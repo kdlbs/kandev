@@ -53,8 +53,8 @@ export function buildFrontendErrorReport(input: FrontendErrorReportInput): Front
     stack: bounded(new Error("error toast emitted").stack, STACK_LIMIT),
   };
   if (currentURL) {
-    report.url = bounded(currentURL.href, TEXT_LIMIT);
     report.task_id = deriveTaskID(currentURL);
+    report.url = bounded(`${currentURL.origin}${currentURL.pathname}`, TEXT_LIMIT);
   }
   addBrowserContext(report);
   const error = errorDetails(input.error);

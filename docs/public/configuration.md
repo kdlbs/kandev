@@ -140,7 +140,7 @@ The voice fallback sends audio to the configured OpenAI transcription service an
 | `logging.level` | `KANDEV_LOG_LEVEL` | `info` | File threshold: `debug`, `info`, `warn`, or `error`. `--debug` selects `debug`; normal and `--verbose` launches select `info`. |
 | `logging.format` | `KANDEV_LOGGING_FORMAT` | `text`, or `json` in production/Kubernetes | `text` or `json`; `auto` is not accepted. |
 
-Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts. At the next UTC day it rolls to `backend-logs-YYYY-MM-DD.log`; Kandev retains the current UTC day and the two preceding days. Files are owner-only (`0600`) on Unix.
+Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 256 MiB; later entries are dropped until the next UTC day rather than allowing diagnostics to fill the disk. At the next UTC day it rolls to `backend-logs-YYYY-MM-DD.log`; Kandev retains the current UTC day and the two preceding days. Files are owner-only (`0600`) on Unix.
 
 Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 

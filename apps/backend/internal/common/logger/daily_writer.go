@@ -16,9 +16,11 @@ const (
 	activeBackendLogName = "backend-logs.log"
 	backendDayMarkerName = ".backend-logs-day"
 	rolloverJournalName  = ".backend-logs-rollover.json"
+	dailyBackendLogBytes = 256 * 1024 * 1024
 )
 
 var datedBackendLogPattern = regexp.MustCompile(`^backend-logs-(\d{4}-\d{2}-\d{2})\.log$`)
+var errDailyBackendLogLimit = errors.New("daily backend log byte limit reached")
 
 type rolloverJournal struct {
 	SourceDay         string `json:"source_day"`
@@ -35,6 +37,8 @@ type dailyWriter struct {
 	now            func() time.Time
 	day            string
 	file           *os.File
+	size           int64
+	maxBytes       int64
 	closed         bool
 	maintenanceErr error
 }
@@ -49,7 +53,7 @@ func newDailyWriter(logDir string, now func() time.Time) (*dailyWriter, error) {
 	if err := os.Chmod(logDir, 0o700); err != nil {
 		return nil, fmt.Errorf("secure log directory: %w", err)
 	}
-	writer := &dailyWriter{logDir: logDir, now: now}
+	writer := &dailyWriter{logDir: logDir, now: now, maxBytes: dailyBackendLogBytes}
 	if err := writer.prepare(); err != nil {
 		return nil, err
 	}
@@ -94,7 +98,12 @@ func (w *dailyWriter) Write(data []byte) (int, error) {
 			return w.file.Write(data)
 		}
 	}
-	return w.file.Write(data)
+	if w.size+int64(len(data)) > w.maxBytes {
+		return 0, errDailyBackendLogLimit
+	}
+	written, err := w.file.Write(data)
+	w.size += int64(written)
+	return written, err
 }
 
 func (w *dailyWriter) switchDay(today string) error {
@@ -120,6 +129,13 @@ func (w *dailyWriter) reopenPrevious(day string, rolloverErr error) error {
 	}
 	w.file = file
 	w.day = day
+	info, statErr := file.Stat()
+	if statErr != nil {
+		_ = file.Close()
+		w.file = nil
+		return errors.Join(rolloverErr, statErr)
+	}
+	w.size = info.Size()
 	return rolloverErr
 }
 
@@ -173,6 +189,13 @@ func (w *dailyWriter) openActive(day string) error {
 	}
 	w.file = file
 	w.day = day
+	info, err := file.Stat()
+	if err != nil {
+		_ = file.Close()
+		w.file = nil
+		return fmt.Errorf("stat active log: %w", err)
+	}
+	w.size = info.Size()
 	return nil
 }
 

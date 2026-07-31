@@ -254,9 +254,9 @@ It does not erase the entire Kandev home: backups, `master.key`, logs, service m
 
 Open **Settings > System > Logs** to create and download one ZIP containing frontend and backend logs. The archive has `backend/`, `frontend/`, and `manifest.json`; inspect the manifest for requested sources, warnings, captured ranges, truncation, and loss before treating it as complete.
 
-Every launch writes info and above to `<home>/logs/backend-logs.log`; normal and debug stdout show warn and above. `kandev --verbose` also shows info on stdout. `kandev --debug` records debug events in the file and enables ACP message dumps. The backend appends on same-day restarts, rolls at UTC midnight, and retains the current day plus the two previous UTC days.
+Every launch writes info and above to `<home>/logs/backend-logs.log`; normal and debug stdout show warn and above. `kandev --verbose` also shows info on stdout. `kandev --debug` records debug events in the file and enables ACP message dumps. The backend appends on same-day restarts, caps each daily file at 256 MiB, rolls at UTC midnight, and retains the current day plus the two previous UTC days.
 
-The browser keeps a bounded three-day console history locally and sends it only when an authenticated bundle request asks for frontend evidence. Console calls are not continuously uploaded. A bundle can be partial if no browser responds, IndexedDB is unavailable, queues shed entries, or byte/profile limits truncate data. Ready bundles expire after 15 minutes; one active job per user and bounded global capacity can return `429` or `503`. Agent materialization is capped at 256 MiB.
+The browser keeps a bounded three-day console history locally and sends it only when an authenticated bundle request asks for frontend evidence. Console calls are not continuously uploaded. Error toasts are reported immediately, but automatic reports remove URL query strings and fragments and use count and byte rate limits. A bundle can be partial if no browser responds, IndexedDB is unavailable, queues shed entries, or byte/profile limits truncate data. Ready bundles expire after 15 minutes; one active job per user and bounded global capacity can return `429` or `503`. Agent materialization is capped at 256 MiB.
 
 Process-manager logs remain useful for live output:
 

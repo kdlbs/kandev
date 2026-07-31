@@ -39,7 +39,6 @@ import type {
   SessionMCPStatusPayload,
   SessionPromptUsagePayload,
   SessionTodosPayload,
-  RunEventAppendedPayload,
 } from "./session-runtime-payloads";
 import type {
   ExecutorPayload,
@@ -405,7 +404,6 @@ export type UserSettingsUpdatedPayload = Omit<
   workspace_id: string;
   repository_ids: string[];
 };
-
 export type ShellOutputPayload = {
   task_id: string;
   session_id: string;

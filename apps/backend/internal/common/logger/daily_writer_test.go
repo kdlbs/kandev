@@ -131,6 +131,47 @@ func TestDailyWriterResumesJournalWithoutDuplicatingDestination(t *testing.T) {
 	}
 }
 
+func TestDailyWriterRejectsEntriesBeyondDailyByteLimit(t *testing.T) {
+	logDir := t.TempDir()
+	activePath := filepath.Join(logDir, activeBackendLogName)
+	const dailyLimit = int64(len("full\n"))
+	if err := os.WriteFile(activePath, []byte("full\n"), 0o600); err != nil {
+		t.Fatalf("seed active log: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(logDir, backendDayMarkerName),
+		[]byte("2026-07-30"), 0o600); err != nil {
+		t.Fatalf("seed day marker: %v", err)
+	}
+	now := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
+	writer, err := newDailyWriter(logDir, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newDailyWriter: %v", err)
+	}
+	defer func() { _ = writer.Close() }()
+	if writer.maxBytes != dailyBackendLogBytes {
+		t.Fatalf("default daily limit = %d, want %d", writer.maxBytes, dailyBackendLogBytes)
+	}
+	writer.maxBytes = dailyLimit
+
+	if _, err := writer.Write([]byte("must-not-grow\n")); err == nil {
+		t.Fatal("write beyond daily byte limit succeeded")
+	}
+	info, err := os.Stat(activePath)
+	if err != nil {
+		t.Fatalf("stat active log: %v", err)
+	}
+	if info.Size() != dailyLimit {
+		t.Fatalf("active log size = %d, want %d", info.Size(), dailyLimit)
+	}
+	now = now.Add(24 * time.Hour)
+	if _, err := writer.Write([]byte("next\n")); err != nil {
+		t.Fatalf("next-day write: %v", err)
+	}
+	if active := readLogFile(t, activePath); active != "next\n" {
+		t.Fatalf("next-day active log = %q", active)
+	}
+}
+
 func readLogFile(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)

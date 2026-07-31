@@ -7,12 +7,16 @@ import (
 )
 
 const (
-	identityRatePerMinute = 60
-	identityBurst         = 20
-	globalRatePerMinute   = 300
-	globalBurst           = 100
-	identityBucketTTL     = 10 * time.Minute
-	limiterCleanupEvery   = time.Minute
+	identityRatePerMinute  = 60
+	identityBurst          = 20
+	globalRatePerMinute    = 300
+	globalBurst            = 100
+	identityBytesPerMinute = 64 * 1024
+	identityBytesBurst     = 64 * 1024
+	globalBytesPerMinute   = 256 * 1024
+	globalBytesBurst       = 256 * 1024
+	identityBucketTTL      = 10 * time.Minute
+	limiterCleanupEvery    = time.Minute
 )
 
 type tokenBucket struct {
@@ -21,12 +25,19 @@ type tokenBucket struct {
 	lastSeen time.Time
 }
 
+type identityBuckets struct {
+	requests tokenBucket
+	bytes    tokenBucket
+	lastSeen time.Time
+}
+
 type limiter struct {
-	mu          sync.Mutex
-	now         func() time.Time
-	global      tokenBucket
-	identities  map[string]*tokenBucket
-	lastCleanup time.Time
+	mu             sync.Mutex
+	now            func() time.Time
+	globalRequests tokenBucket
+	globalBytes    tokenBucket
+	identities     map[string]*identityBuckets
+	lastCleanup    time.Time
 }
 
 func newLimiter(now func() time.Time) *limiter {
@@ -35,32 +46,57 @@ func newLimiter(now func() time.Time) *limiter {
 	}
 	current := now()
 	return &limiter{
-		now: now, global: newTokenBucket(globalBurst, current),
-		identities: make(map[string]*tokenBucket), lastCleanup: current,
+		now:            now,
+		globalRequests: newTokenBucket(globalBurst, current),
+		globalBytes:    newTokenBucket(globalBytesBurst, current),
+		identities:     make(map[string]*identityBuckets),
+		lastCleanup:    current,
 	}
 }
 
 func (l *limiter) Allow(identity string) (bool, time.Duration) {
+	return l.allow(identity, 1, false)
+}
+
+func (l *limiter) AllowBytes(identity string, size int) (bool, time.Duration) {
+	return l.allow(identity, max(1, size), true)
+}
+
+func (l *limiter) allow(identity string, cost int, bytes bool) (bool, time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	l.cleanup(now)
-	identityBucket := l.identities[identity]
-	if identityBucket == nil {
-		bucket := newTokenBucket(identityBurst, now)
-		identityBucket = &bucket
-		l.identities[identity] = identityBucket
+	buckets := l.identities[identity]
+	if buckets == nil {
+		buckets = &identityBuckets{
+			requests: newTokenBucket(identityBurst, now),
+			bytes:    newTokenBucket(identityBytesBurst, now),
+			lastSeen: now,
+		}
+		l.identities[identity] = buckets
 	}
-	refill(identityBucket, identityRatePerMinute, identityBurst, now)
-	refill(&l.global, globalRatePerMinute, globalBurst, now)
-	identityBucket.lastSeen = now
-	identityRetry := retryAfter(identityBucket, identityRatePerMinute)
-	globalRetry := retryAfter(&l.global, globalRatePerMinute)
+	buckets.lastSeen = now
+	if bytes {
+		return consumeBuckets(&buckets.bytes, &l.globalBytes, cost,
+			identityBytesPerMinute, identityBytesBurst,
+			globalBytesPerMinute, globalBytesBurst, now)
+	}
+	return consumeBuckets(&buckets.requests, &l.globalRequests, cost,
+		identityRatePerMinute, identityBurst, globalRatePerMinute, globalBurst, now)
+}
+
+func consumeBuckets(identity, global *tokenBucket, cost, identityRate, identityBurst,
+	globalRate, globalBurst int, now time.Time) (bool, time.Duration) {
+	refill(identity, identityRate, identityBurst, now)
+	refill(global, globalRate, globalBurst, now)
+	identityRetry := retryAfter(identity, identityRate, cost)
+	globalRetry := retryAfter(global, globalRate, cost)
 	if identityRetry > 0 || globalRetry > 0 {
 		return false, maxDuration(identityRetry, globalRetry)
 	}
-	identityBucket.tokens--
-	l.global.tokens--
+	identity.tokens -= float64(cost)
+	global.tokens -= float64(cost)
 	return true, 0
 }
 
@@ -88,11 +124,11 @@ func refill(bucket *tokenBucket, ratePerMinute, burst int, now time.Time) {
 	}
 }
 
-func retryAfter(bucket *tokenBucket, ratePerMinute int) time.Duration {
-	if bucket.tokens >= 1 {
+func retryAfter(bucket *tokenBucket, ratePerMinute, cost int) time.Duration {
+	if bucket.tokens >= float64(cost) {
 		return 0
 	}
-	seconds := math.Ceil((1 - bucket.tokens) / (float64(ratePerMinute) / 60))
+	seconds := math.Ceil((float64(cost) - bucket.tokens) / (float64(ratePerMinute) / 60))
 	if seconds < 1 {
 		seconds = 1
 	}

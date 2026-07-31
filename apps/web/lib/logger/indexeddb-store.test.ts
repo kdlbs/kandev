@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 import { retentionPlan } from "./indexeddb-store";
 
@@ -23,5 +25,13 @@ describe("IndexedDB log retention", () => {
     const result = retentionPlan(records, now);
     expect(result.removeIDs).toEqual([1, 2]);
     expect(result.retainedCount).toBe(10_000);
+  });
+
+  it("walks the timestamp index without materializing the full store", () => {
+    const source = readFileSync("lib/logger/indexeddb-store.ts", "utf8");
+
+    expect(source).toContain('index("timestamp_ms")');
+    expect(source).toContain("index.openCursor()");
+    expect(source).not.toContain("store.getAll()");
   });
 });

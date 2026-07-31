@@ -280,7 +280,7 @@ healthcheck:
   start_period: 15s
 ```
 
-The backend writes its daily files to `/data/logs/backend-logs.log` on the persistent volume and prints the path at startup. It retains the current UTC day plus the two preceding days. `docker logs` shows the bounded stdout stream; use **Settings > System > Logs** for a frontend+backend diagnostic ZIP.
+The backend writes its daily files to `/data/logs/backend-logs.log` on the persistent volume and prints the path at startup. Each daily file accepts at most 256 MiB, and Kandev retains the current UTC day plus the two preceding days. `docker logs` shows the bounded stdout stream; use **Settings > System > Logs** for a frontend+backend diagnostic ZIP.
 
 ## Upgrade and remove
 

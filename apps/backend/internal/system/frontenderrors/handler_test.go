@@ -25,7 +25,7 @@ func TestHandlerLogsBoundedStructuredFrontendError(t *testing.T) {
 		"task_id":"task-123",
 		"title":"Failed to save",
 		"description":"The backend rejected the update",
-		"url":"http://localhost/settings/system/logs",
+		"url":"http://localhost/settings/system/logs?token=secret#private",
 		"user_agent":"test-agent",
 		"language":"en-US",
 		"platform":"test-platform",
@@ -49,6 +49,9 @@ func TestHandlerLogsBoundedStructuredFrontendError(t *testing.T) {
 	if fields["task_id"] != "task-123" || fields["source"] != "sonner" ||
 		fields["title"] != "Failed to save" || fields["error_name"] != "TypeError" {
 		t.Fatalf("structured fields = %#v", fields)
+	}
+	if fields["url"] != "http://localhost/settings/system/logs" {
+		t.Fatalf("logged url = %#v", fields["url"])
 	}
 }
 
@@ -99,6 +102,26 @@ func TestHandlerTruncatesUTF8FieldsAndMarksEntry(t *testing.T) {
 	}
 	if len(taskID) != taskIDByteLimit || fields["truncated"] != true {
 		t.Fatalf("task/truncated fields = %d/%#v", len(taskID), fields["truncated"])
+	}
+}
+
+func TestHandlerLimitsAcceptedRequestBytes(t *testing.T) {
+	router, observed := newHandlerTestRouter(t, "user-1")
+	body := `{"source":"sonner","title":"visible"}` + strings.Repeat(" ", 40*1024)
+
+	if response := performFrontendErrorRequest(router, body); response.Code != http.StatusNoContent {
+		t.Fatalf("first status = %d, body = %s", response.Code, response.Body.String())
+	}
+	response := performFrontendErrorRequest(router, body)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("second status = %d, want %d, body = %s",
+			response.Code, http.StatusTooManyRequests, response.Body.String())
+	}
+	if response.Header().Get("Retry-After") == "" {
+		t.Fatal("missing Retry-After")
+	}
+	if observed.Len() != 1 {
+		t.Fatalf("logged entries = %d, want 1", observed.Len())
 	}
 }
 

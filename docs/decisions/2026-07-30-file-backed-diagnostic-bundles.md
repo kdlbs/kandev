@@ -19,9 +19,11 @@ meaningful privacy, retention, transport, and access alternatives.
 The backend owns an always-on current-day file at
 `<ResolvedHomeDir>/logs/backend-logs.log`, rolls it at UTC midnight to
 `backend-logs-YYYY-MM-DD.log`, appends across same-day restarts, and retains
-the current plus two preceding UTC days. Normal/debug/verbose file and stdout
-thresholds remain defined by the diagnostic-logging spec. Destination and
-lumberjack rotation settings are removed.
+the current plus two preceding UTC days. Each daily file has a fixed 256 MiB
+write bound so sustained or hostile diagnostic traffic cannot consume
+unbounded disk before midnight. Normal/debug/verbose file and stdout thresholds
+remain defined by the diagnostic-logging spec. Destination and lumberjack
+rotation settings are removed.
 
 The backend structured ring buffer, Logs-page tail and file table, individual
 file downloads, and dev-only log export are removed. Files become the backend
@@ -34,9 +36,11 @@ file. Startup log-path failures degrade to stderr and background retry rather
 than preventing Kandev from starting. Browser interception stages only
 reference-free bounded values and persists compact batches asynchronously
 during idle time. Toast reporting is scheduled after the toast is handed to the
-UI library and is never awaited. Bundle capture and archive construction have
-fixed per-job byte/profile limits plus a bounded, coalescing background worker
-so one export cannot create unbounded CPU, disk, memory, or connection work.
+UI library and is never awaited. Automatic toast reports remove URL query and
+fragment data and are guarded by both count and byte token buckets. Bundle
+capture and archive construction have fixed per-job byte/profile limits plus a
+bounded, coalescing background worker so one export cannot create unbounded
+CPU, disk, memory, or connection work.
 
 The browser intercepts every console level plus uncaught errors and rejections,
 but retains entries locally in bounded IndexedDB for three UTC days. It never
@@ -89,6 +93,11 @@ does not mistake a best-effort bundle for complete evidence. Diagnostic bundle
 requests can be temporarily busy or coalesced instead of competing with normal
 product activity.
 
+The fixed daily file bound limits worst-case disk growth but can omit later
+same-day evidence after sustained pressure. Count and byte limits reduce how
+quickly automatic browser reports consume that budget, while UTC rollover
+restores capacity without operator action.
+
 Fixed byte/profile caps mean a very large retained backend file or a fifth
 browser profile may be represented only partially. Newest backend bytes are
 preferred and the manifest records exact included ranges. ZIP payloads are
@@ -132,3 +141,8 @@ action and no wide table.
   files.
 - **Use local-time retention and rollover.** Rejected because UTC is
   deterministic across machines and daylight-saving transitions.
+- **Rely on three-day retention without a daily byte bound.** Rejected because
+  retention limits age but a single current-day file can still exhaust disk.
+- **Make the daily byte bound configurable.** Rejected to keep diagnostic
+  resource behavior predictable and avoid restoring the removed rotation
+  configuration surface.

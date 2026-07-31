@@ -3,10 +3,12 @@
 package frontenderrors
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -80,9 +82,14 @@ func Handle(service *Service) gin.HandlerFunc {
 			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
 			return
 		}
-		request, status, err := decodeRequest(c)
+		request, requestBytes, status, err := decodeRequest(c)
 		if err != nil {
 			c.JSON(status, gin.H{"error": err.Error()})
+			return
+		}
+		if allowed, retry := service.limiter.AllowBytes(identity.UserID, requestBytes); !allowed {
+			c.Header("Retry-After", strconv.Itoa(max(1, int(retry.Seconds()))))
+			c.JSON(http.StatusTooManyRequests, gin.H{"error": "rate limit exceeded"})
 			return
 		}
 		normalized, err := normalize(request)
@@ -95,23 +102,29 @@ func Handle(service *Service) gin.HandlerFunc {
 	}
 }
 
-func decodeRequest(c *gin.Context) (Request, int, error) {
+func decodeRequest(c *gin.Context) (Request, int, int, error) {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRequestBodyBytes)
-	decoder := json.NewDecoder(c.Request.Body)
+	body, err := io.ReadAll(c.Request.Body)
+	if err != nil {
+		var maxBytesError *http.MaxBytesError
+		if errors.As(err, &maxBytesError) {
+			return Request{}, 0, http.StatusRequestEntityTooLarge,
+				errors.New("request body too large")
+		}
+		return Request{}, 0, http.StatusBadRequest, errors.New("invalid request body")
+	}
+	decoder := json.NewDecoder(bytes.NewReader(body))
 	decoder.DisallowUnknownFields()
 	var request Request
 	if err := decoder.Decode(&request); err != nil {
-		var maxBytesError *http.MaxBytesError
-		if errors.As(err, &maxBytesError) {
-			return Request{}, http.StatusRequestEntityTooLarge, errors.New("request body too large")
-		}
-		return Request{}, http.StatusBadRequest, errors.New("invalid request body")
+		return Request{}, 0, http.StatusBadRequest, errors.New("invalid request body")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); !errors.Is(err, io.EOF) {
-		return Request{}, http.StatusBadRequest, errors.New("request body must contain one JSON object")
+		return Request{}, 0, http.StatusBadRequest,
+			errors.New("request body must contain one JSON object")
 	}
-	return request, http.StatusOK, nil
+	return request, len(body), http.StatusOK, nil
 }
 
 func normalize(request Request) (normalizedRequest, error) {
@@ -129,7 +142,7 @@ func normalize(request Request) (normalizedRequest, error) {
 	normalized := normalizedRequest{Request: request}
 	normalized.Title = truncateField(request.Title, titleByteLimit, &normalized.Truncated)
 	normalized.Description = truncateField(request.Description, descriptionByteLimit, &normalized.Truncated)
-	normalized.URL = truncateField(request.URL, urlByteLimit, &normalized.Truncated)
+	normalized.URL = truncateField(redactURL(request.URL), urlByteLimit, &normalized.Truncated)
 	normalized.TaskID = truncateField(request.TaskID, taskIDByteLimit, &normalized.Truncated)
 	normalized.UserAgent = truncateField(request.UserAgent, browserFieldByteLimit, &normalized.Truncated)
 	normalized.Language = truncateField(request.Language, browserFieldByteLimit, &normalized.Truncated)
@@ -143,6 +156,18 @@ func normalize(request Request) (normalizedRequest, error) {
 		normalized.Error = &copy
 	}
 	return normalized, nil
+}
+
+func redactURL(value string) string {
+	parsed, err := url.Parse(value)
+	if err != nil {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	return parsed.String()
 }
 
 func truncateField(value string, limit int, truncated *bool) string {

@@ -24,7 +24,7 @@ describe("frontend error log API", () => {
   });
 
   it("builds bounded browser context without serializing arbitrary React nodes", () => {
-    window.history.replaceState({}, "", "/t/task-one");
+    window.history.replaceState({}, "", "/t/task-one?token=secret#private");
     const report = buildFrontendErrorReport({
       source: "sonner",
       title: "Failed to save",
@@ -37,7 +37,8 @@ describe("frontend error log API", () => {
     expect(report.description).toBe("[object]");
     expect(report.task_id).toBe("task-one");
     expect(report.error).toMatchObject({ name: "TypeError", message: "Failed to fetch" });
-    expect(report.url).toBe(window.location.href);
+    expect(report.url).toBe(`${window.location.origin}/t/task-one`);
+    expect(report.url).not.toContain("secret");
     expect(report.viewport).toEqual({ width: window.innerWidth, height: window.innerHeight });
     expect(JSON.stringify(report)).not.toContain("must-not-be-walked");
   });

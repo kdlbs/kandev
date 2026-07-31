@@ -82,11 +82,56 @@ export class IndexedDBLogStore {
     const database = await this.open();
     const transaction = database.transaction(STORE_NAME, "readwrite");
     const store = transaction.objectStore(STORE_NAME);
-    const records = await requestResult<PersistedEntry[]>(store.getAll());
-    const retained = retentionPlan(records, Date.now());
-    for (const id of retained.removeIDs) store.delete(id);
+    const index = store.index("timestamp_ms");
+    const totals = await scanAndDeleteExpired(index, Date.now() - THREE_DAYS_MS);
+    await deleteOldestUntilWithinBounds(index, totals);
     await transactionDone(transaction);
   }
+}
+
+type RetentionTotals = { count: number; bytes: number };
+
+function scanAndDeleteExpired(index: IDBIndex, cutoff: number): Promise<RetentionTotals> {
+  return new Promise((resolve, reject) => {
+    const totals = { count: 0, bytes: 0 };
+    const request = index.openCursor();
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) {
+        resolve(totals);
+        return;
+      }
+      const record = cursor.value as PersistedEntry;
+      if (record.timestamp_ms < cutoff) {
+        cursor.delete();
+      } else {
+        totals.count += 1;
+        totals.bytes += record.bytes;
+      }
+      cursor.continue();
+    };
+  });
+}
+
+function deleteOldestUntilWithinBounds(index: IDBIndex, totals: RetentionTotals): Promise<void> {
+  if (totals.count <= MAX_ENTRIES && totals.bytes <= MAX_BYTES) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const request = index.openCursor();
+    request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor || (totals.count <= MAX_ENTRIES && totals.bytes <= MAX_BYTES)) {
+        resolve();
+        return;
+      }
+      const record = cursor.value as PersistedEntry;
+      cursor.delete();
+      totals.count -= 1;
+      totals.bytes -= record.bytes;
+      cursor.continue();
+    };
+  });
 }
 
 export function retentionPlan(

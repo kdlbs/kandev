@@ -48,6 +48,10 @@ history or returning an unbounded log export.
 - Cleanup retains a rolling three-day UTC window: the current active day and
   at most the two preceding dated daily files. Older recognized daily files
   are removed; unrelated files in the log directory are preserved.
+- Each daily backend file accepts at most 256 MiB. Once the active file reaches
+  that bound, entries that would exceed it are dropped without blocking
+  application work and are reflected in file-sink loss statistics. UTC
+  rollover resumes normal writes into the next day's file.
 - Rollover is crash-recoverable. A small owner-only rollover journal records
   the source day, source identity/size, destination, and copied offset before
   an existing dated destination is extended. Recovery resumes that transaction
@@ -62,9 +66,10 @@ history or returning an unbounded log export.
   is reported immediately to the backend and written as an `error` entry named
   `frontend error toast`.
 - Toast reporting includes the visible toast text plus rich browser context:
-  the full browser URL, browser identity fields, viewport dimensions, a client
-  timestamp, the toast implementation source, the current task ID when it can
-  be derived from a recognized task route, a toast-emission call stack when
+  the browser URL origin and pathname with query and fragment removed, browser
+  identity fields, viewport dimensions, a client timestamp, the toast
+  implementation source, the current task ID when it can be derived from a
+  recognized task route or query parameter, a toast-emission call stack when
   available, and underlying error metadata when the caller still provides it.
 - Toast reporting is best effort. A reporting failure does not suppress,
   replace, duplicate, or otherwise alter the original toast and does not
@@ -76,7 +81,9 @@ history or returning an unbounded log export.
   allowing 60 reports per minute with a burst of 20, plus a process-wide
   bucket allowing 300 reports per minute with a burst of 100. Exhausted
   buckets return `429 Too Many Requests` with `Retry-After`; the frontend
-  silently discards that response.
+  silently discards that response. Independent byte buckets admit at most
+  64 KiB per minute per identity with a 64 KiB burst and 256 KiB per minute
+  process-wide with a 256 KiB burst, measured from the bounded request body.
 
 ### Browser console history
 
@@ -429,9 +436,10 @@ disclosure before the download action.
 
 ## Persistence guarantees
 
-- `backend-logs.log` preserves every entry accepted by the file queue during the
-  current UTC day. Pressure drops, startup fallback gaps, bounded-shutdown loss,
-  and archive truncation are explicit in counters and bundle manifests.
+- `backend-logs.log` preserves entries accepted by the file queue during the
+  current UTC day until the fixed 256 MiB daily bound. Pressure drops, startup
+  fallback gaps, bounded-shutdown loss, and archive truncation are explicit in
+  counters and bundle manifests.
 - Dated archives preserve the two preceding UTC calendar days. Files outside
   that rolling window are deleted at startup and after successful rollover.
 - Browser console history remains in the browser profile for three UTC days,
@@ -513,4 +521,5 @@ disclosure before the download action.
 - Retrying failed error-toast reports.
 - Changing toast copy, placement, duration, or styling.
 - Adding a setting for log path, retention, browser capture, or bundle bounds.
-- Supporting size-based, per-process, or local-time backend rotation.
+- Supporting configurable size-based, per-process, or local-time backend
+  rotation.

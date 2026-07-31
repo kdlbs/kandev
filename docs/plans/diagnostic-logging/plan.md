@@ -433,6 +433,14 @@ Task 05 and Task 06 are parallel-safe after Tasks 09 and 10 because public docs
 and agent-harness files are disjoint. Parallel execution still requires
 explicit user authorization.
 
+Wave 8:
+
+- [x] [Task 11: Merge-risk hardening](task-11-merge-risk-hardening.md)
+
+Task 11 is a sequential PR-remediation task covering the current-main lint
+integration, bounded automatic toast ingestion, the fixed daily file bound,
+URL privacy hardening, and allocation-free IndexedDB pruning.
+
 ## Risks
 
 - Frontend console data is highly sensitive. It remains browser-local until an
