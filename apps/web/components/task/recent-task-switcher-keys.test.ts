@@ -5,6 +5,7 @@ import {
   hasHoldModifier,
   isCommitReleaseEvent,
   isCycleShortcutEvent,
+  isHeldCycleKeyEvent,
 } from "./recent-task-switcher-keys";
 
 function event(overrides: Partial<KeyboardEvent>): KeyboardEvent {
@@ -60,6 +61,20 @@ describe("recent task switcher key helpers", () => {
         event({ key: KEYS.SPACE, ctrlKey: true, repeat: true }),
         taskSwitcherShortcut,
       ),
+    ).toBe(false);
+  });
+
+  it("continues cycling with only the primary hold modifier", () => {
+    const shortcut: KeyboardShortcut = {
+      key: KEYS.G,
+      modifiers: { ctrlOrCmd: true, shift: true },
+    };
+
+    expect(
+      isHeldCycleKeyEvent(event({ key: KEYS.G, ctrlKey: true }), shortcut, platform("linux")),
+    ).toBe(true);
+    expect(
+      isHeldCycleKeyEvent(event({ key: KEYS.G, shiftKey: true }), shortcut, platform("linux")),
     ).toBe(false);
   });
 
