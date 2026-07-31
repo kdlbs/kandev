@@ -21,7 +21,7 @@ restart required for startup-gated features such as Office mode and Debug mode.
 - The page shows user-facing runtime toggles, not every profile/env knob.
 - V1 exposes three user-facing toggles:
   - **Office mode** — enables the autonomous-agent Office surface.
-  - **App status bar** — shows the global desktop/tablet status bar and the phone Status drawer entry. It is stable and off by default in production; enabling it changes visibility only.
+  - **App status bar** — shows the general-purpose desktop/tablet status bar and phone Status drawer entry. It is stable and off by default in production; enabling it changes visibility only. Disabling it does not suppress the problem-only [WebSocket connectivity warning](../ui/ws-connectivity-warning.md).
   - **Debug mode** — enables local diagnostic/debug behavior, including agent
     message debug logs.
 - Office mode is marked **Experimental** and includes a concise description of
@@ -262,7 +262,8 @@ especially Debug mode, to admins.
   enabled after restart.
 - **GIVEN** App status bar is using its default, **WHEN** the user opens Feature
   Toggles, **THEN** it appears off and explains that enabling it adds both the
-  desktop/tablet bar and phone Status entry after restart.
+  desktop/tablet bar and ordinary phone Status entry after restart, while urgent
+  WebSocket connectivity warnings remain available when it is off.
 - **GIVEN** a toggle override exists, **WHEN** the user clicks `Reset to default`,
   **THEN** the override is removed and the page shows restart-required state if
   the effective runtime value differs from the restored default.

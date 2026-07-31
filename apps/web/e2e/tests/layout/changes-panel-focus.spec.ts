@@ -385,7 +385,7 @@ test.describe("Changes panel focus behavior", () => {
     await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
   });
 
-  test("new git updates do not replace a returning task's saved agent tab", async ({
+  test("new git updates focus changes when returning to a task with a saved layout", async ({
     testPage,
     apiClient,
     seedData,
@@ -444,7 +444,6 @@ test.describe("Changes panel focus behavior", () => {
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
       timeout: 15_000,
     });
-    await expect(session.activeChat()).toBeVisible({ timeout: 5_000 });
-    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/);
+    await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
   });
 });

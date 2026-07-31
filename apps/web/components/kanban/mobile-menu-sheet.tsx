@@ -31,6 +31,7 @@ import type { Repository, Task } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
+import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 type MobileMenuSheetProps = {
   open: boolean;
@@ -289,7 +290,8 @@ function MobileUtilityActions({
   onOpenImproveKandev: () => void;
   onOpenChange: (open: boolean) => void;
 }) {
-  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
+  const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
+  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
   const closeSheet = () => onOpenChange(false);
   const openHealth = () => {
     closeSheet();
@@ -307,12 +309,24 @@ function MobileUtilityActions({
         <Button
           type="button"
           variant="outline"
-          className="h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm"
+          className={cn(
+            "relative h-11 w-full cursor-pointer justify-start gap-3 px-3 text-sm",
+            issueSeverity === "lost" && "border-destructive/40 text-destructive",
+            issueSeverity === "unstable" && "border-amber-500/40 text-amber-500",
+          )}
           onClick={openStatus}
           data-testid="mobile-home-status-button"
+          aria-label={issueDetails?.description}
+          data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
         >
           <IconActivity className={mobileControlIconClass} />
           Status
+          {issueDetails && (
+            <span
+              className={cn("ml-auto size-2 rounded-full", issueDetails.dotClass)}
+              aria-hidden="true"
+            />
+          )}
         </Button>
       )}
       <Button

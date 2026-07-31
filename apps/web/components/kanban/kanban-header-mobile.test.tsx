@@ -30,9 +30,16 @@ vi.mock("./mobile-menu-sheet", () => ({
 }));
 
 const quickChatMocks = vi.hoisted(() => ({ openQuickChat: vi.fn() }));
+const statusDrawerState = vi.hoisted(() => ({
+  issueSeverity: "none" as "none" | "unstable" | "lost",
+}));
 
 vi.mock("@/hooks/use-quick-chat-launcher", () => ({
   useQuickChatLauncher: () => quickChatMocks.openQuickChat,
+}));
+
+vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
+  useAppStatusDrawer: () => statusDrawerState,
 }));
 
 const LEFT_ACTIONS_TEST_ID = "topbar-left-actions";
@@ -41,6 +48,7 @@ const QUICK_CHAT_TEST_ID = "mobile-quick-chat-button";
 afterEach(() => {
   cleanup();
   quickChatMocks.openQuickChat.mockClear();
+  statusDrawerState.issueSeverity = "none";
 });
 
 function renderHeader(title: string, workspaceId?: string, onSearchChange?: () => void) {
@@ -96,5 +104,16 @@ describe("KanbanHeaderMobile", () => {
     const quickChat = screen.getByTestId(QUICK_CHAT_TEST_ID);
     const search = screen.getByTestId("mobile-search-toggle");
     expect(quickChat.nextElementSibling).toBe(search);
+  });
+
+  it("describes a connectivity warning on the persistent Home menu trigger", () => {
+    statusDrawerState.issueSeverity = "lost";
+    renderHeader("Home");
+
+    expect(
+      screen.getByRole("button", {
+        name: "Connection lost for at least 10 seconds. Live updates may be stale. Open menu",
+      }),
+    ).toBeTruthy();
   });
 });

@@ -15,6 +15,8 @@ import { IntegrationCopyConfigMenu } from "@/components/integrations/integration
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
+import { cn } from "@/lib/utils";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -143,7 +145,8 @@ function IntegrationCopyConfigAction() {
 
 function SettingsMobileMenu({ pathname }: { pathname: string }) {
   const [open, setOpen] = useState(false);
-  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
+  const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
+  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
 
   const closeOnLinkClick = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target instanceof Element && event.target.closest("a[href]")) {
@@ -162,11 +165,27 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
           type="button"
           variant="ghost"
           size="icon"
-          className="h-11 w-11 cursor-pointer md:hidden"
-          aria-label="Open settings menu"
+          className={cn(
+            "relative h-11 w-11 cursor-pointer md:hidden",
+            issueSeverity === "lost" && "text-destructive",
+            issueSeverity === "unstable" && "text-amber-500",
+          )}
+          aria-label={
+            issueDetails ? `${issueDetails.description} Open settings menu` : "Open settings menu"
+          }
           data-testid="settings-mobile-menu-button"
+          data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
         >
           <IconMenu2 className="h-4 w-4" />
+          {issueDetails && (
+            <span
+              className={cn(
+                "absolute right-2 top-2 size-2 rounded-full ring-2 ring-background",
+                issueDetails.dotClass,
+              )}
+              aria-hidden="true"
+            />
+          )}
         </Button>
       </SheetTrigger>
       <SheetContent
@@ -182,12 +201,24 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
             <Button
               type="button"
               variant="ghost"
-              className="h-11 cursor-pointer justify-start gap-2.5 px-2.5"
+              className={cn(
+                "relative h-11 cursor-pointer justify-start gap-2.5 px-2.5",
+                issueSeverity === "lost" && "text-destructive",
+                issueSeverity === "unstable" && "text-amber-500",
+              )}
               onClick={openStatus}
               data-testid="settings-mobile-status-button"
+              aria-label={issueDetails?.description}
+              data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
             >
               <IconActivity className="h-4 w-4 shrink-0" />
               <span>Status</span>
+              {issueDetails && (
+                <span
+                  className={cn("ml-auto size-2 rounded-full", issueDetails.dotClass)}
+                  aria-hidden="true"
+                />
+              )}
             </Button>
           )}
           <Link

@@ -429,6 +429,7 @@ type SessionMobileFooterProps = {
   hasReview: boolean;
   showStatus: boolean;
   onOpenStatus: () => void;
+  connectionIssueSeverity: import("@/lib/types/connection").ConnectionIssueSeverity;
 };
 
 function SessionMobileFooter({
@@ -440,6 +441,7 @@ function SessionMobileFooter({
   hasReview,
   showStatus,
   onOpenStatus,
+  connectionIssueSeverity,
 }: SessionMobileFooterProps) {
   return (
     <>
@@ -456,15 +458,29 @@ function SessionMobileFooter({
         hasReview={hasReview}
         showStatus={showStatus}
         onOpenStatus={onOpenStatus}
+        connectionIssueSeverity={connectionIssueSeverity}
       />
     </>
+  );
+}
+
+function StatusAwareSessionMobileFooter(
+  props: Omit<SessionMobileFooterProps, "showStatus" | "onOpenStatus" | "connectionIssueSeverity">,
+) {
+  const { enabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
+  return (
+    <SessionMobileFooter
+      {...props}
+      showStatus={enabled}
+      onOpenStatus={openStatusDrawer}
+      connectionIssueSeverity={issueSeverity}
+    />
   );
 }
 
 export const SessionMobileLayout = memo(function SessionMobileLayout(
   props: SessionMobileLayoutProps,
 ) {
-  const { enabled: statusDrawerEnabled, openStatusDrawer } = useAppStatusDrawer();
   const {
     activeTaskId,
     effectiveSessionId,
@@ -514,7 +530,6 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         showApproveButton={showApproveButton}
         onApprove={handleApprove}
       />
-
       <MobilePanelArea
         currentMobilePanel={effectiveMobilePanel}
         activeTaskId={activeTaskId}
@@ -537,15 +552,13 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         onSelectReviewPR={mobilePR.selectPR}
       />
 
-      <SessionMobileFooter
+      <StatusAwareSessionMobileFooter
         sessionId={effectiveSessionId ?? null}
         activePanel={effectiveMobilePanel}
         onPanelChange={handleMobilePanelChange}
         planBadge={hasUnseenPlanUpdate}
         changesBadge={totalChangesCount}
         hasReview={reviewSource !== null}
-        showStatus={statusDrawerEnabled}
-        onOpenStatus={openStatusDrawer}
       />
 
       {/* Task Switcher Sheet */}

@@ -197,6 +197,12 @@ type Manager struct {
 	admissionDrained chan struct{}
 	stopping         bool
 	mainReapPending  atomic.Bool
+	// stopChClosed guards close(stopCh), which is the only part of teardown
+	// that is not naturally idempotent. It is reset wherever stopCh itself is
+	// created so the flag always describes the current channel — a Start that
+	// fails before reaching that point must not leave the flag describing a
+	// channel that no longer exists.
+	stopChClosed     atomic.Bool
 	groupAliveFn     func(int) bool
 	terminateGroupFn func(int) error
 	killGroupFn      func(int) error
@@ -880,6 +886,10 @@ func (m *Manager) Start(ctx context.Context) error {
 		return fmt.Errorf("agent is already running")
 	}
 
+	// A previous lifecycle may still be live: an agent that exited on its own
+	// never ran teardown, and Start is reachable without an intervening Stop.
+	m.finishPreviousLifecycle(ctx)
+
 	m.logger.Info("starting agent process",
 		zap.String("protocol", string(m.cfg.Protocol)),
 		zap.Strings("args", m.cfg.AgentArgs),
@@ -934,6 +944,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
+	m.stopChClosed.Store(false)
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
@@ -985,6 +996,7 @@ func (m *Manager) startOneShot() error {
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
+	m.stopChClosed.Store(false)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1497,14 +1509,24 @@ func (m *Manager) stop(ctx context.Context) error {
 			zap.String("status", string(status)),
 			zap.Int("pid", m.agentPID()))
 		if status == StatusStopped {
+			// The agent process reaches StatusStopped on its own whenever the
+			// child exits without an explicit Stop (waitForExit stores it). The
+			// adapter and stopCh were never torn down in that case, so do it
+			// here — otherwise the adapter's update worker and forwardUpdates
+			// stay alive for the lifetime of the manager. The call is a no-op
+			// after a normal stop, in which case behaviour is unchanged.
+			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
 				return err
 			}
-			if m.mainReapPending.Load() {
+			switch {
+			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
 					return err
 				}
 				m.mainReapPending.Store(false)
+			case tornDown:
+				m.drainAfterLateTeardown(ctx)
 			}
 			return nil
 		}
@@ -1592,7 +1614,13 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
-func (m *Manager) closeAdapterAndStdin() {
+// Adapter.Close and stdin.Close are idempotent, so they run unconditionally —
+// that matters after a Start that failed once an adapter had already been
+// created. close(stopCh) is not idempotent and is guarded instead.
+//
+// It reports whether this call closed stopCh, i.e. whether goroutines were just
+// released and still need draining.
+func (m *Manager) closeAdapterAndStdin() bool {
 	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
 		if err := m.adapter.Close(); err != nil {
@@ -1602,10 +1630,12 @@ func (m *Manager) closeAdapterAndStdin() {
 	m.logger.Debug("adapter closed")
 
 	m.logger.Debug("closing stop channel")
-	if m.stopCh != nil {
+	closedStopCh := false
+	if m.stopCh != nil && m.stopChClosed.CompareAndSwap(false, true) {
 		close(m.stopCh)
+		closedStopCh = true
 	}
-	m.logger.Debug("stop channel closed")
+	m.logger.Debug("stop channel closed", zap.Bool("closed_now", closedStopCh))
 
 	// Close stdin to signal EOF to agent
 	m.logger.Debug("closing stdin")
@@ -1615,6 +1645,42 @@ func (m *Manager) closeAdapterAndStdin() {
 		}
 	}
 	m.logger.Debug("stdin closed")
+	return closedStopCh
+}
+
+// finishPreviousLifecycle completes a teardown the previous lifecycle never ran
+// before Start replaces stopCh, doneCh and the adapter.
+//
+// Start accepts StatusStopped and StatusError, so it can be reached after the
+// agent process exited on its own without an intervening Stop. In that case the
+// previous forwardUpdates is still waiting on the old stopCh and the previous
+// adapter's update worker is still live; reassigning the fields would strand
+// both permanently.
+func (m *Manager) finishPreviousLifecycle(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.closeAdapterAndStdin() {
+		return
+	}
+	m.logger.Info("draining previous agent lifecycle before restart")
+	m.drainAfterLateTeardown(ctx)
+}
+
+// drainAfterLateTeardown waits for the manager's goroutines to finish after a
+// teardown that ran later than the process exit. Unlike waitForProcessExit it
+// never signals a process group: the manager has already reported StatusStopped,
+// so m.cmd may hold a stale PID it no longer owns.
+func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	if m.waitForManagerDone(ctx, done, m.processExitGrace(ctx)) {
+		return
+	}
+	m.logger.Warn("manager goroutines still running after late adapter teardown")
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for

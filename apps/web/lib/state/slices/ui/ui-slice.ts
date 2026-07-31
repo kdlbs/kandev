@@ -80,7 +80,7 @@ export const defaultUIState: UISliceState = {
   },
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
-  connection: { status: "disconnected", error: null },
+  connection: { status: "disconnected", error: null, issueSeverity: "none" },
   mobileKanban: { activeColumnIndex: 0, isMenuOpen: false, isSearchOpen: false },
   mobileSession: {
     activePanelBySessionId: {},
@@ -455,6 +455,10 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
     set((draft) => {
       draft.connection.status = status;
       draft.connection.error = error ?? null;
+    }),
+  setConnectionIssueSeverity: (severity) =>
+    set((draft) => {
+      draft.connection.issueSeverity = severity;
     }),
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {

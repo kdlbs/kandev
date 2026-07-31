@@ -9,8 +9,11 @@ import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { useAppStore } from "@/components/state-provider";
+import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
+import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
+import { cn } from "@/lib/utils";
 
 type KanbanHeaderMobileProps = {
   workspaceId?: string;
@@ -57,6 +60,9 @@ function MobileHeaderActions({
   toggleSearch: () => void;
   setMenuOpen: (open: boolean) => void;
 }) {
+  const { issueSeverity } = useAppStatusDrawer();
+  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
+
   return (
     <>
       <MainTopBarPluginActions
@@ -94,10 +100,24 @@ function MobileHeaderActions({
         variant="outline"
         size="icon-lg"
         onClick={() => setMenuOpen(true)}
-        className="cursor-pointer"
+        className={cn(
+          "relative cursor-pointer",
+          issueSeverity === "lost" && "text-destructive",
+          issueSeverity === "unstable" && "text-amber-500",
+        )}
+        aria-label={issueDetails ? `${issueDetails.description} Open menu` : "Open menu"}
+        data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
       >
         <IconMenu2 className="h-4 w-4" />
-        <span className="sr-only">Open menu</span>
+        {issueDetails && (
+          <span
+            className={cn(
+              "absolute right-1.5 top-1.5 size-2 rounded-full ring-2 ring-background",
+              issueDetails.dotClass,
+            )}
+            aria-hidden="true"
+          />
+        )}
       </Button>
     </>
   );

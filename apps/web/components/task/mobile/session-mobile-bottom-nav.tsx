@@ -13,6 +13,8 @@ import {
 import { cn } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
+import type { ConnectionIssueSeverity } from "@/lib/types/connection";
+import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
 
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
@@ -22,12 +24,14 @@ type SessionMobileBottomNavProps = {
   hasReview?: boolean;
   showStatus: boolean;
   onOpenStatus: () => void;
+  connectionIssueSeverity?: ConnectionIssueSeverity;
 };
 
 type NavItem = {
   label: string;
   icon: React.ReactNode;
   badge?: React.ReactNode;
+  connectionIssueSeverity?: Exclude<ConnectionIssueSeverity, "none">;
 } & ({ panel: MobileSessionPanel; onClick?: never } | { panel?: never; onClick: () => void });
 
 export function SessionMobileBottomNav({
@@ -38,6 +42,7 @@ export function SessionMobileBottomNav({
   hasReview = false,
   showStatus,
   onOpenStatus,
+  connectionIssueSeverity = "none",
 }: SessionMobileBottomNavProps) {
   const items: NavItem[] = useMemo(
     () => [
@@ -93,11 +98,12 @@ export function SessionMobileBottomNav({
               label: "Status",
               icon: <IconActivity className="h-5 w-5" />,
               onClick: onOpenStatus,
+              ...(connectionIssueSeverity !== "none" && { connectionIssueSeverity }),
             },
           ]
         : []),
     ],
-    [planBadge, changesBadge, hasReview, showStatus, onOpenStatus],
+    [planBadge, changesBadge, hasReview, showStatus, onOpenStatus, connectionIssueSeverity],
   );
 
   return (
@@ -106,24 +112,68 @@ export function SessionMobileBottomNav({
       style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }}
     >
       {items.map((item) => (
-        <button
+        <MobileNavButton
           key={item.label}
-          type="button"
-          onClick={item.onClick ?? (() => onPanelChange(item.panel))}
-          className={cn(
-            "flex min-h-11 flex-col items-center justify-center py-2 px-3 gap-0.5 min-w-0 flex-1 transition-colors",
-            activePanel === item.panel
-              ? "text-primary"
-              : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          <span className="relative">
-            {item.icon}
-            {item.badge}
-          </span>
-          <span className="text-[10px] font-medium truncate">{item.label}</span>
-        </button>
+          item={item}
+          activePanel={activePanel}
+          onPanelChange={onPanelChange}
+        />
       ))}
     </nav>
   );
+}
+
+function MobileNavButton({
+  item,
+  activePanel,
+  onPanelChange,
+}: {
+  item: NavItem;
+  activePanel: MobileSessionPanel;
+  onPanelChange: (panel: MobileSessionPanel) => void;
+}) {
+  const issueDetails = item.connectionIssueSeverity
+    ? connectionIssueDetails(item.connectionIssueSeverity)
+    : null;
+
+  return (
+    <button
+      type="button"
+      onClick={item.onClick ?? (() => onPanelChange(item.panel))}
+      className={cn(
+        "flex min-h-11 min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-3 py-2 transition-colors",
+        mobileNavColorClass(item, activePanel, issueDetails !== null),
+      )}
+      aria-label={issueDetails?.description}
+      data-connection-severity={item.connectionIssueSeverity}
+    >
+      <span className="relative">
+        {item.icon}
+        {item.badge}
+        {issueDetails && (
+          <span
+            className={cn(
+              "absolute -right-1 -top-1 size-2 rounded-full ring-2 ring-background",
+              issueDetails.dotClass,
+            )}
+            aria-hidden="true"
+          />
+        )}
+      </span>
+      <span className="text-[10px] font-medium truncate">{item.label}</span>
+    </button>
+  );
+}
+
+function mobileNavColorClass(
+  item: NavItem,
+  activePanel: MobileSessionPanel,
+  hasConnectionIssue: boolean,
+) {
+  if (hasConnectionIssue) {
+    return item.connectionIssueSeverity === "lost" ? "text-destructive" : "text-amber-500";
+  }
+  return activePanel === item.panel
+    ? "text-primary"
+    : "text-muted-foreground hover:text-foreground";
 }

@@ -1,4 +1,4 @@
-import type { ConnectionStatus } from "@/lib/types/connection";
+import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
 import type { StateSnapshot } from "react-virtuoso";
 import type {
@@ -34,6 +34,7 @@ export type DiffState = {
 export type ConnectionState = {
   status: ConnectionStatus;
   error: string | null;
+  issueSeverity: ConnectionIssueSeverity;
 };
 
 export type MobileKanbanState = {
@@ -213,6 +214,7 @@ export type UISliceActions = {
   setPreviewUrlDraft: (sessionId: string, url: string) => void;
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
+  setConnectionIssueSeverity: (severity: ConnectionIssueSeverity) => void;
   setMobileKanbanColumnIndex: (index: number) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
