@@ -19,10 +19,11 @@ Remove the previous provider conversation's context-window reading from persiste
 - A successful shared reset clears `task_sessions.metadata.context_window` and the initiating client's `contextWindow.bySessionId[sessionId]` entry.
 - `session.state_changed` clears cached usage only when `metadata` or `session_metadata` explicitly contains an empty `context_window`; unrelated metadata does not clear it.
 - Failed resets retain the prior persisted and frontend reading.
+- If the provider reset succeeds but metadata clearing fails, Kandev logs the persistence failure, keeps the reset response successful, and the initiating client still receives an explicit in-memory clear.
 
 ## TDD sequence
 
-1. Extend `TestProcessOnEnterResetAgentContext` with successful-clear and failed-retention assertions; run it and confirm the successful-clear assertion fails.
+1. Extend `TestProcessOnEnterResetAgentContext` with successful-clear, failed-retention, and successful-provider-reset plus failed-metadata-clear assertions; run it and confirm the successful-clear assertion fails.
 2. Add frontend handler cases for `context_window: null` and unrelated metadata; run them and confirm the null case fails.
 3. Add the reset-button success/failure cache tests; run them and confirm the success case fails.
 4. Implement the smallest backend and frontend changes, rerun the exact checks, and refactor without widening behavior.
@@ -57,4 +58,4 @@ None.
 
 ## Output contract
 
-Result: RED reproduced the persisted-cache bug and the frontend null-handling gap. GREEN passed `go test -v -run TestProcessOnEnterResetAgentContext ./internal/orchestrator` (9 tests) and `pnpm --filter @kandev/web test -- --run lib/ws/handlers/agent-session.test.ts components/task/chat/reset-context-button.test.tsx` (47 tests). The reset boundary now clears persisted usage after successful reset, explicit null session metadata clears subscribed clients, and the initiating client clears only after a successful response.
+Result: RED reproduced the persisted-cache bug and the frontend null-handling gap. GREEN passed `go test -v -run TestProcessOnEnterResetAgentContext ./internal/orchestrator` (9 tests) and `pnpm --filter @kandev/web test -- --run lib/ws/handlers/agent-session.test.ts components/task/chat/reset-context-button.test.tsx` (47 tests). The reset boundary now clears persisted usage after successful reset, explicit null session metadata clears subscribed clients, a metadata-clear failure keeps the provider reset successful while clearing the in-memory snapshot, and the initiating client clears only after a successful response.

@@ -357,8 +357,8 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 	// The generation check prevents a pre-reset update from resurrecting stale
 	// usage after resetAgentContext clears the metadata.
 	go func() {
-		persisted, err := s.persistContextWindowUpdate(
-			context.Background(), data.TaskSessionID, generation, contextWindowData,
+		persisted, err := s.persistAndPublishContextWindowUpdate(
+			context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
 		)
 		switch {
 		case err != nil:
@@ -376,22 +376,30 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 				zap.String("session_id", data.TaskSessionID))
 		}
 	}()
+}
 
-	// Broadcast context window update so the frontend can update in real-time.
-	// This uses the existing session.state_changed event with metadata included.
-	if s.eventBus != nil {
-		_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
-			events.TaskSessionStateChanged,
-			"orchestrator",
-			map[string]interface{}{
-				"task_id":    data.TaskID,
-				"session_id": data.TaskSessionID,
-				"metadata": map[string]interface{}{
-					contextWindowMetadataKey: contextWindowData,
-				},
-			},
-		))
+func (s *Service) persistAndPublishContextWindowUpdate(
+	ctx context.Context,
+	taskID, sessionID string,
+	generation uint64,
+	contextWindowData map[string]interface{},
+) (bool, error) {
+	persisted, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
+	if !persisted || err != nil || s.eventBus == nil {
+		return persisted, err
 	}
+	_ = s.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+		events.TaskSessionStateChanged,
+		"orchestrator",
+		map[string]interface{}{
+			"task_id":    taskID,
+			"session_id": sessionID,
+			"metadata": map[string]interface{}{
+				contextWindowMetadataKey: contextWindowData,
+			},
+		},
+	))
+	return true, nil
 }
 
 func (s *Service) resolveContextWindowValues(ctx context.Context, data watcher.ContextWindowData) (int64, int64, float64, string, bool) {

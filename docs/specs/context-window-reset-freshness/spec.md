@@ -23,11 +23,12 @@ The context-window indicator can continue showing the previous conversation's ne
 
 - A successful reset clears `task_sessions.metadata.context_window` before the reset flow returns the session to its idle state.
 - Live frontend context-window state is a cache of agent-reported or persisted session metadata. An explicit cleared value invalidates that cache; absence of a fresh report must not be interpreted as zero usage.
+- If the provider reset succeeds but metadata clearing fails, Kandev logs the persistence failure, keeps the reset response successful, and publishes an explicit in-memory clear so the initiating client still hides stale usage.
 
 ## Failure modes
 
 - If the agent reset fails, Kandev restores the idle session state and leaves the previous context-window reading intact.
-- If clearing persisted metadata fails after the provider conversation has already reset, Kandev does not attempt to undo the reset. It reports the persistence failure and the initiating client still hides its stale cached reading.
+- If clearing persisted metadata fails after the provider conversation has already reset, Kandev does not attempt to undo the reset. It logs the persistence failure, keeps the reset response successful, and the initiating client still hides its stale cached reading.
 
 ## Scenarios
 
@@ -35,6 +36,7 @@ The context-window indicator can continue showing the previous conversation's ne
 - **GIVEN** a successful context reset has hidden the ring, **WHEN** the fresh agent conversation has not reported context usage, **THEN** the ring remains absent across session-state updates and page refresh.
 - **GIVEN** a successful context reset has hidden the ring, **WHEN** the fresh agent conversation reports context-window usage, **THEN** the ring reappears using only that new reading.
 - **GIVEN** an idle session displays context-window usage, **WHEN** its context reset fails, **THEN** the previous ring remains visible.
+- **GIVEN** the provider reset succeeds but clearing persisted metadata fails, **WHEN** the reset settles, **THEN** Kandev logs the persistence failure, the initiating client hides stale usage, and the provider reset is not reported as failed.
 - **GIVEN** the user sends a new message after reset, **WHEN** the session becomes busy, **THEN** the reset action is hidden until the session is idle again.
 
 ## Out of scope

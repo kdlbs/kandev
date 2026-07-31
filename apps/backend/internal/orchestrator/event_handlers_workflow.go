@@ -2084,9 +2084,12 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		s.logger.Warn("failed to clear context window from session metadata",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
-	} else {
-		clearInMemoryContextWindow(session)
 	}
+	// Keep the in-memory event snapshot aligned with the new provider
+	// conversation even when persistence fails; the initiating client clears
+	// its cache after the provider reset succeeds and must not receive stale data
+	// back through the final processOnEnter state event.
+	clearInMemoryContextWindow(session)
 	return true
 }
 

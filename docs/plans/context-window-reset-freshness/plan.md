@@ -20,10 +20,10 @@ Invalidate context-window data at the successful reset boundary, then teach the 
 
 - Update `apps/backend/internal/orchestrator/event_handlers_workflow.go` in `resetAgentContext` to clear `context_window` after `agentManager.ResetAgentContext` succeeds, alongside `acp_session_id` cleanup.
 - Keep the clear after the irreversible runtime reset so failed resets preserve the previous reading.
-- Log a persistence failure without reporting the already-completed provider reset as failed.
+- Log a metadata persistence failure without reporting the already-completed provider reset as failed; always clear the preloaded in-memory snapshot so the initiating client does not receive stale usage back through the final state event.
 - Extend `apps/backend/internal/orchestrator/event_handlers_workflow_triggers_test.go` to prove successful resets clear both metadata keys and failed resets retain context-window metadata.
 
-The public user-request path and workflow reset path share this helper, so the invariant applies to both without adding a new API or event type. The existing transition back to `WAITING_FOR_INPUT` reloads session metadata and publishes it through `session.state_changed`.
+The public user-request path and workflow reset path share this helper, so the invariant applies to both without adding a new API or event type. After a successful metadata clear, the existing transition back to `WAITING_FOR_INPUT` reloads session metadata and publishes it through `session.state_changed`.
 
 ## Frontend
 
@@ -43,7 +43,7 @@ No layout, breakpoint, touch, or scroll behavior changes. Desktop and mobile alr
 
 - **What:** successful resets clear persisted context-window metadata while failed resets retain it.
   - **File:** `apps/backend/internal/orchestrator/event_handlers_workflow_triggers_test.go`
-  - **How:** extend the existing real-repository reset helper tests and run only `TestProcessOnEnterResetAgentContext`.
+  - **How:** extend the existing real-repository reset helper tests, including successful provider reset plus metadata-clear failure, and run only `TestProcessOnEnterResetAgentContext`.
 - **What:** explicit cleared metadata invalidates the frontend cache, while metadata without the key leaves it untouched.
   - **File:** `apps/web/lib/ws/handlers/agent-session.test.ts`
   - **How:** dispatch `session.state_changed` payloads against the focused store fake.

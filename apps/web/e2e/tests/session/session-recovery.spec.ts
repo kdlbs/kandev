@@ -106,6 +106,7 @@ test.describe("Session recovery", () => {
 
     await seedStaleContextWindow(testPage);
     const contextRing = testPage.getByRole("button", { name: "Context window: 95% used" });
+    const contextIndicators = testPage.getByRole("button", { name: /^Context window:/ });
     await expect(contextRing).toBeVisible();
 
     // Click reset context button — confirmation dialog should appear
@@ -121,7 +122,7 @@ test.describe("Session recovery", () => {
     // Agent should restart and become idle again
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.resetContextButton()).toBeVisible();
-    await expect(contextRing).toHaveCount(0, { timeout: 30_000 });
+    await expect(contextIndicators).toHaveCount(0, { timeout: 30_000 });
 
     // The ring should return only after the agent reports fresh usage.
     await session.sendMessage("/background 1ms");
