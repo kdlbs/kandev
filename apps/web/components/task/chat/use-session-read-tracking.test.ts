@@ -126,6 +126,48 @@ describe("useSessionReadTracking", () => {
     expect(result.current).toBeNull();
   });
 
+  it("does not activate a divider when a new message arrives after opening at the cursor", () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    const { result, rerender } = renderHook(
+      ({ latest }: { latest: string }) => useSessionReadTracking("session-1", true, latest),
+      { initialProps: { latest: "m1" } },
+    );
+
+    // Opening at the transcript tail has no unread boundary.
+    expect(result.current).toBeNull();
+
+    // The user stays on this chat panel and sends a new prompt. It must not
+    // turn the tail cursor captured at visit start into a "New" divider.
+    rerender({ latest: "m2" });
+    expect(result.current).toBeNull();
+  });
+
+  it("waits for the initial message load before preserving a genuine unread boundary", () => {
+    mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
+    const trackRead = useSessionReadTracking as unknown as (
+      sessionId: string | null,
+      isVisible: boolean,
+      latestMessageId: string | null,
+      initialMessagesLoading: boolean,
+    ) => string | null;
+    const { result, rerender } = renderHook(
+      ({
+        latest,
+        initialMessagesLoading,
+      }: {
+        latest: string | null;
+        initialMessagesLoading: boolean;
+      }) => trackRead("session-1", true, latest, initialMessagesLoading),
+      { initialProps: { latest: null as string | null, initialMessagesLoading: true } },
+    );
+
+    expect(result.current).toBeNull();
+
+    // The first complete transcript includes messages that pre-date this visit.
+    rerender({ latest: "m3", initialMessagesLoading: false });
+    expect(result.current).toBe("m1");
+  });
+
   it("freezes the divider anchor at the cursor value from before this visit's advance", async () => {
     mockState.taskSessions.items["session-1"] = session({ last_read_message_id: "m1" });
     const { result } = renderHook(() => useSessionReadTracking("session-1", true, "m3"));

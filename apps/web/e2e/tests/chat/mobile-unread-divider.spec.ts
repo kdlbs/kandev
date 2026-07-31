@@ -42,4 +42,44 @@ test.describe("Mobile unread divider", () => {
     const newestRow = activeChat.locator(`[id="msg-${newestMessageId}"]`);
     expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
   });
+
+  test("does not add a New divider when a visible session advances from its current tail", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile Unread Divider Active Visit Test",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    let session = await openTaskSession(testPage, task.id);
+    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    const initialMessages = await apiClient.listSessionMessages(task.session_id);
+    const initialTail = initialMessages.messages[initialMessages.messages.length - 1];
+    if (!initialTail) throw new Error("expected the initial transcript to contain a message");
+    await expect
+      .poll(
+        async () => (await apiClient.getTaskSession(task.session_id!)).session.last_read_message_id,
+      )
+      .toBe(initialTail.id);
+
+    await testPage.goto("/");
+    await testPage.waitForLoadState("networkidle");
+    session = await openTaskSession(testPage, task.id);
+    await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
+
+    await session.sendMessageViaButton("prompt while actively reading");
+    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    await expect(session.activeChat().getByTestId("unread-divider")).toHaveCount(0);
+  });
 });

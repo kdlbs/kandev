@@ -61,9 +61,15 @@ function useUnreadDividerBeforeItemKey(
   sessionId: string | null,
   isVisible: boolean,
   groupedItems: Parameters<typeof lastRenderedMessageId>[0],
+  isInitialMessagesLoading: boolean,
 ) {
   const latestMessageId = useMemo(() => lastRenderedMessageId(groupedItems), [groupedItems]);
-  const dividerAnchor = useSessionReadTracking(sessionId, isVisible, latestMessageId);
+  const dividerAnchor = useSessionReadTracking(
+    sessionId,
+    isVisible,
+    latestMessageId,
+    isInitialMessagesLoading,
+  );
   return useMemo(
     () => findUnreadDividerItemId(groupedItems, dividerAnchor),
     [groupedItems, dividerAnchor],
@@ -209,6 +215,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     taskId,
     isWorking,
     messagesLoading,
+    isInitialMessagesLoading,
     groupedItems,
     allMessages,
     footerActionMessages,
@@ -222,6 +229,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     resolvedSessionId,
     isVisible,
     groupedItems,
+    isInitialMessagesLoading,
   );
   const { handleCancelTurn } = useChatPanelHandlers(resolvedSessionId, chatInputRef);
   const { clarificationKey, handleClarificationResolved } = useClarificationKey(agentMessageCount);

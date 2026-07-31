@@ -426,6 +426,7 @@ function useSessionData(
   const {
     messages,
     isLoading: messagesLoading,
+    isInitialMessagesLoading,
     hasMore: hasOlderMessages,
   } = useSessionMessages(resolvedSessionId);
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
@@ -450,6 +451,7 @@ function useSessionData(
   return {
     messages,
     messagesLoading,
+    isInitialMessagesLoading,
     ...processed,
     sessionModel,
     activeModel,

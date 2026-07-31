@@ -5,6 +5,31 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { markSessionRead } from "@/lib/api/domains/session-api";
 
 type Anchor = { sessionId: string; messageId: string | null };
+type Visit = {
+  sessionId: string;
+  priorCursor: string | null;
+  initialMessagesReady: boolean;
+};
+
+function visitAnchor(
+  sessionId: string,
+  priorCursor: string | null,
+  latestMessageId: string | null,
+) {
+  return latestMessageId !== null && priorCursor !== null && priorCursor !== latestMessageId
+    ? { sessionId, messageId: priorCursor }
+    : null;
+}
+
+function visibleAnchor(
+  unreadDividerEnabled: boolean,
+  isVisible: boolean,
+  anchor: Anchor | null,
+  sessionId: string | null,
+): string | null {
+  if (!unreadDividerEnabled || !isVisible || anchor?.sessionId !== sessionId) return null;
+  return anchor.messageId;
+}
 
 /**
  * Tracks a session's Slack-style read cursor and derives the frozen
@@ -14,31 +39,20 @@ type Anchor = { sessionId: string; messageId: string | null };
  *   latestMessageId immediately (no debounce) whenever it changes — mirrors
  *   Slack's continuous mark-as-read-while-open behavior, so a quick
  *   navigate-away-and-back still sees the correct boundary next time.
- * - The divider itself never moves during a single visit: it's captured
- *   once, from the cursor's value the instant the session becomes visible
- *   (before this visit's advance overwrites it), and held fixed until the
- *   next visibility transition (leaving and coming back, or switching
- *   sessions). This matches Slack — opening a channel draws the line where
- *   you left off; it doesn't jump around while you're already reading it.
- * - The anchor is captured synchronously during render (via the React
- *   "adjust state while rendering" pattern), not inside a useEffect, so
- *   it's correct on the exact same commit isVisible first turns true —
- *   never a commit late. isVisible itself (usePanelActive, backed by
- *   Dockview's async active-tab signal) typically only resolves true one
- *   render *after* this hook's owning panel first mounts, so the message
- *   list's very first paint still shows no divider; the message list
- *   (see message-list-native.tsx's didScrollToDivider) re-applies the
- *   scroll once dividerBeforeItemKey subsequently resolves from this
- *   hook, rather than assuming it's already known on mount.
+ * - A visible visit captures its persisted cursor synchronously, but decides
+ *   divider eligibility only once the initial message load settles. If that
+ *   cursor is already the initial transcript tail, the visit is permanently
+ *   divider-ineligible: later live messages cannot create a "New" boundary.
+ *   A genuine initial unread boundary remains frozen until the next
+ *   visibility transition (leaving and coming back, or switching sessions).
+ * - The visit state is captured during render (via the React "adjust state
+ *   while rendering" pattern), not inside a useEffect. It retains the cursor
+ *   from before live mark-read can overwrite it, while avoiding a divider
+ *   decision from a partial transcript.
  * - The capture is additionally gated on the session record already
- *   existing in the store (a reactive selector, not store.getState() —
- *   this one specifically must trigger a re-render once the session
- *   loads). Without this, a host where isVisible is true from the very
- *   first render — mobile, which unlike the dockview path never calls
- *   usePanelActive and so has no equivalent async lag — could capture
- *   before the session's own fetch resolves, permanently locking in
- *   `undefined?.last_read_message_id ?? null` as if that were a real
- *   "no prior cursor" answer instead of "haven't loaded it yet".
+ *   existing in the store (a reactive selector, not store.getState()). This
+ *   prevents a host where isVisible is true from its first render (such as
+ *   mobile) from treating an unloaded session as a real empty cursor.
  *
  * Returns the render-item key (see hooks/use-processed-messages.ts's
  * findUnreadDividerItemId) the "New" divider should render immediately
@@ -48,6 +62,7 @@ export function useSessionReadTracking(
   sessionId: string | null,
   isVisible: boolean,
   latestMessageId: string | null,
+  initialMessagesLoading = false,
 ): string | null {
   const store = useAppStoreApi();
   const updateSessionReadCursor = useAppStore((state) => state.updateSessionReadCursor);
@@ -63,47 +78,45 @@ export function useSessionReadTracking(
     (state) => sessionId !== null && sessionId in state.taskSessions.items,
   );
   const [anchor, setAnchor] = useState<Anchor | null>(null);
-  // The session id this hook currently considers itself "visible for" — null
-  // while hidden. The *show* transition (visibleFor !== sessionId while
-  // isVisible) is checked on every render, not just in an effect, so the
-  // anchor is captured within the same render pass isVisible turns true.
-  const [visibleFor, setVisibleFor] = useState<string | null>(null);
+  // A visit starts at a visibility transition but only becomes eligible for
+  // a divider after its initial message load settles. Its prior cursor stays
+  // immutable so live messages cannot create a new boundary mid-visit.
+  const [visit, setVisit] = useState<Visit | null>(null);
 
-  if (unreadDividerEnabled && isVisible && sessionId && sessionLoaded && visibleFor !== sessionId) {
-    const priorCursor =
-      store.getState().taskSessions.items[sessionId]?.last_read_message_id ?? null;
-    setVisibleFor(sessionId);
-    setAnchor({ sessionId, messageId: priorCursor });
+  if (unreadDividerEnabled && isVisible && sessionId && sessionLoaded) {
+    if (visit?.sessionId !== sessionId) {
+      const priorCursor =
+        store.getState().taskSessions.items[sessionId]?.last_read_message_id ?? null;
+      const initialMessagesReady = !initialMessagesLoading;
+      setVisit({ sessionId, priorCursor, initialMessagesReady });
+      setAnchor(initialMessagesReady ? visitAnchor(sessionId, priorCursor, latestMessageId) : null);
+    } else if (!visit.initialMessagesReady && !initialMessagesLoading) {
+      setVisit({ ...visit, initialMessagesReady: true });
+      setAnchor(visitAnchor(sessionId, visit.priorCursor, latestMessageId));
+    }
   }
 
   // The *hide* transition is debounced rather than immediate: Dockview
   // briefly disposes and re-registers a panel's underlying api during a
   // layout-driven remount (see PanelPortalManager's class doc and
   // usePanelActive), which can make isVisible read false for a render or
-  // two even though the user never actually left. Resetting visibleFor
-  // synchronously on that blip would make the very next render re-capture
-  // a fresh anchor from the cursor's *already-advanced* value, drawing a
-  // phantom "New" divider in front of a message the user was actively
-  // viewing the whole time. A short delay lets a same-tick blip recover
-  // (isVisible flips back true, cancelling the pending reset below) before
-  // committing; a genuine navigate-away plays out on a completely
-  // different time scale and still resets normally.
+  // two even though the user never actually left.
   useEffect(() => {
-    if (visibleFor === null) return;
+    if (visit === null) return;
     if (!unreadDividerEnabled) {
-      setVisibleFor(null);
+      setVisit(null);
       setAnchor(null);
       latestDispatchRef.current = null;
       return;
     }
     if (isVisible) return;
     const timer = setTimeout(() => {
-      setVisibleFor(null);
+      setVisit(null);
       setAnchor(null);
       latestDispatchRef.current = null;
     }, 300);
     return () => clearTimeout(timer);
-  }, [isVisible, unreadDividerEnabled, visibleFor]);
+  }, [isVisible, unreadDividerEnabled, visit]);
 
   // Tracks the (sessionId, messageId) of the most recently *dispatched*
   // mark-read request. The backend's cursor write is atomically monotonic
@@ -119,19 +132,13 @@ export function useSessionReadTracking(
   const latestDispatchRef = useRef<{ sessionId: string; messageId: string } | null>(null);
 
   useEffect(() => {
-    // Gated on visibleFor === sessionId (the capture above having already
-    // committed for this exact session) rather than just isVisible: without
-    // this, this effect could dispatch and advance the cursor on a render
-    // before the capture above ever ran for this session (e.g. while
-    // sessionLoaded was still false), and the capture would then read the
-    // *already-advanced* cursor once it finally runs — silently swallowing
-    // this visit's real divider boundary with no error, just no divider.
     if (
       !unreadDividerEnabled ||
       !sessionId ||
       !isVisible ||
       !latestMessageId ||
-      visibleFor !== sessionId
+      visit?.sessionId !== sessionId ||
+      !visit.initialMessagesReady
     )
       return;
     const currentCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
@@ -151,14 +158,12 @@ export function useSessionReadTracking(
   }, [
     sessionId,
     isVisible,
-    visibleFor,
+    visit,
     latestMessageId,
     store,
     unreadDividerEnabled,
     updateSessionReadCursor,
   ]);
 
-  return unreadDividerEnabled && isVisible && anchor && anchor.sessionId === sessionId
-    ? anchor.messageId
-    : null;
+  return visibleAnchor(unreadDividerEnabled, isVisible, anchor, sessionId);
 }
