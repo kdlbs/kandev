@@ -16,9 +16,9 @@ instead of adapting to the space actually available in that panel.
 
 - The Changes toolbar adapts the **Walkthrough** action to the inline width of
   the Changes panel, independent of the browser viewport width.
-- At a Changes-panel width of 339px or less, the action shows its route icon
+- At a Changes-panel width of 349px or less, the action shows its route icon
   without the visible **Walkthrough** label.
-- At a Changes-panel width of 340px or more, the action shows both its route
+- At a Changes-panel width of 350px or more, the action shows both its route
   icon and the **Walkthrough** label.
 - Both presentations retain the same accessible name, tooltip, enabled and
   disabled behavior, and click outcome.
@@ -29,13 +29,13 @@ instead of adapting to the space actually available in that panel.
 
 ## Scenarios
 
-- **GIVEN** a desktop task whose Changes panel is 339px wide, **WHEN** the
+- **GIVEN** a desktop task whose Changes panel is 349px wide, **WHEN** the
   Changes toolbar renders, **THEN** the Walkthrough label is hidden while its
   icon button remains visible, accessible, and fully contained in the panel.
-- **GIVEN** a desktop task whose Changes panel is 340px wide, **WHEN** the
+- **GIVEN** a desktop task whose Changes panel is 350px wide, **WHEN** the
   Changes toolbar renders, **THEN** the Walkthrough label is visible and the
   complete action remains contained in the panel.
-- **GIVEN** a wide laptop viewport with a Changes panel narrowed to 339px,
+- **GIVEN** a wide laptop viewport with a Changes panel narrowed to 349px,
   **WHEN** the toolbar renders, **THEN** the panel width rather than the
   viewport width selects the icon-only presentation.
 - **GIVEN** the phone Changes surface is wide enough to show the label, **WHEN**

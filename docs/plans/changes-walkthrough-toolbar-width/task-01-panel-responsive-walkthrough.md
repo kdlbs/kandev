@@ -12,20 +12,20 @@ spec: "../../specs/changes-walkthrough-toolbar-width/spec.md"
 
 ## Acceptance
 
-- A 339px Changes panel renders an accessible, fully contained icon-only
+- A 349px Changes panel renders an accessible, fully contained icon-only
   Walkthrough action, independent of the viewport width.
-- A 340px-or-wider Changes panel renders the complete Walkthrough label without
+- A 350px-or-wider Changes panel renders the complete Walkthrough label without
   clipping the action or the branch and Pull controls.
 - The Pixel 5 Changes request flow remains usable, contained, and free of
   document-level horizontal overflow.
 
 ## TDD sequence
 
-1. Add the desktop 339px/340px geometry regression and the mobile containment
+1. Add the desktop 349px/350px geometry regression and the mobile containment
    assertions, then run the focused command and confirm they fail because the
    current label follows viewport width.
 2. Add the named panel containers and replace the viewport breakpoint with the
-   340px container-query boundary.
+   350px container-query boundary.
 3. Run the same focused command until both desktop and mobile scenarios pass.
 4. Refactor only if the minimal class changes expose duplication or unclear
    naming; rerun the focused command after any refactor.
