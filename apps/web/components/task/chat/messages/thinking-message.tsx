@@ -2,10 +2,10 @@
 
 import { useState, memo } from "react";
 import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import { IconBrain } from "@tabler/icons-react";
 import type { Message } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
+import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import { ExpandableRow } from "./expandable-row";
 import { useTranslation } from "react-i18next";
 
@@ -60,7 +60,9 @@ export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comm
       {!isShort && (
         <div className="pl-4 border-l-2 border-border/30">
           <div className="markdown-body max-w-none text-xs text-foreground/70 [&>*]:my-1 [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&_strong]:text-foreground/80">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
+              {text}
+            </ReactMarkdown>
           </div>
         </div>
       )}
