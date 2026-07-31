@@ -13,6 +13,8 @@ type OpenEditorOptions = {
   editorId?: string;
   editorType?: string;
   worktreeId?: string;
+  /** `filePath` points at a folder, so the embedded editor has nothing to goto. */
+  isDirectory?: boolean;
 };
 
 /**
@@ -33,6 +35,19 @@ function parseInternalVscodeURL(url: string): { file: string; line: number; col:
     line: parseInt(parts[1] ?? "0", 10) || 0,
     col: parseInt(parts[2] ?? "0", 10) || 0,
   };
+}
+
+/**
+ * Reveals the embedded editor panel and, for a file target, gotos it through
+ * the backend Remote CLI. Folder targets have nothing to goto — the panel is
+ * already rooted at the workspace.
+ */
+function openInternalVscode(sessionId: string, url: string, options?: OpenEditorOptions) {
+  const goto_ = parseInternalVscodeURL(url);
+  useDockviewStore.getState().openInternalVscode(null);
+  if (goto_ && !options?.isDirectory) {
+    openFileInVscode(sessionId, goto_.file, goto_.line, goto_.col);
+  }
 }
 
 export function useOpenSessionInEditor(sessionId?: string | null) {
@@ -57,13 +72,7 @@ export function useOpenSessionInEditor(sessionId?: string | null) {
     if (response?.url) {
       // Intercept internal VS Code URLs — handle in-app instead of opening a tab.
       if (response.url.startsWith("internal://vscode")) {
-        const goto_ = parseInternalVscodeURL(response.url);
-        useDockviewStore.getState().openInternalVscode(null);
-
-        // Open the file via the backend Remote CLI if goto params are provided
-        if (goto_ && sessionId) {
-          openFileInVscode(sessionId, goto_.file, goto_.line, goto_.col);
-        }
+        openInternalVscode(sessionId, response.url, options);
         return response;
       }
 

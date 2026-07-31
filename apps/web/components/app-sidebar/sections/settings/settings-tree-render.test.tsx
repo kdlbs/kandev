@@ -21,7 +21,6 @@ const state = {
   },
   features: {
     office: false,
-    plugins: false,
     auth: false,
   },
   auth: {
@@ -228,10 +227,7 @@ describe("SettingsTree integration status", () => {
 });
 
 describe("SettingsTree standalone leaves", () => {
-  afterEach(() => {
-    cleanup();
-    state.features.plugins = false;
-  });
+  afterEach(cleanup);
 
   it("keeps Voice Mode in the settings tree as a standalone active leaf", () => {
     render(<SettingsTree pathname="/settings" />);
@@ -250,9 +246,7 @@ describe("SettingsTree standalone leaves", () => {
     expect(screen.queryByRole("link", { name: "Appearance" })).toBeNull();
   });
 
-  it("puts Plugins immediately before System when plugins are enabled", () => {
-    state.features.plugins = true;
-
+  it("puts Plugins immediately before System", () => {
     render(<SettingsTree pathname="/settings" />);
 
     expect(

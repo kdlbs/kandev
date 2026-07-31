@@ -41,7 +41,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
 	b.subscribe(eventBus, events.SessionWorkspaceSourcesUpdated, ws.ActionSessionWorkspaceSourcesUpdated)
 	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
-	b.subscribe(eventBus, events.TaskStateChanged, ws.ActionTaskStateChanged)
+	b.subscribeLifecycleStateEvents(eventBus)
 	b.subscribe(eventBus, events.TaskPlanCreated, ws.ActionTaskPlanCreated)
 	b.subscribe(eventBus, events.TaskPlanUpdated, ws.ActionTaskPlanUpdated)
 	b.subscribe(eventBus, events.TaskPlanDeleted, ws.ActionTaskPlanDeleted)
@@ -71,7 +71,6 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentCreated, ws.ActionEnvironmentCreated)
 	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
-	b.subscribe(eventBus, events.TaskSessionStateChanged, ws.ActionSessionStateChanged)
 	b.subscribe(eventBus, events.TaskSessionActivityChanged, ws.ActionSessionActivityChanged)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
@@ -105,91 +104,132 @@ func (b *TaskEventBroadcaster) Close() {
 }
 
 func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action string) {
+	b.subscribeWithResolver(eventBus, subject, func(*bus.Event) string { return action })
+}
+
+// subscribeLifecycleStateEvents uses one NATS subscription so task and session
+// state notifications remain ordered for clients when the event bus is remote.
+func (b *TaskEventBroadcaster) subscribeLifecycleStateEvents(eventBus bus.EventBus) {
+	b.subscribeWithResolver(eventBus, ">", func(event *bus.Event) string {
+		switch event.Type {
+		case events.TaskStateChanged:
+			return ws.ActionTaskStateChanged
+		case events.TaskSessionStateChanged:
+			return ws.ActionSessionStateChanged
+		default:
+			return ""
+		}
+	})
+}
+
+func (b *TaskEventBroadcaster) subscribeWithResolver(
+	eventBus bus.EventBus,
+	subject string,
+	resolveAction func(*bus.Event) string,
+) {
 	sub, err := eventBus.Subscribe(subject, func(ctx context.Context, event *bus.Event) error {
-		msg, err := ws.NewNotification(action, event.Data)
-		if err != nil {
-			b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
+		action := resolveAction(event)
+		if action == "" {
 			return nil
 		}
-		// Try to extract session_id from event data (works for both map and struct types)
-		var sessionID string
-		if data, ok := event.Data.(map[string]interface{}); ok {
-			sessionID, _ = data["session_id"].(string)
-		} else if data, ok := event.Data.(interface{ GetSessionID() string }); ok {
-			sessionID = data.GetSessionID()
-		}
-
-		// Debug logging for session state changes with metadata
-		if action == ws.ActionSessionStateChanged {
-			if data, ok := event.Data.(map[string]interface{}); ok {
-				if metadata, ok := data["metadata"]; ok {
-					b.logger.Debug("received session.state_changed with metadata",
-						zap.String("action", action),
-						zap.String("session_id", sessionID),
-						zap.Any("metadata", metadata))
-				}
-			}
-		}
-		if data, ok := event.Data.(map[string]interface{}); ok {
-			b.logLifecycleBroadcast(action, data, sessionID)
-		}
-
-		workspaceID := extractWorkspaceID(event.Data)
-		switch action {
-		case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
-			// Workspace event payloads are the workspace DTO itself: the
-			// workspace ID lives under "id", not "workspace_id". Without this
-			// the extract comes back empty and the event would broadcast to
-			// every user (caught by the auth E2E segregation spec).
-			if workspaceID == "" {
-				workspaceID = extractStringField(event.Data, "id")
-			}
-			b.hub.BroadcastToWorkspace(workspaceID, msg)
-			return nil
-		case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
-			if sessionID != "" {
-				b.hub.BroadcastToSession(sessionID, msg)
-				return nil
-			}
-		case ws.ActionSessionStateChanged:
-			// Broadcast beyond the session subscribers so the sidebar task
-			// switcher can track state changes for all tasks — but scoped to
-			// the owning workspace's user when auth is enabled.
-			b.hub.BroadcastToWorkspace(workspaceID, msg)
-			return nil
-		case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
-			if sessionID != "" {
-				b.hub.BroadcastToSession(sessionID, msg)
-				return nil
-			}
-		case ws.ActionSessionWorkspaceSourcesUpdated:
-			if sessionID != "" {
-				b.hub.BroadcastToSession(sessionID, msg)
-				return nil
-			}
-		case ws.ActionMessageQueueStatusChanged:
-			if sessionID != "" {
-				b.hub.BroadcastToSession(sessionID, msg)
-				return nil
-			}
-		case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
-			// Broadcast to the owning workspace's clients so prepare
-			// progress/warnings are available when the user navigates to the
-			// session page after task creation.
-			b.hub.BroadcastToWorkspace(workspaceID, msg)
-			return nil
-		}
-		// Workspace-carrying events (task/workflow/repository/…) route to the
-		// owner's clients; events without workspace context (executors,
-		// environments, agent profiles — instance-wide resources) stay global.
-		b.hub.BroadcastToWorkspace(workspaceID, msg)
-		return nil
+		return b.broadcastEvent(ctx, event, action)
 	})
 	if err != nil {
 		b.logger.Error("failed to subscribe to events", zap.String("subject", subject), zap.Error(err))
 		return
 	}
 	b.subscriptions = append(b.subscriptions, sub)
+}
+
+func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Event, action string) error {
+	msg, err := ws.NewNotification(action, event.Data)
+	if err != nil {
+		b.logger.Error("failed to build websocket notification", zap.String("action", action), zap.Error(err))
+		return nil
+	}
+	sessionID := extractSessionID(event.Data)
+	b.logSessionStateMetadata(action, sessionID, event.Data)
+	if data, ok := event.Data.(map[string]interface{}); ok {
+		b.logLifecycleBroadcast(action, data, sessionID)
+	}
+
+	return b.routeBroadcast(action, event.Data, sessionID, extractWorkspaceID(event.Data), msg)
+}
+
+func (b *TaskEventBroadcaster) logSessionStateMetadata(action, sessionID string, data interface{}) {
+	if action != ws.ActionSessionStateChanged {
+		return
+	}
+	payload, ok := data.(map[string]interface{})
+	if !ok {
+		return
+	}
+	metadata, ok := payload["metadata"]
+	if !ok {
+		return
+	}
+	b.logger.Debug("received session.state_changed with metadata",
+		zap.String("action", action),
+		zap.String("session_id", sessionID),
+		zap.Any("metadata", metadata))
+}
+
+func (b *TaskEventBroadcaster) routeBroadcast(
+	action string,
+	data interface{},
+	sessionID string,
+	workspaceID string,
+	msg *ws.Message,
+) error {
+	switch action {
+	case ws.ActionWorkspaceCreated, ws.ActionWorkspaceUpdated, ws.ActionWorkspaceDeleted:
+		// Workspace event payloads are the workspace DTO itself: the
+		// workspace ID lives under "id", not "workspace_id". Without this
+		// the extract comes back empty and the event would broadcast to
+		// every user (caught by the auth E2E segregation spec).
+		if workspaceID == "" {
+			workspaceID = extractStringField(data, "id")
+		}
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	case ws.ActionSessionAgentctlStarting, ws.ActionSessionAgentctlReady, ws.ActionSessionAgentctlError:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionStateChanged:
+		// Broadcast beyond the session subscribers so the sidebar task
+		// switcher can track state changes for all tasks — but scoped to
+		// the owning workspace's user when auth is enabled.
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	case ws.ActionSessionMessageAdded, ws.ActionSessionMessageUpdated, ws.ActionSessionMessageDeleted:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionWorkspaceSourcesUpdated:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionMessageQueueStatusChanged:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionExecutorPrepareProgress, ws.ActionExecutorPrepareCompleted:
+		// Broadcast to the owning workspace's clients so prepare
+		// progress/warnings are available when the user navigates to the
+		// session page after task creation.
+		b.hub.BroadcastToWorkspace(workspaceID, msg)
+		return nil
+	}
+	// Workspace-carrying events (task/workflow/repository/…) route to the
+	// owner's clients; events without workspace context (executors,
+	// environments, agent profiles — instance-wide resources) stay global.
+	b.hub.BroadcastToWorkspace(workspaceID, msg)
+	return nil
 }
 
 // extractWorkspaceID pulls a workspace ID from event payloads (map- or

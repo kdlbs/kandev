@@ -17,10 +17,9 @@ pipeline, enable/disable, and security posture work, see
 [Plugins](plugins.md). For building one, see [Authoring a
 plugin](plugins-authoring.md).
 
-Like the rest of plugins, the marketplace is gated behind the `plugins` feature
-flag (**Settings > System > Feature Toggles**) — off by default in production,
-on by default in dev/e2e builds. Enabling it requires a backend restart and
-surfaces **Settings > Plugins** in the sidebar.
+Like the rest of plugins, the marketplace ships in the base product with no
+feature flag to turn on — **Settings > Plugins** is always available in the
+sidebar.
 
 > **Sideloading still works.** The marketplace only adds *discovery*. Installing
 > a plugin by URL or by uploading a `.tar.gz` is unchanged and always available,

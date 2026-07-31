@@ -17,7 +17,7 @@ import {
   defaultSystemState,
   defaultReviewState,
 } from "./slices";
-import { getStoredQuickChatNames } from "@/lib/local-storage";
+import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { HydrationState } from "./store";
 import { migrateView } from "./slices/ui/ui-slice";
 
@@ -69,8 +69,10 @@ export const defaultState = {
   sessionTodos: defaultSessionRuntimeState.sessionTodos,
   agentCapabilities: defaultSessionRuntimeState.agentCapabilities,
   sessionModels: defaultSessionRuntimeState.sessionModels,
+  sessionMcpStatus: defaultSessionRuntimeState.sessionMcpStatus,
   promptUsage: defaultSessionRuntimeState.promptUsage,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
+  embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
   githubStatus: defaultGitHubState.githubStatus,
   githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
@@ -152,17 +154,9 @@ function mergeQuickChatState(initialState: HydrationState): DefaultState["quickC
   const quickChat = { ...defaultState.quickChat, ...initialState.quickChat };
   if (!initialState.quickChat?.sessions) return quickChat;
 
-  const storedNames = getStoredQuickChatNames();
   return {
     ...quickChat,
-    sessions: initialState.quickChat.sessions.map((session) => {
-      const localName = storedNames[session.sessionId];
-      return {
-        ...session,
-        kind: session.kind ?? "chat",
-        ...(localName ? { name: localName } : {}),
-      };
-    }),
+    sessions: applyStoredQuickChatNames(initialState.quickChat.sessions),
   };
 }
 
@@ -298,8 +292,13 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     sessionTodos: { ...defaultState.sessionTodos, ...initialState.sessionTodos },
     agentCapabilities: { ...defaultState.agentCapabilities, ...initialState.agentCapabilities },
     sessionModels: { ...defaultState.sessionModels, ...initialState.sessionModels },
+    sessionMcpStatus: { ...defaultState.sessionMcpStatus, ...initialState.sessionMcpStatus },
     promptUsage: { ...defaultState.promptUsage, ...initialState.promptUsage },
     sessionPollMode: { ...defaultState.sessionPollMode, ...initialState.sessionPollMode },
+    embeddedVscodeSupport: {
+      ...defaultState.embeddedVscodeSupport,
+      ...initialState.embeddedVscodeSupport,
+    },
     ...mergeGitHubState(initialState),
     taskPRs: { ...defaultState.taskPRs, ...initialState.taskPRs },
     taskIssues: { ...defaultState.taskIssues, ...initialState.taskIssues },

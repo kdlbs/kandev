@@ -1,6 +1,43 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile general settings", () => {
+  test("keeps the full Transcript Navigation card above the floating Save action", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto("/settings/general/task-actions");
+
+    const autoScrollControl = testPage.getByRole("switch", {
+      name: "Show transcript auto-scroll control",
+    });
+    await autoScrollControl.click();
+
+    const [scrollContainer, transcriptCard, floatingSave] = [
+      testPage.getByTestId("settings-scroll-container"),
+      testPage.getByTestId("anchored-prompt-bar-card"),
+      testPage.getByTestId("settings-floating-save"),
+    ];
+    await expect(floatingSave).toBeVisible();
+    await scrollContainer.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+    });
+
+    const [cardBox, saveBox] = await Promise.all([
+      transcriptCard.boundingBox(),
+      floatingSave.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(saveBox).not.toBeNull();
+    expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(saveBox!.y);
+    expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+      await testPage.evaluate(() => document.documentElement.clientWidth),
+    );
+    await prCapture.screenshot("transcript-navigation-save-clearance", {
+      caption: "Mobile Transcript Navigation card above the floating Save action",
+    });
+  });
+
   test("keeps the floating Save reachable without covering the last control", async ({
     testPage,
     apiClient,

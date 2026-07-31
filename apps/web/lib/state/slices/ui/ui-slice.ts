@@ -3,7 +3,6 @@ import {
   getStoredCollapsedSubtaskParents,
   setLocalStorage,
   setStoredCollapsedSubtaskParents,
-  setStoredQuickChatName,
   setStoredAutoScrollEnabled,
   setStoredAutoScrollTop,
 } from "@/lib/local-storage";
@@ -19,8 +18,13 @@ import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
 import type { SidebarView, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
-import type { ActiveDocument, UISlice, UISliceState } from "./types";
+import type { ActiveDocument, QuickChatSession, UISlice, UISliceState } from "./types";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
+import {
+  reconcileQuickChatSessions,
+  removeQuickChatSessionsForTask,
+  upsertQuickChatSession,
+} from "./quick-chat-sync";
 
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
@@ -307,6 +311,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
     workspaceId: string,
     agentProfileId?: string,
     kind: "chat" | "config" = "chat",
+    taskId?: string,
   ) =>
     set((draft) => {
       if (!sessionId) {
@@ -331,8 +336,9 @@ function buildOpenQuickChatAction(set: ImmerSet) {
       if (existing) {
         if (existing.workspaceId !== workspaceId) return;
         if (agentProfileId) existing.agentProfileId = agentProfileId;
+        if (taskId) existing.taskId = taskId;
       } else {
-        draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
+        draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
       }
       draft.quickChat.isOpen = true;
       draft.quickChat.activeSessionId = sessionId;
@@ -347,6 +353,7 @@ function buildQuickChatActions(set: ImmerSet) {
       workspaceId: string,
       agentProfileId?: string,
       kind: "chat" | "config" = "chat",
+      taskId?: string,
     ) =>
       set((draft) => {
         const activeWorkspaceId = draft.quickChat.sessions.find(
@@ -360,8 +367,9 @@ function buildQuickChatActions(set: ImmerSet) {
         if (existing) {
           if (existing.workspaceId !== workspaceId) return;
           if (agentProfileId) existing.agentProfileId = agentProfileId;
+          if (taskId) existing.taskId = taskId;
         } else {
-          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind });
+          draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
         }
         if (shouldActivate) draft.quickChat.activeSessionId = sessionId;
       }),
@@ -391,17 +399,25 @@ function buildQuickChatActions(set: ImmerSet) {
         if (!session || session.workspaceId !== workspaceId) return;
         draft.quickChat.activeSessionId = sessionId;
       }),
-    renameQuickChatSession: (sessionId: string, name: string) => {
-      let renamed = false;
+    // Optimistic only. Persisting the name is `persistQuickChatRename`'s job,
+    // so the backing task title stays the shared source of truth.
+    renameQuickChatSession: (sessionId: string, name: string) =>
       set((draft) => {
         const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
-        if (session) {
-          session.name = name;
-          renamed = true;
-        }
-      });
-      if (renamed) setStoredQuickChatName(sessionId, name);
-    },
+        if (session) session.name = name;
+      }),
+    syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) =>
+      set((draft) => {
+        draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
+      }),
+    upsertQuickChatSessionFromEvent: (session: QuickChatSession) =>
+      set((draft) => {
+        draft.quickChat = upsertQuickChatSession(draft.quickChat, session);
+      }),
+    removeQuickChatSessionsForTask: (taskId: string) =>
+      set((draft) => {
+        draft.quickChat = removeQuickChatSessionsForTask(draft.quickChat, taskId);
+      }),
     setQuickChatInitialPrompt: (sessionId: string, prompt?: string) =>
       set((draft) => {
         const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);

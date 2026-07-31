@@ -47,6 +47,8 @@ export function makeStore(initial: Partial<AppState> = {}) {
     }),
     removeTaskFromSidebarPrefs: vi.fn(),
     setTaskDeletedNotification: vi.fn(),
+    upsertQuickChatSessionFromEvent: vi.fn(),
+    removeQuickChatSessionsForTask: vi.fn(),
     ...initial,
   } as unknown as AppState;
 

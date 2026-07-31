@@ -11,6 +11,7 @@ import { ContextZone } from "./context-items/context-zone";
 import type { ContextItem } from "@/lib/types/context";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { ImagePasteIssue } from "./clipboard-attachments";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 export type ChatInputEditorAreaProps = {
   inputRef: React.RefObject<import("./tiptap-input").TipTapInputHandle | null>;
@@ -24,6 +25,7 @@ export type ChatInputEditorAreaProps = {
   planModeEnabled: boolean;
   planModeAvailable: boolean;
   mcpServers: string[];
+  mcpAttachmentHistory?: MCPAttachmentHistory;
   submitKey: "enter" | "cmd_enter";
   setIsInputFocused: (focused: boolean) => void;
   sessionId: string | null;
@@ -177,6 +179,7 @@ export function ChatInputEditorArea(p: ChatInputEditorAreaProps) {
         planModeEnabled={planModeEnabled}
         planModeAvailable={planModeAvailable}
         mcpServers={mcpServers}
+        mcpAttachmentHistory={p.mcpAttachmentHistory}
         onPlanModeChange={onPlanModeChange}
         sessionId={sessionId}
         taskId={taskId}

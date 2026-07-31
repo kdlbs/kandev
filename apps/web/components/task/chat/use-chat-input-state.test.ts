@@ -4,6 +4,7 @@ import React from "react";
 import { ToastProvider } from "@/components/toast-provider";
 import { useChatInputState } from "./use-chat-input-state";
 import { MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
@@ -234,9 +235,7 @@ describe("useChatInputState attachment feedback", () => {
     expect(result.current.attachments).toHaveLength(2);
     expect(screen.getAllByTestId("toast-message")).toHaveLength(1);
     expect(toastMessage()).toContain("Attachment limit reached");
-    expect(toastMessage()).toContain(
-      `Attachments can total up to ${MAX_TOTAL_SIZE / 1024 / 1024} MB.`,
-    );
+    expect(toastMessage()).toContain(`Attachments can total up to ${formatBytes(MAX_TOTAL_SIZE)}.`);
   });
 
   it("warns when a pasted attachment exceeds the file size limit", async () => {
@@ -250,7 +249,7 @@ describe("useChatInputState attachment feedback", () => {
 
     expect(toastMessage()).toContain("Attachment is too large");
     expect(toastMessage()).toContain(
-      `recording.mov is 11 MB. The maximum file size is ${MAX_FILE_SIZE / 1024 / 1024} MB.`,
+      `recording.mov is 11.0 MB. The maximum file size is ${formatBytes(MAX_FILE_SIZE)}.`,
     );
     expect(result.current.attachments).toEqual([]);
   });

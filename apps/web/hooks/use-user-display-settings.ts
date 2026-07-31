@@ -57,14 +57,21 @@ function carryForwardUtilitySettings(current: DisplaySettings) {
   };
 }
 
+function carryForwardTranscriptNavigationSettings(current: DisplaySettings) {
+  return {
+    showAnchoredPromptBar: current.showAnchoredPromptBar ?? false,
+    showScrollToLastPrompt: current.showScrollToLastPrompt ?? true,
+    showScrollToStart: current.showScrollToStart ?? false,
+    showTranscriptAutoScrollControl: current.showTranscriptAutoScrollControl ?? true,
+  };
+}
+
 function carryForwardCoreSettings(current: DisplaySettings) {
   return {
     shellOptions: current.shellOptions ?? [],
     defaultEditorId: current.defaultEditorId ?? null,
     chatSubmitKey: current.chatSubmitKey ?? "cmd_enter",
-    showAnchoredPromptBar: current.showAnchoredPromptBar ?? true,
-    showScrollToLastPrompt: current.showScrollToLastPrompt ?? true,
-    showScrollToStart: current.showScrollToStart ?? true,
+    ...carryForwardTranscriptNavigationSettings(current),
     reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
     showReleaseNotification: current.showReleaseNotification ?? true,
     releaseNotesLastSeenVersion: current.releaseNotesLastSeenVersion ?? null,

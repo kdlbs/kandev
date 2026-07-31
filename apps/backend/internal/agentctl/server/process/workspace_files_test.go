@@ -2,6 +2,8 @@ package process
 
 import (
 	"context"
+	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -514,6 +516,47 @@ func TestSearchFileCandidatesBreaksTiesByRepositoryRelativePathLength(t *testing
 
 	if len(results) != 2 || results[0].Path != "long-repository-name/a/query.go" {
 		t.Fatalf("search results = %#v, want shortest repo-relative path first", results)
+	}
+}
+
+// A caller-supplied limit reaches searchFileCandidates straight from the
+// `limit` query parameter, so an absurd value must not drive the result
+// slice's pre-allocation.
+func TestSearchFileCandidatesClampsCallerSuppliedLimit(t *testing.T) {
+	candidates := make([]fileSearchCandidate, 0, fileSearchMaxLimit+50)
+	for i := range fileSearchMaxLimit + 50 {
+		candidates = append(candidates, fileSearchCandidate{
+			path:      fmt.Sprintf("src/query-%d.go", i),
+			matchPath: fmt.Sprintf("src/query-%d.go", i),
+		})
+	}
+
+	results := searchFileCandidates(candidates, "query", math.MaxInt32)
+
+	if len(results) != fileSearchMaxLimit {
+		t.Fatalf("len(results) = %d, want the clamped %d", len(results), fileSearchMaxLimit)
+	}
+	if cap(results) > fileSearchMaxLimit {
+		t.Fatalf("cap(results) = %d, want no more than the clamped %d", cap(results), fileSearchMaxLimit)
+	}
+}
+
+func TestSearchFileCandidatesDefaultsNonPositiveLimit(t *testing.T) {
+	candidates := make([]fileSearchCandidate, 0, fileSearchDefaultLimit+5)
+	for i := range fileSearchDefaultLimit + 5 {
+		candidates = append(candidates, fileSearchCandidate{
+			path:      fmt.Sprintf("src/query-%d.go", i),
+			matchPath: fmt.Sprintf("src/query-%d.go", i),
+		})
+	}
+
+	for _, limit := range []int{0, -1} {
+		results := searchFileCandidates(candidates, "query", limit)
+
+		if len(results) != fileSearchDefaultLimit {
+			t.Fatalf("limit %d: len(results) = %d, want the default %d",
+				limit, len(results), fileSearchDefaultLimit)
+		}
 	}
 }
 

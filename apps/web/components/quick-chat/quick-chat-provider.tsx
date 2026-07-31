@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
+import { useQuickChatResync } from "@/hooks/use-quick-chat-resync";
 import { QuickChatModal } from "./quick-chat-modal";
 
 // SSR-safe client mount detection without useEffect setState
@@ -41,6 +42,9 @@ export function QuickChatProvider({ children }: { children: React.ReactNode }) {
 
   // Preload agent profiles so they're available when quick chat is opened
   useSettingsData(true);
+  // Quick chats are shared across devices: re-read the server's list whenever
+  // the socket connects so tabs opened or closed elsewhere show up here too.
+  useQuickChatResync(activeWorkspace);
 
   const workspaceId = getWorkspaceId(quickChatSessions, isOpen, activeSessionId, activeWorkspace);
 

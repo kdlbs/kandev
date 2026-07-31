@@ -5,6 +5,7 @@ import { REVIEW_SIDEBAR_LIMITS } from "../../../hooks/use-review-sidebar-resize"
 import path from "node:path";
 
 const ADDED_PATH = "review-status-added.ts";
+const NESTED_PATH = "review-status-nested/nested.ts";
 const MODIFIED_PATH = "review-status-modified.ts";
 const DELETED_PATH = "review-status-deleted.ts";
 const MOVED_FROM_PATH = "review-status-old-name.ts";
@@ -18,6 +19,7 @@ test.describe("Review file status", () => {
     apiClient,
     seedData,
     backend,
+    prCapture,
   }) => {
     await testPage.addInitScript(({ key, width }) => sessionStorage.setItem(key, width), {
       key: REVIEW_SIDEBAR_LIMITS.storageKey,
@@ -89,16 +91,19 @@ test.describe("Review file status", () => {
     git.createFile(DELETED_PATH, "remove me\n");
     git.stageAll();
     git.commit("seed review status files");
-    git.createFile(ADDED_PATH, "added\n");
+    git.createFile(ADDED_PATH, "added line\n".repeat(80));
     git.stageFile(ADDED_PATH);
+    git.createFile(NESTED_PATH, "nested\n");
+    git.stageFile(NESTED_PATH);
     git.modifyFile(MODIFIED_PATH, "after\n");
     git.deleteFile(DELETED_PATH);
 
     const changesTab = testPage.getByTestId("dockview-tab-changes");
     await expect(changesTab).toBeVisible();
     await changesTab.click();
-    for (const filePath of [ADDED_PATH, MODIFIED_PATH, DELETED_PATH]) {
-      await expect(testPage.getByTestId(`file-row-${filePath}`)).toBeVisible({ timeout: 20_000 });
+    for (const filePath of [ADDED_PATH, NESTED_PATH, MODIFIED_PATH, DELETED_PATH]) {
+      const rowTestId = `file-row-${filePath.replace(/[/\\]/g, "-")}`;
+      await expect(testPage.getByTestId(rowTestId)).toBeVisible({ timeout: 20_000 });
     }
 
     await testPage
@@ -110,6 +115,14 @@ test.describe("Review file status", () => {
     await expect(dialog).toBeVisible();
     const sidebar = dialog.getByTestId("review-dialog-sidebar");
     await expect(sidebar).toBeVisible();
+
+    const sidebarOrder = await sidebar
+      .getByTestId("review-file-row")
+      .evaluateAll((rows) => rows.map((row) => (row as HTMLElement).dataset.filePath));
+    const diffOrder = await dialog
+      .getByTestId("review-file-header")
+      .evaluateAll((headers) => headers.map((header) => (header as HTMLElement).dataset.filePath));
+    expect(sidebarOrder).toEqual(diffOrder);
 
     for (const [path, name] of [
       [ADDED_PATH, "Added"],
@@ -157,6 +170,28 @@ test.describe("Review file status", () => {
     expect(geometry.nameRight).toBeLessThanOrEqual(geometry.markerLeft);
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.rowRight);
     expect(geometry.markerRight).toBeLessThanOrEqual(geometry.sidebarRight);
+
+    await expect(dialog.getByText("0 of 5 files reviewed")).toBeVisible();
+    await sidebar
+      .locator(`[data-testid="review-file-row"][data-file-path="${NESTED_PATH}"]`)
+      .click();
+    const reviewScroll = dialog.getByTestId("review-diff-scroll");
+    await expect
+      .poll(() => reviewScroll.evaluate((element) => element.scrollTop))
+      .toBeGreaterThan(0);
+    await testPage.waitForTimeout(600);
+    await expect(dialog.getByText("0 of 5 files reviewed")).toBeVisible();
+    await prCapture.screenshot("review-ordered-safe-jump", {
+      caption: "Review keeps tree and diff order aligned without auto-reviewing a file jump",
+    });
+
+    await reviewScroll.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await expect.poll(() => reviewScroll.evaluate((element) => element.scrollTop)).toBe(0);
+    await reviewScroll.hover();
+    await testPage.mouse.wheel(0, 500);
+    await expect(dialog.getByText(/[1-5] of 5 files reviewed/)).toBeVisible();
 
     await movedRow.click();
     await expect(

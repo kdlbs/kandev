@@ -58,7 +58,6 @@ export function settingsOpenGroupIdForPath(pathname: string): string {
  * footer gear is active, as the full-height sidebar takeover.
  */
 export function SettingsTree({ pathname }: { pathname: string }) {
-  const pluginsEnabled = useFeature("plugins");
   const authEnabled = useFeature("auth");
   const authMode = useAppStore((s) => s.auth.mode);
   const showAccountGroup = authEnabled && authMode === "enabled";
@@ -115,14 +114,12 @@ export function SettingsTree({ pathname }: { pathname: string }) {
         isActive={pathname === EXT_MCP_HREF}
       />
       <PluginSlot name="settings-nav" />
-      {pluginsEnabled && (
-        <SettingsLeaf
-          href={PLUGINS_HREF}
-          label="Plugins"
-          icon={IconPuzzle}
-          isActive={pathname === PLUGINS_HREF}
-        />
-      )}
+      <SettingsLeaf
+        href={PLUGINS_HREF}
+        label="Plugins"
+        icon={IconPuzzle}
+        isActive={pathname === PLUGINS_HREF}
+      />
       <SystemGroup pathname={pathname} {...groupProps("system")} />
       {showAccountGroup && <AccountGroup pathname={pathname} {...groupProps("account")} />}
     </>

@@ -40,6 +40,7 @@ test.describe("Mobile code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData);
 
@@ -63,6 +64,8 @@ test.describe("Mobile code walkthrough", () => {
     await testPage.evaluate(() => window.dispatchEvent(new CustomEvent("open-review-dialog")));
     const reviewDialog = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reviewDialog).toBeVisible({ timeout: 15_000 });
+    await expect(reviewDialog.locator('[data-walkthrough-active="true"]')).toHaveCount(0);
+    await expect(reviewDialog.getByText("0 of 3 files reviewed")).toBeVisible();
     await expectWalkthroughBehindDialog(testPage, reviewDialog, [
       { locator: card, name: "walkthrough window" },
       {
@@ -70,6 +73,9 @@ test.describe("Mobile code walkthrough", () => {
         name: "walkthrough launcher",
       },
     ]);
+    await prCapture.screenshot("mobile-review-with-walkthrough", {
+      caption: "Mobile Review stays isolated from the task walkthrough",
+    });
   });
 
   test("requests a walkthrough from Changes and opens the generated bottom sheet", async ({

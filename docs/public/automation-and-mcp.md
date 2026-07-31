@@ -237,6 +237,12 @@ An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers wh
 
 Stdio normally starts per session and cannot be shared. Network servers can be shared or per-session. The executor's MCP policy can deny transports/server names, rewrite URLs, or inject environment. See [Agents and profiles](agents-and-profiles.md) for configuration, secret handling, and failure behavior.
 
+### Diagnose one running session
+
+Use the neutral plug button beside the chat composer to inspect the current session's MCP attachment report. It distinguishes configuration delivered to the agent from a connection observed by Kandev: the built-in task server becomes **Connected** after MCP initialize and **Active** after it serves `tools/list`. A third-party profile server usually remains **Delivered · connection unverified** because it connects directly to the agent rather than through Kandev. Missing observation is not a failure; red appears only for an explicit sanitized error.
+
+On desktop, hover or focus the button for the compact status list. On touch devices, tap its 44px target to open the same list in a bottom drawer. The report is per Kandev session and execution, so simultaneous agents in one task never share a status row. It stores only bounded, sanitized attachment facts: no MCP headers, environment values, tool arguments/results, raw ACP frames, or agent output.
+
 ## External MCP
 
 Open **Settings > External MCP** (`/settings/external-mcp`) for client-specific snippets for Claude Code, Cursor, Codex, Auggie, OpenCode, and GitHub Copilot CLI.
@@ -283,6 +289,7 @@ The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Ka
 - **Webhook rejected or data is incomplete:** check the exact automation ID, `X-Webhook-Secret` header, and enabled automation/trigger. Bodies over 1 MiB are not rejected; the suffix is silently discarded, so inspect the retained trigger data.
 - **Missing template data:** inspect run trigger data and the dot path; unresolved placeholders are intentionally removed.
 - **Task MCP tool missing:** confirm this is a Kandev task session, the agent supports the injection strategy, and the operation belongs to task rather than external mode.
+- **One agent did not load MCP tools:** inspect that session's toolbar report. A delivered/unverified row is evidence that ACP or passthrough configuration reached the agent, not proof that the agent contacted the server. For deeper developer investigation, run `acpdbg mcp-probe` against the agent and inspect its JSONL.
 - **External client cannot stream:** verify the base backend URL and configure the reverse proxy for both the selected MCP transport and long-lived requests.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).

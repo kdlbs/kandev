@@ -25,8 +25,11 @@ type Props = {
  * renderer-side behavior driven by this preference.
  */
 export function AutoScrollToggleButton({ sessionId }: Props) {
+  const showControl = useAppStore((state) => state.userSettings.showTranscriptAutoScrollControl);
   const enabled = useTranscriptAutoScrollEnabled(sessionId);
   const setEnabled = useAppStore((state) => state.setTranscriptAutoScrollEnabled);
+
+  if (!showControl) return null;
 
   const label = enabled ? "Turn off transcript auto-scroll" : "Turn on transcript auto-scroll";
 

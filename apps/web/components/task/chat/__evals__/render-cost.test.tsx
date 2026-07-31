@@ -17,6 +17,7 @@ vi.mock("react-markdown", () => ({
 
 vi.mock("@/components/shared/markdown-components", () => ({
   MarkdownFileLinkContext: createContext({}),
+  MarkdownTaskContext: createContext(null),
   markdownComponents: {},
   remarkPlugins: [],
 }));

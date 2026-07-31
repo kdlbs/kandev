@@ -18,6 +18,9 @@ import type { TaskPR } from "@/lib/types/github";
 import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
 import { prTaskKey } from "@/components/github/pr-utils";
 import {
+  activateChatReplacement,
+  isChatPlaceholderSelected,
+  restorePreservedActivePanel,
   shouldActivateSessionPanel,
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
@@ -363,14 +366,25 @@ export function findSessionAnchorGroupId(api: DockviewApi): string | null {
   return null;
 }
 
-export function resolveInitialPosition(api: DockviewApi): AddPanelOptions["position"] {
+export function resolveInitialPosition(
+  api: DockviewApi,
+  chatWasSelected = false,
+): AddPanelOptions["position"] {
   // Prefer the live "chat" placeholder's group. The session panel must be added
   // INTO that group (so it's a tab beside chat) BEFORE chat is removed —
   // otherwise removing chat empties and destroys the center group, the stored
   // centerGroupId goes stale, and the session panel gets appended as a new row,
   // collapsing the horizontal default layout into a vertical stack.
   const chatGroupId = api.getPanel("chat")?.group?.id;
-  if (chatGroupId && isCenterCandidateGroupId(chatGroupId)) return { referenceGroup: chatGroupId };
+  if (chatGroupId) {
+    // Put the replacement before selected Chat so its group remains focused
+    // through removal. Otherwise retain the saved tab order for an inactive
+    // Chat placeholder.
+    return {
+      referenceGroup: chatGroupId,
+      ...(chatWasSelected ? { index: 0 } : {}),
+    };
+  }
   const { centerGroupId } = useDockviewStore.getState();
   const centerGroupExists =
     centerGroupId &&
@@ -750,7 +764,8 @@ export function runAutoSessionTabEffect(
     return;
   }
 
-  const initialPosition = resolveInitialPosition(api);
+  const chatWasSelected = isChatPlaceholderSelected(api);
+  const initialPosition = resolveInitialPosition(api, chatWasSelected);
   const sessionPanelExistedBefore = !!api.getPanel(`session:${effectiveSessionId}`);
   // Preserve the restored/user-selected panel before adding and reordering the
   // session tab. Dockview's same-group move briefly activates a sibling even
@@ -771,6 +786,13 @@ export function runAutoSessionTabEffect(
     refs.sessionTabCreatedRef.current,
   );
 
+  // Chat is a placeholder for the real Agent panel. When it was selected and
+  // this effect created its replacement, transfer that group-local selection
+  // before removal so Dockview never chooses a neighboring Plan tab. A session
+  // anchored during task switching already has its restored selection, which
+  // must not be overwritten here.
+  activateChatReplacement(api, effectiveSessionId, chatWasSelected && !sessionPanelExistedBefore);
+
   // Now that the session panel occupies the center group, drop the generic
   // "chat" placeholder. Order matters: removing chat first would empty and
   // destroy the center group, collapsing the horizontal layout.
@@ -784,6 +806,8 @@ export function runAutoSessionTabEffect(
     refs,
     tid,
   );
+
+  restorePreservedActivePanel(api, activePanelIdBeforeEnsure, preserveActivePanel);
 
   const siblingAnchor: AddPanelOptions["position"] = activePanel
     ? { referenceGroup: activePanel.group.id }

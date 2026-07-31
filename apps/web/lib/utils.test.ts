@@ -1,6 +1,7 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractRepoName,
+  formatRelativeTime,
   formatUserHomePath,
   generateUUID,
   getRepositoryDisplayName,
@@ -144,5 +145,60 @@ describe("generateUUID", () => {
     const a = generateUUID();
     const b = generateUUID();
     expect(a).not.toBe(b);
+  });
+});
+
+describe("formatRelativeTime", () => {
+  const NOW = new Date("2026-03-15T12:00:00.000Z");
+  const SECOND = 1000;
+  const MINUTE = 60 * SECOND;
+  const HOUR = 60 * MINUTE;
+  const DAY = 24 * HOUR;
+
+  /** ISO string for a timestamp `ms` milliseconds before the frozen NOW. */
+  const ago = (ms: number) => new Date(NOW.getTime() - ms).toISOString();
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("says 'just now' below the 10s boundary", () => {
+    expect(formatRelativeTime(ago(0))).toBe("just now");
+    expect(formatRelativeTime(ago(9 * SECOND))).toBe("just now");
+  });
+
+  it("switches to seconds at 10s and holds until the 60s boundary", () => {
+    expect(formatRelativeTime(ago(10 * SECOND))).toBe("10s ago");
+    expect(formatRelativeTime(ago(59 * SECOND))).toBe("59s ago");
+  });
+
+  it("switches to minutes at 60s and holds until the 60m boundary", () => {
+    expect(formatRelativeTime(ago(MINUTE))).toBe("1m ago");
+    expect(formatRelativeTime(ago(59 * MINUTE))).toBe("59m ago");
+  });
+
+  it("switches to hours at 60m and holds until the 24h boundary", () => {
+    expect(formatRelativeTime(ago(HOUR))).toBe("1h ago");
+    expect(formatRelativeTime(ago(23 * HOUR))).toBe("23h ago");
+  });
+
+  it("says 'yesterday' for the whole first day past the 24h boundary", () => {
+    expect(formatRelativeTime(ago(DAY))).toBe("yesterday");
+    expect(formatRelativeTime(ago(2 * DAY - SECOND))).toBe("yesterday");
+  });
+
+  it("switches to days at 48h and holds until the 7d boundary", () => {
+    expect(formatRelativeTime(ago(2 * DAY))).toBe("2d ago");
+    expect(formatRelativeTime(ago(6 * DAY))).toBe("6d ago");
+  });
+
+  it("falls back to an absolute date at 7d", () => {
+    const sevenDaysAgo = new Date(NOW.getTime() - 7 * DAY);
+    expect(formatRelativeTime(sevenDaysAgo.toISOString())).toBe(sevenDaysAgo.toLocaleDateString());
   });
 });

@@ -184,6 +184,7 @@ export type UserSettingsState = {
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
   showScrollToStart: boolean;
+  showTranscriptAutoScrollControl: boolean;
   showReleaseNotification: boolean;
   releaseNotesLastSeenVersion: string | null;
   lspAutoStartLanguages: string[];

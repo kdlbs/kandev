@@ -59,17 +59,6 @@ func TestOptionsFromConfigParsesUppercaseTruthyEnv(t *testing.T) {
 	}
 }
 
-func TestOptionsFromConfigParsesUppercaseTruthyEnvForPlugins(t *testing.T) {
-	preserveEnv(t, "KANDEV_FEATURES_PLUGINS")
-	t.Setenv("KANDEV_FEATURES_PLUGINS", "TRUE")
-
-	opts := OptionsFromConfig(&config.Config{})
-
-	if !opts.EnvValues["KANDEV_FEATURES_PLUGINS"] {
-		t.Fatal("KANDEV_FEATURES_PLUGINS TRUE parsed false, want true")
-	}
-}
-
 func TestOptionsFromConfigParsesUppercaseTruthyEnvForAppStatusBar(t *testing.T) {
 	preserveEnv(t, "KANDEV_FEATURES_APP_STATUS_BAR")
 	t.Setenv("KANDEV_FEATURES_APP_STATUS_BAR", "TRUE")
@@ -89,29 +78,6 @@ func TestOptionsFromConfigParsesClaudeBackgroundPromptHandoffEnv(t *testing.T) {
 
 	if !opts.EnvValues["KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF"] {
 		t.Fatal("KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF TRUE parsed false, want true")
-	}
-}
-
-func TestValuesFromConfigIncludesPlugins(t *testing.T) {
-	cfg := &config.Config{}
-	cfg.Features.Plugins = true
-
-	values := ValuesFromConfig(cfg)
-
-	if !values["features.plugins"] {
-		t.Fatal("ValuesFromConfig did not surface features.plugins = true")
-	}
-}
-
-func TestApplyStatesToConfigSetsPlugins(t *testing.T) {
-	cfg := &config.Config{}
-	ApplyStatesToConfig(cfg, []RuntimeFlagState{{
-		Key:            "features.plugins",
-		EffectiveValue: true,
-	}})
-
-	if !cfg.Features.Plugins {
-		t.Fatal("ApplyStatesToConfig did not set Features.Plugins = true")
 	}
 }
 

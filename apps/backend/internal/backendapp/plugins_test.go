@@ -7,7 +7,6 @@ import (
 	goruntime "runtime"
 	"testing"
 
-	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/plugins"
 	"github.com/kandev/kandev/internal/plugins/delivery"
@@ -155,19 +154,6 @@ func installTestPluginPackageForBoot(t *testing.T, svc *plugins.Service, id, ver
 	return rec
 }
 
-func TestBootActivePluginsGatedOnFeatureFlag(t *testing.T) {
-	svc := newTestPluginsService(t)
-	installTestPluginForBoot(t, svc, "kandev-plugin-hello", true)
-
-	got := bootActivePlugins(routeParams{
-		features: config.FeaturesConfig{Plugins: false},
-		services: &Services{Plugins: svc},
-	})
-	if got != nil {
-		t.Fatalf("bootActivePlugins() with features.Plugins=false = %v, want nil", got)
-	}
-}
-
 func TestBootActivePluginsPopulatesFromActiveUIPlugins(t *testing.T) {
 	svc := newTestPluginsService(t)
 
@@ -180,7 +166,6 @@ func TestBootActivePluginsPopulatesFromActiveUIPlugins(t *testing.T) {
 	}
 
 	got := bootActivePlugins(routeParams{
-		features: config.FeaturesConfig{Plugins: true},
 		services: &Services{Plugins: svc},
 	})
 	if len(got) != 1 {
@@ -219,7 +204,6 @@ func TestBootActivePluginsBundleURLChangesWithVersion(t *testing.T) {
 
 	installTestPluginPackageForBoot(t, svc, "kandev-plugin-hello", "1.0.0")
 	first := bootActivePlugins(routeParams{
-		features: config.FeaturesConfig{Plugins: true},
 		services: &Services{Plugins: svc},
 	})
 	if len(first) != 1 {
@@ -233,7 +217,6 @@ func TestBootActivePluginsBundleURLChangesWithVersion(t *testing.T) {
 	// Same version reinstalled (no-op update) must resolve to the identical
 	// URL — no needless cache-busting.
 	repeat := bootActivePlugins(routeParams{
-		features: config.FeaturesConfig{Plugins: true},
 		services: &Services{Plugins: svc},
 	})
 	if repeat[0].BundleURL != firstURL {
@@ -244,7 +227,6 @@ func TestBootActivePluginsBundleURLChangesWithVersion(t *testing.T) {
 	// and re-executes the bundle's registerKandevPlugin() side effect.
 	installTestPluginPackageForBoot(t, svc, "kandev-plugin-hello", "1.0.1")
 	updated := bootActivePlugins(routeParams{
-		features: config.FeaturesConfig{Plugins: true},
 		services: &Services{Plugins: svc},
 	})
 	updatedURL := updated[0].BundleURL
@@ -256,10 +238,17 @@ func TestBootActivePluginsBundleURLChangesWithVersion(t *testing.T) {
 	}
 }
 
+// TestBootActivePluginsNoServiceReturnsNil covers one reason the boot payload
+// carries no plugins now that they ship unflagged: the plugin service is absent
+// because initialization failed. An initialized service with nothing active
+// that declares a UI bundle yields an empty payload too — see
+// TestBootActivePluginsPopulatesFromActiveUIPlugins for that path.
 func TestBootActivePluginsNoServiceReturnsNil(t *testing.T) {
-	got := bootActivePlugins(routeParams{features: config.FeaturesConfig{Plugins: true}, services: &Services{}})
-	if got != nil {
+	if got := bootActivePlugins(routeParams{services: &Services{}}); got != nil {
 		t.Fatalf("bootActivePlugins() with nil Plugins service = %v, want nil", got)
+	}
+	if got := bootActivePlugins(routeParams{}); got != nil {
+		t.Fatalf("bootActivePlugins() with nil services = %v, want nil", got)
 	}
 }
 

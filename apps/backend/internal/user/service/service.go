@@ -35,50 +35,51 @@ type Service struct {
 }
 
 type UpdateUserSettingsRequest struct {
-	WorkspaceID                 *string
-	KanbanViewMode              *string
-	WorkflowFilterID            *string
-	RepositoryIDs               *[]string
-	TasksListSort               *string
-	TasksListGroup              *string
-	TasksListShowDetails        *bool
-	InitialSetupComplete        *bool
-	PreferredShell              *string
-	DefaultEditorID             *string
-	EnablePreviewOnClick        *bool
-	ChatSubmitKey               *string
-	ReviewAutoMarkOnScroll      *bool
-	ConfirmTaskArchive          *bool
-	MCPTaskAgentProfileDefault  *string
-	ShowAnchoredPromptBar       *bool
-	ShowScrollToLastPrompt      *bool
-	ShowScrollToStart           *bool
-	ShowReleaseNotification     *bool
-	ReleaseNotesLastSeenVersion *string
-	LspAutoStartLanguages       *[]string
-	LspAutoInstallLanguages     *[]string
-	LspServerConfigs            *map[string]map[string]interface{}
-	SavedLayouts                *[]models.SavedLayout
-	SidebarViews                *[]models.SidebarView
-	SidebarActiveViewID         *string
-	SidebarDraft                **models.SidebarViewDraft
-	SidebarTaskPrefs            *models.SidebarTaskPrefs
-	TaskCreateLastUsed          *models.TaskCreateLastUsed
-	JiraSavedViews              **json.RawMessage
-	JiraTaskPresets             **json.RawMessage
-	GitHubSavedPresets          **json.RawMessage
-	GitHubDefaultQueryPresets   **json.RawMessage
-	GitLabSavedPresets          **json.RawMessage
-	DefaultUtilityAgentID       *string
-	DefaultUtilityModel         *string
-	KeyboardShortcuts           *map[string]interface{}
-	TerminalLinkBehavior        *string
-	TerminalFontFamily          *string
-	TerminalFontSize            *int
-	ChangesPanelLayout          *string
-	SystemMetricsDisplay        *SystemMetricsDisplaySettingsPatch
-	AppStatusBarOrder           *models.AppStatusBarOrder
-	VoiceMode                   *models.VoiceModeSettings
+	WorkspaceID                     *string
+	KanbanViewMode                  *string
+	WorkflowFilterID                *string
+	RepositoryIDs                   *[]string
+	TasksListSort                   *string
+	TasksListGroup                  *string
+	TasksListShowDetails            *bool
+	InitialSetupComplete            *bool
+	PreferredShell                  *string
+	DefaultEditorID                 *string
+	EnablePreviewOnClick            *bool
+	ChatSubmitKey                   *string
+	ReviewAutoMarkOnScroll          *bool
+	ConfirmTaskArchive              *bool
+	MCPTaskAgentProfileDefault      *string
+	ShowAnchoredPromptBar           *bool
+	ShowScrollToLastPrompt          *bool
+	ShowScrollToStart               *bool
+	ShowTranscriptAutoScrollControl *bool
+	ShowReleaseNotification         *bool
+	ReleaseNotesLastSeenVersion     *string
+	LspAutoStartLanguages           *[]string
+	LspAutoInstallLanguages         *[]string
+	LspServerConfigs                *map[string]map[string]interface{}
+	SavedLayouts                    *[]models.SavedLayout
+	SidebarViews                    *[]models.SidebarView
+	SidebarActiveViewID             *string
+	SidebarDraft                    **models.SidebarViewDraft
+	SidebarTaskPrefs                *models.SidebarTaskPrefs
+	TaskCreateLastUsed              *models.TaskCreateLastUsed
+	JiraSavedViews                  **json.RawMessage
+	JiraTaskPresets                 **json.RawMessage
+	GitHubSavedPresets              **json.RawMessage
+	GitHubDefaultQueryPresets       **json.RawMessage
+	GitLabSavedPresets              **json.RawMessage
+	DefaultUtilityAgentID           *string
+	DefaultUtilityModel             *string
+	KeyboardShortcuts               *map[string]interface{}
+	TerminalLinkBehavior            *string
+	TerminalFontFamily              *string
+	TerminalFontSize                *int
+	ChangesPanelLayout              *string
+	SystemMetricsDisplay            *SystemMetricsDisplaySettingsPatch
+	AppStatusBarOrder               *models.AppStatusBarOrder
+	VoiceMode                       *models.VoiceModeSettings
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -273,6 +274,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.ShowScrollToStart != nil {
 		settings.ShowScrollToStart = *req.ShowScrollToStart
+	}
+	if req.ShowTranscriptAutoScrollControl != nil {
+		settings.ShowTranscriptAutoScrollControl = *req.ShowTranscriptAutoScrollControl
 	}
 	if req.ShowReleaseNotification != nil {
 		settings.ShowReleaseNotification = *req.ShowReleaseNotification
@@ -637,52 +641,53 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		return
 	}
 	data := map[string]interface{}{
-		"user_id":                         settings.UserID,
-		"workspace_id":                    settings.WorkspaceID,
-		"kanban_view_mode":                settings.KanbanViewMode,
-		"workflow_filter_id":              settings.WorkflowFilterID,
-		"repository_ids":                  settings.RepositoryIDs,
-		"tasks_list_sort":                 settings.TasksListSort,
-		"tasks_list_group":                settings.TasksListGroup,
-		"tasks_list_show_details":         settings.TasksListShowDetails,
-		"initial_setup_complete":          settings.InitialSetupComplete,
-		"preferred_shell":                 settings.PreferredShell,
-		"default_editor_id":               settings.DefaultEditorID,
-		"enable_preview_on_click":         settings.EnablePreviewOnClick,
-		"chat_submit_key":                 settings.ChatSubmitKey,
-		"review_auto_mark_on_scroll":      settings.ReviewAutoMarkOnScroll,
-		"confirm_task_archive":            settings.ConfirmTaskArchive,
-		"mcp_task_agent_profile_default":  models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
-		"show_anchored_prompt_bar":        settings.ShowAnchoredPromptBar,
-		"show_scroll_to_last_prompt":      settings.ShowScrollToLastPrompt,
-		"show_scroll_to_start":            settings.ShowScrollToStart,
-		"show_release_notification":       settings.ShowReleaseNotification,
-		"release_notes_last_seen_version": settings.ReleaseNotesLastSeenVersion,
-		"lsp_auto_start_languages":        settings.LspAutoStartLanguages,
-		"lsp_auto_install_languages":      settings.LspAutoInstallLanguages,
-		"lsp_server_configs":              settings.LspServerConfigs,
-		"saved_layouts":                   settings.SavedLayouts,
-		"sidebar_views":                   settings.SidebarViews,
-		"sidebar_active_view_id":          settings.SidebarActiveViewID,
-		"sidebar_draft":                   settings.SidebarDraft,
-		"sidebar_task_prefs":              settings.SidebarTaskPrefs,
-		"task_create_last_used":           settings.TaskCreateLastUsed,
-		"jira_saved_views":                settings.JiraSavedViews,
-		"jira_task_presets":               settings.JiraTaskPresets,
-		"github_saved_presets":            settings.GitHubSavedPresets,
-		"github_default_query_presets":    settings.GitHubDefaultQueryPresets,
-		"gitlab_saved_presets":            settings.GitLabSavedPresets,
-		"default_utility_agent_id":        settings.DefaultUtilityAgentID,
-		"default_utility_model":           settings.DefaultUtilityModel,
-		"keyboard_shortcuts":              settings.KeyboardShortcuts,
-		"terminal_link_behavior":          settings.TerminalLinkBehavior,
-		"terminal_font_family":            settings.TerminalFontFamily,
-		"terminal_font_size":              settings.TerminalFontSize,
-		"changes_panel_layout":            settings.ChangesPanelLayout,
-		"system_metrics_display":          settings.SystemMetricsDisplay,
-		"app_status_bar_order":            settings.AppStatusBarOrder,
-		"voice_mode":                      settings.VoiceMode,
-		"updated_at":                      settings.UpdatedAt.Format(time.RFC3339),
+		"user_id":                             settings.UserID,
+		"workspace_id":                        settings.WorkspaceID,
+		"kanban_view_mode":                    settings.KanbanViewMode,
+		"workflow_filter_id":                  settings.WorkflowFilterID,
+		"repository_ids":                      settings.RepositoryIDs,
+		"tasks_list_sort":                     settings.TasksListSort,
+		"tasks_list_group":                    settings.TasksListGroup,
+		"tasks_list_show_details":             settings.TasksListShowDetails,
+		"initial_setup_complete":              settings.InitialSetupComplete,
+		"preferred_shell":                     settings.PreferredShell,
+		"default_editor_id":                   settings.DefaultEditorID,
+		"enable_preview_on_click":             settings.EnablePreviewOnClick,
+		"chat_submit_key":                     settings.ChatSubmitKey,
+		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
+		"confirm_task_archive":                settings.ConfirmTaskArchive,
+		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
+		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
+		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
+		"show_scroll_to_start":                settings.ShowScrollToStart,
+		"show_transcript_auto_scroll_control": settings.ShowTranscriptAutoScrollControl,
+		"show_release_notification":           settings.ShowReleaseNotification,
+		"release_notes_last_seen_version":     settings.ReleaseNotesLastSeenVersion,
+		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
+		"lsp_auto_install_languages":          settings.LspAutoInstallLanguages,
+		"lsp_server_configs":                  settings.LspServerConfigs,
+		"saved_layouts":                       settings.SavedLayouts,
+		"sidebar_views":                       settings.SidebarViews,
+		"sidebar_active_view_id":              settings.SidebarActiveViewID,
+		"sidebar_draft":                       settings.SidebarDraft,
+		"sidebar_task_prefs":                  settings.SidebarTaskPrefs,
+		"task_create_last_used":               settings.TaskCreateLastUsed,
+		"jira_saved_views":                    settings.JiraSavedViews,
+		"jira_task_presets":                   settings.JiraTaskPresets,
+		"github_saved_presets":                settings.GitHubSavedPresets,
+		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
+		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
+		"default_utility_model":               settings.DefaultUtilityModel,
+		"keyboard_shortcuts":                  settings.KeyboardShortcuts,
+		"terminal_link_behavior":              settings.TerminalLinkBehavior,
+		"terminal_font_family":                settings.TerminalFontFamily,
+		"terminal_font_size":                  settings.TerminalFontSize,
+		"changes_panel_layout":                settings.ChangesPanelLayout,
+		"system_metrics_display":              settings.SystemMetricsDisplay,
+		"app_status_bar_order":                settings.AppStatusBarOrder,
+		"voice_mode":                          settings.VoiceMode,
+		"updated_at":                          settings.UpdatedAt.Format(time.RFC3339),
 	}
 	if err := s.eventBus.Publish(ctx, events.UserSettingsUpdated, bus.NewEvent(events.UserSettingsUpdated, "user-service", data)); err != nil {
 		s.logger.Error("failed to publish user settings event", zap.Error(err))

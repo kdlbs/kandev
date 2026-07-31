@@ -178,11 +178,6 @@ func TestMemoryEventBus_SingleTokenWildcard(t *testing.T) {
 }
 
 func TestMemoryEventBus_MultiTokenWildcard(t *testing.T) {
-	// Note: The current implementation has a bug where > wildcard doesn't work correctly
-	// because regexp.QuoteMeta doesn't escape > (it's not a special regex char).
-	// This test documents the current behavior. When the bug is fixed, update this test.
-	t.Skip("Skipping: > wildcard has a known bug in compilePattern - regexp.QuoteMeta doesn't escape >")
-
 	log := newTestLogger(t)
 	bus := NewMemoryEventBus(log)
 	defer bus.Close()

@@ -105,7 +105,7 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.confirmTaskArchive).toBe(true);
   });
 
-  it("syncs transcript navigation preferences and defaults missing values to enabled", () => {
+  it("syncs transcript navigation preferences and uses the documented defaults", () => {
     const store = makeStore();
 
     registerUsersHandlers(store)["user.settings.updated"]?.(
@@ -123,9 +123,10 @@ describe("user settings websocket handler", () => {
 
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings).toMatchObject({
-      showAnchoredPromptBar: true,
+      showAnchoredPromptBar: false,
       showScrollToLastPrompt: true,
-      showScrollToStart: true,
+      showScrollToStart: false,
+      showTranscriptAutoScrollControl: true,
     });
   });
 });

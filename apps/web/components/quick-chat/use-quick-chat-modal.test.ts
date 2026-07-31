@@ -5,6 +5,7 @@ import { renderHook, act } from "@testing-library/react";
 const mockToast = vi.fn();
 const mockStartQuickChat = vi.fn();
 const mockDeleteTask = vi.fn();
+const mockUpdateTask = vi.fn();
 let mockAppState: ReturnType<typeof makeAppState>;
 
 vi.mock("@/components/state-provider", () => ({
@@ -22,6 +23,7 @@ vi.mock("@/lib/api/domains/workspace-api", () => ({
 
 vi.mock("@/lib/api/domains/kanban-api", () => ({
   deleteTask: (...args: unknown[]) => mockDeleteTask(...args),
+  updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));
 
 import { useAgentSelection, useQuickChatModal } from "./use-quick-chat-modal";
@@ -40,6 +42,7 @@ function makeAppState() {
         sessionId: string;
         workspaceId: string;
         kind: "chat" | "config";
+        taskId?: string;
       }>,
       activeSessionId: "",
     },
@@ -197,7 +200,14 @@ describe("useAgentSelection — happy path", () => {
       await result.current.handleSelectAgent("agent-a");
     });
 
-    expect(store.openQuickChat).toHaveBeenCalledWith("sess-a", WORKSPACE_ID, "agent-a");
+    // taskId is threaded through so closing the tab can delete the right task.
+    expect(store.openQuickChat).toHaveBeenCalledWith(
+      "sess-a",
+      WORKSPACE_ID,
+      "agent-a",
+      "chat",
+      "task-a",
+    );
     expect(store.renameQuickChatSession).toHaveBeenCalledWith("sess-a", expect.any(String));
     expect(mockDeleteTask).not.toHaveBeenCalled();
     expect(result.current.pendingAgentId).toBeNull();
@@ -270,7 +280,13 @@ describe("useAgentSelection — supersession", () => {
     await act(async () => {
       await result.current.handleSelectAgent("agent-b");
     });
-    expect(store.openQuickChat).toHaveBeenCalledWith("sess-b", WORKSPACE_ID, "agent-b");
+    expect(store.openQuickChat).toHaveBeenCalledWith(
+      "sess-b",
+      WORKSPACE_ID,
+      "agent-b",
+      "chat",
+      "task-b",
+    );
 
     // Now A resolves — its orphan task is deleted instead of opening a stale session.
     await act(async () => {
@@ -362,5 +378,61 @@ describe("useAgentSelection — error handling", () => {
       }),
     );
     expect(result.current.pendingAgentId).toBeNull();
+  });
+});
+
+describe("useQuickChatModal — renaming", () => {
+  it("saves the new name to the backing task so other devices pick it up", async () => {
+    mockUpdateTask.mockResolvedValue(undefined);
+    mockAppState.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
+    ];
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    await act(async () => {
+      result.current.handleRename("session-1", "Renamed");
+      await flushPromises();
+    });
+
+    expect(mockAppState.renameQuickChatSession).toHaveBeenCalledWith("session-1", "Renamed");
+    expect(mockUpdateTask).toHaveBeenCalledWith("task-1", { title: "Renamed" });
+    expect(mockToast).not.toHaveBeenCalled();
+  });
+
+  // The close path resolves the task via taskSessions when the tab itself has
+  // no taskId; rename must agree, or it silently downgrades to a local-only
+  // rename for exactly those sessions — and without a toast, since that branch
+  // resolves rather than rejects.
+  it("falls back to taskSessions for a tab that carries no taskId", async () => {
+    mockUpdateTask.mockResolvedValue(undefined);
+    mockAppState.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+    ];
+    mockAppState.taskSessions.items = { "session-1": { task_id: "task-legacy" } };
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    await act(async () => {
+      result.current.handleRename("session-1", "Renamed");
+      await flushPromises();
+    });
+
+    expect(mockUpdateTask).toHaveBeenCalledWith("task-legacy", { title: "Renamed" });
+  });
+
+  it("warns that the rename did not sync when the request fails", async () => {
+    mockUpdateTask.mockRejectedValue(new Error("offline"));
+    mockAppState.quickChat.sessions = [
+      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
+    ];
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    await act(async () => {
+      result.current.handleRename("session-1", "Renamed");
+      await flushPromises();
+    });
+
+    // The label still changed locally — only the sync failed.
+    expect(mockAppState.renameQuickChatSession).toHaveBeenCalledWith("session-1", "Renamed");
+    expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
   });
 });

@@ -91,6 +91,9 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	case "session_models":
 		s.handleSessionModelsEvent(ctx, payload)
 
+	case streams.EventTypeMCPAttachment:
+		s.handleSessionMCPAttachmentEvent(ctx, payload)
+
 	case streams.EventTypeSessionInfo:
 		s.handleSessionInfoEvent(ctx, payload)
 
@@ -1649,7 +1652,18 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 	// (2,000+ redundant writes observed on long-running turns).
 	wasAlreadyRunning := session.State == models.TaskSessionStateRunning
 
-	if updatedSession := s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateRunning, "", true, session); updatedSession != nil {
+	if updatedSession, _ := s.updateTaskSessionStateWithHook(
+		ctx,
+		taskID,
+		sessionID,
+		models.TaskSessionStateRunning,
+		"",
+		true,
+		func() {
+			s.reconcileRunningTaskStateLocked(ctx, taskID, sessionID)
+		},
+		session,
+	); updatedSession != nil {
 		if len(preloadedSession) > 0 && preloadedSession[0] != nil && preloadedSession[0] != updatedSession {
 			*preloadedSession[0] = *updatedSession
 		}
@@ -1658,7 +1672,10 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 	if wasAlreadyRunning {
 		return
 	}
+}
 
+// reconcileRunningTaskStateLocked requires taskRuntimeStateMu to be held.
+func (s *Service) reconcileRunningTaskStateLocked(ctx context.Context, taskID, sessionID string) {
 	if err := s.reconcileTaskStateForRuntimeLocked(
 		ctx,
 		taskID,
@@ -2386,6 +2403,62 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+// handleSessionMCPAttachmentEvent reduces safe attachment observations into
+// bounded session metadata and broadcasts the resulting report. A failed
+// diagnostic write is intentionally isolated from task and agent state.
+func (s *Service) handleSessionMCPAttachmentEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
+	if payload == nil || payload.Data == nil || payload.SessionID == "" || s.repo == nil {
+		return
+	}
+	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
+	if err != nil || session == nil {
+		if err != nil {
+			s.logger.Warn("failed to load session for MCP attachment evidence", zap.String("session_id", payload.SessionID), zap.Error(err))
+		}
+		return
+	}
+	if staleMCPAttachmentAttempt(payload) {
+		s.logger.Warn("dropping stale MCP attachment attempt in orchestrator",
+			zap.String("attempt_execution_id", payload.Data.MCPAttachmentAttempt.ExecutionID),
+			zap.String("event_execution_id", payload.ExecutionID))
+		return
+	}
+	history, _ := lifecycle.LoadMCPAttachmentHistory(session.Metadata[models.SessionMetaKeyMCPAttachmentState])
+	changed := reduceMCPAttachmentHistory(&history, payload.Data)
+	if !changed || !history.Valid() {
+		return
+	}
+	writeCtx := context.WithoutCancel(ctx)
+	if err := s.repo.SetSessionMetadataKey(writeCtx, payload.SessionID, models.SessionMetaKeyMCPAttachmentState, history); err != nil {
+		s.logger.Warn("failed to persist MCP attachment status", zap.String("session_id", payload.SessionID), zap.Error(err))
+		return
+	}
+	eventPayload := lifecycle.SessionMCPStatusEventPayload{
+		TaskID: payload.TaskID, SessionID: payload.SessionID, History: history,
+		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if s.eventBus != nil {
+		_ = s.eventBus.Publish(writeCtx, events.BuildSessionMCPStatusSubject(payload.SessionID), bus.NewEvent(events.SessionMCPStatusUpdated, "orchestrator", eventPayload))
+	}
+}
+
+func staleMCPAttachmentAttempt(payload *lifecycle.AgentStreamEventPayload) bool {
+	attempt := payload.Data.MCPAttachmentAttempt
+	return attempt != nil && attempt.ExecutionID != "" && attempt.ExecutionID != payload.ExecutionID
+}
+
+func reduceMCPAttachmentHistory(history *streams.MCPAttachmentHistory, data *lifecycle.AgentStreamEventData) bool {
+	changed := false
+	if attempt := data.MCPAttachmentAttempt; attempt != nil {
+		history.StartAttempt(*attempt)
+		changed = true
+	}
+	if evidence := data.MCPAttachment; evidence != nil {
+		changed = history.Apply(*evidence) || changed
+	}
+	return changed
 }
 
 func (s *Service) sessionACPConfigBaselineForEvent(

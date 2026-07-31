@@ -130,8 +130,8 @@ func TestScanUserSettingsShowAnchoredPromptBarDefault(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !settings.ShowAnchoredPromptBar {
-		t.Fatal("ShowAnchoredPromptBar = false, want true (default)")
+	if settings.ShowAnchoredPromptBar {
+		t.Fatal("ShowAnchoredPromptBar = true, want false (default)")
 	}
 
 	settings, err = scanUserSettings(settingsScanner{raw: `{"show_anchored_prompt_bar":false}`}, DefaultUserID)
@@ -148,9 +148,9 @@ func TestScanUserSettingsTranscriptNavigationDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("scan defaults: %v", err)
 	}
-	if !settings.ShowScrollToLastPrompt || !settings.ShowScrollToStart {
+	if !settings.ShowScrollToLastPrompt || settings.ShowScrollToStart {
 		t.Fatalf(
-			"transcript controls = (%t, %t), want (true, true)",
+			"transcript controls = (%t, %t), want (true, false)",
 			settings.ShowScrollToLastPrompt,
 			settings.ShowScrollToStart,
 		)
@@ -170,12 +170,37 @@ func TestScanUserSettingsTranscriptNavigationDefaults(t *testing.T) {
 			settings.ShowScrollToStart,
 		)
 	}
+	if !settings.ShowTranscriptAutoScrollControl {
+		t.Fatal("ShowTranscriptAutoScrollControl = false, want true (default)")
+	}
+
+	settings, err = scanUserSettings(
+		settingsScanner{raw: `{"show_transcript_auto_scroll_control":false}`},
+		DefaultUserID,
+	)
+	if err != nil {
+		t.Fatalf("scan stored auto-scroll-control preference: %v", err)
+	}
+	if settings.ShowTranscriptAutoScrollControl {
+		t.Fatal("ShowTranscriptAutoScrollControl = true, want false (stored)")
+	}
+}
+
+func TestScanUserSettingsDefaultsTranscriptAutoScrollControlToVisible(t *testing.T) {
+	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
+	if err != nil {
+		t.Fatalf("scan settings: %v", err)
+	}
+	if !settings.ShowTranscriptAutoScrollControl {
+		t.Fatal("ShowTranscriptAutoScrollControl = false, want true (default)")
+	}
 }
 
 func TestTranscriptNavigationSettingsRoundTripThroughMarshalAndScan(t *testing.T) {
 	raw, err := marshalUserSettingsPayload(&models.UserSettings{
-		ShowScrollToLastPrompt: false,
-		ShowScrollToStart:      false,
+		ShowScrollToLastPrompt:          false,
+		ShowScrollToStart:               false,
+		ShowTranscriptAutoScrollControl: false,
 	})
 	if err != nil {
 		t.Fatalf("marshal settings: %v", err)
@@ -184,11 +209,12 @@ func TestTranscriptNavigationSettingsRoundTripThroughMarshalAndScan(t *testing.T
 	if err != nil {
 		t.Fatalf("scan settings: %v", err)
 	}
-	if settings.ShowScrollToLastPrompt || settings.ShowScrollToStart {
+	if settings.ShowScrollToLastPrompt || settings.ShowScrollToStart || settings.ShowTranscriptAutoScrollControl {
 		t.Fatalf(
-			"transcript controls = (%t, %t), want (false, false)",
+			"transcript controls = (%t, %t, %t), want (false, false, false)",
 			settings.ShowScrollToLastPrompt,
 			settings.ShowScrollToStart,
+			settings.ShowTranscriptAutoScrollControl,
 		)
 	}
 }

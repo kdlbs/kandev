@@ -111,6 +111,63 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(session.idleInput()).toBeVisible({ timeout: 15_000 });
   });
 
+  test("preserves selected model across context reset", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { agents } = await apiClient.listAgents();
+    const agent = agents.find((item) => item.name === "mock-agent");
+    if (!agent) {
+      throw new Error("E2E mock agent is required for model-reset coverage");
+    }
+    const smartProfile = await apiClient.createAgentProfile(agent.id, "Reset Model Profile", {
+      model: "mock-smart",
+    });
+
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Reset Model Workflow");
+    const startStep = await apiClient.createWorkflowStep(workflow.id, "Start", 0);
+    const resetStep = await apiClient.createWorkflowStep(workflow.id, "Reset", 1);
+
+    await apiClient.updateWorkflowStep(startStep.id, {
+      prompt: 'e2e:message("start complete")\n{{task_prompt}}',
+      events: { on_enter: [{ type: "auto_start_agent" }] },
+    });
+    await apiClient.updateWorkflowStep(resetStep.id, {
+      prompt: 'e2e:message("reset complete")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "reset_agent_context" }, { type: "auto_start_agent" }],
+      },
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Reset Model Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: startStep.id,
+      agent_profile_id: smartProfile.id,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    const modelTrigger = testPage.getByRole("button", { name: "Session model settings" });
+    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+
+    await session.proceedNextStepButton().click();
+    await expect(session.stepperStep("Reset")).toHaveAttribute("aria-current", "step", {
+      timeout: 15_000,
+    });
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await expect(modelTrigger).toContainText("Mock Smart", { timeout: 15_000 });
+  });
+
   test("shows next step auto-start prompt when its message-added notification is missed", async ({
     testPage,
     apiClient,

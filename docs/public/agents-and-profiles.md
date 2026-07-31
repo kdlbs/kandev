@@ -172,6 +172,7 @@ Only custom TUI agents can be deleted from the agent list. Built-in definitions 
 - **Launch fails after editing flags:** inspect the command preview, remove stale arguments, and correct unmatched quotes or trailing escapes.
 - **Environment value is absent:** confirm the secret still exists, the key is not reserved, and an executor/runtime variable is not already taking precedence.
 - **MCP server is absent:** confirm agent MCP support, valid JSON, transport mode, executor policy, and the session warning logs.
+- **MCP tools are missing from one agent session:** open the neutral plug button in that session's chat toolbar. **Delivered** means Kandev included the server in the agent launch but cannot yet observe a connection; **Connected** means the built-in server saw MCP initialize; **Active** means it served `tools/list`. A gray filtered/unavailable row explains an intentional omission, while red is reserved for an explicit sanitized error. Third-party profile servers normally remain Delivered because they connect directly to the agent and Kandev cannot inspect them. The report is scoped to that session and its current execution, so compare the affected agent's own toolbar rather than another agent on the task.
 - **Automation cannot select a profile:** passthrough agent profiles and Local executor profiles are intentionally omitted from the automation selectors.
 
 Related: [Executors](executors.md), [Automation and MCP](automation-and-mcp.md), and the contributor guide [Adding a new agent CLI](add-agent-cli.md).

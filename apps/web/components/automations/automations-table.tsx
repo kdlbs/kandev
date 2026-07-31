@@ -8,7 +8,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPlayerPlay, IconTrash } from "@tabler/icons-react";
 import type { Automation, TriggerType } from "@/lib/types/automation";
-import { formatRelativeTime } from "./format-utils";
+import { formatRelativeTime } from "@/lib/utils";
 
 type AutomationsTableProps = {
   automations: Automation[];
