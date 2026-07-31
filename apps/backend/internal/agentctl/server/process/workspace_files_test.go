@@ -550,10 +550,13 @@ func TestSearchFileCandidatesDefaultsNonPositiveLimit(t *testing.T) {
 		})
 	}
 
-	results := searchFileCandidates(candidates, "query", 0)
+	for _, limit := range []int{0, -1} {
+		results := searchFileCandidates(candidates, "query", limit)
 
-	if len(results) != fileSearchDefaultLimit {
-		t.Fatalf("len(results) = %d, want the default %d", len(results), fileSearchDefaultLimit)
+		if len(results) != fileSearchDefaultLimit {
+			t.Fatalf("limit %d: len(results) = %d, want the default %d",
+				limit, len(results), fileSearchDefaultLimit)
+		}
 	}
 }
 
