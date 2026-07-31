@@ -43,8 +43,8 @@ export function TaskSort({ field, dir, onFieldChange, onDirChange }: IssueSortPr
               key={f.value}
               onClick={() => onFieldChange(f.value)}
               className={cn(
-                "flex items-center gap-2 px-2 py-1.5 text-sm rounded-md cursor-pointer",
-                field === f.value ? "bg-accent text-foreground" : "hover:bg-accent/50",
+                "flex items-center gap-2 rounded-md border border-transparent px-2 py-1.5 text-sm cursor-pointer",
+                field === f.value ? "border-primary/50 bg-card text-foreground" : "hover:bg-muted",
               )}
             >
               {f.label}

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useCallback, createRef, useState, useEffect } from "react";
+import { memo, useMemo, useCallback, createRef, useState } from "react";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
@@ -8,7 +8,6 @@ import type { Comment } from "@/lib/state/slices/comments";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useGitOperations } from "@/hooks/use-git-operations";
-import { walkthroughStepMatchesFile } from "@/lib/diff/walkthrough-match";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
@@ -451,35 +450,6 @@ function useReviewDialogState(props: ReviewDialogProps) {
 
 export type ReviewDialogViewState = ReturnType<typeof useReviewDialogState>;
 
-/**
- * Drives review file-selection from the active walkthrough step: when the tour
- * advances (or the dialog opens on a tour), select+scroll to the step's file so
- * its diff expands and the inline WalkthroughStepCard renders at the line.
- */
-function useWalkthroughFileSelection(
-  open: boolean,
-  allFiles: ReviewFile[],
-  filter: string,
-  setFilter: (value: string) => void,
-  handleSelectFile: (key: string) => void,
-) {
-  const step = useAppStore((state) => {
-    const taskId = state.tasks.activeTaskId;
-    if (!taskId) return null;
-    const wt = state.walkthroughs.byTaskId[taskId];
-    const idx = state.walkthroughs.activeStepByTaskId[taskId] ?? 0;
-    return wt?.steps[idx] ?? null;
-  });
-  useEffect(() => {
-    if (!open || !step) return;
-    const file = allFiles.find((f) => walkthroughStepMatchesFile(f, step, allFiles));
-    if (!file) return;
-    const q = filter.trim().toLowerCase();
-    if (q && !file.path.toLowerCase().includes(q)) setFilter("");
-    handleSelectFile(reviewFileKey(file));
-  }, [open, step, allFiles, filter, setFilter, handleSelectFile]);
-}
-
 function useReviewDialogWalkthroughRequest({
   sessionId,
   allFiles,
@@ -514,7 +484,6 @@ export const ReviewDialog = memo(function ReviewDialog(props: ReviewDialogProps)
     sessionId,
     allFiles: s.allFiles,
   });
-  useWalkthroughFileSelection(open, s.allFiles, s.filter, s.setFilter, s.handleSelectFile);
   return (
     <ReviewDialogSurface
       open={open}

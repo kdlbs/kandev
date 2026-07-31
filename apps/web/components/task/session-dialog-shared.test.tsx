@@ -3,6 +3,7 @@ import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
 import { MAX_FILES, MAX_FILE_SIZE, MAX_TOTAL_SIZE } from "./chat/file-attachment";
+import { formatBytes } from "@/lib/utils/format-bytes";
 import { useDialogAttachments } from "./session-dialog-shared";
 
 afterEach(cleanup);
@@ -114,7 +115,7 @@ describe("useDialogAttachments", () => {
     ]);
     expect(screen.getAllByTestId(toastMessageTestId)).toHaveLength(1);
     expect(screen.getByTestId(toastMessageTestId).textContent).toContain(
-      `Attachments can total up to ${MAX_TOTAL_SIZE / 1024 / 1024} MB.`,
+      `Attachments can total up to ${formatBytes(MAX_TOTAL_SIZE)}.`,
     );
   });
 });

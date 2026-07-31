@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -14,6 +15,12 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.uber.org/zap"
 )
+
+const kandevMCPServerName = "kandev"
+
+// PublishesMCPAttachmentResults reports that this adapter emits attachment
+// results for the servers that survive its own capability filtering.
+func (a *Adapter) PublishesMCPAttachmentResults() bool { return true }
 
 // NewSession creates a new agent session.
 func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) (string, error) {
@@ -43,12 +50,22 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 	defer span.End()
 
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
-	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
+	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	for _, decision := range decisions {
+		kind := streams.MCPAttachmentEvidenceDelivered
+		if !decision.Included {
+			kind = streams.MCPAttachmentEvidenceFiltered
+		}
+		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
 	resp, err := conn.NewSession(ctx, acp.NewSessionRequest{
 		Cwd:        a.cfg.WorkDir,
 		McpServers: toACPMcpServers(filteredServers),
 	})
 	if err != nil {
+		for _, server := range filteredServers {
+			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_new_failed", err.Error())
+		}
 		// An agent may have emitted provisional usage before returning an RPC
 		// error. Clear at the FIFO boundary so an already queued notification
 		// cannot repopulate the tracker after this failure cleanup.
@@ -60,6 +77,9 @@ func (a *Adapter) NewSession(ctx context.Context, mcpServers []types.McpServer) 
 			return "", fmt.Errorf("authentication required: %w", err)
 		}
 		return "", fmt.Errorf("failed to create session: %w", err)
+	}
+	for _, server := range filteredServers {
+		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
 
 	sessionID := string(resp.SessionId)
@@ -184,31 +204,103 @@ func effectiveMcpCapabilities(caps acp.McpCapabilities, cfg *shared.Config) acp.
 // surviving entry is kept to prevent duplicate tool registration.
 //
 //nolint:goconst // "sse"/"http"/"streamable_http" are ACP protocol-type string literals; constants would obscure the type discriminant
+const (
+	mcpFilterReasonSSEUnsupported  = "sse_unsupported"
+	mcpFilterReasonHTTPUnsupported = "http_unsupported"
+	mcpFilterReasonDuplicateName   = "duplicate_name"
+)
+
+type mcpServerFilterDecision struct {
+	Server     types.McpServer
+	Included   bool
+	ReasonCode string
+}
+
 func filterMcpServersByCapabilities(servers []types.McpServer, caps acp.McpCapabilities, logger *logger.Logger) []types.McpServer {
+	filtered, _ := filterMcpServersWithDecisions(servers, caps, logger)
+	return filtered
+}
+
+// filterMcpServersWithDecisions preserves the existing first-surviving-server
+// selection while retaining an explicit decision for every input server.
+func filterMcpServersWithDecisions(
+	servers []types.McpServer,
+	caps acp.McpCapabilities,
+	logger *logger.Logger,
+) ([]types.McpServer, []mcpServerFilterDecision) {
 	filtered := make([]types.McpServer, 0, len(servers))
+	decisions := make([]mcpServerFilterDecision, 0, len(servers))
 	seenNames := make(map[string]bool)
 	for _, s := range servers {
+		decision := mcpServerFilterDecision{Server: s}
 		switch s.Type {
 		case "sse":
 			if !caps.Sse {
 				logger.Warn("filtering out SSE MCP server (agent does not support SSE)", zap.String("name", s.Name))
+				decision.ReasonCode = mcpFilterReasonSSEUnsupported
+				decisions = append(decisions, decision)
 				continue
 			}
 		case "http", "streamable_http":
 			if !caps.Http {
 				logger.Warn("filtering out HTTP MCP server (agent does not support HTTP)", zap.String("name", s.Name), zap.String("type", s.Type))
+				decision.ReasonCode = mcpFilterReasonHTTPUnsupported
+				decisions = append(decisions, decision)
 				continue
 			}
 		}
 		// Skip duplicate names - first surviving entry wins
 		if seenNames[s.Name] {
 			logger.Debug("skipping duplicate MCP server name", zap.String("name", s.Name), zap.String("type", s.Type))
+			decision.ReasonCode = mcpFilterReasonDuplicateName
+			decisions = append(decisions, decision)
 			continue
 		}
 		seenNames[s.Name] = true
 		filtered = append(filtered, s)
+		decision.Included = true
+		decisions = append(decisions, decision)
 	}
-	return filtered
+	return filtered, decisions
+}
+
+// emitMCPAttachmentEvidence forwards only safe, backend-attributed attachment
+// facts through the adapter's existing update stream. A missing context means
+// this call was made outside agentctl's lifecycle boundary, so it deliberately
+// produces no ambiguous attribution.
+func (a *Adapter) emitMCPAttachmentEvidence(
+	ctx context.Context,
+	server types.McpServer,
+	kind streams.MCPAttachmentEvidenceKind,
+	reasonCode string,
+	summary string,
+) {
+	attachmentContext, ok := streams.MCPAttachmentContextFromContext(ctx)
+	if !ok {
+		return
+	}
+	target := streams.SanitizeMCPStdioTarget(server.Command)
+	if server.Type == "sse" || server.Type == "http" || server.Type == "streamable_http" {
+		target = streams.SanitizeMCPNetworkTarget(server.URL)
+	}
+	source := streams.MCPServerSourceProfile
+	if server.Name == kandevMCPServerName {
+		source = streams.MCPServerSourceKandev
+	}
+	a.sendUpdate(AgentEvent{
+		Type: streams.EventTypeMCPAttachment,
+		MCPAttachment: &streams.MCPAttachmentEvidence{
+			AttemptID:  attachmentContext.Attempt.AttemptID,
+			ServerName: server.Name,
+			Kind:       kind,
+			OccurredAt: time.Now().UTC(),
+			Source:     source,
+			Transport:  server.Type,
+			Target:     target,
+			ReasonCode: reasonCode,
+			Summary:    streams.SanitizeMCPErrorSummary(summary),
+		},
+	})
 }
 
 //nolint:goconst // "sse"/"http"/"streamable_http" are ACP protocol-type string literals; constants would obscure the type discriminant
@@ -318,7 +410,14 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 
 	// Filter MCP servers by agent capabilities (same logic as NewSession).
 	caps := effectiveMcpCapabilities(a.capabilities.McpCapabilities, a.cfg)
-	filteredServers := filterMcpServersByCapabilities(mcpServers, caps, a.logger)
+	filteredServers, decisions := filterMcpServersWithDecisions(mcpServers, caps, a.logger)
+	for _, decision := range decisions {
+		kind := streams.MCPAttachmentEvidenceDelivered
+		if !decision.Included {
+			kind = streams.MCPAttachmentEvidenceFiltered
+		}
+		a.emitMCPAttachmentEvidence(ctx, decision.Server, kind, decision.ReasonCode, "")
+	}
 
 	// Suppress history replay notifications during load.
 	// ACP session/load replays the entire conversation history asynchronously.
@@ -337,6 +436,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 	})
 
 	if err != nil {
+		for _, server := range filteredServers {
+			a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceExplicitError, "session_load_failed", err.Error())
+		}
 		// Notifications sent before the failed RPC response may still be queued
 		// on the adapter worker. Clear replay suppression only at a FIFO barrier,
 		// otherwise those frames can escape as live messages, tools, or plans
@@ -354,6 +456,9 @@ func (a *Adapter) LoadSession(ctx context.Context, sessionID string, mcpServers 
 		}
 		span.RecordError(err)
 		return fmt.Errorf("failed to load session: %w", err)
+	}
+	for _, server := range filteredServers {
+		a.emitMCPAttachmentEvidence(ctx, server, streams.MCPAttachmentEvidenceSessionAccepted, "", "")
 	}
 
 	// The SDK may finish the load RPC while replay notifications are still

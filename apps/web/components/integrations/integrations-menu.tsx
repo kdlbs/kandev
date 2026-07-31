@@ -24,7 +24,6 @@ import { useAzureDevOpsAvailable } from "@/hooks/domains/azure-devops/use-azure-
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { useGitLabAvailable } from "@/hooks/domains/gitlab/use-task-mr";
 import { useAppStore } from "@/components/state-provider";
-import { useFeature } from "@/hooks/domains/features/use-feature";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { GitHubStatus } from "@/lib/types/github";
@@ -249,16 +248,13 @@ function MobileIntegrationRow({
  * Mobile counterpart to the desktop sidebar Integrations section: the
  * hamburger-sheet surface that exposes the first-party integration links plus
  * any plugin-registered nav items targeting this section
- * (`registerNavItem({ section: "integrations" })`). Plugin items are gated on
- * the "plugins" feature flag, matching the desktop `IntegrationsSection`.
+ * (`registerNavItem({ section: "integrations" })`), matching the desktop
+ * `IntegrationsSection`.
  */
 export function MobileIntegrationsSection({ onNavigate }: MobileIntegrationsSectionProps) {
   const links = useConfiguredIntegrationLinks();
-  const pluginsEnabled = useFeature("plugins");
   const registry = usePluginRegistry();
-  const pluginItems = pluginsEnabled
-    ? registry.getNavItems().filter((item) => item.section === "integrations")
-    : [];
+  const pluginItems = registry.getNavItems().filter((item) => item.section === "integrations");
 
   if (links.length === 0 && pluginItems.length === 0) return null;
 

@@ -40,7 +40,7 @@ function AgentPickerPopover({
       <PopoverContent className="w-48 p-1" align="start">
         <button
           type="button"
-          className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-accent cursor-pointer"
+          className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer"
           onClick={() => onSelect("")}
         >
           Unassigned
@@ -49,7 +49,7 @@ function AgentPickerPopover({
           <button
             key={agent.id}
             type="button"
-            className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-accent cursor-pointer"
+            className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer"
             onClick={() => onSelect(agent.id)}
           >
             {agent.name}
@@ -80,7 +80,7 @@ function ProjectPickerPopover({
       <PopoverContent className="w-48 p-1" align="start">
         <button
           type="button"
-          className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-accent cursor-pointer"
+          className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer"
           onClick={() => onSelect("")}
         >
           No project
@@ -89,7 +89,7 @@ function ProjectPickerPopover({
           <button
             key={project.id}
             type="button"
-            className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-accent cursor-pointer flex items-center gap-2"
+            className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted cursor-pointer flex items-center gap-2"
             onClick={() => onSelect(project.id)}
           >
             {project.color && (

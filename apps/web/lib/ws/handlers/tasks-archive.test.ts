@@ -29,6 +29,8 @@ function makeStore(initial: Partial<AppState> = {}) {
     setActiveSessionAuto: vi.fn(),
     removeTaskFromSidebarPrefs: vi.fn(),
     setTaskDeletedNotification: vi.fn(),
+    upsertQuickChatSessionFromEvent: vi.fn(),
+    removeQuickChatSessionsForTask: vi.fn(),
     setOfficeRefetchTrigger: vi.fn(),
     ...initial,
   } as unknown as AppState;

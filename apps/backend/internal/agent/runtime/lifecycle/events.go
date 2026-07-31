@@ -208,6 +208,8 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		Usage:                   event.Usage,
 		PlanEntries:             event.PlanEntries,
 		PlanContent:             event.PlanContent,
+		MCPAttachment:           event.MCPAttachment,
+		MCPAttachmentAttempt:    event.MCPAttachmentAttempt,
 	}
 
 	// Build agent event message payload

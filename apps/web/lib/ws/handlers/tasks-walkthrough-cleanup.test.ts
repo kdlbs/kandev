@@ -39,6 +39,8 @@ function makeStore() {
     },
     removeTaskFromSidebarPrefs: vi.fn(),
     setTaskDeletedNotification: vi.fn(),
+    upsertQuickChatSessionFromEvent: vi.fn(),
+    removeQuickChatSessionsForTask: vi.fn(),
   } as unknown as AppState;
 
   const listeners = new Set<Listener>();

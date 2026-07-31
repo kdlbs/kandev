@@ -31,8 +31,15 @@ export async function seedScrolledPastLastPrompt(
     trailingFillerCount?: number;
     lastPromptText?: string;
     onSessionId?: (sessionId: string) => void;
+    showScrollControls?: boolean;
   } = {},
 ): Promise<SessionPage> {
+  if (opts.showScrollControls ?? true) {
+    await apiClient.saveUserSettings({
+      show_scroll_to_last_prompt: true,
+      show_scroll_to_start: true,
+    });
+  }
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,

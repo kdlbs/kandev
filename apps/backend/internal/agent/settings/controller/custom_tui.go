@@ -28,6 +28,7 @@ type CreateCustomTUIAgentRequest struct {
 	Model       string
 	Command     string
 	Description string
+	CommandArgs []string
 }
 
 // CreateCustomTUIAgent registers a new custom TUI agent and persists it to the database.
@@ -56,7 +57,7 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 
 	// Register in the in-memory registry
 	if regErr := c.agentRegistry.RegisterCustomTUIAgent(
-		slug, req.DisplayName, req.Command, req.Description, req.Model, nil,
+		slug, req.DisplayName, req.Command, req.Description, req.Model, req.CommandArgs,
 	); regErr != nil {
 		return nil, fmt.Errorf("failed to register agent: %w", regErr)
 	}
@@ -67,6 +68,7 @@ func (c *Controller) CreateCustomTUIAgent(ctx context.Context, req CreateCustomT
 		DisplayName:     req.DisplayName,
 		Model:           req.Model,
 		Description:     req.Description,
+		CommandArgs:     req.CommandArgs,
 		WaitForTerminal: true,
 	}
 	agent := &models.Agent{

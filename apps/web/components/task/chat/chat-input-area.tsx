@@ -314,11 +314,68 @@ type TodoDisplayItem = {
   status?: "pending" | "in_progress" | "completed" | "failed";
 };
 
+export function shouldRenderChatStatusBar({
+  hasTask,
+  hasTodos,
+  hasQueueChip,
+  showRightControls,
+  showProceed,
+}: {
+  hasTask: boolean;
+  hasTodos: boolean;
+  hasQueueChip: boolean;
+  showRightControls: boolean;
+  showProceed: boolean;
+}): boolean {
+  return hasTask || hasTodos || hasQueueChip || showRightControls || showProceed;
+}
+
+function getRightControlVisibility({
+  taskId,
+  sessionId,
+  sessionState,
+  showAutoScrollControl,
+  showScrollToLastPrompt,
+  showScrollToStart,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  sessionState: string | null;
+  showAutoScrollControl: boolean;
+  showScrollToLastPrompt: boolean | undefined;
+  showScrollToStart: boolean | undefined;
+}) {
+  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
+  const showRightControls =
+    (showAutoScrollControl && !!sessionId) ||
+    canShare ||
+    !!showScrollToLastPrompt ||
+    !!showScrollToStart;
+  return { canShare, showRightControls };
+}
+
 /**
  * Row above the composer showing todo progress, PR/CI status chips,
  * merged/closed PR banners, the auto-scroll toggle + Share (right-aligned),
  * and a "move to next step" action when the workflow allows it.
  */
+type ChatStatusBarProps = {
+  todoItems: TodoDisplayItem[];
+  taskId: string | null;
+  sessionId: string | null;
+  sessionState: string | null;
+  nextStepName: string | null;
+  onProceed: () => void;
+  isAgentBusy: boolean;
+  isMoving: boolean;
+  queueChip?: ReactNode;
+  showScrollToLastPrompt?: boolean;
+  onScrollToLastPrompt?: () => void;
+  lastPromptScrollDirection?: "up" | "down";
+  showScrollToStart?: boolean;
+  onScrollToStart?: () => void;
+};
+
 function ChatStatusBar({
   todoItems,
   taskId,
@@ -334,29 +391,31 @@ function ChatStatusBar({
   lastPromptScrollDirection,
   showScrollToStart,
   onScrollToStart,
-}: {
-  todoItems: TodoDisplayItem[];
-  taskId: string | null;
-  sessionId: string | null;
-  sessionState: string | null;
-  nextStepName: string | null;
-  onProceed: () => void;
-  isAgentBusy: boolean;
-  isMoving: boolean;
-  queueChip?: ReactNode;
-  showScrollToLastPrompt?: boolean;
-  onScrollToLastPrompt?: () => void;
-  lastPromptScrollDirection?: "up" | "down";
-  showScrollToStart?: boolean;
-  onScrollToStart?: () => void;
-}) {
+}: ChatStatusBarProps) {
   const showTodos = todoItems.length > 0;
   const showProceed = !!nextStepName && !isAgentBusy;
-  const canShare = !!taskId && !!sessionId && shareableSessionStateClient(sessionState);
-  // Auto-scroll toggle only needs a session (quick-chat/ephemeral sessions
-  // have a transcript with no taskId); the nav group (Share + scroll jumps)
-  // needs a session too, so both gate on the same right-cluster visibility.
-  const showRightControls = !!sessionId || canShare || showScrollToLastPrompt || showScrollToStart;
+  const showAutoScrollControl = useAppStore(
+    (state) => state.userSettings.showTranscriptAutoScrollControl,
+  );
+  const { canShare, showRightControls } = getRightControlVisibility({
+    taskId,
+    sessionId,
+    sessionState,
+    showAutoScrollControl,
+    showScrollToLastPrompt,
+    showScrollToStart,
+  });
+  if (
+    !shouldRenderChatStatusBar({
+      hasTask: !!taskId,
+      hasTodos: showTodos,
+      hasQueueChip: !!queueChip,
+      showRightControls,
+      showProceed,
+    })
+  ) {
+    return null;
+  }
   // PRMergedBanner returns null internally when not applicable
   return (
     <div

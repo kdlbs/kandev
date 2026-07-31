@@ -15,6 +15,20 @@ type createCustomTUIAgentRequest struct {
 	Model       string `json:"model"`
 	Command     string `json:"command"`
 	Description string `json:"description"`
+	// CommandArgs are appended to the argv built from Command. Unlike Command —
+	// which the registry splits on whitespace — each entry is one argv element,
+	// so an argument containing a space can only be expressed here.
+	CommandArgs []string `json:"command_args"`
+}
+
+func (r createCustomTUIAgentRequest) toControllerRequest() controller.CreateCustomTUIAgentRequest {
+	return controller.CreateCustomTUIAgentRequest{
+		DisplayName: r.DisplayName,
+		Model:       r.Model,
+		Command:     r.Command,
+		Description: r.Description,
+		CommandArgs: r.CommandArgs,
+	}
 }
 
 func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
@@ -32,12 +46,7 @@ func (h *Handlers) httpCreateCustomTUIAgent(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.controller.CreateCustomTUIAgent(c.Request.Context(), controller.CreateCustomTUIAgentRequest{
-		DisplayName: body.DisplayName,
-		Model:       body.Model,
-		Command:     body.Command,
-		Description: body.Description,
-	})
+	resp, err := h.controller.CreateCustomTUIAgent(c.Request.Context(), body.toControllerRequest())
 	if err != nil {
 		switch err {
 		case controller.ErrInvalidSlug, controller.ErrCommandRequired:

@@ -42,6 +42,7 @@ type restartMockAgentctlServer struct {
 	mu          sync.Mutex
 	httpActions []string
 	wsActions   []string
+	setModelIDs []string
 
 	failStop       bool
 	failSessionNew bool
@@ -109,7 +110,7 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 				continue
 			}
 
-			m.recordWS(msg.Action)
+			m.recordWS(msg)
 
 			var resp *ws.Message
 			switch msg.Action {
@@ -139,6 +140,10 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 					"session_id": "reset-session-456",
 				})
 			case "agent.session.set_mode":
+				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+					"success": true,
+				})
+			case "agent.session.set_model":
 				resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 					"success": true,
 				})
@@ -185,10 +190,19 @@ func (m *restartMockAgentctlServer) recordHTTP(action string) {
 	m.httpActions = append(m.httpActions, action)
 }
 
-func (m *restartMockAgentctlServer) recordWS(action string) {
+func (m *restartMockAgentctlServer) recordWS(message ws.Message) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.wsActions = append(m.wsActions, action)
+	m.wsActions = append(m.wsActions, message.Action)
+	if message.Action != "agent.session.set_model" {
+		return
+	}
+	var payload struct {
+		ModelID string `json:"model_id"`
+	}
+	if err := json.Unmarshal(message.Payload, &payload); err == nil {
+		m.setModelIDs = append(m.setModelIDs, payload.ModelID)
+	}
 }
 
 func (m *restartMockAgentctlServer) getHTTPActions() []string {
@@ -204,6 +218,14 @@ func (m *restartMockAgentctlServer) getWSActions() []string {
 	defer m.mu.Unlock()
 	out := make([]string, len(m.wsActions))
 	copy(out, m.wsActions)
+	return out
+}
+
+func (m *restartMockAgentctlServer) getSetModelIDs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.setModelIDs))
+	copy(out, m.setModelIDs)
 	return out
 }
 
@@ -684,6 +706,55 @@ func TestManager_ResetAgentContext_ReappliesSessionMode(t *testing.T) {
 	require.Nil(t, exec.protocolMessageIDs)
 	require.Nil(t, exec.protocolThinkingIDs)
 	require.Zero(t, exec.assistantHistoryBuffer.Len())
+}
+
+// TestManager_ResetAgentContext_ReappliesSessionModel is the regression test
+// for an ACP fast-path reset replacing the task's selected model with the
+// provider default from the freshly-created session.
+func TestManager_ResetAgentContext_ReappliesSessionModel(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			"session-1": {SessionID: "session-1", RuntimeModel: "mock-smart"},
+		},
+	}
+	mock := newRestartMockAgentctlServer(t, false, false)
+
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	require.NoError(t, client.StreamUpdates(ctx, func(agentctl.AgentEvent) {}, nil, nil))
+
+	exec := &AgentExecution{
+		ID:                 "exec-model-reset",
+		TaskID:             "task-1",
+		SessionID:          "session-1",
+		AgentProfileID:     "profile-1",
+		ACPSessionID:       "old-session",
+		AgentCommand:       "auggie --model test",
+		Status:             v1.AgentStatusRunning,
+		WorkspacePath:      "/workspace",
+		sessionInitialized: true,
+		agentctl:           client,
+		promptDoneCh:       make(chan PromptCompletionSignal, 1),
+	}
+	// The cache may lag a just-persisted workflow/user model change. The
+	// persisted runtime model is the authoritative pre-reset selection.
+	exec.SetModelState(&CachedModelState{CurrentModelID: "mock-fast"})
+	require.NoError(t, mgr.executionStore.Add(exec))
+
+	require.NoError(t, mgr.ResetAgentContext(ctx, exec.ID))
+
+	actions := mock.getWSActions()
+	resetIndex := slices.Index(actions, "agent.session.reset")
+	modelIndex := slices.Index(actions, "agent.session.set_model")
+	require.GreaterOrEqual(t, resetIndex, 0)
+	require.Greater(t, modelIndex, resetIndex,
+		"the model must be reapplied after the fresh ACP session is created")
+	require.Equal(t, []string{"mock-smart"}, mock.getSetModelIDs(),
+		"reset must restore the persisted effective model, not the fresh-session default")
 }
 
 // TestManager_RestartAgentProcess_PrefersPersistedModeOverStaleCache is the

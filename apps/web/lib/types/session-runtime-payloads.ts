@@ -50,6 +50,38 @@ export type SessionModelsPayload = {
   timestamp: string;
 };
 
+export type MCPAttachmentServerPayload = {
+  name: string;
+  source?: "kandev" | "profile";
+  transport?: string;
+  target?: string;
+  status: "unknown" | "delivered" | "connected" | "active" | "failed" | "filtered" | "unavailable";
+  reason_code?: string;
+  summary?: string;
+  connection_id?: string;
+  tool_count?: number;
+};
+
+export type MCPAttachmentAttemptPayload = {
+  attachment_attempt_id: string;
+  started_at: string;
+  updated_at?: string;
+  servers?: MCPAttachmentServerPayload[];
+};
+
+export type MCPAttachmentHistoryPayload = {
+  version: number;
+  current: MCPAttachmentAttemptPayload;
+  previous?: MCPAttachmentAttemptPayload[];
+};
+
+export type SessionMCPStatusPayload = {
+  task_id: string;
+  session_id: string;
+  history: MCPAttachmentHistoryPayload;
+  timestamp: string;
+};
+
 export type SessionInfoPayload = {
   task_id: string;
   session_id: string;

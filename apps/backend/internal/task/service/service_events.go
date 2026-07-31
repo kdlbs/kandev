@@ -361,6 +361,9 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		"created_at":       task.CreatedAt.Format(time.RFC3339),
 		"updated_at":       task.UpdatedAt.Format(time.RFC3339),
 		"is_ephemeral":     task.IsEphemeral,
+		// Consumers that restore quick-chat tabs filter on origin, so it has to
+		// travel with the event and not just the HTTP DTO.
+		"origin": task.Origin,
 	}
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {

@@ -222,7 +222,8 @@ response but stays `enabled`.
 
 - Browsing the catalog and installing from it require the same operator authority as
   the existing plugin-management API — marketplace endpoints sit behind the same
-  `Features.Plugins` gate and auth as `POST /api/plugins/install`.
+  auth as `POST /api/plugins/install`. Plugins ship unflagged in the base
+  product, so there is no feature gate in front of either.
 - Managing marketplace sources (add/remove/enable) is an operator action; adding a
   source is an explicit act of trust in that source's maintainer, equivalent to
   `brew tap`-ing a third-party tap.
@@ -338,8 +339,8 @@ instead of by a click.
 
 API: `GET/PUT /api/plugins/settings` (`{auto_update_default}`) for the
 instance-wide default and `PUT /api/plugins/:id/auto-update` (`{auto_update:
-true|false|null}`) for the per-plugin override. Both sit behind the same
-`Features.Plugins` gate and operator authority as the rest of plugin management.
+true|false|null}`) for the per-plugin override. Both require the same operator
+authority as the rest of plugin management.
 
 ## Out of scope
 

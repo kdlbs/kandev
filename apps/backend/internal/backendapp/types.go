@@ -99,10 +99,8 @@ type Services struct {
 	// creates tasks via the task service.
 	Automation *automation.Components
 	// Plugins is the extensible plugin system service (registration
-	// registry, event delivery, health monitoring). Gated on
-	// features.Plugins for route registration and boot-payload population,
-	// but always constructed (non-nil) when initialization succeeds so
-	// tests/tools can exercise it directly.
+	// registry, event delivery, health monitoring). Always constructed
+	// (non-nil) when initialization succeeds.
 	Plugins *plugins.Service
 	// Mentions owns the provider registry shared by # search and submission authorization.
 	Mentions *MentionComponents

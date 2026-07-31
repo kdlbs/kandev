@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	acptransport "github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -347,6 +349,80 @@ func (s *Server) injectKandevMcpServers(mcpServers []types.McpServer) []types.Mc
 	return filtered
 }
 
+// startMCPAttachmentAttempt records backend-owned identity before an adapter
+// receives MCP configuration. The context is passed only to the adapter call;
+// agents cannot choose the task, session, execution, or attempt identities.
+func (s *Server) startMCPAttachmentAttempt(ctx context.Context, servers []types.McpServer) context.Context {
+	attempt := streams.MCPAttachmentAttempt{
+		AttemptID:   uuid.NewString(),
+		TaskID:      s.cfg.TaskID,
+		SessionID:   s.cfg.SessionID,
+		ExecutionID: s.cfg.InstanceID,
+		AgentID:     s.cfg.AgentType,
+		StartedAt:   time.Now().UTC(),
+	}
+	s.procMgr.PublishMCPAttachmentAttempt(attempt)
+	if s.mcpServer != nil {
+		s.mcpServer.SetAttachmentAttempt(attempt)
+	}
+	for _, mcpServer := range servers {
+		s.procMgr.PublishMCPAttachment(mcpAttachmentEvidence(attempt.AttemptID, mcpServer, streams.MCPAttachmentEvidenceConfigured, "", ""))
+	}
+	return streams.WithMCPAttachmentContext(ctx, attempt)
+}
+
+func (s *Server) publishMCPAttachmentResult(attemptID string, servers []types.McpServer, err error) {
+	if adapter, ok := s.procMgr.GetAdapter().(mcpAttachmentResultPublisher); ok && adapter.PublishesMCPAttachmentResults() {
+		return
+	}
+	kind := streams.MCPAttachmentEvidenceSessionAccepted
+	reasonCode := ""
+	summary := ""
+	if err != nil {
+		kind = streams.MCPAttachmentEvidenceExplicitError
+		reasonCode = "session_request_failed"
+		summary = err.Error()
+	}
+	for _, mcpServer := range servers {
+		s.procMgr.PublishMCPAttachment(mcpAttachmentEvidence(attemptID, mcpServer, kind, reasonCode, summary))
+	}
+}
+
+// mcpAttachmentResultPublisher identifies adapters that emit per-server
+// delivery and session-result evidence after their own MCP capability filter.
+// Generic adapters still receive result evidence from this API boundary.
+type mcpAttachmentResultPublisher interface {
+	PublishesMCPAttachmentResults() bool
+}
+
+func mcpAttachmentEvidence(
+	attemptID string,
+	mcpServer types.McpServer,
+	kind streams.MCPAttachmentEvidenceKind,
+	reasonCode string,
+	summary string,
+) streams.MCPAttachmentEvidence {
+	target := streams.SanitizeMCPStdioTarget(mcpServer.Command)
+	if mcpServer.Type == mcpTransportHTTP || mcpServer.Type == mcpTransportSSE || mcpServer.Type == "streamable_http" {
+		target = streams.SanitizeMCPNetworkTarget(mcpServer.URL)
+	}
+	source := streams.MCPServerSourceProfile
+	if mcpServer.Name == kandevMcpServerName {
+		source = streams.MCPServerSourceKandev
+	}
+	return streams.MCPAttachmentEvidence{
+		AttemptID:  attemptID,
+		ServerName: mcpServer.Name,
+		Kind:       kind,
+		OccurredAt: time.Now().UTC(),
+		Source:     source,
+		Transport:  mcpServer.Type,
+		Target:     target,
+		ReasonCode: reasonCode,
+		Summary:    streams.SanitizeMCPErrorSummary(summary),
+	}
+}
+
 func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Message {
 	var req NewSessionRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -376,7 +452,10 @@ func (s *Server) handleWSNewSession(ctx context.Context, msg *ws.Message) *ws.Me
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
 
+	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
+	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	sessionID, err := adapter.NewSession(ctx, mcpServers)
+	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("new session failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
@@ -423,11 +502,15 @@ func (s *Server) handleWSLoadSession(ctx context.Context, msg *ws.Message) *ws.M
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
 
+	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
+	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	if err := adapter.LoadSession(ctx, req.SessionID, mcpServers); err != nil {
+		s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 		s.logger.Error("load session failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		return resp
 	}
+	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, nil)
 
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, LoadSessionResponse{
 		Success:   true,
@@ -651,7 +734,10 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 		mcpServers = s.injectKandevMcpServers(mcpServers)
 	}
 
+	ctx = s.startMCPAttachmentAttempt(ctx, mcpServers)
+	attachmentContext, _ := streams.MCPAttachmentContextFromContext(ctx)
 	sessionID, err := sr.ResetSession(ctx, mcpServers)
+	s.publishMCPAttachmentResult(attachmentContext.Attempt.AttemptID, mcpServers, err)
 	if err != nil {
 		s.logger.Error("session reset failed", zap.Error(err))
 		resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)

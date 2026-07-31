@@ -1,4 +1,8 @@
 import { expect, test } from "../../fixtures/test-base";
+import {
+  metricsUnavailableWasRendered,
+  observeMetricsUnavailable,
+} from "./metrics-loading-observer";
 
 type SystemMetricsDisplay = {
   show_in_topbar: boolean;
@@ -30,8 +34,11 @@ test.describe("Resource metrics display", () => {
     const floatingSave = testPage.getByTestId("settings-floating-save");
     await floatingSave.getByRole("button", { name: "Save changes" }).click();
     await expect(floatingSave).not.toBeVisible();
+    await observeMetricsUnavailable(testPage);
     await testPage.reload();
     await expect(simplified).toHaveAttribute("aria-checked", "true");
+    await expect(testPage.getByTestId("app-status-metrics").getByLabel(/^CPU /)).toBeVisible();
+    expect(await metricsUnavailableWasRendered(testPage)).toBe(false);
 
     await testPage.goto("/");
 

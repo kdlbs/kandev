@@ -45,6 +45,32 @@ async function seedOverflowingTask(
 }
 
 test.describe("Mobile transcript auto-scroll toggle", () => {
+  test("can be hidden without changing the mobile transcript auto-scroll default", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.saveUserSettings({ show_transcript_auto_scroll_control: false });
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Auto-scroll Toggle Hidden",
+    );
+    const list = session.activeChat().locator(".chat-message-list");
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.clientHeight), {
+        timeout: 15_000,
+        message: "Waiting for chat to overflow",
+      })
+      .toBeGreaterThan(200);
+
+    await expect(session.chatStatusBar().getByTestId("auto-scroll-toggle-button")).toHaveCount(0);
+    await expect
+      .poll(async () => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+      .toBeLessThan(25);
+  });
+
   test("is reachable and toggles by touch", async ({ testPage, apiClient, seedData }) => {
     const session = await seedOverflowingTask(
       testPage,
@@ -110,5 +136,61 @@ test.describe("Mobile transcript auto-scroll toggle", () => {
       .poll(async () => list.evaluate((el) => el.scrollTop), { timeout: 2_000 })
       .toBeLessThan(targetScrollTop + 10);
     expect(await list.evaluate((el) => el.scrollTop)).toBeGreaterThan(targetScrollTop - 10);
+  });
+
+  test("disabling from the bottom freezes the view when new content arrives", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const session = await seedOverflowingTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Mobile Auto-scroll Toggle Bottom Anchor",
+    );
+    const activeChat = session.activeChat();
+    const list = activeChat.locator(".chat-message-list");
+    // Establish the true-bottom precondition after the mobile sticky prompt
+    // bar has joined the scroll layout.
+    await expect
+      .poll(
+        async () =>
+          list.evaluate((el) => {
+            el.scrollTop = el.scrollHeight;
+            return el.scrollHeight - el.scrollTop - el.clientHeight;
+          }),
+        {
+          timeout: 5_000,
+          message: "expected to be at the bottom before disabling",
+        },
+      )
+      .toBeLessThan(5);
+
+    const toggle = session.chatStatusBar().getByTestId("auto-scroll-toggle-button");
+    await toggle.tap();
+    await expect(toggle).toHaveAttribute("aria-pressed", "false");
+
+    const marker = "New content while disabled at bottom on mobile";
+    await session.sendMessageViaButton(`e2e:delay(500)\ne2e:message("${marker}")`);
+    // Mobile submission clears the composer and appends the user's prompt,
+    // which can resize the transcript before the delayed agent reply. Capture
+    // the frozen position after that submit layout settles so this assertion
+    // isolates movement caused by the incoming content.
+    const frozenScrollTop = await list.evaluate((el) => el.scrollTop);
+    await expect(activeChat.getByText(marker, { exact: false }).last()).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await expect
+      .poll(
+        async () =>
+          list.evaluate(
+            (el, expectedScrollTop) => Math.abs(el.scrollTop - expectedScrollTop),
+            frozenScrollTop,
+          ),
+        { timeout: 2_000 },
+      )
+      .toBeLessThanOrEqual(2);
   });
 });

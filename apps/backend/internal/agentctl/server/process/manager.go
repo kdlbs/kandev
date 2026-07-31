@@ -1413,6 +1413,37 @@ func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
 	}
 }
 
+// PublishMCPAttachment forwards safe MCP attachment evidence through the
+// existing agent update stream. Diagnostics are best effort: an overloaded
+// consumer must never delay the agent process or create a second stream.
+func (m *Manager) PublishMCPAttachment(evidence streams.MCPAttachmentEvidence) {
+	select {
+	case m.updatesCh <- adapter.AgentEvent{
+		Type:          streams.EventTypeMCPAttachment,
+		MCPAttachment: &evidence,
+	}:
+	default:
+		m.logger.Warn("updates channel full, dropping MCP attachment evidence",
+			zap.String("attempt_id", evidence.AttemptID),
+			zap.String("server_name", evidence.ServerName),
+			zap.String("kind", string(evidence.Kind)))
+	}
+}
+
+// PublishMCPAttachmentAttempt starts an attachment-evidence timeline through
+// the existing non-blocking agent update stream.
+func (m *Manager) PublishMCPAttachmentAttempt(attempt streams.MCPAttachmentAttempt) {
+	select {
+	case m.updatesCh <- adapter.AgentEvent{
+		Type:                 streams.EventTypeMCPAttachment,
+		MCPAttachmentAttempt: &attempt,
+	}:
+	default:
+		m.logger.Warn("updates channel full, dropping MCP attachment attempt",
+			zap.String("attempt_id", attempt.AttemptID))
+	}
+}
+
 // GetAdapter returns the protocol adapter
 func (m *Manager) GetAdapter() adapter.AgentAdapter {
 	m.mu.RLock()

@@ -4,6 +4,7 @@ import { memo, useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import {
   MarkdownFileLinkContext,
+  MarkdownTaskContext,
   markdownComponents,
   remarkPlugins,
   type MarkdownFileLinkContextValue,
@@ -22,6 +23,7 @@ import { normalizeCached } from "@/lib/markdown/normalize-cache";
 type MemoizedMarkdownProps = MarkdownFileLinkContextValue & {
   content: string;
   components?: Components;
+  taskId?: string | null;
 };
 
 export const MemoizedMarkdown = memo(function MemoizedMarkdown({
@@ -29,15 +31,18 @@ export const MemoizedMarkdown = memo(function MemoizedMarkdown({
   worktreePath,
   onOpenFile,
   components,
+  taskId = null,
 }: MemoizedMarkdownProps) {
   const fileLinkContext = useMemo(() => ({ worktreePath, onOpenFile }), [worktreePath, onOpenFile]);
   const resolvedComponents = components ?? markdownComponents;
 
   return (
-    <MarkdownFileLinkContext.Provider value={fileLinkContext}>
-      <ReactMarkdown remarkPlugins={remarkPlugins} components={resolvedComponents}>
-        {normalizeCached(content)}
-      </ReactMarkdown>
-    </MarkdownFileLinkContext.Provider>
+    <MarkdownTaskContext.Provider value={taskId}>
+      <MarkdownFileLinkContext.Provider value={fileLinkContext}>
+        <ReactMarkdown remarkPlugins={remarkPlugins} components={resolvedComponents}>
+          {normalizeCached(content)}
+        </ReactMarkdown>
+      </MarkdownFileLinkContext.Provider>
+    </MarkdownTaskContext.Provider>
   );
 });

@@ -4,11 +4,13 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const setTranscriptAutoScrollEnabledMock = vi.fn();
 let enabledBySessionId: Record<string, boolean> = {};
+let showTranscriptAutoScrollControl = true;
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
     selector({
       transcriptAutoScroll: { enabledBySessionId },
+      userSettings: { showTranscriptAutoScrollControl },
       setTranscriptAutoScrollEnabled: setTranscriptAutoScrollEnabledMock,
     }),
 }));
@@ -32,6 +34,7 @@ function getButton() {
 describe("AutoScrollToggleButton", () => {
   beforeEach(() => {
     enabledBySessionId = {};
+    showTranscriptAutoScrollControl = true;
     setTranscriptAutoScrollEnabledMock.mockReset();
     window.sessionStorage.clear();
   });
@@ -72,6 +75,14 @@ describe("AutoScrollToggleButton", () => {
     renderButton("session-b");
     fireEvent.click(getButton());
     expect(setTranscriptAutoScrollEnabledMock).toHaveBeenCalledWith("session-b", false);
+  });
+
+  it("does not render when the user hides the transcript auto-scroll control", () => {
+    showTranscriptAutoScrollControl = false;
+
+    renderButton("session-a");
+
+    expect(screen.queryByTestId(TOGGLE_TESTID)).toBeNull();
   });
 
   it("falls back to the sessionStorage-persisted preference when the store hasn't hydrated this session yet", () => {

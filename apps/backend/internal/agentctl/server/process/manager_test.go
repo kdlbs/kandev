@@ -14,11 +14,63 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/pkg/agent"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+func TestPublishMCPAttachmentPublishesWithoutBlocking(t *testing.T) {
+	m := &Manager{
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		logger:    newTestLogger(t),
+	}
+	evidence := streams.MCPAttachmentEvidence{
+		AttemptID:  "attempt-1",
+		ServerName: "kandev",
+		Kind:       streams.MCPAttachmentEvidenceDelivered,
+	}
+
+	m.PublishMCPAttachment(evidence)
+
+	select {
+	case event := <-m.updatesCh:
+		if event.Type != streams.EventTypeMCPAttachment {
+			t.Fatalf("event type = %q, want MCP attachment", event.Type)
+		}
+		if event.MCPAttachment == nil || event.MCPAttachment.AttemptID != "attempt-1" {
+			t.Fatalf("attachment event = %+v, want attempt evidence", event.MCPAttachment)
+		}
+	default:
+		t.Fatal("expected MCP attachment update")
+	}
+
+	// A saturated diagnostics channel must not stall agent lifecycle work.
+	m.updatesCh <- adapter.AgentEvent{Type: streams.EventTypeMessageChunk}
+	m.PublishMCPAttachment(evidence)
+	if got := len(m.updatesCh); got != 1 {
+		t.Fatalf("queued events = %d, want 1", got)
+	}
+}
+
+func TestPublishMCPAttachmentAttemptCarriesBackendOwnedIdentity(t *testing.T) {
+	m := &Manager{updatesCh: make(chan adapter.AgentEvent, 1), logger: newTestLogger(t)}
+	m.PublishMCPAttachmentAttempt(streams.MCPAttachmentAttempt{
+		AttemptID:   "attempt-1",
+		TaskID:      "task-1",
+		SessionID:   "session-1",
+		ExecutionID: "execution-1",
+	})
+
+	event := <-m.updatesCh
+	if event.MCPAttachmentAttempt == nil {
+		t.Fatal("expected MCP attachment attempt")
+	}
+	if got := event.MCPAttachmentAttempt; got.TaskID != "task-1" || got.ExecutionID != "execution-1" {
+		t.Fatalf("attempt identity = %+v", got)
+	}
+}
 
 // stubAdapter is a minimal AgentAdapter for testing the startup sequence.
 type stubAdapter struct {

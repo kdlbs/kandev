@@ -82,7 +82,8 @@ The only public API addition is `registerComponent("app-status-bar-left" | "app-
 
 ## Failure modes
 
-- Missing metrics snapshot renders a recognizable unavailable/loading state; it does not create a fallback fetch or provider.
+- Before the first metrics snapshot arrives, the metrics item remains hidden while its normal WebSocket subscription stays active; loading is not presented as an availability failure and does not create a fallback fetch or provider.
+- A received snapshot without the Kandev host source renders the recognizable unavailable state. Unavailable metric samples keep their existing per-metric degraded presentation and inspectable error detail.
 - Connection errors remain inspectable through accessible detail; reconnecting is not misrepresented as connected.
 - A failed plugin contribution is contained by its own boundary; remaining contributions and first-party state remain usable.
 - If Status drawer closes during a metrics update or breakpoint changes, the inactive presentation unmounts and releases only its own ref-counted subscription.
@@ -105,6 +106,7 @@ Visual interaction is a clean Kandev adaptation of Orca's public status-bar idea
 
 - **GIVEN** the feature is enabled on a desktop or tablet route, **WHEN** it opens, **THEN** one 24 px app status bar remains at its bottom and route/sidebar content use the remaining height without a new page scrollbar.
 - **GIVEN** metrics preference enabled, **WHEN** a desktop/tablet status bar mounts, **THEN** existing Kandev-host metrics appear there, task/session/executor metrics do not, and no route header still renders metrics.
+- **GIVEN** metrics preference enabled and no metrics snapshot has arrived yet, **WHEN** a desktop/tablet status bar mounts or a phone user opens Status, **THEN** the metrics item remains hidden without showing an unavailable message until the first snapshot arrives, while the normal metrics subscription remains active.
 - **GIVEN** the detailed metrics style or no stored style preference, **WHEN** host metrics render in a status surface, **THEN** the host marker and percentage meter bars remain visible.
 - **GIVEN** the user selects **Simplified metrics** and saves Appearance settings, **WHEN** host metrics render in the desktop/tablet status bar or pre-status-bar topbar fallback, **THEN** each enabled metric shows its icon and formatted value without a host marker or percentage meter bar, and the choice survives reload.
 - **GIVEN** the simplified metrics preference, **WHEN** a phone user opens Status, **THEN** the metrics row shows the same icon-and-value presentation without a host marker or percentage meter bar.

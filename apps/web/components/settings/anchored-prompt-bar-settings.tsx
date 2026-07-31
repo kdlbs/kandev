@@ -13,6 +13,7 @@ type TranscriptNavigationSettings = {
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
   showScrollToStart: boolean;
+  showTranscriptAutoScrollControl: boolean;
 };
 
 function sameSettings(
@@ -22,7 +23,8 @@ function sameSettings(
   return (
     left.showAnchoredPromptBar === right.showAnchoredPromptBar &&
     left.showScrollToLastPrompt === right.showScrollToLastPrompt &&
-    left.showScrollToStart === right.showScrollToStart
+    left.showScrollToStart === right.showScrollToStart &&
+    left.showTranscriptAutoScrollControl === right.showTranscriptAutoScrollControl
   );
 }
 
@@ -40,7 +42,44 @@ function changedSettings(
   if (saved.showScrollToStart !== draft.showScrollToStart) {
     changes.show_scroll_to_start = draft.showScrollToStart;
   }
+  if (saved.showTranscriptAutoScrollControl !== draft.showTranscriptAutoScrollControl) {
+    changes.show_transcript_auto_scroll_control = draft.showTranscriptAutoScrollControl;
+  }
   return changes;
+}
+
+type TranscriptNavigationSwitchProps = {
+  id: string;
+  label: string;
+  description: string;
+  checked: boolean;
+  isDirty: boolean;
+  onCheckedChange: (checked: boolean) => void;
+};
+
+function TranscriptNavigationSwitch({
+  id,
+  label,
+  description,
+  checked,
+  isDirty,
+  onCheckedChange,
+}: TranscriptNavigationSwitchProps) {
+  return (
+    <div className="flex min-h-11 items-center justify-between gap-4">
+      <div className="min-w-0 space-y-0.5">
+        <Label htmlFor={id}>{label}</Label>
+        <p className="text-xs text-muted-foreground">{description}</p>
+      </div>
+      <Switch
+        id={id}
+        checked={checked}
+        data-settings-dirty={isDirty}
+        onCheckedChange={onCheckedChange}
+        className="shrink-0 cursor-pointer"
+      />
+    </div>
+  );
 }
 
 export function AnchoredPromptBarSettings() {
@@ -51,6 +90,7 @@ export function AnchoredPromptBarSettings() {
     showAnchoredPromptBar: userSettings.showAnchoredPromptBar,
     showScrollToLastPrompt: userSettings.showScrollToLastPrompt,
     showScrollToStart: userSettings.showScrollToStart,
+    showTranscriptAutoScrollControl: userSettings.showTranscriptAutoScrollControl,
   };
   const [saved, setSaved] = useState(current);
   const [draft, setDraft] = useState(current);
@@ -63,7 +103,12 @@ export function AnchoredPromptBarSettings() {
       if (sameSettings(draftRef.current, previous)) setDraft(current);
       return current;
     });
-  }, [current.showAnchoredPromptBar, current.showScrollToLastPrompt, current.showScrollToStart]);
+  }, [
+    current.showAnchoredPromptBar,
+    current.showScrollToLastPrompt,
+    current.showScrollToStart,
+    current.showTranscriptAutoScrollControl,
+  ]);
 
   useSettingsSaveContributor({
     id: "general-transcript-navigation",
@@ -85,58 +130,46 @@ export function AnchoredPromptBarSettings() {
         <CardTitle className="text-base">Transcript Navigation</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="show-anchored-prompt-bar">Show anchored prompt bar</Label>
-            <p className="text-xs text-muted-foreground">
-              Desktop only. While you scroll past your last prompt, stick a shortened copy to the
-              top of the transcript with an expand toggle.
-            </p>
-          </div>
-          <Switch
-            id="show-anchored-prompt-bar"
-            checked={draft.showAnchoredPromptBar}
-            data-settings-dirty={isDirty}
-            onCheckedChange={(showAnchoredPromptBar) =>
-              setDraft((previous) => ({ ...previous, showAnchoredPromptBar }))
-            }
-            className="shrink-0 cursor-pointer"
-          />
-        </div>
-        <div className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="show-scroll-to-last-prompt">Show scroll to last prompt</Label>
-            <p className="text-xs text-muted-foreground">
-              Show the jump control after your latest prompt scrolls above the transcript.
-            </p>
-          </div>
-          <Switch
-            id="show-scroll-to-last-prompt"
-            checked={draft.showScrollToLastPrompt}
-            data-settings-dirty={isDirty}
-            onCheckedChange={(showScrollToLastPrompt) =>
-              setDraft((previous) => ({ ...previous, showScrollToLastPrompt }))
-            }
-            className="shrink-0 cursor-pointer"
-          />
-        </div>
-        <div className="flex min-h-11 items-center justify-between gap-4">
-          <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="show-scroll-to-start">Show scroll to start</Label>
-            <p className="text-xs text-muted-foreground">
-              Show the control that jumps to the beginning of the transcript.
-            </p>
-          </div>
-          <Switch
-            id="show-scroll-to-start"
-            checked={draft.showScrollToStart}
-            data-settings-dirty={isDirty}
-            onCheckedChange={(showScrollToStart) =>
-              setDraft((previous) => ({ ...previous, showScrollToStart }))
-            }
-            className="shrink-0 cursor-pointer"
-          />
-        </div>
+        <TranscriptNavigationSwitch
+          id="show-anchored-prompt-bar"
+          label="Show anchored prompt bar"
+          description="Desktop only. While you scroll past your last prompt, stick a shortened copy to the top of the transcript with an expand toggle."
+          checked={draft.showAnchoredPromptBar}
+          isDirty={isDirty}
+          onCheckedChange={(showAnchoredPromptBar) =>
+            setDraft((previous) => ({ ...previous, showAnchoredPromptBar }))
+          }
+        />
+        <TranscriptNavigationSwitch
+          id="show-scroll-to-last-prompt"
+          label="Show scroll to last prompt"
+          description="Show the jump control after your latest prompt scrolls above the transcript."
+          checked={draft.showScrollToLastPrompt}
+          isDirty={isDirty}
+          onCheckedChange={(showScrollToLastPrompt) =>
+            setDraft((previous) => ({ ...previous, showScrollToLastPrompt }))
+          }
+        />
+        <TranscriptNavigationSwitch
+          id="show-scroll-to-start"
+          label="Show scroll to start"
+          description="Show the control that jumps to the beginning of the transcript."
+          checked={draft.showScrollToStart}
+          isDirty={isDirty}
+          onCheckedChange={(showScrollToStart) =>
+            setDraft((previous) => ({ ...previous, showScrollToStart }))
+          }
+        />
+        <TranscriptNavigationSwitch
+          id="show-transcript-auto-scroll-control"
+          label="Show transcript auto-scroll control"
+          description="Show the per-session button that temporarily turns transcript auto-scroll on or off. Hiding it does not change the default: new transcripts still auto-scroll."
+          checked={draft.showTranscriptAutoScrollControl}
+          isDirty={isDirty}
+          onCheckedChange={(showTranscriptAutoScrollControl) =>
+            setDraft((previous) => ({ ...previous, showTranscriptAutoScrollControl }))
+          }
+        />
       </CardContent>
     </SettingsCard>
   );

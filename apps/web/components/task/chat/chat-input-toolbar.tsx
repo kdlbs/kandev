@@ -9,11 +9,13 @@ import { SubmitButton } from "./chat-input-toolbar-primitives";
 import { shouldUseCompactTaskChrome } from "@/hooks/use-compact-task-chrome";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { ContextFile } from "@/lib/state/context-files-store";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 export type ChatInputToolbarProps = {
   planModeEnabled: boolean;
   planModeAvailable?: boolean;
   mcpServers?: string[];
+  mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   sessionId: string | null;
   taskId: string | null;
@@ -150,6 +152,7 @@ export const ChatInputToolbar = memo(function ChatInputToolbar(rawProps: ChatInp
           (props.hideSessionsDropdown ?? false) || responsiveBreakpoint.isMobile
         }
         mcpServers={props.mcpServers}
+        mcpAttachmentHistory={props.mcpAttachmentHistory}
         sessionId={props.sessionId}
         taskId={props.taskId}
         taskTitle={props.taskTitle}

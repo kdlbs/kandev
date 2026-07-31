@@ -71,7 +71,7 @@ export function PriorityPicker({ task }: PriorityPickerProps) {
           aria-haspopup="listbox"
           aria-expanded={open}
           data-testid="priority-picker-trigger"
-          className="inline-flex items-center gap-1.5 cursor-pointer rounded px-2 py-1 hover:bg-accent/50 ml-auto"
+          className="inline-flex items-center gap-1.5 cursor-pointer rounded px-2 py-1 hover:bg-muted ml-auto"
         >
           <CurrentIcon className={cn("h-3.5 w-3.5", current.iconClass)} />
           <span>{current.label}</span>
@@ -89,8 +89,8 @@ export function PriorityPicker({ task }: PriorityPickerProps) {
               aria-selected={task.priority === opt.value}
               data-testid={`priority-picker-option-${opt.value}`}
               className={cn(
-                "flex w-full items-center gap-2 rounded px-2 py-1.5 text-sm cursor-pointer hover:bg-accent",
-                task.priority === opt.value && "bg-accent/40",
+                "flex w-full items-center gap-2 rounded border border-transparent px-2 py-1.5 text-sm cursor-pointer hover:bg-muted",
+                task.priority === opt.value && "border-primary/50 bg-card",
               )}
               onClick={() => handleSelect(opt.value)}
             >

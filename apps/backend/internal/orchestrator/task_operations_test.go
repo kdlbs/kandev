@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -2068,9 +2069,9 @@ func TestClarificationRecovery_ReleasesGuardAfterRetryDispatch(t *testing.T) {
 	select {
 	case recovered := <-recoveryDone:
 		require.True(t, recovered)
-	default:
+	case <-time.After(2 * time.Second):
 		close(turnComplete)
-		t.Fatal("clarification recovery must return after retry dispatch acceptance")
+		t.Fatal("clarification recovery did not return after retry dispatch acceptance")
 	}
 	close(turnComplete)
 
@@ -4577,6 +4578,64 @@ func TestErrorClassificationFunctions(t *testing.T) {
 }
 
 // --- GetTaskSessionStatus ---
+
+func TestGetTaskSessionStatus_ReportsEmbeddedVscodeCapability(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	if err := repo.CreateExecutor(ctx, &models.Executor{
+		ID:     "executor-docker",
+		Name:   "Docker",
+		Type:   models.ExecutorTypeLocalDocker,
+		Status: models.ExecutorStatusActive,
+	}); err != nil {
+		t.Fatalf("create executor: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, "session1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.ExecutorID = "executor-docker"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.executor = executor.NewExecutor(svc.agentManager, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus: %v", err)
+	}
+	if !resp.Capabilities.EmbeddedVscode {
+		t.Fatal("embedded_vscode = false, want true for a Docker session")
+	}
+	encoded, err := json.Marshal(resp)
+	if err != nil {
+		t.Fatalf("marshal status response: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"capabilities":{"embedded_vscode":true}`) {
+		t.Fatalf("serialized status = %s, want embedded_vscode capability", encoded)
+	}
+}
+
+func TestGetTaskSessionStatus_FailsClosedWithoutExecutorCapability(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateWaitingForInput)
+
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.executor = executor.NewExecutor(svc.agentManager, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus: %v", err)
+	}
+	if resp.Capabilities.EmbeddedVscode {
+		t.Fatal("embedded_vscode = true, want false without an executor")
+	}
+}
 
 func TestGetTaskSessionStatus_HealsStuckStartingSession(t *testing.T) {
 	ctx := context.Background()
