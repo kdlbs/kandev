@@ -25,19 +25,9 @@ test.describe("Mobile layout profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.openFromMobileMenu();
 
-    const overflowButton = layouts.editor.locator(".dv-tabs-overflow-dropdown-default");
-    if (await overflowButton.isVisible()) {
-      await overflowButton.tap();
-      const overflowPrDetails = testPage.locator(".dv-tabs-overflow-container .dv-tab", {
-        hasText: "PR Details",
-      });
-      await expect(overflowPrDetails).toBeVisible();
-      await overflowPrDetails.tap();
-    } else {
-      const prDetailsTab = layouts.editor.locator(".dv-tab", { hasText: "PR Details" });
-      await expect(prDetailsTab).toBeVisible();
-      await prDetailsTab.tap();
-    }
+    const prDetailsTab = layouts.editor.locator(".dv-tab", { hasText: "PR Details" });
+    await expect(prDetailsTab).toBeVisible();
+    await prDetailsTab.tap();
     await prCapture.screenshot("pr-details-touch-layout-editor", {
       caption: "Mobile layout editor selects PR Details through touch controls",
     });
@@ -55,11 +45,7 @@ test.describe("Mobile layout profiles", () => {
     const prDetailsGroup = profile.layout.columns
       .flatMap((column) => column.groups)
       .find((group) => group.panels.some((panel) => panel.id === "pr-detail"));
-    expect(prDetailsGroup?.panels.map((panel) => panel.id)).toEqual([
-      "files",
-      "pr-detail",
-      "changes",
-    ]);
+    expect(prDetailsGroup?.panels.map((panel) => panel.id)).toEqual(["pr-detail", "chat"]);
 
     await assertNoDocumentHorizontalOverflow(testPage, "PR Details mobile layout edit");
     await assertNoDescendantOverflowsRight(layouts.root, "PR Details mobile layout settings");
@@ -91,7 +77,7 @@ test.describe("Mobile layout profiles", () => {
     const filesGroup = profile.layout.columns
       .flatMap((column) => column.groups)
       .find((group) => group.panels.some((panel) => panel.id === "files"));
-    expect(filesGroup?.panels.map((panel) => panel.id)).toEqual(["changes", "files", "pr-detail"]);
+    expect(filesGroup?.panels.map((panel) => panel.id)).toEqual(["changes", "files"]);
 
     await assertNoDocumentHorizontalOverflow(testPage, "edited layouts page");
     await assertNoDescendantOverflowsRight(layouts.root, "edited layouts settings");

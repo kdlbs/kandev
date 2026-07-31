@@ -18,7 +18,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - Exactly one layout is effective as the user default. A saved profile, including a reserved built-in override, marked `is_default` wins; when none is marked, the built-in Default layout is effective.
 - The visual editor supports one instance of each reusable panel: Agent, Files, Changes, PR Details, Terminal, Plan, Browser, and VS Code. Agent is required and cannot be removed.
 - PR Details is the canonical reusable `pr-detail` panel. It renders the active task's linked GitHub pull request or GitLab merge request through the existing provider-aware review surface and remains present with its normal empty state when no review is linked.
-- The built-in Default layout places PR Details after Files and Changes in the top-right group, with Files remaining the initially selected tab. The compact desktop layout includes PR Details in its single tab group because it has no separate right column.
+- The built-in Default layout places PR Details beside Agent in the center group. Files remains the initially selected tab in the top-right Files and Changes group. The compact desktop layout includes PR Details in its single tab group because it has no separate right column.
 - Runtime review-data synchronization may update the canonical PR Details panel's content identity, but it never adds, removes, or moves the panel. Removing PR Details from a profile or task layout therefore remains a user-owned layout choice.
 - Explicitly opening a specific pull request or merge request focuses a matching tab in place. A new task-specific review tab joins the canonical PR Details panel's configured group when that panel exists and otherwise falls back to the existing center group; opening never relocates an already-open tab.
 - Selecting a tab makes it active and shows contextual controls next to its split. Users can reorder or remove the tab, move it between groups, create splits, and move, merge, or resize the selected split. Adding a missing panel remains a separate floating action. Every editor action provides a hover/focus description.
@@ -31,7 +31,7 @@ Users can arrange and save the desktop task workbench only while a task is open,
 - The existing workbench layout menu continues to apply built-in and custom profiles and save the current workbench as a custom profile. Profile mutations from either surface remain consistent after the user-settings response is received.
 - Layout-profile editing is usable with pointer, keyboard, and touch input. On narrow settings viewports, profile management and all editor commands remain reachable without horizontal page scrolling.
 - Layout profiles configure the desktop Dockview workbench only. Mobile and tablet task-detail layouts retain their existing behavior.
-- The default right-side workbench column is responsive: its Files, Changes, PR Details, and Terminal panels resize together from the current desktop workbench width whenever the display changes.
+- The default right-side workbench column is responsive: its Files, Changes, and Terminal panels resize together from the current desktop workbench width whenever the display changes.
 - A right-column resize performed through the desktop sash is an explicit per-task-environment preference. It persists across reloads and display changes, while still respecting the current screen's safety cap.
 
 ## Data model
@@ -92,7 +92,7 @@ The frontend treats the returned settings payload as authoritative after each su
 - **GIVEN** a customized built-in layout, **WHEN** the user chooses Reset and saves, **THEN** its hidden override is removed and the original code-defined layout is restored.
 - **GIVEN** a customized built-in layout, **WHEN** the user selects that built-in from the task workbench layout menu, **THEN** the saved override is applied instead of the original code-defined template.
 - **GIVEN** a valid custom profile, **WHEN** the user reorders tabs or moves a panel into a new split and saves, **THEN** reopening the profile shows the same tab order, active tab, split order, and proportions.
-- **GIVEN** the code-defined Default layout, **WHEN** a fresh desktop task environment opens, **THEN** PR Details is a background tab after Files and Changes in the top-right group and Files remains selected.
+- **GIVEN** the code-defined Default layout, **WHEN** a fresh desktop task environment opens, **THEN** PR Details is a background tab beside Agent in the center group and Files remains selected in the top-right Files and Changes group.
 - **GIVEN** a compact desktop task environment, **WHEN** the built-in compact layout is applied, **THEN** PR Details is available as a tab in the single workbench group.
 - **GIVEN** a user moves PR Details to another group in the Layout editor and saves that profile, **WHEN** the profile is used for a fresh task or through Reset Layout, **THEN** the canonical panel opens in the saved group without a separate appearance setting.
 - **GIVEN** PR Details is present but the active task has no linked pull request or merge request, **WHEN** review data settles, **THEN** the panel remains in the configured group and shows its normal empty state.

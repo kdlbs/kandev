@@ -105,7 +105,7 @@ async function linkPR(apiClient: ApiClient, taskId: string): Promise<void> {
 }
 
 test.describe("PR Details layout panel", () => {
-  test("keeps the Default panel in Files/Changes and syncs linked review content", async ({
+  test("keeps the Default panel beside Agent and syncs linked review content", async ({
     testPage,
     apiClient,
     seedData,
@@ -118,8 +118,8 @@ test.describe("PR Details layout panel", () => {
     await expect
       .poll(() => readReviewLayout(testPage), { timeout: 15_000 })
       .toMatchObject({
-        canonicalGroupId: "group-right-top",
-        rightTopOrder: ["files", "changes", "pr-detail"],
+        canonicalGroupId: "group-center",
+        rightTopOrder: ["files", "changes"],
       });
 
     await expect(session.prDetailTab()).toBeVisible();

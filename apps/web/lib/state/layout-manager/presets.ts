@@ -6,14 +6,14 @@ export function defaultLayout(): LayoutState {
     columns: [
       {
         id: "center",
-        groups: [{ id: CENTER_GROUP, panels: [panel("chat")] }],
+        groups: [{ id: CENTER_GROUP, panels: [panel("chat"), panel("pr-detail")] }],
       },
       {
         id: "right",
         pinned: true,
         width: 350,
         groups: [
-          { id: RIGHT_TOP_GROUP, panels: [panel("files"), panel("changes"), panel("pr-detail")] },
+          { id: RIGHT_TOP_GROUP, panels: [panel("files"), panel("changes")] },
           { id: RIGHT_BOTTOM_GROUP, panels: [panel("terminal-default")] },
         ],
       },

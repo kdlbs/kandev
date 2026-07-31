@@ -215,14 +215,14 @@ test.describe("Task layout profile defaults", () => {
     await layouts.open();
     await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toBeVisible();
     await layouts.selectPanel("PR Details");
-    await prCapture.screenshot("default-pr-details-top-right", {
-      caption: "Default layout puts PR Details after Files and Changes in the top-right pane",
+    await prCapture.screenshot("default-pr-details-agent-group", {
+      caption: "Default layout puts PR Details beside Agent in the center pane",
     });
 
     await layouts.actions.getByRole("button", { name: "Move tab to split" }).click();
-    await testPage.getByRole("menuitem", { name: "Agent", exact: true }).click();
-    await prCapture.screenshot("pr-details-moved-with-layout-editor", {
-      caption: "Layout editor moves PR Details into the Agent pane before saving",
+    await testPage.getByRole("menuitem", { name: "Files", exact: true }).click();
+    await prCapture.screenshot("pr-details-moved-to-files-group", {
+      caption: "Layout editor moves PR Details into the Files/Changes pane before saving",
     });
     await layouts.save();
 
@@ -236,8 +236,8 @@ test.describe("Task layout profile defaults", () => {
       .toMatchObject({
         filesGroupId: "group-right-top",
         changesGroupId: "group-right-top",
-        prDetailsGroupId: "group-center",
-        rightGroupOrder: ["files", "changes"],
+        prDetailsGroupId: "group-right-top",
+        rightGroupOrder: ["files", "changes", "pr-detail"],
       });
   });
 

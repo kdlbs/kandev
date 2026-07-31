@@ -14,7 +14,7 @@ Prove layout-owned PR Details behavior through production-build desktop/mobile f
 
 ## Acceptance
 
-- Desktop Layout settings show PR Details in the built-in Default Files/Changes group and can save it in another group; fresh/reset workbenches honor that placement.
+- Desktop Layout settings show PR Details in the built-in Default Agent group and can save it in another group; fresh/reset workbenches honor that placement.
 - Canonical PR Details remains present with no linked review, follows the active task's provider/key, and is not auto-created after the user removes it.
 - Explicit secondary PR/MR tabs join the canonical group, fall back to center when canonical is absent, and focus without relocation when already open.
 - Mobile Layout settings can add/move PR Details using existing touch controls and produce no document-level horizontal overflow.

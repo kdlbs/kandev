@@ -7,11 +7,13 @@ describe("layout presets", () => {
     expect(layout.columns.map((c) => c.id)).toEqual(["center", "right"]);
   });
 
-  it("places PR Details after Files and Changes in the top-right group", () => {
+  it("places PR Details in the Agent group", () => {
     const layout = defaultLayout();
+    const center = layout.columns.find((column) => column.id === "center")?.groups[0];
     const rightTop = layout.columns.find((column) => column.id === "right")?.groups[0];
 
-    expect(rightTop?.panels.map((panel) => panel.id)).toEqual(["files", "changes", "pr-detail"]);
+    expect(center?.panels.map((panel) => panel.id)).toEqual(["chat", "pr-detail"]);
+    expect(rightTop?.panels.map((panel) => panel.id)).toEqual(["files", "changes"]);
   });
 
   it("compact preset is a single center column with everything tabbed", () => {

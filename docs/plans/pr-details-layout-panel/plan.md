@@ -8,7 +8,7 @@ status: complete
 
 ## Overview
 
-Replace this branch's global Appearance preference for pull-request tab placement with the existing task-layout profile system. Promote the canonical `pr-detail` runtime panel to the reusable **PR Details** panel, put it in the built-in Default layout's `RIGHT_TOP_GROUP`, and let users place or remove it with `Settings > General > Layouts`. Keep review identity synchronization separate from layout mutation: runtime code may update which review the canonical panel renders, but only layouts decide whether the panel exists and where it lives.
+Replace this branch's global Appearance preference for pull-request tab placement with the existing task-layout profile system. Promote the canonical `pr-detail` runtime panel to the reusable **PR Details** panel, put it beside Agent in the built-in Default layout's `CENTER_GROUP`, and let users place or remove it with `Settings > General > Layouts`. Keep review identity synchronization separate from layout mutation: runtime code may update which review the canonical panel renders, but only layouts decide whether the panel exists and where it lives.
 
 No backend schema, user-settings field, endpoint, or ADR is required. `users.settings.saved_layouts` already owns portable layout placement, and `docs/specs/ui/task-layout-profiles.md` owns the product contract.
 
@@ -47,7 +47,7 @@ No backend schema, user-settings field, endpoint, or ADR is required. `users.set
 
 ## Tests
 
-- `apps/web/lib/state/layout-manager/presets.test.ts`: exact Default right-top order and compact membership.
+- `apps/web/lib/state/layout-manager/presets.test.ts`: exact Default Agent-group and right-top order plus compact membership.
 - `apps/web/lib/layout/layout-profiles.test.ts`: canonical `pr-detail` accepted; keyed PR/MR IDs rejected.
 - `apps/web/components/settings/layouts/layout-editor-actions.test.ts`: PR Details appears once in the add catalog and participates in existing panel operations.
 - `apps/web/components/task/dockview-review-panel-sync.test.ts`: GitHub/GitLab/empty identity transitions mutate params only and ignore a missing canonical panel.
@@ -57,7 +57,7 @@ No backend schema, user-settings field, endpoint, or ADR is required. `users.set
 
 ## E2E
 
-- Extend `apps/web/e2e/tests/settings/layout-profiles.spec.ts` to prove the built-in Default contains PR Details in the Files/Changes group and a saved move changes fresh/reset desktop placement.
+- Extend `apps/web/e2e/tests/settings/layout-profiles.spec.ts` to prove the built-in Default contains PR Details beside Agent and a saved move changes fresh/reset desktop placement.
 - Extend `apps/web/e2e/tests/settings/mobile-layout-profiles.spec.ts` to add or move PR Details with touch controls and assert no document-level horizontal overflow.
 - Replace `apps/web/e2e/tests/pr/pr-detail-auto-show.spec.ts` with focused layout-owned coverage: canonical content follows the active task, no-review state leaves the tab present, and removing the canonical tab is not undone by linked-review updates.
 - Update `pr-detail-manual-open.spec.ts` and `pr-detail-dedup.spec.ts` for canonical-group anchoring, center fallback, exact-tab focus, and no relocation.
@@ -65,7 +65,7 @@ No backend schema, user-settings field, endpoint, or ADR is required. `users.set
 
 ## Mobile design contract
 
-- Desktop outcome: Default layout shows PR Details as a background tab in the top-right Files/Changes group; custom placement uses existing Dockview editor controls.
+- Desktop outcome: Default layout shows PR Details as a background tab beside Agent in the center group; custom placement uses existing Dockview editor controls.
 - Phone entry: `Settings > General > Layouts`, using the existing settings drawer and Layout editor surface.
 - Nearest mobile exemplar: `apps/web/e2e/tests/settings/mobile-layout-profiles.spec.ts`; no new drawer, overlay, or navigation model is introduced.
 - Scroll ownership: existing settings page remains the vertical scroll owner; editor controls must not add horizontal page scrolling.
@@ -94,7 +94,7 @@ Wave 3 (depends on Wave 2):
 - Existing saved layouts intentionally lack `pr-detail`; auto-inserting it would violate task-layout precedence and user ownership.
 - Dockview parameter updates merge values. Provider switches must explicitly clear stale `prKey`, `mrKey`, and provider markers.
 - Existing Agent-restoration logic assumes review tabs were Agent siblings. Leaving that heuristic intact could restore Agent into the configured PR Details group.
-- Default and compact preset changes affect fresh environments and Reset Layout; ordering must keep Files active and avoid focus theft.
+- Default and compact preset changes affect fresh environments and Reset Layout; ordering must keep Agent and PR Details together without focus theft.
 - This branch currently changes backend and frontend settings contracts. Cleanup must remove the entire unused contract so no dead API field or persistence path remains.
 - E2E runs use production Vite assets; every frontend E2E run must use the managed runner with a fresh build after source changes.
 
@@ -117,3 +117,6 @@ cd apps/web && pnpm e2e:run tests/settings/mobile-layout-profiles.spec.ts -- --p
 - 2026-07-31: `make -C apps/backend test` and both public-doc validators passed.
 - 2026-07-31: fresh production-build desktop PR/Layout E2E suite passed (8 tests), and focused desktop Layout capture passed (4 tests).
 - 2026-07-31: mobile Layout E2E passed (2 tests), including touch selection and no horizontal overflow.
+- 2026-07-31: Default PR Details placement moved beside Agent. Focused preset unit test,
+  fresh production desktop E2E, mobile Layout E2E (2 tests), typecheck, lint, and public-doc
+  validation passed.
