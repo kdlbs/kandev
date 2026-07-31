@@ -2,6 +2,7 @@ package agents
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -172,6 +173,20 @@ func TestHermesACP_DetectionRequiresACPCheck(t *testing.T) {
 		}
 		if result.Available {
 			t.Fatal("Available=true when hermes acp --check fails")
+		}
+	})
+
+	t.Run("returns cancellation from caller context", func(t *testing.T) {
+		t.Setenv(hermesACPCheckHelperEnv, "available")
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		result, err := NewHermesACP().IsInstalled(ctx)
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("IsInstalled error = %v, want context.Canceled", err)
+		}
+		if result.Available {
+			t.Fatal("Available=true with a cancelled context")
 		}
 	})
 }

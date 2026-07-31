@@ -3,7 +3,10 @@ package agents
 import (
 	"context"
 	"os/exec"
+	"time"
 )
+
+const commandCheckTimeout = 5 * time.Second
 
 // DetectOption is a detection strategy. Returns (found, matchedPath, err).
 type DetectOption func(ctx context.Context) (bool, string, error)
@@ -29,7 +32,9 @@ func WithCommandCheck(name string, args ...string) DetectOption {
 		if err != nil {
 			return false, "", nil
 		}
-		if err := exec.CommandContext(ctx, path, args...).Run(); err != nil {
+		checkCtx, cancel := context.WithTimeout(ctx, commandCheckTimeout)
+		defer cancel()
+		if err := exec.CommandContext(checkCtx, path, args...).Run(); err != nil {
 			if ctx.Err() != nil {
 				return false, "", ctx.Err()
 			}
