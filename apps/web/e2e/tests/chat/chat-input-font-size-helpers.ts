@@ -27,9 +27,13 @@ export async function openTaskChat(page: Page, taskId: string): Promise<SessionP
 }
 
 /**
- * Multiple TipTap instances can be mounted in dockview and mobile layouts;
- * scope to the first visible one.
+ * The prompt composer of the active chat panel. Dockview and mobile layouts keep
+ * background panels mounted, and a chat transcript can host read-only
+ * `[contenteditable="false"]` ProseMirror decorations (mention chips, code-block
+ * views), so a bare `.tiptap.ProseMirror` match could measure the wrong element.
+ * Scope through `activeChat()` and require an editable host — the same locator
+ * `SessionPage.sendMessage()` uses.
  */
-export function composerEditor(page: Page) {
-  return page.locator(".tiptap.ProseMirror:visible").first();
+export function composerEditor(session: SessionPage) {
+  return session.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
 }

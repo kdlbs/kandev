@@ -15,7 +15,7 @@ test.describe("Mobile chat input font size", () => {
     prCapture,
   }) => {
     const task = await createReadyTask(apiClient, seedData, "Mobile Chat Input Font Size");
-    await openTaskChat(testPage, task.id);
+    const session = await openTaskChat(testPage, task.id);
 
     // Guard: the 16px rule is gated on `@media (any-pointer: coarse)`. Assert
     // the emulated device really exposes a coarse pointer so a fixture change
@@ -23,7 +23,7 @@ test.describe("Mobile chat input font size", () => {
     const coarse = await testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches);
     expect(coarse).toBe(true);
 
-    const editor = composerEditor(testPage);
+    const editor = composerEditor(session);
     await expect(editor).toBeVisible();
     await editor.tap();
 

@@ -18,9 +18,9 @@ test.describe("Chat input font size", () => {
     prCapture,
   }) => {
     const task = await createReadyTask(apiClient, seedData, "Chat Input Font Size");
-    await openTaskChat(testPage, task.id);
+    const session = await openTaskChat(testPage, task.id);
 
-    const editor = composerEditor(testPage);
+    const editor = composerEditor(session);
     await expect(editor).toBeVisible();
 
     // Desktop Chrome exposes a fine pointer, so the globals.css 16px
