@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, memo } from "react";
-import ReactMarkdown from "react-markdown";
 import { IconBrain } from "@tabler/icons-react";
 import type { Message } from "@/lib/types/http";
 import type { RichMetadata } from "@/components/task/chat/types";
-import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { ExpandableRow } from "./expandable-row";
 import { useTranslation } from "react-i18next";
 
@@ -29,7 +28,15 @@ function stripMarkdown(text: string): string {
   );
 }
 
-export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comment: Message }) {
+export const ThinkingMessage = memo(function ThinkingMessage({
+  comment,
+  worktreePath,
+  onOpenFile,
+}: {
+  comment: Message;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
   const { t } = useTranslation();
   const [isExpanded, setIsExpanded] = useState(false);
   const metadata = comment.metadata as RichMetadata | undefined;
@@ -60,9 +67,7 @@ export const ThinkingMessage = memo(function ThinkingMessage({ comment }: { comm
       {!isShort && (
         <div className="pl-4 border-l-2 border-border/30">
           <div className="markdown-body max-w-none text-xs text-foreground/70 [&>*]:my-1 [&>p]:my-1 [&>ul]:my-1 [&>ol]:my-1 [&_strong]:text-foreground/80">
-            <ReactMarkdown remarkPlugins={remarkPlugins} components={markdownComponents}>
-              {text}
-            </ReactMarkdown>
+            <MemoizedMarkdown content={text} worktreePath={worktreePath} onOpenFile={onOpenFile} />
           </div>
         </div>
       )}
