@@ -1,5 +1,6 @@
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
 import type { TaskNoteDeletedEventPayload, TaskNoteEventPayload } from "./task-note-events";
+import type { RunEventAppendedPayload } from "./run-events";
 
 export type BackendMessageType = keyof BackendMessageMap;
 
@@ -657,17 +658,8 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "run.event.appended": BackendMessage<"run.event.appended", RunEventAppendedPayload>;
   };
 
-// The WS gateway forwards run events verbatim: id at top level, row under `event`.
-export type RunEventAppendedPayload = {
-  run_id: string;
-  event: {
-    seq: number;
-    event_type: string;
-    level: string;
-    payload: string;
-    created_at: string;
-  };
-};
+// Run event types (extracted to reduce file size)
+export * from "./run-events";
 
 // Workspace file types (extracted to reduce file size)
 export * from "./workspace-files";
