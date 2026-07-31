@@ -223,8 +223,8 @@ describe("applyChangesPanelAutoFocusState fallback session keys", () => {
   });
 });
 
-describe("applyChangesPanelAutoFocusState saved layouts", () => {
-  it("keeps a returning environment's saved active panel over pending changes", () => {
+describe("applyChangesPanelAutoFocusState returning environments", () => {
+  it("activates pending changes when returning from another environment", () => {
     const previousMarkers = {
       envB: { count: 1, fingerprint: "b1" },
     };
@@ -240,7 +240,6 @@ describe("applyChangesPanelAutoFocusState saved layouts", () => {
       environmentIdBySessionId: {},
       previousMarkers,
       pendingEnvKeys,
-      hasSavedLayout: true,
       isRestoringLayout: false,
       activate: () => {
         activateCalls += 1;
@@ -248,7 +247,7 @@ describe("applyChangesPanelAutoFocusState saved layouts", () => {
       },
     });
 
-    expect(activateCalls).toBe(0);
+    expect(activateCalls).toBe(1);
     expect(pendingEnvKeys.size).toBe(0);
   });
 });
