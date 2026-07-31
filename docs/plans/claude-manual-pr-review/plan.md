@@ -34,7 +34,8 @@ boundary.
 ## Non-goals
 
 - Change the open-only automatic review policy or the fork allowlist policy.
-- Change Claude action pinning, OAuth/OIDC, action permissions, or prompts.
+- Change Claude action pinning, OAuth/OIDC, job permissions, or existing generic
+  Claude prompts. The manual review path adds a dedicated constrained prompt.
 - Run untrusted pull-request code as part of the checkout; the workflow still
   only provides Claude's existing read-oriented review context.
 
@@ -58,9 +59,10 @@ ADR-2026-07-31-isolate-manual-pr-review-content.
 ### Regression contract
 
 Add raw-workflow contract assertions before changing the workflow. The tests
-must prove that a PR issue-comment checkout uses the issue's PR number and
-that non-PR issue mentions still use the default checkout. Existing tests
-continue to pin the open-only automatic review and allowlist behavior.
+must prove that the constrained `gh pr diff` and `gh pr view` path targets the
+issue's PR number, no PR content is checked out, and other mentions still use
+the default checkout. Existing tests continue to pin the open-only automatic
+review and allowlist behavior.
 
 ## Tasks
 
@@ -72,9 +74,15 @@ continue to pin the open-only automatic review and allowlist behavior.
 rtk python3 .github/scripts/claude-code-review-workflow-contract_test.py
 rtk python3 .github/scripts/lint-action-pinning_test.py
 rtk python3 .github/scripts/lint-action-pinning.py
-zizmor .github/workflows/claude.yml
+rtk zizmor .github/workflows/claude.yml
 git diff --check
 ```
+
+Both remediation commits ran the active pre-commit and commit-msg hooks:
+Harness file lint and Conventional Commits validation passed; Go, frontend, and
+format hooks skipped because no applicable files changed. Public documentation
+under `docs/public/**` is unaffected because this is an internal CI workflow
+repair.
 
 ## Risks and rollback
 

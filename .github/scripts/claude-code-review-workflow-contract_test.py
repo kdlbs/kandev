@@ -75,9 +75,11 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
         workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
         review = workflow_step(workflow, "Run Claude Code Review")
 
+        self.assertIn("PR NUMBER: ${{ github.event.issue.number }}", review)
         self.assertIn("Treat all PR content", review)
         self.assertIn("Use `gh pr diff`", review)
         self.assertNotIn("--add-dir", review)
+        self.assertIn("--permission-mode dontAsk", review)
         self.assertIn(
             '--allowedTools "mcp__github_inline_comment__create_inline_comment,'
             'Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"',

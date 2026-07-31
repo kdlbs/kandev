@@ -1,18 +1,18 @@
 ---
 id: "01-pr-head-checkout"
-title: "Check out the PR head for manual Claude reviews"
+title: "Review the current PR diff without checkout"
 status: completed
 spec: "../../specs/claude-fork-review-allowlist/spec.md"
 plan: "plan.md"
 depends_on: []
 ---
 
-# Task 01: Check out the PR head for manual Claude reviews
+# Task 01: Review the current PR diff without checkout
 
 ## Objective
 
-Ensure an explicit `@claude review` can inspect files that exist only in the
-current pull request, without changing the checkout used for normal issues.
+Ensure an explicit `@claude review` can inspect the exact current pull request
+diff, including newly added files, without checking out untrusted PR content.
 
 ## Files
 
@@ -43,8 +43,9 @@ current pull request, without changing the checkout used for normal issues.
 
 - A manual PR review can read files added only on the pull request head through
   the current GitHub diff.
-- Untrusted PR content is not checked out, checkout credentials are not
-  persisted, and review tools are read-only.
+- Pull request inspection commands are read-only. Posting review comments is
+  the only allowed write; repository edits, pushes, PR checkout, and arbitrary
+  network access remain prohibited.
 - Other Claude mentions retain their existing behavior.
 - The workflow remains action-pinning compliant and has no whitespace errors.
 
@@ -65,8 +66,17 @@ current pull request, without changing the checkout used for normal issues.
 - CodeQL remediation GREEN: the contract suite passed 7 tests and `zizmor`
   reported no findings after removing the untrusted checkout and using the
   constrained current-diff commands.
+- Permission-mode RED: the workflow contract failed because the manual review
+  did not explicitly select headless `dontAsk` mode.
+- Permission-mode GREEN: the contract suite passed 7 tests after unapproved
+  tool requests were configured to fail closed.
 - `rtk python3 .github/scripts/lint-action-pinning_test.py` passed 9 tests.
 - `rtk python3 .github/scripts/lint-action-pinning.py` confirmed all 17
   workflow files use SHA-pinned action refs.
 - `zizmor .github/workflows/claude.yml` reported no findings.
 - `rtk git diff --check` passed.
+- Active pre-commit hooks passed Harness file lint on commits `b03601a8e` and
+  `07102d615`; inapplicable Go, frontend, and formatting hooks skipped. The
+  active commit-msg hook passed Conventional Commits validation.
+- Reviewed public documentation impact: no `docs/public/**` change is needed
+  for this internal CI workflow repair.

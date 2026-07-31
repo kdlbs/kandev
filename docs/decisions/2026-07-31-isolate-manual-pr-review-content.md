@@ -22,8 +22,9 @@ request through constrained `gh pr diff` and `gh pr view` commands.
 
 The manual review uses an explicit prompt so the Claude action selects its
 automation mode rather than its write-capable mention mode. Its tool policy is
-review-only: it may read pull request context and post findings, but it may not
-edit files, mutate Git history, push, or fetch arbitrary network content.
+review-only: it may read pull request context and post review comments, but it
+may not edit repository files, mutate Git history, push, or fetch arbitrary
+network content. Headless permission requests fail closed.
 Other `@claude` issue and comment requests keep the trusted default-branch
 workspace and the existing generic behavior.
 
@@ -33,7 +34,8 @@ workspace and the existing generic behavior.
   pull request content in the privileged runner workspace.
 - The checkout-provided GitHub token is not retained in the trusted worktree.
   The Claude action still manages its own short-lived authentication, while
-  its review process cannot use mutation or arbitrary network tools.
+  its review process can write review comments but cannot use repository
+  mutation or arbitrary network tools.
 - Reviewing files beyond the pull request diff requires adding another
   explicitly allowlisted read-only GitHub command.
 - Manual review mode is intentionally unsuitable for implementing requested
