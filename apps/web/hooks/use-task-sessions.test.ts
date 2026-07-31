@@ -127,6 +127,44 @@ describe("useTaskSessions", () => {
     expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, liveSessions);
     expect(consoleError).toHaveBeenCalledWith("Failed to load task sessions:", error);
   });
+
+  it("preserves and rehydrates a live session added during an older request", async () => {
+    const existing = session("existing");
+    const livePartial = session("live-upsert");
+    const liveHydrated = { ...livePartial, name: "Hydrated live session" };
+    const firstResponse = deferred<{ sessions: TaskSession[] }>();
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [existing];
+    mockState.setTaskSessionsLoading.mockImplementation((id: string, loading: boolean) => {
+      mockState.taskSessionsByTask.loadingByTaskId[id] = loading;
+    });
+    mockState.setTaskSessionsForTask.mockImplementation((id: string, sessions: TaskSession[]) => {
+      mockState.taskSessionsByTask.itemsByTaskId[id] = sessions;
+      mockState.taskSessionsByTask.loadedByTaskId[id] = true;
+    });
+    apiMock.listTaskSessions
+      .mockReturnValueOnce(firstResponse.promise)
+      .mockResolvedValueOnce({ sessions: [existing, liveHydrated] });
+
+    const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(1));
+
+    mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [existing, livePartial];
+    firstResponse.resolve({ sessions: [existing] });
+
+    await waitFor(() =>
+      expect(mockState.setTaskSessionsForTask).toHaveBeenCalledWith(TASK_ID, [
+        existing,
+        livePartial,
+      ]),
+    );
+    rerender();
+
+    await waitFor(() => expect(apiMock.listTaskSessions).toHaveBeenCalledTimes(2));
+    expect(mockState.setTaskSessionsForTask).toHaveBeenLastCalledWith(TASK_ID, [
+      existing,
+      liveHydrated,
+    ]);
+  });
 });
 
 describe("useTaskSessions refreshes", () => {

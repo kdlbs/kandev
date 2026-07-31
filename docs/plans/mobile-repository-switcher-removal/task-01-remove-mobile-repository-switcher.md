@@ -31,6 +31,8 @@ spec: "../../specs/ui/mobile-task-navigation.md"
 10. **REVIEW 3 GREEN:** invalidate the loaded list only for unknown live sessions so `useTaskSessions` hydrates their full rows, then verify known-session events do not trigger reloads.
 11. **REVIEW 4 RED:** fail the API hydration after a live partial upsert and confirm the non-forced error path clears all session rows.
 12. **REVIEW 4 GREEN:** preserve the current store snapshot on non-forced hydration failure so live rows remain visible and later refresh triggers can recover.
+13. **REVIEW 5 RED:** resolve an older in-flight list request after a live session arrives and confirm its response drops the new row without another fetch.
+14. **REVIEW 5 GREEN:** preserve sessions added during a list request and queue one forced follow-up load for authoritative hydration.
 
 ## Verification
 
@@ -92,4 +94,5 @@ Report RED and GREEN evidence, files deleted/changed, exact command results, rem
 - **Recorded commands:** `cd apps/backend && go test ./internal/office/testharness` passed; `cd apps/web && pnpm lint` passed.
 - **Review remediation 3:** a partial live-session upsert now marks an already-loaded per-task list stale so the existing hook fetches authoritative repository fields; events for known sessions keep the list loaded. Focused slice/hook/picker tests (`39 passed`), typecheck, full lint, production build, and a page-live secondary-session mobile E2E (`1 passed`) passed.
 - **Review remediation 4:** failed stale-list hydration now re-commits the current live store rows instead of replacing them with `[]`; the list remains available and avoids a retry loop until reconnect or foreground refresh. Focused slice/hook/picker tests (`40 passed`), typecheck, full lint, production build, and the live-seeded mobile E2E (`1 passed`) passed.
+- **Review remediation 5:** an older successful response now merges live sessions introduced after its request began, then schedules one forced list reload so their complete repository data replaces the partial row. Request reconciliation was extracted to keep the hook within lint limits; focused slice/hook/picker tests (`41 passed`), typecheck, full lint, production build, and the live-seeded mobile E2E (`1 passed`) passed.
 - **Remaining risks:** none known within scoped phone task workbench; repository selection elsewhere is unchanged.

@@ -1,10 +1,45 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { listTaskSessions } from "@/lib/api";
+import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 
 const EMPTY_SESSIONS: TaskSession[] = [];
+
+function storedTaskSessions(getStoreState: () => AppState, taskId: string) {
+  return getStoreState().taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS;
+}
+
+async function hydrateTaskSessions({
+  taskId,
+  force,
+  getStoreState,
+  setTaskSessionsForTask,
+}: {
+  taskId: string;
+  force: boolean;
+  getStoreState: () => AppState;
+  setTaskSessionsForTask: AppState["setTaskSessionsForTask"];
+}): Promise<boolean> {
+  const sessionIdsAtRequestStart = new Set(
+    storedTaskSessions(getStoreState, taskId).map((session) => session.id),
+  );
+  try {
+    const response = await listTaskSessions(taskId, { cache: "no-store" });
+    const fetchedSessions = response.sessions ?? [];
+    const fetchedSessionIds = new Set(fetchedSessions.map((session) => session.id));
+    const sessionsAddedDuringLoad = storedTaskSessions(getStoreState, taskId).filter(
+      (session) => !sessionIdsAtRequestStart.has(session.id) && !fetchedSessionIds.has(session.id),
+    );
+    setTaskSessionsForTask(taskId, [...fetchedSessions, ...sessionsAddedDuringLoad]);
+    return sessionsAddedDuringLoad.length > 0;
+  } catch (error) {
+    console.error("Failed to load task sessions:", error);
+    if (!force) setTaskSessionsForTask(taskId, storedTaskSessions(getStoreState, taskId));
+    return false;
+  }
+}
 
 export function useTaskSessions(taskId: string | null) {
   const getStoreState = useAppStoreApi().getState;
@@ -38,16 +73,13 @@ export function useTaskSessions(taskId: string | null) {
       if (!force && isLoaded) return;
       setTaskSessionsLoading(taskId, true);
       try {
-        const response = await listTaskSessions(taskId, { cache: "no-store" });
-        const sessions = response.sessions ?? [];
-        setTaskSessionsForTask(taskId, sessions);
-      } catch (error) {
-        console.error("Failed to load task sessions:", error);
-        if (!force) {
-          const currentSessions =
-            getStoreState().taskSessionsByTask.itemsByTaskId[taskId] ?? EMPTY_SESSIONS;
-          setTaskSessionsForTask(taskId, currentSessions);
-        }
+        const needsFollowUp = await hydrateTaskSessions({
+          taskId,
+          force,
+          getStoreState,
+          setTaskSessionsForTask,
+        });
+        if (needsFollowUp) pendingForcedReloadRef.current = true;
       } finally {
         setTaskSessionsLoading(taskId, false);
         if (force && !pendingForcedReloadRef.current) {
