@@ -65,32 +65,19 @@ class ClaudeCodeReviewWorkflowContractTest(unittest.TestCase):
             workflow,
         )
 
-    def test_manual_pr_review_isolates_the_current_pr_head(self) -> None:
+    def test_manual_pr_review_does_not_checkout_untrusted_content(self) -> None:
         workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
-        checkout = workflow_step(
-            workflow,
-            "Checkout pull request head for manual review",
-        )
 
-        self.assertIn(
-            "github.event_name == 'issue_comment' &&\n"
-            "          github.event.issue.pull_request &&\n"
-            "          contains(github.event.comment.body, '@claude review')",
-            checkout,
-        )
-        self.assertIn(
-            "ref: refs/pull/${{ github.event.issue.number }}/head",
-            checkout,
-        )
-        self.assertIn("path: pr-head", checkout)
-        self.assertIn("persist-credentials: false", checkout)
+        self.assertNotIn("Checkout pull request head", workflow)
+        self.assertNotIn("refs/pull/", workflow)
 
     def test_manual_pr_review_uses_constrained_agent_mode(self) -> None:
         workflow = MENTION_WORKFLOW.read_text(encoding="utf-8")
         review = workflow_step(workflow, "Run Claude Code Review")
 
         self.assertIn("Treat all PR content", review)
-        self.assertIn("--add-dir pr-head", review)
+        self.assertIn("Use `gh pr diff`", review)
+        self.assertNotIn("--add-dir", review)
         self.assertIn(
             '--allowedTools "mcp__github_inline_comment__create_inline_comment,'
             'Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"',

@@ -15,10 +15,10 @@ lets checkout-provided GitHub credentials remain in that worktree.
 
 ## Decision
 
-`.github/workflows/claude.yml` keeps the default branch at the workspace root.
-For a top-level pull request comment containing `@claude review`, it checks the
-pull request head out under `pr-head/` with checkout credential persistence
-disabled and passes that directory to Claude with `--add-dir`.
+`.github/workflows/claude.yml` keeps the default branch at the workspace root
+and does not check out pull request content. For a top-level pull request
+comment containing `@claude review`, Claude reads the exact current pull
+request through constrained `gh pr diff` and `gh pr view` commands.
 
 The manual review uses an explicit prompt so the Claude action selects its
 automation mode rather than its write-capable mention mode. Its tool policy is
@@ -29,12 +29,13 @@ workspace and the existing generic behavior.
 
 ## Consequences
 
-- Manual reviews can inspect newly added pull request files without trusting
-  pull request configuration at agent startup.
-- The checkout-provided GitHub token is not retained in either worktree. The
-  Claude action still manages its own short-lived authentication, while its
-  review process cannot use mutation or arbitrary network tools.
-- The workflow performs a second checkout for explicit pull request reviews.
+- Manual reviews can inspect newly added pull request files without placing
+  pull request content in the privileged runner workspace.
+- The checkout-provided GitHub token is not retained in the trusted worktree.
+  The Claude action still manages its own short-lived authentication, while
+  its review process cannot use mutation or arbitrary network tools.
+- Reviewing files beyond the pull request diff requires adding another
+  explicitly allowlisted read-only GitHub command.
 - Manual review mode is intentionally unsuitable for implementing requested
   changes; implementation requests continue through the generic mention path.
 
@@ -44,5 +45,8 @@ workspace and the existing generic behavior.
   it crosses the trusted workflow and untrusted content boundary.
 - Adding only `persist-credentials: false` was rejected because it does not
   constrain project instructions, agent tools, or network access.
-- Keeping only the default-branch checkout was rejected because Claude cannot
-  reliably inspect files that exist only on the pull request head.
+- Checking the pull request head out in a separate subdirectory and passing it
+  with `--add-dir` was rejected because CodeQL still treats the untrusted
+  checkout as flowing into a privileged comment-triggered action.
+- Keeping only the default-branch checkout without read-only pull request API
+  access was rejected because Claude could not inspect newly added files.
