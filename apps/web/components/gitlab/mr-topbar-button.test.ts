@@ -89,12 +89,12 @@ describe("mrTriggerClass", () => {
       mr_iid: 22,
     } as TaskMR;
 
-    openDesktopMRReview(addMRPanel, "session-1", mr, schedule);
+    openDesktopMRReview(addMRPanel, mr, schedule);
     expect(addMRPanel).toHaveBeenCalledTimes(1);
     scheduled.shift()?.(0);
     expect(addMRPanel).toHaveBeenCalledTimes(1);
     scheduled.shift()?.(0);
-    expect(addMRPanel).toHaveBeenLastCalledWith("https://gitlab.example|group/b|22", "session-1");
+    expect(addMRPanel).toHaveBeenLastCalledWith("https://gitlab.example|group/b|22");
     expect(addMRPanel).toHaveBeenCalledTimes(2);
   });
 });

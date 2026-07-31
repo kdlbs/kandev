@@ -7,6 +7,13 @@ describe("layout presets", () => {
     expect(layout.columns.map((c) => c.id)).toEqual(["center", "right"]);
   });
 
+  it("places PR Details after Files and Changes in the top-right group", () => {
+    const layout = defaultLayout();
+    const rightTop = layout.columns.find((column) => column.id === "right")?.groups[0];
+
+    expect(rightTop?.panels.map((panel) => panel.id)).toEqual(["files", "changes", "pr-detail"]);
+  });
+
   it("compact preset is a single center column with everything tabbed", () => {
     const layout = compactLayout();
     expect(layout.columns.map((c) => c.id)).toEqual(["center"]);
@@ -14,6 +21,7 @@ describe("layout presets", () => {
       "chat",
       "files",
       "changes",
+      "pr-detail",
       "terminal-default",
     ]);
   });

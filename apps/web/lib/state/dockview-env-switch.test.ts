@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import {
-  performEnvSwitch,
-  savedRightColumnWidth,
-  type EnvSwitchParams,
-} from "./dockview-env-switch";
-import type { SerializedDockview } from "dockview-react";
+import { performEnvSwitch, type EnvSwitchParams } from "./dockview-env-switch";
 
 const { CANONICAL_CENTER_GROUP_ID, RIGHT_TOP_GROUP_ID, RIGHT_BOTTOM_GROUP_ID } = vi.hoisted(() => ({
   CANONICAL_CENTER_GROUP_ID: "group-center",
@@ -596,6 +591,37 @@ describe("performEnvSwitch missing Agent restoration", () => {
     );
     expect(setActive).not.toHaveBeenCalled();
   });
+
+  it("does not use a configured PR Details group as the Agent restoration anchor", () => {
+    const savedLayout = makeHealthyLayoutWith({ "pr-detail": { contentComponent: "pr-detail" } });
+    vi.mocked(getEnvLayout).mockReturnValueOnce(savedLayout).mockReturnValueOnce(savedLayout);
+    vi.mocked(savedLayoutMatchesLive).mockReturnValueOnce(false);
+
+    const fallbackGroup = { id: "fallback-center", panels: [] };
+    const reviewGroup = { id: "custom-pr-details-group", panels: [] };
+    const reviewPanel = { id: "pr-detail", api: { component: "pr-detail" }, group: reviewGroup };
+    const addPanel = vi.fn(() => ({
+      id: NEW_SESSION_PANEL_ID,
+      api: { component: "chat", setActive: vi.fn() },
+      group: fallbackGroup,
+    }));
+    const api = {
+      ...makeMockApi(),
+      panels: [reviewPanel],
+      groups: [fallbackGroup, reviewGroup],
+      getPanel: vi.fn((id: string) => (id === "pr-detail" ? reviewPanel : null)),
+      addPanel,
+    } as unknown as EnvSwitchParams["api"];
+
+    performEnvSwitch(makeParams({ api }));
+
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: NEW_SESSION_PANEL_ID,
+        position: expect.objectContaining({ referenceGroup: fallbackGroup.id }),
+      }),
+    );
+  });
 });
 
 describe("performEnvSwitch fast-path active view restoration", () => {
@@ -643,61 +669,5 @@ describe("performEnvSwitch fast-path active view restoration", () => {
     const lastRightCall = setActiveRight.mock.invocationCallOrder.at(-1) ?? 0;
     const lastCenterCall = setActiveCenter.mock.invocationCallOrder.at(-1) ?? 0;
     expect(lastRightCall).toBeGreaterThan(lastCenterCall);
-  });
-});
-
-describe("savedRightColumnWidth", () => {
-  function makeSaved(children: Array<{ id: string; size: number }>): SerializedDockview {
-    return {
-      grid: {
-        root: {
-          type: "branch",
-          data: children.map((c) => ({
-            type: "leaf",
-            data: { id: c.id, views: [] },
-            size: c.size,
-          })),
-        },
-        height: 600,
-        width: 1600,
-        orientation: "HORIZONTAL",
-      },
-      panels: {},
-      activeGroup: undefined,
-    } as unknown as SerializedDockview;
-  }
-
-  it("returns the saved right size for a 3-column layout (sidebar+center+right)", () => {
-    const saved = makeSaved([
-      { id: "group-sidebar", size: 300 },
-      { id: CANONICAL_CENTER_GROUP_ID, size: 1000 },
-      { id: "group-right-top", size: 300 },
-    ]);
-    expect(savedRightColumnWidth(saved)).toBe(300);
-  });
-
-  it("returns the saved right size for a 2-column layout with sidebar hidden", () => {
-    // Regression: pre-fix this returned undefined (column-count gate), which
-    // caused the right column to fall back to ~450 default on env switch
-    // instead of restoring the user's narrow width.
-    const saved = makeSaved([
-      { id: CANONICAL_CENTER_GROUP_ID, size: 1380 },
-      { id: "group-right-top", size: 220 },
-    ]);
-    expect(savedRightColumnWidth(saved)).toBe(220);
-  });
-
-  it("returns undefined for a 2-column layout where the last child is not a right column", () => {
-    // 2-column layouts can also be sidebar+center (right hidden); we must NOT
-    // mistake the center for the right column.
-    const saved = makeSaved([
-      { id: "group-sidebar", size: 300 },
-      { id: CANONICAL_CENTER_GROUP_ID, size: 1300 },
-    ]);
-    expect(savedRightColumnWidth(saved)).toBeUndefined();
-  });
-
-  it("returns undefined for null input", () => {
-    expect(savedRightColumnWidth(null)).toBeUndefined();
   });
 });

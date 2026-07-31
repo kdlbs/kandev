@@ -90,6 +90,12 @@ describe("validateReusableLayout", () => {
     expect(result).toMatchObject({ valid: true, issues: [] });
   });
 
+  it("accepts canonical PR Details as reusable layout content", () => {
+    const result = validateReusableLayout(reusableLayout(["chat", "pr-detail"]));
+
+    expect(result).toMatchObject({ valid: true, issues: [] });
+  });
+
   it("normalizes a saved session Agent without changing the input", () => {
     const input = reusableLayout();
     input.columns[0].groups[0].panels[0] = {
@@ -110,7 +116,9 @@ describe("validateReusableLayout", () => {
     });
     expect(input).toEqual(snapshot);
   });
+});
 
+describe("validateReusableLayout failures", () => {
   it.each([
     {
       name: "a missing Agent",
@@ -124,7 +132,27 @@ describe("validateReusableLayout", () => {
     },
     {
       name: "an unsupported panel",
-      layout: reusableLayout(["chat", "pr-detail"]),
+      layout: {
+        columns: [
+          {
+            id: CENTER_COLUMN_ID,
+            groups: [
+              {
+                id: "group-center",
+                panels: [
+                  panel("chat"),
+                  {
+                    id: "pr-detail|owner/repository/123",
+                    component: "pr-detail",
+                    title: "Pull Request",
+                  },
+                ],
+                activePanel: "chat",
+              },
+            ],
+          },
+        ],
+      },
       code: "unsupported-panel",
     },
     {

@@ -13,7 +13,7 @@ export function defaultLayout(): LayoutState {
         pinned: true,
         width: 350,
         groups: [
-          { id: RIGHT_TOP_GROUP, panels: [panel("files"), panel("changes")] },
+          { id: RIGHT_TOP_GROUP, panels: [panel("files"), panel("changes"), panel("pr-detail")] },
           { id: RIGHT_BOTTOM_GROUP, panels: [panel("terminal-default")] },
         ],
       },
@@ -29,7 +29,13 @@ export function compactLayout(): LayoutState {
         groups: [
           {
             id: CENTER_GROUP,
-            panels: [panel("chat"), panel("files"), panel("changes"), panel("terminal-default")],
+            panels: [
+              panel("chat"),
+              panel("files"),
+              panel("changes"),
+              panel("pr-detail"),
+              panel("terminal-default"),
+            ],
           },
         ],
       },

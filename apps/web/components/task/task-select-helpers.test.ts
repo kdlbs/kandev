@@ -5,6 +5,13 @@ import {
   selectTaskWithLayout,
 } from "./task-select-helpers";
 
+const { dockviewState } = vi.hoisted(() => ({
+  dockviewState: {
+    api: null as unknown,
+    buildDefaultLayout: vi.fn(),
+  },
+}));
+
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: vi.fn(),
 }));
@@ -14,10 +21,7 @@ vi.mock("@/lib/services/session-launch-helpers", () => ({
 vi.mock("@/lib/state/dockview-store", () => ({
   performLayoutSwitch: vi.fn(),
   releaseLayoutToDefault: vi.fn(),
-  useDockviewStore: { getState: () => ({ api: null, buildDefaultLayout: vi.fn() }) },
-}));
-vi.mock("@/lib/state/layout-manager", () => ({
-  INTENT_PR_REVIEW: "pr-review",
+  useDockviewStore: { getState: () => dockviewState },
 }));
 vi.mock("@/lib/links", () => ({
   replaceTaskUrl: vi.fn(),
@@ -33,10 +37,12 @@ import type { TaskSession } from "@/lib/types/http";
 const NEW_TASK_ID = "task-new";
 const OLD_SESSION_ID = "old-session";
 
-function makeStore(activeSessionId: string | null): StoreApi<AppState> {
+function makeStore(activeSessionId: string | null, hasLinkedPR = false): StoreApi<AppState> {
   const state = {
     tasks: { activeSessionId },
-    taskPRs: { byTaskId: {} as Record<string, unknown[]> },
+    taskPRs: {
+      byTaskId: hasLinkedPR ? { [NEW_TASK_ID]: [{}] } : ({} as Record<string, unknown[]>),
+    },
     environmentIdBySessionId: activeSessionId ? { [activeSessionId]: "env-old" } : {},
   };
   return {
@@ -186,6 +192,7 @@ function makeDeferredSessionLoader() {
 describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    dockviewState.api = null;
   });
 
   it("releases the outgoing env's panels before awaiting launchSession", async () => {
@@ -256,6 +263,26 @@ describe("prepareAndSwitchTask — outgoing-env panel cleanup", () => {
     expect(releaseLayoutToDefault).toHaveBeenCalledTimes(1);
     expect(switchToSession).not.toHaveBeenCalled();
     expect(setPreparingTaskId).toHaveBeenLastCalledWith(null);
+  });
+
+  it("does not rebuild a user's layout when the task has a linked PR", async () => {
+    vi.mocked(launchSession).mockResolvedValue({
+      success: true,
+      task_id: NEW_TASK_ID,
+      session_id: "new-session",
+      state: "ready",
+    });
+    dockviewState.api = {};
+
+    const result = await prepareAndSwitchTask(
+      NEW_TASK_ID,
+      makeStore(OLD_SESSION_ID, true),
+      vi.fn(),
+      vi.fn(),
+    );
+
+    expect(result).toBe(true);
+    expect(dockviewState.buildDefaultLayout).not.toHaveBeenCalled();
   });
 });
 
