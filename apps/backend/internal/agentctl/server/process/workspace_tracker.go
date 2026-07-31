@@ -259,10 +259,10 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		// Start() then arms pollModeGraceTimer: the gateway only pushes a mode
 		// for workspaces a client focuses or subscribes to, and it deliberately
 		// skips the paused push for a workspace it has never pushed to
-		// (workspacePollAggregator.plan). Without the timer, every tracker the
-		// gateway never speaks about — including all of manager_rescan.go's and
-		// GetWorkspaceTrackerFor's, which are assigned no mode at all — scanned
-		// at 2s/3s for the life of the process.
+		// (workspacePollAggregator.plan). Without the timer, a tracker the
+		// gateway never speaks about scans at 2s/3s for the life of the
+		// process. Trackers created after launch inherit the workspace's
+		// current mode instead — see Manager.configurePollMode.
 		pollMode:                PollModeFast,
 		pollModeGrace:           pollModeGracePeriod,
 		monitorModeChanged:      make(chan struct{}, 1),

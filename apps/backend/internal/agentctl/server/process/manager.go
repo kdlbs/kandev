@@ -126,13 +126,14 @@ type Manager struct {
 	// per-field repoTrackersMu still allows concurrent subscribe/unsubscribe
 	// readers while a rescan is in flight.
 	rescanMu sync.Mutex
-	// lastPollMode is the most recent mode the gateway pushed for this
-	// workspace, empty until it pushes at all. Trackers created after that
-	// point — rescan adding a repository to a workspace that is already
-	// focused, or a lazily-created subpath tracker — inherit it, because no
-	// further push arrives unless the session's own mode changes.
-	lastPollMode   PollMode
-	lastPollModeMu sync.RWMutex
+	// workspacePollMode is the most recent mode the gateway pushed for this
+	// workspace. Trackers created after that point — rescan, rebind or
+	// reconcile adding a repository to a workspace that is already focused —
+	// inherit it, because no further push arrives unless the session's own
+	// mode changes.
+	workspacePollMode    PollMode
+	workspacePollModeSet bool
+	workspacePollModeMu  sync.RWMutex
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
@@ -614,7 +615,6 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 		return t, nil
 	}
 	t := NewWorkspaceTracker(full, m.logger)
-	m.inheritPollMode(t)
 	t.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), cleaned))
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
@@ -745,20 +745,20 @@ func (m *Manager) RepoSubpaths() []string {
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
 	t := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
-	m.inheritPollMode(t)
+	m.configurePollMode(t)
 	return t
 }
 
-// inheritPollMode applies the last mode the gateway pushed, if it ever pushed
-// one. SetPollMode also disarms the tracker's grace demotion, which is correct:
-// the gateway has spoken for this workspace, so the fallback must not override
-// it. With no prior push the tracker keeps its own default and the grace timer
-// stays in charge.
-func (m *Manager) inheritPollMode(t *WorkspaceTracker) {
-	m.lastPollModeMu.RLock()
-	mode := m.lastPollMode
-	m.lastPollModeMu.RUnlock()
-	if mode == "" {
+// configurePollMode applies the last mode the gateway pushed, if it ever
+// pushed one. SetPollMode also disarms the tracker”s grace demotion, which is
+// correct: the gateway has spoken for this workspace, so the fallback must not
+// override it. With no prior push the tracker keeps its own default and the
+// grace timer stays in charge.
+func (m *Manager) configurePollMode(t *WorkspaceTracker) {
+	m.workspacePollModeMu.RLock()
+	mode, ok := m.workspacePollMode, m.workspacePollModeSet
+	m.workspacePollModeMu.RUnlock()
+	if !ok {
 		return
 	}
 	t.SetPollMode(mode)
@@ -772,9 +772,10 @@ func (m *Manager) inheritPollMode(t *WorkspaceTracker) {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
-	m.lastPollModeMu.Lock()
-	m.lastPollMode = mode
-	m.lastPollModeMu.Unlock()
+	m.workspacePollModeMu.Lock()
+	m.workspacePollMode = mode
+	m.workspacePollModeSet = true
+	m.workspacePollModeMu.Unlock()
 
 	root, trackers := m.snapshotTrackers()
 	root.SetPollMode(mode)

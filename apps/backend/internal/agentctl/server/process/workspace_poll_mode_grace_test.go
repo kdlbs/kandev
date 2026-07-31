@@ -7,9 +7,9 @@ import (
 )
 
 // waitForPollMode polls GetPollMode until it matches want or the deadline
-// passes. Used instead of a fixed sleep because the grace demotion fires on a
-// timer goroutine, and CI hosts under load can delay it well past its nominal
-// deadline.
+// passes. Used only for the demotion assertions, where the transition is
+// inherently timer-driven; the "must NOT demote" cases assert on timer state
+// instead so they need no sleeping at all.
 func waitForPollMode(t *testing.T, wt *WorkspaceTracker, want PollMode, timeout time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
@@ -22,22 +22,45 @@ func waitForPollMode(t *testing.T, wt *WorkspaceTracker, want PollMode, timeout 
 	t.Fatalf("poll mode = %v after %v, want %v", wt.GetPollMode(), timeout, want)
 }
 
+// assertGraceDisarmed reports whether the fallback can still fire. Asserting on
+// the timer directly is deterministic: once a push has been recorded and the
+// timer cleared, no amount of elapsed time can demote the tracker, so there is
+// nothing to wait for.
+func assertGraceDisarmed(t *testing.T, wt *WorkspaceTracker) {
+	t.Helper()
+	wt.pollModeMu.RLock()
+	pushed, timer := wt.pollModePushed, wt.pollModeGraceTimer
+	wt.pollModeMu.RUnlock()
+	if !pushed {
+		t.Error("push was not recorded, so the grace demotion can still fire")
+	}
+	if timer != nil {
+		t.Error("grace timer still armed after an explicit push")
+	}
+}
+
+func newGraceTestTracker(t *testing.T) *WorkspaceTracker {
+	t.Helper()
+	isolateTestGitEnv(t)
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	// Long poll intervals keep the loops from doing real git work; these tests
+	// assert on the mode, not on scan output.
+	wt.filePollInterval = 30 * time.Second
+	wt.gitPollInterval = 30 * time.Second
+	wt.pollModeGrace = 50 * time.Millisecond
+	return wt
+}
+
 // TestPollModeGrace_DemotesWhenNoPushArrives covers the leak this mechanism
 // exists to close: the gateway only pushes a mode for workspaces a client
 // focuses or subscribes to, and it deliberately skips the paused push for a
 // workspace it has never pushed to. Without the grace demotion such a tracker
 // stays at the fast 2s/3s cadence for the life of the process.
 func TestPollModeGrace_DemotesWhenNoPushArrives(t *testing.T) {
-	isolateTestGitEnv(t)
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
-	// Long poll intervals keep the loops from doing real git work during the
-	// test; we are asserting on the mode, not on scan output.
-	wt.filePollInterval = 30 * time.Second
-	wt.gitPollInterval = 30 * time.Second
-	wt.pollModeGrace = 50 * time.Millisecond
+	wt := newGraceTestTracker(t)
 
 	if got := wt.GetPollMode(); got != PollModeFast {
 		t.Fatalf("construction mode = %v, want %v", got, PollModeFast)
@@ -52,23 +75,13 @@ func TestPollModeGrace_DemotesWhenNoPushArrives(t *testing.T) {
 // TestPollModeGrace_ExplicitPushDisarmsDemotion verifies the gateway wins: once
 // it has spoken for a workspace, the fallback must never override it.
 func TestPollModeGrace_ExplicitPushDisarmsDemotion(t *testing.T) {
-	isolateTestGitEnv(t)
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
-	wt.filePollInterval = 30 * time.Second
-	wt.gitPollInterval = 30 * time.Second
-	wt.pollModeGrace = 50 * time.Millisecond
-
+	wt := newGraceTestTracker(t)
 	wt.Start(context.Background())
 	defer wt.Stop()
 
-	// A focused workspace: the gateway pushes fast right after the instance
-	// comes up. The tracker must still be fast well after the grace deadline.
 	wt.SetPollMode(PollModeFast)
-	time.Sleep(300 * time.Millisecond)
 
+	assertGraceDisarmed(t, wt)
 	if got := wt.GetPollMode(); got != PollModeFast {
 		t.Errorf("poll mode = %v after an explicit fast push, want %v", got, PollModeFast)
 	}
@@ -80,39 +93,21 @@ func TestPollModeGrace_ExplicitPushDisarmsDemotion(t *testing.T) {
 // exists to detect the absence of. Recording the push must therefore happen
 // before SetPollMode's same-mode early return.
 func TestPollModeGrace_NoOpPushStillDisarms(t *testing.T) {
-	isolateTestGitEnv(t)
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
-	wt.filePollInterval = 30 * time.Second
-	wt.gitPollInterval = 30 * time.Second
-	wt.pollModeGrace = 50 * time.Millisecond
-
+	wt := newGraceTestTracker(t)
 	wt.Start(context.Background())
 	defer wt.Stop()
 
 	// Same mode the tracker was constructed with — a no-op for the cadence.
 	wt.SetPollMode(PollModeFast)
-	time.Sleep(300 * time.Millisecond)
 
-	if got := wt.GetPollMode(); got != PollModeFast {
-		t.Errorf("poll mode = %v after a same-mode push, want %v — the push was not recorded", got, PollModeFast)
-	}
+	assertGraceDisarmed(t, wt)
 }
 
 // TestPollModeGrace_NotArmedWhenNeverStarted guards against a tracker that is
 // constructed but never started leaving a live timer (and therefore a
 // goroutine reference) behind.
 func TestPollModeGrace_NotArmedWhenNeverStarted(t *testing.T) {
-	isolateTestGitEnv(t)
-	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
-
-	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
-	wt.pollModeGrace = 50 * time.Millisecond
-
-	time.Sleep(300 * time.Millisecond)
+	wt := newGraceTestTracker(t)
 
 	wt.pollModeMu.RLock()
 	armed := wt.pollModeGraceTimer != nil
@@ -122,5 +117,35 @@ func TestPollModeGrace_NotArmedWhenNeverStarted(t *testing.T) {
 	}
 	if got := wt.GetPollMode(); got != PollModeFast {
 		t.Errorf("poll mode = %v on an unstarted tracker, want %v", got, PollModeFast)
+	}
+}
+
+// TestPollModeGrace_StopDisarmsTimer covers teardown inside the grace window:
+// Stop must clear the pending timer so it cannot fire against a torn-down
+// tracker and so it holds no reference past the tracker's lifetime.
+func TestPollModeGrace_StopDisarmsTimer(t *testing.T) {
+	wt := newGraceTestTracker(t)
+	// Long enough that the timer is certain to still be pending at Stop.
+	wt.pollModeGrace = time.Hour
+
+	wt.Start(context.Background())
+
+	wt.pollModeMu.RLock()
+	armed := wt.pollModeGraceTimer != nil
+	wt.pollModeMu.RUnlock()
+	if !armed {
+		t.Fatal("grace timer was not armed by Start")
+	}
+
+	wt.Stop()
+
+	wt.pollModeMu.RLock()
+	timer := wt.pollModeGraceTimer
+	wt.pollModeMu.RUnlock()
+	if timer != nil {
+		t.Error("grace timer still armed after Stop")
+	}
+	if got := wt.GetPollMode(); got != PollModeFast {
+		t.Errorf("Stop changed the poll mode to %v, want it left at %v", got, PollModeFast)
 	}
 }
