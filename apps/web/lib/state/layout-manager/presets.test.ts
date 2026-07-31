@@ -13,6 +13,7 @@ describe("layout presets", () => {
     const rightTop = layout.columns.find((column) => column.id === "right")?.groups[0];
 
     expect(center?.panels.map((panel) => panel.id)).toEqual(["chat", "pr-detail"]);
+    expect(center?.activePanel).toBe("chat");
     expect(rightTop?.panels.map((panel) => panel.id)).toEqual(["files", "changes"]);
   });
 

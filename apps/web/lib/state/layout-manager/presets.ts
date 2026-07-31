@@ -6,7 +6,13 @@ export function defaultLayout(): LayoutState {
     columns: [
       {
         id: "center",
-        groups: [{ id: CENTER_GROUP, panels: [panel("chat"), panel("pr-detail")] }],
+        groups: [
+          {
+            id: CENTER_GROUP,
+            activePanel: "chat",
+            panels: [panel("chat"), panel("pr-detail")],
+          },
+        ],
       },
       {
         id: "right",

@@ -14,7 +14,7 @@ No backend schema, user-settings field, endpoint, or ADR is required. `users.set
 
 ## Architecture boundary
 
-- `LayoutState` owns the canonical `pr-detail` panel's existence, tab order, group, and geometry.
+- `LayoutState` owns the canonical `pr-detail` panel's existence, tab order, group, geometry, and initial active tab.
 - Review-domain state owns only the canonical panel's provider and primary PR/MR key.
 - Keyed `pr-detail|...` and `mr-detail|...` panels remain task-specific transient review tabs; the Layout editor never serializes them.
 - Existing custom profiles and environment-scoped task layouts are not backfilled. Fresh environments and Reset Layout use the updated built-in/default profile.
@@ -47,7 +47,8 @@ No backend schema, user-settings field, endpoint, or ADR is required. `users.set
 
 ## Tests
 
-- `apps/web/lib/state/layout-manager/presets.test.ts`: exact Default Agent-group and right-top order plus compact membership.
+- `apps/web/lib/state/layout-manager/presets.test.ts`: exact Default Agent-group, active Agent tab, and right-top order plus compact membership.
+- `apps/web/lib/state/layout-manager/merger.test.ts`: Plan-to-Default session replacement preserves Agent before PR Details and keeps Agent selected.
 - `apps/web/lib/layout/layout-profiles.test.ts`: canonical `pr-detail` accepted; keyed PR/MR IDs rejected.
 - `apps/web/components/settings/layouts/layout-editor-actions.test.ts`: PR Details appears once in the add catalog and participates in existing panel operations.
 - `apps/web/components/task/dockview-review-panel-sync.test.ts`: GitHub/GitLab/empty identity transitions mutate params only and ignore a missing canonical panel.
@@ -119,4 +120,8 @@ cd apps/web && pnpm e2e:run tests/settings/mobile-layout-profiles.spec.ts -- --p
 - 2026-07-31: mobile Layout E2E passed (2 tests), including touch selection and no horizontal overflow.
 - 2026-07-31: Default PR Details placement moved beside Agent. Focused preset unit test,
   fresh production desktop E2E, mobile Layout E2E (2 tests), typecheck, lint, and public-doc
+  validation passed.
+- 2026-07-31: CI exposed Plan-to-Default focus theft: live session tabs were appended after
+  PR Details. The merge now replaces Chat in place and preserves Agent selection; focused
+  unit tests, the fresh-build 14-test workflow E2E suite, typecheck, lint, and public-doc
   validation passed.

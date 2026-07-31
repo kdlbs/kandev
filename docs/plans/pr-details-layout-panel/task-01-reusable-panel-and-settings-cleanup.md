@@ -16,7 +16,7 @@ Remove the branch's parallel placement preference, then make canonical `pr-detai
 
 - No backend, boot-state, frontend HTTP, SSR, Zustand, WebSocket, or Appearance-settings contract contains `pr_panel_placement` / `prPanelPlacement`.
 - `REUSABLE_PANEL_IDS` contains canonical `pr-detail`, whose editor/runtime registry title is `PR Details`; `mr-detail` and keyed review IDs remain non-reusable.
-- `defaultLayout()` puts PR Details beside Agent in `CENTER_GROUP`, while Files and Changes remain in `RIGHT_TOP_GROUP`.
+- `defaultLayout()` puts PR Details beside Agent in `CENTER_GROUP` with Agent selected, while Files and Changes remain in `RIGHT_TOP_GROUP`.
 - `compactLayout()` includes PR Details in its single group.
 - Layout-profile validation accepts canonical `pr-detail`, rejects keyed review IDs, and still enforces one instance per reusable panel.
 - Layout editor renders a lightweight PR Details placeholder and exposes it through existing add/move/remove controls without mounting live review data.
