@@ -257,13 +257,13 @@ export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
         <div
           data-testid="github-connection-scroll-fade"
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-background via-background/80 to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-6 bg-gradient-to-t from-popover to-transparent"
         />
       </div>
       <div
         data-testid="github-connection-footer"
         className={cn(
-          "flex shrink-0 justify-end border-t bg-background pt-3",
+          "flex shrink-0 justify-end border-t bg-popover pt-3",
           isMobile ? "px-4 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))]" : "pb-0",
         )}
       >
