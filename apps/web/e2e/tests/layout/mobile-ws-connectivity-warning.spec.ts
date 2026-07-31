@@ -41,6 +41,20 @@ test.describe("Mobile WebSocket connectivity warning", () => {
     await setConnectionIssueSeverity(testPage, "none");
     await expect(trigger).toHaveCount(0);
   });
+
+  test("keeps the connection-only trigger visible on a coarse-pointer tablet", async ({
+    testPage,
+  }) => {
+    await testPage.setViewportSize({ width: 900, height: 900 });
+    await testPage.goto("/stats");
+    await setAppStatusBarEnabled(testPage, false);
+    await setConnectionIssueSeverity(testPage, "unstable");
+
+    const trigger = testPage.getByTestId("app-status-drawer-trigger");
+    await expect(trigger).toBeVisible();
+    await trigger.tap();
+    await expect(testPage.getByTestId("app-status-drawer")).toBeVisible();
+  });
 });
 
 type E2EStore = {

@@ -144,7 +144,9 @@ describe("AppStatusSurfaceProvider", () => {
     expect(screen.getByTestId(STATUS_DRAWER_TEST_ID).getAttribute("data-connection-only")).toBe(
       "true",
     );
-    expect(screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID)).toBeTruthy();
+    const trigger = screen.getByTestId(STATUS_DRAWER_TRIGGER_TEST_ID);
+    expect(trigger.className).toContain("lg:hidden");
+    expect(trigger.className).not.toContain("md:hidden");
   });
 
   it("closes a connection-only drawer when the warning recovers", () => {

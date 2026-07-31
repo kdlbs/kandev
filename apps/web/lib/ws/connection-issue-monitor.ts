@@ -6,6 +6,7 @@ const LOST_DELAY_MS = 10_000;
 export class ConnectionIssueMonitor {
   private disposed = false;
   private offline = false;
+  private severity: ConnectionIssueSeverity = "none";
   private unstableTimer: ReturnType<typeof setTimeout> | null = null;
   private lostTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,20 +24,26 @@ export class ConnectionIssueMonitor {
     if (this.offline) return;
 
     this.offline = true;
-    this.unstableTimer = setTimeout(() => this.onSeverityChange("unstable"), UNSTABLE_DELAY_MS);
-    this.lostTimer = setTimeout(() => this.onSeverityChange("lost"), LOST_DELAY_MS);
+    this.unstableTimer = setTimeout(() => this.reportSeverity("unstable"), UNSTABLE_DELAY_MS);
+    this.lostTimer = setTimeout(() => this.reportSeverity("lost"), LOST_DELAY_MS);
   }
 
   dispose() {
+    if (this.disposed) return;
+    this.reset();
     this.disposed = true;
-    this.clearTimers();
   }
 
   private reset() {
-    const wasOffline = this.offline;
     this.offline = false;
     this.clearTimers();
-    if (wasOffline) this.onSeverityChange("none");
+    if (this.severity !== "none") this.reportSeverity("none");
+  }
+
+  private reportSeverity(severity: ConnectionIssueSeverity) {
+    if (this.disposed) return;
+    this.severity = severity;
+    this.onSeverityChange(severity);
   }
 
   private clearTimers() {

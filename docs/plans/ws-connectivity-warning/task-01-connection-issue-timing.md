@@ -26,6 +26,17 @@ cd apps && pnpm --filter @kandev/web test -- lib/ws/connection-issue-monitor.tes
 cd apps/web && pnpm run typecheck
 ```
 
+## Completion report
+
+- Timing/state behavior: the monitor preserves one outage clock, reports `unstable` at 3,000 ms
+  and `lost` at 10,000 ms, clears a visible warning on reconnect or lifecycle disposal, and cancels
+  pre-threshold timers without emitting a redundant state change.
+- Focused tests: passed — 3 test files and 11 tests.
+- Typecheck: passed — `tsc --noEmit` completed with no errors.
+- Blockers: none.
+- Remaining risk: browser timer throttling can delay a warning, but cannot shorten either grace
+  period or leave a surfaced warning behind after monitor replacement.
+
 ## Files likely touched
 
 - `apps/web/lib/types/connection.ts`

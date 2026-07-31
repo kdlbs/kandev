@@ -25,6 +25,16 @@ node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
 
+## Completion report
+
+- Public docs: updated the operations and configuration guidance for the 3-second yellow state,
+  10-second red state, stale-data warning, and urgent fallback when the general status bar is off.
+- Validator tests: passed — 58 tests.
+- Published-doc validation: passed — 41 pages validated.
+- Blockers: none.
+- Remaining risk: none beyond keeping the documented thresholds and feature-toggle behavior in sync
+  with future connectivity UI changes.
+
 ## Files likely touched
 
 - `docs/public/operations.md`

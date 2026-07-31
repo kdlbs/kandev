@@ -48,13 +48,19 @@ describe("ConnectionIssueMonitor", () => {
     expect(onChange).toHaveBeenNthCalledWith(1, "unstable");
     expect(onChange).toHaveBeenNthCalledWith(2, "none");
     expect(onChange).toHaveBeenCalledTimes(2);
+
+    vi.advanceTimersByTime(1);
+
+    expect(onChange).toHaveBeenNthCalledWith(3, "unstable");
+    expect(onChange).toHaveBeenCalledTimes(3);
   });
 
-  it("does not emit after disposal", () => {
+  it("clears scheduled timers and ignores later status changes after disposal", () => {
     vi.useFakeTimers();
     const onChange = vi.fn();
     const monitor = new ConnectionIssueMonitor(onChange);
 
+    monitor.onStatusChange("reconnecting");
     monitor.dispose();
     monitor.onStatusChange("reconnecting");
     vi.advanceTimersByTime(10_000);

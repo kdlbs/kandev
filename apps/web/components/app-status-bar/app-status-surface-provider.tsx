@@ -93,7 +93,7 @@ export function AppStatusDrawerTrigger({
 }
 
 function drawerTriggerVisibilityClass(connectionOnly: boolean) {
-  return connectionOnly ? "md:hidden" : "sm:hidden";
+  return connectionOnly ? "lg:hidden" : "sm:hidden";
 }
 
 export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) {

@@ -48,4 +48,24 @@ describe("useWebSocket", () => {
     expect(store.getState().connection.issueSeverity).toBe("none");
     unmount();
   });
+
+  it("clears an active outage when replacing the WebSocket URL", () => {
+    vi.useFakeTimers();
+    const store = createAppStore();
+    const { rerender, unmount } = renderHook(
+      ({ url }: { url: string }) => useWebSocket(store, url),
+      { initialProps: { url: "ws://kandev.test/first" } },
+    );
+
+    act(() => {
+      mocks.onStatusChange?.("reconnecting");
+      vi.advanceTimersByTime(3_000);
+    });
+    expect(store.getState().connection.issueSeverity).toBe("unstable");
+
+    rerender({ url: "ws://kandev.test/replacement" });
+
+    expect(store.getState().connection.issueSeverity).toBe("none");
+    unmount();
+  });
 });
