@@ -47,7 +47,11 @@ test.describe("Mobile layout profiles", () => {
     await layouts.save();
 
     const response = await apiClient.getUserSettings();
-    const profile = (response.settings.saved_layouts as SavedProfile[])[0];
+    const profile = (response.settings.saved_layouts as SavedProfile[]).find(
+      (candidate) => candidate.is_default,
+    );
+    expect(profile, "Default saved layout is present").toBeDefined();
+    if (!profile) return;
     const prDetailsGroup = profile.layout.columns
       .flatMap((column) => column.groups)
       .find((group) => group.panels.some((panel) => panel.id === "pr-detail"));
