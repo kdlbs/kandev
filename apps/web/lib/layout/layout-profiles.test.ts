@@ -78,8 +78,10 @@ describe("built-in layout profiles", () => {
     first.layout.columns[0].groups[0].panels.length = 0;
 
     expect(
-      getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID).layout.columns[0].groups[0].panels,
-    ).toHaveLength(1);
+      getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID).layout.columns[0].groups[0].panels.map(
+        (panel) => panel.id,
+      ),
+    ).toEqual(["chat", "pr-detail"]);
   });
 });
 
