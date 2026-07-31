@@ -1,6 +1,6 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { TaskReviewTarget } from "./task-pr-open";
@@ -40,6 +40,7 @@ const targets: TaskReviewTarget[] = [
     } as TaskMR,
   },
 ];
+const selectedAttribute = "data-selected";
 
 function ControlledPicker({ onActivateIndex }: { onActivateIndex: (index: number) => void }) {
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -57,6 +58,8 @@ function ControlledPicker({ onActivateIndex }: { onActivateIndex: (index: number
 }
 
 describe("TaskPRPickerDialog", () => {
+  afterEach(() => cleanup());
+
   it("keeps controlled selection, focus, arrow keys, Enter, and click in sync", async () => {
     const onActivateIndex = vi.fn();
     render(<ControlledPicker onActivateIndex={onActivateIndex} />);
@@ -66,15 +69,15 @@ describe("TaskPRPickerDialog", () => {
 
     expect(prRow.compareDocumentPosition(mrRow)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     await waitFor(() => expect(document.activeElement).toBe(prRow));
-    expect(prRow.getAttribute("data-selected")).toBe("true");
+    expect(prRow.getAttribute(selectedAttribute)).toBe("true");
 
     fireEvent.keyDown(prRow, { key: "ArrowDown" });
     await waitFor(() => expect(document.activeElement).toBe(mrRow));
-    expect(mrRow.getAttribute("data-selected")).toBe("true");
+    expect(mrRow.getAttribute(selectedAttribute)).toBe("true");
 
     fireEvent.keyDown(mrRow, { key: "ArrowDown" });
     await waitFor(() => expect(document.activeElement).toBe(prRow));
-    expect(prRow.getAttribute("data-selected")).toBe("true");
+    expect(prRow.getAttribute(selectedAttribute)).toBe("true");
 
     fireEvent.keyDown(prRow, { key: "ArrowUp" });
     await waitFor(() => expect(document.activeElement).toBe(mrRow));
@@ -84,5 +87,21 @@ describe("TaskPRPickerDialog", () => {
 
     expect(onActivateIndex).toHaveBeenNthCalledWith(1, 1);
     expect(onActivateIndex).toHaveBeenNthCalledWith(2, 0);
+  });
+
+  it("activates the row focused with Tab when Enter is pressed", async () => {
+    const onActivateIndex = vi.fn();
+    render(<ControlledPicker onActivateIndex={onActivateIndex} />);
+
+    const prRow = screen.getByTestId("task-pr-picker-row-pr-1");
+    const mrRow = screen.getByTestId("task-mr-picker-row-mr-2");
+    await waitFor(() => expect(document.activeElement).toBe(prRow));
+
+    mrRow.focus();
+    expect(document.activeElement).toBe(mrRow);
+    await waitFor(() => expect(mrRow.getAttribute(selectedAttribute)).toBe("true"));
+    fireEvent.keyDown(mrRow, { key: "Enter" });
+
+    expect(onActivateIndex).toHaveBeenCalledWith(1);
   });
 });

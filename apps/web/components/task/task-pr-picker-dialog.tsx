@@ -27,9 +27,10 @@ type TaskReviewRowProps = {
   index: number;
   selected: boolean;
   onActivate: (index: number) => void;
+  onFocus: (index: number) => void;
 };
 
-function TaskReviewRow({ target, index, selected, onActivate }: TaskReviewRowProps) {
+function TaskReviewRow({ target, index, selected, onActivate, onFocus }: TaskReviewRowProps) {
   const isMergeRequest = target.type === "mr";
   const testId = isMergeRequest
     ? `task-mr-picker-row-${target.review.id}`
@@ -51,6 +52,7 @@ function TaskReviewRow({ target, index, selected, onActivate }: TaskReviewRowPro
       data-testid={testId}
       aria-current={selected ? "true" : undefined}
       onClick={() => onActivate(index)}
+      onFocus={() => onFocus(index)}
       className={cn(
         "flex cursor-pointer items-center gap-2 rounded-md border border-transparent px-2 py-2 text-left text-sm transition-colors hover:border-border hover:bg-muted/40 focus:border-primary/70 focus:outline-none",
         isMergeRequest && "min-h-11",
@@ -142,6 +144,7 @@ export function TaskPRPickerDialog({
               index={index}
               selected={index === selectedIndex}
               onActivate={onActivateIndex}
+              onFocus={onSelectedIndexChange}
             />
           ))}
         </div>
