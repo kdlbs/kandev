@@ -55,6 +55,12 @@ function resetMocks() {
   mocks.activeWorkflowId = mocks.workflowId;
   mocks.setActiveWorkspace.mockReset();
   mocks.setActiveWorkflow.mockReset();
+  mocks.setActiveWorkspace.mockImplementation((workspaceId: string | null) => {
+    mocks.activeWorkspaceId = workspaceId;
+  });
+  mocks.setActiveWorkflow.mockImplementation((workflowId: string | null) => {
+    mocks.activeWorkflowId = workflowId;
+  });
   mocks.commitSettings.mockReset();
   mocks.setView.mockReset();
   window.history.replaceState({}, "", "/");
@@ -65,17 +71,19 @@ afterEach(resetMocks);
 
 describe("useKanbanDisplaySettings", () => {
   it("keeps workspace and workflow scope in task overview history", () => {
-    const { result } = renderHook(() => useKanbanDisplaySettings());
+    const { result, rerender } = renderHook(() => useKanbanDisplaySettings());
 
     act(() => result.current.onWorkspaceChange("workspace-2"));
     expect(window.location.search).toBe("?home=overview&workspaceId=workspace-2");
+    rerender();
 
     act(() => result.current.onWorkflowChange("workflow-2"));
     expect(window.location.search).toBe(
       "?home=overview&workspaceId=workspace-2&workflowId=workflow-2",
     );
+    rerender();
 
     act(() => result.current.onWorkflowChange(null));
-    expect(window.location.search).toBe("?home=overview&workspaceId=workspace-1");
+    expect(window.location.search).toBe("?home=overview&workspaceId=workspace-2");
   });
 });
