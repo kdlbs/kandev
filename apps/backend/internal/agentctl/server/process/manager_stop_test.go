@@ -74,6 +74,7 @@ func TestManager_StopIsIdempotentAfterSelfExit(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 	killAgentProcess(t, mgr)
 
 	for i := range 3 {
@@ -99,6 +100,9 @@ func TestManager_RestartAfterSelfExitDrainsPreviousLifecycle(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("first Start() error = %v", err)
 	}
+	// Registered before the first failure path: Stop tears down whichever
+	// lifecycle the manager holds when the test ends, first or second.
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 	killAgentProcess(t, mgr)
 
 	firstAdapter := mgr.adapter
@@ -108,7 +112,6 @@ func TestManager_RestartAfterSelfExitDrainsPreviousLifecycle(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("second Start() error = %v", err)
 	}
-	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
 	if mgr.stopCh == firstStopCh {
 		t.Fatal("restart reused the previous stop channel")
@@ -139,6 +142,7 @@ func TestManager_StopClosesAdapterFromFailedRestart(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 	killAgentProcess(t, mgr)
 	if err := mgr.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop() error = %v", err)
