@@ -197,6 +197,10 @@ type Manager struct {
 	admissionDrained chan struct{}
 	stopping         bool
 	mainReapPending  atomic.Bool
+	// teardownDone guards closeAdapterAndStdin so it runs exactly once per
+	// Start. Stop can reach it from two paths (the normal stop and the
+	// already-stopped path taken when the agent process exited on its own).
+	teardownDone     atomic.Bool
 	groupAliveFn     func(int) bool
 	terminateGroupFn func(int) error
 	killGroupFn      func(int) error
@@ -934,6 +938,7 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
+	m.teardownDone.Store(false)
 
 	// Connect adapter to the process stdin/stdout pipes
 	if err := m.adapter.Connect(m.stdin, m.stdout); err != nil {
@@ -985,6 +990,7 @@ func (m *Manager) startOneShot() error {
 
 	m.stopCh = make(chan struct{})
 	m.doneCh = make(chan struct{})
+	m.teardownDone.Store(false)
 
 	// Forward adapter updates to our channel
 	m.wg.Add(1)
@@ -1497,14 +1503,24 @@ func (m *Manager) stop(ctx context.Context) error {
 			zap.String("status", string(status)),
 			zap.Int("pid", m.agentPID()))
 		if status == StatusStopped {
+			// The agent process reaches StatusStopped on its own whenever the
+			// child exits without an explicit Stop (waitForExit stores it). The
+			// adapter and stopCh were never torn down in that case, so do it
+			// here — otherwise the adapter's update worker and forwardUpdates
+			// stay alive for the lifetime of the manager. The call is a no-op
+			// after a normal stop, in which case behaviour is unchanged.
+			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
 				return err
 			}
-			if m.mainReapPending.Load() {
+			switch {
+			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
 					return err
 				}
 				m.mainReapPending.Store(false)
+			case tornDown:
+				m.drainAfterLateTeardown(ctx)
 			}
 			return nil
 		}
@@ -1592,7 +1608,14 @@ func (m *Manager) stopShellAndProcesses(ctx context.Context) error {
 }
 
 // closeAdapterAndStdin closes the protocol adapter, the stop channel, and stdin.
-func (m *Manager) closeAdapterAndStdin() {
+// It runs at most once per Start and reports whether this call performed the
+// teardown, so callers can decide whether goroutines still need draining.
+func (m *Manager) closeAdapterAndStdin() bool {
+	if !m.teardownDone.CompareAndSwap(false, true) {
+		m.logger.Debug("adapter and stdin already closed")
+		return false
+	}
+
 	m.logger.Debug("closing adapter")
 	if m.adapter != nil {
 		if err := m.adapter.Close(); err != nil {
@@ -1615,6 +1638,23 @@ func (m *Manager) closeAdapterAndStdin() {
 		}
 	}
 	m.logger.Debug("stdin closed")
+	return true
+}
+
+// drainAfterLateTeardown waits for the manager's goroutines to finish after the
+// adapter and stopCh were closed on the already-stopped path. Unlike
+// waitForProcessExit it never signals a process group: the manager has already
+// reported StatusStopped, so m.cmd may hold a stale PID it no longer owns.
+func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
+	done := make(chan struct{})
+	go func() {
+		m.wg.Wait()
+		close(done)
+	}()
+	if m.waitForManagerDone(ctx, done, m.processExitGrace(ctx)) {
+		return
+	}
+	m.logger.Warn("manager goroutines still running after late adapter teardown")
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
