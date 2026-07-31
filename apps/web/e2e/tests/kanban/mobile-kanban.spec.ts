@@ -192,10 +192,13 @@ test.describe("Mobile kanban view", () => {
     await mobile.goto();
 
     await mobile.taskCard(task.id).getByRole("button", { name: "More options" }).click();
+    // "Edit" is a submenu trigger (Edit task / Edit notes) — open it, then
+    // pick the leaf item that actually shows the edit-task dialog.
     await testPage
       .locator('[data-slot="dropdown-menu-content"]:visible')
       .getByRole("menuitem", { name: "Edit", exact: true })
       .click();
+    await testPage.getByRole("menuitem", { name: "Edit task", exact: true }).click();
 
     const dialog = testPage.getByRole("dialog");
     const titleInput = dialog.getByTestId("task-title-input");
