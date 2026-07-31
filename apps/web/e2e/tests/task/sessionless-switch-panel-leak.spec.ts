@@ -13,7 +13,7 @@ import { SessionPage } from "../../pages/session-page";
 
 /**
  * Regression: switching from a task with env-scoped panels open (file-editor,
- * diff-viewer, commit-detail, browser, vscode, pr-detail) to a task that
+ * diff-viewer, commit-detail, browser, vscode) to a task that
  * needs an env prepared used to leave those panels mounted in the dockview
  * for the entire `await launchSession(...)` round-trip + WS env-id
  * propagation. They surfaced as stray tabs (e.g. a file-editor tab) on the
@@ -21,6 +21,8 @@ import { SessionPage } from "../../pages/session-page";
  *
  * Fix: `prepareAndSwitchTask` calls `releaseLayoutToDefault` BEFORE awaiting
  * the launch, dropping env-scoped portals so the user sees a clean slate.
+ * `pr-detail` is intentionally excluded: it is now a layout-owned default
+ * panel, so a fresh default layout correctly includes it during preparation.
  */
 
 async function setupTaskWithFilePanel(args: {
@@ -65,8 +67,7 @@ async function setupTaskWithFilePanel(args: {
   return { session, filename };
 }
 
-/** Read the live dockview component names — file-editor / diff-viewer /
- *  commit-detail are env-scoped and must NOT survive into a different task. */
+/** Read live component names that are not part of the default layout. */
 async function readLiveDockviewComponents(testPage: Page): Promise<string[]> {
   return testPage.evaluate(() => {
     type Panel = { id: string; api?: { component?: string } };
@@ -77,13 +78,12 @@ async function readLiveDockviewComponents(testPage: Page): Promise<string[]> {
   });
 }
 
-const ENV_SCOPED_COMPONENTS = [
+const NON_DEFAULT_ENV_SCOPED_COMPONENTS = [
   "file-editor",
   "diff-viewer",
   "commit-detail",
   "browser",
   "vscode",
-  "pr-detail",
 ];
 
 test.describe("Sessionless task switch — env-scoped panel cleanup", () => {
@@ -129,7 +129,7 @@ test.describe("Sessionless task switch — env-scoped panel cleanup", () => {
       .poll(
         async () => {
           const components = await readLiveDockviewComponents(testPage);
-          return components.some((c) => ENV_SCOPED_COMPONENTS.includes(c));
+          return components.some((c) => NON_DEFAULT_ENV_SCOPED_COMPONENTS.includes(c));
         },
         {
           timeout: 5_000,

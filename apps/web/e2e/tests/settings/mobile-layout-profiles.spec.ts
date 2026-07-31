@@ -17,6 +17,40 @@ type SavedProfile = {
 };
 
 test.describe("Mobile layout profiles", () => {
+  test("moves PR Details with touch controls without horizontal overflow", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.openFromMobileMenu();
+
+    const prDetailsTab = layouts.editor.locator(".dv-tab", { hasText: "PR Details" });
+    await expect(prDetailsTab).toBeVisible();
+    await prDetailsTab.tap();
+    await prCapture.screenshot("pr-details-touch-layout-editor", {
+      caption: "Mobile layout editor selects PR Details through touch controls",
+    });
+    const moveLeft = layouts.actions.getByRole("button", { name: "Move tab left" });
+    await expect(moveLeft).toBeEnabled();
+    await moveLeft.tap();
+    await layouts.save();
+
+    const response = await apiClient.getUserSettings();
+    const profile = (response.settings.saved_layouts as SavedProfile[]).find(
+      (candidate) => candidate.is_default,
+    );
+    expect(profile, "Default saved layout is present").toBeDefined();
+    if (!profile) return;
+    const prDetailsGroup = profile.layout.columns
+      .flatMap((column) => column.groups)
+      .find((group) => group.panels.some((panel) => panel.id === "pr-detail"));
+    expect(prDetailsGroup?.panels.map((panel) => panel.id)).toEqual(["pr-detail", "chat"]);
+
+    await assertNoDocumentHorizontalOverflow(testPage, "PR Details mobile layout edit");
+    await assertNoDescendantOverflowsRight(layouts.root, "PR Details mobile layout settings");
+  });
+
   test("edits and reorders a profile without horizontal overflow", async ({
     testPage,
     apiClient,

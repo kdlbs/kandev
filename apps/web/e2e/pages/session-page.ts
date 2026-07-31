@@ -600,7 +600,7 @@ export class SessionPage {
     return this.page.getByTestId("pr-topbar-button");
   }
 
-  /** PR detail panel (auto-shown when task has an associated PR). */
+  /** PR detail panel content when a linked GitHub pull request is selected. */
   prDetailPanel(): Locator {
     return this.page.getByTestId("pr-detail-panel");
   }
@@ -794,81 +794,11 @@ export class SessionPage {
     }).toPass({ timeout: 10_000 });
   }
 
-  /**
-   * Assert the `pr-detail` panel's dockview group contains at least one
-   * `session:{sessionId}` panel — i.e. the PR opened as a tab next to a
-   * session chat, not as a split in a separate group. Regression guard for
-   * the "PR opens in a split instead of the center tab" bug.
-   *
-   * Checks group membership of the PR panel directly rather than picking a
-   * session panel first, so the assertion is deterministic even when outgoing
-   * and incoming session panels briefly coexist during a task switch.
-   */
-  async expectPrPanelAndSessionShareGroup(): Promise<void> {
-    const result = await this.page.evaluate(() => {
-      type Panel = { id: string; group?: { id?: string } };
-      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
-      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-      if (!api) return { error: "dockview api not exposed" };
-      const pr = api.getPanel("pr-detail");
-      if (!pr) return { error: "pr-detail panel missing" };
-      const prGroupId = pr.group?.id ?? null;
-      const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
-      if (sessionPanels.length === 0) return { error: "no session panel" };
-      const sessionInPrGroup = sessionPanels.some((p) => p.group?.id === prGroupId);
-      return {
-        sessionInPrGroup,
-        prGroupId,
-        sessionLocations: sessionPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
-      };
-    });
-    expect(result.error, result.error).toBeUndefined();
-    expect(
-      result.sessionInPrGroup,
-      `PR panel landed in a dockview group that contains no session chat. ` +
-        `PR group=${result.prGroupId} sessions=[${result.sessionLocations?.join(", ")}]`,
-    ).toBe(true);
-  }
-
-  /**
-   * Like `expectPrPanelAndSessionShareGroup`, but matches any pr-detail panel
-   * (legacy `pr-detail` or keyed `pr-detail|owner/repo/N`). Use for flows that
-   * exercise the manual click path, which always creates a keyed panel.
-   */
-  async expectAnyPrPanelAndSessionShareGroup(): Promise<void> {
-    const result = await this.page.evaluate(() => {
-      type Panel = { id: string; group?: { id?: string } };
-      type Api = { panels: Panel[]; getPanel: (i: string) => Panel | undefined };
-      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-      if (!api) return { error: "dockview api not exposed" };
-      const prPanels = api.panels.filter(
-        (p) => p.id === "pr-detail" || p.id.startsWith("pr-detail|"),
-      );
-      if (prPanels.length === 0) return { error: "no pr-detail panel" };
-      const sessionPanels = api.panels.filter((p) => p.id.startsWith("session:"));
-      if (sessionPanels.length === 0) return { error: "no session panel" };
-      const sessionGroupIds = new Set(sessionPanels.map((p) => p.group?.id).filter(Boolean));
-      const allPrsInSessionGroup = prPanels.every((p) => {
-        const gid = p.group?.id;
-        return gid !== undefined && sessionGroupIds.has(gid);
-      });
-      return {
-        allPrsInSessionGroup,
-        prLocations: prPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
-        sessionLocations: sessionPanels.map((p) => `${p.id}@${p.group?.id ?? "?"}`),
-      };
-    });
-    expect(result.error, result.error).toBeUndefined();
-    expect(
-      result.allPrsInSessionGroup,
-      `PR panel(s) landed outside the session's group. ` +
-        `prs=[${result.prLocations?.join(", ")}] sessions=[${result.sessionLocations?.join(", ")}]`,
-    ).toBe(true);
-  }
-
-  /** Dockview tab for the PR detail panel (title starts as "Pull Request", updated to "PR #N"). */
+  /** Dockview tab for canonical or keyed PR detail content. */
   prDetailTab(): Locator {
-    return this.page.locator(".dv-default-tab").filter({ hasText: /^(Pull Request|PR #\d+)$/ });
+    return this.page
+      .locator(".dv-default-tab")
+      .filter({ hasText: /^(PR Details|Pull Request|PR #\d+)$/ });
   }
 
   /** Click a dockview tab by its visible label (e.g. "Changes", "Files", "Terminal"). */

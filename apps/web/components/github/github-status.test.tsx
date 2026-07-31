@@ -47,11 +47,11 @@ function status(source: "pat" | "gh_cli" | "github_app_installation"): GitHubSta
 }
 
 describe("GitHubPersonalSettings", () => {
-  it.each(["pat", "gh_cli"] as const)("explains the shared human identity for %s", (source) => {
+  it.each(["pat", "gh_cli"] as const)("does not separate the shared identity for %s", (source) => {
     mocks.status = status(source);
     renderPersonal();
-    expect(screen.getByText("My GitHub identity")).toBeTruthy();
-    expect(screen.getByText(/same human account selected for workspace access/)).toBeTruthy();
+    expect(screen.queryByText("My GitHub identity")).toBeNull();
+    expect(screen.queryByTestId("github-personal-identity")).toBeNull();
     expect(screen.queryByRole("button", { name: /Connect identity/ })).toBeNull();
   });
 

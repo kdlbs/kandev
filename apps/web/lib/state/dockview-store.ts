@@ -159,12 +159,10 @@ type DockviewStore = {
   openInternalVscode: (goto_: { file: string; line: number; col: number } | null) => void;
   addPlanPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
   addNotesPanel: (opts?: { groupId?: string; quiet?: boolean; inCenter?: boolean }) => void;
-  /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR.
-   *  activeSessionId anchors the new panel to the session's current group so it lands as a tab
-   *  next to the session, not as a split. Falls back to centerGroupId when omitted. */
-  addPRPanel: (prKey?: string, activeSessionId?: string | null) => void;
+  /** Open a PR detail panel. prKey (owner/repo/pr_number) gives multi-repo tasks one tab per PR. */
+  addPRPanel: (prKey?: string) => void;
   /** Open a GitLab merge request detail panel keyed by host/project/iid. */
-  addMRPanel: (mrKey: string, activeSessionId?: string | null) => void;
+  addMRPanel: (mrKey: string) => void;
   addTerminalPanel: (
     terminalId?: string,
     groupId?: string,
@@ -448,12 +446,34 @@ function applyLayoutAndSet(
   return ids;
 }
 
+function isRightColumn(column: LayoutState["columns"][number]): boolean {
+  return (
+    column.id === "right" ||
+    column.groups.some((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP)
+  );
+}
+
+function columnHasRightPanel(column: LayoutState["columns"][number]): boolean {
+  const includesLayoutOwnedPRDetails = isRightColumn(column);
+  return column.groups.some((group) =>
+    group.panels.some(
+      (panel) =>
+        RIGHT_PANEL_IDS.has(panel.id) || (includesLayoutOwnedPRDetails && panel.id === "pr-detail"),
+    ),
+  );
+}
+
 function removeRightPanelTabs(state: LayoutState): LayoutState {
   const columns = state.columns
     .map((col) => {
+      const includesLayoutOwnedPRDetails = isRightColumn(col);
       const groups = col.groups
         .map((group) => {
-          const panels = group.panels.filter((panel) => !RIGHT_PANEL_IDS.has(panel.id));
+          const panels = group.panels.filter(
+            (panel) =>
+              !RIGHT_PANEL_IDS.has(panel.id) &&
+              !(includesLayoutOwnedPRDetails && panel.id === "pr-detail"),
+          );
           if (panels.length === group.panels.length) return group;
           const activePanel = panels.some((panel) => panel.id === group.activePanel)
             ? group.activePanel
@@ -485,10 +505,7 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       if (rightPanelsVisible) {
         const current = fromDockviewApi(api);
         const withoutRight: LayoutState = {
-          columns: current.columns.filter(
-            (c) =>
-              !c.groups.some((g) => g.panels.some((p) => p.id === "files" || p.id === "changes")),
-          ),
+          columns: current.columns.filter((column) => !columnHasRightPanel(column)),
         };
         set({ isRestoringLayout: true, rightPanelsVisible: false });
         applyLayoutAndSet(api, withoutRight, liveWidths, set);

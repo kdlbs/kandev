@@ -18,8 +18,6 @@ import type { ApiClient } from "../../helpers/api-client";
  * - Backend integration: TestPromptTask_PassthroughRoutesToPTYStdin
  */
 test.describe("CLI mode: message.add submits to PTY", () => {
-  test.describe.configure({ retries: 1 });
-
   async function createPassthroughProfile(apiClient: ApiClient, name: string): Promise<string> {
     const { agents } = await apiClient.listAgents();
     if (agents.length === 0) throw new Error("no agents registered in this e2e profile");
@@ -55,6 +53,24 @@ test.describe("CLI mode: message.add submits to PTY", () => {
       },
     );
     if (!created.session_id) throw new Error("createTaskWithAgent did not return session_id");
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(created.id))?.status, {
+        timeout: 30_000,
+        message: `${taskTitle} environment did not become ready`,
+      })
+      .toBe("ready");
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(created.id);
+          return sessions.find((session) => session.id === created.session_id)?.state ?? null;
+        },
+        {
+          timeout: 30_000,
+          message: `${taskTitle} passthrough session did not become idle`,
+        },
+      )
+      .toBe("WAITING_FOR_INPUT");
 
     const kanban = new KanbanPage(testPage);
     await kanban.goto();

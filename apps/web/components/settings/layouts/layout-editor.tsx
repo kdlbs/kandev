@@ -43,6 +43,7 @@ const placeholderComponents = {
   chat: PlaceholderPanel,
   files: PlaceholderPanel,
   changes: PlaceholderPanel,
+  "pr-detail": PlaceholderPanel,
   terminal: PlaceholderPanel,
   plan: PlaceholderPanel,
   browser: PlaceholderPanel,

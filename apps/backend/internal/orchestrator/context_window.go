@@ -1,0 +1,72 @@
+package orchestrator
+
+import (
+	"context"
+	"sync"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+const contextWindowMetadataKey = "context_window"
+
+// contextWindowWriteGuard serializes context-window metadata writes for one
+// session and advances its generation at each successful agent reset boundary.
+// A context update that was observed before a reset cannot write after the
+// reset's clear, even though its persistence is performed asynchronously.
+type contextWindowWriteGuard struct {
+	mu         sync.Mutex
+	generation uint64
+}
+
+func (s *Service) contextWindowGuard(sessionID string) *contextWindowWriteGuard {
+	guard := &contextWindowWriteGuard{}
+	actual, _ := s.contextWindowGuards.LoadOrStore(sessionID, guard)
+	return actual.(*contextWindowWriteGuard)
+}
+
+func (s *Service) captureContextWindowGeneration(sessionID string) uint64 {
+	guard := s.contextWindowGuard(sessionID)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	return guard.generation
+}
+
+// clearContextWindowForReset advances the session's context generation while
+// holding the same lock used by asynchronous context-window persistence.
+func (s *Service) clearContextWindowForReset(ctx context.Context, sessionID string) error {
+	guard := s.contextWindowGuard(sessionID)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	guard.generation++
+	return s.repo.SetSessionMetadataKey(ctx, sessionID, contextWindowMetadataKey, nil)
+}
+
+// persistContextWindowUpdate stores an update only when it belongs to the
+// current context generation. The bool is false when a reset superseded it.
+func (s *Service) persistContextWindowUpdate(
+	ctx context.Context,
+	sessionID string,
+	generation uint64,
+	contextWindowData map[string]interface{},
+) (bool, error) {
+	guard := s.contextWindowGuard(sessionID)
+	guard.mu.Lock()
+	defer guard.mu.Unlock()
+	if guard.generation != generation {
+		return false, nil
+	}
+	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, contextWindowMetadataKey, contextWindowData); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func clearInMemoryContextWindow(session *models.TaskSession) {
+	if session == nil {
+		return
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[contextWindowMetadataKey] = nil
+}

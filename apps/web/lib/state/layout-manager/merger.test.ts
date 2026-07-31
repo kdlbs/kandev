@@ -132,25 +132,6 @@ describe("mergePanelsIntoPreset", () => {
     expect(panelIdsIn(result, "right")).toEqual(["files", "changes"]);
   });
 
-  it("places the surviving notes panel in the center column, not the side column", () => {
-    // Same case as the plan panel above: notes has its own column in the
-    // current layout, which the target preset doesn't have. Notes should
-    // follow the chat into center rather than being dumped into "right"
-    // alongside files.
-    const currentState = makeLayoutWithSide([{ id: SESSION_ABC, component: "chat" }], "notes", [
-      { id: "notes", component: "notes" },
-    ]);
-    const targetPreset = makeLayoutWithSide([{ id: "chat", component: "chat" }], "right", [
-      { id: "files", component: "files" },
-      { id: "changes", component: "changes" },
-    ]);
-
-    const result = mergePanelsIntoPreset(currentState, targetPreset);
-
-    expect(panelIdsIn(result, "center")).toEqual([SESSION_ABC, "notes"]);
-    expect(panelIdsIn(result, "right")).toEqual(["files", "changes"]);
-  });
-
   it("places surviving browser/vscode/pr-detail in center, files/changes in the side column", () => {
     // Switching from a content preset (vscode/preview/etc.) back to default:
     // main-content surfaces (browser, vscode, pr-detail) must follow the chat
@@ -175,6 +156,53 @@ describe("mergePanelsIntoPreset", () => {
       "pr-detail",
     ]);
     expect(panelIdsIn(result, "right")).toEqual(["changes", "files"]);
+  });
+});
+
+describe("mergePanelsIntoPreset — side panel survival", () => {
+  it("places the surviving notes panel in the center column, not the side column", () => {
+    // Same case as the plan panel above: notes has its own column in the
+    // current layout, which the target preset doesn't have. Notes should
+    // follow the chat into center rather than being dumped into "right"
+    // alongside files.
+    const currentState = makeLayoutWithSide([{ id: SESSION_ABC, component: "chat" }], "notes", [
+      { id: "notes", component: "notes" },
+    ]);
+    const targetPreset = makeLayoutWithSide([{ id: "chat", component: "chat" }], "right", [
+      { id: "files", component: "files" },
+      { id: "changes", component: "changes" },
+    ]);
+
+    const result = mergePanelsIntoPreset(currentState, targetPreset);
+
+    expect(panelIdsIn(result, "center")).toEqual([SESSION_ABC, "notes"]);
+    expect(panelIdsIn(result, "right")).toEqual(["files", "changes"]);
+  });
+
+  it("keeps Agent selected when leaving Plan for Default with PR Details", () => {
+    const currentState = makeLayoutWithSide(
+      [
+        { id: SESSION_ABC, component: "chat" },
+        { id: "pr-detail", component: "pr-detail" },
+      ],
+      "plan",
+      [{ id: "plan", component: "plan" }],
+    );
+    const targetPreset = makeLayoutWithSide(
+      [
+        { id: "chat", component: "chat" },
+        { id: "pr-detail", component: "pr-detail" },
+      ],
+      "right",
+      [{ id: "files", component: "files" }],
+    );
+    targetPreset.columns[1]!.groups[0]!.activePanel = "chat";
+
+    const result = mergePanelsIntoPreset(currentState, targetPreset);
+    const center = result.columns.find((column) => column.id === "center")!.groups[0]!;
+
+    expect(center.panels.map((panel) => panel.id)).toEqual([SESSION_ABC, "pr-detail", "plan"]);
+    expect(center.activePanel).toBe(SESSION_ABC);
   });
 });
 

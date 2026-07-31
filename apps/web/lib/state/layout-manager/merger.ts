@@ -70,6 +70,38 @@ function appendToFirstGroup(
   });
 }
 
+/** Replace the reusable Chat slot with live session tabs in place.
+ *
+ * Keeping the replacement at Chat's original index preserves both the tab
+ * order and its selected state. Appending session tabs after the target
+ * preset's other panels would put PR Details ahead of Agent after a
+ * Plan → Default transition, making the background review tab visible while
+ * the agent input is hidden.
+ */
+function replaceChatWithSessionPanels(
+  groups: LayoutState["columns"][number]["groups"],
+  sessionPanels: LayoutPanel[],
+  toAdd: LayoutPanel[],
+): LayoutState["columns"][number]["groups"] {
+  return groups.map((group, idx) => {
+    if (idx !== 0) return group;
+
+    let insertedSessions = false;
+    const basePanels = group.panels.flatMap((panel) => {
+      if (panel.id !== "chat") return [panel];
+      insertedSessions = true;
+      return sessionPanels;
+    });
+    if (!insertedSessions) basePanels.unshift(...sessionPanels);
+
+    const existingIds = new Set(basePanels.map((panel) => panel.id));
+    const additions = toAdd.filter((panel) => !existingIds.has(panel.id));
+    const activePanel = group.activePanel === "chat" ? sessionPanels[0]?.id : group.activePanel;
+
+    return { ...group, panels: [...basePanels, ...additions], activePanel };
+  });
+}
+
 /**
  * Pure merge logic: merge extra panels from the current state into a target
  * preset layout. Session panels (`session:*`) replace the generic `chat`
@@ -106,10 +138,15 @@ export function mergePanelsIntoPreset(
       // Center-affinity extras (e.g. "plan") sit alongside the chat. When
       // the side column doesn't exist, side extras land here too.
       const fallbackSide = extrasColumnId === "center" ? sideExtras : [];
-      const filterChat = hasSessionPanels ? (p: LayoutPanel) => p.id !== "chat" : undefined;
-      const additions = [...sessionExtras, ...centerExtras, ...fallbackSide];
-      if (additions.length === 0 && !filterChat) return col;
-      return { ...col, groups: appendToFirstGroup(col.groups, additions, filterChat) };
+      const additions = [...centerExtras, ...fallbackSide];
+      if (hasSessionPanels) {
+        return {
+          ...col,
+          groups: replaceChatWithSessionPanels(col.groups, sessionExtras, additions),
+        };
+      }
+      if (additions.length === 0) return col;
+      return { ...col, groups: appendToFirstGroup(col.groups, additions) };
     }
     if (col.id === extrasColumnId && sideExtras.length > 0) {
       return { ...col, groups: appendToFirstGroup(col.groups, sideExtras) };

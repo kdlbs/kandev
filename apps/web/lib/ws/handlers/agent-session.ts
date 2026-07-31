@@ -262,14 +262,21 @@ function maybeFanOutOfficeRefetch(
   setOfficeTrigger("agents");
 }
 
-/** Extract context window data from payload metadata and store it. */
+/** Extract context-window data or an explicit cache invalidation from a session event. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payload: any): void {
-  const metadata = payload.metadata;
-  if (!metadata || typeof metadata !== "object") return;
-  const contextWindow = (metadata as Record<string, unknown>).context_window;
+  const metadataSources = [payload.metadata, payload.session_metadata];
+  const metadata = metadataSources.find(
+    (candidate) =>
+      candidate &&
+      typeof candidate === "object" &&
+      Object.prototype.hasOwnProperty.call(candidate, "context_window"),
+  ) as Record<string, unknown> | undefined;
+  if (!metadata) return;
+  const contextWindow = metadata.context_window;
   const entry = parseContextWindowEntry(contextWindow, new Date().toISOString());
   if (entry) store.getState().setContextWindow(sessionId, entry);
+  else store.getState().clearContextWindow(sessionId);
 }
 
 /** Copy agentctl "ready" status from one session to another (same-task switch). */

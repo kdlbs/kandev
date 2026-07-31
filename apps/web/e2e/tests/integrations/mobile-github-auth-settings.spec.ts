@@ -19,9 +19,13 @@ test.describe("Mobile GitHub authentication settings", () => {
     await expect(testPage.getByRole("heading", { name: "Workspace GitHub access" })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(testPage.getByText("My GitHub identity", { exact: true })).toBeVisible();
-
     const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(testPage.getByText("My GitHub identity", { exact: true })).toHaveCount(0);
+    await expect(
+      automation.getByText("This account also powers My GitHub and user-triggered actions.", {
+        exact: true,
+      }),
+    ).toBeVisible();
     await automation.getByRole("button", { name: "Change connection" }).click();
     const githubSettings = new GitHubAuthSettingsPage(testPage);
     const connectionDialog = githubSettings.connectionSurface();
@@ -33,14 +37,14 @@ test.describe("Mobile GitHub authentication settings", () => {
     ).toBeVisible();
     await githubSettings.chooseMethod("GitHub CLI account");
 
-    const [accountBox, useAccountBox] = await Promise.all([
+    const [accountBox, saveBox] = await Promise.all([
       connectionDialog.getByRole("combobox", { name: "GitHub CLI account" }).boundingBox(),
-      connectionDialog.getByRole("button", { name: "Use account" }).boundingBox(),
+      connectionDialog.getByRole("button", { name: "Save changes" }).boundingBox(),
     ]);
     expect(accountBox).not.toBeNull();
-    expect(useAccountBox).not.toBeNull();
+    expect(saveBox).not.toBeNull();
     expect(accountBox!.height).toBeGreaterThanOrEqual(44);
-    expect(accountBox!.height).toBeCloseTo(useAccountBox!.height, 1);
+    expect(saveBox!.height).toBeGreaterThanOrEqual(44);
 
     const hasHorizontalOverflow = await testPage.evaluate(
       () => document.documentElement.scrollWidth > document.documentElement.clientWidth,

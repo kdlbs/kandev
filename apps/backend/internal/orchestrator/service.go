@@ -503,6 +503,9 @@ type Service struct {
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.
 	resetInProgressSessions sync.Map
+	// contextWindowGuards serializes live context usage writes and gives each
+	// session a generation boundary that reset_agent_context can invalidate.
+	contextWindowGuards sync.Map
 
 	// suppressToast: sessionID -> true. Set by failure handlers that create
 	// guidance messages with actions. Cleared by updateTaskSessionState which

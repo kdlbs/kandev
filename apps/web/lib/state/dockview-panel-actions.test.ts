@@ -484,12 +484,7 @@ describe("addPRPanel — dedup with legacy auto-shown panel", () => {
     return { api, actions: buildExtraPanelActions(store.get) };
   }
 
-  /**
-   * Mirrors how useAutoPRPanel seeds the legacy panel in production: same
-   * unkeyed "pr-detail" id, but stamped with the PR it's currently showing
-   * so later `addPRPanel` calls can tell whether a menu click targets that
-   * same PR (reuse the tab) or a different one (open a distinct tab).
-   */
+  /** Canonical PR Details panels retain the key currently shown for the task. */
   function seedLegacyPanel(api: DockviewApi, prKey: string): void {
     api.addPanel({
       id: LEGACY_PR_ID,
@@ -559,21 +554,19 @@ describe("addPRPanel — dedup with legacy auto-shown panel", () => {
   });
 });
 
-describe("addPRPanel — group placement", () => {
+describe("addPRPanel — layout-owned group placement", () => {
   const PR_KEY = "testorg/testrepo/202";
   const KEYED_PR_ID = `pr-detail|${PR_KEY}`;
   const SESSION_ID = "s-1";
   const SESSION_PANEL_ID = `session:${SESSION_ID}`;
   const SESSION_GROUP = "group-session-host";
+  const PR_DETAILS_GROUP = "group-configured-pr-details";
 
   function buildExtra(api: DockviewApi) {
     const store = makeStore(api);
     return { api, actions: buildExtraPanelActions(store.get) };
   }
 
-  // Seed the api with a session panel in a group that is NOT the store's
-  // centerGroupId. This mirrors the post-transition state where the store's
-  // tracked centerGroupId has gone stale and the live session sits elsewhere.
   function seedSessionInGroup(api: DockviewApi, groupId: string): void {
     api.addPanel({
       id: SESSION_PANEL_ID,
@@ -584,44 +577,57 @@ describe("addPRPanel — group placement", () => {
     });
   }
 
-  it("places the PR panel in the same group as the active session panel", () => {
+  function seedCanonicalPRDetails(api: DockviewApi, groupId = PR_DETAILS_GROUP): void {
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: "PR Details",
+      position: { referenceGroup: groupId },
+    });
+  }
+
+  it("places a new PR tab in PR Details' configured group, not beside Agent", () => {
     const { api, actions } = buildExtra(makeApi());
     seedSessionInGroup(api, SESSION_GROUP);
+    seedCanonicalPRDetails(api);
 
-    actions.addPRPanel(PR_KEY, SESSION_ID);
-
-    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
-    const session = api.getPanel(SESSION_PANEL_ID) as unknown as MockPanel;
-    expect(pr).toBeDefined();
-    expect(pr.group.id).toBe(session.group.id);
-    expect(pr.group.id).toBe(SESSION_GROUP);
-    // Critical: must NOT have landed in the store's centerGroupId (the bug).
-    expect(pr.group.id).not.toBe(CENTER_GROUP);
-  });
-
-  it("falls back to centerGroupId when no session panel exists for the id", () => {
-    const { api, actions } = buildExtra(makeApi());
-    // No session panel seeded — resolver should fall back.
-    actions.addPRPanel(PR_KEY, SESSION_ID);
+    actions.addPRPanel(PR_KEY);
 
     const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
     expect(pr).toBeDefined();
-    expect(pr.group.id).toBe(CENTER_GROUP);
+    expect(pr.group.id).toBe(PR_DETAILS_GROUP);
+    expect(pr.group.id).not.toBe(SESSION_GROUP);
   });
 
-  it("falls back to centerGroupId when sessionId is not provided", () => {
+  it("falls back to centerGroupId when no PR Details panel exists", () => {
     const { api, actions } = buildExtra(makeApi());
-    // Even with a session panel present, omitting the id keeps legacy behavior.
-    seedSessionInGroup(api, SESSION_GROUP);
     actions.addPRPanel(PR_KEY);
 
     const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
     expect(pr).toBeDefined();
     expect(pr.group.id).toBe(CENTER_GROUP);
   });
+
+  it("focuses an existing keyed PR tab without relocating it", () => {
+    const { api, actions } = buildExtra(makeApi());
+    seedCanonicalPRDetails(api);
+    api.addPanel({
+      id: KEYED_PR_ID,
+      component: "pr-detail",
+      title: "Pull Request",
+      params: { prKey: PR_KEY },
+      position: { referenceGroup: SESSION_GROUP },
+    });
+
+    actions.addPRPanel(PR_KEY);
+
+    const pr = api.getPanel(KEYED_PR_ID) as unknown as MockPanel;
+    expect(pr.group.id).toBe(SESSION_GROUP);
+    expect(pr.isActive).toBe(true);
+  });
 });
 
-describe("addMRPanel — dedup with legacy auto-shown panel", () => {
+describe("addMRPanel — layout-owned review tabs", () => {
   const MR_KEY = "https://gitlab.example.test|platform/kandev|81";
   const OTHER_MR_KEY = "https://gitlab.example.test|platform/kandev|82";
   const LEGACY_MR_ID = "mr-detail";
@@ -641,24 +647,32 @@ describe("addMRPanel — dedup with legacy auto-shown panel", () => {
     });
   }
 
-  it("replaces a matching auto-shown panel with an active keyed panel", () => {
+  it("focuses a matching legacy panel in place", () => {
     const { api, actions } = buildExtra(makeApi());
     seedLegacyPanel(api, MR_KEY);
 
     actions.addMRPanel(MR_KEY);
 
     expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(1);
-    expect(api.getPanel(LEGACY_MR_ID)).toBeUndefined();
-    expect((api.getPanel(`${LEGACY_MR_ID}|${MR_KEY}`) as unknown as MockPanel).isActive).toBe(true);
+    expect(api.getPanel(`${LEGACY_MR_ID}|${MR_KEY}`)).toBeUndefined();
+    expect((api.getPanel(LEGACY_MR_ID) as unknown as MockPanel).isActive).toBe(true);
   });
 
-  it("opens a keyed panel when the auto-shown panel displays a different MR", () => {
+  it("opens a keyed panel in the canonical PR Details group", () => {
     const { api, actions } = buildExtra(makeApi());
     seedLegacyPanel(api, MR_KEY);
+    api.addPanel({
+      id: "pr-detail",
+      component: "pr-detail",
+      title: "PR Details",
+      position: { referenceGroup: "group-configured-pr-details" },
+    });
 
     actions.addMRPanel(OTHER_MR_KEY);
 
-    expect(api.getPanel(`${LEGACY_MR_ID}|${OTHER_MR_KEY}`)).toBeDefined();
+    const keyed = api.getPanel(`${LEGACY_MR_ID}|${OTHER_MR_KEY}`) as unknown as MockPanel;
+    expect(keyed).toBeDefined();
+    expect(keyed.group.id).toBe("group-configured-pr-details");
     expect(api.panels.filter((panel) => panel.id.startsWith(LEGACY_MR_ID))).toHaveLength(2);
   });
 });

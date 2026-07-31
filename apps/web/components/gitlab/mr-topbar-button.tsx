@@ -76,15 +76,14 @@ export function openMobileMRReview(
 }
 
 export function openDesktopMRReview(
-  addMRPanel: (mrKey: string, sessionId?: string | null) => void,
-  sessionId: string | null,
+  addMRPanel: (mrKey: string) => void,
   mr: TaskMR,
   schedule: (callback: FrameRequestCallback) => number = requestAnimationFrame,
 ) {
   const mrKey = mrTaskKey(mr);
-  addMRPanel(mrKey, sessionId);
+  addMRPanel(mrKey);
   schedule(() => {
-    schedule(() => addMRPanel(mrKey, sessionId));
+    schedule(() => addMRPanel(mrKey));
   });
 }
 
@@ -139,9 +138,9 @@ function MRMenuButton({
 
   useEffect(() => {
     if (!dockviewReady || !pendingDesktopMR) return;
-    openDesktopMRReview(addMRPanel, activeSessionId, pendingDesktopMR);
+    openDesktopMRReview(addMRPanel, pendingDesktopMR);
     setPendingDesktopMR(null);
-  }, [activeSessionId, addMRPanel, dockviewReady, pendingDesktopMR]);
+  }, [addMRPanel, dockviewReady, pendingDesktopMR]);
 
   const openReview = (mr: TaskMR) => {
     if (mobile) {
@@ -151,7 +150,7 @@ function MRMenuButton({
     if (!dockviewReady) {
       setPendingDesktopMR(mr);
     } else {
-      openDesktopMRReview(addMRPanel, activeSessionId, mr);
+      openDesktopMRReview(addMRPanel, mr);
     }
   };
   return (

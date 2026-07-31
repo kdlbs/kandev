@@ -58,19 +58,6 @@ function focusMatchingLegacyPanel(
   return true;
 }
 
-function removeMatchingLegacyPanel(
-  api: DockviewApi,
-  keyedPanelId: string,
-  legacyPanelId: string,
-  paramName: string,
-  key: string,
-): void {
-  if (api.getPanel(keyedPanelId)) return;
-  const legacy = api.getPanel(legacyPanelId);
-  const legacyKey = (legacy?.params as Record<string, unknown> | undefined)?.[paramName];
-  if (legacy && legacyKey === key) api.removePanel(legacy);
-}
-
 // ---------------------------------------------------------------------------
 // Preview-tab machinery
 // ---------------------------------------------------------------------------
@@ -474,6 +461,63 @@ export function removeSessionPanel(api: DockviewApi, sessionId: string): void {
   if (panel) api.removePanel(panel);
 }
 
+function buildReviewPanelActions(get: StoreGet) {
+  return {
+    /**
+     * Focus an existing PR tab in place, or add a keyed tab beside the
+     * layout-owned canonical PR Details panel. Fall back to the center group
+     * when the current layout intentionally omits PR Details.
+     */
+    addPRPanel: (prKey?: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      // Multi-repo: each TaskPR opens in its own panel keyed by
+      // owner/repo/pr_number so multiple PRs can be tabbed side-by-side.
+      // Legacy single-repo callers (no key) get the historical panel id.
+      const id = prKey ? `pr-detail|${prKey}` : "pr-detail";
+      // A canonical panel already rendering this key is the task's primary
+      // review tab; focus it instead of creating a duplicate keyed tab.
+      const existing = api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      if (prKey && focusMatchingLegacyPanel(api, id, "pr-detail", "prKey", prKey)) return;
+      const targetGroupId = api.getPanel("pr-detail")?.group.id ?? centerGroupId;
+      focusOrAddPanel(api, {
+        id,
+        component: "pr-detail",
+        title: prKey ? "Pull Request" : "PR Details",
+        position: { referenceGroup: targetGroupId },
+        params: prKey ? { prKey } : undefined,
+      });
+    },
+    addMRPanel: (mrKey: string) => {
+      const { api, centerGroupId } = get();
+      if (!api) return;
+      const id = `mr-detail|${mrKey}`;
+      const existing = api.getPanel(id);
+      if (existing) {
+        existing.api.setActive();
+        return;
+      }
+      if (focusMatchingLegacyPanel(api, id, "mr-detail", "mrKey", mrKey)) return;
+      const canonical = api.getPanel("pr-detail");
+      if (canonical?.params?.mrKey === mrKey) {
+        canonical.api.setActive();
+        return;
+      }
+      focusOrAddPanel(api, {
+        id,
+        component: "mr-detail",
+        title: "Merge Request",
+        position: { referenceGroup: canonical?.group.id ?? centerGroupId },
+        params: { mrKey },
+      });
+    },
+  };
+}
+
 export function buildExtraPanelActions(get: StoreGet) {
   return {
     addVscodePanel: () => {
@@ -515,70 +559,7 @@ export function buildExtraPanelActions(get: StoreGet) {
         title: "Notes",
         tabComponent: "notesTab",
       }),
-    /**
-     * Opens the PR detail panel for a given key, or focuses the tab already
-     * showing that exact PR.
-     *
-     * @param prKey - `<owner>/<repo>/<pr_number>` identifying the PR to
-     *   show; `undefined` targets the legacy single-repo panel id
-     *   ("pr-detail").
-     * @param activeSessionId - Session to anchor the panel next to as a
-     *   tab; falls back to `centerGroupId` when omitted or when no matching
-     *   session panel exists.
-     *
-     * Reuses the legacy unkeyed "pr-detail" panel only when it's already
-     * showing this exact PR (tracked via its stamped `params.prKey` — see
-     * `runAutoPRPanelEffect` in dockview-session-tabs.ts, which keeps that
-     * key in sync with the task's current default PR). A different PR
-     * always gets its own `pr-detail|<prKey>` tab instead of overwriting
-     * the one already open.
-     */
-    addPRPanel: (prKey?: string, activeSessionId?: string | null) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      // Multi-repo: each TaskPR opens in its own panel keyed by
-      // owner/repo/pr_number so multiple PRs can be tabbed side-by-side.
-      // Legacy single-repo callers (no key) get the historical panel id.
-      const id = prKey ? `pr-detail|${prKey}` : "pr-detail";
-      // If a legacy "pr-detail" panel is already open (auto-shown on task
-      // open or restored from a saved layout) AND it's currently showing
-      // this exact PR (see useAutoPRPanel, which stamps the panel's params
-      // with the PR it renders), reuse it instead of adding a second tab.
-      // A legacy panel showing a DIFFERENT PR (multi-repo "+" menu click)
-      // must NOT be repurposed — that would silently swap its content
-      // instead of opening a distinct tab for the newly requested PR.
-      if (prKey && focusMatchingLegacyPanel(api, id, "pr-detail", "prKey", prKey)) return;
-      // Prefer the live session panel's group over the store's centerGroupId
-      // — the latter can be stale across layout transitions and lands the PR
-      // panel in a separate split group instead of as a tab next to the
-      // session. Mirrors the resolution used by useAutoPRPanel.
-      const targetGroupId = activeSessionId
-        ? (api.getPanel(`session:${activeSessionId}`)?.group?.id ?? centerGroupId)
-        : centerGroupId;
-      focusOrAddPanel(api, {
-        id,
-        component: "pr-detail",
-        title: "Pull Request",
-        position: { referenceGroup: targetGroupId },
-        params: prKey ? { prKey } : undefined,
-      });
-    },
-    addMRPanel: (mrKey: string, activeSessionId?: string | null) => {
-      const { api, centerGroupId } = get();
-      if (!api) return;
-      const id = `mr-detail|${mrKey}`;
-      removeMatchingLegacyPanel(api, id, "mr-detail", "mrKey", mrKey);
-      const targetGroupId = activeSessionId
-        ? (api.getPanel(`session:${activeSessionId}`)?.group?.id ?? centerGroupId)
-        : centerGroupId;
-      focusOrAddPanel(api, {
-        id,
-        component: "mr-detail",
-        title: "Merge Request",
-        position: { referenceGroup: targetGroupId },
-        params: { mrKey },
-      });
-    },
+    ...buildReviewPanelActions(get),
     addTerminalPanel: (
       terminalId?: string,
       groupId?: string,

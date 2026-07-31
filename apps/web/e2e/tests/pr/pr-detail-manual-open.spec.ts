@@ -4,9 +4,9 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR detail panel — manual open", () => {
   /**
-   * Regression: when the user dismisses the auto-shown PR panel and re-opens
-   * it manually via the topbar PR button, the new panel must land as a tab
-   * inside the session's dockview group — not as a separate split group.
+   * Regression: when the user removes the layout-owned PR Details panel and
+   * opens a pull request manually from the topbar, the keyed review tab must
+   * use the center fallback — not create a separate split.
    *
    * The manual path uses `addPRPanel(prKey)` which historically anchored on
    * the store's `centerGroupId`. That value can be stale across layout
@@ -17,7 +17,7 @@ test.describe("PR detail panel — manual open", () => {
    *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
    *   Task A (with PR #501)
    */
-  test("places PR panel as a tab in the session group when opened from topbar", async ({
+  test("uses the center fallback when PR Details is absent", async ({
     testPage,
     apiClient,
     seedData,
@@ -93,7 +93,7 @@ test.describe("PR detail panel — manual open", () => {
       timeout: 45_000,
     });
 
-    // Open the task — the auto-show hook adds the legacy `pr-detail` panel.
+    // Open the task — the Default layout provides the canonical PR Details panel.
     await kanban.taskCardInColumn("Order Basket Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
@@ -103,22 +103,35 @@ test.describe("PR detail panel — manual open", () => {
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
 
-    // Dismiss the auto-shown PR panel. The auto-show hook already marked it
-    // as "offered" on add, so it won't re-add it — the next open path is the
-    // manual one.
+    // Remove the canonical panel from the task layout. Its absence is a user
+    // choice, so review data must not recreate it.
     await session.prDetailTab().hover();
     const closeBtn = session.prDetailTab().locator(".dv-default-tab-action");
     await closeBtn.click();
     await expect(session.prDetailTab()).not.toBeVisible({ timeout: 10_000 });
 
-    // Click the topbar PR button — exercises addPRPanel(prKey, activeSessionId)
-    // and creates a keyed `pr-detail|owner/repo/N` panel.
+    // Click the topbar PR button — this creates a keyed `pr-detail|owner/repo/N`
+    // panel because the canonical one is no longer present.
     await session.prTopbarButton().click();
     await expect(session.prDetailPanel()).toBeVisible({ timeout: 10_000 });
     await expect(session.prDetailTab()).toBeVisible({ timeout: 10_000 });
 
-    // Invariant: PR panel is a tab in the session's dockview group, not a
-    // split into a separate group. Matches keyed (pr-detail|...) panel id.
-    await session.expectAnyPrPanelAndSessionShareGroup();
+    const location = await testPage.evaluate(() => {
+      type Panel = { id: string; group?: { id?: string } };
+      type Api = { panels: Panel[]; getPanel: (id: string) => Panel | undefined };
+      const api = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
+      if (!api) return { error: "dockview api not exposed" };
+      const keyed = api.panels.find((panel) => panel.id.startsWith("pr-detail|"));
+      const sessionPanel = api.panels.find((panel) => panel.id.startsWith("session:"));
+      return {
+        canonicalExists: !!api.getPanel("pr-detail"),
+        keyedGroupId: keyed?.group?.id ?? null,
+        sessionGroupId: sessionPanel?.group?.id ?? null,
+      };
+    });
+
+    expect(location.error, location.error).toBeUndefined();
+    expect(location.canonicalExists).toBe(false);
+    expect(location.keyedGroupId).toBe(location.sessionGroupId);
   });
 });
