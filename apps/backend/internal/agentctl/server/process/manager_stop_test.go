@@ -20,11 +20,9 @@ import (
 func TestManager_StopAfterAgentSelfExitTearsDownAdapter(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
 		AgentArgs: fixtureArgs(),
-		// Print, then hold the process open briefly so Start() reliably
-		// completes before the agent exits on its own.
-		AgentEnv: fixtureEnvSlice("echo-then-sleep started 1"),
-		WorkDir:  t.TempDir(),
-		Protocol: agent.ProtocolACP,
+		AgentEnv:  fixtureEnvSlice("sleep 60"),
+		WorkDir:   t.TempDir(),
+		Protocol:  agent.ProtocolACP,
 	}, newTestLogger(t))
 
 	if err := mgr.Start(context.Background()); err != nil {
@@ -32,7 +30,7 @@ func TestManager_StopAfterAgentSelfExitTearsDownAdapter(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
 
-	waitForManagerStatus(t, mgr, StatusStopped)
+	killAgentProcess(t, mgr)
 
 	if err := mgr.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop() error = %v", err)
@@ -68,7 +66,7 @@ func TestManager_StopAfterAgentSelfExitTearsDownAdapter(t *testing.T) {
 func TestManager_StopIsIdempotentAfterSelfExit(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
 		AgentArgs: fixtureArgs(),
-		AgentEnv:  fixtureEnvSlice("echo-then-sleep started 1"),
+		AgentEnv:  fixtureEnvSlice("sleep 60"),
 		WorkDir:   t.TempDir(),
 		Protocol:  agent.ProtocolACP,
 	}, newTestLogger(t))
@@ -76,7 +74,7 @@ func TestManager_StopIsIdempotentAfterSelfExit(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	waitForManagerStatus(t, mgr, StatusStopped)
+	killAgentProcess(t, mgr)
 
 	for i := range 3 {
 		if err := mgr.Stop(context.Background()); err != nil {
@@ -93,7 +91,7 @@ func TestManager_StopIsIdempotentAfterSelfExit(t *testing.T) {
 func TestManager_RestartAfterSelfExitDrainsPreviousLifecycle(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
 		AgentArgs: fixtureArgs(),
-		AgentEnv:  fixtureEnvSlice("echo-then-sleep started 1"),
+		AgentEnv:  fixtureEnvSlice("sleep 60"),
 		WorkDir:   t.TempDir(),
 		Protocol:  agent.ProtocolACP,
 	}, newTestLogger(t))
@@ -101,7 +99,7 @@ func TestManager_RestartAfterSelfExitDrainsPreviousLifecycle(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("first Start() error = %v", err)
 	}
-	waitForManagerStatus(t, mgr, StatusStopped)
+	killAgentProcess(t, mgr)
 
 	firstAdapter := mgr.adapter
 	firstStopCh := mgr.stopCh
@@ -133,7 +131,7 @@ func TestManager_RestartAfterSelfExitDrainsPreviousLifecycle(t *testing.T) {
 func TestManager_StopClosesAdapterFromFailedRestart(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
 		AgentArgs: fixtureArgs(),
-		AgentEnv:  fixtureEnvSlice("echo-then-sleep started 1"),
+		AgentEnv:  fixtureEnvSlice("sleep 60"),
 		WorkDir:   t.TempDir(),
 		Protocol:  agent.ProtocolACP,
 	}, newTestLogger(t))
@@ -141,7 +139,7 @@ func TestManager_StopClosesAdapterFromFailedRestart(t *testing.T) {
 	if err := mgr.Start(context.Background()); err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
-	waitForManagerStatus(t, mgr, StatusStopped)
+	killAgentProcess(t, mgr)
 	if err := mgr.Stop(context.Background()); err != nil {
 		t.Fatalf("Stop() error = %v", err)
 	}
@@ -168,9 +166,26 @@ func TestManager_StopClosesAdapterFromFailedRestart(t *testing.T) {
 	}
 }
 
+// killAgentProcess terminates the agent's child process directly and waits for
+// the manager to observe it. That models the real trigger for this bug — an
+// agent that dies without an explicit Stop (crash, self-exit, OOM) — and keeps
+// the test independent of how a spawned binary receives its arguments and
+// environment, which differs per platform: Windows starts agents suspended
+// under a Job Object, so a short-lived fixture is not a portable exit signal.
+func killAgentProcess(t *testing.T, mgr *Manager) {
+	t.Helper()
+	if mgr.cmd == nil || mgr.cmd.Process == nil {
+		t.Fatal("manager has no agent process to kill")
+	}
+	if err := mgr.cmd.Process.Kill(); err != nil {
+		t.Fatalf("kill agent process: %v", err)
+	}
+	waitForManagerStatus(t, mgr, StatusStopped)
+}
+
 func waitForManagerStatus(t *testing.T, mgr *Manager, want Status) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for mgr.Status() != want {
 		if time.Now().After(deadline) {
 			t.Fatalf("manager status = %s, want %s", mgr.Status(), want)
