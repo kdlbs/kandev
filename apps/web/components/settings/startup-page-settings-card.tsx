@@ -33,8 +33,8 @@ export function StartupPageSettingsCard({
       <CardHeader>
         <CardTitle className="text-base">Open Kandev to</CardTitle>
         <CardDescription>
-          This applies when Kandev starts or you open its bare home page. Home and Back always open
-          the task overview.
+          This applies when Kandev starts or you open its bare home page. Home, Back, and workflow
+          navigation always open the task overview.
         </CardDescription>
       </CardHeader>
       <CardContent>

@@ -30,12 +30,15 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
     initialTaskId,
     initialSessionId,
   );
+  const [recentTasks, setRecentTasks] = useState<ReturnType<typeof getRecentTasks> | null>(null);
   const startupTaskId = resolveStartupTaskId({
     startupPage,
     workspaceId,
-    recentTasks: getRecentTasks(),
+    recentTasks: recentTasks ?? [],
     hasExplicitDestination,
   });
+  const isResolvingStartupTask =
+    startupPage === "last_task" && !hasExplicitDestination && recentTasks === null;
   const hasWorkflowFilter = Boolean(searchParams.get("workflowId"));
   const [showOnboarding, setShowOnboarding] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -51,6 +54,11 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
   };
 
   useEffect(() => {
+    setRecentTasks(getRecentTasks());
+  }, []);
+
+  useEffect(() => {
+    if (isResolvingStartupTask) return;
     if (startupTaskId) {
       router.replace(linkToTask(startupTaskId));
       return;
@@ -63,13 +71,14 @@ export function PageClient({ workspaceId, initialTaskId, initialSessionId }: Pag
     hasWorkflowFilter,
     initialSessionId,
     initialTaskId,
+    isResolvingStartupTask,
     preferredView,
     router,
     startupTaskId,
     workspaceId,
   ]);
 
-  if (startupTaskId) {
+  if (isResolvingStartupTask || startupTaskId) {
     return (
       <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
         <p role="status" aria-live="polite" className="text-sm text-muted-foreground">

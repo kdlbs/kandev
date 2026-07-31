@@ -32,7 +32,7 @@ describe("workspace delete navigation", () => {
     const next = resolvePostDeleteWorkspace(deleted.id, [deleted, kanban]);
 
     expect(next).toBe(kanban);
-    expect(postDeleteWorkspaceHref(next)).toBe("/?workspaceId=kanban-1");
+    expect(postDeleteWorkspaceHref(next)).toBe("/?home=overview&workspaceId=kanban-1");
   });
 
   it("routes to the new office workspace wizard when no workspaces remain", () => {

@@ -518,11 +518,13 @@ export function MobileMenuSheet({
       onOpenChange(false);
     } else if (value === "kanban") {
       onViewModeChange("kanban");
-      if (currentPage !== "kanban") router.push(linkToTaskOverview({ workspaceId }));
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: activeWorkflowId ?? undefined }));
       onOpenChange(false);
     } else if (value === "pipeline" && !isMobile) {
       onViewModeChange("pipeline");
-      if (currentPage !== "kanban") router.push(linkToTaskOverview({ workspaceId }));
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: activeWorkflowId ?? undefined }));
       onOpenChange(false);
     }
   };

@@ -1,5 +1,6 @@
 import { render, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { renderToString } from "react-dom/server";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const replaceMock = vi.hoisted(() => vi.fn());
 const kanbanWithPreviewMock = vi.hoisted(() => vi.fn(() => null));
@@ -7,6 +8,7 @@ const startupPageMock = vi.hoisted(() => ({ value: "task_overview" }));
 const recentTasksMock = vi.hoisted(() => ({
   entries: [] as Array<{ taskId: string; workspaceId: string }>,
 }));
+const getRecentTasksMock = vi.hoisted(() => vi.fn());
 const searchMock = vi.hoisted(() => ({ value: "" }));
 
 vi.mock("@/components/kanban-with-preview", () => ({
@@ -27,7 +29,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({ userSettings: { startupPage: startupPageMock.value } }),
 }));
 vi.mock("@/lib/recent-tasks", () => ({
-  getRecentTasks: () => recentTasksMock.entries,
+  getRecentTasks: getRecentTasksMock,
   findMostRecentTaskForWorkspace: (
     entries: Array<{ taskId: string; workspaceId: string }>,
     workspaceId?: string,
@@ -36,9 +38,14 @@ vi.mock("@/lib/recent-tasks", () => ({
 
 import { PageClient } from "./page-client";
 
+beforeEach(() => {
+  getRecentTasksMock.mockImplementation(() => recentTasksMock.entries);
+});
+
 afterEach(() => {
   replaceMock.mockReset();
   kanbanWithPreviewMock.mockClear();
+  getRecentTasksMock.mockReset();
   startupPageMock.value = "task_overview";
   recentTasksMock.entries = [];
   searchMock.value = "";
@@ -82,6 +89,16 @@ describe("PageClient", () => {
       expect(replaceMock).toHaveBeenCalledWith("/t/last-task");
     });
     expect(kanbanWithPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("does not read browser recent tasks during server rendering", () => {
+    startupPageMock.value = "last_task";
+    recentTasksMock.entries = [{ taskId: "last-task", workspaceId: "workspace-1" }];
+
+    const markup = renderToString(<PageClient workspaceId="workspace-1" />);
+
+    expect(markup).toContain("Opening last task…");
+    expect(getRecentTasksMock).not.toHaveBeenCalled();
   });
 
   it("keeps an explicit overview entry from resuming the last task", async () => {

@@ -54,9 +54,9 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 			if err != nil {
 				t.Fatalf("scan settings: %v", err)
 			}
-			encoded, err := json.Marshal(settings)
+			encoded, err := marshalUserSettingsPayload(settings)
 			if err != nil {
-				t.Fatalf("marshal normalized settings: %v", err)
+				t.Fatalf("marshal settings payload: %v", err)
 			}
 			var payload map[string]any
 			if err := json.Unmarshal(encoded, &payload); err != nil {

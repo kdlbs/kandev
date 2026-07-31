@@ -68,6 +68,13 @@ function getHeaderTitle(currentPage: string): string {
   return currentPage === "tasks" ? "Tasks" : "Home";
 }
 
+function toHeaderHealthProps(health: ReturnType<typeof useSystemHealthIndicator>) {
+  return {
+    showHealthIndicator: health.hasIssues,
+    onOpenHealthDialog: health.openDialog,
+  };
+}
+
 // Integrations / Stats / Office / Improve Kandev / Settings / Release notes
 // have all moved to the unified AppSidebar (Fix 6). The kanban top bar now
 // focuses on task-creation, view-toggle, kanban display, and search.
@@ -300,9 +307,10 @@ function DesktopHeader({
   );
 }
 
-function useHeaderViewChange(
+function useHeaderView(
   currentPage: string,
   workspaceId: string | undefined,
+  workflowId: string | null,
   onViewModeChange: (mode: string) => void,
 ) {
   const router = useRouter();
@@ -312,10 +320,12 @@ function useHeaderViewChange(
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
     } else if (value === "kanban") {
       onViewModeChange("kanban");
-      if (currentPage !== "kanban") router.push(linkToTaskOverview({ workspaceId }));
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
     } else if (value === "pipeline") {
       onViewModeChange("pipeline");
-      if (currentPage !== "kanban") router.push(linkToTaskOverview({ workspaceId }));
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
     }
   };
 }
@@ -332,19 +342,17 @@ export function KanbanHeader({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } =
-    useKanbanDisplaySettings();
+  const workflowId = useAppStore((state) => state.workflows.activeId);
+  const display = useKanbanDisplaySettings();
+  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } = display;
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
-  const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
+  const handleViewChange = useHeaderView(currentPage, workspaceId, workflowId, onViewModeChange);
   const title = getHeaderTitle(currentPage);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
 
-  const healthProps = {
-    showHealthIndicator: healthIndicator.hasIssues,
-    onOpenHealthDialog: healthIndicator.openDialog,
-  };
+  const healthProps = toHeaderHealthProps(healthIndicator);
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
 
   const renderHeader = () => {

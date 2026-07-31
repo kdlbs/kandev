@@ -365,7 +365,12 @@ test.describe("Mobile kanban view", () => {
     const menuCard = testPage.getByTestId("mobile-home-menu-card");
     await menuCard.getByText("Kanban", { exact: true }).click();
 
-    await expect(testPage).toHaveURL(/\/$/);
+    await expect(testPage).toHaveURL(
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("home") === "overview" &&
+        url.searchParams.get("workspaceId") === seedData.workspaceId,
+    );
     await expect(testPage.getByTestId("mobile-kanban-layout")).toBeVisible();
     await expect
       .poll(async () => (await apiClient.getUserSettings()).settings.kanban_view_mode)
