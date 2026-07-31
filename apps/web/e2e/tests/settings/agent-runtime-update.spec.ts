@@ -133,6 +133,30 @@ test.describe("managed agent runtime updates", () => {
     });
   });
 
+  test("uses the job versions for a stale retry decision", async ({ testPage }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      postResponse: updateJob({
+        status: "failed",
+        current_version: "0.63.0",
+        target_version: "0.63.0",
+        error: "The package registry is unavailable",
+        finished_at: "2026-07-26T12:01:00.000Z",
+      }),
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).click();
+    const dialog = testPage.getByTestId(`agent-update-dialog-${runtime.agentName}`);
+    const retryUpdate = testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`);
+    await retryUpdate.click();
+
+    await expect(dialog.getByText("0.63.0", { exact: true })).toBeVisible();
+    await expect(dialog.getByText("Up to date", { exact: true })).toBeVisible();
+    await expect(retryUpdate).toHaveText("Retry update");
+    await expect(retryUpdate).toBeDisabled();
+    expect(runtime.postCount()).toBe(1);
+  });
+
   test("retries an update after its job fails", async ({ testPage }) => {
     const runtime = await installRuntimeUpdateFixture(testPage);
 

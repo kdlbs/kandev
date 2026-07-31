@@ -131,19 +131,25 @@ func (s *AgentUpdateJobStore) run(
 	defer cancel()
 	s.setStatus(job, dto.AgentUpdateJobStatusResolving)
 
-	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok {
-		s.mu.Lock()
-		job.CurrentVersion = caps.AgentVersion
-		s.mu.Unlock()
-	}
 	target, err := s.updater.ResolveTarget(ctx, spec.Package)
 	if err != nil {
 		s.finishFailed(job, ctx, fmt.Errorf("resolve target version: %w", err), ref)
 		return
 	}
+	currentVersion := ""
+	if caps, ok := s.updater.CurrentCapabilities(job.AgentName); ok {
+		currentVersion = caps.AgentVersion
+		s.mu.Lock()
+		job.CurrentVersion = currentVersion
+		s.mu.Unlock()
+	}
 	s.mu.Lock()
 	job.TargetVersion = target
 	s.mu.Unlock()
+	if currentVersion != "" && currentVersion == target {
+		s.finishAlreadyUpToDate(job, ref)
+		return
+	}
 
 	s.setStatus(job, dto.AgentUpdateJobStatusUpdating)
 	flusher := newUpdateOutputFlusher(s, job)
@@ -193,6 +199,18 @@ func (s *AgentUpdateJobStore) finishFailed(
 	job.Error = formatUpdateJobError(ctx, err)
 	// Release the shared claim while the local active entry is still present.
 	// That makes same-agent retries atomic from the perspective of Enqueue.
+	s.maintenance.release(job.AgentName, ref)
+	s.finishLocked(job)
+	snapshot := job.snapshot()
+	s.mu.Unlock()
+	s.broadcast(ws.ActionAgentUpdateFinished, snapshot)
+	s.scheduleEviction(job.ID)
+}
+
+func (s *AgentUpdateJobStore) finishAlreadyUpToDate(job *AgentUpdateJob, ref MaintenanceJobRef) {
+	s.mu.Lock()
+	job.Status = dto.AgentUpdateJobStatusSucceeded
+	_, _ = job.Output.Write([]byte("Runtime already up to date.\n"))
 	s.maintenance.release(job.AgentName, ref)
 	s.finishLocked(job)
 	snapshot := job.snapshot()

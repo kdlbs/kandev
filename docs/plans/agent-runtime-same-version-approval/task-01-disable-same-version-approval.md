@@ -18,6 +18,8 @@ spec: "../../specs/agents/runtime-updates.md"
 - Differing-version approval and failed-job retry remain enabled.
 - Desktop and mobile use the same predicate, and the public Agents guide
   explains the unavailable approval state.
+- A stale preview cannot invoke a package command after the backend resolves
+  that the runtime is already up to date.
 
 ## TDD sequence
 
@@ -29,15 +31,23 @@ spec: "../../specs/agents/runtime-updates.md"
 3. Run both runtime-update spec files to prove the new regression and existing
    enabled paths.
 4. Update and validate the public documentation.
+5. Revalidate the current runtime version in the backend before executing a
+   package command and cover the no-op job path with a Go unit test.
 
 ## Verification
 
+- From `apps/` in a fresh worktree, install dependencies:
+  `pnpm install --frozen-lockfile`
 - Desktop E2E:
-  `cd apps/web && pnpm e2e:run tests/settings/agent-runtime-update.spec.ts`
+  `pnpm --filter @kandev/web e2e:run --host tests/settings/agent-runtime-update.spec.ts`
 - Mobile E2E:
-  `cd apps/web && pnpm e2e:run tests/settings/mobile-agent-runtime-update.spec.ts -- --project=mobile-chrome`
+  `pnpm --filter @kandev/web e2e:run --host tests/settings/mobile-agent-runtime-update.spec.ts -- --project=mobile-chrome`
 - Frontend typecheck:
-  `cd apps/web && pnpm run typecheck`
+  `pnpm --filter @kandev/web run typecheck`
+- Frontend unit tests:
+  `pnpm --filter @kandev/web test -- --run lib/agent-runtime-update.test.ts`
+- Backend unit test:
+  `cd ../apps/backend && go test -run TestAgentUpdateJobSkipsCommandWhenRuntimeIsAlreadyUpToDate ./internal/agent/settings/controller`
 - Public docs:
   `node --test scripts/validate-public-docs.test.mjs && node scripts/validate-public-docs.mjs`
 
@@ -46,6 +56,10 @@ spec: "../../specs/agents/runtime-updates.md"
 - `apps/web/components/settings/agent-runtime-update-control.tsx`
 - `apps/web/e2e/tests/settings/agent-runtime-update.spec.ts`
 - `apps/web/e2e/tests/settings/mobile-agent-runtime-update.spec.ts`
+- `apps/web/lib/agent-runtime-update.ts`
+- `apps/web/lib/agent-runtime-update.test.ts`
+- `apps/backend/internal/agent/settings/controller/agent_update_job.go`
+- `apps/backend/internal/agent/settings/controller/agent_update_test.go`
 - `docs/public/agents-and-profiles.md`
 
 ## Dependencies

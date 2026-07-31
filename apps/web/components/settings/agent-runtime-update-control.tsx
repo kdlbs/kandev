@@ -20,6 +20,10 @@ import {
 } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  canApproveAgentRuntimeUpdate,
+  resolveRuntimeVersionPair,
+} from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import type { RuntimeUpdate } from "@/lib/types/http";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
@@ -48,6 +52,7 @@ function updatePhase(status: AgentUpdateJob["status"] | undefined): string | nul
 
 function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdateJob }) {
   if (!job) return null;
+  const { versionsMatch } = resolveRuntimeVersionPair(null, job);
   if (job.status === "succeeded" && job.refresh_error) {
     return (
       <p
@@ -66,7 +71,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
         role="status"
         data-testid={`agent-update-result-${agentName}`}
       >
-        Runtime updated successfully.
+        {versionsMatch ? "Runtime already up to date." : "Runtime updated successfully."}
       </p>
     );
   }
@@ -101,11 +106,7 @@ function RuntimeVersionSummary({
   preview: AgentUpdatePreview;
   job?: AgentUpdateJob;
 }) {
-  const currentVersion = job?.current_version || preview.current_version || "Unknown";
-  const targetVersion = job?.target_version || preview.target_version;
-  const versionsMatch = Boolean(
-    currentVersion && targetVersion && currentVersion === targetVersion,
-  );
+  const { currentVersion, targetVersion, versionsMatch } = resolveRuntimeVersionPair(preview, job);
 
   return (
     <div className="space-y-1">
@@ -226,33 +227,6 @@ type UpdateFooterProps = {
   mobile?: boolean;
 };
 
-function canApproveUpdate({
-  preview,
-  previewError,
-  loading,
-  updateInFlight,
-  starting,
-  installInFlight,
-}: {
-  preview: AgentUpdatePreview | null;
-  previewError: string | null;
-  loading: boolean;
-  updateInFlight: boolean;
-  starting: boolean;
-  installInFlight: boolean;
-}) {
-  const currentVersion = preview?.current_version;
-  const targetVersion = preview?.target_version;
-  return (
-    Boolean(currentVersion && targetVersion && currentVersion !== targetVersion) &&
-    !previewError &&
-    !loading &&
-    !updateInFlight &&
-    !starting &&
-    !installInFlight
-  );
-}
-
 function UpdateFooter({
   agentName,
   preview,
@@ -267,8 +241,9 @@ function UpdateFooter({
 }: UpdateFooterProps) {
   const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
   const canRetry = job?.status === "failed";
-  const canApprove = canApproveUpdate({
+  const canApprove = canApproveAgentRuntimeUpdate({
     preview,
+    job,
     previewError,
     loading,
     updateInFlight,

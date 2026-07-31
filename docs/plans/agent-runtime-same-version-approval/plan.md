@@ -72,8 +72,9 @@ upstream target differs from the reported current version.
   **File:** `docs/public/agents-and-profiles.md`.
   **How:** Run the public-doc validators.
 
-No new function or API contract is introduced; the changed existing predicate
-is exercised through the rendered shared action and the mocked update boundary.
+No new public function or API contract is introduced; the private version
+resolution helper and approval predicate are covered by focused unit tests and
+the rendered shared action is exercised through the mocked update boundary.
 
 ## E2E Tests
 
@@ -103,3 +104,10 @@ authorized.
 - The update icon remains available so operators can open a fresh read-only
   preview; this change disables only the confirmation action after equality is
   known.
+
+## Stale preview guard
+
+The backend resolves the target and then re-reads the current runtime version
+before invoking the package command. If the versions now match, it completes a
+successful no-op job with an explicit message and skips the update and refresh
+commands.
