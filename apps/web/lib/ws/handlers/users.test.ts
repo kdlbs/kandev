@@ -93,7 +93,7 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.mcpTaskAgentProfileDefault).toBe("current_task");
   });
 
-  it("applies archive confirmation preferences and defaults missing values to enabled", () => {
+  it("applies archive confirmation preferences and preserves them when omitted", () => {
     const store = makeStore();
 
     registerUsersHandlers(store)["user.settings.updated"]?.(
@@ -102,7 +102,7 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.confirmTaskArchive).toBe(false);
 
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
-    expect(store.getState().userSettings.confirmTaskArchive).toBe(true);
+    expect(store.getState().userSettings.confirmTaskArchive).toBe(false);
   });
 
   it("syncs transcript navigation preferences and uses the documented defaults", () => {
@@ -124,8 +124,29 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings).toMatchObject({
       showAnchoredPromptBar: false,
-      showScrollToLastPrompt: true,
+      showScrollToLastPrompt: false,
       showScrollToStart: false,
+      showTranscriptAutoScrollControl: false,
+    });
+  });
+});
+
+describe("user settings websocket partial updates", () => {
+  it("preserves normalized preferences omitted from a partial live update", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        unread_divider: true,
+        show_transcript_auto_scroll_control: true,
+      }),
+    );
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ preferred_shell: "zsh" }),
+    );
+
+    expect(store.getState().userSettings).toMatchObject({
+      unreadDivider: true,
       showTranscriptAutoScrollControl: true,
     });
   });
