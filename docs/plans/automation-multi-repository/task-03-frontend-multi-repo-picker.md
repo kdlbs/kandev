@@ -176,8 +176,8 @@ spec: "../../specs/office/automations-settings.md"
 
 ## Verification
 
-```
-(cd apps && pnpm --filter @kandev/web test -- automations/config-section.test.tsx automations/automation-payload.test.ts)
+```shell
+(cd apps && pnpm --filter @kandev/web test -- automations/config-section.test.tsx automations/automation-payload.test.ts automations/automation-repository-selection.test.ts)
 (cd apps/web && pnpm run typecheck)
 ```
 
