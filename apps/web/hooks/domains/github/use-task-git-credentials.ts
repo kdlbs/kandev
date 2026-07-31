@@ -11,7 +11,7 @@ export type TaskGitCredentialsState = {
   mode: TaskGitCredentialsMode;
   loading: boolean;
   error: boolean;
-  save: (mode: TaskGitCredentialsMode) => Promise<void>;
+  save: (mode: TaskGitCredentialsMode) => Promise<boolean>;
 };
 
 export function useTaskGitCredentials(workspaceId: string): TaskGitCredentialsState {
@@ -46,9 +46,10 @@ export function useTaskGitCredentials(workspaceId: string): TaskGitCredentialsSt
         workspace_id: workspaceId,
         task_git_credentials_mode: nextMode,
       });
-      if (activeWorkspaceId.current !== workspaceId) return;
+      if (activeWorkspaceId.current !== workspaceId) return false;
       setMode(updated.task_git_credentials_mode ?? "managed");
       setError(false);
+      return true;
     },
     [workspaceId],
   );

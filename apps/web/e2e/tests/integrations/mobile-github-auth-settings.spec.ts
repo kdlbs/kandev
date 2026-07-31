@@ -19,9 +19,13 @@ test.describe("Mobile GitHub authentication settings", () => {
     await expect(testPage.getByRole("heading", { name: "Workspace GitHub access" })).toBeVisible({
       timeout: 15_000,
     });
-    await expect(testPage.getByText("My GitHub identity", { exact: true })).toBeVisible();
-
     const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(testPage.getByText("My GitHub identity", { exact: true })).toHaveCount(0);
+    await expect(
+      automation.getByText("This account also powers My GitHub and user-triggered actions.", {
+        exact: true,
+      }),
+    ).toBeVisible();
     await automation.getByRole("button", { name: "Change connection" }).click();
     const githubSettings = new GitHubAuthSettingsPage(testPage);
     const connectionDialog = githubSettings.connectionSurface();

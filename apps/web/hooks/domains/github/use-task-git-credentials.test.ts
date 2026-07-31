@@ -90,12 +90,16 @@ describe("useTaskGitCredentials", () => {
     const { result } = renderHook(() => useTaskGitCredentials(WORKSPACE_A));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    await act(() => result.current.save("executor"));
+    let saved: boolean | undefined;
+    await act(async () => {
+      saved = await result.current.save("executor");
+    });
 
     expect(updateGitHubWorkspaceSettings).toHaveBeenCalledWith({
       workspace_id: WORKSPACE_A,
       task_git_credentials_mode: "executor",
     });
+    expect(saved).toBe(true);
     expect(result.current).toMatchObject({ mode: "executor", error: false });
   });
 
@@ -129,8 +133,12 @@ describe("useTaskGitCredentials", () => {
     await waitFor(() => expect(result.current.mode).toBe("executor"));
 
     pendingSave.resolve(workspaceSettings(WORKSPACE_A, "managed"));
-    await act(() => save);
+    let saved: boolean | undefined;
+    await act(async () => {
+      saved = await save;
+    });
 
+    expect(saved).toBe(false);
     expect(result.current.mode).toBe("executor");
   });
 });

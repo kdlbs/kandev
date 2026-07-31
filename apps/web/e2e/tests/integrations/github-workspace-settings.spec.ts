@@ -90,6 +90,8 @@ test.describe("GitHub workspace settings", () => {
     const identityHelp = automation.getByRole("button", {
       name: "Explain workspace GitHub identity",
     });
+    await expect(identityHelp).not.toHaveAttribute("aria-haspopup");
+    await expect(identityHelp).not.toHaveAttribute("aria-expanded");
     await identityHelp.hover();
     await expect(
       testPage.getByRole("tooltip", {
@@ -97,6 +99,8 @@ test.describe("GitHub workspace settings", () => {
       }),
     ).toBeVisible();
     const taskAccessHelp = automation.getByRole("button", { name: "Explain task Git access" });
+    await expect(taskAccessHelp).not.toHaveAttribute("aria-haspopup");
+    await expect(taskAccessHelp).not.toHaveAttribute("aria-expanded");
     await taskAccessHelp.hover();
     await expect(
       testPage.getByRole("tooltip", {

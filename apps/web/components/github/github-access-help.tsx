@@ -33,19 +33,18 @@ export function GitHubAccessHelp({
       variant="ghost"
       size="icon"
       className="h-11 w-11 shrink-0 cursor-pointer text-muted-foreground sm:h-6 sm:w-6"
-      aria-haspopup="dialog"
-      aria-expanded={open}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? open : undefined}
       aria-label={label}
     >
       <IconInfoCircle className="h-4 w-4" />
     </Button>
   );
-  const drawerTrigger = <DrawerTrigger asChild>{button}</DrawerTrigger>;
   const trigger = usesTouchDrawer ? (
-    drawerTrigger
+    <DrawerTrigger asChild>{button}</DrawerTrigger>
   ) : (
     <Tooltip>
-      <TooltipTrigger asChild>{drawerTrigger}</TooltipTrigger>
+      <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[320px] text-xs leading-relaxed">
         {content ?? description}
       </TooltipContent>

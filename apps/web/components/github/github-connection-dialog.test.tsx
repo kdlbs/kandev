@@ -105,12 +105,13 @@ const registration: GitHubAppRegistrationCatalogItem = {
 };
 
 function view(workspaceId = WORKSPACE_ID, currentTaskAccess = taskAccess) {
+  const onSaved = vi.fn();
   return render(
     <ToastProvider>
       <GitHubConnectionDialog
         status={{ ...status, workspace_id: workspaceId }}
         workspaceId={workspaceId}
-        onSaved={vi.fn()}
+        onSaved={onSaved}
         taskAccess={currentTaskAccess}
       />
     </ToastProvider>,
@@ -136,6 +137,19 @@ describe("GitHubConnectionDialog task access", () => {
 
     expect(dialog.getAttribute("data-state")).toBe("open");
     expect(executor.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("does not report a discarded task access save as successful", async () => {
+    const save = vi.fn().mockResolvedValue(false);
+    view(WORKSPACE_ID, { ...taskAccess, save });
+    fireEvent.click(screen.getByRole("button", { name: changeConnectionLabel }));
+    const dialog = await screen.findByTestId(DESKTOP_CONNECTION_TEST_ID);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save task access" }));
+
+    await waitFor(() => expect(save).toHaveBeenCalledWith("managed"));
+    expect(screen.queryByText("Task Git access saved")).toBeNull();
+    expect(dialog.getAttribute("data-state")).toBe("open");
   });
 });
 afterEach(() => cleanup());

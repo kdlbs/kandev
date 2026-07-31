@@ -24,6 +24,10 @@ test.describe("GitHub workspace settings on mobile", () => {
       name: "Explain workspace GitHub identity",
     });
     const taskAccessHelp = automation.getByRole("button", { name: "Explain task Git access" });
+    await expect(identityHelp).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(identityHelp).toHaveAttribute("aria-expanded", "false");
+    await expect(taskAccessHelp).toHaveAttribute("aria-haspopup", "dialog");
+    await expect(taskAccessHelp).toHaveAttribute("aria-expanded", "false");
     const [identityHelpBox, taskAccessHelpBox] = await Promise.all([
       identityHelp.boundingBox(),
       taskAccessHelp.boundingBox(),

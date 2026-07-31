@@ -65,7 +65,8 @@ export function GitHubTaskAccessForm({
   const save = async () => {
     setSaving(true);
     try {
-      await taskAccess.save(draft);
+      const saved = await taskAccess.save(draft);
+      if (!saved) return;
       toast({ description: "Task Git access saved", variant: "success" });
       onSaved();
     } catch {

@@ -68,6 +68,12 @@ test.describe("GitHub workspace authentication", () => {
       timeout: 15_000,
     });
     await expect(automation.getByText("GitHub CLI", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("My GitHub identity", { exact: true })).toHaveCount(0);
+    await expect(
+      automation.getByText("This account also powers My GitHub and user-triggered actions.", {
+        exact: true,
+      }),
+    ).toBeVisible();
     const accountsResponse = await apiClient.rawRequest(
       "GET",
       `/api/v1/github/auth/gh-cli/accounts?workspace_id=${encodeURIComponent(workspaceB.id)}`,
@@ -96,10 +102,6 @@ test.describe("GitHub workspace authentication", () => {
     await expect(
       workspaceBDialog.getByRole("combobox", { name: "GitHub CLI account" }),
     ).toContainText("bob-cli");
-    await expect(testPage.getByText("My GitHub identity", { exact: true })).toBeVisible();
-    await expect(
-      testPage.getByText(/same human account selected for workspace access/),
-    ).toBeVisible();
 
     await testPage.screenshot({
       path: testInfo.outputPath("github-workspace-isolation-desktop.png"),

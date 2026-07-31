@@ -34,8 +34,8 @@ spec: "../../specs/integrations/github-authentication.md"
 ```bash
 cd apps && pnpm --filter @kandev/web test -- --run components/github/github-connection-dialog.test.tsx
 cd apps/web && pnpm run typecheck
-cd apps/web && pnpm e2e:run tests/integrations/github-workspace-settings.spec.ts -- --project=chromium --grep "task Git credential policy"
-cd apps/web && pnpm e2e:run tests/integrations/mobile-github-workspace-settings.spec.ts -- --project=mobile-chrome --grep "task Git credential"
+cd apps/web && pnpm e2e:run tests/integrations/github-workspace-settings.spec.ts -- --project=chromium --grep "configures task Git access from the workspace connection dialog"
+cd apps/web && pnpm e2e:run tests/integrations/mobile-github-workspace-settings.spec.ts -- --project=mobile-chrome --grep "configures task Git access in the connection drawer"
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```
