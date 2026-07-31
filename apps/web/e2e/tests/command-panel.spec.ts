@@ -144,7 +144,8 @@ test.describe("Command Panel", () => {
       .toBe("ready");
 
     await testPage.goto(`/t/${task.id}`);
-    await expect(testPage.getByTestId("task-topbar")).toBeVisible();
+    const session = new SessionPage(testPage);
+    await session.showSessionContext();
 
     await openCommandPanel(testPage);
     const dialog = commandDialog(testPage);

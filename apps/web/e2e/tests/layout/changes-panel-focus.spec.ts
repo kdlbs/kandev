@@ -5,6 +5,7 @@ import { makeGitEnv } from "../../helpers/git-helper";
 import fs from "node:fs";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { waitForSessionDone } from "../../helpers/session";
 
 /** Minimal git helper for E2E tests - runs git commands in the test repository. */
 class GitHelper {
@@ -79,6 +80,11 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
       type StoreWindow = Window & {
         __KANDEV_E2E_STORE__?: {
           getState: () => {
+            setSessionCommits: (
+              sessionId: string,
+              commits: unknown[],
+              options?: { allowEmpty?: boolean },
+            ) => void;
             setGitStatus: (
               sessionId: string,
               status: {
@@ -100,6 +106,7 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
       };
       const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
       if (!store) throw new Error("E2E store bridge missing");
+      store.getState().setSessionCommits(sid, [], { allowEmpty: true });
       const fileMap = Object.fromEntries(
         files.map((path): [string, FileInfo] => [
           path,
@@ -358,6 +365,7 @@ test.describe("Changes panel focus behavior", () => {
       },
     );
     if (!taskB.session_id) throw new Error("Task B did not start a session");
+    await waitForSessionDone(apiClient, taskB.id, taskB.session_id, "Task B did not settle");
 
     await testPage.goto(`/t/${taskA.id}`);
     const session = new SessionPage(testPage);

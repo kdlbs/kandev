@@ -168,6 +168,7 @@ test.describe("File editor auto-update on file change", () => {
     // focus transition instead of testing editor refresh behavior.
     await openChangesTab(testPage);
     await openFileDiff(testPage, "diff_update_test.txt");
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
     const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
     await expect(editFile).toBeVisible();
     await editFile.click();

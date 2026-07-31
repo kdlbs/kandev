@@ -209,8 +209,10 @@ test.describe("Mobile sidebar task actions", () => {
       actions.boundingBox(),
     ]);
     if (!diffBox || !actionBox) throw new Error("mobile task controls have no layout box");
-    expect(actionBox.width).toBeGreaterThanOrEqual(44);
-    expect(actionBox.height).toBeGreaterThanOrEqual(44);
+    // Chromium can report a 44px transformed box as 43.999969 CSS pixels.
+    // Compare physical CSS-pixel intent, not floating-point layout residue.
+    expect(Math.round(actionBox.width)).toBeGreaterThanOrEqual(44);
+    expect(Math.round(actionBox.height)).toBeGreaterThanOrEqual(44);
     const overlapWidth =
       Math.min(diffBox.x + diffBox.width, actionBox.x + actionBox.width) -
       Math.max(diffBox.x, actionBox.x);

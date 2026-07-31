@@ -1,4 +1,4 @@
-import { type Page, test as base } from "@playwright/test";
+import { expect, type Page, test as base } from "@playwright/test";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -97,7 +97,6 @@ export const sshTest = backendFixture.extend<
   ],
 
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
-    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
@@ -121,6 +120,26 @@ export const sshTest = backendFixture.extend<
     await use(page);
     await context.close();
   },
+});
+
+async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
+  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  await expect
+    .poll(async () => (await apiClient.listSSHSessions(seedData.sshExecutorId)).length, {
+      message: "previous SSH runtime rows should be torn down before the next test",
+      timeout: 60_000,
+    })
+    .toBe(0);
+}
+
+// Run for API-only tests as well as browser tests. Playwright fixtures are
+// lazy, so reset inside `testPage` did not isolate sessions-endpoint specs.
+sshTest.beforeEach(async ({ apiClient, seedData }) => {
+  await resetSSHRuntime(apiClient, seedData);
+});
+
+sshTest.afterEach(async ({ apiClient, seedData }) => {
+  await resetSSHRuntime(apiClient, seedData);
 });
 
 async function seedSSHWorkspace(
