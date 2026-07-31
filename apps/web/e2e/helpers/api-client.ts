@@ -843,6 +843,7 @@ export class ApiClient {
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
+    unread_divider?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;

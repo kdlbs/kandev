@@ -249,20 +249,20 @@ describe("mapUserSettingsResponse", () => {
 });
 
 describe("mapUserSettingsResponse unread divider", () => {
-  it("defaults the preference to enabled and preserves an explicit disable", () => {
+  it("defaults the preference to disabled and preserves explicit enablement", () => {
     const fallback = mapUserSettingsResponse(null) as { unreadDivider?: boolean };
     const disabled = mapUserSettingsResponse({
       settings: {
         user_id: DEFAULT_USER_ID,
         workspace_id: toWorkspaceId(""),
         repository_ids: [],
-        unread_divider: false,
+        unread_divider: true,
         updated_at: UPDATED_AT,
       } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
     }) as { unreadDivider?: boolean };
 
-    expect(fallback.unreadDivider).toBe(true);
-    expect(disabled.unreadDivider).toBe(false);
+    expect(fallback.unreadDivider).toBe(false);
+    expect(disabled.unreadDivider).toBe(true);
   });
 });
 
@@ -274,7 +274,7 @@ describe("transcript navigation settings", () => {
       showAnchoredPromptBar: false,
       showScrollToLastPrompt: true,
       showScrollToStart: false,
-      showTranscriptAutoScrollControl: true,
+      showTranscriptAutoScrollControl: false,
     });
   });
 });

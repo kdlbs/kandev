@@ -7,11 +7,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import { useEnsureUserSettings } from "@/hooks/use-ensure-user-settings";
 import { repositoryId, type Repository } from "@/lib/types/http";
-import { DEFAULT_TASKS_LIST_GROUP, DEFAULT_TASKS_LIST_SORT } from "@/lib/tasks/tasks-list-options";
-import {
-  DEFAULT_VOICE_MODE_STATE,
-  type UserSettingsState,
-} from "@/lib/state/slices/settings/types";
+import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 
 type DisplaySettings = UserSettingsState;
 
@@ -32,127 +28,15 @@ type CommitPayload = {
   kanbanViewMode?: string | null;
 };
 
-function carryForwardTerminalSettings(current: DisplaySettings) {
-  return {
-    terminalLinkBehavior: (current.terminalLinkBehavior ?? "new_tab") as
-      | "new_tab"
-      | "browser_panel",
-    terminalFontFamily: current.terminalFontFamily ?? null,
-    terminalFontSize: current.terminalFontSize ?? null,
-  };
-}
-
-function carryForwardLspSettings(current: DisplaySettings) {
-  return {
-    lspAutoStartLanguages: current.lspAutoStartLanguages ?? [],
-    lspAutoInstallLanguages: current.lspAutoInstallLanguages ?? [],
-    lspServerConfigs: current.lspServerConfigs ?? {},
-  };
-}
-
-function carryForwardUtilitySettings(current: DisplaySettings) {
-  return {
-    defaultUtilityAgentId: current.defaultUtilityAgentId ?? null,
-    keyboardShortcuts: current.keyboardShortcuts ?? {},
-  };
-}
-
-function carryForwardTranscriptNavigationSettings(current: DisplaySettings) {
-  return {
-    showAnchoredPromptBar: current.showAnchoredPromptBar ?? false,
-    showScrollToLastPrompt: current.showScrollToLastPrompt ?? true,
-    showScrollToStart: current.showScrollToStart ?? false,
-    showTranscriptAutoScrollControl: current.showTranscriptAutoScrollControl ?? true,
-  };
-}
-
-function carryForwardCoreSettings(current: DisplaySettings) {
-  return {
-    shellOptions: current.shellOptions ?? [],
-    defaultEditorId: current.defaultEditorId ?? null,
-    chatSubmitKey: current.chatSubmitKey ?? "cmd_enter",
-    ...carryForwardTranscriptNavigationSettings(current),
-    reviewAutoMarkOnScroll: current.reviewAutoMarkOnScroll ?? true,
-    showReleaseNotification: current.showReleaseNotification ?? true,
-    releaseNotesLastSeenVersion: current.releaseNotesLastSeenVersion ?? null,
-    savedLayouts: current.savedLayouts ?? [],
-    ...carryForwardUtilitySettings(current),
-    tasksListSort: current.tasksListSort ?? DEFAULT_TASKS_LIST_SORT,
-    tasksListGroup: current.tasksListGroup ?? DEFAULT_TASKS_LIST_GROUP,
-    changesPanelLayout: current.changesPanelLayout ?? "tree",
-    ...carryForwardAppStatusSettings(current),
-    voiceMode: current.voiceMode ?? { ...DEFAULT_VOICE_MODE_STATE },
-  };
-}
-
-function carryForwardAppStatusSettings(current: DisplaySettings) {
-  return {
-    systemMetricsDisplay: current.systemMetricsDisplay ?? {
-      showInTopbar: false,
-      simplified: false,
-    },
-    appStatusBarOrder: current.appStatusBarOrder ?? { leftItemIds: [], rightItemIds: [] },
-  };
-}
-
-function carryForwardTaskActionSettings(current: DisplaySettings) {
-  return {
-    confirmTaskArchive: current.confirmTaskArchive ?? true,
-    unreadDivider: current.unreadDivider ?? true,
-    mcpTaskAgentProfileDefault: current.mcpTaskAgentProfileDefault ?? "current_task",
-  };
-}
-
-function carryForwardSidebarSettings(current: DisplaySettings) {
-  return {
-    sidebarViews: current.sidebarViews ?? [],
-    sidebarActiveViewId: current.sidebarActiveViewId ?? null,
-    sidebarDraft: current.sidebarDraft ?? null,
-    sidebarTaskPrefs: current.sidebarTaskPrefs ?? {
-      pinnedTaskIds: [],
-      orderedTaskIds: [],
-      subtaskOrderByParentId: {},
-    },
-  };
-}
-
-function carryForwardSyncedLocalSettings(current: DisplaySettings) {
-  return {
-    taskCreateLastUsed: current.taskCreateLastUsed ?? {
-      repositoryId: null,
-      branch: null,
-      agentProfileId: null,
-      executorProfileId: null,
-    },
-    jiraSavedViews: current.jiraSavedViews,
-    jiraTaskPresets: current.jiraTaskPresets,
-    githubSavedPresets: current.githubSavedPresets,
-    githubDefaultQueryPresets: current.githubDefaultQueryPresets,
-    gitlabSavedPresets: current.gitlabSavedPresets,
-  };
-}
-
-function carryForwardSettings(current: DisplaySettings) {
-  return {
-    ...carryForwardCoreSettings(current),
-    ...carryForwardTaskActionSettings(current),
-    ...carryForwardSidebarSettings(current),
-    ...carryForwardSyncedLocalSettings(current),
-    ...carryForwardLspSettings(current),
-    ...carryForwardTerminalSettings(current),
-  };
-}
-
 function buildNormalizedSettings(next: CommitPayload, current: DisplaySettings): DisplaySettings {
   return {
+    ...current,
     workspaceId: next.workspaceId,
     workflowId: next.workflowId,
-    kanbanViewMode: current.kanbanViewMode ?? null,
     repositoryIds: Array.from(new Set(next.repositoryIds)).sort(),
-    preferredShell: next.preferredShell ?? current.preferredShell ?? null,
+    preferredShell: next.preferredShell ?? current.preferredShell,
     enablePreviewOnClick: next.enablePreviewOnClick ?? current.enablePreviewOnClick,
-    tasksListShowDetails: next.tasksListShowDetails ?? current.tasksListShowDetails ?? false,
-    ...carryForwardSettings(current),
+    tasksListShowDetails: next.tasksListShowDetails ?? current.tasksListShowDetails,
     loaded: true,
   };
 }
