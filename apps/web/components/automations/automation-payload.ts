@@ -1,7 +1,15 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
-import type { ExecutionMode, TriggerType } from "@/lib/types/automation";
+import type {
+  CreateAutomationRequest,
+  ExecutionMode,
+  TriggerType,
+  UpdateAutomationRequest,
+} from "@/lib/types/automation";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
-import type { RepositorySelection } from "./automation-repository-selection";
+import {
+  normalizeRepositorySelections,
+  type RepositorySelection,
+} from "./automation-repository-selection";
 
 // Shared form state + pending trigger types used by the editor and its
 // save handler. Lifted out of automation-editor.tsx so the editor stays
@@ -64,6 +72,24 @@ export async function resolveRepositoryIds(
   return { ids: resolvedIds.filter((id) => id !== ""), selections: promoted };
 }
 
+// resolveNormalizedRepositoryIds is the save-boundary entry point used by
+// useSaveHandler (automation-editor.tsx). It enforces the single-repository
+// invariant (see normalizeRepositorySelections) before resolving, so a form
+// that had 2+ repos selected under a compatible executor, then switched to
+// an incompatible executor or a github_pr trigger without the picker being
+// touched again, can't smuggle every stale entry into the saved
+// repository_ids — only the first survives. Kept as a named function (not
+// inlined at the call site) deliberately: it's the test seam this module's
+// unit tests exercise directly, without needing a full AutomationEditor
+// render harness.
+export async function resolveNormalizedRepositoryIds(
+  workspaceId: string,
+  selections: RepositorySelection[],
+  mode: { supportsMultiRepo: boolean; isPRTrigger: boolean },
+): Promise<ResolvedRepositories> {
+  return resolveRepositoryIds(workspaceId, normalizeRepositorySelections(selections, mode));
+}
+
 async function resolveOneRepositoryId(
   workspaceId: string,
   selection: RepositorySelection,
@@ -96,7 +122,7 @@ export function buildCreatePayload(
   form: FormState,
   repositoryIds: string[],
   pending: PendingTrigger[],
-) {
+): CreateAutomationRequest {
   return {
     workspace_id: workspaceId,
     name: form.name || "New Automation",
@@ -114,7 +140,10 @@ export function buildCreatePayload(
   };
 }
 
-export function buildUpdatePayload(form: FormState, repositoryIds: string[]) {
+export function buildUpdatePayload(
+  form: FormState,
+  repositoryIds: string[],
+): UpdateAutomationRequest {
   return {
     name: form.name,
     description: form.description,

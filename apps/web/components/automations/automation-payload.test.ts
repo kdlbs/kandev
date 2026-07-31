@@ -6,7 +6,12 @@ vi.mock("@/app/actions/workspaces", () => ({
   createRepositoryAction: (...args: unknown[]) => createRepositoryAction(...args),
 }));
 
-import { buildCreatePayload, buildUpdatePayload, resolveRepositoryIds } from "./automation-payload";
+import {
+  buildCreatePayload,
+  buildUpdatePayload,
+  resolveNormalizedRepositoryIds,
+  resolveRepositoryIds,
+} from "./automation-payload";
 import type { FormState } from "./automation-payload";
 
 function baseForm(overrides: Partial<FormState> = {}): FormState {
@@ -64,6 +69,63 @@ describe("resolveRepositoryIds", () => {
 
     expect(result.selections).toEqual([{ kind: "registered", id: "repo-a" }]);
     expect(createRepositoryAction).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveNormalizedRepositoryIds", () => {
+  afterEach(() => {
+    createRepositoryAction.mockReset();
+  });
+
+  const twoRegistered = [
+    { kind: "registered" as const, id: "repo-a" },
+    { kind: "registered" as const, id: "repo-b" },
+  ];
+
+  it("resolves every selection when the executor supports multi-repo and it's not a PR trigger", async () => {
+    const result = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
+      supportsMultiRepo: true,
+      isPRTrigger: false,
+    });
+    expect(result.ids).toEqual(["repo-a", "repo-b"]);
+  });
+
+  it("truncates a stale multi-repository selection to one ID when the executor no longer supports multi-repo", async () => {
+    // Regression: the picker only *renders* repositorySelections[0] once the
+    // executor stops supporting multi-repo, it doesn't truncate the
+    // underlying form state — a save that skipped normalization would send
+    // both stale repository_ids here.
+    const result = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
+      supportsMultiRepo: false,
+      isPRTrigger: false,
+    });
+    expect(result.ids).toEqual(["repo-a"]);
+  });
+
+  it("truncates a stale multi-repository selection to one ID for a github_pr trigger", async () => {
+    const result = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
+      supportsMultiRepo: true,
+      isPRTrigger: true,
+    });
+    expect(result.ids).toEqual(["repo-a"]);
+  });
+
+  it("feeds the truncated ids straight into buildUpdatePayload", async () => {
+    const { ids } = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
+      supportsMultiRepo: false,
+      isPRTrigger: false,
+    });
+    const payload = buildUpdatePayload(baseForm(), ids);
+    expect(payload.repository_ids).toEqual(["repo-a"]);
+  });
+
+  it("feeds the truncated ids straight into buildCreatePayload", async () => {
+    const { ids } = await resolveNormalizedRepositoryIds("ws-1", twoRegistered, {
+      supportsMultiRepo: false,
+      isPRTrigger: false,
+    });
+    const payload = buildCreatePayload("ws-1", baseForm(), ids, []);
+    expect(payload.repository_ids).toEqual(["repo-a"]);
   });
 });
 

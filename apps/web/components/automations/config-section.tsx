@@ -17,6 +17,7 @@ import { AutomationRepositoryRows } from "./automation-repository-rows";
 import {
   buildRepositoryItems,
   pickSelectionFromOptionId,
+  resolveExecutorType,
   selectionToOptionId,
   type RepositorySelection,
 } from "./automation-repository-selection";
@@ -164,9 +165,8 @@ function useConfigSectionComputed({
         executor_name: p.executor_name ?? executor.name,
       })),
     );
-  const selectedExecutorProfile = allExecutorProfiles.find((p) => p.id === executorProfileId);
   const supportsMultiRepo =
-    getMultiRepoExecutorDisabledReason(selectedExecutorProfile?.executor_type) === null;
+    getMultiRepoExecutorDisabledReason(resolveExecutorType(executors, executorProfileId)) === null;
   const executorItems = allExecutorProfiles.map((p) => {
     const disabledReason = getExecutorItemDisabledReason(p.executor_type, repositorySelections);
     return {

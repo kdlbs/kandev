@@ -108,14 +108,30 @@ spec: "../../specs/office/automations-settings.md"
    - `resolveRepositoryId` → `resolveRepositoryIds(workspaceId, selections:
      RepositorySelection[]): Promise<string[]>` via `Promise.all` over the
      existing per-selection resolution logic.
+   - New `normalizeRepositorySelections(selections, {supportsMultiRepo,
+     isPRTrigger})` (in `automation-repository-selection.ts`): truncates to
+     at most one entry when the picker is in single-repository mode. The
+     picker only *renders* `repositorySelections[0]` in that mode — it
+     doesn't truncate the underlying array — so a form that had 2+ repos
+     selected under a compatible executor, then switched to an incompatible
+     executor or a `github_pr` trigger without the picker being touched
+     again, would otherwise still save every stale entry.
+   - New `resolveNormalizedRepositoryIds(workspaceId, selections, mode)`:
+     the save-boundary entry point — normalizes, then resolves. Replaces
+     the direct `resolveRepositoryIds` call in `useSaveHandler`.
    - `buildCreatePayload`/`buildUpdatePayload`: `repository_id: repositoryId`
      → `repository_ids: repositoryIds`.
 5. **`automation-editor.tsx`**:
    - `defaultForm.repositorySelections: []`.
    - `formFromAutomation`: `a.repository_ids.map(id => ({kind:"registered" as
      const, id}))`.
-   - `useSaveHandler`: switch to `resolveRepositoryIds`; promote each
-     discovered selection independently by mapping
+   - New `useSupportsMultiRepo(executorProfileId)` hook mirrors
+     `ConfigSection`'s own `getMultiRepoExecutorDisabledReason` check via the
+     shared `resolveExecutorType` helper, so the save handler enforces the
+     same capability the picker rendered.
+   - `useSaveHandler`: switch to `resolveNormalizedRepositoryIds(workspaceId,
+     form.repositorySelections, {supportsMultiRepo, isPRTrigger})`; promote
+     each discovered selection independently by mapping
      `form.repositorySelections` against the resolved `repositoryIds` array
      by index (only rows with `kind === "discovered"` get promoted to
      `{kind:"registered", id: repositoryIds[i]}`).
@@ -148,12 +164,21 @@ spec: "../../specs/office/automations-settings.md"
   checks trigger type first and resolves from the PR's own trigger data
   unconditionally for `github_pr`, never reading `RepositoryIDs` (task 02;
   see `TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs`).
+- Editing a form with 2+ repository selections, then switching to a
+  single-repo-only executor or a `github_pr` trigger without touching the
+  picker again, and saving: the emitted `repository_ids` payload has at
+  most one entry on both create and update, even though the underlying
+  `repositorySelections` state still held every stale entry. Covered by
+  `resolveNormalizedRepositoryIds` unit tests in `automation-payload.test.ts`
+  (truncation for an incompatible executor, for a `github_pr` trigger, and
+  feeding the truncated ids into both `buildCreatePayload` and
+  `buildUpdatePayload`).
 
 ## Verification
 
 ```
-cd apps && pnpm --filter @kandev/web test -- automations/config-section.test.tsx automations/automation-payload.test.ts
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm --filter @kandev/web test -- automations/config-section.test.tsx automations/automation-payload.test.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 ## Files likely touched
