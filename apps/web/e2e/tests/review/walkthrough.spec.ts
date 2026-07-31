@@ -83,6 +83,12 @@ async function expectContainedInPanel(panel: Locator, action: Locator): Promise<
   if (!panelBox || !actionBox) throw new Error("Changes toolbar geometry unavailable");
   expect(actionBox.x).toBeGreaterThanOrEqual(panelBox.x);
   expect(actionBox.x + actionBox.width).toBeLessThanOrEqual(panelBox.x + panelBox.width + 1);
+  const actionCenterHitsButton = await action.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return hit === element || !!hit?.closest('[data-testid="changes-request-walkthrough"]');
+  });
+  expect(actionCenterHitsButton).toBe(true);
 }
 
 test.describe("Code walkthrough", () => {
@@ -121,6 +127,15 @@ test.describe("Code walkthrough", () => {
     await prCapture.screenshot("desktop-changes-walkthrough", {
       caption: "Walkthrough stays fully visible in the Changes toolbar",
     });
+
+    const minimumWidth = await resizeColumnViaSplitview(testPage, "right", 180);
+    expect(minimumWidth).toBe(180);
+    await expect
+      .poll(async () => Math.round((await session.changes.boundingBox())?.width ?? 0))
+      .toBe(180);
+    await expect(label).toBeHidden();
+    await expect(request).toBeVisible();
+    await expectContainedInPanel(session.changes, request);
   });
 
   test("Changes-panel request asks the agent to walk through current changes", async ({
