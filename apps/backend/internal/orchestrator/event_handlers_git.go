@@ -337,6 +337,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 			zap.String("task_id", data.TaskID))
 		return
 	}
+	generation := s.captureContextWindowGeneration(data.TaskSessionID)
 
 	size, remaining, efficiency, source, ok := s.resolveContextWindowValues(ctx, data)
 	if !ok {
@@ -353,13 +354,23 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 
 	// Persist to database asynchronously using json_set to atomically set one
 	// key without clobbering other metadata keys (plan_mode, prepare_result).
+	// The generation check prevents a pre-reset update from resurrecting stale
+	// usage after resetAgentContext clears the metadata.
 	go func() {
-		if err := s.repo.SetSessionMetadataKey(context.Background(), data.TaskSessionID, "context_window", contextWindowData); err != nil {
+		persisted, err := s.persistContextWindowUpdate(
+			context.Background(), data.TaskSessionID, generation, contextWindowData,
+		)
+		switch {
+		case err != nil:
 			s.logger.Error("failed to update session with context window",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.TaskSessionID),
 				zap.Error(err))
-		} else {
+		case !persisted:
+			s.logger.Debug("discarded stale context window update after reset",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.TaskSessionID))
+		default:
 			s.logger.Debug("persisted context window to session",
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.TaskSessionID))
@@ -376,7 +387,7 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 				"task_id":    data.TaskID,
 				"session_id": data.TaskSessionID,
 				"metadata": map[string]interface{}{
-					"context_window": contextWindowData,
+					contextWindowMetadataKey: contextWindowData,
 				},
 			},
 		))

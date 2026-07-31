@@ -2080,10 +2080,12 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
 	}
-	if updateErr := s.repo.SetSessionMetadataKey(ctx, sessionID, "context_window", nil); updateErr != nil {
+	if updateErr := s.clearContextWindowForReset(ctx, sessionID); updateErr != nil {
 		s.logger.Warn("failed to clear context window from session metadata",
 			zap.String("session_id", sessionID),
 			zap.Error(updateErr))
+	} else {
+		clearInMemoryContextWindow(session)
 	}
 	return true
 }
