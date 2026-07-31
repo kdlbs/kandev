@@ -444,6 +444,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	return json.Marshal(map[string]interface{}{
 		"workspace_id":                        settings.WorkspaceID,
 		"kanban_view_mode":                    settings.KanbanViewMode,
+		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
 		"workflow_filter_id":                  settings.WorkflowFilterID,
 		"repository_ids":                      settings.RepositoryIDs,
 		"tasks_list_sort":                     models.NormalizeTasksListSort(settings.TasksListSort),
@@ -588,6 +589,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.KeyboardShortcuts = map[string]interface{}{}
 		settings.TerminalLinkBehavior = "new_tab"
 		settings.ChangesPanelLayout = "tree"
+		settings.StartupPage = models.StartupPageTaskOverview
 		settings.SidebarViews = []models.SidebarView{}
 		settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{})
 		settings.AppStatusBarOrder = normalizeAppStatusBarOrder(models.AppStatusBarOrder{})
@@ -597,6 +599,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	var payload struct {
 		WorkspaceID                     string                              `json:"workspace_id"`
 		KanbanViewMode                  string                              `json:"kanban_view_mode"`
+		StartupPage                     string                              `json:"startup_page"`
 		WorkflowFilterID                string                              `json:"workflow_filter_id"`
 		RepositoryIDs                   []string                            `json:"repository_ids"`
 		TasksListSort                   string                              `json:"tasks_list_sort"`
@@ -646,6 +649,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	settings.WorkspaceID = payload.WorkspaceID
 	settings.KanbanViewMode = payload.KanbanViewMode
+	settings.StartupPage = models.NormalizeStartupPage(payload.StartupPage)
 	settings.WorkflowFilterID = payload.WorkflowFilterID
 	settings.RepositoryIDs = payload.RepositoryIDs
 	settings.TasksListSort = models.NormalizeTasksListSort(payload.TasksListSort)

@@ -2,9 +2,15 @@ import { render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const replaceMock = vi.hoisted(() => vi.fn());
+const kanbanWithPreviewMock = vi.hoisted(() => vi.fn(() => null));
+const startupPageMock = vi.hoisted(() => ({ value: "task_overview" }));
+const recentTasksMock = vi.hoisted(() => ({
+  entries: [] as Array<{ taskId: string; workspaceId: string }>,
+}));
+const searchMock = vi.hoisted(() => ({ value: "" }));
 
 vi.mock("@/components/kanban-with-preview", () => ({
-  KanbanWithPreview: () => null,
+  KanbanWithPreview: kanbanWithPreviewMock,
 }));
 vi.mock("@/components/onboarding-dialog", () => ({
   OnboardingDialog: () => null,
@@ -14,12 +20,28 @@ vi.mock("@/hooks/use-task-listing-view", () => ({
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ replace: replaceMock }),
+  useSearchParams: () => new URLSearchParams(searchMock.value),
+}));
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: { userSettings: { startupPage: string } }) => unknown) =>
+    selector({ userSettings: { startupPage: startupPageMock.value } }),
+}));
+vi.mock("@/lib/recent-tasks", () => ({
+  getRecentTasks: () => recentTasksMock.entries,
+  findMostRecentTaskForWorkspace: (
+    entries: Array<{ taskId: string; workspaceId: string }>,
+    workspaceId?: string,
+  ) => entries.find((entry) => entry.workspaceId === workspaceId) ?? null,
 }));
 
 import { PageClient } from "./page-client";
 
 afterEach(() => {
   replaceMock.mockReset();
+  kanbanWithPreviewMock.mockClear();
+  startupPageMock.value = "task_overview";
+  recentTasksMock.entries = [];
+  searchMock.value = "";
 });
 
 describe("PageClient", () => {
@@ -45,5 +67,33 @@ describe("PageClient", () => {
     await waitFor(() => {
       expect(replaceMock).not.toHaveBeenCalled();
     });
+  });
+
+  it("replaces bare startup with the newest recent task in the active workspace", async () => {
+    startupPageMock.value = "last_task";
+    recentTasksMock.entries = [
+      { taskId: "foreign-task", workspaceId: "workspace-2" },
+      { taskId: "last-task", workspaceId: "workspace-1" },
+    ];
+
+    render(<PageClient workspaceId="workspace-1" />);
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith("/t/last-task");
+    });
+    expect(kanbanWithPreviewMock).not.toHaveBeenCalled();
+  });
+
+  it("keeps an explicit overview entry from resuming the last task", async () => {
+    startupPageMock.value = "last_task";
+    recentTasksMock.entries = [{ taskId: "last-task", workspaceId: "workspace-1" }];
+    searchMock.value = "home=overview";
+
+    render(<PageClient workspaceId="workspace-1" />);
+
+    await waitFor(() => {
+      expect(replaceMock).toHaveBeenCalledWith("/tasks?workspace=workspace-1");
+    });
+    expect(replaceMock).not.toHaveBeenCalledWith("/t/last-task");
   });
 });

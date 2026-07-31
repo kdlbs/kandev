@@ -3,7 +3,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { KanbanState } from "@/lib/state/slices";
 import type { TaskSession } from "@/lib/types/http";
-import { replaceTaskUrl } from "@/lib/links";
+import { linkToTaskOverview, replaceTaskUrl } from "@/lib/links";
 import { listTaskSessions } from "@/lib/api";
 import { performLayoutSwitch } from "@/lib/state/dockview-store";
 import { getRecentTasks } from "@/lib/recent-tasks";
@@ -240,7 +240,7 @@ export function useTaskRemoval({ store, useLayoutSwitch = false }: TaskRemovalOp
         return { switchedTaskId: nextTask.id };
       }
 
-      window.location.href = "/";
+      window.location.href = linkToTaskOverview();
       return { switchedTaskId: null };
     },
     [store, useLayoutSwitch, loadTaskSessionsForTask],

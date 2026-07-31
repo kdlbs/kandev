@@ -3,6 +3,7 @@ import {
   buildCoreFields,
   mapUserSettingsResponse,
   parseChangesPanelLayout,
+  parseStartupPage,
   parseSystemMetricsDisplay,
   parseVoiceMode,
 } from "./user-settings";
@@ -10,6 +11,30 @@ import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
+
+describe("startup page user settings", () => {
+  it("normalizes startup page preferences", () => {
+    expect(parseStartupPage("last_task")).toBe("last_task");
+    expect(parseStartupPage(undefined)).toBe("task_overview");
+    expect(parseStartupPage("future_value")).toBe("task_overview");
+  });
+
+  it("defaults startup page and maps the last-task choice", () => {
+    expect(mapUserSettingsResponse(null).startupPage).toBe("task_overview");
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        startup_page: "last_task",
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.startupPage).toBe("last_task");
+  });
+});
 
 describe("buildCoreFields", () => {
   it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {

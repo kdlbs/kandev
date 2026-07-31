@@ -245,7 +245,7 @@ export function AppSidebarWorkspacePicker({
       resetKanbanWorkspaceContext();
       setActiveWorkspace(id);
       if (type === "kanban") {
-        router.push(`/?workspaceId=${id}`);
+        router.push(workspaceHomeHref(workspace));
       } else if (officeEnabled) {
         router.push(`/office?workspaceId=${id}`);
       }

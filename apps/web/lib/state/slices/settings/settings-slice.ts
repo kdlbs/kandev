@@ -25,6 +25,7 @@ export const defaultSettingsState: SettingsSliceState = {
   userSettings: {
     workspaceId: null,
     kanbanViewMode: null,
+    startupPage: "task_overview",
     workflowId: null,
     repositoryIds: [],
     tasksListSort: DEFAULT_TASKS_LIST_SORT,

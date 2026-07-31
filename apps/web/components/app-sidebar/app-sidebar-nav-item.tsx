@@ -70,9 +70,10 @@ function renderTrigger({ onClick, disabled, baseClass, label, href, inner, testI
 
 function isPathActive(pathname: string, href: string | undefined, exactMatch: boolean): boolean {
   if (!href) return false;
-  if (exactMatch) return pathname === href;
-  if (pathname === href) return true;
-  return href !== "/" && pathname.startsWith(`${href}/`);
+  const hrefPathname = href.split(/[?#]/, 1)[0] || "/";
+  if (exactMatch) return pathname === hrefPathname;
+  if (pathname === hrefPathname) return true;
+  return hrefPathname !== "/" && pathname.startsWith(`${hrefPathname}/`);
 }
 
 export function AppSidebarNavItem({

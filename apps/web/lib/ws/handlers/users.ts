@@ -9,6 +9,7 @@ import {
   taskCreateLastUsedHasValue,
   parseVoiceMode,
   parseMCPTaskAgentProfileDefault,
+  parseStartupPage,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import { migrateView } from "@/lib/state/slices/ui/ui-slice";
@@ -85,6 +86,7 @@ function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayl
     mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(
       payload.mcp_task_agent_profile_default,
     ),
+    startupPage: parseStartupPage(payload.startup_page),
     showAnchoredPromptBar: payload.show_anchored_prompt_bar ?? false,
     showScrollToLastPrompt: payload.show_scroll_to_last_prompt ?? true,
     showScrollToStart: payload.show_scroll_to_start ?? false,

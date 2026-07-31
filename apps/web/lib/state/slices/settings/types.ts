@@ -11,6 +11,7 @@ import type {
   SavedLayout,
   ToolStatus,
   MCPTaskAgentProfileDefault,
+  StartupPage,
 } from "@/lib/types/http";
 import type {
   VoiceInputActivationMode,
@@ -168,6 +169,7 @@ export type SettingsDataState = {
 export type UserSettingsState = {
   workspaceId: string | null;
   kanbanViewMode: string | null;
+  startupPage: StartupPage;
   workflowId: string | null;
   repositoryIds: string[];
   tasksListSort: TasksListSort;

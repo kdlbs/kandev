@@ -18,6 +18,7 @@ import {
 import { MobileRepoPill } from "./mobile-repo-pill";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
+import { linkToTaskOverview } from "@/lib/links";
 
 type SessionMobileTopBarProps = {
   taskId?: string | null;
@@ -321,7 +322,10 @@ export const SessionMobileTopBar = memo(function SessionMobileTopBar(
     <header className="flex items-center justify-between px-2 py-2 bg-background">
       <div className="flex items-center gap-2 min-w-0 flex-1">
         <Button variant="ghost" size="icon-sm" asChild>
-          <Link href="/">
+          <Link
+            href={linkToTaskOverview({ workspaceId: props.workspaceId ?? undefined })}
+            aria-label="Task overview"
+          >
             <IconArrowLeft className="h-4 w-4" />
           </Link>
         </Button>

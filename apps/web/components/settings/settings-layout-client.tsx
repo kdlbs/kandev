@@ -15,6 +15,7 @@ import { IntegrationCopyConfigMenu } from "@/components/integrations/integration
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
+import { linkToTaskOverview } from "@/lib/links";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -191,7 +192,7 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
             </Button>
           )}
           <Link
-            href="/"
+            href={linkToTaskOverview()}
             className="flex h-10 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => setOpen(false)}
           >

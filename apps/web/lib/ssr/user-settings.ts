@@ -8,7 +8,7 @@ import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/s
 import type { SidebarView, SidebarViewDraft } from "@/lib/state/slices/ui/sidebar-view-types";
 import { DEFAULT_VOICE_MODE_STATE, type VoiceModeState } from "@/lib/state/slices/settings/types";
 import type { SavedLayout, SidebarTaskPrefsApi, UserSettingsResponse } from "@/lib/types/http";
-import type { MCPTaskAgentProfileDefault } from "@/lib/types/http-user-settings";
+import type { MCPTaskAgentProfileDefault, StartupPage } from "@/lib/types/http-user-settings";
 import type { VoiceModeSettings } from "@/lib/types/http-voice";
 
 export type UserSettingsData = NonNullable<UserSettingsResponse["settings"]>;
@@ -25,6 +25,10 @@ export function parseMCPTaskAgentProfileDefault(
   value: string | undefined,
 ): MCPTaskAgentProfileDefault {
   return value === "workspace_default" ? "workspace_default" : "current_task";
+}
+
+export function parseStartupPage(value: string | undefined): StartupPage {
+  return value === "last_task" ? "last_task" : "task_overview";
 }
 
 export function parseSystemMetricsDisplay(value: UserSettingsData["system_metrics_display"]) {
@@ -127,6 +131,7 @@ function buildBehaviorFields(s: UserSettingsData) {
     reviewAutoMarkOnScroll: s.review_auto_mark_on_scroll ?? true,
     confirmTaskArchive: s.confirm_task_archive ?? true,
     mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(s.mcp_task_agent_profile_default),
+    startupPage: parseStartupPage(s.startup_page),
     showAnchoredPromptBar: s.show_anchored_prompt_bar ?? false,
     showScrollToLastPrompt: s.show_scroll_to_last_prompt ?? true,
     showScrollToStart: s.show_scroll_to_start ?? false,
@@ -181,6 +186,7 @@ export function mapUserSettingsResponse(response: UserSettingsResponse | null) {
       workspaceId: null,
       workflowId: null,
       kanbanViewMode: null,
+      startupPage: "task_overview" as const,
       repositoryIds: [] as string[],
       tasksListSort: DEFAULT_TASKS_LIST_SORT,
       tasksListGroup: DEFAULT_TASKS_LIST_GROUP,

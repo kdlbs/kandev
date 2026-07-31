@@ -20,7 +20,7 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
   {
     href: "/settings/general/appearance",
     label: "Appearance",
-    description: "Theme, metrics, and changes panel preferences",
+    description: "Theme, startup page, metrics, and changes panel preferences",
     icon: IconPalette,
   },
   {

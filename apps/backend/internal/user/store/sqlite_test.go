@@ -36,6 +36,39 @@ func (s settingsScanner) Scan(dest ...any) error {
 	return nil
 }
 
+func TestScanUserSettingsStartupPage(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty settings default to task overview", raw: "{}", want: "task_overview"},
+		{name: "missing setting defaults to task overview", raw: `{"chat_submit_key":"cmd_enter"}`, want: "task_overview"},
+		{name: "unknown setting defaults to task overview", raw: `{"startup_page":"future_value"}`, want: "task_overview"},
+		{name: "last task is preserved", raw: `{"startup_page":"last_task"}`, want: "last_task"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			encoded, err := json.Marshal(settings)
+			if err != nil {
+				t.Fatalf("marshal normalized settings: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(encoded, &payload); err != nil {
+				t.Fatalf("decode normalized settings: %v", err)
+			}
+			if got := payload["startup_page"]; got != tt.want {
+				t.Fatalf("startup_page = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestScanUserSettingsChangesPanelLayoutDefault(t *testing.T) {
 	t.Run("empty settings default to tree", func(t *testing.T) {
 		settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)

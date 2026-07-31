@@ -19,6 +19,7 @@ import type {
   TaskCreateLastUsedApi,
   AppStatusBarOrderApi,
   MCPTaskAgentProfileDefault,
+  StartupPage,
   TaskPendingAction,
   TaskSessionState,
   StepEvents,
@@ -401,6 +402,7 @@ export type UserSettingsUpdatedPayload = {
   user_id: string;
   workspace_id: string;
   kanban_view_mode?: string;
+  startup_page?: StartupPage;
   tasks_list_show_details?: boolean;
   workflow_filter_id?: string;
   repository_ids: string[];

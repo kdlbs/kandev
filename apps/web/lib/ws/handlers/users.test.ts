@@ -24,6 +24,26 @@ function userSettingsMessage(
   };
 }
 
+describe("startup page websocket sync", () => {
+  it("applies startup page preferences and normalizes unknown values", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        startup_page: "last_task",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.startupPage).toBe("last_task");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        startup_page: "unexpected",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.startupPage).toBe("task_overview");
+  });
+});
+
 describe("user settings websocket handler", () => {
   it("updates the List detail preference and preserves it when omitted", () => {
     const store = makeStore();

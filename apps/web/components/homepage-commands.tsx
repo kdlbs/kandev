@@ -5,7 +5,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { IconLayoutKanban, IconGitBranch, IconList, IconPlus } from "@tabler/icons-react";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { linkToTasks } from "@/lib/links";
+import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import type { CommandItem } from "@/lib/commands/types";
 import { useAppStore } from "@/components/state-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
@@ -42,7 +42,7 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
         keywords: ["kanban", "board", "view"],
         priority: 0,
         action: () => {
-          router.push("/");
+          router.push(linkToTaskOverview());
           if (!isMobile) onViewModeChange("");
         },
       },
@@ -57,7 +57,7 @@ export function HomepageCommands({ onCreateTask }: HomepageCommandsProps) {
         keywords: ["pipeline", "graph", "view"],
         priority: 0,
         action: () => {
-          router.push("/");
+          router.push(linkToTaskOverview());
           onViewModeChange("graph2");
         },
       });

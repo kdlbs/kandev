@@ -10,7 +10,7 @@ import { toKanbanTask, type TaskLike } from "@/lib/kanban/map-task";
 import { sessionId as toSessionId } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
 import { softNavigate } from "@/lib/routing/client-router";
-import { isTaskDetailPath, normalizePathname } from "@/lib/links";
+import { isTaskDetailPath, linkToTaskOverview, normalizePathname } from "@/lib/links";
 import {
   clearPinnedSessionIfOverridden,
   shouldPreservePinnedSessionForTask,
@@ -321,7 +321,7 @@ function clearDeletedTaskWalkthrough(state: AppState, taskId: string): AppState 
 }
 
 function removedTaskRedirectHref(pathname: string, taskId: string): string | null {
-  if (isTaskDetailPath(pathname, taskId)) return "/";
+  if (isTaskDetailPath(pathname, taskId)) return linkToTaskOverview();
   const normalized = normalizePathname(pathname);
   return normalized === `/office/tasks/${taskId}` ? "/office/tasks" : null;
 }

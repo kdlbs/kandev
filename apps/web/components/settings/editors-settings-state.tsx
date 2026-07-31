@@ -16,6 +16,7 @@ import {
   taskCreateLastUsedHasValue,
   parseVoiceMode,
   parseMCPTaskAgentProfileDefault,
+  parseStartupPage,
 } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import {
@@ -309,6 +310,7 @@ function buildUserSettingsFromResponse(
     workspaceId: s.workspace_id || null,
     workflowId: s.workflow_filter_id || null,
     kanbanViewMode: s.kanban_view_mode || null,
+    startupPage: parseStartupPage(s.startup_page),
     repositoryIds: s.repository_ids ?? [],
     preferredShell: s.preferred_shell || null,
     shellOptions: shellOptions ?? [],

@@ -21,7 +21,7 @@ import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
-import { linkToTasks } from "@/lib/links";
+import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -312,10 +312,10 @@ function useHeaderViewChange(
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
     } else if (value === "kanban") {
       onViewModeChange("kanban");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban") router.push(linkToTaskOverview({ workspaceId }));
     } else if (value === "pipeline") {
       onViewModeChange("pipeline");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban") router.push(linkToTaskOverview({ workspaceId }));
     }
   };
 }
