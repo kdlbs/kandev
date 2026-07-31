@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -81,6 +82,89 @@ func TestManager_StopIsIdempotentAfterSelfExit(t *testing.T) {
 		if err := mgr.Stop(context.Background()); err != nil {
 			t.Fatalf("Stop() call %d error = %v", i+1, err)
 		}
+	}
+}
+
+// Start accepts StatusStopped, so a restart after the agent self-exited can run
+// without an intervening Stop. The previous lifecycle never tore itself down, so
+// Start must finish that teardown before replacing stopCh, doneCh and the
+// adapter — otherwise the old forwardUpdates waits forever on a stopCh nobody
+// closes, and the old adapter's update worker is stranded with it.
+func TestManager_RestartAfterSelfExitDrainsPreviousLifecycle(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentArgs: fixtureArgs(),
+		AgentEnv:  fixtureEnvSlice("echo-then-sleep started 1"),
+		WorkDir:   t.TempDir(),
+		Protocol:  agent.ProtocolACP,
+	}, newTestLogger(t))
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("first Start() error = %v", err)
+	}
+	waitForManagerStatus(t, mgr, StatusStopped)
+
+	firstAdapter := mgr.adapter
+	firstStopCh := mgr.stopCh
+
+	// Restart without an intervening Stop.
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("second Start() error = %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.Stop(context.Background()) })
+
+	if mgr.stopCh == firstStopCh {
+		t.Fatal("restart reused the previous stop channel")
+	}
+
+	// The first lifecycle's adapter must have been closed by the restart.
+	select {
+	case _, ok := <-firstAdapter.Updates():
+		if ok {
+			t.Fatal("previous adapter delivered an event instead of being closed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("restart left the previous adapter open")
+	}
+}
+
+// A Start that fails after its adapter was created must still leave that adapter
+// closable: the stopCh guard is scoped to the channel, not to teardown as a
+// whole, so it must not swallow the adapter close for the failed attempt.
+func TestManager_StopClosesAdapterFromFailedRestart(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentArgs: fixtureArgs(),
+		AgentEnv:  fixtureEnvSlice("echo-then-sleep started 1"),
+		WorkDir:   t.TempDir(),
+		Protocol:  agent.ProtocolACP,
+	}, newTestLogger(t))
+
+	if err := mgr.Start(context.Background()); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	waitForManagerStatus(t, mgr, StatusStopped)
+	if err := mgr.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() error = %v", err)
+	}
+
+	// Restart with a command that cannot be spawned: Start fails after
+	// buildAdapterConfig has already created a second adapter.
+	mgr.cfg.AgentArgs = []string{filepath.Join(t.TempDir(), "does-not-exist")}
+	if err := mgr.Start(context.Background()); err == nil {
+		t.Fatal("Start() with a missing binary unexpectedly succeeded")
+	}
+	failedAdapter := mgr.adapter
+
+	if err := mgr.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() after failed restart error = %v", err)
+	}
+
+	select {
+	case _, ok := <-failedAdapter.Updates():
+		if ok {
+			t.Fatal("adapter from failed start delivered an event instead of being closed")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Stop() left the failed start's adapter open")
 	}
 }
 
