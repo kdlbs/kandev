@@ -1,7 +1,7 @@
 ---
 id: app-status-bar-14
 title: Sidebar-aligned status bar
-status: pending
+status: done
 wave: 9
 depends_on: [app-status-bar-13]
 plan: docs/plans/app-status-bar/plan.md
@@ -68,6 +68,15 @@ cd apps/web && pnpm e2e:run tests/plugins/mobile-status-drawer.spec.ts -- --proj
 The desktop E2E must compare sidebar/status-bar bounding boxes before and after
 collapse and resize. Existing mobile E2E supplies parity coverage because phone
 composition and interaction stay unchanged.
+
+## Verification results
+
+- `cd apps && pnpm --filter @kandev/web test -- components/app-status-bar/app-status-surface-provider.test.tsx` — 4 passed.
+- `cd apps/web && pnpm run typecheck` — passed.
+- `cd apps/web && pnpm e2e:run tests/layout/app-status-bar.spec.ts` — 3 passed;
+  the new assertion first failed against the old full-width bar, then passed
+  after the shell change.
+- `cd apps/web && pnpm e2e:run tests/plugins/mobile-status-drawer.spec.ts -- --project=mobile-chrome` — 2 passed.
 
 ## Dependencies
 

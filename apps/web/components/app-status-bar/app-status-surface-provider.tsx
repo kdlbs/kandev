@@ -95,7 +95,7 @@ export function AppStatusSurfaceProvider({ children }: { children: ReactNode }) 
 
   return (
     <AppStatusDrawerContext.Provider value={drawer}>
-      <div className="flex h-dvh min-h-0 w-full flex-col overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         {children}
         {appStatusBarEnabled &&
           (isMobile ? (

@@ -1,5 +1,5 @@
 ---
-status: building
+status: done
 spec: docs/specs/ui/app-status-bar.md
 ---
 
@@ -111,4 +111,4 @@ cd apps/web && pnpm e2e:run tests/layout/app-status-bar.spec.ts tests/plugins/mo
 | 11 | done | 6 | [Stable status item identities](task-11-stable-status-item-identities.md) |
 | 12 | done | 7 | [Reorder interaction and alignment](task-12-reorder-interaction-and-alignment.md) |
 | 13 | done | 8 | [Reorder docs, E2E, and verification](task-13-reorder-docs-e2e-verification.md) |
-| 14 | pending | 9 | [Sidebar-aligned status bar](task-14-sidebar-aligned-status-bar.md) |
+| 14 | done | 9 | [Sidebar-aligned status bar](task-14-sidebar-aligned-status-bar.md) |
