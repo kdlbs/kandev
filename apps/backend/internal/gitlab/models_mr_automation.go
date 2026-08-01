@@ -52,10 +52,15 @@ type TaskMRAutomationResponse struct {
 	UpdatedAt               time.Time               `json:"updated_at"`
 	MRStates                []*TaskMRLifecycleState `json:"mr_states"`
 	// WorkspaceID is internal routing metadata (best-effort resolved, may be
-	// empty) — excluded from the public HTTP/MCP response body. It lets the
-	// websocket broadcaster scope the gitlab.task_mr_options.updated event to
-	// the owning workspace instead of falling back to a global broadcast.
-	WorkspaceID string `json:"-"`
+	// empty) that lets the websocket broadcaster scope the
+	// gitlab.task_mr_options.updated event to the owning workspace instead of
+	// falling back to a global broadcast. It must stay JSON-visible (not
+	// `json:"-"`): the NATS-backed event bus round-trips event.Data through
+	// JSON, so a hidden field would silently vanish before the broadcaster's
+	// map-based workspace_id extraction ever saw it, defeating the whole
+	// scoping fix in any deployment using NATS. Surfacing it in the HTTP/MCP
+	// response is not a leak — it's the task's own workspace.
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // GetWorkspaceID implements the websocket broadcaster's workspace-routing

@@ -30,9 +30,13 @@ func (s *Service) queueAndDrainLifecyclePrompt(
 		return "", inactiveErr
 	}
 	s.publishQueueStatusEvent(ctx, session.ID)
-	if ciAutomationSessionCanReceivePrompt(session) &&
-		(session.State == models.TaskSessionStateWaitingForInput || session.State == models.TaskSessionStateIdle) {
-		s.drainQueuedMessageForPromptableSession(ctx, session.ID)
-	}
+	// Always attempt the drain rather than gating it on this stale `session`
+	// snapshot's state: drainQueuedMessageForPromptableSession reloads the
+	// session and re-checks promptability itself, so it safely no-ops when
+	// not ready. Gating here on the pre-queue snapshot left a real race — a
+	// session that became promptable between snapshot and queueing would
+	// have its prompt stuck until some unrelated later event triggered a
+	// drain.
+	s.drainQueuedMessageForPromptableSession(ctx, session.ID)
 	return session.ID, nil
 }

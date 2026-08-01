@@ -150,8 +150,16 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 	if err != nil {
 		return nil, err
 	}
-	reviewChanged := patch.PromptOnReviewRequested != nil &&
-		before.PromptOnReviewRequested != *patch.PromptOnReviewRequested
+	// Reset on either a boolean flip or a reviewer-identity change: a patch
+	// that resends prompt_on_review_requested=true while it was already true
+	// still re-resolves the authenticated username (resolveReviewerUsernameForPatch),
+	// which can differ from the stored one after the workspace's connected
+	// GitLab account changes. Without this second condition, a baseline
+	// recorded against the old identity would survive and could suppress or
+	// misfire the next prompt evaluated against the new one.
+	reviewChanged := (patch.PromptOnReviewRequested != nil &&
+		before.PromptOnReviewRequested != *patch.PromptOnReviewRequested) ||
+		(reviewerUsername != nil && before.ReviewReviewerUsername != *reviewerUsername)
 
 	updated := applyTaskMRAutomationPatch(before, taskID, patch, reviewerUsername)
 	if err := writeTaskMRAutomationOptions(ctx, tx, updated); err != nil {

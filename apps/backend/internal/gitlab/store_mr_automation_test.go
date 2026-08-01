@@ -197,6 +197,46 @@ func TestStore_RebindTaskMRReviewer_ClearsBaselines(t *testing.T) {
 	}
 }
 
+// TestStore_UpdateTaskMRAutomationOptions_ResendingSameSwitchResetsBaselineOnIdentityChange
+// pins a gap in the boolean-only reviewChanged check: a PATCH that resends
+// prompt_on_review_requested=true (already true) still re-resolves the
+// authenticated username, which can differ after the workspace's connected
+// GitLab account changes. The baseline must reset even though the boolean
+// itself never flips, otherwise a request already recorded for the old
+// identity can suppress the next prompt evaluated against the new one.
+func TestStore_UpdateTaskMRAutomationOptions_ResendingSameSwitchResetsBaselineOnIdentityChange(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	alice := "alice"
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnReviewRequested: boolPtr(true),
+	}, &alice); err != nil {
+		t.Fatalf("seed options: %v", err)
+	}
+	if err := store.SetTaskMRReviewRequestState(ctx, "task-1", "", "group/a", 1, true); err != nil {
+		t.Fatalf("SetTaskMRReviewRequestState: %v", err)
+	}
+
+	bob := "bob"
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnReviewRequested: boolPtr(true), // unchanged: was already true
+	}, &bob); err != nil {
+		t.Fatalf("resend patch with new identity: %v", err)
+	}
+
+	opts, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil || opts.ReviewReviewerUsername != "bob" {
+		t.Fatalf("reviewer not updated: %+v err=%v", opts, err)
+	}
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
+	if got.ReviewRequestInitialized || got.LastReviewRequested {
+		t.Fatalf("expected review baseline reset after identity change even with an unchanged switch: %+v", got)
+	}
+}
+
 func TestStore_ListLifecycleSubscribedTaskMRs(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

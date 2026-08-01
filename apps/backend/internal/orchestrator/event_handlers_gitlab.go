@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -63,14 +64,37 @@ func (s *Service) subscribeGitLabEvents() {
 // handleGitLabTaskMRUpdated reacts to every observed MR change — from the
 // poller's lifecycle sync pass or a manual link/refresh — by starting a
 // single-flight lifecycle evaluation. event.Data is *gitlab.TaskMRUpdatedEvent
-// (published by both producers); a differently-shaped payload is ignored.
+// on the in-memory bus, but a map[string]interface{} on the NATS bus (Publish
+// JSON-marshals the event; Subscribe unmarshals into the untyped Data field,
+// which loses the concrete type) — decodeTaskMRUpdatedEvent normalizes both.
 func (s *Service) handleGitLabTaskMRUpdated(ctx context.Context, event *bus.Event) error {
-	payload, ok := event.Data.(*gitlab.TaskMRUpdatedEvent)
+	payload, ok := decodeTaskMRUpdatedEvent(event.Data)
 	if !ok || payload == nil || payload.TaskMR == nil {
 		return nil
 	}
 	s.startTaskMRLifecycleAutomation(ctx, payload.TaskMR)
 	return nil
+}
+
+// decodeTaskMRUpdatedEvent accepts either the in-process pointer shape or the
+// NATS-decoded map shape and normalizes both to *gitlab.TaskMRUpdatedEvent.
+func decodeTaskMRUpdatedEvent(data interface{}) (*gitlab.TaskMRUpdatedEvent, bool) {
+	switch v := data.(type) {
+	case *gitlab.TaskMRUpdatedEvent:
+		return v, true
+	case map[string]interface{}:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, false
+		}
+		var payload gitlab.TaskMRUpdatedEvent
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return &payload, true
+	default:
+		return nil, false
+	}
 }
 
 // startTaskMRLifecycleAutomation runs the lifecycle evaluation pass in a
