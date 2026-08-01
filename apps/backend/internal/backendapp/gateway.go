@@ -201,8 +201,8 @@ func provideGateway(
 				}
 			}
 			if gitlabSvc != nil {
-				router.associateGitLab = func(ctx context.Context, workspaceID, taskID, repositoryID, mrURL string) error {
-					_, err := gitlabSvc.AssociateExistingMRByURL(ctx, workspaceID, taskID, repositoryID, mrURL)
+				router.associateGitLab = func(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, mrURL string) error {
+					_, err := gitlabSvc.AssociateExistingMRByURLForSession(ctx, workspaceID, sessionID, taskID, repositoryID, mrURL)
 					return err
 				}
 			}
@@ -397,7 +397,7 @@ type createdChangeAssociationRouter struct {
 	resolveRepositoryID func(context.Context, string, string) string
 	resolveWorkspaceID  func(context.Context, string) (string, error)
 	associateGitHub     func(context.Context, string, string, string, string, string, string) error
-	associateGitLab     func(context.Context, string, string, string, string) error
+	associateGitLab     func(context.Context, string, string, string, string, string) error
 }
 
 func (r createdChangeAssociationRouter) associate(
@@ -423,7 +423,7 @@ func (r createdChangeAssociationRouter) associate(
 		if err != nil {
 			return err
 		}
-		return r.associateGitLab(ctx, workspaceID, taskID, repositoryID, changeURL)
+		return r.associateGitLab(ctx, workspaceID, sessionID, taskID, repositoryID, changeURL)
 	case "github", "":
 		if r.associateGitHub == nil {
 			return nil

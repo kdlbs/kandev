@@ -197,6 +197,35 @@ func (s *Service) AssociateExistingMRByURL(
 	return association, nil
 }
 
+// AssociateExistingMRByURLForSession wraps AssociateExistingMRByURL for
+// callers that have a concrete session to key a refresh watch with — the
+// Create-MR action and manual URL linking triggered from a session's git
+// activity. This mirrors GitHub's split between AssociatePRByURLForWorkspace
+// (session-aware, creates a watch) and AssociateExistingPRByURLForWorkspace
+// (the workspace-level HTTP endpoint, no session, no watch). Watch creation
+// is best-effort: the association already succeeded, so a watch failure is
+// logged rather than surfaced, matching ensureWatchForLinkedMR's convention.
+func (s *Service) AssociateExistingMRByURLForSession(
+	ctx context.Context,
+	workspaceID, sessionID, taskID, repositoryID, mrURL string,
+) (*TaskMR, error) {
+	association, err := s.AssociateExistingMRByURL(ctx, workspaceID, taskID, repositoryID, mrURL)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := s.EnsureMRWatch(
+		ctx, sessionID, taskID, association.RepositoryID, association.ProjectPath,
+		association.MRIID, association.HeadBranch,
+	); err != nil {
+		s.logger.Warn("failed to ensure MR watch after URL association",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Int("mr_iid", association.MRIID),
+			zap.Error(err))
+	}
+	return association, nil
+}
+
 func validateReturnedMRIdentity(status *MRStatus, host, projectPath string, iid int) error {
 	if status == nil || status.MR == nil {
 		return ErrTaskMRNotFound
