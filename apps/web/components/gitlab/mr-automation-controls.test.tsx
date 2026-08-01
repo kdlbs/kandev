@@ -9,6 +9,7 @@ const hookMocks = vi.hoisted(() => ({
   options: null as TaskMRAutomationOptions | null,
   loading: false,
   updateMock: vi.fn(),
+  refreshMock: vi.fn(),
 }));
 
 const responsiveMock = vi.hoisted(() => ({
@@ -29,7 +30,7 @@ vi.mock("@/hooks/domains/gitlab/use-task-mr-automation", () => ({
     loading: hookMocks.loading,
     saving: false,
     error: hookMocks.error,
-    refresh: vi.fn(),
+    refresh: hookMocks.refreshMock,
     update: hookMocks.updateMock,
   }),
 }));
@@ -70,6 +71,8 @@ function resetHookMocks() {
   hookMocks.loading = false;
   hookMocks.updateMock.mockReset();
   hookMocks.updateMock.mockResolvedValue(makeOptions());
+  hookMocks.refreshMock.mockReset();
+  hookMocks.refreshMock.mockResolvedValue(makeOptions());
   responsiveMock.isFinePointer = true;
   responsiveMock.isMobile = false;
 }
@@ -147,6 +150,29 @@ describe("MRAutomationControls", () => {
     renderControls();
     fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
     expect(screen.getByRole("alert").textContent).toContain("network down");
+  });
+
+  it("shows a retry banner outside the collapsed group when the initial load fails", () => {
+    hookMocks.options = null;
+    hookMocks.error = "initial load failed";
+    renderControls();
+
+    // Visible without opening the collapsible group — the group never
+    // auto-expands with no loaded options, so a nested error would be
+    // invisible in the default collapsed state.
+    expect(screen.getByRole("alert").textContent).toContain("initial load failed");
+    fireEvent.click(screen.getByTestId("mr-automation-retry"));
+    expect(hookMocks.refreshMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not duplicate the error banner once options have loaded (save/update error)", () => {
+    hookMocks.options = makeOptions();
+    hookMocks.error = "save failed";
+    renderControls();
+
+    expect(screen.queryByTestId("mr-automation-retry")).toBeNull();
+    fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
   });
 
   it("disables the switches until options have loaded", () => {

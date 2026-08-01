@@ -113,6 +113,34 @@ function MRAutomationErrorRow({ error }: { error: string }) {
   );
 }
 
+/**
+ * Shown outside the collapsible section so an initial-load failure stays
+ * visible (and recoverable) in the default collapsed state — the group
+ * never auto-expands when there are no loaded options to detect an enabled
+ * switch from, so an error nested inside CollapsibleContent would otherwise
+ * be invisible until the user manually opens it.
+ */
+function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetry: () => void }) {
+  return (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-2 px-1 py-1 text-[11px] text-destructive"
+    >
+      <span className="min-w-0 flex-1 truncate">{error}</span>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        data-testid="mr-automation-retry"
+        className="h-6 cursor-pointer px-2 text-[11px]"
+        onClick={onRetry}
+      >
+        Retry
+      </Button>
+    </div>
+  );
+}
+
 function ReviewRequestedPromptRow({
   taskId,
   options,
@@ -210,7 +238,7 @@ function MRAgentPromptRows({
  * its active switches. Mirrors ReviewFollowUpSection (GitHub), AC29.
  */
 export function MRAutomationControls({ taskId }: { taskId: string }) {
-  const { options, loading, saving, error, update } = useTaskMRAutomationOptions(taskId);
+  const { options, loading, saving, error, update, refresh } = useTaskMRAutomationOptions(taskId);
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
@@ -233,8 +261,20 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
     });
   };
 
+  const loadFailed = Boolean(error) && !options;
+
   return (
     <div data-testid="mr-automation-controls">
+      {loadFailed ? (
+        <MRAutomationLoadErrorBanner
+          error={error as string}
+          onRetry={() => {
+            refresh().catch(() => {
+              // Error state is already surfaced by the hook; nothing further to do here.
+            });
+          }}
+        />
+      ) : null}
       <Collapsible open={open} onOpenChange={setOpen}>
         <CollapsibleTrigger asChild>
           <Button
@@ -259,7 +299,7 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
             disabled={saving || loading || !options}
             patchOption={patchOption}
           />
-          {error ? <MRAutomationErrorRow error={error} /> : null}
+          {error && options ? <MRAutomationErrorRow error={error} /> : null}
         </CollapsibleContent>
       </Collapsible>
     </div>
