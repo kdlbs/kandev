@@ -1519,11 +1519,12 @@ func externalMCPAuthMiddleware(authSvc *auth.Service) gin.HandlerFunc {
 func runGracefulShutdown(
 	server *http.Server,
 	listeners *serverListeners,
+	scheduling *schedulingRuntime,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
 	log *logger.Logger,
-) {
+) []error {
 	start := time.Now()
 	var shutdownErrs []error
 	log.Info("Graceful shutdown started",
@@ -1533,7 +1534,9 @@ func runGracefulShutdown(
 
 	// Stop the background bind-retry loop before Shutdown so no new listener
 	// can be created after the server begins closing its listeners.
-	listeners.Stop()
+	if listeners != nil {
+		listeners.Stop()
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()
@@ -1543,9 +1546,16 @@ func runGracefulShutdown(
 		log.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
-	if err := orchestratorSvc.Stop(); err != nil {
+	if err := scheduling.Stop(); err != nil {
 		shutdownErrs = append(shutdownErrs, err)
-		log.Error("Orchestrator stop error", zap.Error(err))
+		log.Error("Scheduler stop error", zap.Error(err))
+	}
+
+	if orchestratorSvc != nil {
+		if err := orchestratorSvc.Stop(); err != nil {
+			shutdownErrs = append(shutdownErrs, err)
+			log.Error("Orchestrator stop error", zap.Error(err))
+		}
 	}
 
 	if err := stopLifecycleManager(lifecycleMgr, log); err != nil {
@@ -1565,6 +1575,7 @@ func runGracefulShutdown(
 		zap.Duration("duration", time.Since(start)),
 		zap.Int("error_count", len(shutdownErrs)))
 	_ = log.Sync()
+	return shutdownErrs
 }
 
 // stopLifecycleManager gracefully stops all agents and the lifecycle manager.

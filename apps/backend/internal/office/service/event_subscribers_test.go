@@ -227,6 +227,7 @@ func TestTaskCreated_WakesAssigneeFromStoredRunner(t *testing.T) {
 
 	createTestAgent(t, svc, "ws-1", "worker-created")
 	insertTestTask(t, svc, "task-created-assigned", "ws-1")
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, "task-created-assigned")
 	setTestTaskAssignee(t, svc, "task-created-assigned", "worker-created")
 
 	event := bus.NewEvent(events.TaskCreated, "test", map[string]string{
@@ -286,6 +287,7 @@ func TestTaskAssigned_ReassignmentUsesAgentScopedIdempotency(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-old")
 	createTestAgent(t, svc, "ws-1", "worker-new")
 	insertTestTask(t, svc, "task-reassigned", "ws-1")
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, "task-reassigned")
 
 	for _, agentID := range []string{"worker-old", "worker-new"} {
 		event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
@@ -310,6 +312,33 @@ func TestTaskAssigned_ReassignmentUsesAgentScopedIdempotency(t *testing.T) {
 	}
 	if !seen["worker-old"] || !seen["worker-new"] {
 		t.Fatalf("task assignment runs = %#v, want both old and new assignees", runs)
+	}
+}
+
+func TestTaskAssigned_KanbanRunnerIsIgnored(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-kanban")
+	insertTestTask(t, svc, "task-kanban-assigned", "ws-1")
+	setTestTaskAssignee(t, svc, "task-kanban-assigned", "worker-kanban")
+
+	event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
+		"task_id":                   "task-kanban-assigned",
+		"assignee_agent_profile_id": "worker-kanban",
+	})
+	if err := eb.Publish(ctx, events.TaskUpdated, event); err != nil {
+		t.Fatalf("publish task updated event: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonTaskAssigned {
+			t.Fatalf("Kanban assignment queued task_assigned run: %#v", run)
+		}
 	}
 }
 

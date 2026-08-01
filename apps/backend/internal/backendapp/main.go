@@ -789,7 +789,8 @@ func startGatewayAndServe(
 	// ============================================
 	// ORCHESTRATE CONFIG LOADER + WAKEUP SCHEDULER
 	// ============================================
-	if ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry); !ok {
+	scheduling, ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry)
+	if !ok {
 		return false
 	}
 
@@ -882,7 +883,7 @@ func startGatewayAndServe(
 	// and any subsequent /health call will land on a wired route.
 	go waitListenerThenMarkReady(listeners.probeAddr(), log)
 
-	awaitShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
@@ -946,7 +947,7 @@ func waitListenerThenMarkReady(listenAddr string, log *logger.Logger) {
 
 // initOfficeServices constructs the office service with all dependencies, then
 // sets up the reconciler, event subscribers, scheduler, and garbage collector.
-// Returns false if a fatal error prevents startup.
+// Returns a scheduling runtime plus false if a fatal error prevents startup.
 func initOfficeServices(
 	ctx context.Context,
 	cfg *config.Config,
@@ -959,7 +960,7 @@ func initOfficeServices(
 	addCleanup func(func() error),
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
-) bool {
+) (*schedulingRuntime, bool) {
 	// Feature gate: when features.office is off (the production default),
 	// skip every Office construction step. Downstream call sites
 	// (helpers.go route registration, cron scheduler, skill backfill,
@@ -968,7 +969,7 @@ func initOfficeServices(
 	// See docs/decisions/0007-runtime-feature-flags.md.
 	if !cfg.Features.Office {
 		log.Info("Office feature disabled (features.office=false); skipping initialization")
-		return true
+		return nil, true
 	}
 
 	configBasePath := cfg.ResolvedHomeDir()
@@ -1049,11 +1050,12 @@ func initOfficeServices(
 	// Register event subscribers and start scheduler
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
 		log.Error("Failed to register office event subscribers", zap.Error(err))
-		return false
+		return nil, false
 	}
 
-	startOfficeSchedulersAndGC(ctx, cfg, repos, services, eventBus, orchestratorSvc, log)
-	return true
+	scheduling := startOfficeSchedulersAndGC(ctx, cfg, repos, services, eventBus, orchestratorSvc, log)
+	addCleanup(scheduling.Stop)
+	return scheduling, true
 }
 
 // wireOfficeSvcsDependencies wires inter-service dependencies into the
@@ -1214,7 +1216,7 @@ func startOfficeSchedulersAndGC(
 	eventBus bus.EventBus,
 	orchestratorSvc *orchestrator.Service,
 	log *logger.Logger,
-) {
+) *schedulingRuntime {
 	log.Info("Office scheduler wired to orchestrator StartTask")
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		services.Office, runsscheduler.TickIntervalFromEnv(),
@@ -1245,7 +1247,7 @@ func startOfficeSchedulersAndGC(
 		orchScheduler, runsSvc.SubscribeSignal(),
 		runsscheduler.TickIntervalFromEnv(), log,
 	)
-	go runScheduler.Start(ctx)
+	runScheduler.Start(ctx)
 	log.Info("Runs scheduler started",
 		zap.Duration("tick", runsscheduler.TickIntervalFromEnv()))
 	// Phase 5 (ADR-0004): start the shared cron loop. The routines handler
@@ -1255,7 +1257,9 @@ func startOfficeSchedulersAndGC(
 	if services.OfficeSvcs != nil {
 		officeRoutines = services.OfficeSvcs.Routines
 	}
-	startCronScheduler(ctx, repos, engineDispatcher, officeRoutines, log)
+	cronLoop := startCronScheduler(ctx, repos, engineDispatcher, officeRoutines,
+		officeservice.NewOfficeRecoveryHandler(orchScheduler), log)
+	return &schedulingRuntime{runs: runScheduler, cron: cronLoop}
 }
 
 // wireWorkflowEngineForOffice composes the Phase 2 (ADR-0004)
@@ -1823,6 +1827,7 @@ func buildHTTPServer(
 func awaitShutdown(
 	server *http.Server,
 	listeners *serverListeners,
+	scheduling *schedulingRuntime,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
@@ -1849,5 +1854,5 @@ func awaitShutdown(
 	log.Info("Received shutdown signal",
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
-	runGracefulShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

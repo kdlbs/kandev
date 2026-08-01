@@ -74,7 +74,7 @@ func NewSchedulerIntegration(svc *Service, tickInterval time.Duration) *Schedule
 	return &SchedulerIntegration{
 		svc:          svc,
 		tickInterval: tickInterval,
-		logger:       svc.logger.WithFields(zap.String("component", "office-scheduler")),
+		logger:       svc.logger.WithFields(zap.String("component", "runs-processor")),
 	}
 }
 
@@ -114,6 +114,9 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 	for i := 0; i < maxRunsPerTick; i++ {
 		run, err := si.svc.ClaimNextRun(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return
+			}
 			si.logger.Error("failed to claim run", zap.Error(err))
 			return
 		}
@@ -123,7 +126,6 @@ func (si *SchedulerIntegration) tick(ctx context.Context) {
 
 		si.processRun(ctx, run)
 	}
-	si.recoverUnstartedTasks(ctx)
 	si.recoverStaleClaimedRuns(ctx)
 }
 
@@ -140,6 +142,9 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 	}
 	lifted, err := rd.LiftParkedRuns(ctx, time.Now().UTC())
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		si.logger.Warn("lift parked runs failed", zap.Error(err))
 		return
 	}
@@ -151,6 +156,9 @@ func (si *SchedulerIntegration) liftParkedRoutingRuns(ctx context.Context) {
 func (si *SchedulerIntegration) recoverStaleClaimedRuns(ctx context.Context) {
 	count, err := si.svc.repo.RecoverStale(ctx, time.Now().UTC().Add(-staleClaimedRunAge))
 	if err != nil {
+		if ctx.Err() != nil {
+			return
+		}
 		si.logger.Error("failed to recover stale claimed runs", zap.Error(err))
 		return
 	}
