@@ -247,11 +247,12 @@ func TestDecideTaskMRAgentPrompt(t *testing.T) {
 	}
 }
 
-// TestGitLabMRLifecycleConstants_AreDistinctFromStateConstants is a direct
-// AC35 regression: the lifecycle event identifiers must be their own named
-// constants, not the state constants reused by value, even though the
-// merged/closed strings coincide.
-func TestGitLabMRLifecycleConstants_AreDistinctFromStateConstants(t *testing.T) {
+// TestGitLabMRLifecycleConstants_ShareStateConstantValues pins the AC35
+// design: the lifecycle event identifiers are separate named constants that
+// currently hold the same strings as the state constants. The separation
+// itself is enforced by the two const blocks in
+// event_handlers_gitlab_mr_automation.go, not by this assertion.
+func TestGitLabMRLifecycleConstants_ShareStateConstantValues(t *testing.T) {
 	if mrAgentEventMerged != gitlabMRStateMerged {
 		t.Fatalf("expected mrAgentEventMerged and gitlabMRStateMerged to share the same string value by design")
 	}

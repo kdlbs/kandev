@@ -169,7 +169,10 @@ func TestStore_RebindTaskMRReviewer_ClearsBaselines(t *testing.T) {
 	if changed {
 		t.Fatalf("expected no change when username is identical")
 	}
-	got, _ := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
 	if !got.LastReviewRequested {
 		t.Fatalf("baseline should survive an unchanged rebind: %+v", got)
 	}
@@ -229,7 +232,6 @@ func TestStore_ListLifecycleSubscribedTaskMRs(t *testing.T) {
 // a second time against an existing one (idempotent CREATE TABLE IF NOT
 // EXISTS — no ALTER TABLE migration is involved since both tables are new).
 func TestStore_MRAutomationTables_FreshDBAndReplay(t *testing.T) {
-	t.Cleanup(func() {})
 	tmp := t.TempDir()
 	dbPath := filepath.Join(tmp, "gitlab-replay.db")
 

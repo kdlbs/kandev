@@ -9,6 +9,9 @@ import (
 // GetTaskMRAutomationResponse returns a task's MR automation options plus
 // its per-MR lifecycle checkpoints (AC1).
 func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string) (*TaskMRAutomationResponse, error) {
+	if err := s.authorizeTaskMRAccess(ctx, taskID); err != nil {
+		return nil, err
+	}
 	store := s.requireStore()
 	if store == nil {
 		return nil, errStoreUnavailable
@@ -21,10 +24,13 @@ func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string
 	if err != nil {
 		return nil, err
 	}
-	return taskMRAutomationResponseFromOptions(opts, states), nil
+	workspaceID, _ := store.WorkspaceIDForTask(ctx, taskID)
+	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
 }
 
-func taskMRAutomationResponseFromOptions(opts *TaskMRAutomationOptions, states []*TaskMRLifecycleState) *TaskMRAutomationResponse {
+func taskMRAutomationResponseFromOptions(
+	opts *TaskMRAutomationOptions, states []*TaskMRLifecycleState, workspaceID string,
+) *TaskMRAutomationResponse {
 	return &TaskMRAutomationResponse{
 		TaskID:                  opts.TaskID,
 		PromptOnReviewRequested: opts.PromptOnReviewRequested,
@@ -33,6 +39,7 @@ func taskMRAutomationResponseFromOptions(opts *TaskMRAutomationOptions, states [
 		ReviewReviewerUsername:  opts.ReviewReviewerUsername,
 		UpdatedAt:               opts.UpdatedAt,
 		MRStates:                states,
+		WorkspaceID:             workspaceID,
 	}
 }
 
@@ -42,6 +49,9 @@ func taskMRAutomationResponseFromOptions(opts *TaskMRAutomationOptions, states [
 // stored username. Resolution always goes through the strict, non-ambient
 // workspace client (AC32).
 func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID string, patch TaskMRAutomationPatch) (*TaskMRAutomationResponse, error) {
+	if err := s.authorizeTaskMRAccess(ctx, taskID); err != nil {
+		return nil, err
+	}
 	store := s.requireStore()
 	if store == nil {
 		return nil, errStoreUnavailable
@@ -58,7 +68,8 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if err != nil {
 		return nil, err
 	}
-	return taskMRAutomationResponseFromOptions(opts, states), nil
+	workspaceID, _ := store.WorkspaceIDForTask(ctx, taskID)
+	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
 }
 
 func (s *Service) resolveReviewerUsernameForPatch(ctx context.Context, taskID string, patch TaskMRAutomationPatch) (*string, error) {

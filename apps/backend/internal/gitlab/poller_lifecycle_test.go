@@ -131,3 +131,67 @@ func TestPoller_RunMRLifecycleSync_ErrorOnOneRowDoesNotAbortOthers(t *testing.T)
 		t.Fatalf("expected last_error recorded for the broken row, got %+v", state)
 	}
 }
+
+// TestPoller_RunMRLifecycleSync_UsesStrictClient is AC32: the lifecycle sync
+// pass must resolve its GitLab client through clientForTaskStrict, never the
+// ambient/legacy Service.Client() singleton. The ambient client here is
+// seeded with the MR and would succeed if used; the workspace has no secret
+// store configured, so only the strict path (which never falls back) fails
+// closed and records the checkpoint error instead of silently syncing
+// against the wrong account.
+func TestPoller_RunMRLifecycleSync_UsesStrictClient(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	if err := store.SaveConfigForWorkspace(ctx, "ws-1", &GitLabConfig{
+		Host: "https://gitlab.example.com", AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+
+	ambientClient := NewMockClient("https://gitlab.example.com")
+	ambientClient.SeedMR("group/subscribed", &MR{
+		IID: 1, State: "opened", HeadBranch: "feat", BaseBranch: "main",
+		WebURL: "https://gitlab.example.com/group/subscribed/-/merge_requests/1",
+	})
+	svc := NewService("https://gitlab.example.com", ambientClient, AuthMethodPAT, nil, newTestLogger(t))
+	svc.SetStore(store)
+	// No SetWorkspaceSecretStore call: workspaceSecrets stays nil, so
+	// clientForTaskStrict must fail rather than fall back to ambientClient.
+
+	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "", "group/subscribed", 1)); err != nil {
+		t.Fatalf("seed subscribed MR: %v", err)
+	}
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("enable switch: %v", err)
+	}
+
+	memBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetEventBus(memBus)
+	var received []*TaskMRUpdatedEvent
+	if _, err := memBus.Subscribe(events.GitLabTaskMRUpdated, func(_ context.Context, e *bus.Event) error {
+		if payload, ok := e.Data.(*TaskMRUpdatedEvent); ok {
+			received = append(received, payload)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	poller := NewPoller(svc, memBus, newTestLogger(t))
+	poller.runMRLifecycleSync(ctx)
+
+	if len(received) != 0 {
+		t.Fatalf("expected no successful sync via the ambient client, got %+v", received)
+	}
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/subscribed", 1)
+	if err != nil {
+		t.Fatalf("get lifecycle state: %v", err)
+	}
+	if state == nil || state.LastError == nil || *state.LastError == "" {
+		t.Fatalf("expected last_error recorded (strict client fails closed), got %+v", state)
+	}
+}

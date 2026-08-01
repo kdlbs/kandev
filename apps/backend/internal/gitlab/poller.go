@@ -125,8 +125,11 @@ func (p *Poller) mrMonitorLoop(ctx context.Context) {
 func (p *Poller) runMRMonitor(ctx context.Context) {
 	watches, err := p.service.ListActiveMRWatches(ctx)
 	if err != nil {
+		// Log and fall through to the independent lifecycle sync pass below —
+		// a failure listing legacy watches must not also stop lifecycle
+		// notifications for every subscribed task.
 		p.logger.Warn("gitlab poller: list MR watches", zap.Error(err))
-		return
+		watches = nil
 	}
 	for _, w := range watches {
 		if ctx.Err() != nil {
@@ -160,7 +163,7 @@ func (p *Poller) runMRLifecycleSync(ctx context.Context) {
 }
 
 func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
-	updated, err := p.service.SyncTaskMR(ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID)
+	updated, err := p.service.SyncTaskMRStrict(ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID)
 	if err != nil {
 		p.logger.Debug("gitlab poller: MR lifecycle sync failed",
 			zap.String("task_id", row.TaskID), zap.String("project", row.ProjectPath),

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // errLifecyclePromptOverridesUnsupported mirrors github's sentinel — GitLab's
@@ -34,6 +35,9 @@ func (c *Controller) RegisterMRAutomationHTTPRoutes(api *gin.RouterGroup) {
 func (c *Controller) httpGetTaskMRAutomation(ctx *gin.Context) {
 	resp, err := c.service.GetTaskMRAutomationResponse(ctx.Request.Context(), ctx.Param("taskID"))
 	if err != nil {
+		if writeMRAutomationTaskNotFound(ctx, err) {
+			return
+		}
 		c.logger.Error("get task MR automation failed", zap.String("task_id", ctx.Param("taskID")), zap.Error(err))
 		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "failed to load MR automation options"})
 		return
@@ -53,12 +57,27 @@ func (c *Controller) httpPatchTaskMRAutomation(ctx *gin.Context) {
 	}
 	resp, err := c.service.UpdateTaskMRAutomationOptions(ctx.Request.Context(), ctx.Param("taskID"), patch)
 	if err != nil {
+		if writeMRAutomationTaskNotFound(ctx, err) {
+			return
+		}
 		c.logger.Error("update task MR automation failed", zap.String("task_id", ctx.Param("taskID")), zap.Error(err))
 		ctx.JSON(http.StatusInternalServerError, gin.H{responseErrorKey: "failed to update MR automation options"})
 		return
 	}
 	c.publishTaskMRAutomationUpdated(ctx.Request.Context(), resp)
 	ctx.JSON(http.StatusOK, resp)
+}
+
+// writeMRAutomationTaskNotFound maps the scoped-visibility denial from
+// Service.authorizeTaskMRAccess to a 404, matching the "foreign workspace is
+// indistinguishable from nonexistent" no-existence-leak convention
+// (task/service/service_access.go) instead of a generic 500.
+func writeMRAutomationTaskNotFound(ctx *gin.Context, err error) bool {
+	if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		ctx.JSON(http.StatusNotFound, gin.H{responseErrorKey: "task not found"})
+		return true
+	}
+	return false
 }
 
 func parseTaskMRAutomationPatch(ctx *gin.Context) (TaskMRAutomationPatch, error) {

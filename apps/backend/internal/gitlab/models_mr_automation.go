@@ -51,6 +51,21 @@ type TaskMRAutomationResponse struct {
 	ReviewReviewerUsername  string                  `json:"review_reviewer_username"`
 	UpdatedAt               time.Time               `json:"updated_at"`
 	MRStates                []*TaskMRLifecycleState `json:"mr_states"`
+	// WorkspaceID is internal routing metadata (best-effort resolved, may be
+	// empty) — excluded from the public HTTP/MCP response body. It lets the
+	// websocket broadcaster scope the gitlab.task_mr_options.updated event to
+	// the owning workspace instead of falling back to a global broadcast.
+	WorkspaceID string `json:"-"`
+}
+
+// GetWorkspaceID implements the websocket broadcaster's workspace-routing
+// interface (internal/gateway/websocket.extractWorkspaceID) — a struct
+// payload's fields are otherwise invisible to that generic extractor.
+func (r *TaskMRAutomationResponse) GetWorkspaceID() string {
+	if r == nil {
+		return ""
+	}
+	return r.WorkspaceID
 }
 
 // TaskMRLifecycleState is the per-MR dedupe/checkpoint row that guards

@@ -244,7 +244,7 @@ Lifecycle messages only report the observed event and canonical PR URL; the task
 
 ### GitLab MR automation
 
-The GitLab MR topbar control has a **Review follow-up** group with the same three notification switches as GitHub's, scoped to a linked merge request:
+The GitLab MR topbar control has a **Review follow-up** group with the same three notification switches as GitHub's. The switches are task-level and apply to every merge request linked to the task:
 
 - **Your review is requested** wakes the agent when the workspace's connected GitLab account appears as a reviewer on the MR, including re-review after changes.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.

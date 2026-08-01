@@ -312,12 +312,23 @@ type TaskMRUpdatedEvent struct {
 	*TaskMR
 }
 
+// GetWorkspaceID implements the websocket broadcaster's workspace-routing
+// interface (internal/gateway/websocket.extractWorkspaceID). Without it, the
+// broadcaster's map-only field extractor cannot see WorkspaceID on this
+// struct payload and always treats the event as workspace-unknown.
+func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
+	if e == nil {
+		return ""
+	}
+	return e.WorkspaceID
+}
+
 // publishTaskMRLifecycleSyncEvent publishes a TaskMRUpdatedEvent after the
-// poller's lifecycle sync pass refreshes a linked MR (AC22). Best-effort
-// workspace resolution: an empty workspace ID still publishes (matching the
-// existing broadcast-instance-wide fallback for events without workspace
-// context), since the orchestrator's lifecycle subscriber only needs the
-// embedded *TaskMR, not the workspace ID.
+// poller's lifecycle sync pass refreshes a linked MR (AC22). Unlike
+// publishTaskMRUpdated (an HTTP/link-flow caller that already has a trusted
+// workspace ID), this path resolves the workspace itself — a lookup failure
+// skips publishing rather than emitting an event the websocket layer could
+// broadcast instance-wide; the next poll retries.
 func (s *Service) publishTaskMRLifecycleSyncEvent(ctx context.Context, mr *TaskMR) {
 	if mr == nil {
 		return
@@ -326,14 +337,14 @@ func (s *Service) publishTaskMRLifecycleSyncEvent(ctx context.Context, mr *TaskM
 	eventBus := s.eventBus
 	store := s.store
 	s.mu.RUnlock()
-	if eventBus == nil {
+	if eventBus == nil || store == nil {
 		return
 	}
-	workspaceID := ""
-	if store != nil {
-		if id, err := store.WorkspaceIDForTask(ctx, mr.TaskID); err == nil {
-			workspaceID = id
-		}
+	workspaceID, err := store.WorkspaceIDForTask(ctx, mr.TaskID)
+	if err != nil {
+		s.logger.Debug("gitlab: resolve workspace for MR lifecycle sync event",
+			zap.String("task_id", mr.TaskID), zap.Error(err))
+		return
 	}
 	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
 		WorkspaceID: workspaceID,

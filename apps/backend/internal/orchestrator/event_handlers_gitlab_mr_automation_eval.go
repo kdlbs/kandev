@@ -95,7 +95,13 @@ func (s *Service) evalTaskMRLifecycle(
 	if err != nil {
 		return false, fmt.Errorf("dispatch %s prompt: %w", decision.Event, err)
 	}
-	err = automation.RecordTaskMRLifecyclePrompt(ctx, gitlab.TaskMRLifecyclePrompt{
+	// Detached context: the durable prompt has already been queued/drained
+	// (the user-visible side effect). A context cancellation racing this
+	// checkpoint write must not leave it unstamped — that would make the next
+	// poll re-evaluate the same transition and re-dispatch a duplicate
+	// notification. Matches recordMRAutomationError's use of WithoutCancel
+	// below for the same reason.
+	err = automation.RecordTaskMRLifecyclePrompt(context.WithoutCancel(ctx), gitlab.TaskMRLifecyclePrompt{
 		TaskID:          mr.TaskID,
 		RepositoryID:    mr.RepositoryID,
 		ProjectPath:     mr.ProjectPath,

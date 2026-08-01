@@ -46,11 +46,28 @@ func (s *Store) createMRAutomationTables() error {
 	return err
 }
 
-// GetTaskMRAutomationOptions returns a task's MR automation options, or an
+// execContext is satisfied by *sqlx.Tx (and *sqlx.DB), narrowed to the one
+// method deleteMRAutomationForWorkspace needs so it can run inside the
+// existing ResetWorkspaceE2E transaction. Also used to parametrize the MR
+// automation mutators below over either the writer pool or a transaction.
+type execContext interface {
+	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+}
+
+// queryExecer adds a single-row read to execContext. *sqlx.DB and *sqlx.Tx
+// both satisfy it, letting the read half of a read-modify-write mutator run
+// against either the ad-hoc reader pool or the same transaction as its write
+// half (the latter is what makes the mutators below race-free).
+type queryExecer interface {
+	execContext
+	GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+}
+
+// getTaskMRAutomationOptions returns a task's MR automation options, or an
 // implicit all-false default when no row has been persisted yet (AC1).
-func (s *Store) GetTaskMRAutomationOptions(ctx context.Context, taskID string) (*TaskMRAutomationOptions, error) {
+func getTaskMRAutomationOptions(ctx context.Context, q queryExecer, taskID string) (*TaskMRAutomationOptions, error) {
 	var row TaskMRAutomationOptions
-	err := s.ro.GetContext(ctx, &row, `
+	err := q.GetContext(ctx, &row, `
 		SELECT task_id, prompt_on_review_requested, prompt_on_merged, prompt_on_closed,
 			review_reviewer_username, created_at, updated_at
 		FROM gitlab_task_mr_options WHERE task_id = ?`, taskID)
@@ -63,17 +80,18 @@ func (s *Store) GetTaskMRAutomationOptions(ctx context.Context, taskID string) (
 	return &row, nil
 }
 
-// UpdateTaskMRAutomationOptions applies a partial update, upserting the
-// options row. reviewerUsername, when non-nil, replaces the stored
-// review_reviewer_username (nil leaves it untouched); the caller resolves
-// this server-side (AC5) — it is never taken from the patch directly.
-func (s *Store) UpdateTaskMRAutomationOptions(
-	ctx context.Context, taskID string, patch TaskMRAutomationPatch, reviewerUsername *string,
-) (*TaskMRAutomationOptions, error) {
-	current, err := s.GetTaskMRAutomationOptions(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
+// GetTaskMRAutomationOptions is the read-only entry point (AC1).
+func (s *Store) GetTaskMRAutomationOptions(ctx context.Context, taskID string) (*TaskMRAutomationOptions, error) {
+	return getTaskMRAutomationOptions(ctx, s.ro, taskID)
+}
+
+// applyTaskMRAutomationPatch computes the post-patch option row in memory.
+// reviewerUsername, when non-nil, replaces the stored review_reviewer_username
+// (nil leaves it untouched); the caller resolves this server-side (AC5) — it
+// is never taken from the patch directly.
+func applyTaskMRAutomationPatch(
+	current *TaskMRAutomationOptions, taskID string, patch TaskMRAutomationPatch, reviewerUsername *string,
+) *TaskMRAutomationOptions {
 	if patch.PromptOnReviewRequested != nil {
 		current.PromptOnReviewRequested = *patch.PromptOnReviewRequested
 	}
@@ -92,7 +110,11 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 	if current.CreatedAt.IsZero() {
 		current.CreatedAt = now
 	}
-	_, err = s.db.ExecContext(ctx, `
+	return current
+}
+
+func writeTaskMRAutomationOptions(ctx context.Context, exec execContext, opts *TaskMRAutomationOptions) error {
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO gitlab_task_mr_options (
 			task_id, prompt_on_review_requested, prompt_on_merged, prompt_on_closed,
 			review_reviewer_username, created_at, updated_at
@@ -103,12 +125,47 @@ func (s *Store) UpdateTaskMRAutomationOptions(
 			prompt_on_closed = excluded.prompt_on_closed,
 			review_reviewer_username = excluded.review_reviewer_username,
 			updated_at = excluded.updated_at`,
-		current.TaskID, current.PromptOnReviewRequested, current.PromptOnMerged, current.PromptOnClosed,
-		current.ReviewReviewerUsername, current.CreatedAt, current.UpdatedAt)
+		opts.TaskID, opts.PromptOnReviewRequested, opts.PromptOnMerged, opts.PromptOnClosed,
+		opts.ReviewReviewerUsername, opts.CreatedAt, opts.UpdatedAt)
+	return err
+}
+
+// UpdateTaskMRAutomationOptions applies a partial update atomically. The read
+// of the pre-patch row, the option write, and (when prompt_on_review_requested
+// changes value) the review-request baseline reset all run in one
+// transaction: a stale baseline from before the switch flipped can otherwise
+// suppress or misfire the next prompt (functional-correctness review
+// finding), and a bare two-statement version could partially apply under a
+// mid-write failure (data-integrity review finding).
+func (s *Store) UpdateTaskMRAutomationOptions(
+	ctx context.Context, taskID string, patch TaskMRAutomationPatch, reviewerUsername *string,
+) (*TaskMRAutomationOptions, error) {
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
-	return current, nil
+	defer func() { _ = tx.Rollback() }()
+
+	before, err := getTaskMRAutomationOptions(ctx, tx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	reviewChanged := patch.PromptOnReviewRequested != nil &&
+		before.PromptOnReviewRequested != *patch.PromptOnReviewRequested
+
+	updated := applyTaskMRAutomationPatch(before, taskID, patch, reviewerUsername)
+	if err := writeTaskMRAutomationOptions(ctx, tx, updated); err != nil {
+		return nil, err
+	}
+	if reviewChanged {
+		if err := resetReviewBaselinesForTask(ctx, tx, taskID); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }
 
 const mrLifecycleStateSelectCols = `task_id, repository_id, project_path, mr_iid,
@@ -116,11 +173,11 @@ const mrLifecycleStateSelectCols = `task_id, repository_id, project_path, mr_iid
 	last_lifecycle_event, last_lifecycle_prompt_at, last_lifecycle_session_id,
 	last_error, created_at, updated_at`
 
-// GetTaskMRLifecycleState returns the checkpoint row for one linked MR, or
-// nil when no evaluation has run yet (silent-baseline case, AC10).
-func (s *Store) GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*TaskMRLifecycleState, error) {
+func getTaskMRLifecycleState(
+	ctx context.Context, q queryExecer, taskID, repositoryID, projectPath string, mrIID int,
+) (*TaskMRLifecycleState, error) {
 	var row TaskMRLifecycleState
-	err := s.ro.GetContext(ctx, &row, `
+	err := q.GetContext(ctx, &row, `
 		SELECT `+mrLifecycleStateSelectCols+` FROM gitlab_task_mr_state
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
 		taskID, repositoryID, projectPath, mrIID)
@@ -131,6 +188,12 @@ func (s *Store) GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryI
 		return nil, err
 	}
 	return &row, nil
+}
+
+// GetTaskMRLifecycleState returns the checkpoint row for one linked MR, or
+// nil when no evaluation has run yet (silent-baseline case, AC10).
+func (s *Store) GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*TaskMRLifecycleState, error) {
+	return getTaskMRLifecycleState(ctx, s.ro, taskID, repositoryID, projectPath, mrIID)
 }
 
 // ListTaskMRLifecycleStates returns every checkpoint row for a task.
@@ -148,13 +211,13 @@ func (s *Store) ListTaskMRLifecycleStates(ctx context.Context, taskID string) ([
 	return out, nil
 }
 
-func (s *Store) upsertMRLifecycleState(ctx context.Context, row *TaskMRLifecycleState) error {
+func upsertMRLifecycleState(ctx context.Context, exec execContext, row *TaskMRLifecycleState) error {
 	now := time.Now().UTC()
 	row.UpdatedAt = now
 	if row.CreatedAt.IsZero() {
 		row.CreatedAt = now
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := exec.ExecContext(ctx, `
 		INSERT INTO gitlab_task_mr_state (
 			task_id, repository_id, project_path, mr_iid,
 			review_request_initialized, last_review_requested, last_observed_state,
@@ -177,8 +240,10 @@ func (s *Store) upsertMRLifecycleState(ctx context.Context, row *TaskMRLifecycle
 	return err
 }
 
-func (s *Store) loadOrDefaultMRLifecycleState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*TaskMRLifecycleState, error) {
-	row, err := s.GetTaskMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
+func loadOrDefaultMRLifecycleState(
+	ctx context.Context, q queryExecer, taskID, repositoryID, projectPath string, mrIID int,
+) (*TaskMRLifecycleState, error) {
+	row, err := getTaskMRLifecycleState(ctx, q, taskID, repositoryID, projectPath, mrIID)
 	if err != nil {
 		return nil, err
 	}
@@ -188,98 +253,137 @@ func (s *Store) loadOrDefaultMRLifecycleState(ctx context.Context, taskID, repos
 	return row, nil
 }
 
-// SetTaskMRReviewRequestState stamps the review-request baseline/observation
-// used to detect a false→true edge (AC10-AC12).
-func (s *Store) SetTaskMRReviewRequestState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, requested bool) error {
-	row, err := s.loadOrDefaultMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
+// mutateMRLifecycleState reads the checkpoint row and writes mutate's result
+// back inside one transaction, so two independent mutators racing on the same
+// (task_id, repository_id, project_path, mr_iid) row (for example the
+// poller's RecordTaskMRAutomationError and an orchestrator evaluation's
+// SetTaskMRReviewRequestState) cannot lose one side's field change to a
+// stale full-row overwrite (data-integrity review finding).
+func (s *Store) mutateMRLifecycleState(
+	ctx context.Context, taskID, repositoryID, projectPath string, mrIID int,
+	mutate func(*TaskMRLifecycleState),
+) error {
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	row.ReviewRequestInitialized = true
-	row.LastReviewRequested = requested
-	return s.upsertMRLifecycleState(ctx, row)
+	defer func() { _ = tx.Rollback() }()
+
+	row, err := loadOrDefaultMRLifecycleState(ctx, tx, taskID, repositoryID, projectPath, mrIID)
+	if err != nil {
+		return err
+	}
+	mutate(row)
+	if err := upsertMRLifecycleState(ctx, tx, row); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// SetTaskMRReviewRequestState stamps the review-request baseline/observation
+// used to detect a false→true edge (AC10-AC12).
+func (s *Store) SetTaskMRReviewRequestState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, requested bool) error {
+	return s.mutateMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID, func(row *TaskMRLifecycleState) {
+		row.ReviewRequestInitialized = true
+		row.LastReviewRequested = requested
+	})
 }
 
 // SetTaskMRObservedState stamps the last-observed MR state, used to detect a
 // terminal-state transition (AC13-AC15).
 func (s *Store) SetTaskMRObservedState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, state string) error {
-	row, err := s.loadOrDefaultMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
-	if err != nil {
-		return err
-	}
-	row.LastObservedState = state
-	return s.upsertMRLifecycleState(ctx, row)
+	return s.mutateMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID, func(row *TaskMRLifecycleState) {
+		row.LastObservedState = state
+	})
 }
 
 // RecordTaskMRLifecyclePrompt persists an accepted lifecycle prompt
 // checkpoint, clearing any prior error for this MR.
 func (s *Store) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt TaskMRLifecyclePrompt) error {
-	row, err := s.loadOrDefaultMRLifecycleState(ctx, prompt.TaskID, prompt.RepositoryID, prompt.ProjectPath, prompt.MRIID)
-	if err != nil {
-		return err
-	}
-	if prompt.ObservedState != "" {
-		row.LastObservedState = prompt.ObservedState
-	}
-	if prompt.Event == mrLifecycleEventReviewRequested {
-		row.ReviewRequestInitialized = true
-		row.LastReviewRequested = prompt.ReviewRequested
-	}
-	row.LastLifecycleEvent = prompt.Event
-	promptedAt := prompt.PromptedAt
-	row.LastLifecyclePromptAt = &promptedAt
-	if prompt.SessionID != "" {
-		sessionID := prompt.SessionID
-		row.LastLifecycleSessionID = &sessionID
-	}
-	row.LastError = nil
-	return s.upsertMRLifecycleState(ctx, row)
+	return s.mutateMRLifecycleState(
+		ctx, prompt.TaskID, prompt.RepositoryID, prompt.ProjectPath, prompt.MRIID,
+		func(row *TaskMRLifecycleState) {
+			if prompt.ObservedState != "" {
+				row.LastObservedState = prompt.ObservedState
+			}
+			if prompt.Event == mrLifecycleEventReviewRequested {
+				row.ReviewRequestInitialized = true
+				row.LastReviewRequested = prompt.ReviewRequested
+			}
+			row.LastLifecycleEvent = prompt.Event
+			promptedAt := prompt.PromptedAt
+			row.LastLifecyclePromptAt = &promptedAt
+			if prompt.SessionID != "" {
+				sessionID := prompt.SessionID
+				row.LastLifecycleSessionID = &sessionID
+			}
+			row.LastError = nil
+		})
 }
 
 // RecordTaskMRAutomationError persists a lifecycle evaluation error against
 // the per-MR checkpoint row without aborting the caller's poll loop (AC25).
 func (s *Store) RecordTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
-	row, err := s.loadOrDefaultMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
-	if err != nil {
-		return err
-	}
-	row.LastError = &message
-	return s.upsertMRLifecycleState(ctx, row)
+	return s.mutateMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID, func(row *TaskMRLifecycleState) {
+		row.LastError = &message
+	})
 }
 
 // ClearTaskMRAutomationError clears a previously recorded lifecycle error.
+// The read-then-skip-if-already-nil check runs inside the same transaction as
+// the write, for the same race reason as mutateMRLifecycleState.
 func (s *Store) ClearTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
-	row, err := s.GetTaskMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row, err := getTaskMRLifecycleState(ctx, tx, taskID, repositoryID, projectPath, mrIID)
 	if err != nil || row == nil || row.LastError == nil {
 		return err
 	}
 	row.LastError = nil
-	return s.upsertMRLifecycleState(ctx, row)
+	if err := upsertMRLifecycleState(ctx, tx, row); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // RebindTaskMRReviewer replaces the stored reviewer username and, when it
-// changed, resets every review-request baseline for the task so a stale
-// baseline recorded against the old identity cannot suppress or misfire a
-// prompt evaluated against the new one (risk 3 in the plan).
+// changed, atomically clears every review-request baseline for the task
+// (risk 3 in the plan) — in the same transaction as the username write, so a
+// failure between the two writes cannot leave the new identity paired with
+// the old identity's baseline.
 func (s *Store) RebindTaskMRReviewer(ctx context.Context, taskID, username string) (bool, error) {
-	current, err := s.GetTaskMRAutomationOptions(ctx, taskID)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	current, err := getTaskMRAutomationOptions(ctx, tx, taskID)
 	if err != nil {
 		return false, err
 	}
 	if current.ReviewReviewerUsername == username {
 		return false, nil
 	}
-	if _, err := s.UpdateTaskMRAutomationOptions(ctx, taskID, TaskMRAutomationPatch{}, &username); err != nil {
+	updated := applyTaskMRAutomationPatch(current, taskID, TaskMRAutomationPatch{}, &username)
+	if err := writeTaskMRAutomationOptions(ctx, tx, updated); err != nil {
 		return false, err
 	}
-	if err := s.resetReviewBaselinesForTask(ctx, taskID); err != nil {
+	if err := resetReviewBaselinesForTask(ctx, tx, taskID); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-func (s *Store) resetReviewBaselinesForTask(ctx context.Context, taskID string) error {
-	_, err := s.db.ExecContext(ctx, `
+func resetReviewBaselinesForTask(ctx context.Context, exec execContext, taskID string) error {
+	_, err := exec.ExecContext(ctx, `
 		UPDATE gitlab_task_mr_state
 		SET review_request_initialized = 0, last_review_requested = 0, updated_at = ?
 		WHERE task_id = ?`, time.Now().UTC(), taskID)
@@ -320,11 +424,4 @@ func (s *Store) deleteMRAutomationForWorkspace(ctx context.Context, tx execConte
 		return fmt.Errorf("delete gitlab_task_mr_options: %w", err)
 	}
 	return nil
-}
-
-// execContext is satisfied by *sqlx.Tx (and *sqlx.DB), narrowed to the one
-// method deleteMRAutomationForWorkspace needs so it can run inside the
-// existing ResetWorkspaceE2E transaction.
-type execContext interface {
-	ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
 }
