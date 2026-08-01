@@ -231,7 +231,9 @@
         "/settings/integrations/slack"
       ],
       "mcpTools": [
+        "get_task_mr_automation_kandev",
         "get_task_pr_automation_kandev",
+        "update_task_mr_automation_kandev",
         "update_task_pr_automation_kandev"
       ]
     },
