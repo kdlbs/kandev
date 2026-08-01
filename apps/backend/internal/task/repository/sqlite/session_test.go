@@ -35,6 +35,97 @@ func newRepoForSessionTests(t *testing.T) *Repository {
 	return repo
 }
 
+func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-workspace-root"
+		sessionID = "session-workspace-root"
+		envID     = "env-workspace-root"
+	)
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Workspace root"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            envID,
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/task-root/kandev",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		WorkspacePath:     "/task-root/kandev",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	if err := repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID:           "session-worktree-root",
+		SessionID:    sessionID,
+		WorktreeID:   "worktree-primary",
+		WorktreePath: "/task-root/kandev",
+		Position:     0,
+	}); err != nil {
+		t.Fatalf("CreateTaskSessionWorktree: %v", err)
+	}
+
+	env, err := repo.GetTaskEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	env.WorkspacePath = "/task-root"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+
+	got, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if got.WorkspacePath != "/task-root" {
+		t.Fatalf("GetTaskSession WorkspacePath = %q, want %q", got.WorkspacePath, "/task-root")
+	}
+	if len(got.Worktrees) != 1 || got.Worktrees[0].WorktreePath != "/task-root/kandev" {
+		t.Fatalf("GetTaskSession primary worktree = %+v, want repository path", got.Worktrees)
+	}
+
+	listed, err := repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		t.Fatalf("ListTaskSessions: %v", err)
+	}
+	if len(listed) != 1 || listed[0].WorkspacePath != "/task-root" {
+		t.Fatalf("ListTaskSessions workspace = %+v, want %q", listed, "/task-root")
+	}
+}
+
+func TestTaskSessionWorkspacePathFallsBackWithoutEnvironment(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-legacy-workspace", Title: "Legacy workspace"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:            "session-legacy-workspace",
+		TaskID:        "task-legacy-workspace",
+		WorkspacePath: "/legacy/repository",
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	got, err := repo.GetTaskSession(ctx, "session-legacy-workspace")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	if got.WorkspacePath != "/legacy/repository" {
+		t.Fatalf("WorkspacePath = %q, want legacy fallback", got.WorkspacePath)
+	}
+}
+
 // seedForMsgTest seeds task, session, and turn rows so that all FK constraints
 // on task_session_messages are satisfied. Returns the turn ID for use in inserts.
 func seedForMsgTest(t *testing.T, repo *Repository, taskID, sessionID, turnID string) {

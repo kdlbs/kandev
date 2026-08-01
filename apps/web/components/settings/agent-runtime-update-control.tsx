@@ -20,6 +20,10 @@ import {
 } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  canApproveAgentRuntimeUpdate,
+  resolveRuntimeVersionPair,
+} from "@/lib/agent-runtime-update";
 import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import type { RuntimeUpdate } from "@/lib/types/http";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
@@ -48,6 +52,7 @@ function updatePhase(status: AgentUpdateJob["status"] | undefined): string | nul
 
 function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdateJob }) {
   if (!job) return null;
+  const { versionsMatch } = resolveRuntimeVersionPair(null, job);
   if (job.status === "succeeded" && job.refresh_error) {
     return (
       <p
@@ -66,7 +71,7 @@ function UpdateResult({ agentName, job }: { agentName: string; job?: AgentUpdate
         role="status"
         data-testid={`agent-update-result-${agentName}`}
       >
-        Runtime updated successfully.
+        {versionsMatch ? "Runtime already up to date." : "Runtime updated successfully."}
       </p>
     );
   }
@@ -93,6 +98,30 @@ type UpdateBodyProps = {
   job?: AgentUpdateJob;
   onRetryPreview: () => void;
 };
+
+function RuntimeVersionSummary({
+  preview,
+  job,
+}: {
+  preview: AgentUpdatePreview;
+  job?: AgentUpdateJob;
+}) {
+  const { currentVersion, targetVersion, versionsMatch } = resolveRuntimeVersionPair(preview, job);
+
+  return (
+    <div className="space-y-1">
+      <p className="font-medium">Runtime version</p>
+      <p className="break-words font-mono text-sm">
+        {versionsMatch ? currentVersion : `${currentVersion} → ${targetVersion}`}
+      </p>
+      {versionsMatch && (
+        <p className="text-sm text-muted-foreground" role="status">
+          Up to date
+        </p>
+      )}
+    </div>
+  );
+}
 
 function UpdateBody({
   agentName,
@@ -143,14 +172,7 @@ function UpdateBody({
       )}
       {preview && (
         <>
-          <div className="space-y-1">
-            <p className="font-medium">Runtime version</p>
-            <p className="break-words font-mono text-sm">
-              {(job?.current_version || preview.current_version || "Unknown") +
-                " → " +
-                (job?.target_version || preview.target_version)}
-            </p>
-          </div>
+          <RuntimeVersionSummary preview={preview} job={job} />
           <div className="space-y-1 text-muted-foreground">
             <p>
               This updates the managed runtime on this Kandev host, then refreshes its models and
@@ -205,31 +227,6 @@ type UpdateFooterProps = {
   mobile?: boolean;
 };
 
-function canApproveUpdate({
-  preview,
-  previewError,
-  loading,
-  updateInFlight,
-  starting,
-  installInFlight,
-}: {
-  preview: AgentUpdatePreview | null;
-  previewError: string | null;
-  loading: boolean;
-  updateInFlight: boolean;
-  starting: boolean;
-  installInFlight: boolean;
-}) {
-  return (
-    Boolean(preview?.current_version) &&
-    !previewError &&
-    !loading &&
-    !updateInFlight &&
-    !starting &&
-    !installInFlight
-  );
-}
-
 function UpdateFooter({
   agentName,
   preview,
@@ -244,8 +241,9 @@ function UpdateFooter({
 }: UpdateFooterProps) {
   const updateInFlight = Boolean(job && ACTIVE_UPDATE_STATUSES.has(job.status));
   const canRetry = job?.status === "failed";
-  const canApprove = canApproveUpdate({
+  const canApprove = canApproveAgentRuntimeUpdate({
     preview,
+    job,
     previewError,
     loading,
     updateInFlight,

@@ -39,6 +39,17 @@ func TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault(t *tes
 	}
 }
 
+func TestMapUserSettingsStateIncludesNormalizedStartupPage(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{StartupPage: "future_value"},
+	}, "workspace-1")
+
+	got, ok := state["startupPage"].(string)
+	if !ok || got != usermodels.StartupPageTaskOverview {
+		t.Fatalf("startupPage = %#v, want task_overview", state["startupPage"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesAppStatusBarOrder(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{AppStatusBarOrder: usermodels.AppStatusBarOrder{

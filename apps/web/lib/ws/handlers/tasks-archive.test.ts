@@ -182,6 +182,7 @@ describe("task.updated archive cleanup", () => {
     archiveTask(store);
 
     expect(window.location.pathname).toBe("/");
+    expect(window.location.search).toBe("?home=overview");
   });
 
   it("does not redirect when a different task is archived", () => {

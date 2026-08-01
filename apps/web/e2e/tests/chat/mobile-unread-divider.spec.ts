@@ -11,6 +11,10 @@ import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/un
  * helpers/unread-divider.ts) — same conversation shape, different viewport.
  */
 test.describe("Mobile unread divider", () => {
+  test.beforeEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings({ unread_divider: true });
+  });
+
   test("scrolls to the New divider on visit start under the mobile chat layout", async ({
     testPage,
     apiClient,

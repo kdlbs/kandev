@@ -285,6 +285,7 @@ func seedTaskHandler(repo *sqliterepo.Repository, log *logger.Logger) gin.Handle
 type seedTaskSessionRequest struct {
 	TaskID         string                 `json:"task_id"`
 	SessionID      string                 `json:"session_id,omitempty"`
+	RepositoryID   string                 `json:"repository_id,omitempty"`
 	State          string                 `json:"state"`
 	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 	StartedAt      *string                `json:"started_at,omitempty"`
@@ -491,6 +492,7 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 	return &models.TaskSession{
 		ID:             sessionID,
 		TaskID:         req.TaskID,
+		RepositoryID:   req.RepositoryID,
 		AgentProfileID: req.AgentProfileID,
 		State:          models.TaskSessionState(req.State),
 		Metadata:       metadata,

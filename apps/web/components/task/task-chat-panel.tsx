@@ -35,6 +35,7 @@ import { useSessionReadTracking } from "./chat/use-session-read-tracking";
 import { useDrainOlderMessages } from "@/components/task/chat/use-drain-older-messages";
 import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 
 /**
@@ -362,7 +363,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           messagesLoading={messagesLoading}
           isWorking={isWorking}
           sessionState={session?.state}
-          worktreePath={session?.worktree_path}
+          worktreePath={getSessionWorkspacePath(session)}
           onOpenFile={onOpenFile}
           dividerBeforeItemKey={dividerBeforeItemKey}
           lastPromptMessageId={lastPromptMessageId}

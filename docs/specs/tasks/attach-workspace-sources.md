@@ -132,6 +132,18 @@ session-scoped workspace-sources update after agentctl has adopted the new works
 refresh the Files tree and repository trackers from those events rather than assuming the POST
 response is the only writer.
 
+Full and summary task-session responses expose `workspace_path` as the effective task workspace
+root. In a multi-source task this is the parent that contains every repository and folder entry;
+`worktree_path` remains the flattened primary-repository path for backward compatibility. Live
+workspace-source and sibling-materialization events update `workspace_path` without replacing the
+primary `worktree_path`, and a later session refresh returns the same effective root.
+
+Chat file links resolve against `workspace_path`, so an absolute path under any attached source is
+converted to its task-root-relative Files path before it is opened. Clients may fall back to
+`worktree_path` for legacy session payloads that do not yet include `workspace_path`. Absolute paths
+outside the effective workspace remain non-actionable and are never rewritten into a workspace
+file request.
+
 `add_workspace_sources_kandev` accepts the same source union and defaults `task_id` to the current
 task.
 
@@ -175,6 +187,7 @@ persisted in source URLs or copied into agent-visible metadata.
 | A container/remote repository clone fails                      | Newly created remote entries are removed best-effort, durable attachments are rolled back, and the response identifies the failed source.           |
 | A container/remote task submits a folder source                | The request returns `422` without persistence or filesystem changes.                                                                                |
 | Agentctl cannot rescan the new root                            | The attachment fails rather than reporting success with a stale Files tree.                                                                         |
+| A chat message links to an absolute path outside the task root | The link is not sent to the workspace file API; normal external/unsafe-path handling remains in effect.                                              |
 | An idle agent must restart to adopt the promoted root          | The intentional stop is not shown as a prior agent failure; the replacement agent uses the promoted task root.                                      |
 | A requested file move or rename crosses canonical source roots | The request is rejected before either source is mutated.                                                                                            |
 | A persisted local folder later disappears                      | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
@@ -241,6 +254,16 @@ must be retried.
 - **GIVEN** the original repository has no pending changes, **WHEN** a legacy add-branch call creates
   a sibling worktree, **THEN** Git status in the original repository does not report the sibling as
   an untracked or changed path.
+- **GIVEN** a task whose workspace contains multiple repositories, **WHEN** an agent message links
+  to an absolute file path in either the primary or an attached repository, **THEN** clicking the
+  link opens the exact file through the task-root-relative Files API path without a file-not-found
+  notification.
+- **GIVEN** that multi-repository task is reloaded after workspace promotion, **WHEN** the user
+  clicks the same chat file link, **THEN** the session-restored `workspace_path` resolves the same
+  file and `worktree_path` still identifies the primary repository.
+- **GIVEN** a legacy single-repository session payload without `workspace_path`, **WHEN** a chat
+  file link is inside `worktree_path`, **THEN** the link continues to open as a repository-relative
+  path.
 - **GIVEN** a live legacy add-branch materialization fails, **WHEN** the MCP call returns an error,
   **THEN** the new `task_repositories` row and any newly created repository entity are rolled back
   while the agent and existing processes continue running.
@@ -276,4 +299,5 @@ must be retried.
 ## Implementation plan
 
 See [Attach Workspace Sources plan](../../plans/attach-workspace-sources/plan.md) and the
-[live add-branch compatibility repair plan](../../plans/restore-live-add-branch/plan.md).
+[live add-branch compatibility repair plan](../../plans/restore-live-add-branch/plan.md), plus the
+[multi-repository chat file-link repair plan](../../plans/multi-repo-chat-file-links/plan.md).

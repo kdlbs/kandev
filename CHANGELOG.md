@@ -2,6 +2,162 @@
 
 All notable changes to Kandev.
 
+## 0.83.0 - 2026-07-31
+
+### Features
+
+- add layout-owned PR Details panel ([#2094](https://github.com/kdlbs/kandev/pull/2094))
+- unify workspace GitHub access ([#2084](https://github.com/kdlbs/kandev/pull/2084))
+- add Hermes ACP agent integration ([#2089](https://github.com/kdlbs/kandev/pull/2089)) by @jelloeater-agent
+- cycle linked reviews with held shortcut ([#2099](https://github.com/kdlbs/kandev/pull/2099))
+- add Slack-style unread divider to session transcript ([#1922](https://github.com/kdlbs/kandev/pull/1922)) by @ClemDNL
+- allow selecting multiple repositories in automation config ([#2077](https://github.com/kdlbs/kandev/pull/2077)) by @ClemDNL
+- show WebSocket connectivity warnings ([#2083](https://github.com/kdlbs/kandev/pull/2083))
+- add start-windows-verbose and start-windows-debug ([#2090](https://github.com/kdlbs/kandev/pull/2090)) by @JnManso
+- open the IDE at a file tree node's path ([#2074](https://github.com/kdlbs/kandev/pull/2074))
+- ship the plugin system without a feature flag ([#2086](https://github.com/kdlbs/kandev/pull/2086))
+- scope embedded VS Code by executor ([#2059](https://github.com/kdlbs/kandev/pull/2059))
+- add session attachment diagnostics ([#2061](https://github.com/kdlbs/kandev/pull/2061))
+- accept command_args when creating custom TUI agents ([#2053](https://github.com/kdlbs/kandev/pull/2053)) by @nova28
+- distinguish workflow completion in task sidebar ([#2058](https://github.com/kdlbs/kandev/pull/2058))
+- add transcript last prompt navigation ([#1999](https://github.com/kdlbs/kandev/pull/1999)) by @ClemDNL
+- add quarantine retention lifecycle ([#2049](https://github.com/kdlbs/kandev/pull/2049))
+- preview markdown from review diffs ([#2036](https://github.com/kdlbs/kandev/pull/2036))
+- hide embedded VS Code on Windows hosts ([#2045](https://github.com/kdlbs/kandev/pull/2045))
+- add transcript auto-scroll toggle ([#2039](https://github.com/kdlbs/kandev/pull/2039)) by @ClemDNL
+- add task PR lifecycle notifications ([#2038](https://github.com/kdlbs/kandev/pull/2038)) by @luancm
+- add task workspace search palette ([#2006](https://github.com/kdlbs/kandev/pull/2006))
+- add favorite star toggle to chat messages ([#2008](https://github.com/kdlbs/kandev/pull/2008)) by @ClemDNL
+- add issue-only Improve Kandev workflow ([#1994](https://github.com/kdlbs/kandev/pull/1994))
+- propagate managed git environment to terminals ([#2010](https://github.com/kdlbs/kandev/pull/2010))
+- stabilize navigation footer ([#2002](https://github.com/kdlbs/kandev/pull/2002))
+- add visible WIP overflow queues ([#2001](https://github.com/kdlbs/kandev/pull/2001))
+- streamline mobile review file headers ([#1995](https://github.com/kdlbs/kandev/pull/1995))
+- support polling multiple projects per issue watcher ([#1978](https://github.com/kdlbs/kandev/pull/1978)) by @ClemDNL
+- explain busy storage cleanup and allow override ([#1993](https://github.com/kdlbs/kandev/pull/1993))
+- refresh task surfaces on foreground and pull ([#1986](https://github.com/kdlbs/kandev/pull/1986))
+- improve agent runtime update flow ([#1982](https://github.com/kdlbs/kandev/pull/1982))
+- add task git credential policy ([#1985](https://github.com/kdlbs/kandev/pull/1985))
+- add user-managed runtime updates ([#1950](https://github.com/kdlbs/kandev/pull/1950))
+- implement Host data API write RPCs (CreateTask/UpdateTask/SendMessage) ([#1970](https://github.com/kdlbs/kandev/pull/1970))
+- reliable cron scheduling and webhook-driven push/CI triggers ([#1972](https://github.com/kdlbs/kandev/pull/1972))
+- polish mobile status drawer ([#1929](https://github.com/kdlbs/kandev/pull/1929))
+- add auth capability for plugin-provided OIDC/SAML login ([#1964](https://github.com/kdlbs/kandev/pull/1964))
+- navigate to code-review findings from the Changes panel ([#1963](https://github.com/kdlbs/kandev/pull/1963))
+- move task list options into mobile menu ([#1956](https://github.com/kdlbs/kandev/pull/1956))
+- native code-review agent with inline findings in the Changes panel ([#1957](https://github.com/kdlbs/kandev/pull/1957))
+- support per-workspace GitHub App registrations ([#1810](https://github.com/kdlbs/kandev/pull/1810))
+- add workspace sources from files panel ([#1900](https://github.com/kdlbs/kandev/pull/1900))
+- update ACP compatibility and subagent handling ([#1880](https://github.com/kdlbs/kandev/pull/1880))
+- remember task listing display preferences ([#1944](https://github.com/kdlbs/kandev/pull/1944))
+- accept input while a session's foreground turn waits on background work ([#1668](https://github.com/kdlbs/kandev/pull/1668)) by @point-source
+
+### Bug Fixes
+
+- clear stale context usage after reset ([#2108](https://github.com/kdlbs/kandev/pull/2108))
+- checkout PR head for Claude mentions ([#2109](https://github.com/kdlbs/kandev/pull/2109))
+- adapt walkthrough label to panel width ([#2106](https://github.com/kdlbs/kandev/pull/2106))
+- stop prompt font size changing on window resize ([#2103](https://github.com/kdlbs/kandev/pull/2103))
+- align status bar with sidebar ([#2096](https://github.com/kdlbs/kandev/pull/2096))
+- phone navigation for plugin pages ([#2093](https://github.com/kdlbs/kandev/pull/2093))
+- re-anchor stale git base for commits panel and cumulative diff ([#2062](https://github.com/kdlbs/kandev/pull/2062))
+- darken auto-scroll toggle green, drop ban overlay, maximize icon size ([#2073](https://github.com/kdlbs/kandev/pull/2073)) by @ClemDNL
+- tear down adapter when the agent process self-exits ([#2095](https://github.com/kdlbs/kandev/pull/2095))
+- restore Changes focus on task return ([#2091](https://github.com/kdlbs/kandev/pull/2091))
+- improve interactive accent contrast ([#2075](https://github.com/kdlbs/kandev/pull/2075))
+- clamp file-search limit to bound result allocation ([#2088](https://github.com/kdlbs/kandev/pull/2088))
+- order runtime task state events ([#2082](https://github.com/kdlbs/kandev/pull/2082))
+- improve Mermaid render diagnostics ([#2080](https://github.com/kdlbs/kandev/pull/2080))
+- sync quick chats and their names across devices ([#2085](https://github.com/kdlbs/kandev/pull/2085))
+- hide transient metrics unavailable state ([#2081](https://github.com/kdlbs/kandev/pull/2081))
+- preserve model across context reset ([#2079](https://github.com/kdlbs/kandev/pull/2079))
+- preserve dockview focus during session restore ([#2060](https://github.com/kdlbs/kandev/pull/2060))
+- improve transcript navigation controls ([#2064](https://github.com/kdlbs/kandev/pull/2064))
+- strip multi-line command echoes in workDir-resolved output ([#2072](https://github.com/kdlbs/kandev/pull/2072)) by @ClemDNL
+- make review ordering and navigation safe ([#2067](https://github.com/kdlbs/kandev/pull/2067))
+- stop a closed dialog from leaving the page click-dead ([#2056](https://github.com/kdlbs/kandev/pull/2056)) by @nova28
+- preserve local repository creation on macOS ([#2052](https://github.com/kdlbs/kandev/pull/2052)) by @nova28
+- stop long GitLab row titles drawing over the row actions ([#2057](https://github.com/kdlbs/kandev/pull/2057)) by @nova28
+- parse glab's "Token found:" auth status label ([#2054](https://github.com/kdlbs/kandev/pull/2054)) by @nova28
+- resume archive-cancelled sessions without a running row ([#2041](https://github.com/kdlbs/kandev/pull/2041)) by @ClemDNL
+- prevent blank screens during SPA recovery ([#2024](https://github.com/kdlbs/kandev/pull/2024))
+- bound task cleanup retries and ignore missing resources ([#2027](https://github.com/kdlbs/kandev/pull/2027)) ([#2046](https://github.com/kdlbs/kandev/pull/2046))
+- keep spawner attribution on a spawned session's first turn ([#2047](https://github.com/kdlbs/kandev/pull/2047))
+- stop the PR panel from showing the previous task's stale feedback ([#2048](https://github.com/kdlbs/kandev/pull/2048)) by @ClemDNL
+- show only model in agent tab title ([#2043](https://github.com/kdlbs/kandev/pull/2043))
+- cover agent launch readiness timeout ([#2040](https://github.com/kdlbs/kandev/pull/2040))
+- stop SELECT * scans from breaking on TaskPR schema drift ([#1988](https://github.com/kdlbs/kandev/pull/1988)) by @ClemDNL
+- backfill remote_url from local checkout for legacy GitLab repos ([#2030](https://github.com/kdlbs/kandev/pull/2030)) by @yattdev
+- cover the whole launch chain in waitForSessionReady ([#2032](https://github.com/kdlbs/kandev/pull/2032)) by @JnManso
+- add stalled agent recovery ([#2035](https://github.com/kdlbs/kandev/pull/2035))
+- keep watcher save state visible ([#2037](https://github.com/kdlbs/kandev/pull/2037))
+- prevent duplicate review-watcher agents and resync task PRs on reconnect ([#2034](https://github.com/kdlbs/kandev/pull/2034))
+- match per-session-suffixed event subjects in plugin delivery ([#2029](https://github.com/kdlbs/kandev/pull/2029))
+- prevent hidden workflow task inheritance ([#2031](https://github.com/kdlbs/kandev/pull/2031))
+- restore coarse running busy signal ([#2023](https://github.com/kdlbs/kandev/pull/2023))
+- return bad request on malformed sprites WS payloads ([#2014](https://github.com/kdlbs/kandev/pull/2014))
+- keep agent tab title synced with model ([#2021](https://github.com/kdlbs/kandev/pull/2021))
+- reconcile responsive task layouts ([#2011](https://github.com/kdlbs/kandev/pull/2011))
+- set confirmed SessionDirTemplate for Pi, Qoder, Kiro and Trae ([#2019](https://github.com/kdlbs/kandev/pull/2019))
+- stop planting self-referential links in local repositories ([#2007](https://github.com/kdlbs/kandev/pull/2007)) by @JnManso
+- return real results from Service.GetBlocking ([#2015](https://github.com/kdlbs/kandev/pull/2015))
+- bound the launcher health probe with a timeout ([#2017](https://github.com/kdlbs/kandev/pull/2017))
+- auto-select the sole visible workflow ([#2020](https://github.com/kdlbs/kandev/pull/2020))
+- bound tool installer downloads with timeouts ([#2016](https://github.com/kdlbs/kandev/pull/2016))
+- pull unstarted feeder tasks into available WIP steps ([#2003](https://github.com/kdlbs/kandev/pull/2003))
+- keep file attachments compact beside image previews ([#1997](https://github.com/kdlbs/kandev/pull/1997))
+- adapt lanes to available board width ([#2004](https://github.com/kdlbs/kandev/pull/2004))
+- honor executor clone transport ([#1998](https://github.com/kdlbs/kandev/pull/1998))
+- make issue-watch StatsPeriod actually filter by issue age ([#1977](https://github.com/kdlbs/kandev/pull/1977)) by @ClemDNL
+- match GitLab MR against repository remote_url identity ([#1996](https://github.com/kdlbs/kandev/pull/1996)) by @yattdev
+- recover failed agent resumes and managed runtimes ([#1991](https://github.com/kdlbs/kandev/pull/1991))
+- expose executor-profile env vars to terminal shells ([#1992](https://github.com/kdlbs/kandev/pull/1992))
+- restore live add-branch worktrees ([#1990](https://github.com/kdlbs/kandev/pull/1990))
+- preserve dockview layout during task switches
+- honor explicit task_id in plan/walkthrough/review tools ([#1984](https://github.com/kdlbs/kandev/pull/1984))
+- unify enabled toolbar icon color ([#1987](https://github.com/kdlbs/kandev/pull/1987))
+- clear sidebar spinner when session settles ([#1981](https://github.com/kdlbs/kandev/pull/1981))
+- warn when pasted attachments are too large ([#1983](https://github.com/kdlbs/kandev/pull/1983))
+- resume manually stopped sessions ([#1979](https://github.com/kdlbs/kandev/pull/1979))
+- enforce workflow-step WIP limits on task creation ([#1980](https://github.com/kdlbs/kandev/pull/1980))
+- preserve prompts across usage-limit recovery ([#1976](https://github.com/kdlbs/kandev/pull/1976))
+- guard Office launches without runtime context ([#1974](https://github.com/kdlbs/kandev/pull/1974))
+- refresh CI summary when popover opens ([#1927](https://github.com/kdlbs/kandev/pull/1927))
+- strip command echo when terminal resolves a relative path to absolute ([#1975](https://github.com/kdlbs/kandev/pull/1975)) by @ClemDNL
+- export executor-profile env into repo setup script ([#1971](https://github.com/kdlbs/kandev/pull/1971))
+- make pr-state work with native jq on Windows ([#1958](https://github.com/kdlbs/kandev/pull/1958)) by @JnManso
+- prefer live model over saved profile label in session tab title ([#1968](https://github.com/kdlbs/kandev/pull/1968))
+- relax OpenCode install detection ([#1967](https://github.com/kdlbs/kandev/pull/1967))
+- guard background work status ([#1966](https://github.com/kdlbs/kandev/pull/1966))
+- restore legacy GitHub launch compatibility ([#1962](https://github.com/kdlbs/kandev/pull/1962))
+- deliver follow-ups after foreground handoff ([#1959](https://github.com/kdlbs/kandev/pull/1959))
+- retire execution activity on teardown ([#1961](https://github.com/kdlbs/kandev/pull/1961))
+- scope integration config/watch routes to workspace owner ([#1960](https://github.com/kdlbs/kandev/pull/1960))
+- harden background work lifecycle tracking ([#1955](https://github.com/kdlbs/kandev/pull/1955))
+- close per-user session isolation gaps (service, WS, orchestrator) ([#1939](https://github.com/kdlbs/kandev/pull/1939))
+- make Makefile $(shell) probes work under native Windows cmd ([#1953](https://github.com/kdlbs/kandev/pull/1953)) by @JnManso
+- extend ACP session creation timeout ([#1949](https://github.com/kdlbs/kandev/pull/1949))
+- isolate task state when switching workspaces ([#1951](https://github.com/kdlbs/kandev/pull/1951))
+- preflight signing configuration before merge ([#1948](https://github.com/kdlbs/kandev/pull/1948))
+
+### Performance
+
+- hydrate empty message favorites once ([#2025](https://github.com/kdlbs/kandev/pull/2025))
+
+### Refactoring
+
+- centralize portable user-setting defaults ([#2107](https://github.com/kdlbs/kandev/pull/2107))
+- consolidate formatRelativeTime into lib/utils ([#2069](https://github.com/kdlbs/kandev/pull/2069))
+- use the shared formatBytes in chat attachments ([#2071](https://github.com/kdlbs/kandev/pull/2071))
+- reuse stats-utils formatDuration in stats-sections ([#2068](https://github.com/kdlbs/kandev/pull/2068))
+- drop dead req param from resolveGHToken ([#2013](https://github.com/kdlbs/kandev/pull/2013))
+- simplify model routing ([#1973](https://github.com/kdlbs/kandev/pull/1973))
+- remove dead code and deprecated shims ([#1965](https://github.com/kdlbs/kandev/pull/1965))
+
+### Documentation
+
+- clarify power-user positioning and roadmap ([#2044](https://github.com/kdlbs/kandev/pull/2044))
+
 ## 0.82.0 - 2026-07-25
 
 ### Features

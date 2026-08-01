@@ -521,7 +521,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     mobileMR.handlePanelChange,
   );
   return (
-    <div className="h-dvh relative bg-background">
+    <div className="h-dvh relative bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
         {...props}
         activeTaskId={activeTaskId}

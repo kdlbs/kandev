@@ -1,0 +1,75 @@
+import { cleanup, render } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  routerPush: vi.fn(),
+  onViewModeChange: vi.fn(),
+  commands: [] as Array<{ id: string; action?: () => void }>,
+  activeWorkspaceId: "workspace-1" as string | null,
+  activeWorkflowId: "workflow-1" as string | null,
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: unknown) => unknown) =>
+    selector({
+      userSettings: { keyboardShortcuts: {} },
+      workspaces: { activeId: mocks.activeWorkspaceId },
+      workflows: { activeId: mocks.activeWorkflowId },
+    }),
+}));
+vi.mock("@/hooks/use-kanban-display-settings", () => ({
+  useKanbanDisplaySettings: () => ({ onViewModeChange: mocks.onViewModeChange }),
+}));
+vi.mock("@/hooks/use-register-commands", () => ({
+  useRegisterCommands: (commands: Array<{ id: string; action?: () => void }>) => {
+    mocks.commands = commands;
+  },
+}));
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: false }),
+}));
+vi.mock("@/lib/keyboard/shortcut-overrides", () => ({
+  getShortcut: () => undefined,
+}));
+vi.mock("@/lib/routing/client-router", () => ({
+  useRouter: () => ({ push: mocks.routerPush }),
+}));
+
+import { HomepageCommands } from "./homepage-commands";
+
+function commandAction(id: string): () => void {
+  const action = mocks.commands.find((command) => command.id === id)?.action;
+  if (!action) throw new Error(`Missing ${id} command action`);
+  return action;
+}
+
+beforeEach(() => {
+  mocks.routerPush.mockReset();
+  mocks.onViewModeChange.mockReset();
+  mocks.commands = [];
+  mocks.activeWorkspaceId = "workspace-1";
+  mocks.activeWorkflowId = "workflow-1";
+});
+
+afterEach(() => cleanup());
+
+describe("HomepageCommands", () => {
+  it("preserves the active scope when changing views", () => {
+    render(<HomepageCommands onCreateTask={vi.fn()} />);
+
+    commandAction("view-kanban")();
+    expect(mocks.routerPush).toHaveBeenCalledWith(
+      "/?home=overview&workspaceId=workspace-1&workflowId=workflow-1",
+    );
+
+    mocks.routerPush.mockClear();
+    commandAction("view-pipeline")();
+    expect(mocks.routerPush).toHaveBeenCalledWith(
+      "/?home=overview&workspaceId=workspace-1&workflowId=workflow-1",
+    );
+
+    mocks.routerPush.mockClear();
+    commandAction("view-list")();
+    expect(mocks.routerPush).toHaveBeenCalledWith("/tasks?workspace=workspace-1");
+  });
+});

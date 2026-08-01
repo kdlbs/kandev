@@ -31,7 +31,7 @@ Open source, multi-provider, no telemetry, not tied to any cloud.
 
 ## Features
 
-- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode, Cursor, Devin, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, AWS Kiro, Qoder, Trae, Oh My Pi, Grok
+- **Multi-agent support** - Claude Code, Codex, GitHub Copilot, Gemini CLI, Amp, Auggie, OpenCode, Cursor, Devin, Qwen, Factory Droid, iFlow, Kilocode, Pi, Kimi, AWS Kiro, Qoder, Trae, Oh My Pi, Grok, Hermes
 - **Parallel task execution** – start and manage multiple tasks from different sources simultaneously, boosting productivity with AI agents
 - **Integrated workspace** - Built-in terminal, code editor with LSP, git changes panel, embedded vscode and chat in one IDE-like view
 - **Kanban task management** - Drag-and-drop boards, columns, and workflow automation
@@ -92,6 +92,7 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 | **Trae** | `traecli acp serve` *(install Trae IDE CLI)* |
 | **Oh My Pi** | `omp acp` *(install `bun install -g @oh-my-pi/pi-coding-agent`)* |
 | **Grok** | `grok --no-auto-update agent stdio` *(install `npm install -g @xai-official/grok`)* |
+| **Hermes** | `hermes acp` *(install with the official Hermes installer)* |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
 
@@ -259,7 +260,7 @@ There are a few similar tools in this space, and new ones appearing everyday. He
 
 - **Server-first architecture** - The core app runs as a server you can access from any device, including your phone.
 - **Remote runtimes** - Run agents on remote servers via SSH, Docker hosts, and cloud environments, not just your local machine.
-- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, OpenCode, Cursor, Devin, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, Oh My Pi, and Grok side by side. Not locked to one vendor.
+- **Multi-provider** - Use Claude Code, Codex, Copilot, Gemini, Amp, Auggie, OpenCode, Cursor, Devin, Qwen, Droid, iFlow, Kilocode, Pi, Kimi, Kiro, Qoder, Trae, Oh My Pi, Grok, and Hermes side by side. Not locked to one vendor.
 - **CLI passthrough and chat** - Interact with agents through structured chat messages or, where supported, drop into raw CLI mode for full agent TUI capabilities.
 - **Open source and self-hostable** - No vendor lock-in, no telemetry, runs on your infrastructure.
 

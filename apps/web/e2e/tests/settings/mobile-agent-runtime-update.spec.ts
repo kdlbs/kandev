@@ -50,6 +50,35 @@ test.describe("managed agent runtime updates on mobile", () => {
     );
   });
 
+  test("shows an up-to-date preview and disables approval when versions match", async ({
+    testPage,
+    prCapture,
+  }) => {
+    const runtime = await installRuntimeUpdateFixture(testPage, {
+      previewResponse: {
+        agent_name: "claude-acp",
+        package: "@agentclientprotocol/claude-agent-acp",
+        current_version: "0.64.0",
+        target_version: "0.64.0",
+        command: ["npm", "exec"],
+        command_string: "npm exec",
+      },
+    });
+
+    await testPage.goto("/settings/agents");
+    await testPage.getByTestId(`agent-update-trigger-${runtime.agentName}`).tap();
+
+    const drawer = testPage.getByTestId(`agent-update-drawer-${runtime.agentName}`);
+    await expect(drawer.getByText("0.64.0", { exact: true })).toBeVisible();
+    await expect(drawer.getByText("Up to date", { exact: true })).toBeVisible();
+    await expect(drawer).not.toContainText("0.64.0 → 0.64.0");
+    await expect(testPage.getByTestId(`agent-update-confirm-${runtime.agentName}`)).toBeDisabled();
+    expect(runtime.postCount()).toBe(0);
+    await prCapture.screenshot("mobile-update-up-to-date", {
+      caption: "Mobile update preview when the managed runtime is up to date",
+    });
+  });
+
   test("keeps retry available after an update job fails", async ({ testPage }) => {
     const runtime = await installRuntimeUpdateFixture(testPage);
 

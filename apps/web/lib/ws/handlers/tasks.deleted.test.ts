@@ -130,6 +130,7 @@ describe("task.deleted live notification + redirect", () => {
       );
 
       expect(window.location.pathname).toBe("/");
+      expect(window.location.search).toBe("?home=overview");
       expect(store.getState().setTaskDeletedNotification).toHaveBeenCalledWith({
         taskId: "t1",
         title: REVIEW_TITLE,

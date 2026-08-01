@@ -26,7 +26,7 @@ import {
   type TasksListDisplayOptions,
 } from "./mobile-menu-task-list-options";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
-import { linkToTask, linkToTasks } from "@/lib/links";
+import { linkToTask, linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { cn } from "@/lib/utils";
 import type { Repository, Task } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
@@ -518,11 +518,13 @@ export function MobileMenuSheet({
       onOpenChange(false);
     } else if (value === "kanban") {
       onViewModeChange("kanban");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: activeWorkflowId ?? undefined }));
       onOpenChange(false);
     } else if (value === "pipeline" && !isMobile) {
       onViewModeChange("pipeline");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: activeWorkflowId ?? undefined }));
       onOpenChange(false);
     }
   };

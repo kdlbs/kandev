@@ -22,10 +22,15 @@ credential, and update surfaces; there is no API or frontend contract change.
   `executors_running.resume_token` as an unusable saved session and calls
   `clearResumeToken`, even when ACP `initialize` never returned and
   `session/load` was never reached.
-- `Executor.ResumeSession` calls `agentManager.LaunchAgent` before
-  `persistResumeState`. GitHub credential issuance occurs inside that launch,
-  while `githubBrokerScopeAuthorizer` still sees `FAILED` or `CANCELLED` and
-  rejects the lease as terminal.
+- `Executor.ResumeSession` calls `buildResumeRequest` before
+  `persistResumeState`, and `buildResumeRequest` itself issues the GitHub
+  credential lease. The prior repair moved the transition ahead of
+  `LaunchAgent` but not ahead of this earlier lease boundary, so
+  `githubBrokerScopeAuthorizer` still sees `FAILED` or `CANCELLED` and rejects
+  the lease as terminal.
+- A successful resume applies `git_credential_snapshot` after the guarded
+  `STARTING` write. Without a second guarded metadata write, SQLite retains
+  the previous credential-routing display even though the new lease is used.
 - `CacheUpdateCommand` can reuse an already-extracted `_npx` directory. npm's
   package-content cache can be valid while that execution tree is truncated,
   so another `npm exec` does not necessarily repair it.
@@ -34,7 +39,8 @@ credential, and update surfaces; there is no API or frontend contract change.
 
 ## Backend
 
-Tasks 01–03 are complete; implementation and focused verification are done.
+Tasks 01–03 are complete. Tasks 04–05 repair the credential-boundary ordering
+regression discovered after release and persist its non-secret display metadata.
 
 ### Preserve resume identity on startup failure
 
@@ -70,6 +76,33 @@ Tasks 01–03 are complete; implementation and focused verification are done.
   `apps/backend/internal/orchestrator/task_operations_resume_test.go`. The fake
   launch boundary must read the repository and reject any lease attempt unless
   the session is already `STARTING`.
+
+### Repair the credential-boundary ordering regression
+
+- Reorder resume request preparation so state-sensitive request fields and
+  other fallible preparation complete while the in-memory session still
+  reflects its prior state.
+- Run the existing guarded `persistResumeState` transition immediately before
+  `configureGitHubCredentialBrokerForRepositories`, which is the actual lease
+  boundary, and remove the later duplicate transition before `LaunchAgent`.
+- Extend rollback to cover credential issuance and any remaining request-build
+  failure after the transition, while retaining the prior-state snapshot for
+  stale-execution cleanup and concurrent-terminal protection.
+- Add a repository-observing credential issuer in
+  `apps/backend/internal/orchestrator/executor/executor_resume_test.go`; unlike
+  the earlier `LaunchAgent` fake, it asserts the state at the exact broker
+  boundary.
+
+### Persist the resume credential snapshot
+
+- After broker configuration records the non-secret credential snapshot, write
+  the changed session metadata with the existing expected-state guard while
+  the session is still `STARTING`.
+- Abort the launch and use the existing guarded rollback if that metadata write
+  loses a concurrent terminal transition or otherwise fails.
+- Add a regression test that observes the persisted snapshot after a resumed
+  managed-GitHub launch; the test must distinguish the first `STARTING` write
+  from the later metadata write.
 
 ### Repair one managed npm execution cache
 
@@ -110,6 +143,18 @@ Tasks 01–03 are complete; implementation and focused verification are done.
   `apps/backend/internal/orchestrator/task_operations_resume_test.go`.
   **How:** repository-observing fake `LaunchAgent`, table-driven prior states,
   and a concurrent-terminal-winner case.
+- **What:** the managed GitHub credential issuer observes `STARTING`, and a
+  lease failure rolls the session back to its prior recoverable state.
+  **File:**
+  `apps/backend/internal/orchestrator/executor/executor_resume_test.go`.
+  **How:** repository-observing fake `GitHubCredentialLeaseIssuer` exercised
+  through the real `ResumeSession -> buildResumeRequest` path.
+- **What:** a resumed launch persists the current non-secret credential
+  routing snapshot after lease setup without weakening the `STARTING` guard.
+  **File:**
+  `apps/backend/internal/orchestrator/executor/executor_resume_test.go`.
+  **How:** inspect detached full-row snapshots recorded by the repository fake
+  and assert the workspace credential display metadata is present.
 - **What:** deterministic keys match npm for built-in packages and cache
   invalidation cannot escape the resolved `_npx` root.
   **File:**
@@ -138,6 +183,14 @@ Wave 2:
 
 - [x] [Task 02: Transition resume state before credential issuance](task-02-resume-state-before-credentials.md)
 
+Wave 3:
+
+- [x] [Task 04: Repair resume lease-boundary ordering](task-04-resume-lease-boundary.md)
+
+Wave 4:
+
+- [x] [Task 05: Persist resume credential snapshot](task-05-resume-credential-snapshot.md)
+
 Execution remains sequential in the primary conversation by default. The
 parallel-safe label does not authorize delegation.
 
@@ -153,5 +206,10 @@ parallel-safe label does not authorize delegation.
   by the supported npm runtime and a repair failure remains bounded.
 - Moving `STARTING` earlier changes when observers see resume progress; guarded
   rollback and state-race tests prevent stale active state.
+- The transition must remain after request preparation that reads the prior
+  session state, but before the first managed credential lease request.
+- Credential display metadata is non-secret and must be persisted with an
+  expected `STARTING` state; it must not revive or overwrite a concurrent
+  terminal session.
 - The plan does not weaken credential authorization, auto-start fresh
   conversations, clean global npm caches, or add launch-time cache mutation.

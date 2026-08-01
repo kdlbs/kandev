@@ -171,7 +171,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
       storeState.setActiveWorkspace.mock.invocationCallOrder[0],
     );
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w3");
-    expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w3");
+    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w3");
   });
 
   it("calls onActionComplete when selecting a different workspace", () => {
@@ -195,7 +195,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w1"))).toBe(false);
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
-    expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w1");
+    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
   });
 
   it("navigates to the office workspace when the office feature is enabled", () => {
@@ -217,7 +217,7 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
 
     expect(cookieWrites.some((c) => c.startsWith("office-active-workspace=w2"))).toBe(true);
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w1");
-    expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w1");
+    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
   });
 });
 
@@ -252,7 +252,7 @@ describe("AppSidebarWorkspacePicker — active workspace display and routing", (
 
     expect(cookieWrites.some((c) => c.startsWith("kandev-active-workspace=w1"))).toBe(true);
     expect(storeState.setActiveWorkspace).not.toHaveBeenCalled();
-    expect(navigationMock.push).toHaveBeenCalledWith("/?workspaceId=w1");
+    expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w1");
   });
 
   it("does not route when selecting the active office workspace", () => {

@@ -21,7 +21,7 @@ import { KanbanHeaderMobile } from "./kanban-header-mobile";
 import { MainTopBarPluginActions } from "./main-top-bar-plugin-actions";
 import { MobileMenuSheet } from "./mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
-import { linkToTasks } from "@/lib/links";
+import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStore } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -66,6 +66,13 @@ function getWorkspaceLabel(
 
 function getHeaderTitle(currentPage: string): string {
   return currentPage === "tasks" ? "Tasks" : "Home";
+}
+
+function toHeaderHealthProps(health: ReturnType<typeof useSystemHealthIndicator>) {
+  return {
+    showHealthIndicator: health.hasIssues,
+    onOpenHealthDialog: health.openDialog,
+  };
 }
 
 // Integrations / Stats / Office / Improve Kandev / Settings / Release notes
@@ -300,9 +307,10 @@ function DesktopHeader({
   );
 }
 
-function useHeaderViewChange(
+function useHeaderView(
   currentPage: string,
   workspaceId: string | undefined,
+  workflowId: string | null,
   onViewModeChange: (mode: string) => void,
 ) {
   const router = useRouter();
@@ -312,10 +320,12 @@ function useHeaderViewChange(
       if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
     } else if (value === "kanban") {
       onViewModeChange("kanban");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
     } else if (value === "pipeline") {
       onViewModeChange("pipeline");
-      if (currentPage !== "kanban") router.push("/");
+      if (currentPage !== "kanban")
+        router.push(linkToTaskOverview({ workspaceId, workflowId: workflowId ?? undefined }));
     }
   };
 }
@@ -332,19 +342,17 @@ export function KanbanHeader({
   const { isMobile, isTablet } = useResponsiveBreakpoint();
   const isMenuOpen = useAppStore((state) => state.mobileKanban.isMenuOpen);
   const setMenuOpen = useAppStore((state) => state.setMobileKanbanMenuOpen);
-  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } =
-    useKanbanDisplaySettings();
+  const workflowId = useAppStore((state) => state.workflows.activeId);
+  const display = useKanbanDisplaySettings();
+  const { effectiveTaskListingView, onViewModeChange, workspaces, activeWorkspaceId } = display;
   const releaseNotes = useReleaseNotes();
   const healthIndicator = useSystemHealthIndicator();
   const toggleValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
-  const handleViewChange = useHeaderViewChange(currentPage, workspaceId, onViewModeChange);
+  const handleViewChange = useHeaderView(currentPage, workspaceId, workflowId, onViewModeChange);
   const title = getHeaderTitle(currentPage);
   const workspaceLabel = getWorkspaceLabel(workspaces, activeWorkspaceId);
 
-  const healthProps = {
-    showHealthIndicator: healthIndicator.hasIssues,
-    onOpenHealthDialog: healthIndicator.openDialog,
-  };
+  const healthProps = toHeaderHealthProps(healthIndicator);
   const sharedSearch = { searchQuery, onSearchChange, isSearchLoading };
 
   const renderHeader = () => {

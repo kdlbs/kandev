@@ -5,9 +5,10 @@ import { expect, type Locator } from "@playwright/test";
 // duplicating the DOM walk caused review churn.
 
 /**
- * Asserts that no descendant of `root` has a right edge past `root`'s right
- * edge. `label` shows up in the failure message so the offending step is
- * identifiable.
+ * Asserts that no visible descendant of `root` has a right edge past `root`'s
+ * right edge. DOM bounds that are clipped inside a nested scroll container do
+ * not constitute a visual overflow. `label` shows up in the failure message
+ * so the offending step is identifiable.
  */
 export async function assertNoDescendantOverflowsRight(
   root: Locator,
@@ -26,12 +27,25 @@ export async function assertNoDescendantOverflowsRight(
       // SVG elements in HTML documents report `tagName` lowercase (per the
       // SVG namespace) while HTML elements report uppercase, so normalize.
       const skip = new Set(["svg", "path", "circle", "rect", "line", "g"]);
+      const clippingOverflow = new Set(["auto", "clip", "hidden", "scroll"]);
+      const isClippedBeforeLimit = (element: Element): boolean => {
+        for (
+          let parent = element.parentElement;
+          parent && parent !== node;
+          parent = parent.parentElement
+        ) {
+          const overflowX = getComputedStyle(parent).overflowX;
+          if (!clippingOverflow.has(overflowX)) continue;
+          if (parent.getBoundingClientRect().right <= limit + 1) return true;
+        }
+        return false;
+      };
       const all = node.querySelectorAll("*");
       for (const el of all) {
         if (skip.has(el.tagName.toLowerCase())) continue;
         const rect = el.getBoundingClientRect();
         if (rect.width === 0 || rect.height === 0) continue;
-        if (rect.right > limit + 1) {
+        if (rect.right > limit + 1 && !isClippedBeforeLimit(el)) {
           results.push({
             tag: el.tagName.toLowerCase(),
             text: (el.textContent ?? "").trim().slice(0, 80),

@@ -531,3 +531,19 @@ func TestSanitizeEnvForAgent(t *testing.T) {
 		t.Errorf("TEST_KEEP_ME was stripped but should have been kept")
 	}
 }
+
+func TestSanitizeEnvForAgentAppliesRuntimeOverrides(t *testing.T) {
+	const envKey = "HERMES_ACP_SKIP_CONFIGURED_MCP"
+	t.Setenv(envKey, "0")
+
+	var cfg InferenceConfigDTO
+	err := json.Unmarshal([]byte(`{"env":{"HERMES_ACP_SKIP_CONFIGURED_MCP":"1"}}`), &cfg)
+	if err != nil {
+		t.Fatalf("unmarshal inference config: %v", err)
+	}
+
+	env := sanitizeEnvForAgent(&cfg)
+	if !slices.Contains(env, envKey+"=1") {
+		t.Errorf("runtime override missing from subprocess env: %v", env)
+	}
+}

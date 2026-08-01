@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
+import { linkToTaskOverview } from "@/lib/links";
 import type { WorkflowsState } from "@/lib/state/slices";
 
 type UserSettingsFields = {
@@ -34,6 +35,10 @@ function useViewModeChange() {
     [setView],
   );
   return { effectiveView, onViewModeChange };
+}
+
+function replaceTaskOverviewHistory(workspaceId?: string, workflowId?: string) {
+  window.history.pushState({}, "", linkToTaskOverview({ workspaceId, workflowId }));
 }
 
 /**
@@ -68,8 +73,7 @@ export function useKanbanDisplaySettings() {
   const handleWorkspaceChange = useCallback(
     (nextWorkspaceId: string | null) => {
       setActiveWorkspace(nextWorkspaceId);
-      const url = nextWorkspaceId ? `/?workspaceId=${nextWorkspaceId}` : "/";
-      window.history.pushState({}, "", url);
+      replaceTaskOverviewHistory(nextWorkspaceId ?? undefined);
       commitSettings({
         workspaceId: nextWorkspaceId,
         workflowId: null,
@@ -86,10 +90,9 @@ export function useKanbanDisplaySettings() {
         const workspaceId = workflows.find(
           (workflow: WorkflowsState["items"][number]) => workflow.id === nextWorkflowId,
         )?.workspaceId;
-        const workspaceParam = workspaceId ? `&workspaceId=${workspaceId}` : "";
-        window.history.pushState({}, "", `/?workflowId=${nextWorkflowId}${workspaceParam}`);
+        replaceTaskOverviewHistory(workspaceId, nextWorkflowId);
       } else if (activeWorkspaceId) {
-        window.history.pushState({}, "", `/?workspaceId=${activeWorkspaceId}`);
+        replaceTaskOverviewHistory(activeWorkspaceId);
       }
       commitSettings({
         workspaceId: userSettings.workspaceId,

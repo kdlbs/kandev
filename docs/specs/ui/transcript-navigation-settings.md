@@ -20,12 +20,14 @@ action is visible.
   - **Show anchored prompt bar** off.
   - **Show scroll to last prompt** on.
   - **Show scroll to start** off.
-  - **Show transcript auto-scroll control** on.
+  - **Show transcript auto-scroll control** off.
 - Hiding the transcript auto-scroll control only removes the per-session header button. Transcript
   auto-scroll remains enabled by default for every session, and an existing per-session choice is
   not rewritten when the control is hidden or shown.
 - Each preference is a local settings draft until the shared **Save changes** action succeeds.
 - Saved values apply after reload and across devices through backend-owned user settings.
+- Missing portable-setting values are resolved at the backend boundary and mapped consistently
+  across frontend delivery paths per [ADR 0041](../../decisions/0041-backend-owned-portable-user-settings.md).
 - When the floating Save action is visible, the settings content scrolls far enough for the final
   transcript-navigation control to sit fully above the action on desktop and phone viewports.
 
@@ -38,7 +40,7 @@ The existing per-user settings JSON object stores four independent booleans:
 | `show_anchored_prompt_bar` | `false` | Show the desktop-only anchored copy of the latest prompt. |
 | `show_scroll_to_last_prompt` | `true` | Show the control that jumps to the latest prompt when eligible. |
 | `show_scroll_to_start` | `false` | Show the control that jumps to the beginning of the transcript when eligible. |
-| `show_transcript_auto_scroll_control` | `true` | Show the per-session auto-scroll toggle in transcript chrome. |
+| `show_transcript_auto_scroll_control` | `false` | Show the per-session auto-scroll toggle in transcript chrome. |
 
 An omitted field uses its documented default. An explicit saved `true` or `false` is preserved.
 The per-session auto-scroll choice remains transient browser-session state and is not replaced by
@@ -60,7 +62,7 @@ fields. PATCH omission leaves a saved value unchanged.
 
 - **GIVEN** a user has no saved transcript-navigation preferences, **WHEN** settings and a
   transcript load, **THEN** the anchored prompt bar and scroll-to-start control are disabled, the
-  scroll-to-last-prompt and auto-scroll controls are enabled, and transcript auto-scroll is on.
+  scroll-to-last-prompt is enabled, the auto-scroll control is hidden, and transcript auto-scroll is on.
 - **GIVEN** a user changes any transcript-navigation switch, **WHEN** Save has not been pressed,
   **THEN** no user-settings request is sent and the changed control is marked dirty.
 - **GIVEN** a user saves transcript-navigation changes, **WHEN** settings and a transcript reload,

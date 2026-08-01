@@ -165,5 +165,6 @@ export const i18nGuardFiles = [
   "components/settings/language-settings.tsx",
   "components/settings/settings-floating-save.tsx",
   "components/settings/settings-layout-client.tsx",
+  "components/settings/startup-page-settings-card.tsx",
   "components/settings/system-metrics-settings-card.tsx",
 ];

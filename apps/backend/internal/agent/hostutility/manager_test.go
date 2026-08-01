@@ -31,6 +31,72 @@ func TestManagerExposesRefreshWithCommand(t *testing.T) {
 	require.True(t, ok, "managed runtime updates need a command-override refresh")
 }
 
+func TestBuildProbeRequestIncludesRuntimeEnv(t *testing.T) {
+	const envKey = "HERMES_ACP_SKIP_CONFIGURED_MCP"
+	ia := &installedInferenceAgent{
+		id:         "hermes-acp",
+		runtimeEnv: map[string]string{envKey: "1"},
+	}
+	req := buildProbeRequest(&instance{agentType: ia.id, workDir: t.TempDir()}, ia, false, agents.Command{})
+
+	payload, err := json.Marshal(req)
+	require.NoError(t, err)
+	var decoded struct {
+		InferenceConfig struct {
+			Env map[string]string `json:"env"`
+		} `json:"inference_config"`
+	}
+	require.NoError(t, json.Unmarshal(payload, &decoded))
+	require.Equal(t, "1", decoded.InferenceConfig.Env[envKey])
+}
+
+func TestExecutePromptWithMCPIncludesRuntimeEnv(t *testing.T) {
+	const envKey = "HERMES_ACP_SKIP_CONFIGURED_MCP"
+	log := newTestLogger(t)
+	reg := registry.NewRegistry(log)
+	ia := &installedInferenceAgent{
+		id:         "hermes-acp",
+		runtimeEnv: map[string]string{envKey: "1"},
+	}
+	require.NoError(t, reg.Register(ia))
+
+	receivedEnv := make(chan map[string]string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/inference/prompt":
+			var request struct {
+				InferenceConfig struct {
+					Env map[string]string `json:"env"`
+				} `json:"inference_config"`
+			}
+			require.NoError(t, json.NewDecoder(r.Body).Decode(&request))
+			receivedEnv <- request.InferenceConfig.Env
+			w.Header().Set("Content-Type", "application/json")
+			require.NoError(t, json.NewEncoder(w).Encode(agentctlutil.PromptResponse{
+				Success:  true,
+				Response: "ok",
+			}))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, port := serverHostPort(t, server)
+
+	mgr := NewManager(reg, host, port, nil, log)
+	mgr.instances[ia.id] = &instance{
+		agentType: ia.id,
+		workDir:   t.TempDir(),
+		client:    agentctlclient.NewClient(host, port, log),
+	}
+
+	_, err := mgr.ExecutePromptWithMCP(context.Background(), ia.id, "", "", "test", nil)
+	require.NoError(t, err)
+	require.Equal(t, "1", (<-receivedEnv)[envKey])
+}
+
 func TestRefreshWithCommandUsesOverrideAndPreservesCacheOnAuthFailure(t *testing.T) {
 	log := newTestLogger(t)
 	reg := registry.NewRegistry(log)
@@ -522,7 +588,8 @@ func newTestLogger(t *testing.T) *logger.Logger {
 }
 
 type installedInferenceAgent struct {
-	id string
+	id         string
+	runtimeEnv map[string]string
 }
 
 func (a *installedInferenceAgent) ID() string          { return a.id }
@@ -544,7 +611,7 @@ func (a *installedInferenceAgent) PermissionSettings() map[string]agents.Permiss
 	return nil
 }
 func (a *installedInferenceAgent) Runtime() *agents.RuntimeConfig {
-	return &agents.RuntimeConfig{Protocol: agent.ProtocolACP}
+	return &agents.RuntimeConfig{Protocol: agent.ProtocolACP, Env: a.runtimeEnv}
 }
 func (a *installedInferenceAgent) BillingType() usage.BillingType {
 	return usage.BillingTypeSubscription

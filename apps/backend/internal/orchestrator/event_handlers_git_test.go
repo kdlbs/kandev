@@ -320,3 +320,45 @@ func TestResolveContextWindowValues(t *testing.T) {
 		require.False(t, ok)
 	})
 }
+
+func TestContextWindowResetDropsStalePersistence(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "context_window", map[string]interface{}{
+		"size": int64(200000), "used": int64(190000),
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	staleGeneration := svc.captureContextWindowGeneration("s1")
+	require.NoError(t, svc.clearContextWindowForReset(ctx, "s1"))
+
+	persisted, err := svc.persistContextWindowUpdate(ctx, "s1", staleGeneration, map[string]interface{}{
+		"size": int64(200000), "used": int64(195000),
+	})
+	require.NoError(t, err)
+	require.False(t, persisted)
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Nil(t, updated.Metadata["context_window"])
+}
+
+func TestContextWindowResetDropsStaleBroadcast(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eventBus := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eventBus
+
+	staleGeneration := svc.captureContextWindowGeneration("s1")
+	require.NoError(t, svc.clearContextWindowForReset(ctx, "s1"))
+
+	persisted, err := svc.persistAndPublishContextWindowUpdate(ctx, "t1", "s1", staleGeneration, map[string]interface{}{
+		"size": int64(200000), "used": int64(195000),
+	})
+	require.NoError(t, err)
+	require.False(t, persisted)
+	require.Empty(t, eventBus.events)
+}

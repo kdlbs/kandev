@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   getRecentTasks,
+  findMostRecentTaskForWorkspace,
   MAX_RECENT_TASKS,
   RECENT_TASKS_STORAGE_KEY,
   removeRecentTask,
@@ -63,5 +64,17 @@ describe("recent task storage", () => {
 
     expect(result.map((item) => item.taskId)).toEqual(["2"]);
     expect(getRecentTasks().map((item) => item.taskId)).toEqual(["2"]);
+  });
+
+  it("selects the newest task only from the active workspace", () => {
+    const missingWorkspace = { ...entry("legacy"), workspaceId: null };
+    const entries = [
+      entry("foreign"),
+      missingWorkspace,
+      { ...entry("local"), workspaceId: "workspace-2" },
+    ];
+
+    expect(findMostRecentTaskForWorkspace(entries, "workspace-2")?.taskId).toBe("local");
+    expect(findMostRecentTaskForWorkspace(entries, "workspace-3")).toBeNull();
   });
 });

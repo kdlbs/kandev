@@ -6,6 +6,7 @@ test.describe("Unread divider preference", () => {
     apiClient,
     prCapture,
   }, testInfo) => {
+    await apiClient.saveUserSettings({ unread_divider: true });
     await testPage.goto("/settings/general/task-actions");
     const toggle = testPage.getByRole("switch", { name: "Show New divider in transcripts" });
 

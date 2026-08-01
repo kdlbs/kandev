@@ -16,6 +16,7 @@ import { ClarificationInputOverlay } from "@/components/task/chat/clarification-
 import { ResizeHandle } from "@/components/task/chat/resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { Message } from "@/lib/types/http";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "@/components/task/chat/route-panel-mouse-down";
 
 type QuickChatContentProps = {
@@ -183,7 +184,7 @@ export const QuickChatContent = memo(function QuickChatContent({
           messagesLoading={panelState.messagesLoading}
           isWorking={panelState.isWorking}
           sessionState={panelState.session?.state}
-          worktreePath={panelState.session?.worktree_path}
+          worktreePath={getSessionWorkspacePath(panelState.session)}
           onOpenFile={undefined}
         />
       </div>

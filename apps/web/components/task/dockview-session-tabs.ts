@@ -3,20 +3,15 @@ import type { DockviewApi, DockviewReadyEvent, AddPanelOptions } from "dockview-
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { releaseLayoutToDefault, useDockviewStore } from "@/lib/state/dockview-store";
-import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import {
   CENTER_GROUP,
   isCenterCandidateGroupId,
   RIGHT_TOP_GROUP,
 } from "@/lib/state/layout-manager";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { wasPRPanelOffered, markPRPanelOffered } from "@/lib/local-storage";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import type { TaskSession } from "@/lib/types/http";
-import type { TaskPR } from "@/lib/types/github";
-import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
-import { prTaskKey } from "@/components/github/pr-utils";
 import {
   activateChatReplacement,
   isChatPlaceholderSelected,
@@ -148,224 +143,6 @@ export function setupChatPanelSafetyNet(
   });
 }
 
-// ---------------------------------------------------------------------------
-// Auto-show PR detail panel
-// ---------------------------------------------------------------------------
-
-/** Pure decision function for whether the PR panel should be auto-added or removed. */
-export function shouldAutoAddPRPanel(params: {
-  hasPR: boolean;
-  panelExists: boolean;
-  isRestoringLayout: boolean;
-  isMaximized: boolean;
-  wasOffered: boolean;
-}): "add" | "remove" | "none" {
-  if (!params.hasPR && params.panelExists) return "remove";
-  if (!params.hasPR) return "none";
-  if (params.panelExists) return "none";
-  if (params.isRestoringLayout) return "none";
-  if (params.isMaximized) return "none";
-  if (params.wasOffered) return "none";
-  return "add";
-}
-
-/**
- * Resolve the group ID to anchor the PR detail panel to.
- *
- * Preference: the live session chat panel's group. It's the group the user is
- * actively looking at, and reading it directly avoids the stale-id window the
- * store's centerGroupId has across layout transitions (which caused the PR
- * panel to land in a split instead of as a tab next to the session).
- */
-export function resolvePRPanelTargetGroup(
-  api: DockviewApi,
-  sessionId: string,
-  centerGroupId: string,
-): string {
-  const sessionPanel = api.getPanel(`session:${sessionId}`);
-  const sessionGroupId = sessionPanel?.group?.id;
-  if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) return sessionGroupId;
-  return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
-}
-
-/**
- * Derive the auto-PR-panel decision inputs from one task's live PR list.
- *
- * @param taskPRs - The task's associated PRs, in creation order; `undefined`
- *   when the task has none loaded.
- * @returns `hasPR` — whether the task has any linked PR; `defaultPRKey` —
- *   the key of the primary/first PR (matches `PRDetailPanelComponent`'s
- *   fallback when no explicit `prKey` param is set), or `undefined` when
- *   there's no PR.
- */
-function resolveAutoPRPanelState(taskPRs: TaskPR[] | undefined): {
-  hasPR: boolean;
-  defaultPRKey: string | undefined;
-} {
-  const primary = getPrimaryTaskPR(taskPRs);
-  return {
-    hasPR: !!taskPRs && taskPRs.length > 0,
-    defaultPRKey: primary ? prTaskKey(primary) : undefined,
-  };
-}
-
-/**
- * Pure effect logic for `useAutoPRPanel`: decides whether to add, remove,
- * or leave alone the auto-shown PR detail panel, and mutates the given
- * dockview `api` accordingly. Extracted for unit testing.
- *
- * @param api - The live dockview API to add/remove/update panels on.
- * @param sessionId - The active session, used for the offered/dismissed
- *   sessionStorage flag and to resolve the panel's target group.
- * @param params.hasPR - Whether the active task has any linked PR.
- * @param params.defaultPRKey - Key of the PR the legacy unkeyed
- *   "pr-detail" panel should render (and stay resynced to).
- * @param params.isRestoringLayout - Suppresses auto-add while a saved
- *   layout is being restored.
- * @param params.isMaximized - Suppresses auto-add while a group is
- *   maximized.
- * @param params.centerGroupId - Fallback group when no live session panel
- *   can anchor the new PR panel.
- */
-export function runAutoPRPanelEffect(
-  api: DockviewApi,
-  sessionId: string,
-  params: {
-    hasPR: boolean;
-    /** Key of the PR the legacy unkeyed "pr-detail" panel should render. */
-    defaultPRKey: string | undefined;
-    isRestoringLayout: boolean;
-    isMaximized: boolean;
-    centerGroupId: string;
-  },
-): void {
-  const decision = shouldAutoAddPRPanel({
-    hasPR: params.hasPR,
-    panelExists: !!api.getPanel("pr-detail"),
-    isRestoringLayout: params.isRestoringLayout,
-    isMaximized: params.isMaximized,
-    wasOffered: wasPRPanelOffered(sessionId),
-  });
-  if (decision === "remove") {
-    api.getPanel("pr-detail")?.api.close();
-    return;
-  }
-
-  if (decision === "add") {
-    const targetGroupId = resolvePRPanelTargetGroup(api, sessionId, params.centerGroupId);
-    focusOrAddPanel(api, {
-      id: "pr-detail",
-      component: "pr-detail",
-      title: "Pull Request",
-      position: { referenceGroup: targetGroupId },
-      inactive: true,
-      // Stamp the panel's params so addPRPanel can tell a matching menu
-      // click (reuse this tab) apart from a different PR's click (open a
-      // new tab) — see addPRPanel in dockview-panel-actions.ts.
-      params: params.defaultPRKey ? { prKey: params.defaultPRKey } : undefined,
-    });
-    markPRPanelOffered(sessionId);
-    return;
-  }
-
-  // "none" — panel already present or conditions not met.
-  // Mark as offered if the panel exists (e.g. restored from saved layout).
-  const legacy = api.getPanel("pr-detail");
-  if (params.hasPR && legacy) {
-    markPRPanelOffered(sessionId);
-    // Keep the legacy tab's stamped key in sync with the CURRENT default PR.
-    // Nothing else ever writes a different key onto this specific panel — a
-    // manual "+" menu pick of a different PR always creates its own keyed
-    // `pr-detail|<key>` tab instead (see addPRPanel in
-    // dockview-panel-actions.ts) — so unconditionally resyncing here is safe
-    // and fixes staleness both when the primary PR changes for this task and
-    // when this panel is reused across a task switch (see Greptile/cubic
-    // review on PR #1636).
-    if (params.defaultPRKey && legacy.params?.prKey !== params.defaultPRKey) {
-      legacy.api.updateParameters({ prKey: params.defaultPRKey });
-    }
-  }
-}
-
-/**
- * Auto-add the PR detail panel to the center group when the active task
- * has an associated pull request. The panel is added as a background tab
- * (the session/agent tab stays focused).
- *
- * Dismissal is persisted to sessionStorage: if the user closes the PR panel,
- * it won't be re-added for that session — even after a page refresh.
- */
-export function useAutoPRPanel() {
-  const taskId = useAppStore((s) => s.tasks.activeTaskId);
-  const sessionId = useAppStore((s) => s.tasks.activeSessionId);
-  const hasPR = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).hasPR;
-  });
-  // Key of the PR the legacy unkeyed "pr-detail" panel renders — mirrors
-  // PRDetailPanelComponent's fallback of the primary/first TaskPR.
-  const defaultPRKey = useAppStore((s) => {
-    const tid = s.tasks.activeTaskId;
-    return resolveAutoPRPanelState(tid ? s.taskPRs.byTaskId[tid] : undefined).defaultPRKey;
-  });
-  const hasApi = useDockviewStore((s) => !!s.api);
-  const appStore = useAppStoreApi();
-
-  useEffect(() => {
-    if (!taskId || !hasApi || !sessionId) return;
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const api = useDockviewStore.getState().api;
-        if (!api) return;
-
-        // Re-read live task/session/PR state before mutating dockview — a
-        // task or session switch during this two-frame delay must not stamp
-        // the panel with a stale task's PR key (cubic-dev-ai review on PR
-        // #1636). If the active task/session moved on, bail: the effect
-        // instance already scheduled for the new task/session (its deps
-        // changed) will handle it correctly.
-        const liveTasks = appStore.getState().tasks;
-        if (liveTasks.activeTaskId !== taskId || liveTasks.activeSessionId !== sessionId) return;
-        const live = resolveAutoPRPanelState(appStore.getState().taskPRs.byTaskId[taskId]);
-
-        runAutoPRPanelEffect(api, sessionId, {
-          hasPR: live.hasPR,
-          defaultPRKey: live.defaultPRKey,
-          isRestoringLayout: useDockviewStore.getState().isRestoringLayout,
-          isMaximized: useDockviewStore.getState().preMaximizeLayout !== null,
-          centerGroupId: useDockviewStore.getState().centerGroupId,
-        });
-      });
-    });
-  }, [taskId, hasPR, hasApi, sessionId, defaultPRKey, appStore]);
-}
-
-/**
- * Panels that are added co-tabbed with a session panel (see `useAutoPRPanel`).
- * When a saved layout's session was stripped (phantom-session sanitize on
- * page load, or stale removal during env switch), these siblings end up alone
- * in a group with no session. Prefer joining that group when adding the new
- * active session — without this fallback we'd add the session as a fresh
- * split next to the sidebar, breaking the user's grouping.
- *
- * Each entry matches either the bare id (e.g. `pr-detail`) or a keyed
- * variant `<id>|<key>` (multi-repo PR panels use `pr-detail|owner/repo/N`,
- * see `addPRPanel` in dockview-panel-actions.ts).
- */
-const SESSION_ANCHOR_PANEL_IDS = ["pr-detail", "mr-detail"];
-
-export function findSessionAnchorGroupId(api: DockviewApi): string | null {
-  for (const id of SESSION_ANCHOR_PANEL_IDS) {
-    const exact = api.getPanel(id);
-    if (exact) return exact.group.id;
-    const keyedPrefix = `${id}|`;
-    const keyed = api.panels.find((p) => p.id.startsWith(keyedPrefix));
-    if (keyed) return keyed.group.id;
-  }
-  return null;
-}
-
 export function resolveInitialPosition(
   api: DockviewApi,
   chatWasSelected = false,
@@ -391,16 +168,6 @@ export function resolveInitialPosition(
     isCenterCandidateGroupId(centerGroupId) &&
     api.groups.some((g) => g.id === centerGroupId);
   if (centerGroupExists) return { referenceGroup: centerGroupId };
-  const anchorGroupId = findSessionAnchorGroupId(api);
-  // index:0 matches the project's session-on-the-left convention (agent tab
-  // first, pr-detail/etc. to the right). Worth noting: if a user had
-  // rearranged a previous layout to put pr-detail first, that ordering is
-  // lost here — but the alternative (appending) would put the agent tab
-  // to the right of pr-detail, which contradicts the default placement
-  // every other code path produces. Pick the consistent default.
-  if (anchorGroupId && isCenterCandidateGroupId(anchorGroupId)) {
-    return { referenceGroup: anchorGroupId, index: 0 };
-  }
   const rightTopExists = api.groups.some((g) => g.id === RIGHT_TOP_GROUP);
   if (rightTopExists) return { referenceGroup: RIGHT_TOP_GROUP, direction: "left" };
   return undefined;

@@ -72,6 +72,20 @@ describe("layout editor actions", () => {
     expect(addReusablePanel(api, "chat")).toBe(false);
   });
 
+  it("adds PR Details through the same reusable-panel catalog", () => {
+    const { api, group } = fakeApi(["chat"]);
+
+    expect(addReusablePanel(api, "pr-detail")).toBe(true);
+    expect(api.addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "pr-detail",
+        component: "pr-detail",
+        title: "PR Details",
+        position: { referenceGroup: group },
+      }),
+    );
+  });
+
   it("protects Agent while removing another reusable panel", () => {
     const { api, panels } = fakeApi();
 

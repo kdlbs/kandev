@@ -18,6 +18,7 @@ import { SettingsSaveProvider } from "@/components/settings/settings-save-provid
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
+import { linkToTaskOverview } from "@/lib/links";
 import { cn } from "@/lib/utils";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
@@ -315,7 +316,7 @@ function SettingsMobileMenu({ pathname }: { pathname: string }) {
             />
           )}
           <Link
-            href="/"
+            href={linkToTaskOverview()}
             className="flex h-10 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
             onClick={() => setOpen(false)}
           >

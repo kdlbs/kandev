@@ -20,13 +20,16 @@ test.describe("Sidebar workspace mode navigation", () => {
     await testPage.getByTestId("sidebar-workspace-trigger").click();
     await testPage.getByTestId(`sidebar-workspace-item-${kanbanWorkspace.id}`).click();
     await expect(testPage).toHaveURL(
-      (url) => url.pathname === "/" && url.searchParams.get("workspaceId") === kanbanWorkspace.id,
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("home") === "overview" &&
+        url.searchParams.get("workspaceId") === kanbanWorkspace.id,
       { timeout: 10_000 },
     );
 
     await expect(sidebar.root.getByRole("link", { name: "Kandev home" })).toHaveAttribute(
       "href",
-      `/?workspaceId=${kanbanWorkspace.id}`,
+      `/?home=overview&workspaceId=${kanbanWorkspace.id}`,
     );
     await expect(sidebar.root.getByRole("button", { name: "Office" })).toBeVisible();
     await sidebar.root.getByRole("button", { name: "Office" }).click();
@@ -46,12 +49,15 @@ test.describe("Sidebar workspace mode navigation", () => {
     await sidebar.root.getByRole("button", { name: "Kanban" }).click();
 
     await expect(testPage).toHaveURL(
-      (url) => url.pathname === "/" && url.searchParams.get("workspaceId") === kanbanWorkspace.id,
+      (url) =>
+        url.pathname === "/" &&
+        url.searchParams.get("home") === "overview" &&
+        url.searchParams.get("workspaceId") === kanbanWorkspace.id,
       { timeout: 10_000 },
     );
     await expect(sidebar.root.getByRole("link", { name: "Kandev home" })).toHaveAttribute(
       "href",
-      `/?workspaceId=${kanbanWorkspace.id}`,
+      `/?home=overview&workspaceId=${kanbanWorkspace.id}`,
     );
   });
 

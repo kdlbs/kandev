@@ -33,7 +33,7 @@ import {
   toggleFolderExpand,
   fetchAndOpenFile,
 } from "./file-browser-hooks";
-import { resolveFileBrowserPaths } from "./file-browser-path";
+import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
 import { FileTreeEditorProvider } from "./file-tree-editor-menu";
 import { getVisiblePaths, moveNodesInTree, computeMoveTargets } from "./file-tree-utils";
 
@@ -452,7 +452,7 @@ function useFileBrowserData(sessionId: string, environmentId: string | null | un
     [gitStatus?.files],
   );
   const paths = resolveFileBrowserPaths({
-    sessionWorktreePath: session?.worktree_path,
+    sessionWorktreePath: getFileBrowserSessionWorkspacePath(session),
     repositoryLocalPath: repository?.local_path,
     treePath: treeState.tree?.path,
     treeLoaded: isTreeLoaded,

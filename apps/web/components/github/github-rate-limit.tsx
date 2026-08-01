@@ -5,11 +5,12 @@ import { formatDistanceToNow } from "date-fns";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import type { GitHubRateLimitInfo, GitHubRateLimitSnapshot } from "@/lib/types/github";
+import { GitHubAccessHelp } from "./github-access-help";
 
-const RESOURCE_LABELS: Record<string, string> = {
-  core: "REST",
-  graphql: "GraphQL",
-  search: "Search",
+const RESOURCE_LABELS: Record<string, { label: string; unit: string }> = {
+  core: { label: "API rate limit", unit: "requests" },
+  graphql: { label: "GraphQL query limit", unit: "points" },
+  search: { label: "Search limit", unit: "requests" },
 };
 
 // useTickNow re-renders every intervalMs and exposes a stable now-value so the
@@ -61,27 +62,51 @@ export function GitHubRateLimitDisplay({ info }: { info?: GitHubRateLimitInfo })
   const exhausted = snapshots.filter((s) => isExhausted(s, now));
 
   return (
+    <GitHubAccessHelp
+      label="Show GitHub API limits"
+      title="GitHub API limits"
+      description="Current GitHub API rate and query limits for this workspace connection."
+      content={<RateLimitDetails snapshots={snapshots} exhausted={exhausted} />}
+    />
+  );
+}
+
+function RateLimitDetails({
+  snapshots,
+  exhausted,
+}: {
+  snapshots: GitHubRateLimitSnapshot[];
+  exhausted: GitHubRateLimitSnapshot[];
+}) {
+  return (
     <div className="space-y-2" data-testid="github-rate-limit-display">
       {exhausted.length > 0 && (
         <Alert variant="destructive" data-testid="github-rate-limit-exhausted">
           <IconAlertTriangle className="h-4 w-4" />
-          <AlertDescription className="text-sm">
-            GitHub API rate limit exhausted on{" "}
-            {exhausted.map((s) => RESOURCE_LABELS[s.resource] ?? s.resource).join(", ")}. Background
-            PR/issue checks are paused until the limit resets {formatReset(latestReset(exhausted))}.
+          <AlertDescription className="text-xs">
+            GitHub API access is exhausted for{" "}
+            {exhausted
+              .map((snapshot) => RESOURCE_LABELS[snapshot.resource]?.label ?? snapshot.resource)
+              .join(", ")}
+            . Background PR and issue checks are paused until the last limit resets{" "}
+            {formatReset(latestReset(exhausted))}.
           </AlertDescription>
         </Alert>
       )}
-      <div className="text-xs text-muted-foreground flex flex-wrap gap-x-4 gap-y-1">
-        {snapshots.map((snap) => {
-          const label = RESOURCE_LABELS[snap.resource] ?? snap.resource;
-          const limit = snap.limit > 0 ? snap.limit : "?";
-          const reset = formatReset(snap);
+      <div className="space-y-1 text-xs text-muted-foreground">
+        {snapshots.map((snapshot) => {
+          const resource = RESOURCE_LABELS[snapshot.resource] ?? {
+            label: snapshot.resource,
+            unit: "requests",
+          };
+          const limit = snapshot.limit > 0 ? snapshot.limit.toLocaleString("en-US") : "unknown";
+          const reset = formatReset(snapshot);
           return (
-            <span key={snap.resource} data-testid={`github-rate-limit-${snap.resource}`}>
-              {label}: <strong>{snap.remaining}</strong>/{limit}
+            <p key={snapshot.resource} data-testid={`github-rate-limit-${snapshot.resource}`}>
+              <span className="font-medium text-foreground">{resource.label}:</span>{" "}
+              {snapshot.remaining.toLocaleString("en-US")} of {limit} {resource.unit} remaining
               {reset ? ` · resets ${reset}` : ""}
-            </span>
+            </p>
           );
         })}
       </div>

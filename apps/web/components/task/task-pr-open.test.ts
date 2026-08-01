@@ -58,12 +58,19 @@ describe("resolveTaskReviewOpenAction", () => {
     expect(resolveTaskReviewOpenAction([], [mr])).toEqual({
       kind: "open",
       url: mr.mr_url,
+      target: { type: "mr", key: "mr:mr-1", url: mr.mr_url, review: mr },
     });
   });
 
   it("uses the provider-aware picker for mixed linked reviews", () => {
     const pr = makePR({ id: "pr" });
     const mr = { id: "mr", mr_url: "https://gitlab.com/a/b/-/merge_requests/2" } as TaskMR;
-    expect(resolveTaskReviewOpenAction([pr], [mr])).toEqual({ kind: "pick" });
+    expect(resolveTaskReviewOpenAction([pr], [mr])).toMatchObject({
+      kind: "pick",
+      targets: [
+        { type: "pr", key: "pr:pr", url: pr.pr_url, review: pr },
+        { type: "mr", key: "mr:mr", url: mr.mr_url, review: mr },
+      ],
+    });
   });
 });

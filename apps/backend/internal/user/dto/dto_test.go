@@ -120,6 +120,55 @@ func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing
 	}
 }
 
+func TestFromUserSettingsIncludesNormalizedStartupPage(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "last task", value: models.StartupPageLastTask, want: models.StartupPageLastTask},
+		{name: "unknown defaults to task overview", value: "future_value", want: models.StartupPageTaskOverview},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			raw, err := json.Marshal(FromUserSettings(&models.UserSettings{StartupPage: tt.value}))
+			if err != nil {
+				t.Fatalf("marshal DTO: %v", err)
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(raw, &payload); err != nil {
+				t.Fatalf("decode DTO: %v", err)
+			}
+			if got := payload["startup_page"]; got != tt.want {
+				t.Fatalf("startup_page = %#v, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestUpdateUserSettingsRequestStartupPagePatchSemantics(t *testing.T) {
+	t.Run("omitted value stays nil", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.StartupPage != nil {
+			t.Fatalf("StartupPage = %#v, want nil", req.StartupPage)
+		}
+	})
+
+	t.Run("explicit last task is retained", func(t *testing.T) {
+		var req UpdateUserSettingsRequest
+		if err := json.Unmarshal([]byte(`{"startup_page":"last_task"}`), &req); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		if req.StartupPage == nil || *req.StartupPage != models.StartupPageLastTask {
+			t.Fatalf("StartupPage = %#v, want last_task", req.StartupPage)
+		}
+	})
+}
+
 func TestUpdateUserSettingsRequestMCPTaskAgentProfileDefaultPatchSemantics(t *testing.T) {
 	t.Run("omitted value stays nil", func(t *testing.T) {
 		var req UpdateUserSettingsRequest

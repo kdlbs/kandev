@@ -5,7 +5,12 @@ import (
 	"strings"
 )
 
-var integrationBranchNames = [...]string{"main", "master"}
+const (
+	mainBranchName   = "main"
+	masterBranchName = "master"
+)
+
+var integrationBranchNames = [...]string{mainBranchName, masterBranchName}
 
 type comparisonBaseGit interface {
 	GetMergeBase(ctx context.Context, ref1, ref2 string) (string, error)

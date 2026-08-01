@@ -364,6 +364,37 @@ func TestAgentUpdateJobResolvesUpdatesRefreshesAndStreams(t *testing.T) {
 	}
 }
 
+func TestAgentUpdateJobSkipsCommandWhenRuntimeIsAlreadyUpToDate(t *testing.T) {
+	updater := &fakeRuntimeUpdater{
+		current:      hostutility.AgentCapabilities{AgentVersion: "1.1.0"},
+		currentFound: true,
+		target:       "1.1.0",
+		refreshCaps:  hostutility.AgentCapabilities{Status: hostutility.StatusOK, AgentVersion: "1.1.0"},
+	}
+	store, completed := newUpdateTestStore(updater, newMaintenanceCoordinator(), nil)
+
+	job, err := store.Enqueue("managed-acp", managedRuntimeSpec())
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	final := waitForUpdateStatus(t, completed, job.ID, dto.AgentUpdateJobStatusSucceeded)
+	if final.CurrentVersion != "1.1.0" || final.TargetVersion != "1.1.0" {
+		t.Fatalf("versions = %q -> %q, want 1.1.0 -> 1.1.0", final.CurrentVersion, final.TargetVersion)
+	}
+	if final.Output != "Runtime already up to date.\n" {
+		t.Fatalf("Output = %q, want no-op message", final.Output)
+	}
+
+	updater.mu.Lock()
+	defer updater.mu.Unlock()
+	if updater.runCalls != 0 {
+		t.Fatalf("update calls = %d, want 0", updater.runCalls)
+	}
+	if updater.refreshCalls != 0 {
+		t.Fatalf("refresh calls = %d, want 0", updater.refreshCalls)
+	}
+}
+
 func TestAgentUpdateAuthRequiredIsPackageSuccessWithRefreshError(t *testing.T) {
 	updater := &fakeRuntimeUpdater{
 		target: "1.1.0",

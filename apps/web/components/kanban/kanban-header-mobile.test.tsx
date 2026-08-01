@@ -71,7 +71,7 @@ describe("KanbanHeaderMobile", () => {
     renderHeader("Home", "workspace-1");
 
     expect(screen.getByRole("link", { name: "Kandev home" }).getAttribute("href")).toBe(
-      "/?workspaceId=workspace-1",
+      "/?home=overview&workspaceId=workspace-1",
     );
     expect(screen.getByTestId(LEFT_ACTIONS_TEST_ID).textContent).toBe("");
   });

@@ -15,9 +15,11 @@ token. A later retry therefore starts a new provider-native conversation even
 though the original session remains valid.
 
 A failed or cancelled GitHub-backed session also requests a new scoped
-credential lease while its persisted state is still terminal. The credential
-broker correctly rejects terminal sessions, so the user-visible Resume action
-cannot reach the agent launch.
+credential lease while its persisted state is still terminal. Resume assembles
+the request before persisting `STARTING`, and request assembly itself issues
+the lease; moving the transition only ahead of `LaunchAgent` therefore leaves
+the broker boundary too early. The credential broker correctly rejects the
+terminal session, so the user-visible Resume action cannot reach agent launch.
 
 Managed npm runtimes can retain a truncated or otherwise corrupt extracted
 `_npx` execution tree even when npm's content-addressable package cache is
@@ -32,11 +34,15 @@ without repairing it.
   **Start fresh**, or is replaced after the agent successfully creates a new
   provider-native session.
 - An authorized resume moves the task session to `STARTING` under the existing
-  per-session resume lock before launching the agent. This makes the session
-  eligible for a scoped GitHub credential lease without weakening the
-  credential broker's terminal-session rejection.
-- If launch fails after that early transition, Kandev restores the prior
-  recoverable session state unless another terminal transition won the race.
+  per-session resume lock before request assembly reaches scoped GitHub
+  credential issuance. This makes the session eligible for a lease without
+  weakening the credential broker's terminal-session rejection.
+- A successful resume persists the non-secret Git credential routing snapshot
+  while the session is still guarded `STARTING`, so the task detail view does
+  not retain an earlier workspace/executor credential policy.
+- If request assembly, credential issuance, or launch fails after that early
+  transition, Kandev restores the prior recoverable session state unless
+  another terminal transition won the race.
 - The explicit managed-runtime update path may invalidate only the
   deterministic `_npx` execution directory for the selected built-in package
   after an initial update failure, then retry once and run the normal ACP
@@ -67,11 +73,16 @@ without repairing it.
   `session/load` completes, **WHEN** the attempt fails, **THEN** Kandev retains
   the token so a later healthy process can retry it.
 - **GIVEN** a failed GitHub-backed session, **WHEN** the user selects Resume,
-  **THEN** the session is persisted as `STARTING` before the credential lease
-  is requested and the launch can proceed.
-- **GIVEN** that launch fails after the early `STARTING` transition, **WHEN**
-  recovery handling completes, **THEN** the session is recoverable and no
-  stale `STARTING` state remains.
+  **THEN** the session is persisted as `STARTING` before
+  `buildResumeRequest` requests the credential lease and the launch can
+  proceed.
+- **GIVEN** a resume selects a credential policy different from the previous
+  attempt, **WHEN** credential setup succeeds, **THEN** the non-secret
+  `git_credential_snapshot` is persisted before launch and reflects the new
+  policy.
+- **GIVEN** that request construction, credential issuance, or launch fails
+  after the early `STARTING` transition, **WHEN** recovery handling completes,
+  **THEN** the session is recoverable and no stale `STARTING` state remains.
 - **GIVEN** an extracted managed npm runtime is corrupt, **WHEN** the first
   explicit update attempt fails, **THEN** only that package's deterministic
   execution directory is invalidated, the update runs once more, and success

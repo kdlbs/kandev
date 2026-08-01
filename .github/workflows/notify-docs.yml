@@ -11,6 +11,7 @@ on:
       - "docs/public/**"
       - "scripts/validate-public-docs.mjs"
       - "scripts/validate-public-docs.test.mjs"
+      - "scripts/notify-docs-workflow.test.mjs"
       - ".github/workflows/notify-docs.yml"
   workflow_dispatch:
 
@@ -34,13 +35,17 @@ jobs:
           persist-credentials: false
 
       - name: Test public docs validator
-        run: node --test scripts/validate-public-docs.test.mjs
+        run: node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs
 
       - name: Validate public docs
         run: node scripts/validate-public-docs.mjs
 
   preview:
     name: Deploy Cloudflare Pages preview
+    outputs:
+      enabled: ${{ steps.cloudflare.outputs.enabled }}
+      deployment_url: ${{ steps.deploy.outputs.deployment-url }}
+      alias_url: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
     needs: validate
     if: >-
       github.event_name == 'pull_request' &&
@@ -49,8 +54,6 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
-      issues: write
-      pull-requests: write
 
     steps:
       - name: Checkout docs pull request
@@ -87,6 +90,7 @@ jobs:
       - name: Build preview from pull request docs
         working-directory: landing
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           KANDEV_DOCS_SOURCE_PATH: ${{ github.workspace }}/docs
         run: pnpm run build:pages
 
@@ -126,12 +130,23 @@ jobs:
             --branch=docs-pr-${{ github.event.pull_request.number }}
             --commit-dirty=true
 
+  publish-preview-link:
+    name: Publish docs preview link
+    needs: preview
+    if: needs.preview.outputs.enabled == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
       - name: Publish docs preview link
-        if: steps.cloudflare.outputs.enabled == 'true'
         uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         env:
-          DEPLOYMENT_URL: ${{ steps.deploy.outputs.deployment-url }}
-          ALIAS_URL: ${{ steps.deploy.outputs.pages-deployment-alias-url }}
+          DEPLOYMENT_URL: ${{ needs.preview.outputs.deployment_url }}
+          ALIAS_URL: ${{ needs.preview.outputs.alias_url }}
         with:
           script: |
             const marker = '<!-- kandev-docs-cloudflare-preview -->';

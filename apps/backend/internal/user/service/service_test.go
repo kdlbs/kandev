@@ -444,6 +444,41 @@ func TestApplyChangesPanelLayout(t *testing.T) {
 	})
 }
 
+func TestApplyStartupPage(t *testing.T) {
+	t.Run("omission preserves saved value", func(t *testing.T) {
+		settings := &models.UserSettings{StartupPage: models.StartupPageLastTask}
+		if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+			t.Fatalf("apply basic settings: %v", err)
+		}
+		if settings.StartupPage != models.StartupPageLastTask {
+			t.Fatalf("StartupPage = %q, want %q", settings.StartupPage, models.StartupPageLastTask)
+		}
+	})
+
+	for _, value := range []string{models.StartupPageTaskOverview, models.StartupPageLastTask} {
+		t.Run("applies "+value, func(t *testing.T) {
+			settings := &models.UserSettings{StartupPage: models.StartupPageTaskOverview}
+			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{StartupPage: ptr(value)}); err != nil {
+				t.Fatalf("apply basic settings: %v", err)
+			}
+			if settings.StartupPage != value {
+				t.Fatalf("StartupPage = %q, want %q", settings.StartupPage, value)
+			}
+		})
+	}
+
+	t.Run("rejects invalid value", func(t *testing.T) {
+		settings := &models.UserSettings{StartupPage: models.StartupPageLastTask}
+		err := applyBasicSettings(settings, &UpdateUserSettingsRequest{StartupPage: ptr("future_value")})
+		if err == nil {
+			t.Fatal("expected invalid startup page error")
+		}
+		if settings.StartupPage != models.StartupPageLastTask {
+			t.Fatalf("StartupPage = %q, want unchanged %q", settings.StartupPage, models.StartupPageLastTask)
+		}
+	})
+}
+
 func TestApplyBasicSettings_TerminalFontSize(t *testing.T) {
 	t.Run("nil leaves settings unchanged", func(t *testing.T) {
 		settings := &models.UserSettings{TerminalFontSize: 14}
@@ -1004,6 +1039,24 @@ func TestPublishUserSettingsEventIncludesNormalizedMCPTaskAgentProfileDefault(t 
 	}
 	if got := eventData["mcp_task_agent_profile_default"]; got != models.MCPTaskAgentProfileDefaultCurrentTask {
 		t.Fatalf("mcp_task_agent_profile_default = %#v, want current_task", got)
+	}
+}
+
+func TestPublishUserSettingsEventIncludesNormalizedStartupPage(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	eventBus := &recordingEventBus{}
+	svc := NewService(&recordingUserRepository{}, eventBus, log)
+	svc.publishUserSettingsEvent(context.Background(), &models.UserSettings{StartupPage: "future_value"})
+
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected event data map, got %T", eventBus.publishedEvents[0].Data)
+	}
+	if got := eventData["startup_page"]; got != models.StartupPageTaskOverview {
+		t.Fatalf("startup_page = %#v, want task_overview", got)
 	}
 }
 

@@ -50,6 +50,19 @@
   align-items: center;
 }
 
+/* The layout editor can place several reusable panels in one group. Let its
+ * tab strip shrink so Dockview can surface overflowing tabs in its menu rather
+ * than extending past a narrow mobile editor. */
+[data-testid="layout-editor"] .dv-tabs-and-actions-container .dv-scrollable {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+[data-testid="layout-editor"] .dv-tabs-and-actions-container .dv-tabs-container {
+  max-width: 100%;
+  min-width: 0;
+}
+
 .dockview-theme-kandev .dv-tabs-container.dv-horizontal .dv-tab::before {
   display: none !important;
 }

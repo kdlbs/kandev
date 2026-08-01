@@ -3,6 +3,10 @@ import { openTaskSession } from "../../helpers/session";
 import { isScrolledIntoView, seedScrollTestConversation } from "../../helpers/unread-divider";
 
 test.describe("Unread divider", () => {
+  test.beforeEach(async ({ apiClient }) => {
+    await apiClient.saveUserSettings({ unread_divider: true });
+  });
+
   test("shows the Slack-style New divider only for messages read before a rewound cursor, and clears after the next visit", async ({
     testPage,
     apiClient,

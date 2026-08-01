@@ -444,6 +444,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 	return map[string]any{
 		"workspaceId":                     effectiveWorkspaceID,
 		"kanbanViewMode":                  nullString(settings.KanbanViewMode),
+		"startupPage":                     usermodels.NormalizeStartupPage(settings.StartupPage),
 		"workflowId":                      nullString(settings.WorkflowFilterID),
 		"repositoryIds":                   stringSlice(settings.RepositoryIDs),
 		"tasksListSort":                   usermodels.NormalizeTasksListSort(settings.TasksListSort),

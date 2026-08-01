@@ -90,12 +90,12 @@ export function OfficeDockviewLayout({ taskId, sessionId }: OfficeDockviewLayout
             status: "ready",
             updatedAt: new Date().toISOString(),
           });
-          // Populate worktree_path from workspace_path for quick-chat sessions
-          // so the file browser shows the workspace path instead of a skeleton.
+          // Populate workspace_path for quick-chat sessions so the file
+          // browser and chat links use the effective task root.
           if (resp.workspace_path) {
             const existing = appStore.getState().taskSessions.items[resp.session_id];
-            if (existing && !existing.worktree_path) {
-              setTaskSession({ ...existing, worktree_path: resp.workspace_path });
+            if (existing && !existing.workspace_path) {
+              setTaskSession({ ...existing, workspace_path: resp.workspace_path });
             }
           }
         }

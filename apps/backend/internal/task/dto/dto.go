@@ -237,6 +237,9 @@ type TaskSessionDTO struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// WorkspacePath is the effective task root used by Files and chat links;
+	// WorktreePath remains the flattened primary repository path.
+	WorkspacePath string `json:"workspace_path,omitempty"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for
 	// backward compatibility.
@@ -290,6 +293,9 @@ type TaskSessionSummaryDTO struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// WorkspacePath is the effective task root used by Files and chat links;
+	// WorktreePath remains the flattened primary repository path.
+	WorkspacePath string `json:"workspace_path,omitempty"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for
 	// backward compatibility.
@@ -728,6 +734,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		RepositoryID:      session.RepositoryID,
 		BaseBranch:        session.BaseBranch,
 		BaseCommitSHA:     session.BaseCommitSHA,
+		WorkspacePath:     session.WorkspacePath,
 		State:             session.State,
 		ErrorMessage:      session.ErrorMessage,
 		Metadata:          session.Metadata,
@@ -763,6 +770,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		RepositoryID:         session.RepositoryID,
 		BaseBranch:           session.BaseBranch,
 		BaseCommitSHA:        session.BaseCommitSHA,
+		WorkspacePath:        session.WorkspacePath,
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,
