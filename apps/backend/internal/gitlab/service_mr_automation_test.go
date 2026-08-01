@@ -41,6 +41,19 @@ func TestClientForTaskStrict_EmptyWorkspaceIDOnTaskRow(t *testing.T) {
 	}
 }
 
+// TestClientForTaskStrict_WorkspaceLookupErrorWrapsSentinel pins the
+// documented contract that ErrWorkspaceClientRequired marks every failure
+// path of clientForTaskStrict — including a WorkspaceIDForTask lookup error
+// (an unseeded task row), not just the empty-workspace-id case.
+func TestClientForTaskStrict_WorkspaceLookupErrorWrapsSentinel(t *testing.T) {
+	store := newTestStore(t)
+	svc := newWorkspaceConfigService(t, store, &configTestSecrets{values: make(map[string]string)})
+	_, err := svc.clientForTaskStrict(context.Background(), "does-not-exist")
+	if !errors.Is(err, ErrWorkspaceClientRequired) {
+		t.Fatalf("expected ErrWorkspaceClientRequired for an unresolvable task, got %v", err)
+	}
+}
+
 func TestClientForTaskStrict_ResolvesWorkspaceScopedClient(t *testing.T) {
 	store := newTestStore(t)
 	seedWorkspace(t, store, "ws-1")

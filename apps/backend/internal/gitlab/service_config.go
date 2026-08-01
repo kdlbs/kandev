@@ -653,7 +653,7 @@ func (s *Service) clientForTaskStrict(ctx context.Context, taskID string) (Clien
 	}
 	workspaceID, err := store.WorkspaceIDForTask(ctx, taskID)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: resolve task workspace: %w", ErrWorkspaceClientRequired, err)
 	}
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, fmt.Errorf("%w: workspace_id is required", ErrWorkspaceClientRequired)

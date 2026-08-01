@@ -504,8 +504,6 @@ const (
 	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
 	ActionGitLabStats             = "gitlab.stats"
 
-	ActionGitLabTaskMRAutomationGet     = "gitlab.task_mr_automation.get"
-	ActionGitLabTaskMRAutomationUpdate  = "gitlab.task_mr_automation.update"
 	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
 
 	ActionGitLabMRMerge                = "gitlab.mr.merge"
