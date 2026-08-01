@@ -134,7 +134,7 @@ export function useSessionPendingInput(sessionId: string | null | undefined): Pe
     if (state.messages.bySession[sessionId] !== undefined) {
       return toBitmask(loadedSessionFlags(state.messages.bySession, sessionId));
     }
-    return toBitmask(actionFlags(state.taskSessions.items[sessionId]?.pending_action));
+    return toBitmask(actionFlags(state.taskSessions?.items?.[sessionId]?.pending_action));
   });
   return { clarification: (flags & 1) !== 0, permission: (flags & 2) !== 0 };
 }
