@@ -31,8 +31,9 @@ viewport or requires scrolling through a wall of identical rows.
 - Per-PR rows keep their existing stable test identifiers so automated tests can
   select them from within the sub-menu.
 - The sub-menu must work with the existing Radix dropdown primitives on desktop
-  (pointer hover and keyboard) and on the sub-640px mobile bottom-sheet
-  presentation that `app/globals.css` already applies to nested dropdown menus.
+  (pointer hover and keyboard). The feature is desktop-only: mobile renders
+  `SessionMobileLayout`, which has no "+" add-panel entry point, so the sub-menu
+  has no mobile presentation.
 
 ## Scenarios
 
@@ -46,7 +47,7 @@ viewport or requires scrolling through a wall of identical rows.
   no inline PR rows.
 - **GIVEN** a task with two linked GitHub PRs and the Pull requests sub-menu
   open, **WHEN** the user selects a PR row, **THEN** that PR's dockview panel
-  opens and the row is labeled with its repo (`PR #N — owner/repo`).
+  opens and the row is labeled `PR #N — owner/repo`.
 - **GIVEN** a task with three linked GitHub PRs, **WHEN** the user opens the "+"
   add-panel menu, **THEN** the main menu height is bounded by the single Pull
   requests trigger instead of three PR rows.
@@ -58,8 +59,8 @@ viewport or requires scrolling through a wall of identical rows.
   inline rendering.
 - Changing the PR top-bar button, the multi-PR CI popover, or the PR picker
   dialog.
-- Changing the mobile bottom-sheet styling itself; this feature only reuses the
-  existing nested-menu treatment.
+- Mobile presentation of the sub-menu: `SessionMobileLayout` has no "+"
+  add-panel entry point, so there is no mobile sub-menu to style.
 
 ## Implementation plan
 

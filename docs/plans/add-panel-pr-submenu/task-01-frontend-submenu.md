@@ -1,7 +1,7 @@
 ---
 id: "01-frontend-submenu"
 title: "Frontend: PR submenu in the + add-panel menu"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

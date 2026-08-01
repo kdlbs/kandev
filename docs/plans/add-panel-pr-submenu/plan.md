@@ -13,9 +13,9 @@ linked GitHub PR as a flat `DropdownMenuItem`. For tasks with many PRs this
 makes the menu too tall. The change collapses the PR rows into a Radix
 `DropdownMenuSub` ("Pull requests") whenever more than one PR is linked,
 keeping the single-PR inline row and the per-PR test ids unchanged. E2E covers
-both the desktop flow (existing multi-PR spec must open the submenu first) and a
-new mobile bottom-sheet spec, since `app/globals.css` already applies nested
-`dropdown-menu-sub-content` bottom-sheet styling below 640px.
+the desktop flow (existing multi-PR spec must open the submenu first). The
+feature is desktop-only: mobile renders `SessionMobileLayout`, which has no "+"
+add-panel entry point, so there is no mobile E2E for it.
 
 Implementation is a pure frontend change in one component plus tests. No backend
 or state changes. Order: component + unit test first, then E2E.
@@ -38,7 +38,7 @@ or state changes. Order: component + unit test first, then E2E.
     `<DropdownMenuSub><DropdownMenuSubTrigger>` labeled **Pull requests** with
     `IconGitPullRequest`, testid `add-panel-pr-submenu`, and a
     `<DropdownMenuSubContent>` listing one row per PR. Each row keeps the
-    current disambiguated label `${prPanelLabel(pr.pr_number)} — ${pr.repo}`
+    current disambiguated label `${prPanelLabel(pr.pr_number)} — ${pr.owner}/${pr.repo}`
     and the same `add-panel-pr-item-${prIdentitySlug(pr)}` testid.
   - Add `max-h`/`overflow-y-auto` on the sub-content so a 10-PR list cannot
     exceed the viewport on short screens.
@@ -98,24 +98,18 @@ None. `addPRPanel`, `prTaskKey`, `prIdentitySlug`, `prPanelLabel`, and
   **What to verify:** after `session.addPanelButton().click()`, the test now
   asserts the `add-panel-pr-submenu` trigger is visible, opens it (click), then
   clicks `add-panel-pr-item-${OWNER}-api-77` and expects a second `prDetailTab`.
-- **Scenario (mobile):** on a <640px viewport, the nested Pull requests submenu
-  opens from the "+" menu, its rows are tappable, and the bottom-sheet
-  presentation stays within the viewport.
-  **File:** `apps/web/e2e/tests/task/mobile-add-panel-pr-submenu.spec.ts` (new,
-  `mobile-*.spec.ts` so `mobile-chrome` picks it up), modeled on
-  `apps/web/e2e/tests/task/mobile-external-link-menu.spec.ts`.
-  **What to verify:** seed a task with two linked PRs (mirror
-  `associateTwoPRs` from `pr-multi-popover.spec.ts`), open the "+" menu, open
-  the submenu, assert a PR row is visible and ≥44px tall, tapping it opens the
-  PR panel, and assert the nested menu box stays within the viewport with no
-  document horizontal overflow (`assertNoDocumentHorizontalOverflow` helper,
-  used by `apps/web/e2e/tests/gitlab/mobile-gitlab-parity.spec.ts`).
+
+No mobile E2E: the dockview "+" add-panel menu is only rendered by
+`DockviewDesktopLayout`; mobile routes to `SessionMobileLayout`, which has no
+"+" add-panel menu and no linked-PR list, so there is no mobile entry point to
+cover. The submenu behavior is covered by unit tests
+(`dockview-add-panel-items.test.tsx`).
 
 ## Implementation Waves
 
 Small feature — sequential, no parallel candidates.
 
-```
+```text
 Wave 1:
 - [x] [task-01-frontend-submenu](task-01-frontend-submenu.md) — implemented, 6 unit tests pass, committed (91f03b6d)
 

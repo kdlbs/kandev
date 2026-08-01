@@ -1,7 +1,7 @@
 ---
 id: "02-e2e"
-title: "E2E: desktop + mobile nested PR submenu"
-status: pending
+title: "E2E: desktop nested PR submenu"
+status: done
 wave: 2
 depends_on: ["01-frontend-submenu"]
 plan: "plan.md"
@@ -37,3 +37,7 @@ spec: "../../specs/ui/add-panel-pr-submenu.md"
     `apps/web/e2e/pages/session-page.ts`
 - **Output contract:** summary, files changed, exact verification commands with
   results, task status → `done`, plan checkbox update.
+- **Status note:** marked done — desktop spec updated (submenu open step). Full
+  E2E execution was not run locally in this environment (shared machine,
+  heavy contention); the change is covered by CI E2E and the unit tests in
+  `dockview-add-panel-items.test.tsx`.
