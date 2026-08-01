@@ -110,16 +110,16 @@ Structured shell-command activity keeps the command, working directory, status, 
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
-tokens. This popover does not show provider subscription plans or rate-limit
-windows. For account-wide provider usage, install the [Provider Usage
+tokens; it focuses on the active session's context window. For account-wide
+provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global
 status bar. The optional status-bar display requires **App status bar** to be
 enabled under **Settings > System > Feature Toggles**; enable it and restart
-Kandev for the change to take effect. If it remains disabled, the session
-top-bar pill still works, but the global status-bar and phone Status drawer
-display do not appear. Configure the plugin under **Settings > Plugins >
-Provider Usage**. Kandev hides the context ring instead of presenting
+Kandev for the change to take effect. The session top-bar pill remains available
+on its own, while enabling App status bar also adds the global status-bar and
+phone Status drawer display. Configure the plugin under **Settings > Plugins >
+Provider Usage**. Kandev hides the context ring rather than presenting
 impossible data when reported use exceeds the reported window.
 
 ## Inspect changes

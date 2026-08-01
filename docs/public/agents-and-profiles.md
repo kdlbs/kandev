@@ -108,11 +108,12 @@ It adds a provider pill to the session top bar and can add a compact display to
 the global status bar. The optional status-bar display requires **App status
 bar** to be enabled under **Settings > System > Feature Toggles**; enable it
 and restart Kandev for the change to take effect. If it remains disabled, the
-session top-bar pill still works, but the global status-bar and phone Status
-drawer display do not appear. Configure the plugin under **Settings > Plugins
-> Provider Usage**. These usage surfaces are operational signals, not a billing
-ledger or a guarantee that the next request will be accepted; provider
-availability, account policy, and concurrent usage still apply.
+session top-bar pill remains available; enabling it also adds the global
+status-bar and phone Status drawer display. Configure the plugin under
+**Settings > Plugins > Provider Usage**. These usage surfaces are operational
+signals, not a billing ledger or a guarantee that the next request will be
+accepted; provider availability, account policy, and concurrent usage still
+apply.
 
 ### CLI flags
 
