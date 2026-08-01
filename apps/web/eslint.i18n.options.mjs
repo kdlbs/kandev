@@ -200,4 +200,13 @@ export const i18nGuardFiles = [
   "components/settings/startup-page-settings-card.tsx",
   "components/settings/system-metrics-settings-card.tsx",
   "components/settings/terminal-settings.tsx",
+  // Settings → General → Editors: the page, its state/section components, the
+  // custom-editor form, and the editable-card shell that form renders inside.
+  // `editable-card.tsx` is shared with repository-card.tsx, which is not
+  // migrated — the guard is per-file, so that stays unaffected.
+  "app/settings/general/editors/**/*.{ts,tsx}",
+  "components/settings/editable-card.tsx",
+  "components/settings/editor-form.tsx",
+  "components/settings/editors-settings-state.tsx",
+  "components/settings/editors-settings.tsx",
 ];
