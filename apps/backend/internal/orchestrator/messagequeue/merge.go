@@ -8,6 +8,16 @@ import (
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// joinMergeContent concatenates the source content below the target content,
+// separated by a blank line. When the target content is empty the source is
+// used verbatim so there is no leading blank line.
+func joinMergeContent(targetContent, sourceContent string) string {
+	if targetContent == "" {
+		return sourceContent
+	}
+	return targetContent + "\n\n" + sourceContent
+}
+
 // ErrMergeReferenceOverflow reports a merge whose combined entity-reference
 // lists would exceed entityrefs' per-message cap. The merge is rejected
 // atomically — neither row is touched — rather than silently dropping
@@ -17,6 +27,16 @@ var ErrMergeReferenceOverflow = errors.New("merge would exceed the per-message e
 // maxEntityReferencesPerMessage mirrors entityrefs.maxReferencesPerMessage so
 // a merged entry never stores more references than dispatch will accept.
 const maxEntityReferencesPerMessage = 100
+
+// joinMergeContent concatenates the source content below the target content,
+// separated by a blank line. When the target content is empty the source is
+// used verbatim so there is no leading blank line.
+func joinMergeContent(targetContent, sourceContent string) string {
+	if targetContent == "" {
+		return sourceContent
+	}
+	return targetContent + "\n\n" + sourceContent
+}
 
 // mergeAllowed reports whether the source entry may be folded into the target
 // entry under the caller identity queuedBy. User entries merge only into user
