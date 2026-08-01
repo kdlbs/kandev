@@ -173,6 +173,61 @@ test.describe("Multi-session UX", () => {
     await expect(row.locator(".tabler-icon-shield-question")).toHaveCount(0);
   });
 
+  test("reload keeps a secondary pending prompt visible in the reopen menu", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Secondary Pending Prompt Task",
+    );
+    const secondary = await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: `secondary-pending-${task.id}`,
+      startedAt: "2020-01-01T00:00:00Z",
+    });
+    await apiClient.seedSessionMessage(secondary.session_id, {
+      type: "clarification_request",
+      content: "Which database should the task use?",
+      metadata: { status: "pending" },
+    });
+
+    // The boot payload loads messages only for the active primary session. The
+    // secondary row must use its compact pending-action projection instead.
+    await testPage.reload();
+    await session.waitForLoad();
+    // The desktop layout eagerly hydrates opened panels; evict this secondary
+    // transcript to model the closed row that prompted the reload regression.
+    await testPage.evaluate((sessionId) => {
+      const store = (
+        window as Window & {
+          __KANDEV_E2E_STORE__?: {
+            getState: () => {
+              messages: { bySession: Record<string, unknown> };
+            };
+            setState: (next: unknown) => void;
+          };
+        }
+      ).__KANDEV_E2E_STORE__;
+      if (!store) return;
+      const state = store.getState();
+      const bySession = { ...state.messages.bySession };
+      delete bySession[sessionId];
+      store.setState({ messages: { ...state.messages, bySession } });
+    }, secondary.session_id);
+    await session.addPanelButton().click();
+
+    const row = session.sessionReopenItem(secondary.session_id);
+    await expect(row).toBeVisible({ timeout: 5_000 });
+    await expect(row.locator(".tabler-icon-message-question")).toHaveCount(1);
+    await expect(row.locator(".tabler-icon-shield-question")).toHaveCount(0);
+  });
+
   test("delete session via context menu shows confirmation", async ({
     testPage,
     apiClient,

@@ -38,6 +38,7 @@ describe("shouldShowReopenStateIcon", () => {
   it("surfaces explicit pending input while waiting", () => {
     expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null, true, false)).toBe(true);
     expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null, false, true)).toBe(true);
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", "background")).toBe(true);
   });
 
   it("surfaces the icon for a pending prompt even mid-turn (still coarsely RUNNING)", () => {

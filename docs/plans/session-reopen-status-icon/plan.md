@@ -11,9 +11,8 @@ status: completed
 The task add-panel menu currently treats every `WAITING_FOR_INPUT` session as
 an active clarification, even though that lifecycle state also means an
 ordinary turn has finished and the session is ready for another prompt. The fix
-will make the reopen-menu indicator depend on the existing message-derived
-pending-input flags while preserving background-running and terminal lifecycle
-icons. Production and permanent test changes wait for user approval.
+makes the reopen-menu indicator depend on explicit per-session pending-input
+projections while preserving background-running and terminal lifecycle icons.
 
 ## Confirmed Root Cause
 
@@ -37,6 +36,9 @@ Dockview `+` menu shows a question icon on that session row.
   `WAITING_FOR_INPUT` session.
 - Continue returning `true` when an input-capable session has an explicit
   pending clarification or permission, or when it carries background activity.
+- Carry the pending action as a per-session boot/list projection so a closed
+  session row can retain the actionable icon even when its transcript is not
+  hydrated; loaded messages remain authoritative when available.
 - Preserve the current behavior for `STARTING`, generating `RUNNING`, and
   terminal/created lifecycle states.
 - Do not change the shared `getSessionStateIcon` mapping; other status surfaces
@@ -66,16 +68,17 @@ pure helper regression matrix is viewport-independent.
 
 ## E2E Tests
 
-- **Scenario:** **GIVEN** a mock-agent session has completed an ordinary turn
-  and the backend reports `WAITING_FOR_INPUT` with no pending clarification or
-  permission, **WHEN** the user opens the Dockview add-panel menu, **THEN** its
-  row contains neither a message-question icon nor a shield-question icon.
+- **Scenario:** **GIVEN** a task has a secondary `WAITING_FOR_INPUT` session
+  with a pending clarification, **WHEN** the user reloads the task and the
+  secondary transcript is not loaded before opening the Dockview add-panel
+  menu, **THEN** its row still contains the message-question icon (and not the
+  shield-question icon); the ordinary idle-session scenario remains icon-free.
 - **File:** `apps/web/e2e/tests/session/multi-session-ux.spec.ts`.
-- **What to verify:** poll the backend precondition to exactly
-  `WAITING_FOR_INPUT`, open the existing `dockview-add-panel-btn`, scope the
-  assertion to `reopen-session-<session-id>`, and assert the two misleading
-  glyphs are absent. Run this E2E before the production edit to confirm RED and
-  after the edit to confirm GREEN.
+- **What to verify:** seed the secondary pending message, reload the task,
+  evict that session's transcript to model an unloaded row, open the existing
+  `dockview-add-panel-btn`, scope the assertion to
+  `reopen-session-<session-id>`, and assert the projected icon variant. Keep
+  the existing idle-waiting check for the absence of both misleading glyphs.
 - **Mobile coverage:** no separate mobile Playwright scenario is added because
   the Dockview add-panel menu is absent from the phone composition and this
   repair changes only viewport-independent state normalization. Existing

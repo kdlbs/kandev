@@ -424,6 +424,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   state: TaskSessionState;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /** Compact pending-input projection used when this session's messages are unloaded. */
+  pending_action?: TaskPendingAction | null;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;

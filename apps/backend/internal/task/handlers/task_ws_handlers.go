@@ -35,10 +35,20 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
+	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
+		ctx,
+		h.service,
+		map[string][]*models.TaskSession{taskID: sessions},
+	)
+	if pendingErr != nil {
+		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
+		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{

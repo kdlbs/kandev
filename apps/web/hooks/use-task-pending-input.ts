@@ -123,14 +123,18 @@ function selectTaskPendingFlags(
   return selectFlagsFromPrimarySession(messagesBySession, primarySessionId, fallback);
 }
 
-/** Per-session pending-input flags; session menus already operate on loaded sessions. */
+/**
+ * Per-session pending-input flags. Loaded messages are authoritative; when a
+ * transcript is not hydrated, use the compact session projection from boot or
+ * the session list instead.
+ */
 export function useSessionPendingInput(sessionId: string | null | undefined): PendingInput {
-  const clarification = useAppStore((state) =>
-    hasPendingClarificationForSession(state.messages.bySession, sessionId),
-  );
-  const permission = useAppStore((state) =>
-    hasPendingPermissionForSession(state.messages.bySession, sessionId),
-  );
-  if (!sessionId) return NONE;
-  return { clarification, permission };
+  const flags = useAppStore((state) => {
+    if (!sessionId) return 0;
+    if (state.messages.bySession[sessionId] !== undefined) {
+      return toBitmask(loadedSessionFlags(state.messages.bySession, sessionId));
+    }
+    return toBitmask(actionFlags(state.taskSessions.items[sessionId]?.pending_action));
+  });
+  return { clarification: (flags & 1) !== 0, permission: (flags & 2) !== 0 };
 }

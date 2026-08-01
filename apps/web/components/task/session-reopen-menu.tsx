@@ -145,7 +145,7 @@ export function SessionReopenMenuItems({
 }
 
 // One reopen-menu row. Split into its own component so each row can read its
-// session's message-derived "needs me" flags
+// session's loaded-or-projected "needs me" flags
 // via the useSessionPendingInput hook without violating the rules of hooks
 // inside the sessions map.
 function SessionReopenMenuItem({

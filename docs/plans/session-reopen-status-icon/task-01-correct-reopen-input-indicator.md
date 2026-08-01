@@ -20,6 +20,8 @@ spec: "../../specs/platform/background-work-liveness.md"
 - A focused browser regression proves the exact idle-waiting backend
   precondition and the absence of both misleading question glyphs in the
   session row.
+- A reload regression preserves a real pending clarification on a secondary
+  session row when that session's messages are not loaded.
 
 ## TDD Sequence
 
@@ -27,7 +29,9 @@ spec: "../../specs/platform/background-work-liveness.md"
 2. Run both focused checks against unchanged production code and record the
    expected failures.
 3. Make the minimal `shouldShowReopenStateIcon` change.
-4. Rerun both focused checks and record the passing results.
+4. Add the per-session pending-action projection and message-aware fallback.
+5. Rerun the focused checks and the reload regression and record the passing
+   results.
 
 ## Verification
 
@@ -42,7 +46,13 @@ cd apps/web && pnpm e2e:run tests/session/multi-session-ux.spec.ts -- --grep "id
 
 - `apps/web/components/task/session-reopen-menu.tsx`
 - `apps/web/components/task/session-reopen-menu.test.tsx`
+- `apps/web/hooks/use-task-pending-input.ts`
+- `apps/web/hooks/use-task-pending-input.test.tsx`
 - `apps/web/e2e/tests/session/multi-session-ux.spec.ts`
+- `apps/backend/internal/backendapp/boot_state.go`
+- `apps/backend/internal/task/dto/dto.go`
+- `apps/backend/internal/task/handlers/task_http_handlers.go`
+- `apps/backend/internal/task/handlers/task_ws_handlers.go`
 
 ## Dependencies
 
@@ -83,11 +93,27 @@ GREEN results:
   session has no question icon"` — 1 Chromium test passed against the managed
   production build.
 
+Remediation results:
+
+- Frontend unit tests: 20 tests passed across the pending-input hook and
+  reopen-menu helper suites.
+- Backend package tests: `go test ./internal/backendapp ./internal/task/dto
+  ./internal/task/handlers` passed.
+- Reload E2E: the secondary pending clarification row retained the projected
+  message-question icon after its transcript was evicted; the idle waiting
+  regression remained icon-free.
+
 Files changed:
 
 - `apps/web/components/task/session-reopen-menu.tsx`
 - `apps/web/components/task/session-reopen-menu.test.tsx`
 - `apps/web/e2e/tests/session/multi-session-ux.spec.ts`
+- `apps/web/hooks/use-task-pending-input.ts`
+- `apps/web/hooks/use-task-pending-input.test.tsx`
+- `apps/backend/internal/backendapp/boot_state.go`
+- `apps/backend/internal/task/dto/dto.go`
+- `apps/backend/internal/task/handlers/task_http_handlers.go`
+- `apps/backend/internal/task/handlers/task_ws_handlers.go`
 - This task and its plan status.
 
 No blockers or residual risks remain within scope. Shared session icon mappings
