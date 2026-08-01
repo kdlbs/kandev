@@ -89,6 +89,7 @@ func TestPostgresRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
 		map[string]interface{}{MetadataEntityReferences: manyEntityRefsFrom(1, maxEntityReferencesPerMessage)})
+	_ = target
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
 		map[string]interface{}{MetadataEntityReferences: manyEntityRefsFrom(maxEntityReferencesPerMessage+1, maxEntityReferencesPerMessage)})
 

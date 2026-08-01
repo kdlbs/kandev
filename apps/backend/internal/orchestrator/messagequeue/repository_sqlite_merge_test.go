@@ -65,6 +65,7 @@ func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
 		map[string]interface{}{MetadataEntityReferences: manyEntityRefs(maxEntityReferencesPerMessage)})
+	_ = target
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
 		map[string]interface{}{MetadataEntityReferences: entityRefs(fmt.Sprintf("%d", maxEntityReferencesPerMessage+1))})
 
@@ -78,6 +79,9 @@ func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 	entries, err := repo.ListBySession(ctx, "s1")
 	if err != nil {
 		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("entries after rejected overflow merge = %d, want 2", len(entries))
 	}
 	for _, e := range entries {
 		refs := entityrefs.NormalizePersisted(e.Metadata[MetadataEntityReferences])
