@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getTaskMRAutomation, updateTaskMRAutomation } from "@/lib/api/domains/gitlab-api";
 import type { TaskMRAutomationOptions, TaskMRAutomationPatch } from "@/lib/types/gitlab";
 
@@ -39,7 +39,15 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
   const updateRequestRef = useRef<Record<string, number>>({});
   const updateSettleCounterRef = useRef<Record<string, number>>({});
   const activeTaskIdRef = useRef<string | null>(taskId);
-  activeTaskIdRef.current = taskId;
+  // Synchronized in a layout effect, not written directly in the render
+  // body: a render can be abandoned (e.g. concurrent rendering) without
+  // committing, and a bare `activeTaskIdRef.current = taskId` during render
+  // would still have mutated the ref for that discarded render, letting an
+  // in-flight request from the previously-committed task be wrongly
+  // invalidated (or a stale response wrongly accepted).
+  useLayoutEffect(() => {
+    activeTaskIdRef.current = taskId;
+  }, [taskId]);
 
   const isCurrent = useCallback(
     (calledForTaskId: string, requestMap: Record<string, number>, requestId: number) =>
@@ -106,25 +114,28 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
     [isCurrent, options, taskId],
   );
 
-  useEffect(() => {
-    if (!taskId) {
-      setOptions(null);
-      setError(null);
-      setSaving(false);
-      setLoading(false);
-      return;
-    }
-    // Reset to a clean slate for the new task immediately — the previous
-    // task's options/saving/error state must not remain visible (or
-    // actionable) while this task's options are (re-)loading, regardless of
-    // how a still-in-flight request for the previous task eventually settles
-    // (isCurrent above ensures it can no longer write to state). Always
-    // re-fetches, including when returning to a task visited earlier in this
-    // hook's lifetime — options was just cleared above, so skipping the
-    // fetch here would leave it permanently null.
+  // Reset to a clean slate for the new task synchronously, before paint —
+  // a plain (passive) effect would reset after the browser has already
+  // painted the new task's controls with the previous task's still-enabled
+  // switches, producing a visible flash of stale state. The previous task's
+  // options/saving/error state must not remain visible (or actionable)
+  // while this task's options are (re-)loading, regardless of how a
+  // still-in-flight request for the previous task eventually settles
+  // (isCurrent above ensures it can no longer write to state).
+  useLayoutEffect(() => {
     setOptions(null);
     setError(null);
     setSaving(false);
+    if (!taskId) {
+      setLoading(false);
+    }
+  }, [taskId]);
+
+  useEffect(() => {
+    if (!taskId) return;
+    // Always re-fetches, including when returning to a task visited earlier
+    // in this hook's lifetime — options was just cleared above, so skipping
+    // the fetch here would leave it permanently null.
     void refresh().catch(() => {
       // Error state is stored for the UI; callers can retry via refresh.
     });
