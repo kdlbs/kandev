@@ -80,6 +80,42 @@ func TestEnsureMRWatch_UpdatesIIDWhenPreviouslyUnknown(t *testing.T) {
 	}
 }
 
+// TestEnsureMRWatch_ReplacesIIDWhenBranchRelinkedToNewMR covers a watch that
+// already knows a positive iid, not just the "previously unknown" case: the
+// original MR closed and a new one opened on the same branch. Without
+// replacing a known-but-stale iid, the watch would keep polling the closed
+// MR forever.
+func TestEnsureMRWatch_ReplacesIIDWhenBranchRelinkedToNewMR(t *testing.T) {
+	store := newTestStore(t)
+	svc := NewService("", nil, "none", nil, newTestLogger(t))
+	svc.SetStore(store)
+	ctx := context.Background()
+
+	first, err := svc.EnsureMRWatch(ctx, "sess-1", "task-1", "repo-1", "group/proj", 5, "feat/a")
+	if err != nil {
+		t.Fatalf("first ensure: %v", err)
+	}
+	if first.MRIID != 5 {
+		t.Fatalf("expected iid 5, got %d", first.MRIID)
+	}
+
+	second, err := svc.EnsureMRWatch(ctx, "sess-1", "task-1", "repo-1", "group/proj", 11, "feat/a")
+	if err != nil {
+		t.Fatalf("second ensure (replacement MR): %v", err)
+	}
+	if second.ID != first.ID {
+		t.Fatalf("expected the same watch row updated in place, got %s and %s", first.ID, second.ID)
+	}
+	if second.MRIID != 11 {
+		t.Fatalf("expected iid replaced with 11, got %d", second.MRIID)
+	}
+
+	got, err := store.GetMRWatchBySessionRepoAndBranch(ctx, "sess-1", "repo-1", "feat/a")
+	if err != nil || got == nil || got.MRIID != 11 {
+		t.Fatalf("persisted iid not replaced: %+v err=%v", got, err)
+	}
+}
+
 func TestEnsureMRWatch_MultiBranchCoexist(t *testing.T) {
 	store := newTestStore(t)
 	svc := NewService("", nil, "none", nil, newTestLogger(t))

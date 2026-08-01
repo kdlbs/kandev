@@ -80,7 +80,11 @@ func (s *Service) EnsureMRWatch(ctx context.Context, sessionID, taskID, reposito
 		}
 		return nil, createErr
 	}
-	if existing.MRIID <= 0 && iid > 0 {
+	// Replace whenever the caller supplies a different, known iid — not just
+	// when the stored one was still unknown (<=0). A branch can be relinked
+	// to a replacement MR (the prior one closed and a new one opened), and
+	// without this the watch keeps polling the stale iid forever.
+	if iid > 0 && existing.MRIID != iid {
 		if err := store.UpdateMRWatchMRIID(ctx, existing.ID, iid); err != nil {
 			return nil, fmt.Errorf("update MR watch iid: %w", err)
 		}
@@ -260,7 +264,16 @@ func (s *Service) refreshTaskMRFromWatch(ctx context.Context, store *Store, clie
 		return
 	}
 	workspaceID, err := store.WorkspaceIDForTask(ctx, watch.TaskID)
-	if err != nil || workspaceID == "" {
+	if err != nil {
+		// This is now the only path that refreshes gitlab_task_mrs on every
+		// poll, so a transient DB error here must be observable — unlike an
+		// empty workspaceID with no error (a benign orphaned-watch case,
+		// e.g. the task was deleted), which is not logged.
+		s.logger.Warn("failed to resolve workspace while refreshing task MR from watch",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+		return
+	}
+	if workspaceID == "" {
 		return
 	}
 	association := taskMRFromStatus(watch.TaskID, watch.RepositoryID, client.Host(), watch.ProjectPath, status)

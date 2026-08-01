@@ -218,9 +218,12 @@ func (s *Service) AssociateExistingMRByURLForSession(
 	// already succeeded and is returned as a success below, so a canceled
 	// EnsureMRWatch would silently leave that MR with no refresh watch until
 	// another push recreates it. Detach from ctx's cancellation the same way
-	// DeleteReviewWatch does for its own post-commit side effect.
+	// DeleteReviewWatch does for its own post-commit side effect, but bound
+	// it with the same timeout so a stalled store call can't hang forever.
+	watchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), watchDeleteTimeout)
+	defer cancel()
 	if _, err := s.EnsureMRWatch(
-		context.WithoutCancel(ctx), sessionID, taskID, association.RepositoryID, association.ProjectPath,
+		watchCtx, sessionID, taskID, association.RepositoryID, association.ProjectPath,
 		association.MRIID, association.HeadBranch,
 	); err != nil {
 		s.logger.Warn("failed to ensure MR watch after URL association",

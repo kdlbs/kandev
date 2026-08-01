@@ -73,7 +73,13 @@ func (s *Service) AutoLinkMRForBranch(
 	if err := store.UpsertTaskMR(ctx, association); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
-	if _, err := s.EnsureMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, mr.IID, branch); err != nil {
+	// Detach from ctx's cancellation, bounded by the same timeout as the
+	// URL-link flow's equivalent post-commit call: the association above
+	// already committed, so a caller's context canceling right after must
+	// not skip watch creation and silently leave this MR unpolled.
+	watchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), watchDeleteTimeout)
+	defer cancel()
+	if _, err := s.EnsureMRWatch(watchCtx, sessionID, taskID, repositoryID, projectPath, mr.IID, branch); err != nil {
 		s.logger.Warn("failed to ensure MR watch after auto-link",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 	}

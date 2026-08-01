@@ -48,8 +48,7 @@ func (s *Service) detectPushAndAssociateMR(
 	// a watch, so returning outright here would leave the association with
 	// nothing for Poller.runMRMonitor to poll and its review/pipeline status
 	// would never update.
-	if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
-		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
+	if s.alreadyLinkedGitLabMR(ctx, sessionID, taskID, repositoryID, branch) {
 		return
 	}
 
@@ -61,42 +60,66 @@ func (s *Service) detectPushAndAssociateMR(
 				return
 			case <-time.After(delay):
 			}
-			if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
-				s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
+			if s.alreadyLinkedGitLabMR(ctx, sessionID, taskID, repositoryID, branch) {
 				return
 			}
 		}
-		assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
-			ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
-		)
-		if err != nil || assoc == nil {
-			s.logger.Debug("no gitlab MR found for branch (will retry)",
-				zap.String("branch", branch),
-				zap.String("session_id", sessionID),
-				zap.String("repository_name", repositoryName),
-				zap.Duration("delay", delay))
-			continue
+		if s.tryAutoLinkMRForPush(ctx, workspaceID, sessionID, taskID, repositoryID, repositoryName, projectPath, branch, delay) {
+			return
 		}
-		s.logger.Info("gitlab MR found after push, associated with task",
-			zap.String("session_id", sessionID),
-			zap.String("task_id", taskID),
-			zap.String("repository_name", repositoryName),
-			zap.Int("mr_iid", assoc.MRIID),
-			zap.String("branch", branch))
-		// AutoLinkMRForBranch already tries to ensure the watch itself, but
-		// only logs a failure rather than surfacing it — this is the push
-		// path's last attempt (retries are exhausted once we return), so
-		// give the idempotent get-or-create one more chance here rather than
-		// declaring the link complete with the association persisted but no
-		// watch to keep its status polled.
-		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, assoc)
-		return
 	}
 	s.logger.Warn("exhausted all retries, no gitlab MR found after push",
 		zap.String("session_id", sessionID),
 		zap.String("task_id", taskID),
 		zap.String("repository_name", repositoryName),
 		zap.String("branch", branch))
+}
+
+// alreadyLinkedGitLabMR checks for an existing (repositoryID, branch)
+// association and, if found, ensures its refresh watch before reporting
+// true. Checked both before the retry loop starts and again after each
+// delay, in case a concurrent Create-MR action or manual URL link races
+// ahead of this push detection.
+func (s *Service) alreadyLinkedGitLabMR(ctx context.Context, sessionID, taskID, repositoryID, branch string) bool {
+	existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch)
+	if existing == nil {
+		return false
+	}
+	s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
+	return true
+}
+
+// tryAutoLinkMRForPush runs one AutoLinkMRForBranch attempt for the push
+// retry loop, logging the outcome. Returns true when a link was made (the
+// caller's retry loop should stop).
+func (s *Service) tryAutoLinkMRForPush(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, repositoryName, projectPath, branch string, delay time.Duration,
+) bool {
+	assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
+		ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
+	)
+	if err != nil || assoc == nil {
+		s.logger.Debug("no gitlab MR found for branch (will retry)",
+			zap.String("branch", branch),
+			zap.String("session_id", sessionID),
+			zap.String("repository_name", repositoryName),
+			zap.Duration("delay", delay))
+		return false
+	}
+	s.logger.Info("gitlab MR found after push, associated with task",
+		zap.String("session_id", sessionID),
+		zap.String("task_id", taskID),
+		zap.String("repository_name", repositoryName),
+		zap.Int("mr_iid", assoc.MRIID),
+		zap.String("branch", branch))
+	// AutoLinkMRForBranch already tries to ensure the watch itself, but only
+	// logs a failure rather than surfacing it — this may be the push path's
+	// last attempt (retries are exhausted once the caller returns), so give
+	// the idempotent get-or-create one more chance here rather than
+	// declaring the link complete with the association persisted but no
+	// watch to keep its status polled.
+	s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, assoc)
+	return true
 }
 
 // ensureWatchForLinkedMR creates the refresh watch for an association that
@@ -191,7 +214,15 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
 		ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
 	)
-	if err != nil || assoc == nil {
+	// A real service/store error (e.g. an unconfigured GitLab connection) is
+	// a backend problem, not "no MR is open on this branch" — propagate it
+	// to the WS caller rather than reporting a misleadingly clean
+	// found=false. Only assoc == nil with a nil error means "searched and
+	// found nothing."
+	if err != nil {
+		return false, err
+	}
+	if assoc == nil {
 		return false, nil
 	}
 	return true, nil

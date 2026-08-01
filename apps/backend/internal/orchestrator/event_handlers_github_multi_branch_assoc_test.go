@@ -7,20 +7,17 @@ import (
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 )
 
-// TestGitHubMultiBranchAssociationsCoexist covers the gap flagged in
-// event_handlers_github_multi_branch_test.go: TestIsMultiBranchSubdir only
-// pins the pure string-matching helper, not the end-to-end behavior it
-// exists to support. Two branches of ONE repository in ONE session (the
-// `<repo>-<branch-slug>` sibling-worktree naming) must each get their own
-// watch and association — the second branch's push must not be dropped, and
-// must not clobber the first branch's already-created rows.
-func TestGitHubMultiBranchAssociationsCoexist(t *testing.T) {
+// seedGitHubPushAssocFixture creates the repository, task_repository
+// (checked out at checkoutBranch), and session wiring shared by
+// TestGitHubMultiBranchAssociationsCoexist and
+// TestGitHubPushAssociationPassesRepositoryID.
+func seedGitHubPushAssocFixture(t *testing.T, repo *sqliterepo.Repository, checkoutBranch string) {
+	t.Helper()
 	ctx := context.Background()
 	now := time.Now().UTC()
-	repo := setupTestRepo(t)
-	seedSession(t, repo, "t1", "s1", "step1")
 
 	repoObj := &models.Repository{
 		ID: "repo1", WorkspaceID: "ws1", Name: "kandev",
@@ -32,7 +29,7 @@ func TestGitHubMultiBranchAssociationsCoexist(t *testing.T) {
 		t.Fatalf("create repository: %v", err)
 	}
 	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
-		ID: "tr1", TaskID: "t1", RepositoryID: "repo1", CheckoutBranch: "main",
+		ID: "tr1", TaskID: "t1", RepositoryID: "repo1", CheckoutBranch: checkoutBranch,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create task repository: %v", err)
@@ -42,6 +39,20 @@ func TestGitHubMultiBranchAssociationsCoexist(t *testing.T) {
 	if err := repo.UpdateTaskSession(ctx, session); err != nil {
 		t.Fatalf("update session: %v", err)
 	}
+}
+
+// TestGitHubMultiBranchAssociationsCoexist covers the gap flagged in
+// event_handlers_github_multi_branch_test.go: TestIsMultiBranchSubdir only
+// pins the pure string-matching helper, not the end-to-end behavior it
+// exists to support. Two branches of ONE repository in ONE session (the
+// `<repo>-<branch-slug>` sibling-worktree naming) must each get their own
+// watch and association — the second branch's push must not be dropped, and
+// must not clobber the first branch's already-created rows.
+func TestGitHubMultiBranchAssociationsCoexist(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedGitHubPushAssocFixture(t, repo, "main")
 
 	mockClient := github.NewMockClient()
 	mockClient.AddPR(&github.PR{
@@ -102,29 +113,9 @@ func TestGitHubMultiBranchAssociationsCoexist(t *testing.T) {
 // use it to scope the row.
 func TestGitHubPushAssociationPassesRepositoryID(t *testing.T) {
 	ctx := context.Background()
-	now := time.Now().UTC()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
-	repoObj := &models.Repository{
-		ID: "repo1", WorkspaceID: "ws1", Name: "kandev",
-		SourceType: "provider", Provider: "github",
-		ProviderOwner: "myorg", ProviderName: "kandev",
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if err := repo.CreateRepository(ctx, repoObj); err != nil {
-		t.Fatalf("create repository: %v", err)
-	}
-	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
-		ID: "tr1", TaskID: "t1", RepositoryID: "repo1", CheckoutBranch: "main",
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatalf("create task repository: %v", err)
-	}
-	session, _ := repo.GetTaskSession(ctx, "s1")
-	session.RepositoryID = "repo1"
-	if err := repo.UpdateTaskSession(ctx, session); err != nil {
-		t.Fatalf("update session: %v", err)
-	}
+	seedGitHubPushAssocFixture(t, repo, "main")
 
 	mockClient := github.NewMockClient()
 	mockClient.AddPR(&github.PR{

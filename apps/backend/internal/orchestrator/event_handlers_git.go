@@ -290,15 +290,12 @@ func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, 
 	// so this read can race ahead of that write on the very first push from a
 	// repository with no durable provider yet. Recompute live from the same
 	// local checkout instead of trusting a possibly-stale empty column.
-	// ResolveGitRemoteProvider only recognizes github.com remotes, so this
-	// closes the race for a repository whose remote is GitHub; a GitLab-only
-	// local checkout with no durable provider tag yet still returns "" here
-	// (same as before), which falls through to the GitHub push-detection
-	// path and finds nothing — no worse than today's un-auto-linked gap, and
-	// AutoLinkMRForBranch's own identity check fails closed regardless if
-	// that path is ever reached with a real association attempt.
+	// ResolveGitRemoteProviderIdentity recognizes both github.com and
+	// gitlab.com remotes (the same helper resolveRepositoryProviderIdentity
+	// uses to backfill Repository rows in production), so this closes the
+	// race for either provider rather than only GitHub.
 	if repoObj.LocalPath != "" {
-		if provider, owner, _ := service.ResolveGitRemoteProvider(repoObj.LocalPath); owner != "" {
+		if provider, _, owner, _ := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && owner != "" {
 			return provider
 		}
 	}
