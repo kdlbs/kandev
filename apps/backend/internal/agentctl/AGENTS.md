@@ -147,9 +147,10 @@ Both accept any value `time.ParseDuration` accepts (`30m`, `2h`, `500ms`, …). 
 
 ## Testing
 
-PTY-backed shell tests must skip on Windows (`runtime.GOOS == "windows"`):
-agentctl shell PTY startup is unsupported there. Keep environment/config merge
-tests platform-neutral so they remain covered on every supported OS.
+PTY-backed shell tests run on Windows through the supported ConPTY path. Skip
+only assertions that require Unix-specific PTY semantics; keep environment and
+configuration-merge tests platform-neutral so they remain covered on every
+supported OS.
 
 ## Further scoped notes
 

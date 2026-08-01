@@ -21,6 +21,7 @@ const FRAMES_DIR = ".frames";
 const MANIFEST_LOCK_DIR = ".manifest.lock";
 const MANIFEST_LOCK_RETRY_MS = 10;
 const MANIFEST_LOCK_TIMEOUT_MS = 5_000;
+const MANIFEST_LOCK_STALE_MS = 30_000;
 const RECORDING_FPS = 5;
 const RECORDING_INTERVAL = 1000 / RECORDING_FPS;
 
@@ -61,6 +62,18 @@ function waitForManifestLock(): void {
   Atomics.wait(signal, 0, 0, MANIFEST_LOCK_RETRY_MS);
 }
 
+function reclaimStaleManifestLock(lockDir: string): boolean {
+  try {
+    const ageMs = Date.now() - fs.statSync(lockDir).mtimeMs;
+    if (ageMs < MANIFEST_LOCK_STALE_MS) return false;
+    fs.rmdirSync(lockDir);
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return true;
+    throw error;
+  }
+}
+
 function withManifestLock<T>(outputDir: string, write: () => T): T {
   const lockDir = path.join(outputDir, MANIFEST_LOCK_DIR);
   const deadline = Date.now() + MANIFEST_LOCK_TIMEOUT_MS;
@@ -70,6 +83,7 @@ function withManifestLock<T>(outputDir: string, write: () => T): T {
       break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+      if (reclaimStaleManifestLock(lockDir)) continue;
       if (Date.now() >= deadline) {
         throw new Error(`timed out waiting for PR asset manifest lock: ${lockDir}`);
       }

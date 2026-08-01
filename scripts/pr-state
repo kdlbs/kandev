@@ -136,7 +136,9 @@ done
 
 [ $# -eq 0 ] || usage
 
-if [[ -n "${COMMENT_ID:-}" ]]; then
+if [[ -n "${COMMENT_ID:-}" && -n "${JOB_LOG_ID:-}" ]]; then
+  usage 1
+elif [[ -n "${COMMENT_ID:-}" ]]; then
   [[ -z "${PR:-}" && "$SUMMARY" == "0" && "$INCLUDE_ALL" == "0" ]] || usage
 elif [[ -n "${JOB_LOG_ID:-}" ]]; then
   [[ -z "${PR:-}" && "$SUMMARY" == "0" && "$INCLUDE_ALL" == "0" ]] || usage
@@ -243,7 +245,7 @@ emit_job_log() {
     archive_file=''
   fi
 
-  if ! rg -n -i -C 4 '(Test timeout|Error:|FAIL|failed|Process completed)' "$log_file" | head -n 240; then
+  if ! rg -n -i -C 4 '(Test timeout|Error:|FAIL|failed|Process completed)' "$log_file" | sed -n '1,240p'; then
     tail -n 80 "$log_file"
   fi
   rm -f "$archive_file" "$log_file"
@@ -615,9 +617,7 @@ fetch_approval_required_runs_json() {
 
   local runs_pages
   if ! runs_pages="$(gh_json api --paginate "repos/$owner/$repo/actions/runs?event=pull_request&head_sha=$head_sha&per_page=100")"; then
-    add_error "approval_required_runs" "workflow runs API failed"
-    printf '%s\n' '[]'
-    return
+    return 1
   fi
 
   jq -cs --argjson pr "$pr_number" --arg head "$head_sha" '
@@ -791,7 +791,10 @@ else
   add_error "pr_view" "gh pr view failed"
 fi
 
-approval_required_runs_json="$(fetch_approval_required_runs_json "$repo_owner" "$repo_name" "$resolved_pr_number" "$checks_head_sha")"
+if ! approval_required_runs_json="$(fetch_approval_required_runs_json "$repo_owner" "$repo_name" "$resolved_pr_number" "$checks_head_sha")"; then
+  approval_required_runs_json='[]'
+  add_error "approval_required_runs" "workflow runs API failed"
+fi
 
 since=''
 if [[ "$INCLUDE_ALL" != "1" && -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then

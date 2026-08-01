@@ -69,6 +69,11 @@ if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && "$2" == repos/kdlbs/kan
   exit 1
 fi
 
+if [[ "${GH_FAIL_APPROVAL_RUNS:-0}" == "1" && "$*" == *"repos/kdlbs/kandev/actions/runs?event=pull_request&head_sha=abc123&per_page=100"* ]]; then
+  echo "workflow runs api failed" >&2
+  exit 1
+fi
+
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
   printf '{"owner":{"login":"kdlbs"},"name":"kandev"}\n'
   exit 0
@@ -1229,6 +1234,21 @@ test_summary_reports_current_head_fork_approval_runs() {
   pass "--summary reports current-head fork approval runs"
 }
 
+test_summary_reports_approval_run_fetch_failure() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_CROSS_REPOSITORY=true GH_FAIL_APPROVAL_RUNS=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary reports approval-run fetch failure" \
+    '.approval_required_runs == [] and any(.errors[]; .source == "approval_required_runs" and .message == "workflow runs API failed")' \
+    "$json"
+  pass "--summary reports approval-run fetch failure"
+}
+
 test_job_log_mode_emits_bounded_failure_context() {
   local tmp
   make_tmp_dir tmp
@@ -1328,6 +1348,13 @@ test_comment_mode_rejects_incompatible_flags() {
   if PATH="$tmp/bin:$PATH" "$SCRIPT" --all --comment 111 >"$tmp/out.log" 2>&1; then
     fail "--comment rejects --all"
   fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 111 --job-log 55150000002 >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects --job-log"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment --job-log prints usage"
+  fi
   if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
     fail "--comment --all prints usage"
   fi
@@ -1421,6 +1448,7 @@ test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
 test_summary_reports_current_head_fork_approval_runs
+test_summary_reports_approval_run_fetch_failure
 test_summary_all_flag_includes_historical_unresolved_threads
 test_job_log_mode_emits_bounded_failure_context
 test_job_log_mode_unpacks_zip_responses

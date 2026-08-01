@@ -43,7 +43,7 @@ cross-repository PR, those fields are the only authoritative push target; do
 not infer it from a local remote named `fork`, `contributor`, or similar.
 Linked worktrees share Git configuration and such remotes may belong to an
 unrelated task.
-`unresolved_review_thread_count`, `hidden_unresolved_threads`, and
+Record `unresolved_review_thread_count`, `hidden_unresolved_threads`, and
 `actionable_issue_comment_count`. Inspect mergeability separately through
 `references/merge-conflicts.md`; it is not a `pr-state --summary` field. If a
 named reviewer is the semantic evidence source, use `--trusted-reviewer` only

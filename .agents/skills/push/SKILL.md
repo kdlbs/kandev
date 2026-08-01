@@ -45,15 +45,22 @@ Push the already committed branch to its remote.
    ```bash
    git push
    ```
-   If the branch has no upstream, first check whether it is an open
-   cross-repository PR:
+   If the branch has no upstream, first look up the current branch's PR. Treat
+   an unavailable or ambiguous lookup as a stop condition; only a confirmed
+   absence of a PR permits the ordinary `origin` fallback. For a confirmed PR,
+   require its `headRefName` to match the checked-out local branch, then inspect
+   its delivery target:
    ```bash
    gh pr view --json isCrossRepository,headRepositoryOwner,headRepository,headRefName,headRefOid,maintainerCanModify
    ```
-   For a cross-repository PR, require `maintainerCanModify=true`; then push the
-   exact current commit to the reported head owner, repository, and ref (using
-   authenticated HTTPS through `gh` credentials if SSH lacks fork permission):
+   For a cross-repository PR, the PR head owner can push its own fork directly.
+   When acting as a base-repository maintainer on somebody else's fork,
+   `maintainerCanModify` must be `true`; do not treat that field as a universal
+   fork-owner gate. Push the exact current commit to the reported head owner,
+   repository, and ref. Before using the HTTPS URL, configure Git to use the
+   authenticated `gh` credential helper:
    ```bash
+   gh auth setup-git
    git push "https://github.com/<head-owner>/<head-repository>.git" "HEAD:refs/heads/<head-ref>"
    ```
    Do not use a conveniently named local `fork`/`contributor` remote: linked

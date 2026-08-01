@@ -73,7 +73,7 @@ pnpm e2e:run tests/task/my-test.spec.ts        # single file (extra args pass th
 pnpm e2e:run tests/path/spec.ts -- --grep "exact test name"  # exact CI failure with a fresh build
 pnpm e2e:run --shards 3                          # 3 shards concurrently on this machine (isolated)
 pnpm e2e:run --no-build -- --grep "task creation"  # skip rebuild; forward flags after --
-pnpm e2e:run --no-build --project mobile-chrome e2e/tests/layout/mobile-capture.spec.ts
+pnpm e2e:run --no-build --project mobile-chrome tests/layout/mobile-spa-resilience.spec.ts
 pnpm e2e:docker                                # force the docker CI image (full isolation from a host dev instance)
 pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
 ```

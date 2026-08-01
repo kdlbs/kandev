@@ -78,7 +78,25 @@ func TestACPDBGHelperProcess(t *testing.T) {
 				})
 				continue
 			}
-			if cwd != workdir {
+			resolvedCWD, err := filepath.EvalSymlinks(cwd)
+			if err != nil {
+				_ = encoder.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      request["id"],
+					"error":   map[string]any{"message": "could not resolve requested cwd"},
+				})
+				continue
+			}
+			resolvedWorkdir, err := filepath.EvalSymlinks(workdir)
+			if err != nil {
+				_ = encoder.Encode(map[string]any{
+					"jsonrpc": "2.0",
+					"id":      request["id"],
+					"error":   map[string]any{"message": "could not resolve test workdir"},
+				})
+				continue
+			}
+			if resolvedCWD != resolvedWorkdir {
 				_ = encoder.Encode(map[string]any{
 					"jsonrpc": "2.0",
 					"id":      request["id"],

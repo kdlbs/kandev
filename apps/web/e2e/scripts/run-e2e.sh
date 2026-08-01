@@ -61,12 +61,12 @@ resolve_runtime_image() {
 # --- clean: remove build/test artifacts, including root-owned ones from prior
 # docker runs (host user can't rm root-owned files, so shell out to a container).
 clean_artifacts() {
-  log "cleaning e2e/test-results, blob-report, and /tmp shard logs"
-  rm -rf "$WEB_DIR"/e2e/test-results* "$WEB_DIR"/e2e/blob-report 2>/dev/null
+  log "cleaning e2e/test-results, blob-report, PR assets, and /tmp shard logs"
+  rm -rf "$WEB_DIR"/e2e/test-results* "$WEB_DIR"/e2e/blob-report "$WEB_DIR"/.pr-assets 2>/dev/null
   rm -f /tmp/e2e-host-shard-*.log /tmp/e2e-docker-shard-*.log 2>/dev/null
   if docker_up; then
     docker run --rm -v "$WEB_DIR":/web alpine sh -c \
-      'rm -rf /web/e2e/test-results* /web/e2e/blob-report' \
+      'rm -rf /web/e2e/test-results* /web/e2e/blob-report /web/.pr-assets' \
       2>/dev/null || true
   fi
 }
