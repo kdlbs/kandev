@@ -36,7 +36,7 @@ All 65 built-in tool registrations use `Server.wrapHandler`, which is the shared
 ## Public documentation
 
 - Update `docs/public/automation-and-mcp.md` with the cross-cutting rule that Kandev validates required fields, types, constraints, and unknown top-level fields before a tool runs.
-- Document `prompt` as the canonical create-task input and `description` as an unadvertised legacy compatibility alias.
+- Document `prompt` as the canonical create-task input and explain legacy `description` migration outside the token-bearing tool schema.
 
 ## Tests
 
@@ -65,8 +65,9 @@ Execution is sequential in the primary conversation because the tasks share the 
 
 ## Validation commands
 
-- `cd apps/backend && go test -run 'TestToolArgumentValidation|TestAllRegisteredToolSchemasCompile|TestSetModeRebuildsToolValidators' ./internal/mcp/server`
-- `cd apps/backend && go test -run 'TestCreateTask_(PromptCanonical|DescriptionCompatibility|RejectsConflictingContext|RejectsUnknownArguments)|TestNormalizeCreateTaskArguments' ./internal/mcp/server`
+- `make -C apps/backend test`
+- `make -C apps/backend lint`
+- `make -C apps/backend build`
 - `node --test scripts/validate-public-docs.test.mjs`
 - `node scripts/validate-public-docs.mjs`
 
@@ -79,11 +80,10 @@ Execution is sequential in the primary conversation because the tasks share the 
 
 ## Validation results
 
-- `cd apps/backend && go test -run 'TestToolArgumentValidation|TestAllRegisteredToolSchemasCompile|TestSetModeRebuildsToolValidators' ./internal/mcp/server` — 14 passed.
-- `cd apps/backend && go test -run 'TestCreateTask_(ToolSchema_HasParentID|PromptCanonical|DescriptionCompatibility|RejectsConflictingContext|RejectsUnknownArguments)|TestNormalizeCreateTaskArguments' ./internal/mcp/server` — 8 passed after prompt convergence.
-- `cd apps/backend && go test ./internal/mcp/server` — 167 passed after prompt convergence.
-- `cd apps/backend && go test -race ./internal/mcp/server` — 167 passed.
-- `cd apps/backend && go test -race -run TestToolValidationCoordinatesWithModeChange -count=100 ./internal/mcp/server` — 100 passed.
-- `cd apps/backend && golangci-lint run ./... --new-from-rev=bb525f1894803d150fb1bfb6a98f116a38ef3d3b --timeout=5m` — no issues.
+- `make -C apps/backend test` — passed across all backend packages.
+- `make -C apps/backend lint` — passed with no issues.
+- `make -C apps/backend build` — passed for the backend and local/remote helper binaries; Darwin helpers emitted the expected local no-codesigner warnings.
+- Focused MCP server tests — 167 passed under the race detector; the deterministic mode-change test passed 100 race-enabled repetitions.
+- CI-style changed-file lint against `bb525f1894803d150fb1bfb6a98f116a38ef3d3b` — no issues.
 - `node --test scripts/validate-public-docs.test.mjs` — 58 passed.
 - `node scripts/validate-public-docs.mjs` — validated 41 published pages.

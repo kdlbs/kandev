@@ -13,7 +13,7 @@ spec: "../../specs/integrations/mcp-tool-argument-validation.md"
 ## Acceptance
 
 - Public MCP documentation states that required fields, types, constraints, and unknown top-level fields are validated before tool execution.
-- Documentation does not advertise the create-task `prompt` compatibility alias or add repeated text to tool schemas.
+- Public documentation identifies `prompt` as canonical and explains the legacy `description` migration without adding the compatibility alias or repeated text to tool schemas.
 - Public-doc validation passes without navigation changes.
 
 ## Verification

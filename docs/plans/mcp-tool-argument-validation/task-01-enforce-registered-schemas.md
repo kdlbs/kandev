@@ -21,7 +21,7 @@ spec: "../../specs/integrations/mcp-tool-argument-validation.md"
 Follow strict TDD, then run:
 
 ```bash
-cd apps/backend && go test -run 'TestToolArgumentValidation|TestAllRegisteredToolSchemasCompile|TestSetModeRebuildsToolValidators' ./internal/mcp/server
+make -C apps/backend test
 ```
 
 ## Files likely touched
