@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/events"
@@ -217,6 +218,48 @@ func TestCheckMRWatch_DoesNotRepublishWhenNothingVisibleChanged(t *testing.T) {
 
 	if len(received) != 1 {
 		t.Fatalf("expected exactly 1 published event across 2 identical polls, got %d", len(received))
+	}
+}
+
+// TestCheckMRWatch_DoesNotDeleteWatchOnNotFoundError guards the coderabbitai
+// finding: ValidateTaskMRRepositoryIdentity returns ErrTaskMRNotFound (and
+// wraps generic store errors) as well as the direct ErrTaskMRRepositoryMismatch
+// sentinel. Only the mismatch sentinel proves the watch is durably wrong;
+// ErrTaskMRNotFound can be a transient race (e.g. the task_repositories link
+// row not yet visible) or a real backend problem, either of which should be
+// retried rather than destroying the watch. Here the watch's repository_id
+// points at a repository that was never linked to the task at all — a
+// not-found, not a mismatch — so the watch must survive and the error must
+// propagate instead of being swallowed as a clean "not valid" result.
+func TestCheckMRWatch_DoesNotDeleteWatchOnNotFoundError(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	// No repository row at all — repo-1 is never linked via task_repositories.
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "")
+
+	client := NewMockClient("https://gitlab.com")
+	svc := NewService("https://gitlab.com", client, "none", nil, newTestLogger(t))
+	svc.SetStore(store)
+
+	watch := &MRWatch{
+		SessionID: "sess-1", TaskID: "task-1", RepositoryID: "repo-1",
+		ProjectPath: "group/proj", MRIID: 5, Branch: "feat/a",
+	}
+	if err := store.CreateMRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	_, _, err := svc.CheckMRWatch(ctx, watch)
+	if !errors.Is(err, ErrTaskMRNotFound) {
+		t.Fatalf("expected ErrTaskMRNotFound to propagate, got %v", err)
+	}
+
+	remaining, err := store.GetMRWatchBySessionRepoAndBranch(ctx, "sess-1", "repo-1", "feat/a")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if remaining == nil {
+		t.Fatal("expected the watch to survive a not-found (non-mismatch) error, but it was deleted")
 	}
 }
 

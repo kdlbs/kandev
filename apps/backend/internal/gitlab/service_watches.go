@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -266,11 +267,16 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 // orphaned (workspaceID == "", e.g. the task was deleted) — refreshing an
 // orphaned watch is already a benign no-op elsewhere in this file, so
 // identity is not re-litigated here. Returns (false, nil) — not an error —
-// when the watch's repository identity is a durable mismatch; the watch is
-// deleted rather than left to retry, since a mismatch is a permanent fact,
-// not a transient failure, and would otherwise poll forever for nothing.
-// Returns (_, err) only for a genuine lookup failure, so the poller's
-// existing per-watch error logging still fires for that case.
+// only when ValidateTaskMRRepositoryIdentity returns the direct
+// ErrTaskMRRepositoryMismatch sentinel, a durable identity mismatch; the
+// watch is deleted rather than left to retry, since a mismatch is a
+// permanent fact, not a transient failure, and would otherwise poll forever
+// for nothing. Any other error — ErrTaskMRNotFound (the task/repository
+// link row itself is missing, which can be a transient race rather than a
+// proven mismatch) or a wrapped store/lookup failure — is propagated
+// instead of deleting the watch, so the poller's existing per-watch error
+// logging fires and retries on the next tick rather than destroying data on
+// what may be a recoverable condition.
 func (s *Service) watchMatchesTaskRepository(ctx context.Context, store *Store, client Client, watch *MRWatch) (bool, error) {
 	workspaceID, err := store.WorkspaceIDForTask(ctx, watch.TaskID)
 	if err != nil {
@@ -279,18 +285,22 @@ func (s *Service) watchMatchesTaskRepository(ctx context.Context, store *Store, 
 	if workspaceID == "" {
 		return true, nil
 	}
-	if err := store.ValidateTaskMRRepositoryIdentity(
+	err = store.ValidateTaskMRRepositoryIdentity(
 		ctx, workspaceID, watch.TaskID, watch.RepositoryID, client.Host(), watch.ProjectPath,
-	); err != nil {
-		s.logger.Warn("dropping MR watch whose repository no longer matches the task",
-			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
-		if delErr := store.DeleteMRWatch(ctx, watch.ID); delErr != nil {
-			s.logger.Warn("failed to delete mismatched MR watch",
-				zap.String("watch_id", watch.ID), zap.Error(delErr))
-		}
-		return false, nil
+	)
+	if err == nil {
+		return true, nil
 	}
-	return true, nil
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		return false, err
+	}
+	s.logger.Warn("dropping MR watch whose repository no longer matches the task",
+		zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+	if delErr := store.DeleteMRWatch(ctx, watch.ID); delErr != nil {
+		s.logger.Warn("failed to delete mismatched MR watch",
+			zap.String("watch_id", watch.ID), zap.Error(delErr))
+	}
+	return false, nil
 }
 
 // refreshTaskMRFromWatch keeps gitlab_task_mrs in sync with every poll, not
