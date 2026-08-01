@@ -60,3 +60,33 @@ func TestDecodeTaskMRUpdatedEvent_UnknownShape(t *testing.T) {
 		t.Fatalf("expected no decode for an unrelated payload, got %+v ok=%v", got, ok)
 	}
 }
+
+// TestMRAutomationInFlightKey_DistinguishesProjectPathWhenRepositoryIDEmpty
+// covers a self-managed GitLab host (no numeric project ID, so
+// RepositoryID is empty) with two different projects that happen to share
+// an MR IID. Without ProjectPath in the key, the two MRs' single-flight keys
+// would collide and the second MR's lifecycle evaluation would be
+// suppressed indefinitely by the first's still-in-flight entry.
+func TestMRAutomationInFlightKey_DistinguishesProjectPathWhenRepositoryIDEmpty(t *testing.T) {
+	a := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "", ProjectPath: "group/a", MRIID: 1}
+	b := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "", ProjectPath: "group/b", MRIID: 1}
+
+	keyA := mrAutomationInFlightKey(a)
+	keyB := mrAutomationInFlightKey(b)
+	if keyA == keyB {
+		t.Fatalf("expected distinct in-flight keys for different project paths, both got %q", keyA)
+	}
+}
+
+// TestMRAutomationInFlightKey_SameIdentityProducesSameKey guards against a
+// regression that makes the key overly specific (e.g. including a
+// non-identity field), which would break the single-flight dedup this key
+// exists for.
+func TestMRAutomationInFlightKey_SameIdentityProducesSameKey(t *testing.T) {
+	a := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 1, State: gitlabMRStateMerged}
+	b := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 1, State: "opened"}
+
+	if mrAutomationInFlightKey(a) != mrAutomationInFlightKey(b) {
+		t.Fatalf("expected the same in-flight key for the same (task, repository, project, iid) identity")
+	}
+}

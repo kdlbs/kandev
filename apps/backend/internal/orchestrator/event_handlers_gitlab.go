@@ -97,14 +97,23 @@ func decodeTaskMRUpdatedEvent(data interface{}) (*gitlab.TaskMRUpdatedEvent, boo
 	}
 }
 
+// mrAutomationInFlightKey identifies a linked MR for single-flight dedup.
+// RepositoryID alone doesn't distinguish MRs when it's empty (self-managed
+// GitLab hosts without a numeric project ID), so ProjectPath is included —
+// two projects sharing an empty RepositoryID and the same IID would otherwise
+// collide and suppress each other's lifecycle evaluation indefinitely.
+func mrAutomationInFlightKey(mr *gitlab.TaskMR) string {
+	return fmt.Sprintf("%s|%s|%s|%d", mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID)
+}
+
 // startTaskMRLifecycleAutomation runs the lifecycle evaluation pass in a
-// detached, single-flight goroutine keyed by (task, repository, iid) —
-// mirrors startTaskPRCIAutomationWithRefresh (AC23).
+// detached, single-flight goroutine keyed by (task, repository, project,
+// iid) — mirrors startTaskPRCIAutomationWithRefresh (AC23).
 func (s *Service) startTaskMRLifecycleAutomation(ctx context.Context, mr *gitlab.TaskMR) {
 	if mr == nil {
 		return
 	}
-	key := fmt.Sprintf("%s|%s|%d", mr.TaskID, mr.RepositoryID, mr.MRIID)
+	key := mrAutomationInFlightKey(mr)
 	if _, loaded := s.mrAutomationInFlight.LoadOrStore(key, struct{}{}); loaded {
 		s.logger.Debug("MR lifecycle automation already in flight",
 			zap.String("task_id", mr.TaskID),
