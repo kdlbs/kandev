@@ -15,11 +15,13 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
+import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 
 export function ResetContextButton({ sessionId }: { sessionId: string }) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const clearContextWindow = useAppStore((state) => state.clearContextWindow);
 
   const handleReset = useCallback(async () => {
     setIsResetting(true);
@@ -27,13 +29,14 @@ export function ResetContextButton({ sessionId }: { sessionId: string }) {
       const client = getWebSocketClient();
       if (!client) return;
       await client.request("session.reset_context", { session_id: sessionId }, 30000);
+      clearContextWindow(sessionId);
     } catch (error) {
       console.error("Failed to reset agent context:", error);
     } finally {
       setIsResetting(false);
       setConfirmOpen(false);
     }
-  }, [sessionId]);
+  }, [clearContextWindow, sessionId]);
 
   return (
     <>

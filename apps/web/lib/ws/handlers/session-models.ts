@@ -137,7 +137,10 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
           category: o.category,
           options: o.options,
         })),
-        configBaseline: payload.config_baseline ?? persisted.baseline,
+        configBaseline:
+          payload.config_baseline ??
+          persisted.baseline ??
+          state.sessionModels.bySessionId[sessionId]?.configBaseline,
       });
 
       clearStaleActiveModel(state, sessionId, acpModels);

@@ -100,13 +100,27 @@ the workspace-search shortcuts untouched. Click a mode or press **Tab** /
 search field. File matches are grouped by repository. Hover a mode to see its
 direct shortcut.
 
-Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell. Changing the default does not replace a layout already saved for a task; choose **Reset Layout** from the workbench layout menu when you want that task to adopt the latest default.
+Open **Settings > General > Layouts** to configure reusable desktop workbench profiles. Select a tab in a built-in layout to reveal its nearby edit controls, arrange or remove tabs and splits, then use the floating **Save changes** control. Kandev keeps the built-in row visible, marks it **Customized**, and stores your override without requiring a duplicate. Choose **Reset** beside a customized built-in to restore its original definition.
+
+**PR Details** is a reusable Layouts panel. The built-in Default puts it beside **Agent** in the center group, with Agent selected first; **Files** and **Changes** remain in the top-right group. You can move PR Details to another group or remove it with the same editor controls. When included in a layout, it shows the active task's linked GitHub pull request or GitLab merge request and remains as an empty panel when no review is linked. Removing it is respected: Kandev does not re-add it when a review appears. Changing the default applies to fresh task environments and **Reset Layout**, not a layout already saved for a task. Removing Terminal from the Default layout also prevents Kandev from creating its initial user shell.
 
 All panels for a task point at the same task environment. In a multi-repository task, check the repository label before editing, committing, or reviewing. A preview also requires the application to listen on a reachable interface and expose a forwarded port.
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
-The ring in the chat-input toolbar shows the active session's context-window use when the agent reports a trustworthy window size. Open it to see used and total tokens. For a supported Codex or Claude Code subscription session, the same popover also fetches the account plan and rate-limit windows; opening it again requests fresh provider data, subject to a short server-side refresh clamp. Kandev hides the ring instead of presenting impossible data when reported use exceeds the reported window, and agents without usage support show no subscription rows.
+The ring in the chat-input toolbar shows the active session's context-window use
+when the agent reports a trustworthy window size. Open it to see used and total
+tokens; it focuses on the active session's context window. For account-wide
+provider usage, install the [Provider Usage
+plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
+provider pill to the session top bar and can add a compact display to the global
+status bar. The optional status-bar display requires **App status bar** to be
+enabled under **Settings > System > Feature Toggles**; enable it and restart
+Kandev for the change to take effect. The session top-bar pill remains available
+on its own, while enabling App status bar also adds the global status-bar and
+phone Status drawer display. Configure the plugin under **Settings > Plugins >
+Provider Usage**. Kandev hides the context ring rather than presenting
+impossible data when reported use exceeds the reported window.
 
 ## Inspect changes
 

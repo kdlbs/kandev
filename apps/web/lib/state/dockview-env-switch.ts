@@ -146,7 +146,9 @@ export type EnvSwitchParams = {
 
 /** Close non-session env-scoped panels before the new env's panels are restored. */
 function removeEphemeralPanels(api: DockviewApi): void {
-  const toRemove = api.panels.filter((p) => EPHEMERAL_COMPONENTS.has(p.api.component));
+  const toRemove = api.panels.filter(
+    (p) => p.id !== "pr-detail" && EPHEMERAL_COMPONENTS.has(p.api.component),
+  );
   for (const p of toRemove) {
     try {
       p.api.close();
@@ -224,7 +226,7 @@ export function replaceStaleSessionPanels(
   addCurrentSessionSiblings(api, keepSessionId, currentSessionIds);
 }
 
-const RESTORED_SESSION_ANCHOR_IDS = ["plan", "pr-detail", "mr-detail"];
+const RESTORED_SESSION_ANCHOR_IDS = ["plan"];
 
 function findRestoredSessionGroup(api: DockviewApi): DockviewApi["groups"][number] | undefined {
   const canonicalCenter = api.groups.find((group) => group.id === CENTER_GROUP);

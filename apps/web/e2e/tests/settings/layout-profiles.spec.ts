@@ -10,6 +10,7 @@ type DockviewSnapshot = {
   panelIds: string[];
   filesGroupId: string | null;
   changesGroupId: string | null;
+  prDetailsGroupId: string | null;
   rightGroupOrder: string[];
 };
 
@@ -98,10 +99,12 @@ async function dockviewSnapshot(page: Page): Promise<DockviewSnapshot> {
     if (!api) throw new Error("dockview api not exposed");
     const files = api.getPanel("files");
     const changes = api.getPanel("changes");
+    const prDetails = api.getPanel("pr-detail");
     return {
       panelIds: api.panels.map((panel) => panel.id),
       filesGroupId: files?.group?.id ?? null,
       changesGroupId: changes?.group?.id ?? null,
+      prDetailsGroupId: prDetails?.group?.id ?? null,
       rightGroupOrder: files?.group?.panels.map((panel) => panel.id) ?? [],
     };
   });
@@ -199,6 +202,43 @@ test.describe("Task layout profile defaults", () => {
     await layouts.save();
 
     expect((await apiClient.getUserSettings()).settings.saved_layouts).toEqual([]);
+  });
+
+  test("moves PR Details through the editor and uses the saved group for fresh tasks", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const layouts = new LayoutSettingsPage(testPage);
+    await layouts.open();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toBeVisible();
+    await layouts.selectPanel("PR Details");
+    await prCapture.screenshot("default-pr-details-agent-group", {
+      caption: "Default layout puts PR Details beside Agent in the center pane",
+    });
+
+    await layouts.actions.getByRole("button", { name: "Move tab to split" }).click();
+    await testPage.getByRole("menuitem", { name: "Files", exact: true }).click();
+    await prCapture.screenshot("pr-details-moved-to-files-group", {
+      caption: "Layout editor moves PR Details into the Files/Changes pane before saving",
+    });
+    await layouts.save();
+
+    const saved = (await apiClient.getUserSettings()).settings.saved_layouts[0];
+    expect(JSON.stringify(saved.layout)).toContain("pr-detail");
+
+    const task = await createTaskWithSession(apiClient, seedData, "Moved PR Details Layout Task");
+    await openTask(testPage, task.id);
+    await expect
+      .poll(() => dockviewSnapshot(testPage), { timeout: 15_000 })
+      .toMatchObject({
+        filesGroupId: "group-right-top",
+        changesGroupId: "group-right-top",
+        prDetailsGroupId: "group-right-top",
+        rightGroupOrder: ["files", "changes", "pr-detail"],
+      });
   });
 
   test("fresh tasks use the no-terminal default while existing tasks wait for Reset Layout", async ({

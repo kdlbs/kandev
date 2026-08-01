@@ -5,17 +5,14 @@ import { GitHubCLIForm } from "./github-cli-form";
 
 const mocks = vi.hoisted(() => ({
   fetchAccounts: vi.fn(),
-  setConnection: vi.fn(),
 }));
 
 vi.mock("@/lib/api/domains/github-api", () => ({
   fetchGitHubCLIAccounts: mocks.fetchAccounts,
-  setGitHubWorkspaceConnection: mocks.setConnection,
 }));
 
 beforeEach(() => {
   mocks.fetchAccounts.mockReset();
-  mocks.setConnection.mockReset();
 });
 
 afterEach(() => cleanup());
@@ -26,7 +23,7 @@ describe("GitHubCLIForm", () => {
 
     render(
       <ToastProvider>
-        <GitHubCLIForm workspaceId="workspace-1" onSaved={vi.fn()} />
+        <GitHubCLIForm workspaceId="workspace-1" onAccountChange={vi.fn()} />
       </ToastProvider>,
     );
 
@@ -41,11 +38,33 @@ describe("GitHubCLIForm", () => {
 
     render(
       <ToastProvider>
-        <GitHubCLIForm workspaceId="workspace-1" onSaved={vi.fn()} />
+        <GitHubCLIForm workspaceId="workspace-1" onAccountChange={vi.fn()} />
       </ToastProvider>,
     );
 
     expect(await screen.findByText(/Sign in with/)).toBeTruthy();
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("reports the preferred account without requiring a second action", async () => {
+    const account = {
+      host: "github.com",
+      login: "octocat",
+      active: true,
+      selected: true,
+      state: "active",
+    };
+    const onAccountChange = vi.fn();
+    mocks.fetchAccounts.mockResolvedValue([account]);
+
+    render(
+      <ToastProvider>
+        <GitHubCLIForm workspaceId="workspace-1" onAccountChange={onAccountChange} />
+      </ToastProvider>,
+    );
+
+    expect(await screen.findByText(/octocat/)).toBeTruthy();
+    expect(onAccountChange).toHaveBeenLastCalledWith(account);
+    expect(screen.queryByRole("button", { name: "Use account" })).toBeNull();
   });
 });

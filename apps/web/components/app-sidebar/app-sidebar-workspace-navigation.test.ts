@@ -27,9 +27,9 @@ describe("app sidebar workspace navigation", () => {
   });
 
   it("routes workspace home by active workspace type", () => {
-    expect(workspaceHomeHref(kanban)).toBe("/?workspaceId=kanban-1");
+    expect(workspaceHomeHref(kanban)).toBe("/?home=overview&workspaceId=kanban-1");
     expect(workspaceHomeHref(office)).toBe("/office?workspaceId=office-1");
-    expect(workspaceHomeHref(undefined)).toBe("/");
+    expect(workspaceHomeHref(undefined)).toBe("/?home=overview");
   });
 
   it("remembers and resolves the last kanban workspace", () => {

@@ -136,10 +136,15 @@ test.describe("Command Panel", () => {
       task.session_id,
       "command alias task session did not become ready",
     );
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(task.id))?.status, {
+        timeout: 30_000,
+        message: "command alias task environment did not become ready",
+      })
+      .toBe("ready");
 
     await testPage.goto(`/t/${task.id}`);
-    const session = new SessionPage(testPage);
-    await session.waitForLoad();
+    await expect(testPage.getByTestId("task-topbar")).toBeVisible();
 
     await openCommandPanel(testPage);
     const dialog = commandDialog(testPage);

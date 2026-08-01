@@ -36,7 +36,12 @@ release.
 Select the update icon to deliberately check npm and refresh the managed
 runtime on the Kandev host. Before anything changes, the update dialog shows
 the current and upstream target versions, the exact command Kandev will run,
-and how the update affects sessions. Select **Approve update** to start it.
+and how the update affects sessions. When the reported current and target
+versions match, the dialog shows the version once as **Up to date** and keeps
+**Approve update** disabled. After a successful preview provides both current
+and target versions and they differ, select **Approve update** to start it;
+the action stays disabled when either version is missing, the preview is
+loading, or the preview has an error.
 The dialog streams progress and stdout/stderr until the update finishes; those
 details do not appear on the agent card and are cleared when you restart the
 page. After the package update, Kandev automatically starts a fresh ACP
@@ -87,7 +92,33 @@ Model, mode, command, and configuration choices are probed from the locally inst
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
 
-**Settings > Agents** shows **Subscription Usage** only when a supported host agent is signed in through a subscription plan. The current section covers Codex and Claude Code, reports the provider's plan and rate-limit windows, and can be refreshed on demand. It is an operational signal from the installed CLI, not a billing ledger or a guarantee that the next request will be accepted; provider availability, account policy, and concurrent usage still apply.
+### Monitor Office agent quota
+
+> [!EXPERIMENTAL]
+> Office mode is feature-flagged and disabled in the production profile by
+> default. Enable **Office mode** under **Settings > System > Feature Toggles**
+> and restart Kandev to try it; its routes and agent surfaces are still in
+> progress. For stable host-CLI installation and profile configuration, use
+> **Settings > Agents**.
+
+When [Office mode](feature-status.md) is enabled, open **Office > Agents** and
+select an Office agent to see its **Subscription Quota** on the overview; the
+Office dashboard also summarizes the highest utilization across subscription
+agents. These cards appear only for supported subscription agents with provider
+credentials.
+
+For account-wide provider usage across supported providers, install the
+[Provider Usage plugin](https://github.com/kdlbs/kandev-plugin-provider-usage).
+It adds a provider pill to the session top bar and can add a compact display to
+the global status bar. The optional status-bar display requires **App status
+bar** to be enabled under **Settings > System > Feature Toggles**; enable it
+and restart Kandev for the change to take effect. If it remains disabled, the
+session top-bar pill remains available; enabling it also adds the global
+status-bar and phone Status drawer display. Configure the plugin under
+**Settings > Plugins > Provider Usage**. These usage surfaces are operational
+signals, not a billing ledger or a guarantee that the next request will be
+accepted; provider availability, account policy, and concurrent usage still
+apply.
 
 ### CLI flags
 

@@ -9,10 +9,20 @@ import * as tiptapEditor from "./use-tiptap-editor";
 import { decideHistoryNav } from "./tiptap-editor-history";
 
 describe("TIPTAP_EDITOR_TEXT_SIZE_CLASS", () => {
-  it("keeps 16px text until the lg breakpoint", () => {
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-base");
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("lg:text-sm");
-    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("md:text-sm");
+  it("uses one text size at every viewport width", () => {
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).toContain("text-sm");
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toContain("text-base");
+  });
+
+  it("carries no variant-prefixed text utility, so resizing cannot change the font", () => {
+    // The touch 16px floor lives in the `any-pointer: coarse` rule in
+    // globals.css; a width breakpoint here would resize the composer text when
+    // a desktop window is dragged narrow. Reject *any* `<variant>:text-*`
+    // rather than a list of named breakpoints — an arbitrary variant such as
+    // `min-[1024px]:text-lg` or `max-[900px]:text-base` is just as
+    // viewport-dependent and would slip past an enumerated pattern.
+    const variantTextUtility = /(?:^|\s)\S+:text-\S+/;
+    expect(TIPTAP_EDITOR_TEXT_SIZE_CLASS).not.toMatch(variantTextUtility);
   });
 });
 

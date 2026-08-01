@@ -159,12 +159,12 @@ describe("AddPanelMenuItems — linked PR rows", () => {
     await openPRSubmenu();
 
     fireEvent.click(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-api-77`));
-    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/api/77", "session-1");
+    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/api/77");
   });
 
   it("keeps the inline row clickable when exactly one PR is linked", () => {
     renderMenu({ prs: [makePR("pr-1", 42)] });
     fireEvent.click(screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-kandev-42`));
-    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/kandev/42", "session-1");
+    expect(mockAddPRPanel).toHaveBeenCalledWith("acme/kandev/42");
   });
 });

@@ -50,6 +50,25 @@ test.describe.serial("opt-in authentication", () => {
     await context.close();
   });
 
+  test("exposes a session challenge to split-origin browsers", async ({ browser, backend }) => {
+    const context = await browser.newContext();
+    const page = await context.newPage();
+    await page.goto(`http://127.0.0.1:${backend.port}/login`);
+
+    const challenge = await page.evaluate(async (apiBaseUrl) => {
+      const response = await fetch(`${apiBaseUrl}/api/v1/workspaces`, {
+        credentials: "include",
+      });
+      return {
+        status: response.status,
+        challenge: response.headers.get("WWW-Authenticate"),
+      };
+    }, backend.baseUrl);
+
+    expect(challenge).toEqual({ status: 401, challenge: "Bearer" });
+    await context.close();
+  });
+
   test("setup wizard promotes the first admin and signs them in", async ({ browser, backend }) => {
     const context = await browser.newContext({ baseURL: backend.frontendUrl });
 

@@ -176,7 +176,14 @@ jobs:
     container: ghcr.io/kdlbs/kandev-ci:build-latest
     services:
       postgres:
-        image: postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+        # Mirrored from the digest-pinned Docker Hub image by
+        # ci-base-image.yml. Service images are pulled before steps begin, so
+        # moving this pull to GHCR removes an otherwise unwrappable Docker Hub
+        # timeout from job startup.
+        image: ghcr.io/kdlbs/kandev-ci:postgres-16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+        credentials:
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
         env:
           POSTGRES_USER: kandev
           POSTGRES_PASSWORD: kandev

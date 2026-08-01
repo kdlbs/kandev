@@ -41,7 +41,7 @@ describe("AppSidebarHeader", () => {
     renderHeader();
 
     expect(screen.getByRole("link", { name: "Kandev home" }).getAttribute("href")).toBe(
-      "/?workspaceId=kanban-1",
+      "/?home=overview&workspaceId=kanban-1",
     );
   });
 

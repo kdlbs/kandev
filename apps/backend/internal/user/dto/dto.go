@@ -18,6 +18,7 @@ type UserSettingsDTO struct {
 	UserID                          string                              `json:"user_id"`
 	WorkspaceID                     string                              `json:"workspace_id"`
 	KanbanViewMode                  string                              `json:"kanban_view_mode"`
+	StartupPage                     string                              `json:"startup_page"`
 	WorkflowFilterID                string                              `json:"workflow_filter_id"`
 	RepositoryIDs                   []string                            `json:"repository_ids"`
 	TasksListSort                   string                              `json:"tasks_list_sort"`
@@ -83,6 +84,7 @@ type ShellOption struct {
 type UpdateUserSettingsRequest struct {
 	WorkspaceID                     *string                            `json:"workspace_id,omitempty"`
 	KanbanViewMode                  *string                            `json:"kanban_view_mode,omitempty"`
+	StartupPage                     *string                            `json:"startup_page,omitempty"`
 	WorkflowFilterID                *string                            `json:"workflow_filter_id,omitempty"`
 	RepositoryIDs                   *[]string                          `json:"repository_ids,omitempty"`
 	TasksListSort                   *string                            `json:"tasks_list_sort,omitempty"`
@@ -209,6 +211,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		UserID:                          settings.UserID,
 		WorkspaceID:                     settings.WorkspaceID,
 		KanbanViewMode:                  settings.KanbanViewMode,
+		StartupPage:                     models.NormalizeStartupPage(settings.StartupPage),
 		WorkflowFilterID:                settings.WorkflowFilterID,
 		RepositoryIDs:                   settings.RepositoryIDs,
 		TasksListSort:                   settings.TasksListSort,

@@ -123,6 +123,52 @@ describe("useGitHubStatus workspace scoping", () => {
   });
 });
 
+describe("useGitHubStatus refresh behavior", () => {
+  it("keeps the loaded status visible while a manual refresh is pending", async () => {
+    const initial: GitHubStatusResponse = {
+      workspace_id: WORKSPACE_A,
+      authenticated: true,
+      username: "initial",
+      auth_method: "pat",
+      token_configured: true,
+      required_scopes: [],
+      effective_personal_actor: {
+        kind: "human",
+        source: "pat",
+        login: "initial",
+        workspace_id: WORKSPACE_A,
+      },
+    };
+    const refreshed = deferred<GitHubStatusResponse>();
+    fetchGitHubStatusMock.mockResolvedValueOnce(initial).mockReturnValueOnce(refreshed.promise);
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <StateProvider>{children}</StateProvider>
+    );
+    const { result } = renderHook(() => useGitHubStatus(WORKSPACE_A), { wrapper });
+
+    await waitFor(() => expect(result.current.status?.username).toBe("initial"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    act(() => result.current.refresh());
+    await waitFor(() => expect(fetchGitHubStatusMock).toHaveBeenCalledTimes(2));
+
+    expect(result.current.status?.username).toBe("initial");
+    expect(result.current.loading).toBe(true);
+
+    await act(async () => {
+      refreshed.resolve({
+        ...initial,
+        username: "refreshed",
+        effective_personal_actor: {
+          ...initial.effective_personal_actor!,
+          login: "refreshed",
+        },
+      });
+      await refreshed.promise;
+    });
+    await waitFor(() => expect(result.current.status?.username).toBe("refreshed"));
+  });
+});
+
 describe("normalizeGitHubStatus for GitHub Apps", () => {
   it("uses the personal identity for App-backed workspaces", () => {
     const status = normalizeGitHubStatus({

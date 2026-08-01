@@ -27,6 +27,10 @@ cache is already present.
   resolves and shows the current runtime version, upstream target version,
   exact built-in command, host-only scope, capability refresh, and active
   session behavior before an update can start.
+- When the resolved current and upstream target versions are identical, the
+  update dialog shows the version once with an **Up to date** status and keeps
+  approval disabled because running the package update would not advance the
+  managed runtime.
 - The update starts only after the operator approves it in the dialog. The
   dialog then shows live stdout/stderr, progress, and the terminal success or
   failure state.
@@ -199,6 +203,11 @@ Jobs are terminal after `succeeded` or `failed`. Retrying creates a new job.
   **WHEN** the operator opens its update action, **THEN** the dialog shows
   `0.62.0 → 0.63.0`, the exact built-in command, and how the host update
   affects capabilities and active sessions without starting the command.
+- **GIVEN** the current runtime and upstream target both report version
+  `0.64.0`, **WHEN** the operator opens the update action, **THEN** the dialog
+  shows `0.64.0` once with **Up to date**, does not show a version transition,
+  keeps **Approve update** disabled on desktop and mobile, and starts no update
+  job.
 - **GIVEN** the update dialog has a resolved preview, **WHEN** the operator
   approves the update, **THEN** Kandev starts exactly one update and the dialog
   streams stdout/stderr until the job is terminal.

@@ -94,7 +94,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
 
   return (
     <>
-      <PanelRoot data-testid="mobile-changes-panel">
+      <PanelRoot className="@container/changes-panel" data-testid="mobile-changes-panel">
         <ChangesPanelHeader
           hasChanges={data.git.hasChanges}
           hasCommits={data.git.hasCommits}

@@ -107,6 +107,30 @@ describe("upsertTaskSessionFromEvent", () => {
     const list = store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID];
     expect(list.map((s) => s.id)).toEqual(["session-other", SESSION_ID]);
   });
+
+  it("invalidates a loaded list when an event introduces a partial session", () => {
+    const store = makeStore();
+    const existing = makeSession({ id: "session-existing", repository_id: "repo-1" });
+    store.getState().setTaskSessionsForTask(TASK_ID, [existing]);
+
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession());
+
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(false);
+    expect(store.getState().taskSessionsByTask.itemsByTaskId[TASK_ID].map((s) => s.id)).toEqual([
+      "session-existing",
+      SESSION_ID,
+    ]);
+  });
+
+  it("keeps a loaded list authoritative when an event updates a known session", () => {
+    const store = makeStore();
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "COMPLETED" }));
+
+    expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
+    expect(store.getState().taskSessions.items[SESSION_ID].repository_id).toBe("repo-1");
+  });
 });
 
 describe("setTaskSessionsForTask preserves WS-seeded fields", () => {

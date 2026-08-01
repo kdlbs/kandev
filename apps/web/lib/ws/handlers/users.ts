@@ -2,14 +2,7 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { UserSettingsUpdatedPayload } from "@/lib/types/backend";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import {
-  parseChangesPanelLayout,
-  parseAppStatusBarOrder,
-  parseSystemMetricsDisplay,
-  taskCreateLastUsedHasValue,
-  parseVoiceMode,
-  parseMCPTaskAgentProfileDefault,
-} from "@/lib/ssr/user-settings";
+import { mapUserSettingsData } from "@/lib/ssr/user-settings";
 import { fromApiSidebarDraft, fromApiSidebarView } from "@/lib/state/slices/ui/sidebar-view-wire";
 import { migrateView } from "@/lib/state/slices/ui/ui-slice";
 
@@ -27,115 +20,7 @@ export function registerUsersHandlers(store: StoreApi<AppState>): WsHandlers {
 }
 
 function buildUserSettingsState(state: AppState, payload: UserSettingsUpdatedPayload) {
-  return {
-    ...state.userSettings,
-    ...buildBehaviorSettings(state, payload),
-    ...buildSidebarSettings(state, payload),
-    ...buildLspSettings(payload),
-    ...buildSyncedLocalSettings(state, payload),
-    defaultUtilityAgentId: payload.default_utility_agent_id || null,
-    keyboardShortcuts: payload.keyboard_shortcuts ?? {},
-    changesPanelLayout: parseChangesPanelLayout(payload.changes_panel_layout),
-    appStatusBarOrder:
-      payload.app_status_bar_order === undefined
-        ? state.userSettings.appStatusBarOrder
-        : parseAppStatusBarOrder(payload.app_status_bar_order),
-    systemMetricsDisplay: parseSystemMetricsDisplay(payload.system_metrics_display),
-    voiceMode: parseVoiceMode(payload.voice_mode),
-    loaded: true,
-  };
-}
-
-function buildLspSettings(payload: UserSettingsUpdatedPayload) {
-  return {
-    lspAutoStartLanguages: payload.lsp_auto_start_languages ?? [],
-    lspAutoInstallLanguages: payload.lsp_auto_install_languages ?? [],
-  };
-}
-
-function buildSyncedLocalSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
-  return {
-    savedLayouts: payload.saved_layouts ?? [],
-    taskCreateLastUsed:
-      payload.task_create_last_used === undefined
-        ? state.userSettings.taskCreateLastUsed
-        : {
-            repositoryId: payload.task_create_last_used?.repository_id || null,
-            branch: payload.task_create_last_used?.branch || null,
-            agentProfileId: payload.task_create_last_used?.agent_profile_id || null,
-            executorProfileId: payload.task_create_last_used?.executor_profile_id || null,
-            synced: taskCreateLastUsedHasValue(payload.task_create_last_used),
-          },
-    jiraSavedViews: payload.jira_saved_views,
-    jiraTaskPresets: payload.jira_task_presets,
-    githubSavedPresets: payload.github_saved_presets,
-    githubDefaultQueryPresets: payload.github_default_query_presets,
-    gitlabSavedPresets: payload.gitlab_saved_presets,
-  };
-}
-
-function buildTranscriptBehaviorSettings(payload: UserSettingsUpdatedPayload) {
-  return {
-    unreadDivider: payload.unread_divider ?? true,
-    showAnchoredPromptBar: payload.show_anchored_prompt_bar ?? false,
-    showScrollToLastPrompt: payload.show_scroll_to_last_prompt ?? true,
-    showScrollToStart: payload.show_scroll_to_start ?? false,
-    showTranscriptAutoScrollControl: payload.show_transcript_auto_scroll_control ?? true,
-  };
-}
-
-function buildBehaviorSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
-  return {
-    preferredShell: payload.preferred_shell || null,
-    defaultEditorId: payload.default_editor_id || null,
-    enablePreviewOnClick: payload.enable_preview_on_click ?? false,
-    chatSubmitKey: (payload.chat_submit_key as "enter" | "cmd_enter") ?? "cmd_enter",
-    reviewAutoMarkOnScroll: payload.review_auto_mark_on_scroll ?? true,
-    confirmTaskArchive: payload.confirm_task_archive ?? true,
-    mcpTaskAgentProfileDefault: parseMCPTaskAgentProfileDefault(
-      payload.mcp_task_agent_profile_default,
-    ),
-    ...buildTranscriptBehaviorSettings(payload),
-    showReleaseNotification: payload.show_release_notification ?? true,
-    releaseNotesLastSeenVersion: (payload.release_notes_last_seen_version as string) || null,
-    terminalLinkBehavior:
-      payload.terminal_link_behavior === "browser_panel"
-        ? ("browser_panel" as const)
-        : ("new_tab" as const),
-    tasksListShowDetails:
-      payload.tasks_list_show_details === undefined
-        ? state.userSettings.tasksListShowDetails
-        : payload.tasks_list_show_details,
-  };
-}
-
-function buildSidebarSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
-  const sidebarViews =
-    payload.sidebar_views === undefined
-      ? state.userSettings.sidebarViews
-      : (payload.sidebar_views ?? []).map(fromApiSidebarView).map(migrateView);
-  return {
-    sidebarViews,
-    sidebarActiveViewId:
-      payload.sidebar_active_view_id === undefined
-        ? state.userSettings.sidebarActiveViewId
-        : payload.sidebar_active_view_id || null,
-    sidebarDraft: parseSidebarDraftForSettings(state, payload),
-    sidebarTaskPrefs:
-      payload.sidebar_task_prefs === undefined
-        ? state.userSettings.sidebarTaskPrefs
-        : {
-            pinnedTaskIds: payload.sidebar_task_prefs.pinned_task_ids ?? [],
-            orderedTaskIds: payload.sidebar_task_prefs.ordered_task_ids ?? [],
-            subtaskOrderByParentId: payload.sidebar_task_prefs.subtask_order_by_parent_id ?? {},
-          },
-  };
-}
-
-function parseSidebarDraftForSettings(state: AppState, payload: UserSettingsUpdatedPayload) {
-  if (payload.sidebar_draft === undefined) return state.userSettings.sidebarDraft;
-  if (payload.sidebar_draft === null) return null;
-  return fromApiSidebarDraft(payload.sidebar_draft);
+  return mapUserSettingsData(payload, state.userSettings);
 }
 
 function buildSidebarTaskPrefsState(state: AppState, payload: UserSettingsUpdatedPayload) {

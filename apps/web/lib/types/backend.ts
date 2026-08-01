@@ -12,18 +12,12 @@ export type { RunEventAppendedPayload } from "./run-events";
 import type {
   AvailableAgent,
   ForegroundActivity,
-  SavedLayout,
-  SidebarViewApi,
-  SidebarViewDraftApi,
-  SidebarTaskPrefsApi,
-  TaskCreateLastUsedApi,
-  AppStatusBarOrderApi,
-  MCPTaskAgentProfileDefault,
   TaskPendingAction,
   TaskSessionState,
   StepEvents,
   TaskState,
   ToolStatus,
+  UserSettings,
 } from "@/lib/types/http";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
@@ -397,49 +391,13 @@ export type AgentProfileChangedPayload = {
   profile: AgentProfilePayload;
 };
 
-export type UserSettingsUpdatedPayload = {
+export type UserSettingsUpdatedPayload = Omit<
+  Partial<UserSettings>,
+  "user_id" | "workspace_id" | "repository_ids"
+> & {
   user_id: string;
   workspace_id: string;
-  kanban_view_mode?: string;
-  tasks_list_show_details?: boolean;
-  workflow_filter_id?: string;
   repository_ids: string[];
-  initial_setup_complete?: boolean;
-  preferred_shell?: string;
-  default_editor_id?: string;
-  enable_preview_on_click?: boolean;
-  chat_submit_key?: string;
-  show_anchored_prompt_bar?: boolean;
-  show_scroll_to_last_prompt?: boolean;
-  show_scroll_to_start?: boolean;
-  show_transcript_auto_scroll_control?: boolean;
-  review_auto_mark_on_scroll?: boolean;
-  confirm_task_archive?: boolean;
-  unread_divider?: boolean;
-  mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
-  show_release_notification?: boolean;
-  release_notes_last_seen_version?: string;
-  lsp_auto_start_languages?: string[];
-  lsp_auto_install_languages?: string[];
-  saved_layouts?: SavedLayout[];
-  sidebar_views?: SidebarViewApi[];
-  sidebar_active_view_id?: string;
-  sidebar_draft?: SidebarViewDraftApi | null;
-  sidebar_task_prefs?: SidebarTaskPrefsApi;
-  task_create_last_used?: TaskCreateLastUsedApi;
-  jira_saved_views?: unknown[] | null;
-  jira_task_presets?: unknown[] | null;
-  github_saved_presets?: unknown[] | null;
-  github_default_query_presets?: object | null;
-  gitlab_saved_presets?: unknown[] | null;
-  default_utility_agent_id?: string;
-  keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
-  terminal_link_behavior?: string;
-  changes_panel_layout?: "flat" | "tree";
-  system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
-  app_status_bar_order?: AppStatusBarOrderApi;
-  voice_mode?: import("@/lib/types/http-voice").VoiceModeSettings;
-  updated_at?: string;
 };
 
 export type ShellOutputPayload = {

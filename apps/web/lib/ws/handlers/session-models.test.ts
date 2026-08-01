@@ -210,6 +210,46 @@ describe("session.models_updated config metadata", () => {
       ],
     });
   });
+
+  it("preserves the hydrated config baseline when a provider snapshot omits it", () => {
+    const configBaseline = {
+      model: providerModelId,
+      [reasoningOptionId]: "medium",
+    };
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: providerModelId,
+            models: [],
+            configOptions: [],
+            configBaseline,
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          config_options: [
+            {
+              type: "select",
+              id: reasoningOptionId,
+              name: reasoningOptionName,
+              current_value: "medium",
+              options: [{ value: "medium", name: "Medium" }],
+            },
+          ],
+        }),
+      ),
+    );
+
+    expect(store.getState().sessionModels.bySessionId["session-1"].configBaseline).toEqual(
+      configBaseline,
+    );
+  });
 });
 
 describe("session.models_updated persisted runtime hydration", () => {

@@ -130,7 +130,6 @@ function usePopoverInteractions() {
 
 function PRSingleButton({ pr, refreshTaskPR }: { pr: TaskPR; refreshTaskPR: () => void }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const tooltip = `${pr.owner}/${pr.repo} #${pr.pr_number} — ${pr.pr_title}`;
   const {
     usesTouchDrawer,
@@ -165,7 +164,7 @@ function PRSingleButton({ pr, refreshTaskPR }: { pr: TaskPR; refreshTaskPR: () =
       onFocus={onTriggerEnter}
       onBlur={onTriggerLeave}
       onClick={() => {
-        addPRPanel(prTaskKey(pr), activeSessionId);
+        addPRPanel(prTaskKey(pr));
         onOpenChange(false);
       }}
     >
@@ -209,7 +208,6 @@ function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: (
   // CI popover with a tab per PR — desktop only, suppressed on touch where
   // there is no hover.
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const {
     usesTouchDrawer,
     open,
@@ -291,7 +289,7 @@ function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: (
           enabled={open}
           refreshTaskPR={refreshTaskPR}
           onOpenDetailPanel={(pr) => {
-            addPRPanel(prTaskKey(pr), activeSessionId);
+            addPRPanel(prTaskKey(pr));
             onOpenChange(false);
           }}
         />
@@ -302,7 +300,6 @@ function PRMultiButton({ prs, refreshTaskPR }: { prs: TaskPR[]; refreshTaskPR: (
 
 function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
-  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   return (
     <DropdownMenuContent align="end" className="w-72">
       <DropdownMenuLabel className="text-xs">Pull requests</DropdownMenuLabel>
@@ -310,7 +307,7 @@ function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
       {prs.map((pr) => (
         <DropdownMenuItem
           key={pr.id}
-          onClick={() => addPRPanel(prTaskKey(pr), activeSessionId)}
+          onClick={() => addPRPanel(prTaskKey(pr))}
           className="cursor-pointer gap-2"
           data-testid={`pr-topbar-menu-item-${prIdentitySlug(pr)}`}
         >

@@ -4,17 +4,15 @@ import { SessionPage } from "../../pages/session-page";
 
 test.describe("PR detail panel dedup", () => {
   /**
-   * Regression: clicking the topbar PR button when the PR panel is already
-   * auto-shown must focus the existing tab, not create a duplicate. The bug
-   * was that auto-add used panel id `pr-detail` while the topbar button used
-   * the keyed id `pr-detail|<owner>/<repo>/<n>`, so `focusOrAddPanel`'s id
-   * dedup missed and the user ended up with two "Pull Request" tabs.
+   * Clicking the topbar PR button for the review already shown by the
+   * layout-owned canonical panel must focus that tab instead of creating a
+   * keyed duplicate.
    *
    * Setup:
    *   Inbox → Working (auto_start, on_turn_complete → Done) → Done
    *   Task A (with PR #501)
    */
-  test("topbar PR button focuses the auto-shown panel instead of duplicating it", async ({
+  test("topbar PR button focuses the canonical panel instead of duplicating it", async ({
     testPage,
     apiClient,
     seedData,
@@ -87,7 +85,7 @@ test.describe("PR detail panel dedup", () => {
       timeout: 45_000,
     });
 
-    // Open task — auto-show should produce the PR tab.
+    // Open task — the Default layout supplies the canonical PR Details tab.
     await kanban.taskCardInColumn("Dedup PR Task", doneStep.id).click();
     await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
 
@@ -95,7 +93,7 @@ test.describe("PR detail panel dedup", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // PR auto-panel is open before any click on the topbar button.
+    // Canonical panel is open before any click on the topbar button.
     await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await expect(session.prDetailTab()).toHaveCount(1);
     await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });

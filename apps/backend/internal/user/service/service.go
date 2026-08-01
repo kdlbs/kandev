@@ -37,6 +37,7 @@ type Service struct {
 type UpdateUserSettingsRequest struct {
 	WorkspaceID                     *string
 	KanbanViewMode                  *string
+	StartupPage                     *string
 	WorkflowFilterID                *string
 	RepositoryIDs                   *[]string
 	TasksListSort                   *string
@@ -230,6 +231,9 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 	if req.KanbanViewMode != nil {
 		settings.KanbanViewMode = *req.KanbanViewMode
 	}
+	if err := applyStartupPage(settings, req.StartupPage); err != nil {
+		return err
+	}
 	if req.WorkflowFilterID != nil {
 		settings.WorkflowFilterID = *req.WorkflowFilterID
 	}
@@ -255,6 +259,20 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		settings.EnablePreviewOnClick = *req.EnablePreviewOnClick
 	}
 	return nil
+}
+
+func applyStartupPage(settings *models.UserSettings, value *string) error {
+	if value == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*value)
+	switch v {
+	case models.StartupPageTaskOverview, models.StartupPageLastTask:
+		settings.StartupPage = v
+		return nil
+	default:
+		return fmt.Errorf("startup_page must be %q or %q", models.StartupPageTaskOverview, models.StartupPageLastTask)
+	}
 }
 
 func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
@@ -648,6 +666,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"user_id":                             settings.UserID,
 		"workspace_id":                        settings.WorkspaceID,
 		"kanban_view_mode":                    settings.KanbanViewMode,
+		"startup_page":                        models.NormalizeStartupPage(settings.StartupPage),
 		"workflow_filter_id":                  settings.WorkflowFilterID,
 		"repository_ids":                      settings.RepositoryIDs,
 		"tasks_list_sort":                     settings.TasksListSort,

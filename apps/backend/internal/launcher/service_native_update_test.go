@@ -95,6 +95,7 @@ func TestInstallSystemdWritesOwnerOnlyNativeMetadata(t *testing.T) {
 		serviceArgs{
 			Action:      actionInstall,
 			System:      true,
+			RunAs:       currentUser.Username,
 			HomeDir:     homeDir,
 			Port:        38429,
 			NoBootStart: true,
@@ -463,7 +464,7 @@ func TestInstallSystemdRejectsSymlinkedMetadataPathsBeforeReload(t *testing.T) {
 			}
 
 			code := installSystemd(
-				serviceArgs{Action: actionInstall, System: true, HomeDir: homeDir},
+				serviceArgs{Action: actionInstall, System: true, RunAs: currentUser.Username, HomeDir: homeDir},
 				BuildInfo{Version: "test"},
 				filepath.Join(tmp, "kandev.service"),
 			)

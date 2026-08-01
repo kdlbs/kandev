@@ -3,6 +3,19 @@ export function linkToTask(taskId: string, layout?: string): string {
   return layout ? `${base}?layout=${encodeURIComponent(layout)}` : base;
 }
 
+export function linkToTaskOverview({
+  workspaceId,
+  workflowId,
+}: {
+  workspaceId?: string;
+  workflowId?: string;
+} = {}): string {
+  const params = new URLSearchParams({ home: "overview" });
+  if (workspaceId) params.set("workspaceId", workspaceId);
+  if (workflowId) params.set("workflowId", workflowId);
+  return `/?${params.toString()}`;
+}
+
 /** Task-detail route prefixes the SPA serves: canonical and compatibility. */
 const TASK_DETAIL_PREFIXES = ["/t/", "/tasks/"];
 

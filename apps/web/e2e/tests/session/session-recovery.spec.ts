@@ -4,6 +4,24 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 
+type ContextWindowStoreWindow = Window & {
+  __KANDEV_E2E_STORE__?: {
+    getState: () => {
+      tasks: { activeSessionId: string | null };
+      setContextWindow: (
+        sessionId: string,
+        contextWindow: {
+          size: number;
+          used: number;
+          remaining: number;
+          efficiency: number;
+          source: "acp" | "api";
+        },
+      ) => void;
+    };
+  };
+};
+
 /**
  * Seed a task + session via the API and navigate directly to the session page.
  * Waits for the mock agent to complete its turn (idle input visible).
@@ -35,6 +53,25 @@ async function seedTaskWithSession(
   return session;
 }
 
+/** Seed a high-usage reading that represents the stale value from before reset. */
+async function seedStaleContextWindow(testPage: Page): Promise<void> {
+  await testPage.evaluate(() => {
+    const store = (window as ContextWindowStoreWindow).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge is unavailable");
+
+    const sessionId = store.getState().tasks.activeSessionId;
+    if (!sessionId) throw new Error("No active session is available");
+
+    store.getState().setContextWindow(sessionId, {
+      size: 200_000,
+      used: 190_000,
+      remaining: 10_000,
+      efficiency: 95,
+      source: "acp",
+    });
+  });
+}
+
 /**
  * Create an ACP profile for the mock agent that fails on resume. The
  * mock-agent's ACP LoadSession handler exits 1 when --fail-on-resume is set,
@@ -60,12 +97,17 @@ async function createACPProfileWithFailOnResume(apiClient: ApiClient, name: stri
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
 
-  test("reset context shows divider and agent responds fresh", async ({
+  test("reset context hides stale usage until a fresh report arrives", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     const session = await seedTaskWithSession(testPage, apiClient, seedData, "Reset Context Test");
+
+    await seedStaleContextWindow(testPage);
+    const contextRing = testPage.getByRole("button", { name: "Context window: 95% used" });
+    const contextIndicators = testPage.getByRole("button", { name: /^Context window:/ });
+    await expect(contextRing).toBeVisible();
 
     // Click reset context button — confirmation dialog should appear
     await session.resetContextButton().click();
@@ -79,10 +121,15 @@ test.describe("Session recovery", () => {
 
     // Agent should restart and become idle again
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(session.resetContextButton()).toBeVisible();
+    await expect(contextIndicators).toHaveCount(0, { timeout: 30_000 });
 
-    // Verify agent works after reset by sending a new message
-    await session.sendMessage("/e2e:simple-message");
+    // The ring should return only after the agent reports fresh usage.
+    await session.sendMessage("/background 1ms");
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+    await expect(testPage.getByRole("button", { name: "Context window: 2% used" })).toBeVisible({
+      timeout: 30_000,
+    });
   });
 
   test("agent crash — start fresh session recovers", async ({ testPage, apiClient, seedData }) => {

@@ -1,4 +1,4 @@
-//nolint:dupl // Native-binary ACP agents (Kiro, Qoder, Hermes, ...) follow the same minimal scaffold; differences are the binary name, argv, and auth surface.
+//nolint:dupl,goconst // Native-binary ACP agents (Kiro, Qoder, Hermes, ...) follow the same minimal scaffold; differences are the binary name, argv, and auth surface. Shared literals live in every peer file by convention.
 package agents
 
 import (
@@ -38,12 +38,15 @@ func NewHermesACP() *HermesACP {
 		StandardPassthrough: StandardPassthrough{
 			PermSettings: emptyPermSettings,
 			Cfg: PassthroughConfig{
-				Supported:      true,
-				Label:          "CLI Passthrough",
-				Description:    "Show terminal directly instead of chat interface",
-				PassthroughCmd: NewCommand(hermesBin),
-				IdleTimeout:    3 * time.Second,
-				BufferMaxBytes: DefaultBufferMaxBytes,
+				Supported:         true,
+				Label:             "CLI Passthrough",
+				Description:       "Show terminal directly instead of chat interface",
+				PassthroughCmd:    NewCommand(hermesBin, "chat"),
+				ModelFlag:         NewParam("--model", "{model}"),
+				ResumeFlag:        NewParam("--continue"),
+				SessionResumeFlag: NewParam("--resume"),
+				IdleTimeout:       3 * time.Second,
+				BufferMaxBytes:    DefaultBufferMaxBytes,
 			},
 		},
 	}
@@ -66,8 +69,8 @@ func (a *HermesACP) Logo(v LogoVariant) []byte {
 }
 
 func (a *HermesACP) IsInstalled(ctx context.Context) (*DiscoveryResult, error) {
-	result, err := Detect(ctx, WithCommand(hermesBin))
-	if err != nil {
+	result, err := Detect(ctx, WithCommandCheck(hermesBin, "acp", "--check"))
+	if err != nil || !result.Available {
 		return result, err
 	}
 	result.SupportsMCP = true

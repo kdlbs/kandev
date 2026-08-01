@@ -24,6 +24,7 @@ import { usePluginShortcuts } from "@/hooks/use-plugin-shortcuts";
 import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
+import { linkToTaskOverview } from "@/lib/links";
 import type { CommandItem } from "@/lib/commands/types";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
@@ -36,7 +37,7 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
       group: "Navigation",
       icon: <IconHome className="size-3.5" />,
       keywords: ["home", "kanban", "board"],
-      action: () => push("/"),
+      action: () => push(linkToTaskOverview()),
     },
     {
       id: "nav-tasks",

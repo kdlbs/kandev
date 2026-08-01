@@ -831,6 +831,7 @@ export class ApiClient {
       terminal_link_behavior?: string;
       terminal_font_family?: string;
       terminal_font_size?: number;
+      startup_page?: "task_overview" | "last_task";
       mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
       tasks_list_show_details?: boolean;
       show_transcript_auto_scroll_control?: boolean;
@@ -843,6 +844,7 @@ export class ApiClient {
   async saveUserSettings(settings: {
     enable_preview_on_click?: boolean;
     confirm_task_archive?: boolean;
+    unread_divider?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
@@ -854,6 +856,7 @@ export class ApiClient {
     terminal_link_behavior?: "new_tab" | "browser_panel";
     terminal_font_family?: string;
     terminal_font_size?: number;
+    startup_page?: "task_overview" | "last_task";
     keyboard_shortcuts?: Record<string, unknown>;
     default_utility_agent_id?: string;
     default_utility_model?: string;
@@ -996,6 +999,7 @@ export class ApiClient {
       state: TaskSessionState;
       sessionId?: string;
       agentProfileId?: string;
+      repositoryId?: string;
       startedAt?: string;
       completedAt?: string;
       commandCount?: number;
@@ -1008,6 +1012,7 @@ export class ApiClient {
     };
     if (opts.sessionId !== undefined) body.session_id = opts.sessionId;
     if (opts.agentProfileId !== undefined) body.agent_profile_id = opts.agentProfileId;
+    if (opts.repositoryId !== undefined) body.repository_id = opts.repositoryId;
     if (opts.startedAt !== undefined) body.started_at = opts.startedAt;
     if (opts.completedAt !== undefined) body.completed_at = opts.completedAt;
     if (opts.commandCount !== undefined) body.command_count = opts.commandCount;

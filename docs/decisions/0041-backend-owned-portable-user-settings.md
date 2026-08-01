@@ -1,6 +1,6 @@
 # 0041: Backend-Owned Portable User Settings
 
-**Status:** accepted
+**Status:** accepted (amended 2026-07-31)
 **Date:** 2026-07-15
 **Area:** frontend, backend
 
@@ -25,6 +25,13 @@ transient drafts. User-settings PATCH semantics remain unchanged: omitted
 fields are unchanged, explicit `null` clears nullable fields where supported,
 and an empty array is an explicit empty value.
 
+The backend also owns the effective value of an omitted portable setting. It
+starts from one default settings value and overlays fields present in the
+stored JSON before emitting a complete HTTP or WebSocket payload. The frontend
+uses one wire-to-store mapper for boot hydration, mutation responses, and live
+updates; an unloaded frontend state is only a rendering placeholder, not an
+independent source of product defaults.
+
 ## Consequences
 
 - Stale browser values cannot override backend settings during hydration.
@@ -32,6 +39,9 @@ and an empty array is an explicit empty value.
   the backend value wins on the next load.
 - Cross-device behavior is consistent because portable settings have one
   durable owner.
+- Changing an omitted-value default no longer requires editing several
+  independent frontend delivery paths.
+- Frontend compatibility handling remains centralized in the common mapper.
 - Device-local layout, collapse, pane-size, and transient draft storage remain
   unaffected.
 
@@ -42,3 +52,6 @@ and an empty array is an explicit empty value.
    override explicit backend clears.
 2. **Keep retry markers without fallback reads.** Rejected because replay still
    requires treating browser state as a second durable source.
+3. **Let every frontend consumer apply wire fallbacks.** Rejected because HTTP,
+   WebSocket, and save-response paths can drift and produce different effective
+   settings for the same backend value.

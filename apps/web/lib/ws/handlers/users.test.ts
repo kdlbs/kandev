@@ -24,6 +24,26 @@ function userSettingsMessage(
   };
 }
 
+describe("startup page websocket sync", () => {
+  it("applies startup page preferences and normalizes unknown values", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        startup_page: "last_task",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.startupPage).toBe("last_task");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        startup_page: "unexpected",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.startupPage).toBe("task_overview");
+  });
+});
+
 describe("user settings websocket handler", () => {
   it("updates the List detail preference and preserves it when omitted", () => {
     const store = makeStore();
@@ -93,7 +113,7 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.mcpTaskAgentProfileDefault).toBe("current_task");
   });
 
-  it("applies archive confirmation preferences and defaults missing values to enabled", () => {
+  it("applies archive confirmation preferences and preserves them when omitted", () => {
     const store = makeStore();
 
     registerUsersHandlers(store)["user.settings.updated"]?.(
@@ -102,7 +122,7 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.confirmTaskArchive).toBe(false);
 
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
-    expect(store.getState().userSettings.confirmTaskArchive).toBe(true);
+    expect(store.getState().userSettings.confirmTaskArchive).toBe(false);
   });
 
   it("syncs transcript navigation preferences and uses the documented defaults", () => {
@@ -124,8 +144,29 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings).toMatchObject({
       showAnchoredPromptBar: false,
-      showScrollToLastPrompt: true,
+      showScrollToLastPrompt: false,
       showScrollToStart: false,
+      showTranscriptAutoScrollControl: false,
+    });
+  });
+});
+
+describe("user settings websocket partial updates", () => {
+  it("preserves normalized preferences omitted from a partial live update", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        unread_divider: true,
+        show_transcript_auto_scroll_control: true,
+      }),
+    );
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ preferred_shell: "zsh" }),
+    );
+
+    expect(store.getState().userSettings).toMatchObject({
+      unreadDivider: true,
       showTranscriptAutoScrollControl: true,
     });
   });
