@@ -151,6 +151,28 @@ test.describe("Multi-session UX", () => {
     await expect(stateIcon).toBeVisible();
   });
 
+  test("idle waiting session has no question icon", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(90_000);
+
+    const { task, session } = await createTaskAndNavigate(
+      testPage,
+      apiClient,
+      seedData,
+      "Idle Waiting Indicator Task",
+    );
+
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions).toHaveLength(1);
+    const idleSession = sessions[0];
+    expect(idleSession.state).toBe("WAITING_FOR_INPUT");
+
+    await session.addPanelButton().click();
+    const row = session.sessionReopenItem(idleSession.id);
+    await expect(row).toBeVisible({ timeout: 5_000 });
+    await expect(row.locator(".tabler-icon-message-question")).toHaveCount(0);
+    await expect(row.locator(".tabler-icon-shield-question")).toHaveCount(0);
+  });
+
   test("delete session via context menu shows confirmation", async ({
     testPage,
     apiClient,

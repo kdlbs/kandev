@@ -29,10 +29,15 @@ describe("shouldShowReopenStateIcon", () => {
     expect(shouldShowReopenStateIcon("STARTING", null, false, true)).toBe(false);
   });
 
-  it("now surfaces the waiting-for-input affordance", () => {
-    // Previously WAITING_FOR_INPUT was silent; it now shows the "needs me" icon
-    // so the reopen menu distinguishes waiting from done and running.
-    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null)).toBe(true);
+  it("keeps a plain waiting session icon-less when no input is pending", () => {
+    // WAITING_FOR_INPUT also means an ordinary turn finished and the session is
+    // ready for another prompt; it is not proof that the agent asked a question.
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null)).toBe(false);
+  });
+
+  it("surfaces explicit pending input while waiting", () => {
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null, true, false)).toBe(true);
+    expect(shouldShowReopenStateIcon("WAITING_FOR_INPUT", null, false, true)).toBe(true);
   });
 
   it("surfaces the icon for a pending prompt even mid-turn (still coarsely RUNNING)", () => {

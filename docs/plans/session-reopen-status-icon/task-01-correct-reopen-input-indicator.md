@@ -1,7 +1,7 @@
 ---
 id: "01-correct-reopen-input-indicator"
 title: "Correct the reopen-menu input indicator"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -69,7 +69,26 @@ must share one RED-GREEN cycle.
 
 ## Output Contract
 
-Report the RED and GREEN results, files changed, any blocker or residual risk,
-and update this task to `done` plus the matching checkbox and plan status in
-`plan.md`. Do not modify shared session icon mappings or adjacent status
-surfaces.
+RED results:
+
+- Unit: failed as expected because plain `WAITING_FOR_INPUT` returned `true`.
+- E2E: failed as expected because the reopen row contained one
+  `tabler-icon-message-question` glyph.
+
+GREEN results:
+
+- `pnpm --filter @kandev/web exec vitest run
+  components/task/session-reopen-menu.test.tsx` — 9 tests passed.
+- `pnpm e2e:run tests/session/multi-session-ux.spec.ts -- --grep "idle waiting
+  session has no question icon"` — 1 Chromium test passed against the managed
+  production build.
+
+Files changed:
+
+- `apps/web/components/task/session-reopen-menu.tsx`
+- `apps/web/components/task/session-reopen-menu.test.tsx`
+- `apps/web/e2e/tests/session/multi-session-ux.spec.ts`
+- This task and its plan status.
+
+No blockers or residual risks remain within scope. Shared session icon mappings
+and adjacent status surfaces were not modified.

@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/platform/background-work-liveness.md
 created: 2026-08-01
-status: draft
+status: completed
 ---
 
 # Fix Plan: Session Reopen Status Icon
@@ -84,7 +84,7 @@ pure helper regression matrix is viewport-independent.
 
 ## Implementation Task
 
-- [ ] [Task 01: Correct the reopen-menu input indicator](task-01-correct-reopen-input-indicator.md)
+- [x] [Task 01: Correct the reopen-menu input indicator](task-01-correct-reopen-input-indicator.md)
 
 Execution is sequential in the primary conversation. This single task is not a
 parallel candidate and does not authorize subagent use.
