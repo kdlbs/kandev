@@ -1,0 +1,110 @@
+package handlers
+
+import (
+	"context"
+	"encoding/json"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/gitlab"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"go.uber.org/zap"
+)
+
+// TaskMRAutomationService is the task-bound GitLab automation surface
+// exposed to agents. The MCP server binds the task ID; agents cannot mutate
+// another task through these tools. Mirrors TaskPRAutomationService.
+type TaskMRAutomationService interface {
+	GetTaskMRAutomationResponse(ctx context.Context, taskID string) (*gitlab.TaskMRAutomationResponse, error)
+	UpdateTaskMRAutomationOptions(ctx context.Context, taskID string, patch gitlab.TaskMRAutomationPatch) (*gitlab.TaskMRAutomationResponse, error)
+}
+
+func (h *Handlers) SetTaskMRAutomationService(automation TaskMRAutomationService) {
+	h.taskMRAutomation = automation
+}
+
+// mrAutomationTaskIDPayload decodes the {task_id} envelope shared by both MR
+// automation handlers, returning a ready-to-return error response when the
+// payload is malformed or task_id is missing.
+func mrAutomationTaskIDPayload(msg *ws.Message) (string, *ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		resp, respErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return "", resp, respErr
+	}
+	if req.TaskID == "" {
+		resp, respErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+		return "", resp, respErr
+	}
+	return req.TaskID, nil, nil
+}
+
+func (h *Handlers) handleGetTaskMRAutomation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	taskID, errResp, err := mrAutomationTaskIDPayload(msg)
+	if errResp != nil || err != nil {
+		return errResp, err
+	}
+	if h.taskMRAutomation == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "GitLab MR automation is not available", nil)
+	}
+	options, err := h.taskMRAutomation.GetTaskMRAutomationResponse(ctx, taskID)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get MR automation options: "+err.Error(), nil)
+	}
+	return ws.NewResponse(msg.ID, msg.Action, options)
+}
+
+func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Payload, &fields); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if hasMRLifecyclePromptOverride(fields) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "lifecycle prompt overrides are not supported", nil)
+	}
+	taskID, errResp, err := mrAutomationTaskIDPayload(msg)
+	if errResp != nil || err != nil {
+		return errResp, err
+	}
+	var req struct {
+		PromptOnReviewRequested *bool `json:"prompt_on_review_requested"`
+		PromptOnMerged          *bool `json:"prompt_on_merged"`
+		PromptOnClosed          *bool `json:"prompt_on_closed"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	patch := gitlab.TaskMRAutomationPatch{
+		PromptOnReviewRequested: req.PromptOnReviewRequested,
+		PromptOnMerged:          req.PromptOnMerged,
+		PromptOnClosed:          req.PromptOnClosed,
+	}
+	if !patch.HasAny() {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "at least one MR automation option is required", nil)
+	}
+	if h.taskMRAutomation == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "GitLab MR automation is not available", nil)
+	}
+	options, err := h.taskMRAutomation.UpdateTaskMRAutomationOptions(ctx, taskID, patch)
+	if err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update MR automation options: "+err.Error(), nil)
+	}
+	if h.eventBus != nil {
+		event := bus.NewEvent(events.GitLabTaskMROptionsUpdated, "mcp", options)
+		if err := h.eventBus.Publish(ctx, events.GitLabTaskMROptionsUpdated, event); err != nil {
+			h.logger.Warn("failed to publish MCP MR automation options update", zap.Error(err))
+		}
+	}
+	return ws.NewResponse(msg.ID, msg.Action, options)
+}
+
+func hasMRLifecyclePromptOverride(fields map[string]json.RawMessage) bool {
+	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
+		if _, ok := fields[field]; ok {
+			return true
+		}
+	}
+	return false
+}

@@ -1498,6 +1498,9 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
 	}
+	if p.services.GitLab != nil {
+		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
+	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

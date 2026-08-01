@@ -493,7 +493,7 @@ func (s *Server) registerTools() {
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
 		s.registerKanbanTools()
-		count += 17
+		count += 19
 		if !s.disableAskQuestion {
 			s.registerInteractionTools()
 			count++
@@ -703,6 +703,22 @@ If the child has no live execution, the call succeeds idempotently with status="
 			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
 		),
 		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewToolWithRawSchema("get_task_mr_automation_kandev",
+			"Get the current task's GitLab MR automation settings, including lifecycle notification switches.",
+			json.RawMessage(`{"type":"object","properties":{}}`),
+		),
+		s.wrapHandler("get_task_mr_automation_kandev", s.getTaskMRAutomationHandler()),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("update_task_mr_automation_kandev",
+			mcp.WithDescription("Update this task's GitLab merge request lifecycle notification switches."),
+			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
+			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
+			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
+		),
+		s.wrapHandler("update_task_mr_automation_kandev", s.updateTaskMRAutomationHandler()),
 	)
 }
 

@@ -308,6 +308,52 @@ func removeLifecyclePromptFields(result map[string]interface{}) {
 	}
 }
 
+func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(
+			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
+		); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{"task_id": s.taskID}
+		args := req.GetArguments()
+		if hasMRLifecyclePromptOverrideArgument(args) {
+			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
+		}
+		for _, key := range []string{"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed"} {
+			if value, ok := args[key].(bool); ok {
+				payload[key] = value
+			}
+		}
+		if len(payload) == 1 {
+			return mcp.NewToolResultError("at least one MR automation option is required"), nil
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func hasMRLifecyclePromptOverrideArgument(args map[string]interface{}) bool {
+	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
+		if _, ok := args[field]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := req.RequireString("task_id")
