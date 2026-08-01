@@ -23,7 +23,11 @@ const secret: SecretListItem = {
  * whole. Read the description element's own `textContent` instead.
  */
 function descriptionText(): string {
-  return screen.getByText(secret.name).closest("p")?.textContent ?? "";
+  const description = screen.getByText(secret.name).closest("p");
+  // Fail on the broken query rather than on an empty string comparison, which
+  // would point every assertion below at the wrong cause.
+  if (!description) throw new Error("secret name is not inside the <p> DialogDescription");
+  return description.textContent ?? "";
 }
 
 afterEach(async () => {
