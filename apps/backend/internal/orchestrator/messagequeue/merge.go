@@ -28,16 +28,6 @@ var ErrMergeReferenceOverflow = errors.New("merge would exceed the per-message e
 // a merged entry never stores more references than dispatch will accept.
 const maxEntityReferencesPerMessage = 100
 
-// joinMergeContent concatenates the source content below the target content,
-// separated by a blank line. When the target content is empty the source is
-// used verbatim so there is no leading blank line.
-func joinMergeContent(targetContent, sourceContent string) string {
-	if targetContent == "" {
-		return sourceContent
-	}
-	return targetContent + "\n\n" + sourceContent
-}
-
 // mergeAllowed reports whether the source entry may be folded into the target
 // entry under the caller identity queuedBy. User entries merge only into user
 // entries owned by the caller; agent entries merge only into agent entries
