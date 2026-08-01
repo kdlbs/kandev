@@ -380,6 +380,14 @@ type Service struct {
 	// racing duplicate auto-fix prompts or merge calls for the same PR.
 	ciAutomationInFlight sync.Map
 
+	// GitLab MR lifecycle notification automation. Nil-safe: without it,
+	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
+	// ever evaluated.
+	gitlabMRAutomation taskMRAgentAutomationService
+	// mrAutomationInFlight prevents overlapping poll ticks from running the
+	// lifecycle evaluation pass twice for the same (task, repository, iid).
+	mrAutomationInFlight sync.Map
+
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once
 	// their owner task has a session with worktree details. Optional;

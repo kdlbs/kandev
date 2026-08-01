@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 
 	"go.uber.org/zap"
 
@@ -33,6 +34,15 @@ func (s *Service) SetGitLabCredentialResolver(resolver executor.GitLabCredential
 	s.executor.SetGitLabCredentialResolver(resolver)
 }
 
+// SetGitLabMRAutomationService wires the GitLab MR lifecycle notification
+// surface into the orchestrator. Mirrors SetGitHubService's role for the
+// narrower taskPRAgentAutomationService interface — GitLab has no
+// auto-fix/auto-merge automation, so there is no larger GitLabService
+// interface for this to be carved out of.
+func (s *Service) SetGitLabMRAutomationService(svc taskMRAgentAutomationService) {
+	s.gitlabMRAutomation = svc
+}
+
 // subscribeGitLabEvents wires bus subscriptions for the GitLab integration
 // events. Idempotent — safe to call once per orchestrator boot.
 func (s *Service) subscribeGitLabEvents() {
@@ -45,6 +55,47 @@ func (s *Service) subscribeGitLabEvents() {
 	if _, err := s.eventBus.Subscribe(events.GitLabNewIssue, s.handleGitLabNewIssue); err != nil {
 		s.logger.Error("subscribe gitlab.new_issue", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.GitLabTaskMRUpdated, s.handleGitLabTaskMRUpdated); err != nil {
+		s.logger.Error("subscribe gitlab.task_mr.updated", zap.Error(err))
+	}
+}
+
+// handleGitLabTaskMRUpdated reacts to every observed MR change — from the
+// poller's lifecycle sync pass or a manual link/refresh — by starting a
+// single-flight lifecycle evaluation. event.Data is *gitlab.TaskMRUpdatedEvent
+// (published by both producers); a differently-shaped payload is ignored.
+func (s *Service) handleGitLabTaskMRUpdated(ctx context.Context, event *bus.Event) error {
+	payload, ok := event.Data.(*gitlab.TaskMRUpdatedEvent)
+	if !ok || payload == nil || payload.TaskMR == nil {
+		return nil
+	}
+	s.startTaskMRLifecycleAutomation(ctx, payload.TaskMR)
+	return nil
+}
+
+// startTaskMRLifecycleAutomation runs the lifecycle evaluation pass in a
+// detached, single-flight goroutine keyed by (task, repository, iid) —
+// mirrors startTaskPRCIAutomationWithRefresh (AC23).
+func (s *Service) startTaskMRLifecycleAutomation(ctx context.Context, mr *gitlab.TaskMR) {
+	if mr == nil {
+		return
+	}
+	key := fmt.Sprintf("%s|%s|%d", mr.TaskID, mr.RepositoryID, mr.MRIID)
+	if _, loaded := s.mrAutomationInFlight.LoadOrStore(key, struct{}{}); loaded {
+		s.logger.Debug("MR lifecycle automation already in flight",
+			zap.String("task_id", mr.TaskID),
+			zap.String("repository_id", mr.RepositoryID),
+			zap.Int("mr_iid", mr.MRIID))
+		return
+	}
+	go func() {
+		defer s.mrAutomationInFlight.Delete(key)
+		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
+		defer cancel()
+		if err := s.handleTaskMRLifecycleAutomation(automationCtx, mr); err != nil {
+			s.logger.Debug("MR lifecycle automation handling failed", zap.String("task_id", mr.TaskID), zap.Error(err))
+		}
+	}()
 }
 
 // handleGitLabNewReviewMR turns a new-MR-to-review event into a Kandev task.

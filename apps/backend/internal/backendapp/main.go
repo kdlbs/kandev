@@ -546,6 +546,7 @@ func startAgentInfrastructure(
 		orchestratorSvc.SetGitLabService(services.GitLab)
 		orchestratorSvc.SetGitLabMRLinkService(services.GitLab)
 		orchestratorSvc.SetGitLabCredentialResolver(services.GitLab)
+		orchestratorSvc.SetGitLabMRAutomationService(services.GitLab)
 		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		glPoller := gitlabpkg.NewPoller(services.GitLab, eventBus, log)

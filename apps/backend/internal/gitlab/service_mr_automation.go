@@ -171,6 +171,31 @@ func (s *Service) RecordTaskMRAutomationError(ctx context.Context, taskID, repos
 	return store.RecordTaskMRAutomationError(ctx, taskID, repositoryID, projectPath, mrIID, message)
 }
 
+// IsReviewerOnMR reports whether username currently appears in the MR's
+// Reviewers list — GitLab's assignment-as-request signal, since GitLab has
+// no distinct "review requested" API event (unlike GitHub's requested
+// reviewers). Always resolves the client via the strict, workspace-scoped
+// helper (AC32); never falls back to the ambient client.
+func (s *Service) IsReviewerOnMR(ctx context.Context, taskID, projectPath string, mrIID int, username string) (bool, error) {
+	client, err := s.clientForTaskStrict(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	mr, err := client.GetMR(ctx, projectPath, mrIID)
+	if err != nil {
+		return false, err
+	}
+	if mr == nil {
+		return false, nil
+	}
+	for _, reviewer := range mr.Reviewers {
+		if strings.EqualFold(reviewer.Username, username) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // ListLifecycleSubscribedTaskMRs pass-through to the store, used by the
 // poller's lifecycle sync pass (AC22).
 func (s *Service) ListLifecycleSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {

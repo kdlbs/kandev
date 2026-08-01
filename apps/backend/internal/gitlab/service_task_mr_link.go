@@ -303,7 +303,11 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 	}
 }
 
-type taskMRUpdatedEvent struct {
+// TaskMRUpdatedEvent is the payload published on events.GitLabTaskMRUpdated.
+// Exported (not just the embedded *TaskMR) so orchestrator-side consumers —
+// notably the MR lifecycle automation pass — can type-assert event.Data
+// without reaching into an unexported gitlab-package type.
+type TaskMRUpdatedEvent struct {
 	WorkspaceID string `json:"workspace_id"`
 	*TaskMR
 }
@@ -315,7 +319,7 @@ func (s *Service) publishTaskMRUpdated(ctx context.Context, workspaceID string, 
 	if eventBus == nil {
 		return
 	}
-	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &taskMRUpdatedEvent{
+	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
 		WorkspaceID: workspaceID,
 		TaskMR:      association,
 	})
