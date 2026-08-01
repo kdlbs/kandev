@@ -673,7 +673,11 @@ func (s *Server) handleGitLog(c *gin.Context) {
 		}
 	}
 
-	result, err := s.runGitLogForRepo(c, req, limit, req.Repo)
+	// c.Request.Context(), not c: *gin.Context satisfies context.Context, so
+	// passing c compiles but hands over a context whose Done() is nil unless
+	// ContextWithFallback is set — which it is not here. The git subprocesses
+	// would then outlive a client disconnect.
+	result, err := s.runGitLogForRepo(c.Request.Context(), req, limit, req.Repo)
 	if err != nil {
 		s.handleGitError(c, "log", err)
 		return
