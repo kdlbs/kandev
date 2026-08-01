@@ -350,8 +350,18 @@ describe("QueueAffordance merge wiring", () => {
 
   it("hides the merge control for agent rows from different sender tasks", () => {
     const state = queueState([
-      entry({ id: "q-1", content: "agent a", queued_by: "agent", metadata: { sender_task_id: "task-7" } }),
-      entry({ id: "q-2", content: "agent b", queued_by: "agent", metadata: { sender_task_id: "task-8" } }),
+      entry({
+        id: "q-1",
+        content: "agent a",
+        queued_by: "agent",
+        metadata: { sender_task_id: "task-7" },
+      }),
+      entry({
+        id: "q-2",
+        content: "agent b",
+        queued_by: "agent",
+        metadata: { sender_task_id: "task-8" },
+      }),
     ]);
     useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
