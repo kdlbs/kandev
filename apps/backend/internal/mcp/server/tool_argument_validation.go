@@ -66,14 +66,11 @@ func compileToolArgumentSchema(toolName string, tool mcp.Tool) (*jsonschema.Sche
 }
 
 func (s *Server) validateToolArguments(toolName string, req mcp.CallToolRequest) (mcp.CallToolRequest, error) {
-	arguments, err := cloneJSONValue(req.GetRawArguments())
-	if err != nil {
-		return req, fmt.Errorf("invalid arguments for %s: arguments are not valid JSON", toolName)
-	}
+	arguments := req.GetRawArguments()
 	if arguments == nil {
 		arguments = map[string]any{}
 	}
-	arguments, err = normalizeToolArguments(toolName, arguments)
+	arguments, err := normalizeToolArguments(toolName, arguments)
 	if err != nil {
 		return req, err
 	}
@@ -155,29 +152,20 @@ func normalizeToolArguments(toolName string, arguments any) (any, error) {
 	if !ok {
 		return arguments, nil
 	}
-	prompt, hasPrompt := args["prompt"]
-	_, hasDescription := args["description"]
+	_, hasPrompt := args["prompt"]
+	description, hasDescription := args["description"]
 	if hasPrompt && hasDescription {
-		return nil, fmt.Errorf("invalid arguments for %s: provide either description or prompt, not both", toolName)
+		return nil, fmt.Errorf("invalid arguments for %s: provide either prompt or description, not both", toolName)
 	}
-	if hasPrompt {
-		args["description"] = prompt
-		delete(args, "prompt")
+	if !hasDescription {
+		return args, nil
 	}
-	return args, nil
-}
 
-func cloneJSONValue(value any) (any, error) {
-	if value == nil {
-		return nil, nil
+	normalized := make(map[string]any, len(args))
+	for key, value := range args {
+		normalized[key] = value
 	}
-	data, err := json.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	var cloned any
-	if err := json.Unmarshal(data, &cloned); err != nil {
-		return nil, err
-	}
-	return cloned, nil
+	normalized["prompt"] = description
+	delete(normalized, "description")
+	return normalized, nil
 }

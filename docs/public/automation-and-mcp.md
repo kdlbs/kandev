@@ -147,6 +147,8 @@ Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent 
 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
 
+`create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
+
 Task mode currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |

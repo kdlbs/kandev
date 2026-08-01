@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"runtime"
 	"testing"
 	"time"
 
@@ -182,26 +183,110 @@ func TestSetModeRebuildsToolValidators(t *testing.T) {
 	assert.Equal(t, ws.ActionMCPCreateWorkflow, backend.lastAction)
 }
 
-func TestToolValidationWaitsForModeChangeLock(t *testing.T) {
+func TestToolValidationCoordinatesWithModeChange(t *testing.T) {
 	s := newTaskModeServer(t, &testBackend{}, "task-current")
 	req := mcp.CallToolRequest{}
 	req.Method = "tools/call"
 	req.Params.Name = "list_workspaces_kandev"
 	req.Params.Arguments = map[string]interface{}{}
 
-	s.mu.Lock()
+	s.validatorMu.Lock()
+	validatorLocked := true
+	t.Cleanup(func() {
+		if validatorLocked {
+			s.validatorMu.Unlock()
+		}
+	})
+
 	validationDone := make(chan error, 1)
 	go func() {
 		_, err := s.validateToolArguments("list_workspaces_kandev", req)
 		validationDone <- err
 	}()
 
+	waitForCondition(t, "validation to acquire the mode read lock", func() bool {
+		if s.mu.TryLock() {
+			s.mu.Unlock()
+			return false
+		}
+		return true
+	})
+
+	modeDone := make(chan struct{})
+	go func() {
+		s.SetMode(ModeConfig)
+		close(modeDone)
+	}()
+	waitForCondition(t, "mode change to wait for the write lock", func() bool {
+		if s.mu.TryRLock() {
+			s.mu.RUnlock()
+			return false
+		}
+		return true
+	})
+
+	select {
+	case <-modeDone:
+		t.Fatal("mode change completed while validation held the read lock")
+	default:
+	}
+	s.validatorMu.Unlock()
+	validatorLocked = false
+
 	select {
 	case err := <-validationDone:
-		t.Fatalf("validation completed while a mode change held the write lock: %v", err)
-	case <-time.After(100 * time.Millisecond):
+		assert.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for validation to complete")
 	}
-	s.mu.Unlock()
+	select {
+	case <-modeDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for mode change to complete")
+	}
+	assert.Equal(t, ModeConfig, s.mode)
+}
 
-	assert.NoError(t, <-validationDone)
+func TestNormalizeCreateTaskArguments(t *testing.T) {
+	t.Run("keeps canonical prompt unchanged", func(t *testing.T) {
+		arguments := map[string]any{
+			"title":  "Review lane",
+			"prompt": "Detailed review instructions",
+		}
+
+		normalized, err := normalizeToolArguments("create_task_kandev", arguments)
+
+		require.NoError(t, err)
+		assert.Equal(t, arguments, normalized)
+		assert.Contains(t, arguments, "prompt")
+		assert.NotContains(t, arguments, "description")
+	})
+
+	t.Run("copies the legacy description alias without mutating the request", func(t *testing.T) {
+		arguments := map[string]any{
+			"title":       "Review lane",
+			"description": "Detailed review instructions",
+		}
+
+		normalized, err := normalizeToolArguments("create_task_kandev", arguments)
+
+		require.NoError(t, err)
+		normalizedArguments, ok := normalized.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "Detailed review instructions", normalizedArguments["prompt"])
+		assert.NotContains(t, normalizedArguments, "description")
+		assert.Equal(t, "Detailed review instructions", arguments["description"])
+		assert.NotContains(t, arguments, "prompt")
+	})
+}
+
+func waitForCondition(t *testing.T, description string, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", description)
+		}
+		runtime.Gosched()
+	}
 }

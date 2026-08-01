@@ -8,7 +8,7 @@ status: implemented
 
 ## Overview
 
-Compile every registered Kandev MCP input schema into a server-owned validator, close only its root argument object, and run validation in the shared `wrapHandler` boundary before any tool-specific code. Then add the unadvertised `create_task_kandev.prompt` compatibility normalization required by issue #2123 and document the fail-closed caller behavior. This covers all current modes and automatically protects tools registered in the future through the standard server path.
+Compile every registered Kandev MCP input schema into a server-owned validator, close only its root argument object, and run validation in the shared `wrapHandler` boundary before any tool-specific code. Converge `create_task_kandev` on the advertised `prompt` name while retaining unadvertised `description` compatibility, and document the fail-closed caller behavior. This covers all current modes and automatically protects tools registered in the future through the standard server path.
 
 ## Confirmed root cause
 
@@ -23,19 +23,20 @@ All 65 built-in tool registrations use `Server.wrapHandler`, which is the shared
 - Add `github.com/santhosh-tekuri/jsonschema/v6` v6.0.2 as a direct backend dependency and use its compiled-schema API rather than implementing a partial JSON Schema interpreter.
 - Add `apps/backend/internal/mcp/server/tool_argument_validation.go` to marshal either `Tool.RawInputSchema` or `Tool.InputSchema`, inject `additionalProperties: false` only at the root object, compile one validator per active tool, and retain a fail-closed compile error for any invalid schema.
 - Extend `Server` with the active compiled validator set. Rebuild it at the end of `registerTools`, which covers initial construction and `SetMode` replacement.
-- Validate a copied/normalized argument object in `wrapHandler` before invoking the wrapped handler. Treat omitted arguments as an empty object, return a sanitized MCP tool error on failure, and preserve existing call-duration/error logging.
+- Normalize the create-task legacy alias when needed and validate arguments in `wrapHandler` before invoking the wrapped handler. Treat omitted arguments as an empty object, return a sanitized MCP tool error on failure, and preserve existing call-duration/error logging.
 - Keep nested object schemas unchanged so open configuration maps continue accepting arbitrary keys.
 
-### Create-task compatibility normalization
+### Create-task parameter convergence
 
-- Add a small pre-validation normalization path for `create_task_kandev`: copy unadvertised `prompt` to `description` and remove `prompt` before schema validation.
-- Reject calls that supply both keys before validation. Do not add `prompt` to `registerCreateTaskTool`, its description, or public tool-schema text.
-- Forward the normalized request through the existing handler and backend `description` payload without changing stored models or WebSocket actions.
+- Advertise `prompt` as the single create-task field for text delivered to the started agent.
+- Add a small pre-validation normalization path for `create_task_kandev`: shallow-copy unadvertised legacy `description` to `prompt` and remove `description` before schema validation. Avoid copying ordinary calls.
+- Reject calls that supply both keys before validation. Do not advertise both names.
+- Forward canonical `prompt` through the existing backend `description` payload without changing stored models or WebSocket actions.
 
 ## Public documentation
 
 - Update `docs/public/automation-and-mcp.md` with the cross-cutting rule that Kandev validates required fields, types, constraints, and unknown top-level fields before a tool runs.
-- Do not document the `prompt` compatibility alias as part of the advertised public contract; `description` remains the canonical create-task input.
+- Document `prompt` as the canonical create-task input and `description` as an unadvertised legacy compatibility alias.
 
 ## Tests
 
@@ -48,7 +49,7 @@ All 65 built-in tool registrations use `Server.wrapHandler`, which is the shared
 - **What:** `SetMode` rebuilds validators for the replacement tool set.
   - **File:** `apps/backend/internal/mcp/server/tool_argument_validation_test.go`
   - **How:** change a server mode and validate calls against a tool schema available only in the replacement mode.
-- **What:** `create_task_kandev` accepts hidden `prompt`, retains canonical `description`, rejects both, and rejects every other unknown key without backend dispatch.
+- **What:** `create_task_kandev` advertises canonical `prompt`, accepts hidden legacy `description`, rejects both, and rejects every other unknown key without backend dispatch.
   - **File:** `apps/backend/internal/mcp/server/handlers_test.go`
   - **How:** focused handler-through-wrapper calls with `testBackend` payload capture.
 
@@ -59,13 +60,13 @@ No browser E2E is needed because this changes the MCP protocol boundary without 
 Execution is sequential in the primary conversation because the tasks share the MCP wrapper and validation contract.
 
 - [x] [Task 01: Enforce registered schemas at the MCP boundary](task-01-enforce-registered-schemas.md) — done
-- [x] [Task 02: Add create-task prompt compatibility](task-02-create-task-prompt-compatibility.md) — done
+- [x] [Task 02: Converge create-task on prompt](task-02-create-task-prompt-compatibility.md) — done
 - [x] [Task 03: Document fail-closed MCP arguments](task-03-document-mcp-validation.md) — done
 
 ## Validation commands
 
 - `cd apps/backend && go test -run 'TestToolArgumentValidation|TestAllRegisteredToolSchemasCompile|TestSetModeRebuildsToolValidators' ./internal/mcp/server`
-- `cd apps/backend && go test -run 'TestCreateTask_(PromptCompatibility|DescriptionCompatibility|RejectsConflictingContext|RejectsUnknownArguments)' ./internal/mcp/server`
+- `cd apps/backend && go test -run 'TestCreateTask_(PromptCanonical|DescriptionCompatibility|RejectsConflictingContext|RejectsUnknownArguments)|TestNormalizeCreateTaskArguments' ./internal/mcp/server`
 - `node --test scripts/validate-public-docs.test.mjs`
 - `node scripts/validate-public-docs.mjs`
 
@@ -79,7 +80,10 @@ Execution is sequential in the primary conversation because the tasks share the 
 ## Validation results
 
 - `cd apps/backend && go test -run 'TestToolArgumentValidation|TestAllRegisteredToolSchemasCompile|TestSetModeRebuildsToolValidators' ./internal/mcp/server` — 14 passed.
-- `cd apps/backend && go test -run 'TestCreateTask_(ToolSchema_HasParentID|PromptCompatibility|DescriptionCompatibility|RejectsConflictingContext|RejectsUnknownArguments)' ./internal/mcp/server` — 5 passed.
-- `cd apps/backend && go test ./internal/mcp/server` — 161 passed after updating valid forwarding fixtures for strict unknown-argument rejection.
+- `cd apps/backend && go test -run 'TestCreateTask_(ToolSchema_HasParentID|PromptCanonical|DescriptionCompatibility|RejectsConflictingContext|RejectsUnknownArguments)|TestNormalizeCreateTaskArguments' ./internal/mcp/server` — 8 passed after prompt convergence.
+- `cd apps/backend && go test ./internal/mcp/server` — 167 passed after prompt convergence.
+- `cd apps/backend && go test -race ./internal/mcp/server` — 167 passed.
+- `cd apps/backend && go test -race -run TestToolValidationCoordinatesWithModeChange -count=100 ./internal/mcp/server` — 100 passed.
+- `cd apps/backend && golangci-lint run ./... --new-from-rev=bb525f1894803d150fb1bfb6a98f116a38ef3d3b --timeout=5m` — no issues.
 - `node --test scripts/validate-public-docs.test.mjs` — 58 passed.
 - `node scripts/validate-public-docs.mjs` — validated 41 published pages.

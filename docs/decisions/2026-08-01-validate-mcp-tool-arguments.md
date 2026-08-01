@@ -16,12 +16,12 @@ All Kandev MCP tool calls are validated in `apps/backend/internal/mcp/server` be
 - Validation treats the root argument object as closed even when the advertised schema omits `additionalProperties: false`; unknown top-level arguments fail without increasing every tool schema's context-token cost.
 - Nested objects retain their declared schema behavior. Open maps such as executor configuration and MCP server configuration remain open unless their own schema closes them.
 - Schemas are compiled once for the active tool set and rebuilt whenever `SetMode` replaces that set. A schema that cannot compile fails closed for calls to that tool and is covered by a registration test.
-- Explicit compatibility normalization may run before validation for an established caller mismatch. `create_task_kandev` accepts unadvertised `prompt` as an alias for `description`; supplying both is an error. Such exceptions require focused tests and do not weaken unknown-argument rejection for other keys.
+- Explicit compatibility normalization may run before validation for an established caller mismatch. `create_task_kandev` advertises `prompt` for agent instructions and accepts the former `description` name as an unadvertised alias; supplying both is an error. The handler maps `prompt` to the backend's existing `description` field. Such exceptions require focused tests and do not weaken unknown-argument rejection for other keys.
 - Argument failures return MCP tool error results and do not invoke the tool handler or dispatch a backend action.
 
 ## Consequences
 
-Invalid calls fail visibly and consistently across task, configuration, external, and Office MCP modes. Future tools inherit the validation boundary automatically when they use the standard registration and `wrapHandler` path. Kandev adds a JSON Schema validation dependency and must keep every registered schema compilable. Closing only the root preserves dynamic nested configuration maps while preventing accidental top-level parameter loss.
+Invalid calls fail visibly and consistently across task, configuration, external, and Office MCP modes. Future tools inherit the validation boundary automatically when they use the standard registration and `wrapHandler` path. Kandev adds a JSON Schema validation dependency and must keep every registered schema compilable. Closing only the root preserves dynamic nested configuration maps while preventing accidental top-level parameter loss. Using `prompt` for agent instructions aligns create-task with the other agent-starting MCP tools without advertising both names or increasing the tool schema's parameter count; `description` remains appropriate for descriptive metadata in other contracts.
 
 ## Alternatives Considered
 

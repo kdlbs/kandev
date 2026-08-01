@@ -39,8 +39,10 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "workflow_id")
 	assert.Contains(t, props, "workflow_step_id")
 	assert.Contains(t, props, "workspace_mode")
-	assert.Contains(t, props, "description")
-	assert.NotContains(t, props, "prompt", "compatibility alias must not increase the advertised schema")
+	assert.Contains(t, props, "prompt")
+	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
+	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")
+	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
 	assert.Contains(t, tool.Tool.Description, "explicit agent_profile_id always wins")
 	assert.Contains(t, tool.Tool.Description, "current_task")
 	assert.Contains(t, tool.Tool.Description, "workspace_default")
@@ -88,7 +90,7 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
 }
 
-func TestCreateTask_PromptCompatibility(t *testing.T) {
+func TestCreateTask_PromptCanonical(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
 	}
@@ -104,6 +106,7 @@ func TestCreateTask_PromptCompatibility(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "Review the authentication changes in detail.", payload["description"])
+	assert.NotContains(t, payload, "prompt")
 }
 
 func TestCreateTask_DescriptionCompatibility(t *testing.T) {
@@ -122,6 +125,7 @@ func TestCreateTask_DescriptionCompatibility(t *testing.T) {
 	payload, ok := backend.lastPayload.(map[string]interface{})
 	require.True(t, ok)
 	assert.Equal(t, "Review the authentication changes in detail.", payload["description"])
+	assert.NotContains(t, payload, "prompt")
 }
 
 func TestCreateTask_RejectsConflictingContext(t *testing.T) {
