@@ -180,7 +180,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
       ),
       { timeout: 10_000 },
     );
-    await expect(titleInput).toHaveAttribute("maxlength", "60");
+    await expect(titleInput).not.toHaveAttribute("maxlength");
 
     await prCapture.screenshot("mobile-task-title-limit", {
       caption: "Mobile remote issue task title truncated to the 60-character limit",
@@ -188,6 +188,10 @@ test.describe("Create task Remote repo picker on mobile", () => {
 
     await titleInput.fill("x".repeat(80));
     await expect(titleInput).toHaveValue("x".repeat(60));
+
+    const emojiTitle = "😀".repeat(60);
+    await titleInput.fill(emojiTitle);
+    await expect(titleInput).toHaveValue(emojiTitle);
   });
 
   test("selects a GitLab repository from the unified provider picker", async ({

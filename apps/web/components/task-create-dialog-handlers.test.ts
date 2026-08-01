@@ -1,5 +1,7 @@
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Executor, Repository } from "@/lib/types/http";
+import type { DialogFormState } from "@/components/task-create-dialog-types";
 import {
   applyCreatedLocalRepository,
   findDirectLocalExecutorProfile,
@@ -7,6 +9,7 @@ import {
   readQueuedTaskCreateLastUsedState,
   resetTaskCreateLastUsedSync,
   syncTaskCreateLastUsed,
+  useDialogHandlers,
 } from "./task-create-dialog-handlers";
 
 const WORKTREE_PROFILE_ID = "worktree-profile";
@@ -121,6 +124,24 @@ describe("local repository creation selection", () => {
     expect(setExecutorId).toHaveBeenCalledWith("local");
     expect(setExecutorProfileId).toHaveBeenCalledWith(LOCAL_PROFILE_ID);
     expect(upsertWorkspaceRepository).toHaveBeenCalledWith("ws-1", created);
+  });
+});
+
+describe("task title handling", () => {
+  it("clamps astral Unicode input before updating the dialog state", () => {
+    const setTaskName = vi.fn();
+    const setHasTitle = vi.fn();
+    const fs = {
+      executorProfileId: "",
+      setTaskName,
+      setHasTitle,
+    } as unknown as DialogFormState;
+    const { result } = renderHook(() => useDialogHandlers(fs, []));
+
+    act(() => result.current.handleTaskNameChange("😀".repeat(80)));
+
+    expect(setTaskName).toHaveBeenCalledWith("😀".repeat(60));
+    expect(setHasTitle).toHaveBeenCalledWith(true);
   });
 });
 

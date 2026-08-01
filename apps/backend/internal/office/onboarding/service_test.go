@@ -2,6 +2,7 @@ package onboarding
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // --- mock implementations ---
@@ -264,6 +266,23 @@ func TestCompleteOnboarding_CreatesEntities(t *testing.T) {
 	}
 	if state.CEOAgentID != result.AgentID {
 		t.Errorf("state.CEOAgentID = %q, want %q", state.CEOAgentID, result.AgentID)
+	}
+}
+
+func TestCompleteOnboardingRejectsOverlongTaskTitleBeforeSideEffects(t *testing.T) {
+	svc, wsCreator, _ := newTestOnboardingService(t)
+	longTitle := strings.Repeat("x", taskservice.TaskTitleMaxLength+1)
+
+	_, err := svc.CompleteOnboarding(context.Background(), CompleteRequest{
+		WorkspaceName: "too-long-title",
+		AgentName:     "CEO",
+		TaskTitle:     longTitle,
+	})
+	if !errors.Is(err, taskservice.ErrTaskTitleTooLong) {
+		t.Fatalf("CompleteOnboarding error = %v, want ErrTaskTitleTooLong", err)
+	}
+	if _, ok := wsCreator.workspaces["too-long-title"]; ok {
+		t.Fatal("CompleteOnboarding created a workspace before rejecting the title")
 	}
 }
 

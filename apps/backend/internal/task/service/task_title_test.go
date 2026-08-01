@@ -121,3 +121,23 @@ func TestUpdateTaskWithoutTitlePreservesLegacyOverlongTitle(t *testing.T) {
 		t.Fatalf("stored title = %q, want legacy title preserved", stored.Title)
 	}
 }
+
+func TestTruncateTaskTitlePreservesCharacterLimit(t *testing.T) {
+	longTitle := strings.Repeat("😀", TaskTitleMaxLength+5)
+
+	got := TruncateTaskTitle(longTitle)
+	if got != strings.Repeat("😀", TaskTitleMaxLength-1)+"…" {
+		t.Fatalf("TruncateTaskTitle = %q, want a 60-character ellipsis title", got)
+	}
+	if gotLen := len([]rune(got)); gotLen != TaskTitleMaxLength {
+		t.Fatalf("TruncateTaskTitle rune length = %d, want %d", gotLen, TaskTitleMaxLength)
+	}
+}
+
+func TestTruncateTaskTitleLeavesShortTitlesUnchanged(t *testing.T) {
+	for _, title := range []string{"", "short", strings.Repeat("x", TaskTitleMaxLength)} {
+		if got := TruncateTaskTitle(title); got != title {
+			t.Errorf("TruncateTaskTitle(%q) = %q, want unchanged title", title, got)
+		}
+	}
+}

@@ -70,7 +70,7 @@ test.describe("GitHub PR task launcher", () => {
 
     const titleInput = testPage.getByTestId("task-title-input");
     await expect(titleInput).toHaveValue(expectedRemoteTitle(`Review: ${prTitle}`));
-    await expect(titleInput).toHaveAttribute("maxlength", "60");
+    await expect(titleInput).not.toHaveAttribute("maxlength");
     await expect(testPage.getByTestId("source-mode-remote")).toHaveAttribute(
       "aria-checked",
       "true",

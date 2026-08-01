@@ -5,7 +5,7 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kan
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Input } from "@kandev/ui/input";
 import { useTaskActions } from "@/hooks/use-task-actions";
-import { clampTaskTitleInput, TASK_TITLE_MAX_LENGTH } from "@/lib/task-title";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 type TaskTopBarTitleProps = {
   taskId?: string | null;
@@ -82,7 +82,6 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
         aria-label="Task title"
         autoFocus
         value={draft}
-        maxLength={TASK_TITLE_MAX_LENGTH}
         onChange={(e) => setDraft(clampTaskTitleInput(e.target.value))}
         onFocus={(e) => e.target.select()}
         onBlur={handleCancel}

@@ -19,8 +19,14 @@ spec: "../../specs/tasks/title-length-limit.md"
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:run --host --project chromium tests/github/pr-action-create-task-dialog.spec.ts
-cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/mobile-create-task-remote-repo.spec.ts
+(
+  cd apps/web
+  pnpm e2e:run --host --project chromium tests/github/pr-action-create-task-dialog.spec.ts
+)
+(
+  cd apps/web
+  pnpm e2e:run --host --project mobile-chrome tests/task/mobile-create-task-remote-repo.spec.ts
+)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 ```

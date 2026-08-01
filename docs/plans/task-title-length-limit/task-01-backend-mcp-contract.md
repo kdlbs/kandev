@@ -19,10 +19,13 @@ spec: "../../specs/tasks/title-length-limit.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/service -run 'Test(CreateTaskAcceptsTitleAtLimit|CreateTaskRejectsTitleLongerThanLimit|UpdateTaskRejectsTitleLongerThanLimit|UpdateTaskWithoutTitlePreservesLegacyOverlongTitle)'
-cd apps/backend && go test ./internal/task/handlers -run 'Test(HTTP|WS).*(Create|Update).*Title'
-cd apps/backend && go test ./internal/mcp/server -run 'TestCreateTask_ToolSchema_HasParentID'
-cd apps/backend && go test ./internal/mcp/handlers -run 'Test(ClassifyCreateTaskErrorMapsOverlongTitleToValidation|HandleCreateTask_RejectsOverlongTitle)'
+(
+  cd apps/backend
+  go test ./internal/task/service -run 'Test(CreateTaskAcceptsTitleAtLimit|CreateTaskRejectsTitleLongerThanLimit|UpdateTaskRejectsTitleLongerThanLimit|UpdateTaskWithoutTitlePreservesLegacyOverlongTitle)'
+  go test ./internal/task/handlers -run 'Test(HTTP|WS).*(Create|Update).*Title'
+  go test ./internal/mcp/server -run 'Test(CreateTask|UpdateTask)_ToolSchema'
+  go test ./internal/mcp/handlers -run 'Test(ClassifyCreateTaskErrorMapsOverlongTitleToValidation|HandleCreateTask_RejectsOverlongTitle|HandleUpdateTask_TitleTooLongReturnsValidation)'
+)
 ```
 
 ## Files likely touched

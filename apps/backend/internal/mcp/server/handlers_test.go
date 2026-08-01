@@ -94,6 +94,23 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
 }
 
+func TestUpdateTask_ToolSchema_HasTitleMaxLength(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-current")
+
+	tool, ok := s.mcpServer.ListTools()["update_task_kandev"]
+	require.True(t, ok, "update_task tool not registered")
+	schema, err := json.Marshal(tool.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "schema should have properties")
+	titleProp, ok := props["title"].(map[string]interface{})
+	require.True(t, ok, "title should be an object")
+	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
+}
+
 func TestCreateTask_SelfResolvesToTaskID(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},

@@ -19,8 +19,14 @@ spec: "../../specs/tasks/title-length-limit.md"
 ## Verification
 
 ```bash
-cd apps && pnpm --filter @kandev/web test -- --run lib/task-title.test.ts components/task-create-dialog-state.test.ts components/task-create-dialog-submit.test.tsx
-cd apps/web && pnpm run typecheck
+(
+  cd apps
+  pnpm --filter @kandev/web test -- --run lib/task-title.test.ts components/task-create-dialog-state.test.ts components/task-create-dialog-submit.test.tsx
+)
+(
+  cd apps/web
+  pnpm run typecheck
+)
 ```
 
 ## Files likely touched
