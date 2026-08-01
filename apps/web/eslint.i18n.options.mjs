@@ -174,6 +174,9 @@ export const i18nGuardFiles = [
   "app/settings/general/appearance/**/*.{ts,tsx}",
   // Settings → General → Secrets.
   "app/settings/general/secrets/**/*.{ts,tsx}",
+  // Settings → General → Terminal; the shared settings chrome is migrated with
+  // the page that owns it, not here.
+  "app/settings/general/terminal/**/*.{ts,tsx}",
   "components/app-sidebar/sections/settings/general-group.tsx",
   "components/settings/general-settings.tsx",
   "components/settings/general-nav.ts",
@@ -181,6 +184,8 @@ export const i18nGuardFiles = [
   "components/settings/secrets-settings.tsx",
   "components/settings/settings-floating-save.tsx",
   "components/settings/settings-layout-client.tsx",
+  "components/settings/shell-settings-card.tsx",
   "components/settings/startup-page-settings-card.tsx",
   "components/settings/system-metrics-settings-card.tsx",
+  "components/settings/terminal-settings.tsx",
 ];
