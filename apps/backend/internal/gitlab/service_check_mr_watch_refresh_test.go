@@ -11,8 +11,8 @@ import (
 func TestCheckMRWatch_RefreshesTaskMRAndPublishes(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	seedWorkspace(t, store, "ws-1")
-	seedTask(t, store, "task-1", "ws-1")
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.com", "group/proj")
 
 	client := NewMockClient("https://gitlab.com")
 	client.SeedMR("group/proj", &MR{
@@ -81,8 +81,8 @@ func TestCheckMRWatch_RefreshesTaskMRAndPublishes(t *testing.T) {
 func TestCheckMRWatch_RejectsMismatchedIdentityOnRefresh(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	seedWorkspace(t, store, "ws-1")
-	seedTask(t, store, "task-1", "ws-1")
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.com", "group/proj")
 
 	client := NewMockClient("https://gitlab.com")
 	svc := NewService("https://gitlab.com", client, "none", nil, newTestLogger(t))
@@ -124,8 +124,8 @@ func TestCheckMRWatch_RejectsMismatchedIdentityOnRefresh(t *testing.T) {
 func TestCheckMRWatch_MismatchedIdentityDoesNotOverwriteExistingRow(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
-	seedWorkspace(t, store, "ws-1")
-	seedTask(t, store, "task-1", "ws-1")
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.com", "group/proj")
 
 	client := NewMockClient("https://gitlab.com")
 	svc := NewService("https://gitlab.com", client, "none", nil, newTestLogger(t))
@@ -165,5 +165,110 @@ func TestCheckMRWatch_MismatchedIdentityDoesNotOverwriteExistingRow(t *testing.T
 	}
 	if len(mrs) != 1 || mrs[0].MRTitle != "Correct Title" {
 		t.Fatalf("expected existing row to remain unchanged, got %+v", mrs)
+	}
+}
+
+// TestCheckMRWatch_DoesNotRepublishWhenNothingVisibleChanged covers the
+// smaller follow-up cubic-dev-ai raised alongside the identity-revalidation
+// finding: refreshTaskMRFromWatch runs on every poll, not just "notable"
+// pipeline/approval transitions, so publishing gitlab.task_mr.updated
+// unconditionally on every poll would broadcast far more WS events than
+// anything actually changed. A second poll with byte-identical MR data must
+// not publish again.
+func TestCheckMRWatch_DoesNotRepublishWhenNothingVisibleChanged(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.com", "group/proj")
+
+	client := NewMockClient("https://gitlab.com")
+	client.SeedMR("group/proj", &MR{
+		IID: 5, State: mrStateOpen, HeadBranch: "feat/a", Title: "Feat A",
+		WebURL: "https://gitlab.com/group/proj/-/merge_requests/5",
+	})
+
+	svc := NewService("https://gitlab.com", client, "none", nil, newTestLogger(t))
+	svc.SetStore(store)
+	eventBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetEventBus(eventBus)
+
+	received := make(chan *bus.Event, 4)
+	if _, err := eventBus.Subscribe(events.GitLabTaskMRUpdated, func(_ context.Context, evt *bus.Event) error {
+		received <- evt
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	watch := &MRWatch{
+		SessionID: "sess-1", TaskID: "task-1", RepositoryID: "repo-1",
+		ProjectPath: "group/proj", MRIID: 5, Branch: "feat/a",
+	}
+	if err := store.CreateMRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	if _, _, err := svc.CheckMRWatch(ctx, watch); err != nil {
+		t.Fatalf("check watch 1: %v", err)
+	}
+	if _, _, err := svc.CheckMRWatch(ctx, watch); err != nil {
+		t.Fatalf("check watch 2: %v", err)
+	}
+
+	if len(received) != 1 {
+		t.Fatalf("expected exactly 1 published event across 2 identical polls, got %d", len(received))
+	}
+}
+
+// TestCheckMRWatch_DeletesWatchWhoseRepositoryNoLongerMatchesTask guards the
+// gap cubic-dev-ai flagged: refreshTaskMRFromWatch only validates the MR
+// *returned by GitLab* against the watch's own (host, project, iid) — that
+// alone still lets a stale or mis-scoped watch (whose repository_id was
+// never actually tied to this GitLab project) poll and self-consistently
+// upsert data anyway, since GetMRStatus itself only cares about project path
+// and iid, not repository_id. The watch's own repository identity must be
+// validated against the task before any GitLab request or upsert, and a
+// mismatched watch is deleted rather than left to retry forever.
+func TestCheckMRWatch_DeletesWatchWhoseRepositoryNoLongerMatchesTask(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	// repo-1 belongs to a different GitLab project than the watch below.
+	setTaskMRRepositoryIdentity(t, store, "repo-1", "https://gitlab.com", "group/other")
+
+	client := NewMockClient("https://gitlab.com")
+	client.SeedMR("group/proj", &MR{
+		IID: 5, State: mrStateOpen, HeadBranch: "feat/a", Title: "Feat A",
+		WebURL: "https://gitlab.com/group/proj/-/merge_requests/5",
+	})
+	svc := NewService("https://gitlab.com", client, "none", nil, newTestLogger(t))
+	svc.SetStore(store)
+
+	watch := &MRWatch{
+		SessionID: "sess-1", TaskID: "task-1", RepositoryID: "repo-1",
+		ProjectPath: "group/proj", MRIID: 5, Branch: "feat/a",
+	}
+	if err := store.CreateMRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	status, notable, err := svc.CheckMRWatch(ctx, watch)
+	if err != nil {
+		t.Fatalf("check watch: %v", err)
+	}
+	if status != nil || notable {
+		t.Fatalf("expected no status for a watch whose repository doesn't match the task, got status=%+v notable=%v", status, notable)
+	}
+
+	mrs, err := store.ListTaskMRsByTask(ctx, "task-1")
+	if err != nil || len(mrs) != 0 {
+		t.Fatalf("expected no task MR row created, got %d rows err=%v", len(mrs), err)
+	}
+	remaining, err := store.GetMRWatchBySessionRepoAndBranch(ctx, "sess-1", "repo-1", "feat/a")
+	if err != nil {
+		t.Fatalf("list watches: %v", err)
+	}
+	if remaining != nil {
+		t.Fatalf("expected the mismatched watch to be deleted, got %+v", remaining)
 	}
 }

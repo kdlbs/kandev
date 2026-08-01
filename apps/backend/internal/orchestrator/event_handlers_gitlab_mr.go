@@ -10,6 +10,13 @@ import (
 	"github.com/kandev/kandev/internal/gitlab"
 )
 
+// gitlabMRStateOpen mirrors the gitlab package's own normalized "open" state
+// value (GitLab's API returns "opened"; the client normalizes it to "open"
+// before it ever reaches a TaskMR row). Kept as a local constant rather than
+// exported from the gitlab package, matching how event_handlers_github.go's
+// githubPRStateOpen mirrors the github package's vocabulary.
+const gitlabMRStateOpen = "open"
+
 // detectPushAndAssociateMR is the GitLab twin of detectPushAndAssociatePR: on
 // push to a session branch, it looks up the open merge request whose source
 // branch matches and links it to the task, scoped by repository_id. Mirrors
@@ -98,7 +105,21 @@ func (s *Service) tryAutoLinkMRForPush(
 	assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
 		ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
 	)
-	if err != nil || assoc == nil {
+	if err != nil {
+		// A real service/store error (e.g. an unconfigured GitLab connection)
+		// is a backend problem, not "no MR is open yet" — worth a louder log
+		// than the normal not-found retry case, even though the retry loop
+		// itself still just tries again (a transient error may clear before
+		// the next delay).
+		s.logger.Warn("gitlab auto-link attempt failed (will retry)",
+			zap.String("branch", branch),
+			zap.String("session_id", sessionID),
+			zap.String("repository_name", repositoryName),
+			zap.Duration("delay", delay),
+			zap.Error(err))
+		return false
+	}
+	if assoc == nil {
 		s.logger.Debug("no gitlab MR found for branch (will retry)",
 			zap.String("branch", branch),
 			zap.String("session_id", sessionID),
@@ -141,16 +162,21 @@ func (s *Service) ensureWatchForLinkedMR(
 	}
 }
 
-// gitlabTaskMRFor returns taskID's existing association for (repositoryID,
-// branch), or nil when there is none, so retries and duplicate push events
-// don't refetch or re-link an MR that's already linked.
+// gitlabTaskMRFor returns taskID's existing *open* association for
+// (repositoryID, branch), or nil when there is none, so retries and
+// duplicate push events don't refetch or re-link an MR that's already
+// linked. Scoped to state=open so a merged/closed MR's leftover row doesn't
+// shadow a replacement MR opened later from the same branch (the prior MR
+// closed, a new one opened): EnsureMRWatch's iid-replacement support only
+// runs when the search this guards against actually re-executes instead of
+// always short-circuiting on any historical row for the branch.
 func (s *Service) gitlabTaskMRFor(ctx context.Context, taskID, repositoryID, branch string) *gitlab.TaskMR {
 	mrs, err := s.gitlabMRLinkService.ListTaskMRsByTask(ctx, taskID)
 	if err != nil {
 		return nil
 	}
 	for _, mr := range mrs {
-		if mr.RepositoryID == repositoryID && mr.HeadBranch == branch {
+		if mr.RepositoryID == repositoryID && mr.HeadBranch == branch && mr.State == gitlabMRStateOpen {
 			return mr
 		}
 	}
@@ -173,6 +199,18 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	}
 
 	if s.gitlabMRLinkService == nil {
+		return false, nil
+	}
+
+	// Push detection never reaches this service's GitLab client for a
+	// GitHub-provider repository — dispatchPushDetection routes by provider
+	// before either detect function runs. This on-demand entry point has no
+	// such router in front of it (a caller invokes it directly by WS action
+	// name), so it must apply the same guard itself: without it, calling
+	// gitlab.check_session_mr for a GitHub-backed session would install a
+	// bogus GitLab watch keyed off the GitHub repository's owner/name before
+	// AutoLinkMRForBranch's own identity check ever runs.
+	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, "") != gitlabProviderName {
 		return false, nil
 	}
 

@@ -253,6 +253,31 @@ func validateReturnedMRIdentity(status *MRStatus, host, projectPath string, iid 
 	return nil
 }
 
+// IsConfiguredGitLabHost reports whether remoteURL's host matches the
+// workspace's own configured GitLab connection, self-managed or gitlab.com.
+// Used by push-detection provider routing to recognize self-managed GitLab
+// repositories: unlike github.com/gitlab.com, they never get a durable
+// "gitlab" provider tag at discovery time (see
+// task/service.resolveRepositoryProviderIdentity), so remote_url is their
+// only durable identity signal, and it must be compared against the actual
+// configured host rather than a github.com/gitlab.com hostname allowlist.
+//
+// Best-effort: returns false on any lookup failure (unconfigured workspace,
+// unparsable remote) rather than erroring, since callers use this only to
+// pick a routing branch — ValidateTaskMRRepositoryIdentity is still the real
+// security boundary and still runs before any GitLab API call.
+func (s *Service) IsConfiguredGitLabHost(ctx context.Context, workspaceID, remoteURL string) bool {
+	host, _ := parseGitLabRemoteURLIdentity(remoteURL)
+	if host == "" {
+		return false
+	}
+	cfg, err := s.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil || cfg == nil || cfg.Host == "" {
+		return false
+	}
+	return sameGitLabHost(host, cfg.Host)
+}
+
 // UnlinkTaskMR removes one association and its matching refresh watch without
 // mutating the task, other associations, or the upstream merge request.
 func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID string) error {

@@ -89,7 +89,7 @@ func TestResolvePushRepositoryProvider_LiveFallbackForUnbackfilledGitLabRepo(t *
 	svc := seedUnbackfilledRepoForProviderTest(t, "https://gitlab.com/acme/widgets.git")
 
 	provider := svc.resolvePushRepositoryProvider(context.Background(), "s1", "t1", "")
-	if provider != "gitlab" {
-		t.Fatalf("provider = %q, want %q (resolved live from the local checkout, not a possibly-stale DB column)", provider, "gitlab")
+	if provider != gitlabProviderName {
+		t.Fatalf("provider = %q, want %q (resolved live from the local checkout, not a possibly-stale DB column)", provider, gitlabProviderName)
 	}
 }

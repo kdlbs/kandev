@@ -42,6 +42,7 @@ func TestDetectPushAndAssociateMR_EnsuresWatchForAlreadyLinkedMR(t *testing.T) {
 		"t1": {{
 			TaskID: "t1", RepositoryID: "repo1",
 			ProjectPath: "group/myproj", MRIID: 42, HeadBranch: "feat/a",
+			State: gitlabMRStateOpen,
 		}},
 	}
 

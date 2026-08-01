@@ -511,6 +511,25 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
 }
 
+// GetTaskMR returns one task-MR association keyed by
+// (task_id, repository_id, project_path, mr_iid), or nil when none exists.
+// Used to compare against an incoming refresh before deciding whether it
+// actually changed anything worth publishing.
+func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, `
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
+		LIMIT 1`, taskID, repositoryID, projectPath, iid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
+}
+
 // ListTaskMRsByTask returns every MR association for a task, oldest first.
 func (s *Store) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*TaskMR, error) {
 	var mrs []TaskMR

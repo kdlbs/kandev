@@ -71,6 +71,35 @@ func TestAutoLinkMRForBranch_NoOpenMR(t *testing.T) {
 	}
 }
 
+// TestAutoLinkMRForBranch_NoOpenMRLeavesPlaceholderWatch covers late MR
+// discovery: when push detection's own [0, 30s, 60s] retry window closes
+// with no MR open yet, a placeholder (iid=0) watch must still exist
+// afterward so an MR opened later — e.g. from the GitLab web UI, well after
+// the retry window — is discovered by the poller's own iid<=0 resolution
+// instead of being lost forever.
+func TestAutoLinkMRForBranch_NoOpenMRLeavesPlaceholderWatch(t *testing.T) {
+	const host = "https://gitlab.acme.test"
+	svc, store, _ := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", host, "group/proj")
+
+	assoc, err := svc.AutoLinkMRForBranch(context.Background(), "ws-1", "sess-1", "task-1", "repo-1", "group/proj", "feat/none")
+	if err != nil {
+		t.Fatalf("AutoLinkMRForBranch: %v", err)
+	}
+	if assoc != nil {
+		t.Fatalf("expected nil association when no MR is open, got %+v", assoc)
+	}
+
+	watch, err := store.GetMRWatchBySessionRepoAndBranch(context.Background(), "sess-1", "repo-1", "feat/none")
+	if err != nil || watch == nil {
+		t.Fatalf("expected a placeholder watch to be created, got %+v err=%v", watch, err)
+	}
+	if watch.MRIID != 0 {
+		t.Fatalf("expected placeholder watch iid=0, got %d", watch.MRIID)
+	}
+}
+
 func TestAutoLinkMRForBranch_Idempotent(t *testing.T) {
 	const host = "https://gitlab.acme.test"
 	svc, store, client := newTaskMRLinkService(t, host)

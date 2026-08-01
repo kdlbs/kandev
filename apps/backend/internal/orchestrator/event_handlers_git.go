@@ -29,6 +29,12 @@ const gitSnapshotPersistInterval = 30 * time.Second
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
 const gitSnapshotCacheMaxEntries = 4096
 
+// gitlabProviderName is the repositories.provider value used for GitLab,
+// mirrored locally the same way githubPRStateOpen mirrors the github
+// package's vocabulary rather than importing task/service's unexported
+// equivalent.
+const gitlabProviderName = "gitlab"
+
 type gitSnapshotCacheEntry struct {
 	hash      string
 	lastWrite time.Time
@@ -257,7 +263,7 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 // from trackPushAndAssociatePR to keep that function inside the statement
 // budget.
 func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
-	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == "gitlab" {
+	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == gitlabProviderName {
 		s.detectPushAndAssociateMR(ctx, sessionID, taskID, repositoryName, branch)
 		return
 	}
@@ -297,6 +303,20 @@ func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, 
 	if repoObj.LocalPath != "" {
 		if provider, _, owner, _ := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && owner != "" {
 			return provider
+		}
+	}
+	// Self-managed GitLab instances never get a durable "gitlab" Provider tag
+	// at all — resolveRepositoryProviderIdentity only recognizes github.com
+	// and gitlab.com at discovery time, so the well-known-host fallback above
+	// can never resolve them either; this is a permanent gap for self-managed
+	// repositories, not just a narrow backfill race. remote_url is their only
+	// durable identity signal (still populated by the same production
+	// backfill), so compare it against the workspace's own configured GitLab
+	// connection instead of a hostname allowlist.
+	if s.gitlabMRLinkService != nil && repoObj.RemoteURL != "" {
+		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
+			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, repoObj.RemoteURL) {
+			return gitlabProviderName
 		}
 	}
 	return ""

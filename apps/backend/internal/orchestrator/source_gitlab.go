@@ -41,6 +41,11 @@ type GitLabMRLinkService interface {
 	AutoLinkMRForBranch(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error)
 	EnsureMRWatch(ctx context.Context, sessionID, taskID, repositoryID, projectPath string, iid int, branch string) (*gitlab.MRWatch, error)
 	ListTaskMRsByTask(ctx context.Context, taskID string) ([]*gitlab.TaskMR, error)
+	// IsConfiguredGitLabHost reports whether remoteURL's host matches the
+	// workspace's own configured GitLab connection. Used by push-detection
+	// provider routing to recognize self-managed GitLab repositories, which
+	// carry no durable "gitlab" provider tag (see resolvePushRepositoryProvider).
+	IsConfiguredGitLabHost(ctx context.Context, workspaceID, remoteURL string) bool
 }
 
 type GitLabReviewWatcherSource struct {

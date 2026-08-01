@@ -60,6 +60,17 @@ func (s *Service) AutoLinkMRForBranch(
 		return nil, fmt.Errorf("find merge request by branch: %w", err)
 	}
 	if mr == nil {
+		// No MR is open on this branch yet — the normal "pushed but nothing
+		// opened" result, not an error. Still leave a placeholder (iid=0)
+		// watch behind so the poller's own iid<=0 resolution (CheckMRWatch)
+		// can discover an MR opened later — e.g. from the GitLab web UI —
+		// well after push detection's own retry window ([0, 30s, 60s])
+		// closes. Best-effort: a watch failure here must not turn "no MR
+		// yet" into a hard auto-link error.
+		if _, err := s.EnsureMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, 0, branch); err != nil {
+			s.logger.Warn("failed to ensure placeholder MR watch while no MR is open on branch",
+				zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		}
 		return nil, nil
 	}
 	status, err := client.GetMRStatus(ctx, projectPath, mr.IID)
