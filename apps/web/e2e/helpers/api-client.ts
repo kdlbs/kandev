@@ -23,6 +23,8 @@ import type {
   Issue as MockGitLabIssue,
   MR as MockGitLabMR,
   TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
 } from "../../lib/types/gitlab";
 import type {
   SSHAgentReadinessResponse,
@@ -1645,6 +1647,21 @@ export class ApiClient {
       "POST",
       this.gitLabWorkspacePath("/api/v1/gitlab/mock/commits", workspaceId),
       { project, iid, commits },
+    );
+  }
+
+  async getTaskMRAutomationOptions(taskId: string): Promise<TaskMRAutomationOptions> {
+    return this.request("GET", `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`);
+  }
+
+  async updateTaskMRAutomationOptions(
+    taskId: string,
+    patch: TaskMRAutomationPatch,
+  ): Promise<TaskMRAutomationOptions> {
+    return this.request(
+      "PATCH",
+      `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+      patch,
     );
   }
 

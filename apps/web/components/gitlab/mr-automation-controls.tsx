@@ -121,10 +121,12 @@ function MRAutomationErrorRow({ error }: { error: string }) {
  * be invisible until the user manually opens it.
  */
 function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetry: () => void }) {
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
   return (
     <div
       role="alert"
-      className="flex items-center justify-between gap-2 px-1 py-1 text-[11px] text-destructive"
+      className={`flex items-center justify-between gap-2 px-1 text-[11px] text-destructive ${minHeight}`}
     >
       <span className="min-w-0 flex-1 truncate">{error}</span>
       <Button
@@ -132,7 +134,7 @@ function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetr
         variant="ghost"
         size="sm"
         data-testid="mr-automation-retry"
-        className="h-6 cursor-pointer px-2 text-[11px]"
+        className={`cursor-pointer px-2 text-[11px] ${minHeight}`}
         onClick={onRetry}
       >
         Retry

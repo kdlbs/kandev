@@ -1,0 +1,151 @@
+import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
+import { seedGitLabReview, GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
+import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import type { ApiClient } from "../../helpers/api-client";
+import type { SeedData } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
+
+const MR_IID = 211;
+
+async function expectTouchTarget(locator: Locator, label: string) {
+  const box = await locator.boundingBox();
+  expect(box, `${label} has no layout box`).not.toBeNull();
+  expect(box!.height, `${label} touch target height`).toBeGreaterThanOrEqual(44);
+}
+
+// DropdownMenuContent runs a 100ms zoom-in-95 entrance animation
+// (data-open:animate-in ... duration-100 in @kandev/ui's dropdown-menu.tsx).
+// A boundingBox() measured mid-animation reports the pre-settle scaled-down
+// size, not the final CSS size — wait past the animation before measuring.
+async function waitForDropdownSettled(page: import("@playwright/test").Page) {
+  await page.waitForTimeout(200);
+}
+
+async function seedTaskWithLinkedMR(apiClient: ApiClient, seedData: SeedData, title: string) {
+  await seedGitLabReview(apiClient, seedData.workspaceId, MR_IID, "Mobile MR automation MR");
+  await apiClient.updateRepository(seedData.repositoryId, {
+    provider: "gitlab",
+    provider_host: GITLAB_HOST,
+    provider_owner: "platform",
+    provider_name: "kandev",
+  });
+  const task = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    title,
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  await apiClient.linkTaskGitLabMR(seedData.workspaceId, {
+    task_id: task.id,
+    repository_id: seedData.repositoryId,
+    mr_url: `${GITLAB_HOST}/${GITLAB_PROJECT}/-/merge_requests/${MR_IID}`,
+  });
+  return task.id;
+}
+
+async function interceptLoadFailure(testPage: import("@playwright/test").Page) {
+  await testPage.route("**/api/v1/gitlab/tasks/*/mr-automation", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    await route.fulfill({ status: 500, json: { error: "backend unavailable" } });
+  });
+}
+
+test.describe("mobile GitLab MR automation options", () => {
+  test("dropdown exposes touch-sized automation controls and persists switches", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "MR automation mobile");
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const mrButton = testPage.getByTestId("mr-topbar-button");
+    await expect(mrButton).toBeVisible({ timeout: 15_000 });
+    await expectTouchTarget(mrButton, "GitLab MR topbar button");
+    await mrButton.tap();
+
+    const controls = testPage.getByTestId("mr-automation-controls");
+    await expect(controls).toBeVisible();
+    await waitForDropdownSettled(testPage);
+    const reviewFollowUp = controls.getByTestId("mr-review-follow-up-trigger");
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
+    await expectTouchTarget(reviewFollowUp, "review follow-up trigger");
+    await reviewFollowUp.tap();
+    await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
+
+    for (const name of ["Your review is requested", "MR merged", "MR closed without merging"]) {
+      const switchLocator = controls.getByRole("switch", { name });
+      await expect(switchLocator).toBeVisible();
+      const row = switchLocator.locator("..");
+      const box = await row.boundingBox();
+      expect(box, `${name} row has no layout box`).not.toBeNull();
+      expect(box!.height, `${name} row touch target height`).toBeGreaterThanOrEqual(44);
+    }
+
+    const helpPopover = controls.locator('[data-slot="popover-content"]');
+    await controls.getByTestId("mr-review-requested-help").tap();
+    await expect(
+      helpPopover.getByText(
+        "Wake the agent when you're added as a reviewer, including re-review after changes.",
+      ),
+    ).toBeVisible();
+    await testPage.keyboard.press("Escape");
+    await controls.getByTestId("mr-terminal-help").tap();
+    await expect(
+      helpPopover.getByText(
+        "Wake the agent when review work ends. Choose either or both outcomes.",
+      ),
+    ).toBeVisible();
+    await testPage.keyboard.press("Escape");
+
+    await controls.getByRole("switch", { name: "Your review is requested" }).tap();
+    await controls.getByRole("switch", { name: "MR closed without merging" }).tap();
+    await expect
+      .poll(async () => apiClient.getTaskMRAutomationOptions(taskId))
+      .toMatchObject({
+        prompt_on_review_requested: true,
+        prompt_on_closed: true,
+      });
+
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile MR automation dropdown");
+  });
+
+  test("dropdown contains a load-error retry banner without horizontal document overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const taskId = await seedTaskWithLinkedMR(
+      apiClient,
+      seedData,
+      "MR automation mobile load error",
+    );
+    await interceptLoadFailure(testPage);
+
+    await testPage.goto(`/t/${taskId}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mr-topbar-button").tap();
+
+    const controls = testPage.getByTestId("mr-automation-controls");
+    await expect(controls).toBeVisible();
+    await expect(controls.getByRole("alert")).toContainText("backend unavailable");
+    await waitForDropdownSettled(testPage);
+    const retry = controls.getByTestId("mr-automation-retry");
+    await expectTouchTarget(retry, "MR automation retry button");
+
+    await assertNoDocumentHorizontalOverflow(testPage, "mobile MR automation load error");
+  });
+});
