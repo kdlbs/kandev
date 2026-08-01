@@ -149,10 +149,7 @@ export function AddPanelMenuItems({
           Files
         </DropdownMenuItem>
       )}
-      <PRPanelMenuItems
-        prs={state.prs}
-        onOpenPR={(pr) => addPRPanel(prTaskKey(pr))}
-      />
+      <PRPanelMenuItems prs={state.prs} onOpenPR={(pr) => addPRPanel(prTaskKey(pr))} />
       {state.mrs.map((mr) => (
         <DropdownMenuItem
           key={mr.id}
