@@ -50,6 +50,15 @@ Choose the right level:
 
 Prefer state/output assertions over interaction assertions. Mock only slow, nondeterministic, or external boundaries; use real implementations or fakes when they keep the test deterministic.
 
+### Cross-layer contracts
+
+When adding or renaming a field that crosses backend, WebSocket, and frontend
+boundaries, use `rg` to trace every producer, DTO, store upsert or partial
+merge, reconnect/readiness handler, and consumer before editing. Add focused
+coverage at the affected boundaries, including refresh/reconnect and an update
+that omits the field, so a partial payload cannot silently discard an existing
+value.
+
 ### Concurrent and event-driven behavior
 
 Test ordering-sensitive behavior with channels, barriers, or controllable fakes;

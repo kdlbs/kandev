@@ -209,6 +209,8 @@ Run the assertion in the relevant desktop and mobile projects when responsive
 layout can change the result. Do not rely on fixed pixels when the product
 contract is equality or alignment.
 
+**Animation-aware geometry:** Before reading dialog or panel geometry, wait only for currently running Web Animations with finite `effect.getComputedTiming().iterations`; await `animation.finished.catch(() => undefined)` because Radix overlays can cancel animations during close or replacement. Never blanket-await infinite animations or use a fixed sleep; then read bounding boxes and assert the relationship.
+
 For narrow-width clipping or overlap regressions, visibility and containment
 are insufficient: assert a real hit target. Check `document.elementFromPoint()`
 at the control center resolves to the control (or its descendant), then prove
