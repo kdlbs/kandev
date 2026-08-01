@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import { renderHook, waitFor } from "@testing-library/react";
 import type { Message } from "@/lib/types/http";
 
@@ -91,5 +92,20 @@ describe("useLastUserMessage", () => {
 
     rerender();
     await waitFor(() => expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1));
+  });
+
+  it("resolves under React StrictMode's double-invoked effects", async () => {
+    // Regression: the app runs under <StrictMode> in dev, which mounts,
+    // cleans up, and re-mounts the effect. The first mount's cleanup must not
+    // cancel the in-flight request in a way that starves the fetched result.
+    mockListTaskSessionMessages.mockResolvedValue({ messages: [userPrompt], has_more: false });
+    const messages = [agentReply];
+
+    const { result } = renderHook(() => useLastUserMessage("session-1", messages), {
+      wrapper: ({ children }) => <StrictMode>{children}</StrictMode>,
+    });
+
+    await waitFor(() => expect(result.current.lastPromptMessage).toEqual(userPrompt));
+    expect(mockListTaskSessionMessages).toHaveBeenCalledTimes(1);
   });
 });

@@ -39,22 +39,27 @@ export function useLastUserMessage(
       return;
     }
     if (!sessionId || fetchedSessionRef.current === sessionId) return;
-    fetchedSessionRef.current = sessionId;
-    let cancelled = false;
-    void listTaskSessionMessages(sessionId, {
+    const session = sessionId;
+    fetchedSessionRef.current = session;
+    // Do NOT cancel this request in the effect cleanup: React StrictMode
+    // double-invokes effects in dev, so the first mount's cleanup would mark
+    // the in-flight request cancelled and the one-shot guard would skip the
+    // retry — the fetched message would never land. Instead guard the commit
+    // on the session still being the one we fetched for, which is safe under
+    // both a StrictMode remount and a real navigation.
+    void listTaskSessionMessages(session, {
       limit: 1,
       author_type: "user",
       sort: "desc",
     })
       .then((response) => {
-        if (!cancelled) setFetchedMessage(response.messages[0] ?? null);
+        if (fetchedSessionRef.current !== session) return;
+        setFetchedMessage(response.messages[0] ?? null);
       })
       .catch(() => {
-        if (!cancelled) setFetchedMessage(null);
+        if (fetchedSessionRef.current !== session) return;
+        setFetchedMessage(null);
       });
-    return () => {
-      cancelled = true;
-    };
   }, [sessionId, windowMessage]);
 
   return { lastPromptMessage: windowMessage ?? fetchedMessage };
