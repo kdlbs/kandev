@@ -198,11 +198,20 @@ const (
 // was almost entirely spawn overhead. On macOS and Linux a spawn is 3-5ms and
 // none of this is visible, which is why the cost went unnoticed for so long.
 //
-// --untracked-files=no is preserved from the old status call: untracked files
-// are already monitored by monitorLoop via git ls-files, and =all would pay for
-// a full directory traversal on every tick.
+// Two flags keep --branch from paying for work the poller throws away:
+//
+//   - --no-ahead-behind, because --branch otherwise walks the revision graph to
+//     count how far the branch is from its upstream, and parseGitPollSnapshot
+//     discards branch.ab. That walk is not free on a diverged branch: measured
+//     at 1799 commits behind, the tick took 334ms with the flag against 646ms
+//     without — worse than the four-spawn version this replaces. git prints
+//     `# branch.ab +? -?` when it skips the count, which the parser ignores as
+//     it ignores every other header.
+//   - --untracked-files=no, preserved from the old status call: untracked files
+//     are already monitored by monitorLoop via git ls-files, and =all would pay
+//     for a full directory traversal on every tick.
 func (wt *WorkspaceTracker) readGitPollSnapshot(ctx context.Context) (gitPollSnapshot, error) {
-	out, err := wt.runPollingGitOutput(ctx, "status", "--porcelain=v2", "--branch", "--untracked-files=no")
+	out, err := wt.runPollingGitOutput(ctx, "status", "--porcelain=v2", "--branch", "--no-ahead-behind", "--untracked-files=no")
 	if err != nil {
 		return gitPollSnapshot{}, err
 	}

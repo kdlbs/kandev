@@ -352,6 +352,17 @@ func TestParseGitPollSnapshot_Sentinels(t *testing.T) {
 		t.Error("index hash changed with branch.ab; headers must be excluded from the hash")
 	}
 
+	// --no-ahead-behind makes git print "+? -?" instead of real counts. It must
+	// parse like any other header and leave the hash alone, so that dropping the
+	// flag (and paying for the revision walk again) stays a deliberate act.
+	unknownAB := parseGitPollSnapshot([]byte("# branch.oid abc\n# branch.head main\n# branch.ab +? -?\n"))
+	if unknownAB.indexHash != withAB.indexHash {
+		t.Error("index hash changed with an unknown branch.ab; the header must be ignored")
+	}
+	if unknownAB.headSHA != "abc" || unknownAB.branch != "main" {
+		t.Errorf("unknown branch.ab disturbed the other headers: head=%q branch=%q", unknownAB.headSHA, unknownAB.branch)
+	}
+
 	// Entry lines must drive the hash.
 	entry := parseGitPollSnapshot([]byte("# branch.oid abc\n# branch.head main\n1 .M N... 100644 100644 100644 aaa bbb file.txt\n"))
 	if entry.indexHash == withAB.indexHash {
