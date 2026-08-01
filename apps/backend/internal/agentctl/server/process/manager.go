@@ -131,9 +131,14 @@ type Manager struct {
 	// reconcile adding a repository to a workspace that is already focused —
 	// inherit it, because no further push arrives unless the session's own
 	// mode changes.
+	//
+	// Guarded by repoTrackersMu rather than a mutex of its own: the mode and
+	// the tracker set have to move together. A separate lock let a tracker read
+	// the mode, then get registered after a concurrent push had already
+	// snapshotted the set — adopting a stale mode with its grace timer disarmed,
+	// with nothing left to correct it.
 	workspacePollMode    PollMode
 	workspacePollModeSet bool
-	workspacePollModeMu  sync.RWMutex
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
@@ -744,24 +749,32 @@ func (m *Manager) RepoSubpaths() []string {
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	t := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
-	m.configurePollMode(t)
-	return t
+	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
 }
 
-// configurePollMode applies the last mode the gateway pushed, if it ever
-// pushed one. SetPollMode also disarms the tracker”s grace demotion, which is
-// correct: the gateway has spoken for this workspace, so the fallback must not
-// override it. With no prior push the tracker keeps its own default and the
-// grace timer stays in charge.
-func (m *Manager) configurePollMode(t *WorkspaceTracker) {
-	m.workspacePollModeMu.RLock()
-	mode, ok := m.workspacePollMode, m.workspacePollModeSet
-	m.workspacePollModeMu.RUnlock()
-	if !ok {
+// applyWorkspacePollModeLocked gives newly built trackers the last mode the
+// gateway pushed, if it ever pushed one. SetPollMode also disarms a tracker's
+// grace demotion, which is correct: the gateway has spoken for this workspace,
+// so the fallback must not override it. With no prior push the trackers keep
+// their construction default and the grace timer stays in charge.
+//
+// Callers must hold repoTrackersMu for writing, and must call this in the same
+// critical section that publishes the trackers. Reading the mode and
+// registering the tracker have to be one step: otherwise a SetWorkspacePollMode
+// running in between stores a new mode and fans it out to a tracker set that
+// does not include this one yet, so the tracker adopts the stale mode — and
+// because SetPollMode marks it as pushed and disarms the grace timer, nothing
+// ever corrects it. It would poll at the wrong cadence for the life of the
+// process, which is the exact failure the grace timer exists to prevent.
+func (m *Manager) applyWorkspacePollModeLocked(trackers ...*WorkspaceTracker) {
+	if !m.workspacePollModeSet {
 		return
 	}
-	t.SetPollMode(mode)
+	for _, t := range trackers {
+		if t != nil {
+			t.SetPollMode(m.workspacePollMode)
+		}
+	}
 }
 
 // SetWorkspacePollMode propagates a poll-mode change to the root tracker and
@@ -772,23 +785,38 @@ func (m *Manager) configurePollMode(t *WorkspaceTracker) {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
-	m.workspacePollModeMu.Lock()
+	// Storing the mode and fanning it out happen under one write lock, the same
+	// one the rescan paths hold while they publish new trackers. That ordering
+	// is what makes the two safe against each other: a tracker is either already
+	// registered and gets this push, or it is registered afterwards and reads
+	// this mode when it does. Anything in between would leave it on a stale mode
+	// with its grace timer disarmed — see applyWorkspacePollModeLocked.
+	//
+	// SetPollMode is a mutex update plus a non-blocking wake-up, so holding the
+	// lock across the fan-out costs nothing. RefreshGitStatus is the slow part
+	// and stays outside, in the goroutine below.
+	m.repoTrackersMu.Lock()
 	m.workspacePollMode = mode
 	m.workspacePollModeSet = true
-	m.workspacePollModeMu.Unlock()
-
-	root, trackers := m.snapshotTrackers()
-	root.SetPollMode(mode)
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	if root != nil {
+		root.SetPollMode(mode)
+	}
 	for _, t := range trackers {
 		t.SetPollMode(mode)
 	}
+	m.repoTrackersMu.Unlock()
 	if mode == PollModePaused {
 		return
 	}
 	// Refresh in background — RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
-		root.RefreshGitStatus(ctx)
+		if root != nil {
+			root.RefreshGitStatus(ctx)
+		}
 		for _, t := range trackers {
 			t.RefreshGitStatus(ctx)
 		}

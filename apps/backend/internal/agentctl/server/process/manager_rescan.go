@@ -244,6 +244,7 @@ func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir st
 	m.repoTrackersMu.Lock()
 	oldBare, oldRepos := m.workspaceTracker, m.repoTrackers
 	m.cfg.WorkDir, m.workspaceTracker, m.repoTrackers, m.workspaceSourceRoots = resolved, bare, repos, append([]string(nil), roots...)
+	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{bare}, repos...)...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
 	if oldBare != nil {
@@ -294,6 +295,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	old := m.workspaceTracker
 	m.workspaceTracker = bareRoot
 	m.repoTrackers = append(m.repoTrackers, newRepoTrackers...)
+	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{bareRoot}, newRepoTrackers...)...)
 	m.cfg.WorkDir = workDir
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
@@ -352,6 +354,7 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 			continue
 		}
 		m.repoTrackers = append(m.repoTrackers, t)
+		m.applyWorkspacePollModeLocked(t)
 	}
 	m.cfg.WorkDir = workDir
 	m.workspaceSourceRoots = append([]string(nil), roots...)
@@ -402,6 +405,7 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, chi
 	m.repoTrackersMu.Lock()
 	retained = append(retained, newTrackers...)
 	m.repoTrackers = retained
+	m.applyWorkspacePollModeLocked(newTrackers...)
 	m.cfg.WorkDir = workDir
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
