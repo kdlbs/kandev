@@ -61,7 +61,7 @@ func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Mes
 	if err := json.Unmarshal(msg.Payload, &fields); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
-	if hasMRLifecyclePromptOverride(fields) {
+	if hasLifecyclePromptOverride(fields) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "lifecycle prompt overrides are not supported", nil)
 	}
 	taskID, errResp, err := mrAutomationTaskIDPayload(msg)
@@ -98,13 +98,4 @@ func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Mes
 		}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, options)
-}
-
-func hasMRLifecyclePromptOverride(fields map[string]json.RawMessage) bool {
-	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
-		if _, ok := fields[field]; ok {
-			return true
-		}
-	}
-	return false
 }

@@ -393,8 +393,8 @@ func TestDispatchTaskMRAgentPrompt_TagsPromptForChatBadge(t *testing.T) {
 	if got := metadata[mrAutomationMetaEvent]; got != mrAgentEventMerged {
 		t.Errorf("event = %v, want %q", got, mrAgentEventMerged)
 	}
-	if got := status.Entries[0].Metadata[messagequeue.MetadataCoalesceKey]; got != "gitlab-mr:repo-1:42:merged" {
-		t.Fatalf("coalesce key = %v, want gitlab-mr:repo-1:42:merged", got)
+	if got := status.Entries[0].Metadata[messagequeue.MetadataCoalesceKey]; got != "gitlab-mr:repo-1:group/project:42:merged" {
+		t.Fatalf("coalesce key = %v, want gitlab-mr:repo-1:group/project:42:merged", got)
 	}
 }
 

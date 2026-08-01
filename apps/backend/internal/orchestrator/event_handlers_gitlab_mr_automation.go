@@ -306,6 +306,6 @@ func (s *Service) dispatchTaskMRAgentPrompt(
 		return "", fmt.Errorf("task is no longer active: %s", mr.TaskID)
 	}
 	metadata := taskMRAgentPromptMetadata(mr, event, mrURL)
-	coalesceKey := fmt.Sprintf("gitlab-mr:%s:%d:%s", mr.RepositoryID, mr.MRIID, event)
+	coalesceKey := fmt.Sprintf("gitlab-mr:%s:%s:%d:%s", mr.RepositoryID, mr.ProjectPath, mr.MRIID, event)
 	return s.queueAndDrainLifecyclePrompt(ctx, session, mr.TaskID, prompt, metadata, coalesceKey, errTaskMRAgentInactive)
 }

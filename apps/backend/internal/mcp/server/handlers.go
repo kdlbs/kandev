@@ -325,7 +325,7 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		payload := map[string]interface{}{"task_id": s.taskID}
 		args := req.GetArguments()
-		if hasMRLifecyclePromptOverrideArgument(args) {
+		if hasLifecyclePromptOverrideArgument(args) {
 			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
 		}
 		for _, key := range []string{"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed"} {
@@ -343,15 +343,6 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
 	}
-}
-
-func hasMRLifecyclePromptOverrideArgument(args map[string]interface{}) bool {
-	for _, field := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {
-		if _, ok := args[field]; ok {
-			return true
-		}
-	}
-	return false
 }
 
 func (s *Server) messageTaskHandler() server.ToolHandlerFunc {

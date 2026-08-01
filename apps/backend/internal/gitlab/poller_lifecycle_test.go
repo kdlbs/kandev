@@ -28,6 +28,11 @@ func TestPoller_RunMRLifecycleSync_SyncsSubscribedRowsAndPublishes(t *testing.T)
 	svc := newWorkspaceConfigService(t, store, secrets)
 	mock := NewMockClient("https://gitlab.example.com")
 	mock.SeedMR("group/subscribed", &MR{IID: 1, State: "opened", HeadBranch: "feat", BaseBranch: "main", WebURL: "https://gitlab.example.com/group/subscribed/-/merge_requests/1"})
+	// Seeded (not just omitted) so a filter regression that wrongly included
+	// the unsubscribed row would still succeed the sync and publish a second
+	// event, rather than failing for an unrelated reason (no seeded MR) and
+	// masking the real assertion below.
+	mock.SeedMR("group/unsubscribed", &MR{IID: 2, State: "opened", HeadBranch: "feat", BaseBranch: "main", WebURL: "https://gitlab.example.com/group/unsubscribed/-/merge_requests/2"})
 	svc.workspaceClientFn = func(_ context.Context, _ *GitLabConfig, _ string) (Client, error) {
 		return mock, nil
 	}
