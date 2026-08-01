@@ -42,9 +42,11 @@ export async function verifyStalledDialogCloseRecovery(page: Page, touch: boolea
       scrollLocked: true,
     });
 
-  const close = dialog.getByRole("button", { name: "Close" });
-  if (touch) await close.tap();
-  else await close.click();
+  // Create Task intentionally omits the generic top-right Close control; the
+  // footer Cancel action is the shared dismissal path for both viewports.
+  const cancel = dialog.getByRole("button", { name: "Cancel", exact: true });
+  if (touch) await cancel.tap();
+  else await cancel.click();
 
   await expect(dialog).not.toBeAttached();
   await expect(page.locator('[data-slot="dialog-overlay"]')).not.toBeAttached();

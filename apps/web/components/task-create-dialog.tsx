@@ -598,7 +598,10 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
       <DialogContent
         ref={setPopoverContainer}
         data-testid="create-task-dialog"
-        className="w-full h-full min-w-0 max-w-full max-h-full overflow-visible rounded-none sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
+        data-webkit-safe-motion="true"
+        showCloseButton={false}
+        overlayClassName="create-task-dialog-overlay"
+        className="w-full h-full min-w-0 max-w-full max-h-full overflow-visible rounded-none pt-0 sm:w-[900px] sm:h-auto sm:max-w-none sm:max-h-[85vh] sm:rounded-lg flex flex-col"
       >
         <TaskCreateDialogPopoverContainerProvider container={popoverContainer}>
           <DialogHeader>

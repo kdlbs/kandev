@@ -38,6 +38,9 @@ export function DiscardLocalChangesDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent
         data-testid="discard-local-changes-dialog"
+        data-webkit-safe-motion="true"
+        data-webkit-modal-layer="discard-confirmation"
+        overlayClassName="discard-confirmation-overlay"
         onClick={(e) => e.stopPropagation()}
       >
         <AlertDialogHeader>
