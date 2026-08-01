@@ -81,6 +81,26 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// The caller may already be gone. Creation is serialised on m.mu, the
+	// control client gives up after 30s, and callers that give up retry — so
+	// under load this lock grows a queue of requests nobody is waiting for any
+	// more. Building an instance for one of those leaks it: no caller holds its
+	// ID, so nothing ever stops it, and it keeps a port, an HTTP server and a
+	// full set of workspace trackers polling git. That extra polling is what
+	// makes the next creation slower, which lengthens the queue, which leaks
+	// more instances.
+	//
+	// Seen in the field as create latency climbing 6ms -> 5.5s -> 34s -> 192s
+	// with 16 live instances and zero deletions, by which point plain
+	// `git ls-files` was hitting its 10s timeout and session resume failed.
+	if err := ctx.Err(); err != nil {
+		m.logger.Warn("create instance abandoned while queued; caller had already given up",
+			zap.String("workspace_path", req.WorkspacePath),
+			zap.Error(err))
+		return nil, fmt.Errorf("create instance abandoned while queued: %w", err)
+	}
+
 	agentEnv, err := config.CollectAgentEnvWithError(req.Env)
 	if err != nil {
 		return nil, fmt.Errorf("prepare agent environment: %w", err)
@@ -144,6 +164,15 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
 	procMgr.StartAllWorkspaceTrackers(context.Background())
 
+	// Starting the trackers is the slow part of creation, so re-check: a caller
+	// that was still waiting when we took the lock can time out during it.
+	// Everything built so far has to be undone by hand — StopInstance takes the
+	// same mutex we are holding, and the instance is not registered yet anyway.
+	if err := ctx.Err(); err != nil {
+		m.abandonPartialInstance(id, port, listener, procMgr)
+		return nil, fmt.Errorf("create instance abandoned during startup: %w", err)
+	}
+
 	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
 		ID:            id,
@@ -171,6 +200,40 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		ID:   id,
 		Port: port,
 	}, nil
+}
+
+// abandonPartialInstanceTimeout bounds the teardown of an instance whose caller
+// vanished mid-creation. It is deliberately short: m.mu is held throughout, so
+// every other creation waits on it, and the queue that produced the abandoned
+// request in the first place is exactly what must not grow further.
+const abandonPartialInstanceTimeout = 5 * time.Second
+
+// abandonPartialInstance unwinds the pieces CreateInstance built before it
+// noticed the caller had gone: the tracker goroutines, the bound listener and
+// the allocated port. It must be called with m.mu held and must not route
+// through StopInstance, which takes that same lock — and the instance was never
+// registered in m.instances, so there is nothing there to remove.
+func (m *Manager) abandonPartialInstance(id string, port int, listener net.Listener, procMgr *process.Manager) {
+	// The request context is already cancelled, so teardown needs its own.
+	ctx, cancel := context.WithTimeout(context.Background(), abandonPartialInstanceTimeout)
+	defer cancel()
+
+	if procMgr != nil {
+		procMgr.CloseAdmission()
+		if err := procMgr.StopForTeardown(ctx); err != nil {
+			m.logger.Warn("error stopping process manager for abandoned instance",
+				zap.String("instance_id", id),
+				zap.Error(err))
+		}
+	}
+	if listener != nil {
+		_ = listener.Close()
+	}
+	m.portAlloc.Release(port)
+
+	m.logger.Warn("abandoned partially created instance",
+		zap.String("instance_id", id),
+		zap.Int("port", port))
 }
 
 // allocatePortAndListener allocates a free port and binds a TCP listener to it.
