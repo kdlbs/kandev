@@ -43,15 +43,15 @@ or state changes. Order: component + unit test first, then E2E.
   - Add `max-h`/`overflow-y-auto` on the sub-content so a 10-PR list cannot
     exceed the viewport on short screens.
 - `AddPanelMenuItems` replaces the inline `.map` with
-  `<PRPanelMenuItems prs={state.prs} onOpenPR={(pr) => addPRPanel(prTaskKey(pr), activeSessionId)} />`.
+  `<PRPanelMenuItems prs={state.prs} onOpenPR={(pr) => addPRPanel(prTaskKey(pr))} />`.
 - Imports: add `DropdownMenuSub`, `DropdownMenuSubTrigger`,
   `DropdownMenuSubContent` from `@kandev/ui/dropdown-menu`.
 - GitLab MR rows stay inline (out of scope per spec).
 
 ### Store / state
 
-None. `addPRPanel`, `prTaskKey`, `prIdentitySlug`, `prPanelLabel`, and
-`activeSessionId` are all reused unchanged.
+None. `addPRPanel`, `prTaskKey`, `prIdentitySlug`, and `prPanelLabel` are all
+reused unchanged.
 
 ---
 
@@ -73,15 +73,16 @@ None. `addPRPanel`, `prTaskKey`, `prIdentitySlug`, `prPanelLabel`, and
   or keyboard on the trigger; follow `task-create-dialog-pill.test.tsx` /
   `executor-settings-button.test.tsx` patterns), then assert every
   `add-panel-pr-item-*` row is visible and labeled `PR #N — owner/repo`.
-- **What:** selecting a submenu row calls `addPRPanel` with that PR's task key
-  and the active session id.
+- **What:** selecting a submenu row calls `addPRPanel` with that PR's task key.
   **File:** same test file. **How:** mock `@/lib/state/dockview-store`
   (`useDockviewStore` returning `addPRPanel: vi.fn()`), mock
   `@/components/state-provider` (`useAppStore` returning
   `{ tasks: { activeSessionId: "session-1" } }`), mock the remaining child hooks
   (`useTaskSessions`, `useSessionPendingInput`, `useRepositoryScripts`,
   `useEnvironmentId`) to render `AddPanelMenuItems`; click a row and assert
-  `addPRPanel` was called with `"owner/repo/N"` and `"session-1"`.
+  `addPRPanel` was called with `prTaskKey(pr)` (e.g. `"owner/repo/N"`). The
+  active session id is not passed here — it is resolved from store state inside
+  `addPRPanel`.
 
 > jsdom notes: Radix submenus only mount `SubContent` when open; open it with
 > pointer events inside `act()`/`waitFor`. If Radix presence keeps the content
