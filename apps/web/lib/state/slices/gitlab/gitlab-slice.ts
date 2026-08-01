@@ -10,6 +10,7 @@ export const defaultGitLabState: GitLabSliceState = {
   gitlabActionPresets: { byWorkspaceId: {}, loading: false },
   gitlabStats: { data: null, loading: false, loadedAt: null },
   gitlabStatus: { workspaceId: null, data: null, loading: false, loadedAt: null },
+  taskMRAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {} },
 };
 
 type ImmerSet = Parameters<
@@ -27,6 +28,7 @@ export const createGitLabSlice: GitLabSliceCreator = (set: ImmerSet) => ({
   ...presetActions(set),
   ...statsActions(set),
   ...statusActions(set),
+  ...taskMRAutomationActions(set),
 });
 
 function taskMRActions(set: ImmerSet) {
@@ -202,6 +204,30 @@ function statusActions(set: ImmerSet) {
       set((draft) => {
         draft.gitlabStatus.workspaceId = workspaceId;
         draft.gitlabStatus.loading = loading;
+      }),
+  };
+}
+
+function taskMRAutomationActions(set: ImmerSet) {
+  return {
+    setTaskMRAutomationOptions: (
+      taskId: string,
+      options: GitLabSliceState["taskMRAutomation"]["byTaskId"][string],
+    ) =>
+      set((draft) => {
+        draft.taskMRAutomation.byTaskId[taskId] = options;
+      }),
+    setTaskMRAutomationLoading: (taskId: string, loading: boolean) =>
+      set((draft) => {
+        draft.taskMRAutomation.loading[taskId] = loading;
+      }),
+    setTaskMRAutomationSaving: (taskId: string, saving: boolean) =>
+      set((draft) => {
+        draft.taskMRAutomation.saving[taskId] = saving;
+      }),
+    setTaskMRAutomationError: (taskId: string, error: string | null) =>
+      set((draft) => {
+        draft.taskMRAutomation.errors[taskId] = error;
       }),
   };
 }

@@ -6,6 +6,7 @@ import type {
   GitLabStats,
   GitLabActionPresets,
   GitLabStatus,
+  TaskMRAutomationOptions,
 } from "@/lib/types/gitlab";
 
 export type TaskMRsState = {
@@ -41,6 +42,13 @@ export type GitLabStatusState = {
   loadedAt: number | null;
 };
 
+export type TaskMRAutomationOptionsState = {
+  byTaskId: Record<string, TaskMRAutomationOptions>;
+  loading: Record<string, boolean>;
+  saving: Record<string, boolean>;
+  errors: Record<string, string | null>;
+};
+
 export type GitLabSliceState = {
   taskMRs: TaskMRsState;
   gitlabReviewWatches: GitLabReviewWatchesState;
@@ -49,6 +57,7 @@ export type GitLabSliceState = {
   gitlabActionPresets: GitLabActionPresetsState;
   gitlabStats: GitLabStatsState;
   gitlabStatus: GitLabStatusState;
+  taskMRAutomation: TaskMRAutomationOptionsState;
 };
 
 export type GitLabSliceActions = {
@@ -82,6 +91,11 @@ export type GitLabSliceActions = {
 
   setGitLabStatus: (workspaceId: string | null, status: GitLabStatus | null) => void;
   setGitLabStatusLoading: (workspaceId: string | null, loading: boolean) => void;
+
+  setTaskMRAutomationOptions: (taskId: string, options: TaskMRAutomationOptions) => void;
+  setTaskMRAutomationLoading: (taskId: string, loading: boolean) => void;
+  setTaskMRAutomationSaving: (taskId: string, saving: boolean) => void;
+  setTaskMRAutomationError: (taskId: string, error: string | null) => void;
 };
 
 export type GitLabSlice = GitLabSliceState & GitLabSliceActions;

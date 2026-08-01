@@ -272,3 +272,66 @@ describe("action presets + stats", () => {
     expect(store.getState().gitlabStats.loadedAt).not.toBeNull();
   });
 });
+
+describe("task MR automation options", () => {
+  it("keys options, loading, saving, and errors independently per task", () => {
+    const store = makeStore();
+    const optionsA = {
+      task_id: "task-a",
+      prompt_on_review_requested: true,
+      prompt_on_merged: false,
+      prompt_on_closed: false,
+      review_reviewer_username: "",
+      updated_at: "2026-01-01T00:00:00Z",
+      mr_states: [],
+    };
+
+    store.getState().setTaskMRAutomationOptions("task-a", optionsA);
+    store.getState().setTaskMRAutomationLoading("task-b", true);
+    store.getState().setTaskMRAutomationSaving("task-a", true);
+    store.getState().setTaskMRAutomationError("task-b", "boom");
+
+    expect(store.getState().taskMRAutomation.byTaskId["task-a"]).toEqual(optionsA);
+    expect(store.getState().taskMRAutomation.byTaskId["task-b"]).toBeUndefined();
+    expect(store.getState().taskMRAutomation.loading["task-b"]).toBe(true);
+    expect(store.getState().taskMRAutomation.loading["task-a"]).toBeUndefined();
+    expect(store.getState().taskMRAutomation.saving["task-a"]).toBe(true);
+    expect(store.getState().taskMRAutomation.errors["task-b"]).toBe("boom");
+    expect(store.getState().taskMRAutomation.errors["task-a"]).toBeUndefined();
+  });
+
+  it("setTaskMRAutomationOptions fully replaces a task's stored options", () => {
+    const store = makeStore();
+    store.getState().setTaskMRAutomationOptions("task-a", {
+      task_id: "task-a",
+      prompt_on_review_requested: true,
+      prompt_on_merged: false,
+      prompt_on_closed: false,
+      review_reviewer_username: "",
+      updated_at: "2026-01-01T00:00:00Z",
+      mr_states: [],
+    });
+    store.getState().setTaskMRAutomationOptions("task-a", {
+      task_id: "task-a",
+      prompt_on_review_requested: false,
+      prompt_on_merged: true,
+      prompt_on_closed: true,
+      review_reviewer_username: "bob",
+      updated_at: "2026-01-02T00:00:00Z",
+      mr_states: [],
+    });
+
+    const stored = store.getState().taskMRAutomation.byTaskId["task-a"];
+    expect(stored?.prompt_on_review_requested).toBe(false);
+    expect(stored?.prompt_on_merged).toBe(true);
+    expect(stored?.review_reviewer_username).toBe("bob");
+  });
+
+  it("setTaskMRAutomationError clears the error by passing null", () => {
+    const store = makeStore();
+    store.getState().setTaskMRAutomationError("task-a", "boom");
+    expect(store.getState().taskMRAutomation.errors["task-a"]).toBe("boom");
+    store.getState().setTaskMRAutomationError("task-a", null);
+    expect(store.getState().taskMRAutomation.errors["task-a"]).toBeNull();
+  });
+});

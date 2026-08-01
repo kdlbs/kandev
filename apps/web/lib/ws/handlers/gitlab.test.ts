@@ -1,20 +1,38 @@
 import { describe, expect, it, vi } from "vitest";
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
-import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskMR, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import { registerGitLabHandlers } from "./gitlab";
 
 const WORKSPACE_A = "workspace-a";
 
 function makeStore(activeWorkspaceId: string | null) {
   const setTaskMR = vi.fn();
+  const setTaskMRAutomationOptions = vi.fn();
   const state = {
     workspaces: { activeId: activeWorkspaceId },
     setTaskMR,
+    setTaskMRAutomationOptions,
   } as unknown as AppState;
   return {
     store: { getState: () => state } as StoreApi<AppState>,
     setTaskMR,
+    setTaskMRAutomationOptions,
+  };
+}
+
+function taskMRAutomationOptions(
+  overrides: Partial<TaskMRAutomationOptions> = {},
+): TaskMRAutomationOptions {
+  return {
+    task_id: "task-1",
+    prompt_on_review_requested: false,
+    prompt_on_merged: true,
+    prompt_on_closed: false,
+    review_reviewer_username: "",
+    updated_at: "2026-01-01T00:00:00Z",
+    mr_states: [],
+    ...overrides,
   };
 }
 
@@ -51,5 +69,28 @@ describe("GitLab WebSocket handlers", () => {
     });
 
     expect(setTaskMR).not.toHaveBeenCalled();
+  });
+
+  it("stores a task MR automation options update pushed for the current task", () => {
+    const { store, setTaskMRAutomationOptions } = makeStore(WORKSPACE_A);
+    const handler = registerGitLabHandlers(store)["gitlab.task_mr_options.updated"]!;
+    const options = taskMRAutomationOptions();
+
+    handler({ type: "notification", action: "gitlab.task_mr_options.updated", payload: options });
+
+    expect(setTaskMRAutomationOptions).toHaveBeenCalledWith("task-1", options);
+  });
+
+  it("ignores a task MR automation options update with no task_id", () => {
+    const { store, setTaskMRAutomationOptions } = makeStore(WORKSPACE_A);
+    const handler = registerGitLabHandlers(store)["gitlab.task_mr_options.updated"]!;
+
+    handler({
+      type: "notification",
+      action: "gitlab.task_mr_options.updated",
+      payload: taskMRAutomationOptions({ task_id: "" }),
+    });
+
+    expect(setTaskMRAutomationOptions).not.toHaveBeenCalled();
   });
 });

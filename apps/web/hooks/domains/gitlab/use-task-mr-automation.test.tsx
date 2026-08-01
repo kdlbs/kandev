@@ -1,5 +1,7 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { createElement, type ReactNode } from "react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 
 const api = vi.hoisted(() => ({
@@ -10,6 +12,10 @@ const api = vi.hoisted(() => ({
 vi.mock("@/lib/api/domains/gitlab-api", () => api);
 
 import { useTaskMRAutomationOptions } from "./use-task-mr-automation";
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(StateProvider, null, children);
+}
 
 function baseOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAutomationOptions {
   return {
@@ -24,6 +30,8 @@ function baseOptions(overrides: Partial<TaskMRAutomationOptions> = {}): TaskMRAu
   };
 }
 
+const NETWORK_DOWN_ERROR = "network down";
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -32,12 +40,13 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("useTaskMRAutomationOptions fetching", () => {
-  beforeEach(() => vi.clearAllMocks());
+beforeEach(() => vi.clearAllMocks());
+afterEach(() => cleanup());
 
+describe("useTaskMRAutomationOptions fetching", () => {
   it("fetches options on mount for a given taskId", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
-    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
 
     await waitFor(() => expect(result.current.options).not.toBeNull());
     expect(api.getTaskMRAutomation).toHaveBeenCalledWith("task-1", { cache: "no-store" });
@@ -46,19 +55,46 @@ describe("useTaskMRAutomationOptions fetching", () => {
   });
 
   it("does not fetch when taskId is null", () => {
-    renderHook(() => useTaskMRAutomationOptions(null));
+    renderHook(() => useTaskMRAutomationOptions(null), { wrapper });
     expect(api.getTaskMRAutomation).not.toHaveBeenCalled();
+  });
+
+  it("does not auto-retry after a load error", async () => {
+    api.getTaskMRAutomation.mockRejectedValue(new Error(NETWORK_DOWN_ERROR));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
+
+    await waitFor(() => expect(result.current.error).toBe(NETWORK_DOWN_ERROR));
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not re-fetch a task whose options are already in the store (WS-pushed or cached)", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions({ prompt_on_merged: true }));
+    const { result, rerender } = renderHook(() => useTaskMRAutomationOptions("task-1"), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+
+    // A remount (e.g. dropdown closed and reopened) with data already cached
+    // in the store must not trigger a second fetch.
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
   });
 });
 
 describe("useTaskMRAutomationOptions optimistic updates", () => {
-  beforeEach(() => vi.clearAllMocks());
-
   it("applies an optimistic update immediately, then reconciles with the server response", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
     const update = deferred<TaskMRAutomationOptions>();
     api.updateTaskMRAutomation.mockImplementation(() => update.promise);
-    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
 
     act(() => {
@@ -80,30 +116,28 @@ describe("useTaskMRAutomationOptions optimistic updates", () => {
 
   it("reverts the optimistic update and surfaces an error on failure (AC27)", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
-    api.updateTaskMRAutomation.mockRejectedValue(new Error("network down"));
-    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"));
+    api.updateTaskMRAutomation.mockRejectedValue(new Error(NETWORK_DOWN_ERROR));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
 
     await act(async () => {
       await expect(result.current.update({ prompt_on_closed: true })).rejects.toThrow(
-        "network down",
+        NETWORK_DOWN_ERROR,
       );
     });
 
     expect(result.current.options?.prompt_on_closed).toBe(false);
-    expect(result.current.error).toBe("network down");
+    expect(result.current.error).toBe(NETWORK_DOWN_ERROR);
     expect(result.current.saving).toBe(false);
   });
 });
 
 describe("useTaskMRAutomationOptions races", () => {
-  beforeEach(() => vi.clearAllMocks());
-
   it("does not let a concurrent refresh discard an update's response (independent generations)", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
     const update = deferred<TaskMRAutomationOptions>();
     api.updateTaskMRAutomation.mockImplementation(() => update.promise);
-    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
 
     // Start an update (PATCH in flight)...
@@ -134,7 +168,7 @@ describe("useTaskMRAutomationOptions races", () => {
 
   it("does not let a refresh started before a save overwrite the saved result", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
-    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"));
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
     await waitFor(() => expect(result.current.options).not.toBeNull());
 
     // A manual refresh starts and stays in flight...
@@ -161,9 +195,7 @@ describe("useTaskMRAutomationOptions races", () => {
 });
 
 describe("useTaskMRAutomationOptions task switching", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("does not leak a stale task's response after switching taskId", async () => {
+  it("keeps each task's options in its own store slot — a stale response for one task cannot leak into another", async () => {
     const taskA = deferred<TaskMRAutomationOptions>();
     api.getTaskMRAutomation.mockImplementation((taskId: string) =>
       taskId === "task-a" ? taskA.promise : Promise.resolve(baseOptions({ task_id: "task-b" })),
@@ -171,40 +203,90 @@ describe("useTaskMRAutomationOptions task switching", () => {
 
     const { result, rerender } = renderHook(
       ({ taskId }: { taskId: string | null }) => useTaskMRAutomationOptions(taskId),
-      { initialProps: { taskId: "task-a" } },
+      { wrapper, initialProps: { taskId: "task-a" } },
     );
 
     // task-a's fetch is still in flight when the caller switches to task-b.
     rerender({ taskId: "task-b" });
     await waitFor(() => expect(result.current.options?.task_id).toBe("task-b"));
 
-    // task-a's stale response resolves after the switch — it must not
-    // overwrite task-b's already-displayed options.
+    // task-a's stale response resolves after the switch — it lands in
+    // task-a's own store slot, not task-b's currently-displayed options.
     await act(async () => {
       taskA.resolve(baseOptions({ task_id: "task-a" }));
     });
     expect(result.current.options?.task_id).toBe("task-b");
   });
 
-  it("reloads options when returning to a task whose intermediate switch never resolved", async () => {
+  it("shows a revisited task's already-cached options immediately without an extra fetch", async () => {
     api.getTaskMRAutomation.mockResolvedValueOnce(baseOptions({ task_id: "task-a" }));
     const { result, rerender } = renderHook(
       ({ taskId }: { taskId: string | null }) => useTaskMRAutomationOptions(taskId),
-      { initialProps: { taskId: "task-a" } },
+      { wrapper, initialProps: { taskId: "task-a" } },
     );
     await waitFor(() => expect(result.current.options?.task_id).toBe("task-a"));
 
-    // Switch to task-b, but its fetch never resolves before switching back
-    // — so nothing ever marks task-b (or re-marks task-a) as loaded.
-    const taskB = deferred<TaskMRAutomationOptions>();
-    api.getTaskMRAutomation.mockReturnValueOnce(taskB.promise);
+    api.getTaskMRAutomation.mockResolvedValueOnce(baseOptions({ task_id: "task-b" }));
     rerender({ taskId: "task-b" });
-    await waitFor(() => expect(result.current.options).toBeNull());
+    await waitFor(() => expect(result.current.options?.task_id).toBe("task-b"));
 
-    // Switch back to task-a before task-b's fetch resolves. This must
-    // re-fetch task-a, not leave options stuck at null.
-    api.getTaskMRAutomation.mockResolvedValueOnce(baseOptions({ task_id: "task-a" }));
+    // Switching back to task-a must show its cached slot immediately,
+    // without issuing a third fetch.
     rerender({ taskId: "task-a" });
-    await waitFor(() => expect(result.current.options?.task_id).toBe("task-a"));
+    expect(result.current.options?.task_id).toBe("task-a");
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(2);
+  });
+
+  it("clears loading for the original task when switching tasks mid-refresh", async () => {
+    let resolveFirst: (value: TaskMRAutomationOptions) => void = () => {};
+    let resolveSecond: (value: TaskMRAutomationOptions) => void = () => {};
+    api.getTaskMRAutomation
+      .mockReturnValueOnce(new Promise((resolve) => (resolveFirst = resolve)))
+      .mockReturnValueOnce(new Promise((resolve) => (resolveSecond = resolve)));
+
+    const { result, rerender } = renderHook(
+      ({ taskId }: { taskId: string | null }) => ({
+        hook: useTaskMRAutomationOptions(taskId),
+        automation: useAppStore((state) => state.taskMRAutomation),
+      }),
+      { wrapper, initialProps: { taskId: "task-a" } },
+    );
+
+    await waitFor(() => expect(result.current.automation.loading["task-a"]).toBe(true));
+    rerender({ taskId: "task-b" });
+    await waitFor(() => expect(result.current.automation.loading["task-b"]).toBe(true));
+
+    resolveFirst(baseOptions({ task_id: "task-a" }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.automation.loading["task-a"]).toBe(false);
+    expect(result.current.automation.loading["task-b"]).toBe(true);
+
+    resolveSecond(baseOptions({ task_id: "task-b" }));
+    await waitFor(() => expect(result.current.automation.loading["task-b"]).toBe(false));
+  });
+});
+
+describe("useTaskMRAutomationOptions live updates", () => {
+  it("reflects a WS-pushed options update (e.g. from another tab or MCP) without a fetch", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions());
+    const { result } = renderHook(
+      () => ({
+        hook: useTaskMRAutomationOptions("task-1"),
+        setOptions: useAppStore((state) => state.setTaskMRAutomationOptions),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hook.options).not.toBeNull());
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      result.current.setOptions("task-1", baseOptions({ prompt_on_merged: true }));
+    });
+
+    expect(result.current.hook.options?.prompt_on_merged).toBe(true);
+    // The push updates the store directly — no extra fetch triggered by it.
+    expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
   });
 });

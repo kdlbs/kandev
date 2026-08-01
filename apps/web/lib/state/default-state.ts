@@ -93,6 +93,7 @@ export const defaultState = {
   gitlabActionPresets: defaultGitLabState.gitlabActionPresets,
   gitlabStats: defaultGitLabState.gitlabStats,
   gitlabStatus: defaultGitLabState.gitlabStatus,
+  taskMRAutomation: defaultGitLabState.taskMRAutomation,
   jiraIssueWatches: defaultJiraState.jiraIssueWatches,
   linearIssueWatches: defaultLinearState.linearIssueWatches,
   office: defaultOfficeState.office,
@@ -318,6 +319,7 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     actionPresets: { ...defaultState.actionPresets, ...initialState.actionPresets },
     prFeedbackCache: { ...defaultState.prFeedbackCache, ...initialState.prFeedbackCache },
     taskCIAutomation: { ...defaultState.taskCIAutomation, ...initialState.taskCIAutomation },
+    taskMRAutomation: { ...defaultState.taskMRAutomation, ...initialState.taskMRAutomation },
     ...mergeCodeHostFields(defaultState, initialState),
     jiraIssueWatches: { ...defaultState.jiraIssueWatches, ...initialState.jiraIssueWatches },
     linearIssueWatches: {

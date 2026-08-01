@@ -54,10 +54,11 @@ lib/state/
 │   ├── settings/                  # executors, agents, editors, prompts (incl. userSettings)
 │   ├── comments/                  # code review diff comments
 │   ├── github/                    # GitHub PRs, reviews
+│   ├── gitlab/                    # GitLab MRs, watches, MR automation options
 │   └── ui/                        # preview, connection, active state, sidebar views
 ├── hydration/                     # SSR merge strategies
 
-hooks/domains/{kanban,session,workspace,settings,comments,github}/  # Domain-organized hooks
+hooks/domains/{kanban,session,workspace,settings,comments,github,gitlab}/  # Domain-organized hooks
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
 ├── plan-api, queue-api, workflow-api, stats-api, github-api
