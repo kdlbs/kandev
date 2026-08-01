@@ -29,6 +29,7 @@ const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
 const SCREENS = [
   { name: "settings — appearance", url: "/settings/general/appearance" },
   { name: "settings — secrets", url: "/settings/general/secrets" },
+  { name: "settings — terminal", url: "/settings/general/terminal" },
 ];
 
 /**

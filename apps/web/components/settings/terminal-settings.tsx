@@ -30,11 +30,9 @@ import { useTranslation } from "react-i18next";
 
 const CUSTOM_VALUE = "__custom__";
 /**
- * Catalog KEYS, not copy. A module-scope table is evaluated once at import, so a
- * `t()` here would freeze at the boot locale and never update on a switch — and
- * neither the lint guard nor the pseudo-locale can see that. Resolved at render
- * in `FontGroupOptions`. The record keys are `FontCategory` values (data) and
- * stay untranslated.
+ * Catalog KEYS, not copy: a `t()` in a module-scope table freezes at the boot
+ * locale, and neither the lint guard nor the pseudo-locale can see that.
+ * Resolved at render in `FontGroupOptions`; the record keys are data.
  */
 export const CATEGORY_LABEL_KEYS: Record<FontCategory, string> = {
   icons: "settings:nerdFonts",
