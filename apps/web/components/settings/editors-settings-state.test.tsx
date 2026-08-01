@@ -64,6 +64,17 @@ describe("getCustomEditorSummary", () => {
   it("falls back to the translated kind label when nothing is configured", () => {
     expect(getCustomEditorSummary(translate, editor({ config: {} }))).toBe("t(settings:command)");
   });
+
+  // A user without a host is not addressable, so the summary shows the kind
+  // rather than a bare username that looks like a target.
+  it("falls back to the kind label when host is absent, even if user is set", () => {
+    expect(
+      getCustomEditorSummary(
+        translate,
+        editor({ kind: "custom_remote_ssh", config: { user: "ada" } }),
+      ),
+    ).toBe("t(settings:vsCodeRemoteSsh)");
+  });
 });
 
 describe("buildDefaultEditorOptions", () => {

@@ -209,4 +209,5 @@ export const i18nGuardFiles = [
   "components/settings/editor-form.tsx",
   "components/settings/editors-settings-state.tsx",
   "components/settings/editors-settings.tsx",
+  "components/settings/lsp-language-options.ts",
 ];

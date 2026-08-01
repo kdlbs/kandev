@@ -42,46 +42,8 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
+import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
-
-/**
- * `id` keys the auto-start/auto-install sets, the config map, and
- * `LSP_DEFAULT_CONFIGS` — a sentinel, never translated. `label` is a language
- * name and `binary` an executable name, so both stay verbatim. Only the install
- * hint is prose, and it is stored as a KEY: this table is evaluated once at
- * import, so a `t()` here would freeze on the boot locale.
- */
-const LSP_LANGUAGE_OPTIONS = [
-  {
-    id: "typescript",
-    label: "TypeScript / JavaScript",
-    binary: "typescript-language-server",
-    docsUrl:
-      "https://github.com/typescript-language-server/typescript-language-server#workspace-configuration",
-    installHintKey: "settings:installsTypescriptLanguageServerAndTypescript",
-  },
-  {
-    id: "go",
-    label: "Go",
-    binary: "gopls",
-    docsUrl: "https://github.com/golang/tools/blob/master/gopls/doc/settings.md",
-    installHintKey: "settings:runsGoInstallGolangOrgXTools",
-  },
-  {
-    id: "rust",
-    label: "Rust",
-    binary: "rust-analyzer",
-    docsUrl: "https://rust-analyzer.github.io/book/configuration.html",
-    installHintKey: "settings:downloadsTheRustAnalyzerBinaryFrom",
-  },
-  {
-    id: "python",
-    label: "Python",
-    binary: "pyright-langserver",
-    docsUrl: "https://microsoft.github.io/pyright/#/settings",
-    installHintKey: "settings:installsPyrightViaNpmInto",
-  },
-];
 
 /**
  * Code identifiers rendered inside `<Trans>` copy. They are passed as
@@ -170,7 +132,7 @@ function LspLanguageCards({
                     <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-[260px] text-xs">
-                    {t(lang.installHintKey)}
+                    {t(lang.installHintKey, lang.installHintValues)}
                   </TooltipContent>
                 </Tooltip>
               </div>

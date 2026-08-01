@@ -43,6 +43,8 @@ const PLACEHOLDER_HINT = "{cwd} {file} {rel} {line} {column}";
 const COMMAND_EXAMPLE = "code --goto {file}:{line}";
 /** Example of the URL this kind builds — a URL, not translatable copy. */
 const REMOTE_SSH_EXAMPLE = "vscode://vscode-remote/ssh-remote+user@host:/path/file:line";
+/** Accepted URL schemes. The user types one of these verbatim into the field. */
+const EDITOR_SCHEME_EXAMPLES = "vscode, cursor";
 
 export function getCustomKindLabel(t: TranslateKey, kind: string) {
   const option = CUSTOM_KIND_OPTIONS.find((candidate) => candidate.value === kind);
@@ -223,7 +225,7 @@ function EditorKindFields({
           value={state.scheme}
           data-settings-dirty={state.scheme !== baseline.scheme}
           onChange={(event) => setField("scheme", event.target.value)}
-          placeholder={t("settings:optionalSchemeVscodeCursor")}
+          placeholder={t("settings:optionalScheme", { schemes: EDITOR_SCHEME_EXAMPLES })}
         />
         <p className="text-xs text-muted-foreground">
           {t("settings:opensAVsCodeRemoteSsh", { example: REMOTE_SSH_EXAMPLE })}
