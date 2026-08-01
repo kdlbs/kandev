@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveFileBrowserPaths } from "./file-browser-path";
+import { getFileBrowserSessionWorkspacePath, resolveFileBrowserPaths } from "./file-browser-path";
 
 describe("resolveFileBrowserPaths", () => {
   it("keeps the toolbar out of loading state when the loaded root path is empty", () => {
@@ -42,5 +42,19 @@ describe("resolveFileBrowserPaths", () => {
       fullPath: "/Users/cfl/Projects/kandev/.kandev/tasks/task-1",
       displayPath: "~/Projects/kandev/.kandev/tasks/task-1",
     });
+  });
+});
+
+describe("getFileBrowserSessionWorkspacePath", () => {
+  it("prefers the effective workspace path and falls back to the legacy worktree path", () => {
+    expect(
+      getFileBrowserSessionWorkspacePath({
+        workspace_path: "/task-root",
+        worktree_path: "/task-root/kandev",
+      }),
+    ).toBe("/task-root");
+    expect(getFileBrowserSessionWorkspacePath({ worktree_path: "/legacy-worktree" })).toBe(
+      "/legacy-worktree",
+    );
   });
 });

@@ -1,6 +1,9 @@
 import type { TaskSession } from "@/lib/types/http";
 
-type SessionWorkspacePathInput = Pick<TaskSession, "workspace_path" | "worktree_path">;
+type SessionWorkspacePathInput = {
+  workspace_path?: TaskSession["workspace_path"] | null;
+  worktree_path?: TaskSession["worktree_path"] | null;
+};
 
 /** Returns the task-root path used by Files/chat, with legacy session fallback. */
 export function getSessionWorkspacePath(

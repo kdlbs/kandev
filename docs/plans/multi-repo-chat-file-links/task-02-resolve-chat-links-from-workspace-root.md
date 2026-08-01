@@ -18,6 +18,8 @@ spec: "../../specs/tasks/attach-workspace-sources.md"
   primary worktree remains stable for repository-aware consumers.
 - Shared task, Office, quick-chat, Markdown-fallback, and Files-root consumers prefer
   `workspace_path` and fall back to `worktree_path` for legacy payloads.
+- Desktop, native-mobile, and LSP file viewers use the same workspace-root selector for display,
+  navigation, and relative-path conversion.
 - Absolute chat links under primary and attached repositories resolve to the correct
   task-root-relative file path; traversal and outside-root absolute paths remain blocked.
 - Desktop and native mobile flows open the linked file after a full reload without showing a file
@@ -31,7 +33,12 @@ rtk pnpm exec vitest run \
   lib/session-workspace-path.test.ts \
   lib/state/slices/session/session-slice.upsert.test.ts \
   lib/ws/handlers/agent-session.test.ts \
-  components/shared/markdown-components.test.tsx
+  components/shared/markdown-components.test.tsx \
+  components/task/file-browser-path.test.ts \
+  components/task/file-tab-content.test.tsx \
+  components/task/mobile/mobile-file-viewer-panel.test.tsx \
+  components/task/file-editor-panel.image.test.tsx \
+  hooks/use-lsp-file-opener.test.ts
 rtk pnpm run typecheck
 rtk pnpm e2e:run -- --project=chromium tests/task/add-workspace-sources.spec.ts
 rtk pnpm e2e:run -- --project=mobile-chrome tests/task/mobile-add-workspace-sources.spec.ts
@@ -55,6 +62,17 @@ If dependencies are absent, first run `rtk pnpm install --frozen-lockfile` from 
 - `apps/web/app/office/tasks/[id]/office-dockview-layout.tsx`
 - `apps/web/components/quick-chat/quick-chat-content.tsx`
 - `apps/web/components/task/file-browser.tsx`
+- `apps/web/components/task/file-browser-path.ts`
+- `apps/web/components/task/file-browser-path.test.ts`
+- `apps/web/components/task/file-tab-content.tsx`
+- `apps/web/components/task/file-tab-content.test.tsx`
+- `apps/web/components/task/file-editor-panel.tsx`
+- `apps/web/components/task/file-editor-panel.image.test.tsx`
+- `apps/web/components/task/mobile/mobile-file-viewer-panel.tsx`
+- `apps/web/components/task/mobile/mobile-file-viewer-panel.test.tsx`
+- `apps/web/hooks/use-lsp-file-opener.ts`
+- `apps/web/hooks/use-lsp-file-opener.test.ts`
+- `apps/web/e2e/helpers/api-client.ts`
 - `apps/web/e2e/tests/task/add-workspace-sources.spec.ts`
 - `apps/web/e2e/tests/task/mobile-add-workspace-sources.spec.ts`
 
@@ -84,8 +102,8 @@ browser verification.
    sibling Markdown links, legacy fallback, and outside-root rejection; confirm RED.
 3. Add `workspace_path` to the session type/store, correct the WS/Office writers, and implement the
    shared root selector.
-4. Route chat, Markdown fallback, and Files consumers through the selector without changing the
-   file API or repository-aware Git fields.
+4. Route chat, Markdown fallback, Files, desktop/mobile viewer, and LSP consumers through the
+   selector without changing the file API or repository-aware Git fields.
 5. Reach GREEN on the focused Vitest set, typecheck, desktop E2E, and mobile E2E.
 
 ## Mobile-Parity Notes

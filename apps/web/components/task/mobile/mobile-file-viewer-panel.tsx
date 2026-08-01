@@ -11,6 +11,7 @@ import { FileBinaryViewer } from "../file-binary-viewer";
 import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
 import { useAppStore } from "@/components/state-provider";
 import type { OpenFileTab } from "@/lib/types/backend";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   ExternalVcsFileLink,
   useExternalVcsFileStatus,
@@ -86,7 +87,7 @@ export function MobileFileViewerPanel({
     sessionId ? (state.taskSessions.items[sessionId] ?? null) : null,
   );
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
-  const worktreePath = activeSession?.worktree_path ?? undefined;
+  const worktreePath = getSessionWorkspacePath(activeSession);
   const repositoryId = activeSession?.repository_id ?? undefined;
   const fileStatus = useExternalVcsFileStatus(file.path, sessionId, file.repo);
   const viewerKind = useMemo(() => resolveViewerKind(file), [file]);

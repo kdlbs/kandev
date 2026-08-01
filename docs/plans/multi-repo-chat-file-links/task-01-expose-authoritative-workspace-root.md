@@ -22,8 +22,7 @@ spec: "../../specs/tasks/attach-workspace-sources.md"
 ## Verification
 
 ```bash
-cd apps/backend
-rtk go test ./internal/task/repository/sqlite ./internal/task/dto
+make -C apps/backend test
 ```
 
 ## Files Likely Touched

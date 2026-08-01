@@ -39,6 +39,14 @@ function createSourceDirectories(root: string) {
   return { repositoryPath, folderPath };
 }
 
+function activeFileEditor(page: Page) {
+  return page.locator(".monaco-editor:visible").first();
+}
+
+function activeFileTab(page: Page, filename: string) {
+  return page.locator(".dv-tab.dv-active-tab", { hasText: filename }).first();
+}
+
 test.describe("Attach local workspace sources", () => {
   test("adds a local repository and folder successively, scopes Changes to Git, and persists", async ({
     testPage,
@@ -207,6 +215,14 @@ test.describe("Attach local workspace sources", () => {
 
     await testPage.reload();
     await session.waitForLoad();
+    const refreshedSessions = await apiClient.listTaskSessions(task.id);
+    const refreshedPrimarySession = refreshedSessions.sessions.find(
+      ({ id }) => id === task.session_id,
+    );
+    expect(refreshedPrimarySession).toMatchObject({
+      workspace_path: path.dirname(repoPaths[0]),
+      worktree_path: repoPaths[0],
+    });
     await session.clickTab("Files");
     await expect(
       session.files
@@ -242,23 +258,14 @@ test.describe("Attach local workspace sources", () => {
     await expect(primaryChatLink).toBeVisible({ timeout: 15_000 });
     await expect(siblingChatLink).toBeVisible({ timeout: 15_000 });
     await primaryChatLink.click();
-    await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({
-      timeout: 15_000,
-    });
-    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
-      "repository 0",
-    );
-    await expect(testPage.locator(".dv-tab", { hasText: "repository-0.txt" })).toBeVisible({
-      timeout: 15_000,
-    });
+    const fileEditor = activeFileEditor(testPage);
+    await expect(fileEditor).toBeVisible({ timeout: 15_000 });
+    await expect(fileEditor.locator(".view-lines")).toContainText("repository 0");
+    await expect(activeFileTab(testPage, "repository-0.txt")).toBeVisible({ timeout: 15_000 });
     await session.showSessionContext();
     await session.activeChat().getByRole("link", { name: "second source" }).click();
-    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
-      "repository source",
-    );
-    await expect(testPage.locator(".dv-tab", { hasText: "second-source.txt" })).toBeVisible({
-      timeout: 15_000,
-    });
+    await expect(fileEditor.locator(".view-lines")).toContainText("repository source");
+    await expect(activeFileTab(testPage, "second-source.txt")).toBeVisible({ timeout: 15_000 });
   });
 
   test("explains the disabled action while an active turn is running", async ({

@@ -181,8 +181,7 @@ waves do not authorize subagents.
 ## Verification Commands
 
 ```bash
-cd apps/backend
-rtk go test ./internal/task/repository/sqlite ./internal/task/dto
+make -C apps/backend test
 
 cd apps/web
 rtk pnpm exec vitest run \
@@ -232,9 +231,9 @@ None.
 
 ## Verification Results
 
-- `rtk go test ./internal/task/repository/sqlite ./internal/task/dto` — 207 tests passed.
-- Focused Vitest suite (workspace selector, session merge/WS handlers, Markdown links) — 95 tests
-  passed in 4 files.
+- `make -C apps/backend test` — passed.
+- Focused Vitest suite (workspace selector, session merge/WS handlers, file viewers, LSP paths, and
+  Markdown links) — 112 tests passed in 9 files.
 - `rtk pnpm run typecheck` — passed.
 - Targeted ESLint on changed frontend files — passed with zero warnings.
 - Desktop Chromium add-sources regression — passed; absolute links opened in both the primary and
