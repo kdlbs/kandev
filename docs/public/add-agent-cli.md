@@ -15,6 +15,13 @@ Choose the smallest integration that matches the CLI:
 
 ACP, REST, and MCP are different boundaries. ACP is the only structured agent protocol accepted by the current agentctl adapter factory. REST/WebSocket control agentctl and Kandev. MCP supplies tools to an agent; it is not a runtime adapter.
 
+## Quick path
+
+1. Use **Add TUI Agent** for a local terminal-only CLI.
+2. Add a built-in `TUIAgent` only when every Kandev install needs it.
+3. Use a full ACP integration for structured chat, tools, models, modes, or resume.
+4. Test discovery, exact command tokens, permissions, credentials, resume, and MCP delivery before packaging.
+
 ## Register a local TUI agent
 
 Open **Settings → Agents**, choose **Add TUI Agent**, and provide:

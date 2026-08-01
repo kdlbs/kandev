@@ -21,6 +21,13 @@ Like the rest of plugins, the marketplace ships in the base product with no
 feature flag to turn on — **Settings > Plugins** is always available in the
 sidebar.
 
+## Quick path
+
+1. Browse and filter the catalog.
+2. Select **Install** and review the package result.
+3. Update installed plugins only when you approve the new version.
+4. Add a team source only when you trust its maintainer.
+
 > **Sideloading still works.** The marketplace only adds *discovery*. Installing
 > a plugin by URL or by uploading a `.tar.gz` is unchanged and always available,
 > even with every source disabled or offline — see
@@ -99,6 +106,9 @@ Notes:
 
 ## Publishing a plugin
 
+<details>
+<summary>Publishing details</summary>
+
 Getting a plugin into the catalog follows a **one-repo-per-plugin** model,
 mirroring Obsidian's community-plugin registry: each plugin lives in its own
 public GitHub repository and publishes its package as a GitHub **Release**
@@ -169,7 +179,12 @@ Ranking in the catalog is **GitHub stars only** — there is no download or usag
 telemetry to game. Full submission details are in
 [`plugin-registry/README.md`](https://github.com/kdlbs/kandev/blob/main/plugin-registry/README.md).
 
+</details>
+
 ## Host your own source
+
+<details>
+<summary>Host-source details</summary>
 
 You do not have to PR into the official registry to share plugins internally.
 Any URL that serves an `index.json` document of the catalog shape can be added
@@ -191,3 +206,5 @@ shape, the build pipeline, and the source data model are specified in the
 Related: [Plugins](plugins.md), [Authoring a
 plugin](plugins-authoring.md), [Plugin manifest
 reference](plugins-manifest.md).
+
+</details>

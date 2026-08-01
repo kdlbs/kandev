@@ -33,6 +33,9 @@ Kandev currently has no built-in multi-user web login or API authorization bound
 
 ## Published images
 
+<details>
+<summary>Published image details</summary>
+
 The release workflow publishes multi-architecture `linux/amd64` and `linux/arm64` images to `ghcr.io/kdlbs/kandev`.
 
 | Flavor | Moving tag | Version tags | Contents |
@@ -64,6 +67,11 @@ RUN apt-get update \
 ```
 
 Leaving the final configured user as root is intentional for this base flavor: the inherited entrypoint repairs `/data` and drops to `kandev` before starting the command. If a derivative finishes with `USER kandev`, provision writable volume ownership in advance, as the universal flavor does.
+
+</details>
+
+<details>
+<summary>Image runtime behavior and persistence details</summary>
 
 ## Image runtime behavior
 
@@ -112,6 +120,8 @@ docker exec --user kandev -it kandev sh
 ```
 
 The same rule applies to `claude login`, `codex login`, and manual `npm install -g` commands. Treat `/data/home` and the database as secret material when backing them up.
+
+</details>
 
 ## Configuration
 

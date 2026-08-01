@@ -7,6 +7,13 @@ description: "Run Kandev on Windows through native and WSL workflows."
 
 Kandev has native Windows x64 desktop and npm/npx releases. WSL 2 remains useful when repositories, agents, or setup scripts assume a Linux environment. Choose one execution environment per Kandev installation; a native process and a WSL process use different filesystems, tools, Docker endpoints, and credential stores even when they can reach each other over localhost.
 
+## Quick path
+
+1. Choose Desktop or the native npm/npx CLI for normal Windows use.
+2. Use WSL 2 only when Linux tools or scripts are required.
+3. Keep repositories, agents, Docker, and credentials in the same environment as Kandev.
+4. Use the troubleshooting section for path, shell, and browser differences.
+
 | Path | Best for | Main limitations |
 |---|---|---|
 | [Desktop app](./desktop-app.md) | Normal interactive use, native menus/notifications/updates | Windows x64 and WebView2; no service/background mode |
@@ -125,6 +132,9 @@ docker info
 
 The local Docker executor creates its client lazily, so Kandev can start even when Docker Desktop is stopped; the executor fails when first used and retries on a later attempt. Windows drive sharing, bind mounts, corporate Docker policies, and WSL-backed Docker Desktop are external dependencies. Do not expose an unauthenticated Docker TCP endpoint. See [Docker](./docker.md).
 
+<details>
+<summary>Run Kandev in WSL 2</summary>
+
 ## Run in WSL 2
 
 WSL is the better choice when the repository's commands and agent CLI are Linux-native.
@@ -169,6 +179,8 @@ Keep Linux worktrees in the WSL filesystem (for example under `~/src` or the def
 ### WSL and Docker
 
 When Docker Desktop WSL integration is enabled for the distribution, verify `docker info` inside WSL. Otherwise install/configure a Linux Docker daemon inside WSL according to your platform policy. Native Windows named-pipe settings do not apply inside WSL; its default endpoint is the Unix socket.
+
+</details>
 
 ## Remote executor limitation
 

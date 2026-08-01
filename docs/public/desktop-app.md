@@ -9,6 +9,13 @@ Kandev Desktop packages the native Kandev runtime inside a Tauri application and
 
 The [CLI](./cli.md) is a better fit for headless machines, browser-only access, or an OS service. Desktop and CLI releases use the same SemVer and the same default Kandev data layout, but they are separate installation and update channels.
 
+## Quick path
+
+1. Download the installer for your platform from GitHub Releases.
+2. Verify its checksum.
+3. Install and launch Kandev.
+4. Use the in-app updater only when a signed update feed is available; otherwise install the next verified artifact manually.
+
 ## Supported artifacts
 
 Download artifacts from [GitHub Releases](https://github.com/kdlbs/kandev/releases). Each desktop filename begins with `kandev-desktop-<platform>-`; use the installer format for your platform, not an updater archive.

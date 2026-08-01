@@ -42,7 +42,12 @@ Skip public docs when the change is:
 4. If no public docs exist but the behavior is user-facing, add or propose the smallest useful public page/section.
    When adding a page, include `title` and `description` frontmatter and list its page slug or path without the `.md` extension in `docs/public/meta.json` exactly once, for example `cli`. See `docs/public/README.md`.
 5. If the change only updates implementation intent or architectural history, update specs/plans/ADRs instead.
-6. Keep public docs task-oriented: prerequisites, commands, expected result, troubleshooting, and links to reference.
+6. Keep public docs task-oriented and scan-friendly:
+   - Start with the common path, expected result, and only the prerequisites it needs.
+   - Use short paragraphs (one idea, normally three sentences or fewer) and bullets for choices, limits, and consequences.
+   - Prefer a link to the page that owns a detailed contract over repeating it.
+   - Use native `<details>` / `<summary>` disclosures for non-essential edge cases, exhaustive option lists, and advanced configuration. Keep required steps, security warnings, destructive effects, and eligibility limits visible.
+   - Use tables only for genuine comparisons, not narrative text.
 7. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
 8. Note docs impact in the PR body.
 
