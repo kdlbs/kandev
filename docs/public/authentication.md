@@ -11,8 +11,8 @@ Authentication is a **runtime feature toggle** — the same system as the other 
 
 ## Quick checklist
 
-1. Keep authentication off for a single-user laptop.
-2. For a shared server, enable **Authentication & users** and restart.
+1. Keep authentication off only for a single-user laptop bound to loopback or another private listener.
+2. For any server reachable by other users or networks, enable **Authentication & users** and restart.
 3. Create the first admin immediately after setup mode appears.
 4. Use personal access tokens for scripts and external MCP clients.
 5. Keep TLS, filesystem permissions, and agent credentials as separate security boundaries.

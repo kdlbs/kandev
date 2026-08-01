@@ -454,6 +454,8 @@ An instance cannot be deleted while a watch references it. Because the instance 
 
 ## Slack
 
+> **Security:** Slack matching text is untrusted input, and the external MCP endpoint exposes destructive task/configuration tools. Use a constrained utility agent and model; review the [external MCP security boundary](automation-and-mcp.md#external-mcp-security-boundary).
+
 <details>
 <summary>Slack details</summary>
 

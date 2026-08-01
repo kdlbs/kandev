@@ -157,6 +157,8 @@ Source batches are atomic: if validation, cloning, or runtime adoption fails, Ka
 
 ## Local Docker
 
+> **Daemon authority:** Dockerfile instructions run with the configured daemon's authority. Treat profile creation as an administrative operation on that daemon.
+
 <details>
 <summary>Local Docker details</summary>
 
@@ -194,6 +196,8 @@ Kandev passes each agent definition's CPU and memory limits to Docker. These are
 
 ### Credentials and security
 
+> **Trust boundary:** A container is useful but not a hostile-code sandbox. The daemon has host-level power, bind mounts expose sources, agents can use injected secrets, and the default image has outbound network access. Kandev does not mount the Docker socket automatically.
+
 <details>
 <summary>Docker credential and security details</summary>
 
@@ -210,6 +214,8 @@ docker ps -a --filter label=kandev.managed=true
 </details>
 
 ## Sprites.dev
+
+> **Credentials and network:** Sprites sandboxes receive highly sensitive data. Credential upload is best effort, and network policy is installed only after credential upload, prepare, controller startup, and agent-instance creation; bootstrap traffic may happen first, so the policy is not a security boundary.
 
 <details>
 <summary>Sprites.dev details</summary>
@@ -232,6 +238,8 @@ Plain Stop preserves the sandbox and workspace for resume. Archive/delete termin
 </details>
 
 ## SSH
+
+> **Trust boundary:** Verify the target host fingerprint before saving. Kandev pins the target key, but unknown ProxyJump bastion keys may be accepted on first use; remote credential transfers write sensitive material under the remote user's home.
 
 <details>
 <summary>SSH details</summary>
@@ -269,6 +277,8 @@ The remote-auth card is built from the currently enabled agents. Depending on an
 </details>
 
 ### Repository sources and cleanup
+
+> **Cleanup:** SSH task directories, session-runtime data, and cached helpers may remain after disconnect. Audit remote processes and paths before deleting anything.
 
 <details>
 <summary>SSH repository source details</summary>

@@ -20,7 +20,9 @@ ACP, REST, and MCP are different boundaries. ACP is the only structured agent pr
 1. Use **Add TUI Agent** for a local terminal-only CLI.
 2. Add a built-in `TUIAgent` only when every Kandev install needs it.
 3. Use a full ACP integration for structured chat, tools, models, modes, or resume.
-4. Test discovery, exact command tokens, permissions, credentials, resume, and MCP delivery before packaging.
+4. Validate the path you chose:
+   - local TUI: installation discovery and exact command-token construction;
+   - built-in or ACP: declared permissions, credentials, resume, and MCP delivery.
 
 ## Register a local TUI agent
 

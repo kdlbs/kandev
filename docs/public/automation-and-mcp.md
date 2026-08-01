@@ -25,7 +25,8 @@ Across Kandev's task, configuration, external, and Office MCP modes, each tool c
 - Use a **workflow event** for predictable transitions on existing tasks.
 - Use a **workspace automation** when a schedule or external signal should create work.
 - Use **task MCP** for tools inside an active agent session.
-- Use **profile or external MCP** to connect third-party clients or servers.
+- Use **profile MCP** to add servers to an agent profile.
+- Use **external MCP** to expose Kandev tools to third-party clients.
 - Treat credentials delivered through any MCP or executor profile as available to the receiving agent.
 
 ## Workflow events and human gates
@@ -299,7 +300,12 @@ External mode has no live Kandev session, so it does not expose `stop_task_kande
 
 ### External MCP security boundary
 
-The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Kandev authentication. They are reachable on every interface to which the backend is bound. Anyone who can reach them can attempt the exposed configuration and task mutations.
+The `/mcp`, `/mcp/sse`, and `/mcp/message` routes are mounted through
+`externalMCPAuthMiddleware`. With authentication disabled, they remain open for
+the current single-user behavior. When authentication is enabled, external
+clients must provide a personal access token; an already-authenticated browser
+session may also pass the same middleware. This is separate from task-mode MCP,
+which runs inside the agentctl session boundary.
 
 - Bind the backend to loopback for a local single-user install.
 - For remote use, place the whole backend behind a VPN, firewall, or authenticated TLS reverse proxy.

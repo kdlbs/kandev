@@ -235,6 +235,8 @@ Lifecycle messages only report the observed event and canonical PR URL; the task
 
 </details>
 
+> **Confidentiality:** redaction is heuristic, a secret Gist is accessible to anyone with its URL, and the snapshot is rendered through a third-party service. Inspect the preview and do not share material that must remain private.
+
 <details>
 <summary>Share a session externally</summary>
 

@@ -142,6 +142,8 @@ the Kandev service first provides the clearest maintenance boundary.
 
 ## Database operation
 
+> **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.
+
 <details>
 <summary>Database operation details</summary>
 
@@ -203,6 +205,8 @@ Adapt the source for a custom `--home-dir`. This archive still does not include 
 </details>
 
 ## Restore and recovery
+
+> **Restore warning:** Stop or finish active sessions, relaunch Kandev after restoring, and reconcile worktrees, containers, pull requests, credentials, and other external state before restarting automation. A database restore does not roll those systems back.
 
 <details>
 <summary>Restore details</summary>

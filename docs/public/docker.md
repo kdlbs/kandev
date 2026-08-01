@@ -70,6 +70,8 @@ Leaving the final configured user as root is intentional for this base flavor: t
 
 </details>
 
+> **Persistence:** Always mount `/data`. Removing a container without a volume removes its database, workspaces, installed agent CLIs, and authentication state.
+
 <details>
 <summary>Image runtime behavior and persistence details</summary>
 
@@ -86,8 +88,6 @@ The base image:
 The universal derivative sets `USER kandev`, so it skips the base entrypoint's root ownership repair. Pre-create a writable bind mount before using that flavor. Recursive ownership repair in the base image makes named volumes convenient, but can be slow on a large bind mount and can fail on root-squashed network storage. To run either image directly as UID 1000, pre-create every required path with suitable ownership and test the storage driver.
 
 ## Persistence
-
-Always mount `/data`. Removing a container without a volume removes its database, workspaces, installed agent CLIs, and authentication state.
 
 | Volume path | Data |
 |---|---|

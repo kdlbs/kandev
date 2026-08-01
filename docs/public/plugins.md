@@ -25,7 +25,7 @@ trust — see [Security posture](#security-posture).
 
 1. Open **Settings > Plugins**.
 2. Install from the marketplace, a URL, or a local tarball.
-3. Confirm the package integrity result before enabling it.
+3. Let the installer verify package integrity before it extracts or spawns the plugin; review the install result before enabling it.
 4. Disable or uninstall a plugin when it is no longer trusted or needed.
 
 ## How it works

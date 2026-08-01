@@ -138,6 +138,8 @@ Keep one transition action per event. A “next” action on the last step or �
 
 ## Safe authoring pattern
 
+> **Safety:** Requiring `step_complete_kandev` can leave a step waiting indefinitely if the agent cannot call it. Export before large edits; workflow deletion is permanent and may require task migration or archival.
+
 <details>
 <summary>Safe authoring details</summary>
 

@@ -169,10 +169,12 @@ env:
 
 Use the SSL mode and trust material required by your database. PostgreSQL moves only database data; keep the `/data` PVC. Kandev's built-in backup/restore is SQLite-only, so schedule `pg_dump` and test restoration independently.
 
+## Agent execution in a pod
+
+> **Docker boundary:** Do not add only a Docker socket mount. The runtime also needs helper, credential-session, and local-clone bind sources at matching daemon-host paths. Privileged Docker-in-Docker has a separate security and persistence model and no supplied manifest.
+
 <details>
 <summary>Agent execution, resources, and probes</summary>
-
-## Agent execution in a pod
 
 Local and Worktree profiles run agents inside the Kandev pod. Install agent CLIs from **Settings > Agents**, or derive an image that contains them. Runtime npm installs persist under `/data/.npm-global`. Choose the universal image when tasks need its additional build toolchains, but account for the larger image and non-root volume requirement.
 

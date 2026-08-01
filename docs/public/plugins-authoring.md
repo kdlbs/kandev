@@ -128,6 +128,8 @@ side effect.
 
 ## The Host API
 
+> **Auth capability:** Only assert email addresses the identity provider verified as owned by the subject. An unverified or user-controlled email claim can take over an account; grant this capability only to trusted plugins.
+
 <details>
 <summary>Host API and native UI details</summary>
 

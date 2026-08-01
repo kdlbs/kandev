@@ -82,6 +82,8 @@ ui:                                           # optional native frontend plugin
 
 ## Field reference
 
+> **Security:** `capabilities.auth` lets a plugin assert external login identities. Grant it only to trusted plugins whose identity provider verifies email ownership; a spoofed email claim can take over an account.
+
 <details>
 <summary>Complete field reference and validation rules</summary>
 

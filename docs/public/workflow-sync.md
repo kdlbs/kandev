@@ -109,12 +109,14 @@ A valid fetch that returns no supported files is different: it is an empty desir
 
 Repository listing or file-download failures fail the run before apply. Per-workspace locking serializes sync, configuration changes, and removal, so two requests cannot interleave their changes.
 
+> **Network security:** The HTTP API is unauthenticated and can read or change sync configuration with the backend's GitHub credentials. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing it.
+
 <details>
 <summary>HTTP API, reconciliation, and cleanup details</summary>
 
 ## HTTP API
 
-The settings UI uses these backend routes. All require a `workspace_id` query parameter. They currently have no backend authentication: any network client that can reach them can inspect or change sync configuration and trigger repository reads with the backend's GitHub credentials. Keep the backend on loopback or put it behind an authenticated, origin-protected reverse proxy before exposing it.
+The settings UI uses these backend routes. All require a `workspace_id` query parameter.
 
 | Method | Route | Success behavior |
 |--------|-------|------------------|

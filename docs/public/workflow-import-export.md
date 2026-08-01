@@ -26,12 +26,14 @@ Open **Settings → Workspaces → select a workspace → Workflows**.
 
 Export does not download a file or change the workflow. Import creates new workflows; it never overwrites a same-named workflow. Delete an unwanted imported workflow through the normal workflow settings flow.
 
+> **Network security:** The HTTP routes are unauthenticated. Keep the backend on loopback or behind an authenticated, origin-protected reverse proxy before exposing them to a network.
+
 <details>
 <summary>HTTP format, fields, and reconciliation details</summary>
 
 ## HTTP routes
 
-All routes are on the Kandev backend under `/api/v1`. The current backend does not authenticate these routes, so treat anyone who can reach them as trusted to read or create workspace workflows. Keep the backend on loopback or put it behind an authenticated, origin-protected reverse proxy before exposing it to a network.
+All routes are on the Kandev backend under `/api/v1`.
 
 | Method | Route | Behavior |
 |--------|-------|----------|
@@ -179,6 +181,8 @@ The Workflows settings UI filters Office-style workflows from its list and Expor
 </details>
 
 ## Profile matching
+
+> **Import warning:** Validation happens before creation, but import is not one transaction across the file. A later failure can leave partial workflows or steps; inspect the workspace and delete incomplete workflows before retrying.
 
 <details>
 <summary>Profile matching and import details</summary>
