@@ -60,22 +60,27 @@ function useEventMeta() {
   };
 }
 
+/**
+ * `eventTitle` comes from the row that owns it rather than a second
+ * `useEventMeta()` lookup, so the accessible name can never drift from the title
+ * the user reads next to the checkbox.
+ */
 function EventCheckbox({
   provider,
   baselineProviders,
   eventType,
+  eventTitle,
   onToggleEvent,
   mobile = false,
 }: {
   provider: NotificationProvider;
   baselineProviders: NotificationProvider[];
   eventType: string;
+  eventTitle: string;
   onToggleEvent: Props["onToggleEvent"];
   mobile?: boolean;
 }) {
   const { t } = useTranslation();
-  const eventMeta = useEventMeta();
-  const meta = eventMeta(eventType);
   const checked = (provider.events ?? []).includes(eventType);
   const baselineChecked = (
     baselineProviders.find((candidate) => candidate.id === provider.id)?.events ?? []
@@ -83,7 +88,7 @@ function EventCheckbox({
   const checkbox = (
     <Checkbox
       aria-label={t("settings:notificationEventToggle", {
-        event: meta.title,
+        event: eventTitle,
         name: provider.name,
       })}
       checked={checked}
@@ -164,6 +169,7 @@ function MobileEventList({
                     provider={provider}
                     baselineProviders={baselineProviders}
                     eventType={eventType}
+                    eventTitle={meta.title}
                     onToggleEvent={onToggleEvent}
                     mobile
                   />
@@ -221,6 +227,7 @@ function DesktopEventTable({
                         provider={provider}
                         baselineProviders={baselineProviders}
                         eventType={eventType}
+                        eventTitle={meta.title}
                         onToggleEvent={onToggleEvent}
                       />
                     </div>

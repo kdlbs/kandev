@@ -25,9 +25,25 @@ import { test, expect } from "../../fixtures/test-base";
 
 const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
 
-/** Migrated screens whose visible text is overwhelmingly UI chrome, not user data. */
-const SCREENS = [
+/**
+ * Migrated screens whose visible text is overwhelmingly UI chrome, not user data.
+ *
+ * `allow` extends `ALLOWED` for one screen only. Use it for text the frontend
+ * must NOT translate but cannot avoid rendering — records the backend owns, or a
+ * product name — and say where the value comes from, so the exemption stays
+ * auditable instead of quietly widening into a place to hide missed strings.
+ */
+const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   { name: "settings — appearance", url: "/settings/general/appearance" },
+  {
+    name: "settings — notifications",
+    url: "/settings/general/notifications",
+    // Provider names are rows in the notification_providers table. The backend
+    // seeds these two (apps/backend/internal/notifications/service/service.go)
+    // and users name their own Apprise ones, so they are data on the same
+    // footing as a task title. `Apprise` labels the provider type.
+    allow: ["Desktop Notifications", "System Notifications", "Apprise"],
+  },
   { name: "settings — secrets", url: "/settings/general/secrets" },
   { name: "settings — terminal", url: "/settings/general/terminal" },
 ];
@@ -111,7 +127,7 @@ test.describe("i18n pseudo-locale coverage", () => {
       // Let lazy panels settle before scanning.
       await testPage.waitForTimeout(1_000);
 
-      const leftovers = await findUnlocalizedText(testPage, ALLOWED);
+      const leftovers = await findUnlocalizedText(testPage, [...ALLOWED, ...(screen.allow ?? [])]);
       expect(
         leftovers,
         `Un-externalized strings on ${screen.name}:\n${leftovers.map((s) => `  - ${s}`).join("\n")}`,
