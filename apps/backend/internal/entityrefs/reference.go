@@ -19,9 +19,13 @@ var ErrInvalidReference = errors.New("invalid entity reference")
 var identityNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
 
 const (
-	maxReferencesPerMessage = 100
-	kandevProviderID        = "kandev"
-	kandevTaskKind          = "task"
+	// MaxReferencesPerMessage is the per-message entity-reference cap enforced
+	// by NormalizeForSubmission/NormalizePersisted. Consumers that build
+	// combined reference lists (e.g. message queue merges) use it to reject
+	// unions that would exceed the cap instead of silently dropping refs.
+	MaxReferencesPerMessage = 100
+	kandevProviderID         = "kandev"
+	kandevTaskKind           = "task"
 )
 
 // CanonicalRef constructs the opaque stable identity owned by the registry.
@@ -60,11 +64,11 @@ func NormalizePersisted(raw any) []apiv1.EntityReference {
 }
 
 func normalize(references []apiv1.EntityReference, strict bool) ([]apiv1.EntityReference, error) {
-	if len(references) > maxReferencesPerMessage {
+	if len(references) > MaxReferencesPerMessage {
 		if strict {
-			return nil, fmt.Errorf("%w: at most %d references are allowed", ErrInvalidReference, maxReferencesPerMessage)
+			return nil, fmt.Errorf("%w: at most %d references are allowed", ErrInvalidReference, MaxReferencesPerMessage)
 		}
-		references = references[:maxReferencesPerMessage]
+		references = references[:MaxReferencesPerMessage]
 	}
 	result := make([]apiv1.EntityReference, 0, len(references))
 	seen := make(map[string]struct{}, len(references))

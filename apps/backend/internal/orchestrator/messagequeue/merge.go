@@ -72,7 +72,7 @@ func mergeEntryMetadata(target, source map[string]interface{}) (map[string]inter
 // unionEntityReferences returns the deduplicated union of two entries' entity
 // reference lists, normalized from either their Go-struct or JSON-roundtripped
 // storage form. When the union would exceed the per-message limit entityrefs
-// enforces (maxReferencesPerMessage), it returns ErrMergeReferenceOverflow so
+// enforces (MaxReferencesPerMessage), it returns ErrMergeReferenceOverflow so
 // the caller can reject the merge atomically instead of silently dropping
 // references that were already persisted.
 func unionEntityReferences(targetMetadata, sourceMetadata map[string]interface{}) ([]apiv1.EntityReference, error) {
