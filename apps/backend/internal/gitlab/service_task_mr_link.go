@@ -312,6 +312,38 @@ type TaskMRUpdatedEvent struct {
 	*TaskMR
 }
 
+// publishTaskMRLifecycleSyncEvent publishes a TaskMRUpdatedEvent after the
+// poller's lifecycle sync pass refreshes a linked MR (AC22). Best-effort
+// workspace resolution: an empty workspace ID still publishes (matching the
+// existing broadcast-instance-wide fallback for events without workspace
+// context), since the orchestrator's lifecycle subscriber only needs the
+// embedded *TaskMR, not the workspace ID.
+func (s *Service) publishTaskMRLifecycleSyncEvent(ctx context.Context, mr *TaskMR) {
+	if mr == nil {
+		return
+	}
+	s.mu.RLock()
+	eventBus := s.eventBus
+	store := s.store
+	s.mu.RUnlock()
+	if eventBus == nil {
+		return
+	}
+	workspaceID := ""
+	if store != nil {
+		if id, err := store.WorkspaceIDForTask(ctx, mr.TaskID); err == nil {
+			workspaceID = id
+		}
+	}
+	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
+		WorkspaceID: workspaceID,
+		TaskMR:      mr,
+	})
+	if err := eventBus.Publish(ctx, events.GitLabTaskMRUpdated, event); err != nil {
+		s.logger.Debug("publish GitLab task MR lifecycle sync event", zap.Error(err))
+	}
+}
+
 func (s *Service) publishTaskMRUpdated(ctx context.Context, workspaceID string, association *TaskMR) {
 	s.mu.RLock()
 	eventBus := s.eventBus
