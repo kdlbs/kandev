@@ -228,7 +228,7 @@ func TestCorrectStaleBase_MergedStackedParent(t *testing.T) {
 	}
 
 	// End-to-end: the commits panel now enumerates exactly the child's commit.
-	result, err := gitOp.GetLog(context.Background(), corrected, 0)
+	result, err := gitOp.GetLog(context.Background(), corrected, 0, false)
 	if err != nil {
 		t.Fatalf("GetLog failed: %v", err)
 	}

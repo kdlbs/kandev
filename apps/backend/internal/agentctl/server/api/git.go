@@ -677,7 +677,7 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	// passing c compiles but hands over a context whose Done() is nil unless
 	// ContextWithFallback is set — which it is not here. The git subprocesses
 	// would then outlive a client disconnect.
-	result, err := s.runGitLogForRepo(c.Request.Context(), req, limit, req.Repo)
+	result, err := s.runGitLogForRepo(c.Request.Context(), req, limit, req.Repo, false)
 	if err != nil {
 		s.handleGitError(c, "log", err)
 		return
@@ -708,6 +708,7 @@ func (s *Server) runGitLogForRepo(
 	req GitLogRequest,
 	limit int,
 	repo string,
+	boundBaseRange bool,
 ) (*process.GitLogResult, error) {
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
@@ -763,7 +764,7 @@ func (s *Server) runGitLogForRepo(
 		)
 	}
 
-	return gitOp.GetLog(ctx, baseCommit, limit)
+	return gitOp.GetLog(ctx, baseCommit, limit, boundBaseRange)
 }
 
 // perRepoLogOutcome captures the outcome of running git log against a single
@@ -898,7 +899,7 @@ func (s *Server) collectLogForRepo(
 	if base := s.resolvePerRepoBase(ctx, sub); base != "" {
 		perRepoReq.Since = base
 	}
-	result, err := s.runGitLogForRepo(ctx, perRepoReq, limit, sub)
+	result, err := s.runGitLogForRepo(ctx, perRepoReq, limit, sub, true)
 	if err != nil {
 		s.logger.Warn("git log for repo failed",
 			zap.String("repo", sub), zap.Error(err))
