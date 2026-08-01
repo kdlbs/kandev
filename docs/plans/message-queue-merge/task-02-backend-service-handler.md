@@ -31,7 +31,7 @@ spec: ../../specs/ui/message-queue-merge.md
 - `apps/backend/pkg/websocket/actions.go`
 - `apps/backend/internal/orchestrator/messagequeue/service.go`
 - `apps/backend/internal/orchestrator/handlers/queue_handlers.go`
-- `apps/backend/internal/orchestrator/handlers/queue_handlers_test.go`
+- `apps/backend/internal/orchestrator/handlers/queue_handlers_merge_test.go`
 - `apps/backend/internal/orchestrator/messagequeue/service_test.go`
 
 ## Inputs

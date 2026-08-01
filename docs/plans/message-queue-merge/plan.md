@@ -137,33 +137,33 @@ that expose it, then the frontend API/hook/components, then E2E.
 
 ## Tests
 
-- **Repository — user↔user happy path** (`repository_sqlite_test.go`,
+- **Repository — user↔user happy path** (`repository_sqlite_merge_test.go`,
   `service_test.go`): merge a user entry into the user entry above it →
   combined content joined with `\n\n`, attachments concatenated, entity
   references unioned/deduped, target identity (id/position/queued_by/queued_at)
   preserved, source row gone, queue count drops by one.
-- **Repository — empty target content** (`repository_sqlite_test.go`): target
+- **Repository — empty target content** (`repository_sqlite_merge_test.go`): target
   with empty content → merged content is exactly the source content (no leading
   blank line).
-- **Repository — head rejected** (`repository_sqlite_test.go`): merging the
+- **Repository — head rejected** (`repository_sqlite_merge_test.go`): merging the
   head entry → `ErrNoMergeTarget`, queue unchanged.
-- **Repository — mismatched kinds rejected** (`repository_sqlite_test.go`):
+- **Repository — mismatched kinds rejected** (`repository_sqlite_merge_test.go`):
   user source above agent target → `ErrNoMergeTarget`; agent source above user
   target → `ErrNoMergeTarget`; workflow/system source → `ErrNoMergeTarget`.
-- **Repository — agent↔agent** (`repository_sqlite_test.go`): same
+- **Repository — agent↔agent** (`repository_sqlite_merge_test.go`): same
   `sender_task_id` → allowed, merged entry keeps target's agent identity;
   different `sender_task_id` → `ErrNoMergeTarget`.
-- **Repository — ownership guard** (`repository_sqlite_test.go`): user merge
+- **Repository — ownership guard** (`repository_sqlite_merge_test.go`): user merge
   with caller `queuedBy` not equal to both rows → `ErrNoMergeTarget`.
-- **Repository — missing source** (`repository_sqlite_test.go`): drained source
+- **Repository — missing source** (`repository_sqlite_merge_test.go`): drained source
   id → `ErrEntryNotFound`.
-- **Repository — reserved in-flight target** (`repository_sqlite_test.go`): a
+- **Repository — reserved in-flight target** (`repository_sqlite_merge_test.go`): a
   durable lifecycle target with the reservation marker → `ErrNoMergeTarget`.
-- **Repository — three-entry chain** (`repository_sqlite_test.go`): merge `C`
+- **Repository — three-entry chain** (`repository_sqlite_merge_test.go`): merge `C`
   into `B`, then `B` into `A` → one entry with `A+B+C` in order.
 - **Service** (`service_test.go`): `MergeIntoAbove` delegates and returns the
   merged entry (or the mapped error) through the memory repo.
-- **WS handler** (`queue_handlers_test.go`): happy path returns `{entry_id}` and
+- **WS handler** (`queue_handlers_merge_test.go`): happy path returns `{entry_id}` and
   publishes status; missing `session_id` / `entry_id` → validation; head merge →
   validation; reserved `user_id` rejected; drained source → `entry_not_found`.
 - **Frontend hook** (`use-queue` via `queued-ghost-list.test.tsx` or a hook
@@ -190,7 +190,7 @@ that expose it, then the frontend API/hook/components, then E2E.
 
 ## Implementation Waves And Parallel Candidates
 
-```
+```text
 Wave 1:
 - [x] [task-01-backend-repository](task-01-backend-repository.md)
 

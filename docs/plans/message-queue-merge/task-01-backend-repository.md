@@ -37,7 +37,7 @@ spec: ../../specs/ui/message-queue-merge.md
 - `apps/backend/internal/orchestrator/messagequeue/repository.go`
 - `apps/backend/internal/orchestrator/messagequeue/repository_sqlite.go`
 - `apps/backend/internal/orchestrator/messagequeue/repository_memory.go`
-- `apps/backend/internal/orchestrator/messagequeue/repository_sqlite_test.go`
+- `apps/backend/internal/orchestrator/messagequeue/repository_sqlite_merge_test.go`
 - `apps/backend/internal/orchestrator/messagequeue/service_test.go`
 
 ## Inputs

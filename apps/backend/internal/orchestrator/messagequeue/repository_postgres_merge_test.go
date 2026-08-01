@@ -7,6 +7,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -88,10 +89,10 @@ func TestPostgresRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 	ctx := context.Background()
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
-		map[string]interface{}{MetadataEntityReferences: manyEntityRefsFrom(1, maxEntityReferencesPerMessage)})
+		map[string]interface{}{MetadataEntityReferences: manyEntityRefsFrom(1, entityrefs.MaxReferencesPerMessage)})
 	_ = target
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
-		map[string]interface{}{MetadataEntityReferences: manyEntityRefsFrom(maxEntityReferencesPerMessage+1, maxEntityReferencesPerMessage)})
+		map[string]interface{}{MetadataEntityReferences: manyEntityRefsFrom(entityrefs.MaxReferencesPerMessage+1, entityrefs.MaxReferencesPerMessage)})
 
 	if _, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user"); !errors.Is(err, ErrMergeReferenceOverflow) {
 		t.Fatalf("merge error = %v, want ErrMergeReferenceOverflow", err)

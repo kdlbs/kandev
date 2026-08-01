@@ -64,10 +64,9 @@ func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 	ctx := context.Background()
 
 	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
-		map[string]interface{}{MetadataEntityReferences: manyEntityRefs(maxEntityReferencesPerMessage)})
-	_ = target
+		map[string]interface{}{MetadataEntityReferences: manyEntityRefs(entityrefs.MaxReferencesPerMessage)})
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
-		map[string]interface{}{MetadataEntityReferences: entityRefs(fmt.Sprintf("%d", maxEntityReferencesPerMessage+1))})
+		map[string]interface{}{MetadataEntityReferences: entityRefs(fmt.Sprintf("%d", entityrefs.MaxReferencesPerMessage+1))})
 
 	if _, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user"); !errors.Is(err, ErrMergeReferenceOverflow) {
 		t.Fatalf("merge error = %v, want ErrMergeReferenceOverflow", err)
@@ -83,14 +82,22 @@ func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("entries after rejected overflow merge = %d, want 2", len(entries))
 	}
-	for _, e := range entries {
-		refs := entityrefs.NormalizePersisted(e.Metadata[MetadataEntityReferences])
-		if len(refs) != maxEntityReferencesPerMessage {
-			t.Errorf("entry %s refs len = %d, want %d (untouched)", e.ID, len(refs), maxEntityReferencesPerMessage)
-		}
-		if e.ID == source.ID && e.Content != "second" {
-			t.Errorf("source content changed after rejected merge = %q", e.Content)
-		}
+	byID := make(map[string]*QueuedMessage, len(entries))
+	for i := range entries {
+		byID[entries[i].ID] = &entries[i]
+	}
+	targetRow, sourceRow := byID[target.ID], byID[source.ID]
+	if targetRow == nil || sourceRow == nil {
+		t.Fatalf("missing rows after rejected overflow merge: target=%v source=%v", byID[target.ID] != nil, byID[source.ID] != nil)
+	}
+	if refs := entityrefs.NormalizePersisted(targetRow.Metadata[MetadataEntityReferences]); len(refs) != entityrefs.MaxReferencesPerMessage {
+		t.Errorf("target refs len = %d, want %d (untouched)", len(refs), entityrefs.MaxReferencesPerMessage)
+	}
+	if refs := entityrefs.NormalizePersisted(sourceRow.Metadata[MetadataEntityReferences]); len(refs) != 1 {
+		t.Errorf("source refs len = %d, want 1 (untouched)", len(refs))
+	}
+	if sourceRow.Content != "second" {
+		t.Errorf("source content changed after rejected merge = %q", sourceRow.Content)
 	}
 }
 
@@ -101,7 +108,7 @@ func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow_DedupeWithinLimit(t *
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()
 
-	refs := manyEntityRefs(maxEntityReferencesPerMessage)
+	refs := manyEntityRefs(entityrefs.MaxReferencesPerMessage)
 	insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
 		map[string]interface{}{MetadataEntityReferences: refs})
 	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
@@ -112,8 +119,8 @@ func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow_DedupeWithinLimit(t *
 		t.Fatalf("merge: %v", err)
 	}
 	union := entityrefs.NormalizePersisted(merged.Metadata[MetadataEntityReferences])
-	if len(union) != maxEntityReferencesPerMessage {
-		t.Errorf("merged refs len = %d, want %d (deduped)", len(union), maxEntityReferencesPerMessage)
+	if len(union) != entityrefs.MaxReferencesPerMessage {
+		t.Errorf("merged refs len = %d, want %d (deduped)", len(union), entityrefs.MaxReferencesPerMessage)
 	}
 }
 

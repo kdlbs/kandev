@@ -24,10 +24,6 @@ func joinMergeContent(targetContent, sourceContent string) string {
 // references that were already persisted.
 var ErrMergeReferenceOverflow = errors.New("merge would exceed the per-message entity reference limit")
 
-// maxEntityReferencesPerMessage mirrors entityrefs.maxReferencesPerMessage so
-// a merged entry never stores more references than dispatch will accept.
-const maxEntityReferencesPerMessage = 100
-
 // mergeAllowed reports whether the source entry may be folded into the target
 // entry under the caller identity queuedBy. User entries merge only into user
 // entries owned by the caller; agent entries merge only into agent entries
@@ -94,8 +90,8 @@ func unionEntityReferences(targetMetadata, sourceMetadata map[string]interface{}
 			union = append(union, ref)
 		}
 	}
-	if len(union) > maxEntityReferencesPerMessage {
-		return nil, fmt.Errorf("%w: at most %d references are allowed", ErrMergeReferenceOverflow, maxEntityReferencesPerMessage)
+	if len(union) > entityrefs.MaxReferencesPerMessage {
+		return nil, fmt.Errorf("%w: at most %d references are allowed", ErrMergeReferenceOverflow, entityrefs.MaxReferencesPerMessage)
 	}
 	return union, nil
 }

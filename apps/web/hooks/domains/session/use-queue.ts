@@ -141,6 +141,10 @@ function useQueueActions({
     setQueueLoading(sessionId, true);
     try {
       await clearQueue(sessionId);
+      // Invalidate any in-flight refetch so a pre-clear getQueueStatus
+      // response cannot land after the empty snapshot and restore the
+      // entries that were just drained.
+      refetchVersion.current[sessionId] = (refetchVersion.current[sessionId] ?? 0) + 1;
       // Reset to a neutral capacity snapshot; the next status_changed event
       // will replace it with the authoritative server value. Using the
       // pre-clear entry count as a fallback for `max` was wrong (it would

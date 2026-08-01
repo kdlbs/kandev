@@ -20,7 +20,9 @@ spec: ../../specs/ui/message-queue-merge.md
    (`data-testid="queue-entry-merge"`, title `Merge with above`,
    `IconArrowMerge`) on an entry only when the entry and the one above it are
    both mergeable and share the same sender kind (`user`↔`user`, `agent`↔
-   `agent`); it is hidden for the first entry, mismatched kinds, and
+   `agent`); agent rows additionally require an identical non-empty
+   `sender_task_id` in metadata (mirroring the backend's `mergeAllowed`), and
+   the control is hidden for the first entry, mismatched kinds, and
    workflow/system entries.
 3. Unit tests cover button gating and the click → `mergeEntry` wiring.
 

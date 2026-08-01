@@ -260,3 +260,94 @@ describe("useQueue mergeEntry", () => {
     expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 });
+
+describe("useQueue clearAll", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+    queueApiMock.clearQueue.mockResolvedValue(undefined);
+  });
+
+  it("discards an in-flight refetch that resolves after the clear", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    // A refetch starts before the clear and resolves afterwards with the
+    // pre-clear entries.
+    let resolveStale: (status: { entries: QueuedMessage[]; count: number; max: number }) => void;
+    queueApiMock.getQueueStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+    );
+    let staleRefetch: Promise<void>;
+    act(() => {
+      staleRefetch = result.current.refetch(SESSION_ID);
+    });
+    expect(mockState.setQueueEntries).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    await act(async () => {
+      resolveStale!({ entries: [entry({ id: "pre-clear" })], count: 1, max: 10 });
+      await staleRefetch!;
+    });
+
+    // The stale pre-clear snapshot must never be applied; the empty snapshot
+    // from clearAll stays the last one written.
+    expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(
+      SESSION_ID,
+      [entry({ id: "pre-clear" })],
+      { count: 1, max: 10 },
+    );
+  });
+});
+
+describe("useQueue clearAll", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+    queueApiMock.clearQueue.mockResolvedValue(undefined);
+  });
+
+  it("discards an in-flight refetch that resolves after the clear", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    // A refetch starts before the clear and will resolve afterwards with the
+    // pre-clear entries.
+    let resolveStale: (status: { entries: QueuedMessage[]; count: number; max: number }) => void;
+    queueApiMock.getQueueStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+    );
+    let staleRefetch: Promise<void>;
+    act(() => {
+      staleRefetch = result.current.refetch(SESSION_ID);
+    });
+    expect(mockState.setQueueEntries).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    await act(async () => {
+      resolveStale!({ entries: [entry({ id: "pre-clear" })], count: 1, max: 10 });
+      await staleRefetch!;
+    });
+
+    // The stale pre-clear snapshot must never be applied; the empty snapshot
+    // from clearAll stays the last one written.
+    expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(SESSION_ID, [entry({ id: "pre-clear" })], {
+      count: 1,
+      max: 10,
+    });
+  });
+});
