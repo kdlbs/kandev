@@ -26,7 +26,10 @@ import { test, expect } from "../../fixtures/test-base";
 const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
 
 /** Migrated screens whose visible text is overwhelmingly UI chrome, not user data. */
-const SCREENS = [{ name: "settings — appearance", url: "/settings/general/appearance" }];
+const SCREENS = [
+  { name: "settings — appearance", url: "/settings/general/appearance" },
+  { name: "settings — secrets", url: "/settings/general/secrets" },
+];
 
 /**
  * Text that is legitimately un-accented under pseudo: brand/proper nouns, code

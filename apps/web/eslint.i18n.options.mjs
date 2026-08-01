@@ -159,10 +159,13 @@ export const i18nGuardFiles = [
   // Settings → General → Appearance, migrated end-to-end as the worked example:
   // the page, the two sections it owns, and the settings chrome around them.
   "app/settings/general/appearance/**/*.{ts,tsx}",
+  // Settings → General → Secrets.
+  "app/settings/general/secrets/**/*.{ts,tsx}",
   "components/app-sidebar/sections/settings/general-group.tsx",
   "components/settings/general-settings.tsx",
   "components/settings/general-nav.ts",
   "components/settings/language-settings.tsx",
+  "components/settings/secrets-settings.tsx",
   "components/settings/settings-floating-save.tsx",
   "components/settings/settings-layout-client.tsx",
   "components/settings/startup-page-settings-card.tsx",
