@@ -37,6 +37,7 @@ type QueueService interface {
 	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
 	UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 	RemoveEntry(ctx context.Context, sessionID, entryID string) error
+	MergeIntoAbove(ctx context.Context, sessionID, entryID, queuedBy string) (*messagequeue.QueuedMessage, error)
 	CancelAll(ctx context.Context, sessionID string) (int, error)
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
@@ -84,6 +85,7 @@ func (h *QueueHandlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMessageQueueAppend, h.wsAppendToQueue)
 	d.RegisterFunc(ws.ActionMessageQueueDrain, h.wsDrainQueue)
 	d.RegisterFunc(ws.ActionMessageQueueRemove, h.wsRemoveEntry)
+	d.RegisterFunc(ws.ActionMessageQueueMerge, h.wsMergeIntoAbove)
 }
 
 type wsQueueMessageRequest struct {
@@ -351,6 +353,50 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+type wsMergeIntoAboveRequest struct {
+	SessionID string `json:"session_id"`
+	EntryID   string `json:"entry_id"`
+	UserID    string `json:"user_id,omitempty"`
+}
+
+func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsMergeIntoAboveRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.SessionID == "" {
+		// Required so publishStatus can broadcast the post-merge list.
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if req.EntryID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
+	}
+	if messagequeue.IsReservedQueuedBy(req.UserID) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
+	}
+	// Default empty user_id to QueuedByUser so the merge ownership guard runs
+	// against a non-empty owner, mirroring wsUpdateMessage.
+	queuedBy := req.UserID
+	if queuedBy == "" {
+		queuedBy = messagequeue.QueuedByUser
+	}
+
+	merged, err := h.queueService.MergeIntoAbove(ctx, req.SessionID, req.EntryID, queuedBy)
+	if err != nil {
+		if errors.Is(err, messagequeue.ErrEntryNotFound) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
+		}
+		if errors.Is(err, messagequeue.ErrNoMergeTarget) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "No mergeable message above this entry", nil)
+		}
+		h.logger.Error("failed to merge queued message", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to merge queued message", nil)
+	}
+
+	h.publishStatus(ctx, req.SessionID)
+	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: merged.ID})
 }
 
 type wsAppendToQueueRequest struct {

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { QueuedGhostMessage } from "./queued-ghost-message";
+import { QueuedGhostMessage, canMergeEntry, canMergeWithAbove } from "./queued-ghost-message";
 import { StateProvider } from "@/components/state-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
@@ -25,6 +25,9 @@ const PNG_BASE64 =
 const ATTACHMENT_1_ALT = "Attachment 1";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
+const MERGE_TESTID = "queue-entry-merge";
+const EDIT_TITLE = "Edit queued message";
+const MERGE_TITLE = "Merge with above";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -181,7 +184,7 @@ describe("QueuedGhostMessage attachment thumbnails", () => {
         onRemove={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTitle("Edit queued message"));
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
     const img = screen.getByAltText(ATTACHMENT_1_ALT) as HTMLImageElement;
     expect(img.className).not.toContain("cursor-pointer");
     expect(screen.queryByRole("button", { name: OPEN_ATTACHMENT_1_LABEL })).toBeNull();
@@ -236,7 +239,7 @@ describe("QueuedGhostMessage entity references", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("Edit queued message"));
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
     fireEvent.change(screen.getByTestId("queue-edit-textarea"), { target: { value: edited } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
@@ -259,12 +262,127 @@ describe("QueuedGhostMessage entity references", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTitle("Edit queued message"));
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
     fireEvent.change(screen.getByTestId("queue-edit-textarea"), {
       target: { value: "reference removed" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSave).toHaveBeenCalledWith("reference removed", []));
+  });
+});
+
+describe("QueuedGhostMessage merge control", () => {
+  it("hides the merge button for the first entry (no entry above)", () => {
+    render(
+      <QueuedGhostMessage entry={entry()} canEdit onSave={async () => {}} onRemove={() => {}} />,
+    );
+    expect(screen.queryByTestId(MERGE_TESTID)).toBeNull();
+  });
+
+  it("shows the merge button when canMerge is set", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        canMerge
+        onMerge={vi.fn()}
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+    const button = screen.getByTestId(MERGE_TESTID);
+    expect(button.getAttribute("title")).toBe(MERGE_TITLE);
+  });
+
+  it("clicking the merge button invokes onMerge", () => {
+    const onMerge = vi.fn();
+    render(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        canMerge
+        onMerge={onMerge}
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTestId(MERGE_TESTID));
+    expect(onMerge).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the merge button for workflow entries", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({
+          queued_by: "workflow",
+          metadata: { workflow_message: true },
+        })}
+        canEdit={false}
+        canMerge
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+    expect(screen.queryByTestId(MERGE_TESTID)).toBeNull();
+  });
+
+  it("hides the merge button while editing", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        canMerge
+        onMerge={vi.fn()}
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByTitle(EDIT_TITLE));
+    expect(screen.queryByTestId(MERGE_TESTID)).toBeNull();
+  });
+});
+
+describe("canMergeEntry / canMergeWithAbove gating", () => {
+  it("treats user entries as mergeable", () => {
+    expect(canMergeEntry(entry({ queued_by: "user-1" }))).toBe(true);
+  });
+
+  it("treats agent entries as mergeable", () => {
+    expect(canMergeEntry(entry({ queued_by: "agent" }))).toBe(true);
+  });
+
+  it("treats workflow and system entries as non-mergeable", () => {
+    expect(canMergeEntry(entry({ queued_by: "workflow" }))).toBe(false);
+    expect(canMergeEntry(entry({ queued_by: "" }))).toBe(false);
+  });
+
+  it("allows user behind user", () => {
+    const above = entry({ id: "q-a", queued_by: "user-1" });
+    const below = entry({ id: "q-b", queued_by: "user-1" });
+    expect(canMergeWithAbove(below, above)).toBe(true);
+  });
+
+  it("allows agent behind agent", () => {
+    const above = entry({ id: "q-a", queued_by: "agent" });
+    const below = entry({ id: "q-b", queued_by: "agent" });
+    expect(canMergeWithAbove(below, above)).toBe(true);
+  });
+
+  it("rejects user behind agent and agent behind user", () => {
+    const agent = entry({ id: "q-a", queued_by: "agent" });
+    const user = entry({ id: "q-b", queued_by: "user-1" });
+    expect(canMergeWithAbove(user, agent)).toBe(false);
+    expect(canMergeWithAbove(agent, user)).toBe(false);
+  });
+
+  it("rejects when no entry is above", () => {
+    expect(canMergeWithAbove(entry(), undefined)).toBe(false);
+  });
+
+  it("rejects a workflow entry behind a user entry", () => {
+    const above = entry({ id: "q-a", queued_by: "user-1" });
+    const below = entry({ id: "q-b", queued_by: "workflow" });
+    expect(canMergeWithAbove(below, above)).toBe(false);
   });
 });

@@ -8,6 +8,7 @@ import {
   getQueueStatus,
   updateQueuedMessage,
   removeQueuedEntry,
+  mergeQueuedEntry,
   QueueEntryNotFoundError,
 } from "@/lib/api/domains/queue-api";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -141,6 +142,24 @@ function useQueueActions({
 
   const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
 
+  const { editEntry, removeEntry, mergeEntry } = useEntryMutations({
+    sessionId,
+    removeQueueEntry,
+    refetch,
+  });
+
+  return { refetch, queue, clearAll, drainNext, editEntry, removeEntry, mergeEntry };
+}
+
+type EntryMutationsArgs = {
+  sessionId: string | null;
+  removeQueueEntry: ReturnType<typeof useQueueState>["removeQueueEntry"];
+  refetch: (sid: string) => Promise<void>;
+};
+
+/** Entry-level mutations (edit / remove / merge) that refetch on success and
+ * resync on a drain race (QueueEntryNotFoundError). */
+function useEntryMutations({ sessionId, removeQueueEntry, refetch }: EntryMutationsArgs) {
   const editEntry = useCallback(
     async (
       entryId: string,
@@ -183,7 +202,23 @@ function useQueueActions({
     [sessionId, refetch, removeQueueEntry],
   );
 
-  return { refetch, queue, clearAll, drainNext, editEntry, removeEntry };
+  const mergeEntry = useCallback(
+    async (entryId: string) => {
+      if (!sessionId) return;
+      try {
+        await mergeQueuedEntry({ session_id: sessionId, entry_id: entryId });
+        await refetch(sessionId);
+      } catch (err) {
+        if (err instanceof QueueEntryNotFoundError) {
+          await refetch(sessionId);
+        }
+        throw err;
+      }
+    },
+    [sessionId, refetch],
+  );
+
+  return { editEntry, removeEntry, mergeEntry };
 }
 
 /**
@@ -198,13 +233,14 @@ export function useQueue(sessionId: string | null) {
   const state = useQueueState(sessionId);
   const { entries, meta, isLoading } = state;
   const connectionStatus = useAppStore((appState) => appState.connection.status);
-  const { refetch, queue, clearAll, drainNext, editEntry, removeEntry } = useQueueActions({
-    sessionId,
-    setQueueEntries: state.setQueueEntries,
-    removeQueueEntry: state.removeQueueEntry,
-    setQueueLoading: state.setQueueLoading,
-    metaMax: meta?.max,
-  });
+  const { refetch, queue, clearAll, drainNext, editEntry, removeEntry, mergeEntry } =
+    useQueueActions({
+      sessionId,
+      setQueueEntries: state.setQueueEntries,
+      removeQueueEntry: state.removeQueueEntry,
+      setQueueLoading: state.setQueueLoading,
+      metaMax: meta?.max,
+    });
 
   useEffect(() => {
     if (!sessionId) return;
@@ -242,6 +278,7 @@ export function useQueue(sessionId: string | null) {
     drainNext,
     editEntry,
     removeEntry,
+    mergeEntry,
     refetch: refetchBound,
   };
 }

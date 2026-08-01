@@ -81,6 +81,7 @@ function baseState(entries: QueuedMessage[]) {
     drainNext: vi.fn(async () => {}),
     editEntry: vi.fn(async () => {}),
     removeEntry: vi.fn(async () => {}),
+    mergeEntry: vi.fn(async () => {}),
     refetch: vi.fn(async () => {}),
   };
 }
@@ -312,6 +313,56 @@ describe("QueueAffordance entity-reference edits", () => {
 
     await waitFor(() =>
       expect(state.editEntry).toHaveBeenCalledWith("q-1", "reference removed", undefined, []),
+    );
+  });
+});
+
+describe("QueueAffordance merge wiring", () => {
+  it("shows a merge control on the second row and calls mergeEntry with its id", () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
+      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+    ]);
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const mergeButtons = screen.getAllByTestId("queue-entry-merge");
+    // Only the second row merges (the head row has nothing above it).
+    expect(mergeButtons).toHaveLength(1);
+    fireEvent.click(mergeButtons[0]);
+    expect(state.mergeEntry).toHaveBeenCalledWith("q-2");
+  });
+
+  it("hides the merge control when the rows have mismatched sender kinds", () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "agent", queued_by: "agent" }),
+      entry({ id: "q-2", content: "user", queued_by: "user-1" }),
+    ]);
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.queryByTestId("queue-entry-merge")).toBeNull();
+  });
+
+  it("toasts an error when the merge fails", async () => {
+    const { toast } = await import("sonner");
+    const state = queueState([
+      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
+      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+    ]);
+    state.mergeEntry = vi.fn(async () => {
+      throw new Error("boom");
+    });
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getAllByTestId("queue-entry-merge")[0]);
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("Failed to merge queued messages."),
     );
   });
 });

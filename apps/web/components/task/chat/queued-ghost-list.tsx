@@ -10,7 +10,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import { useQueue } from "@/hooks/domains/session/use-queue";
-import { isWorkflowQueuedMessage, QueuedGhostMessage } from "./queued-ghost-message";
+import {
+  canMergeWithAbove,
+  isWorkflowQueuedMessage,
+  QueuedGhostMessage,
+} from "./queued-ghost-message";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
@@ -80,6 +84,7 @@ type QueuePanelHandlerArgs = {
     entityReferences?: EntityReference[],
   ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
+  mergeEntry: (entryId: string) => Promise<void>;
 };
 
 function useQueuePanelHandlers({
@@ -87,6 +92,7 @@ function useQueuePanelHandlers({
   drainNext,
   editEntry,
   removeEntry,
+  mergeEntry,
 }: QueuePanelHandlerArgs) {
   const handleSave = useCallback(
     async (entryId: string, content: string, entityReferences: EntityReference[]) => {
@@ -105,6 +111,17 @@ function useQueuePanelHandlers({
     },
     [removeEntry],
   );
+  const handleMerge = useCallback(
+    async (entryId: string) => {
+      try {
+        await mergeEntry(entryId);
+      } catch (err) {
+        console.error("Failed to merge queued entry:", err);
+        toast.error("Failed to merge queued messages.");
+      }
+    },
+    [mergeEntry],
+  );
   const handleClear = useCallback(() => {
     clearAll().catch((err) => {
       console.error("Failed to clear queued messages:", err);
@@ -118,7 +135,7 @@ function useQueuePanelHandlers({
     });
   }, [drainNext]);
 
-  return { handleSave, handleRemove, handleClear, handleDrain };
+  return { handleSave, handleRemove, handleMerge, handleClear, handleDrain };
 }
 
 /**
@@ -135,15 +152,28 @@ export function QueueAffordance({
   canDrain = false,
   renderStatusBar,
 }: QueueAffordanceProps) {
-  const { entries, count, max, isFull, isLoading, clearAll, drainNext, editEntry, removeEntry } =
-    useQueue(sessionId);
-  const [isOpen, setIsOpen] = useState(false);
-  const { handleSave, handleRemove, handleClear, handleDrain } = useQueuePanelHandlers({
+  const {
+    entries,
+    count,
+    max,
+    isFull,
+    isLoading,
     clearAll,
     drainNext,
     editEntry,
     removeEntry,
-  });
+    mergeEntry,
+  } = useQueue(sessionId);
+  const [isOpen, setIsOpen] = useState(false);
+  const { handleSave, handleRemove, handleMerge, handleClear, handleDrain } = useQueuePanelHandlers(
+    {
+      clearAll,
+      drainNext,
+      editEntry,
+      removeEntry,
+      mergeEntry,
+    },
+  );
 
   // Reset disclosure on session switch or full drain using render-phase state
   // adjustment (React docs: "Adjusting some state when a prop changes"). This
@@ -206,6 +236,7 @@ export function QueueAffordance({
             onDrain={handleDrain}
             onSave={handleSave}
             onRemove={handleRemove}
+            onMerge={handleMerge}
           />
         </CollapsibleContent>
       </Collapsible>
@@ -280,6 +311,7 @@ type QueuePanelProps = {
   onDrain: () => void;
   onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
+  onMerge: (entryId: string) => Promise<void>;
 };
 
 function QueuePanel({
@@ -294,6 +326,7 @@ function QueuePanel({
   onDrain,
   onSave,
   onRemove,
+  onMerge,
 }: QueuePanelProps) {
   return (
     <div
@@ -327,8 +360,10 @@ function QueuePanel({
             entry={entry}
             index={index}
             canEdit={canUserEditEntry(entry)}
+            canMerge={canMergeWithAbove(entry, entries[index - 1])}
             onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
             onRemove={() => onRemove(entry.id)}
+            onMerge={() => onMerge(entry.id)}
           />
         ))}
       </div>

@@ -347,6 +347,48 @@ func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID
 	return ErrEntryNotFound
 }
 
+// MergeIntoAbove folds the source entry into the entry directly above it within
+// the same session, mirroring the sqlite repository's semantics. See
+// Repository.MergeIntoAbove for the merge rules and error mapping.
+func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	sourceIndex := -1
+	for i, m := range list {
+		if m.ID == sourceID {
+			sourceIndex = i
+			break
+		}
+	}
+	if sourceIndex < 0 {
+		return nil, ErrEntryNotFound
+	}
+	if sourceIndex == 0 {
+		return nil, ErrNoMergeTarget
+	}
+	source := list[sourceIndex]
+	target := list[sourceIndex-1]
+	if !mergeAllowed(source, target, queuedBy) {
+		return nil, ErrNoMergeTarget
+	}
+
+	target.Content = joinMergeContent(target.Content, source.Content)
+	target.Attachments = append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
+	target.Metadata = mergeEntryMetadata(target.Metadata, source.Metadata)
+	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
+	if len(r.entries[sessionID]) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	}
+
+	merged := *target
+	return &merged, nil
+}
+
 func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

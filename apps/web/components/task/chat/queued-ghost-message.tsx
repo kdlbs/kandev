@@ -19,6 +19,7 @@ import {
   IconRobot,
   IconUser,
   IconX,
+  IconArrowMerge,
 } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
@@ -112,6 +113,18 @@ function senderKindOf(entry: QueuedMessage): SenderKind {
   // queued_by="agent"; that's the only signal needed.
   if (entry.queued_by === "agent") return "agent";
   return "user";
+}
+
+/** A message may serve as a merge source or target only when its sender kind is "user" or "agent". */
+export function canMergeEntry(entry: QueuedMessage): boolean {
+  const kind = senderKindOf(entry);
+  return kind === "user" || kind === "agent";
+}
+
+/** Two messages may merge when both are mergeable and share the same sender kind. */
+export function canMergeWithAbove(entry: QueuedMessage, above: QueuedMessage | undefined): boolean {
+  if (!above) return false;
+  return canMergeEntry(entry) && senderKindOf(entry) === senderKindOf(above);
 }
 
 function senderLabel(entry: QueuedMessage): string {
@@ -256,8 +269,10 @@ type DisplayViewProps = {
   entityReferences: readonly EntityReference[];
   positionLabel: string;
   canEdit: boolean;
+  canMerge: boolean;
   onStartEdit: () => void;
   onRemove: () => void;
+  onMerge?: () => void | Promise<void>;
 };
 
 /** Rough threshold above which we offer a per-row expand toggle. Two lines of
@@ -270,13 +285,101 @@ function shouldOfferExpand(text: string): boolean {
   return text.length > EXPAND_THRESHOLD || text.includes("\n");
 }
 
+type RowActionsProps = {
+  canExpand: boolean;
+  expanded: boolean;
+  canMerge: boolean;
+  canEdit: boolean;
+  onToggleExpand: () => void;
+  onMerge?: () => void | Promise<void>;
+  onStartEdit: () => void;
+  onRemove: () => void;
+};
+
+function RowActions({
+  canExpand,
+  expanded,
+  canMerge,
+  canEdit,
+  onToggleExpand,
+  onMerge,
+  onStartEdit,
+  onRemove,
+}: RowActionsProps) {
+  return (
+    <div
+      className={cn(
+        "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
+        // Hover-reveal on devices that support hover (desktop); always
+        // visible on touch surfaces where there's no hover affordance.
+        "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
+        "[@media(hover:none)]:opacity-100",
+      )}
+    >
+      {canExpand && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+          onClick={onToggleExpand}
+          title={expanded ? "Collapse message" : "Expand message"}
+          data-testid="queue-entry-expand"
+          aria-expanded={expanded}
+        >
+          {expanded ? (
+            <IconChevronUp className="h-3.5 w-3.5" />
+          ) : (
+            <IconChevronDown className="h-3.5 w-3.5" />
+          )}
+        </Button>
+      )}
+      {canMerge && onMerge && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+          onClick={onMerge}
+          title="Merge with above"
+          data-testid="queue-entry-merge"
+        >
+          <IconArrowMerge className="h-3.5 w-3.5" />
+        </Button>
+      )}
+      {canEdit && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+            onClick={onStartEdit}
+            title="Edit queued message"
+          >
+            <IconEdit className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+            onClick={onRemove}
+            title="Remove queued message"
+          >
+            <IconX className="h-4 w-4" />
+          </Button>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DisplayView({
   entry,
   entityReferences,
   positionLabel,
   canEdit,
+  canMerge,
   onStartEdit,
   onRemove,
+  onMerge,
 }: DisplayViewProps) {
   const visible = stripSystemTags(entry.content);
   const attachments = (entry.attachments ?? []) as QueuedAttachment[];
@@ -320,55 +423,16 @@ function DisplayView({
         )}
         <AttachmentRow attachments={attachments} interactive={true} />
       </div>
-      <div
-        className={cn(
-          "flex items-center gap-0.5 flex-shrink-0 transition-opacity",
-          // Hover-reveal on devices that support hover (desktop); always
-          // visible on touch surfaces where there's no hover affordance.
-          "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
-          "[@media(hover:none)]:opacity-100",
-        )}
-      >
-        {canExpand && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={() => setExpanded((v) => !v)}
-            title={expanded ? "Collapse message" : "Expand message"}
-            data-testid="queue-entry-expand"
-            aria-expanded={expanded}
-          >
-            {expanded ? (
-              <IconChevronUp className="h-3.5 w-3.5" />
-            ) : (
-              <IconChevronDown className="h-3.5 w-3.5" />
-            )}
-          </Button>
-        )}
-        {canEdit && (
-          <>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-              onClick={onStartEdit}
-              title="Edit queued message"
-            >
-              <IconEdit className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-              onClick={onRemove}
-              title="Remove queued message"
-            >
-              <IconX className="h-4 w-4" />
-            </Button>
-          </>
-        )}
-      </div>
+      <RowActions
+        canExpand={canExpand}
+        expanded={expanded}
+        canMerge={canMerge}
+        canEdit={canEdit}
+        onToggleExpand={() => setExpanded((v) => !v)}
+        onMerge={onMerge}
+        onStartEdit={onStartEdit}
+        onRemove={onRemove}
+      />
     </div>
   );
 }
@@ -382,14 +446,24 @@ type QueuedGhostMessageProps = {
    * entry's queued_by. Inter-task entries are visible but read-only.
    */
   canEdit: boolean;
+  /**
+   * Merge-with-above control; only shown when this row and the one above it
+   * share a sender kind. Optional so standalone renders (tests) can omit it.
+   */
+  canMerge?: boolean;
   onSave: (content: string, entityReferences: EntityReference[]) => Promise<void>;
   onRemove: () => void | Promise<void>;
+  /** Fold this entry into the one above it. */
+  onMerge?: () => void | Promise<void>;
   /** Called after edit save/cancel so the parent can refocus the chat input. */
   onEditComplete?: () => void;
 };
 
 export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGhostMessageProps>(
-  function QueuedGhostMessage({ entry, index, canEdit, onSave, onRemove, onEditComplete }, ref) {
+  function QueuedGhostMessage(
+    { entry, index, canEdit, canMerge = false, onSave, onRemove, onMerge, onEditComplete },
+    ref,
+  ) {
     const [editing, setEditing] = useState(false);
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
@@ -480,8 +554,10 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
             entityReferences={entityReferences}
             positionLabel={positionLabel}
             canEdit={canEdit}
+            canMerge={canMerge}
             onStartEdit={startEdit}
             onRemove={onRemove}
+            onMerge={onMerge}
           />
         )}
       </div>

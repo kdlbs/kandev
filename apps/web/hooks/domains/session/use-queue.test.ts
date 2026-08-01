@@ -13,6 +13,7 @@ const queueApiMock = vi.hoisted(() => {
     getQueueStatus: vi.fn(),
     updateQueuedMessage: vi.fn(),
     removeQueuedEntry: vi.fn(),
+    mergeQueuedEntry: vi.fn(),
   };
 });
 
@@ -201,5 +202,45 @@ describe("useQueue", () => {
       attachments: undefined,
       entity_references: [],
     });
+  });
+});
+
+describe("useQueue mergeEntry", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  it("merges an entry and refetches the queue", async () => {
+    queueApiMock.mergeQueuedEntry.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.mergeEntry("q-2");
+    });
+
+    expect(queueApiMock.mergeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-2",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches the queue when the merge target was already drained", async () => {
+    queueApiMock.mergeQueuedEntry.mockRejectedValue(new queueApiMock.QueueEntryNotFoundError());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.mergeEntry("q-2")).rejects.toThrow(
+        queueApiMock.QueueEntryNotFoundError,
+      );
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 });

@@ -187,3 +187,19 @@ export async function removeQueuedEntry(params: {
     rethrowQueueError(err);
   }
 }
+
+/** Fold a queued entry into the entry directly above it. Throws QueueEntryNotFoundError if drained. */
+export async function mergeQueuedEntry(params: {
+  session_id: string;
+  entry_id: string;
+}): Promise<{ entry_id: string }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{ entry_id: string }>("message.queue.merge", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}

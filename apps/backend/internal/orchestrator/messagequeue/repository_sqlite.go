@@ -736,6 +736,86 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 	return tx.Commit()
 }
 
+// MergeIntoAbove folds the source entry into the entry directly above it within
+// the same session, updating the target row and deleting the source row in one
+// transaction so a concurrent drain can never observe a half-merged queue.
+// See Repository.MergeIntoAbove for the merge rules and error mapping.
+func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin merge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE id = ? AND session_id = ?
+	`), sourceID, sessionID)
+	source, err := scanQueuedRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrEntryNotFound
+		}
+		return nil, fmt.Errorf("read merge source: %w", err)
+	}
+
+	row = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ? AND position < ?
+		ORDER BY position DESC
+		LIMIT 1
+	`), sessionID, source.Position)
+	target, err := scanQueuedRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoMergeTarget
+		}
+		return nil, fmt.Errorf("read merge target: %w", err)
+	}
+
+	if !mergeAllowed(source, target, queuedBy) {
+		return nil, ErrNoMergeTarget
+	}
+
+	content := joinMergeContent(target.Content, source.Content)
+	attachments := append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
+	metadata := mergeEntryMetadata(target.Metadata, source.Metadata)
+	attachmentsJSON, err := marshalAttachments(attachments)
+	if err != nil {
+		return nil, err
+	}
+	metadataJSON, err := marshalMetadata(metadata)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages
+		SET content = ?, attachments_json = ?, metadata_json = ?
+		WHERE id = ? AND session_id = ?
+	`), content, attachmentsJSON, metadataJSON, target.ID, sessionID); err != nil {
+		return nil, fmt.Errorf("update merge target: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ?
+	`), source.ID, sessionID); err != nil {
+		return nil, fmt.Errorf("delete merge source: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	merged := *target
+	merged.Content = content
+	merged.Attachments = attachments
+	merged.Metadata = metadata
+	return &merged, nil
+}
+
 func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM queued_messages
