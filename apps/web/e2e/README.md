@@ -15,7 +15,7 @@ Playwright-based end-to-end tests. Each Playwright worker spawns its own real Go
 
 ## Playwright projects
 
-The suite is split into four projects. Pick one with `--project=<name>`.
+The suite is split into five projects. Pick one with `--project=<name>`.
 
 ### `routing`
 
@@ -28,6 +28,16 @@ it directly with:
 
 ```sh
 pnpm e2e --project=routing
+```
+
+### `auth`
+
+Runs `tests/auth/**` in an isolated desktop worker. These specs restart their
+backend with authentication enabled, so `chromium` intentionally excludes them.
+Select the project explicitly; otherwise Playwright reports `No tests found`:
+
+```sh
+pnpm e2e --project=auth tests/auth/auth-lifecycle.spec.ts
 ```
 
 ### `chromium` (default)
@@ -85,6 +95,7 @@ This project used to be named `docker`. It was renamed to `containers` once SSH 
 | `pnpm e2e --project=containers`    | Run container-backed tests (needs Docker).       |
 | `pnpm e2e --project=mobile-chrome` | Run mobile responsive tests.                     |
 | `pnpm e2e --project=routing`       | Run provider-mutating Office routing tests.      |
+| `pnpm e2e --project=auth`          | Run auth-isolated tests.                         |
 | `E2E_DEBUG=1 pnpm e2e`             | Surface Docker build output + extra logging.     |
 
 Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (flake hunting).
@@ -97,6 +108,7 @@ Common flags: `--shard=1/4`, `-g "fragment of test name"`, `--repeat-each=3` (fl
 pnpm e2e:run                                  # auto: docker if the daemon + CI image are available, else host
 pnpm e2e:run --shards 3                        # 3 shards concurrently (isolated containers, or host procs with distinct ports)
 pnpm e2e:run tests/chat/foo.spec.ts            # extra args pass straight through to Playwright
+pnpm e2e:run --project auth tests/auth/auth-lifecycle.spec.ts
 pnpm e2e:run --host --no-build -- --grep "x"   # force host, skip rebuild, forward flags after --
 pnpm e2e:docker                                # force the docker CI image (full isolation from a host dev instance)
 pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
@@ -134,7 +146,7 @@ The SSH executor specifically has no mock controller. Tests use a real Docker-ho
 ## Adding a new spec
 
 1. Pick a directory under `tests/` (or create one for a new feature).
-2. Decide which project it belongs to. Anything that needs Docker → `tests/docker/` or `tests/ssh/` (lands in `containers`). Anything mobile-specific → name it `mobile-*.spec.ts`. Otherwise it joins `chromium` automatically.
+2. Decide which project it belongs to. Anything that needs Docker → `tests/docker/` or `tests/ssh/` (lands in `containers`). Auth-isolated specs belong in `tests/auth/` and need `--project=auth`; provider-mutating Office routing specs use `routing`. Anything mobile-specific → name it `mobile-*.spec.ts`. Otherwise it joins `chromium` automatically.
 3. Import the right test base:
    - `import { test, expect } from "../../fixtures/test-base";` for normal tests.
    - `import { test, expect } from "../../fixtures/docker-test-base";` for Docker executor tests.

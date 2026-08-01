@@ -46,8 +46,16 @@ explicitly requests task tracking.
 3. **Remote state:** Confirm the branch has an upstream and the remote contains
    the local `HEAD`. If not, run `/push` before creating the PR.
 
+   **CI artifact bootstrap:** If the diff introduces a CI-consumed registry tag
+   or artifact that a workflow on this branch must publish first, follow that
+   publisher's documented bootstrap path before rerunning consumer checks.
+   Request explicit user approval before a `workflow_dispatch` or other action
+   writes a shared registry, and verify the target tag/digest exists.
+
 4. **Screenshots — capture and validate before publication.** For a UI-visible
-   change, capture fresh desktop and mobile screenshots before creating the PR.
+   change, capture fresh screenshots for every affected viewport before creating
+   the PR. When the changed surface is structurally absent on another viewport,
+   record that rationale instead of capturing an unrelated screen.
    Use synthetic or redacted data, validate the assets, and compress PNGs using
    the recipe in step 7. If capture is impossible, report the concrete blocker
    and stop before PR publication. For non-UI changes, record that screenshots
@@ -79,12 +87,30 @@ explicitly requests task tracking.
 6. **If ready (not draft):** For GitHub, do not begin `/pr-fixup` until any
 required screenshot embedding in step 7 is complete.
 
-7. **Screenshots — publish already captured assets.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), publish the desktop and mobile assets captured and validated in step 4 through the host-specific flow before treating the PR as complete — do not wait to be asked.
+7. **Screenshots — publish already captured assets.** If the diff touches user-visible UI (typically under `apps/web/`, excluding e2e-only or backend-only edits), publish the affected-viewport assets captured and validated in step 4 through the host-specific flow before treating the PR as complete — do not wait to be asked. Preserve any structural-absence rationale recorded in step 4.
 
    **Capture prerequisite:**
-   - Reuse only fresh entries from `apps/web/.pr-assets/manifest.json`.
+   - If `npx --no-install playwright-cli list` has no local browser, use the
+     managed `apps/web` E2E runner with a disposable capture spec instead of
+     treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
+     assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
+     the temporary spec and confirm `git status` is clean.
+   - Reuse only fresh entries from `apps/web/.pr-assets/manifest.json`. After
+     every capture, require a non-empty manifest with the intended fresh asset
+     entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
+     lacks the capture, do not treat the run as successful; rerun with `--host`
+     and report the managed-runner gap.
    - If required assets are missing, run the Playwright capture before
      publication; do not create the PR first.
+   - For a mobile capture through `pnpm e2e:run`, select the runner project
+     before the Playwright separator and use a `mobile-*.spec.ts` filename:
+     `pnpm e2e:run --project mobile-chrome e2e/tests/<area>/mobile-<capture>.spec.ts`.
+     `--project` after `--` is only a Playwright argument and leaves the
+     runner on its default Chromium project.
+   - In managed Docker E2E, write capture files directly to the mounted
+     workspace path `/work/apps/web/.pr-assets/<name>.png`, not
+     `testInfo.outputPath(...)`, which is container-local. After the run,
+     confirm the host has the files before inspecting or compressing them.
    - Reject any asset that exposes secrets, authentication tokens, or personally
      identifiable information and stop for recapture.
    - Compress PNGs before embedding. Prefer a system `pngquant`; when it is
@@ -120,14 +146,16 @@ required screenshot embedding in step 7 is complete.
    ```
    `gh pr edit` fails on this repo (GraphQL touches the deprecated Projects-classic API). Fall back to REST — build the payload with `jq --rawfile`, never by hand-escaping shell strings:
    ```bash
+   set -euo pipefail
+   PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
    if command -v rtk >/dev/null 2>&1; then
-     rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
-     rtk proxy jq empty /tmp/pr-body-payload.json
+     rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
+     rtk proxy jq empty "$PAYLOAD"
    else
-     jq -n --rawfile body "<body-file>" '{body: $body}' > /tmp/pr-body-payload.json
-     jq empty /tmp/pr-body-payload.json
+     jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
+     jq empty "$PAYLOAD"
    fi
-   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input /tmp/pr-body-payload.json
+   gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD"
    ```
    **RTK and JSON payloads:** RTK is optional. If it is installed, it
    summarizes normal stdout, so it must not sit between a JSON producer and a
@@ -141,8 +169,8 @@ required screenshot embedding in step 7 is complete.
    is created, so never PATCH a body reconstructed from the creation-time
    template or a stale `/tmp/pr-body.md`. Before every post-creation update:
 
-   1. Fetch the current body from GitHub and use that exact response as the
-      merge base:
+   1. Fetch the current body from GitHub and keep that pristine live response
+      as the merge base:
       `gh pr view <PR_NUMBER> --json body --jq .body > /tmp/pr-body-latest.md`.
    2. Change only the section owned by this operation. For screenshots, wrap
       the section in `<!-- kandev-screenshots-start -->` and
@@ -150,9 +178,13 @@ required screenshot embedding in step 7 is complete.
       `## Screenshots` block if those markers are not present). Preserve every
       byte outside that range, including
       `<!-- kandev-preview-start --> ... <!-- kandev-preview-end -->`.
-   3. Re-fetch the body immediately before PATCH and compare it with the
-      snapshot used in step 1. If it changed, discard the pending payload,
-      re-fetch, and merge again; do not overwrite the newer body.
+   3. Build a separate merged candidate, then re-fetch the live body immediately
+      before PATCH and compare the two live snapshots (not the candidate with a
+      snapshot). Use PR-scoped temporary filenames, fail immediately on a
+      differing `cmp`, and discard any payload on failure; never reuse a prior
+      `/tmp` payload. Verify the payload contains this PR's current body and
+      required sentinels before PATCH. If it changed, re-fetch and merge again;
+      do not overwrite the newer body.
    4. After PATCH, read the body back and verify both the intended change and
       all previously present sentinel sections are still present.
 

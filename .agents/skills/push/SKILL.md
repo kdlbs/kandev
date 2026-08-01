@@ -20,7 +20,9 @@ delivery.
 
 - `--fixup` — after pushing, begin `/pr-fixup` in the same conversation.
 
-> **Note:** This skill only uses `git push`. GitHub CLI dependency is indirect via `/pr-fixup`.
+> **Note:** This skill normally uses `git push`. It uses `gh pr view` before a
+> no-upstream fallback so a checked-out fork PR is not accidentally pushed to
+> its base repository.
 
 ## Your task
 
@@ -43,8 +45,30 @@ Push the already committed branch to its remote.
    ```bash
    git push
    ```
-   If the branch has no upstream, use `git push -u origin HEAD` rather than
-   transcribing the branch name. Then verify
+   If the branch has no upstream, first look up the current branch's PR. Treat
+   an unavailable or ambiguous lookup as a stop condition; only a confirmed
+   absence of a PR permits the ordinary `origin` fallback. For a confirmed PR,
+   require its `headRefName` to match the checked-out local branch, then inspect
+   its delivery target:
+   ```bash
+   gh pr view --json isCrossRepository,headRepositoryOwner,headRepository,headRefName,headRefOid,maintainerCanModify
+   ```
+   For a cross-repository PR, the PR head owner can push its own fork directly.
+   When acting as a base-repository maintainer on somebody else's fork,
+   `maintainerCanModify` must be `true`; do not treat that field as a universal
+   fork-owner gate. Push the exact current commit to the reported head owner,
+   repository, and ref. Before using the HTTPS URL, configure Git to use the
+   authenticated `gh` credential helper:
+   ```bash
+   gh auth setup-git
+   git push "https://github.com/<head-owner>/<head-repository>.git" "HEAD:refs/heads/<head-ref>"
+   ```
+   Do not use a conveniently named local `fork`/`contributor` remote: linked
+   worktrees share remote configuration, so it can refer to another task.
+   Re-fetch the PR and require `headRefOid` to equal local `HEAD`.
+
+   Only for a non-PR or same-repository PR, use `git push -u origin HEAD`
+   rather than transcribing the branch name. Then verify
    `git rev-parse HEAD` equals `git rev-parse '@{upstream}'`, and report the
    branch from `git branch --show-current`.
    If the branch was rebased or history was rewritten, first confirm the current

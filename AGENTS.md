@@ -89,7 +89,7 @@ For multiline Markdown issue or PR bodies, write the body to a file and pass it
 with the relevant `gh ... --body-file <path>` option. Do not send escaped
 newlines through `--body`; GitHub will render them literally.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>` to reply, resolve, and react in one call. Use `--body-file` whenever a reply has Markdown or shell-sensitive characters (especially backticks, `$`, or quotes); it prevents shell substitution from corrupting the GitHub reply.
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 

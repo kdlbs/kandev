@@ -94,6 +94,7 @@ Per-workspace credentials and triage triggers for external services.
 | [azure-devops-integration](azure-devops-integration/spec.md) | shipped |
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
+| [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |

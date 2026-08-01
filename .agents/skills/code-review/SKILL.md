@@ -70,6 +70,16 @@ Before reviewing implementation details:
 - Identify missing coverage for happy path, key error paths, edge cases, auth/workspace boundaries, and concurrency/order-sensitive behavior.
 - For concurrent or event-driven changes, require a deterministic schedule that checks ownership or generation identity, stale-event handling, cancellation, and lock scope. Channel/barrier coordination is preferable to timing sleeps.
 - For stale-event races, cover both event-before-successor and delayed-old-event-after-successor orderings. Prefer integration coverage for cross-package event or callback paths when practical.
+- When an HTTP mutation returns a full entity while WebSocket/event updates can
+  update the same entity, ensure a delayed HTTP response cannot overwrite the
+  newer event. Prefer a narrow mutation response or guard a full merge with an
+  immutable revision/`updated_at`; cover it with a deferred-response test that
+  applies the newer event first.
+- For ordering guarantees across an event bus, trace producer, remote
+  transport, and gateway/client delivery. Sequential publishes on separate
+  subscriptions do not establish client order; require a unified stream or
+  sequence-aware buffering, with a transport-boundary test and local-emulator
+  coverage.
 - For terminal event streams, block an earlier publication, enqueue a terminal event (for example delete or cancellation), then enqueue a stale update. Assert no later mutation reaches an upserting consumer; queues must tombstone the entity or discard pending work at the terminal boundary.
 - When completion events lack a stable workload identity, test N outstanding registrations with N completion signals and duplicate delivery. A single-registration test cannot prove that uncorrelated completions retire work correctly. Compare this behavior with the accepted spec or ADR; a passing test that contradicts the contract is still a blocker.
 - Treat missing tests for new or changed non-UI logic as a blocker unless the change is explicitly untestable and says why.
@@ -80,6 +90,9 @@ Check every changed file for the following layers. Skip layers that don't apply 
 
 **Security** (blockers if found):
 - No secrets, tokens, or credentials in code
+- When persisted configuration is copied into UI or session metadata, trace it
+  through the applicable sanitizer/redaction boundary; storage-safe values are
+  not automatically presentation-safe.
 - Input validation at system boundaries (user input, API handlers, external data)
 - No SQL injection, XSS, command injection, or path traversal risks
 - Authentication and authorization checks in place for new endpoints
@@ -127,6 +140,11 @@ Check every changed file for the following layers. Skip layers that don't apply 
 - For changed Makefiles, shell scripts, or CI path filters, trace each changed
   target through the shell and platform branches. Distinguish executable naming
   from recipe-shell syntax; inspect `OS`, `MSYSTEM`, and `SHELL` assumptions.
+- When simulating a Windows Make branch from POSIX, prefer
+  `scripts/check-make-shells`. If a manual `make -n` is necessary, neutralize
+  its parse-time probes as that checker does (`NULL_REDIR= BUILD_TIME=simulated`)
+  so POSIX does not create `NUL` artifacts. Compare `git status --short` with
+  the initial snapshot afterward.
 - Use `make -n <changed-target>` for every affected platform branch that is
   available, and confirm CI invokes the changed target. Include docs or
   configuration paths when a validator or test reads them.
@@ -152,6 +170,10 @@ the user asks for a review only, or when reviewing an external contributor's
 branch, do not edit the checkout or push code; report findings through the
 channel the user requested. Do not submit or resolve reviews unless explicitly
 asked.
+
+Before a read-only review ends, compare `git status --short` with the initial
+snapshot. Remove only diagnostic artifacts demonstrably created during the
+review; preserve all pre-existing user changes.
 
 Report findings with a concrete suggested fix. Do not edit the checkout during
 a review-only request; otherwise remediate in the same primary conversation.

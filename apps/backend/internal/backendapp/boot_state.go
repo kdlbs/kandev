@@ -930,6 +930,14 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 	worktreesBySession := make(map[string]any)
 	sessionModelsByID := make(map[string]any)
 	sessionMCPStatusByID := make(map[string]any)
+	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(
+		ctx,
+		map[string][]*taskmodels.TaskSession{taskID: sessions},
+	)
+	if err != nil {
+		b.logBootError("get task detail session pending actions", err)
+		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
+	}
 	for _, session := range sessions {
 		if session == nil {
 			continue
@@ -942,6 +950,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
 		}
+		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionItems[session.ID] = dto
 		sessionList = append(sessionList, dto)
 		if session.TaskEnvironmentID != "" {

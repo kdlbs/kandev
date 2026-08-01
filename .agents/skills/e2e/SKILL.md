@@ -52,6 +52,16 @@ Each worker gets an isolated backend, frontend, database, and mock agent — no 
 
 **Always run headless** (`make test-e2e`). Never use `--headed`, `e2e:headed`, or `test-e2e-headed` — headed mode requires a display and will fail in agent environments.
 
+**Fresh worktree bootstrap:** Before the first pnpm or E2E command in a new
+worktree, install the workspace dependencies:
+
+```bash
+cd apps && pnpm install --frozen-lockfile
+```
+
+Do this once before changing into `apps/web` or running a filtered package
+command. Shared `.git` metadata does not include `apps/node_modules`.
+
 ### Preferred: `pnpm e2e:run` (managed runner — builds, runs, tears down)
 
 `e2e/scripts/run-e2e.sh` handles the build, the run, and cleanup in one command. Use it instead of stitching the steps together. It auto-selects docker vs host, runs N shards concurrently, enforces strict WS accounting by default (matching CI), and never leaves root-owned artifacts behind.
@@ -63,9 +73,24 @@ pnpm e2e:run tests/task/my-test.spec.ts        # single file (extra args pass th
 pnpm e2e:run tests/path/spec.ts -- --grep "exact test name"  # exact CI failure with a fresh build
 pnpm e2e:run --shards 3                          # 3 shards concurrently on this machine (isolated)
 pnpm e2e:run --no-build -- --grep "task creation"  # skip rebuild; forward flags after --
+pnpm e2e:run --no-build --project mobile-chrome tests/layout/mobile-spa-resilience.spec.ts
 pnpm e2e:docker                                # force the docker CI image (full isolation from a host dev instance)
 pnpm e2e:clean                                 # remove build/test artifacts, incl. root-owned ones from prior docker runs
 ```
+
+**Select the owning Playwright project.** The default `chromium` project
+intentionally excludes routing, auth, mobile, and container suites; a matching
+path with the wrong project exits with `No tests found`. Pass the project before
+the spec path, for example:
+
+```bash
+pnpm e2e:run --project auth tests/auth/auth-lifecycle.spec.ts
+pnpm e2e:run --project routing tests/office-routing-<name>.spec.ts
+pnpm e2e:run --project containers tests/docker/<name>.spec.ts
+```
+
+Use `mobile-chrome` only for `mobile-*.spec.ts` files. Confirm Playwright
+discovers the intended test count before treating a focused command as evidence.
 
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
@@ -76,6 +101,12 @@ fixtures also exist; global setup currently requires
 without `--no-build` or first run `make -C apps/backend e2e-plugin-package`.
 Prefer a normal managed build after source or base-branch changes and reserve
 `--no-build` for repeated runs against unchanged artifacts.
+
+For a raw Docker/SSH/container run, `make build-backend` alone does not build
+the Linux mock-agent fixture. Prefer the managed runner; otherwise run
+`make build-backend build-backend-remote-helpers build-web`. If the fixture
+reports a missing `KANDEV_MOCK_AGENT_LINUX_BINARY`, run
+`make -C apps/backend build-mock-agent-linux` before diagnosing product code.
 
 ### Raw commands (when you need fine control)
 
@@ -114,6 +145,13 @@ Start by matching CI as closely as possible, then add pressure deliberately:
    full spec file or full shard with the same resource limits before declaring
    a flake non-reproducible.
 
+A test that passes only after a Playwright retry is still a failure signal.
+During triage disable per-spec retry overrides and use `--retries=0`. When
+isolated repeats pass but the same shard position fails, binary-search the
+preceding spec files under one worker until the smallest ordered sequence
+reproduces the shared-state leak; the fix is complete only when that sequence
+passes with retries disabled.
+
 Record the exact command, resource limits, repeat number, and failure artifact
 path. Always inspect `error-context.md`; mobile/terminal flakes often show
 state that the stack trace alone hides, such as duplicate active terminals or a
@@ -141,7 +179,9 @@ Without this, tests run against stale code and failures are misleading. `make bu
 
 For a touch-specific interaction, use Playwright `.tap()` rather than `.click()`
 so the app receives a touch `pointerType`. Run focused mobile specs with
-`-- --project=mobile-chrome`; otherwise Playwright can report no matching tests.
+`pnpm e2e:run --project mobile-chrome e2e/tests/<area>/mobile-<name>.spec.ts`.
+`--project` is a runner option and must precede `--`; the mobile project only
+matches `mobile-*.spec.ts` files, so another filename can produce no tests.
 After the interaction settles, assert the resulting state and exercise a later
 mouse or pen entry when the UI maintains hybrid-device pointer state.
 
@@ -168,6 +208,13 @@ expect(metricsBox!.height).toBeCloseTo(actionsBox!.height, 1);
 Run the assertion in the relevant desktop and mobile projects when responsive
 layout can change the result. Do not rely on fixed pixels when the product
 contract is equality or alignment.
+
+**Animation-aware geometry:** Before reading dialog or panel geometry, wait only for currently running Web Animations with finite `effect.getComputedTiming().iterations`; await `animation.finished.catch(() => undefined)` because Radix overlays can cancel animations during close or replacement. Never blanket-await infinite animations or use a fixed sleep; then read bounding boxes and assert the relationship.
+
+For narrow-width clipping or overlap regressions, visibility and containment
+are insufficient: assert a real hit target. Check `document.elementFromPoint()`
+at the control center resolves to the control (or its descendant), then prove
+the action remains clickable at the legal minimum width.
 
 ### IDs and response shapes — common pitfalls
 
@@ -219,7 +266,7 @@ KANDEV_LOG_LEVEL=warn apps/backend/bin/kandev &
 
 Start the dev frontend:
 ```bash
-KANDEV_API_BASE_URL=http://localhost:$BACKEND_PORT NEXT_PUBLIC_KANDEV_API_PORT=$BACKEND_PORT \
+KANDEV_API_BASE_URL=http://localhost:$BACKEND_PORT VITE_KANDEV_API_PORT=$BACKEND_PORT \
 pnpm --filter @kandev/web dev --port $FRONTEND_PORT &
 ```
 
@@ -303,7 +350,29 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
 
 - **Test through the UI, not the API.** E2E tests verify user-facing behavior. Don't write tests that only call the API and assert the response -- those are integration tests. Instead, navigate to the page, interact with UI elements, and assert what the user sees.
 - **Verify persistence with page reload.** After changing a setting or creating data, reload the page (`testPage.reload()`) and assert the state is still correct. This catches hydration bugs and Go boot-payload/client-store mismatches.
-- **Restore patched persisted settings.** When a test PATCHes user settings, capture the baseline and restore it in `test.afterEach`. The backend is worker-scoped, and `e2eReset` does not reset every persisted setting, including `system_metrics_display`; leaking one can affect later tests in the same worker.
+- **Restore patched persisted settings.** When a test PATCHes user settings, capture the baseline and restore it in `test.afterEach`. The backend is worker-scoped, and `e2eReset` does not reset every persisted setting, including `system_metrics_display`; leaking one can affect later tests in the same worker. Fixtures are lazy: acquire `testPage` before setting a non-default persisted value in `beforeEach`, otherwise page initialization can reapply the default and silently undo setup. Verify with the focused test that depends on that setting.
+- **Restore patched shared persisted state.** The worker-scoped backend and
+  `e2eReset` do not reset every seeded record. A test that PATCHes a canonical
+  `seedData` profile, repository, executor, or setting must capture its
+  baseline and restore it in `test.afterEach` (so cleanup also runs after
+  failure); prefer a disposable record when the UI can select it. Verify by
+  running the mutating spec followed by its affected neighbour with
+  `--workers=1 --retries=0`.
+- **Pass browser-evaluation values explicitly.** `locator.evaluate` and
+  `page.evaluate` callbacks execute in the browser, so they cannot close over
+  Node/test variables. Pass expected values as the argument instead, for
+  example `locator.evaluate((el, expected) => Math.abs(el.scrollTop - expected), baseline)`.
+- **Measure asynchronous layout from a settled baseline.** When the initiating
+  UI action changes layout before its delayed result arrives, delay the mock
+  response and capture the baseline after that synchronous layout settles. Then
+  assert the absolute deviation after the asynchronous content appears. This
+  attributes movement to the result rather than the initiating action and
+  catches movement in either direction.
+- **Scroll-positioned markers.** For unread dividers, restore points, or search
+  anchors, seed content taller than the viewport and assert the marker's bounds
+  are inside the viewport after navigation. A short transcript's DOM-visible
+  marker does not prove initial scroll behavior; cover every renderer/viewport
+  strategy selected at runtime.
 - **Nested Escape controls.** If an inner panel inside a Radix Dialog handles Escape, intercept the key in capture phase and call both `preventDefault()` and `stopPropagation()` before dismissing the inner panel. A bubble-phase window handler runs after Radix can dismiss the outer dialog. Add a regression that asserts the inner panel collapses while the outer dialog remains open.
 - **Seed via API, assert via UI.** Use `apiClient` to set up preconditions quickly, but always verify the result by opening the page and checking the DOM.
 - **Workflow/session invariants.** For session-primary/profile behavior, prefer polling backend state with `apiClient.listTaskSessions(taskId)` for invariants such as `agent_profile_id`, `is_primary`, `state`, and session count, then add UI assertions as secondary evidence. UI tab markers can lag or be absent when the backend invariant is the behavior under test.
@@ -341,8 +410,15 @@ When a test fails:
 ### Common issues
 
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
-- **"Cannot find module"** — run `cd apps && pnpm install`
+- **"Cannot find module"** — run `cd apps && pnpm install --frozen-lockfile`
 - **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
+- **Responsive layout stays stale after `page.setViewportSize()`** — record
+  `window.innerWidth`, the affected element and parent `clientWidth`, and any
+  layout-library width before changing waits. Headless Chromium reliably
+  resizes the DOM/container and fires `ResizeObserver`, while an
+  application-only `window.resize` listener may not be observed in the test.
+  Prefer synchronizing with the layout container/observer and assert the
+  intended result after both viewport and container-only changes.
 - **Auto-started session never goes idle** — for sessions started by the same call that creates them, the mock agent can finish before the client WS subscription registers, so a raw `idleInput()` visibility wait hangs. Use `SessionPage.waitForChatIdle()` instead; it reloads once and re-derives state from the Go boot payload.
 - **Flaky timeouts** — **never increase locator timeouts to fix flaky tests.** If a locator times out, the root cause is almost always something else: a setup failure, missing navigation, race condition, or the element genuinely not rendering. Investigate why the element never appears instead of giving it more time. Note: infrastructure health timeouts (30s in `fixtures/backend.ts`) and overall test timeouts (60s in `playwright.config.ts`) are separate and should not be modified either.
 - Screenshots on failure, video on first retry (CI)
@@ -367,7 +443,21 @@ E2E tests run against the **production Vite build served by the Go backend**, no
 unzip report-*.zip -d report-shard && cat report-shard/*.jsonl
 ```
 
-When a CI shard fails, download its report-*.zip artifact and unzip it; the report is a *.jsonl event stream. Build a testId map by walking the events: test titles and locations come from the testBegin events, and final status plus duration come from the testEnd events. Match them by test id. This surfaces the slow but passing specs (the timing markers in Playwright output) that never show up as outright failures but are latent flake risks. Specs whose duration approaches the 60s per-test timeout (defined in playwright.config.ts) are the flake candidates to harden. Typically by converting raw chat-flow assertions to the waitForChatIdle() / expectChatResponseVisible() recovery helpers documented earlier in this file.
+When a CI shard fails, distinguish its two useful artifacts. Download and unzip
+the blob `report-*.zip` to map test IDs, titles, locations, final status, and
+timings from its JSONL events. Download `test-results-<shard>` for the exact
+failed assertion, `error-context.md`, screenshot, and trace:
+
+```bash
+gh run download <run-id> --name test-results-<shard> --dir <temp-dir>
+```
+
+The blob report surfaces slow-but-passing specs that are latent flake risks;
+the test-results artifact identifies the concrete failure to reproduce. Specs
+whose duration approaches the 60s per-test timeout (defined in
+`playwright.config.ts`) are candidates to harden, typically by converting raw
+chat-flow assertions to the `waitForChatIdle()` / `expectChatResponseVisible()`
+recovery helpers documented earlier in this file.
 
 ### Flake triage: intrinsic race vs. contention
 
