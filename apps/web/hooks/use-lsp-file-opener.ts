@@ -11,10 +11,10 @@ import {
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 
 export function toWorkspaceRelativePath(filePath: string, workspacePath: string | null): string {
-  if (workspacePath && filePath.startsWith(workspacePath)) {
-    return filePath.slice(workspacePath.length + 1);
-  }
-  return filePath;
+  const normalizedWorkspacePath = workspacePath?.replace(/\/+$/, "") ?? "";
+  if (!normalizedWorkspacePath) return filePath;
+  const workspacePrefix = `${normalizedWorkspacePath}/`;
+  return filePath.startsWith(workspacePrefix) ? filePath.slice(workspacePrefix.length) : filePath;
 }
 
 /**
