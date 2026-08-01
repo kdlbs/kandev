@@ -87,12 +87,20 @@ Model, mode, command, and configuration choices are probed from the locally inst
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
 
-Subscription usage is not shown on **Settings > Agents**, which is the page for
-installing host CLIs and configuring their profiles. When [Office mode](feature-status.md)
-is enabled, open **Office > Agents** and select an Office agent to see its
-**Subscription Quota** on the overview; the Office dashboard also summarizes
-the highest utilization across subscription agents. These cards appear only
-for supported subscription agents with provider credentials.
+### Monitor Office agent quota
+
+> [!EXPERIMENTAL]
+> Office mode is feature-flagged and disabled in the production profile by
+> default. Enable **Office mode** under **Settings > System > Feature Toggles**
+> and restart Kandev to try it; its routes and agent surfaces are still in
+> progress. For stable host-CLI installation and profile configuration, use
+> **Settings > Agents**.
+
+When [Office mode](feature-status.md) is enabled, open **Office > Agents** and
+select an Office agent to see its **Subscription Quota** on the overview; the
+Office dashboard also summarizes the highest utilization across subscription
+agents. These cards appear only for supported subscription agents with provider
+credentials.
 
 For account-wide provider usage across supported providers, install the
 [Provider Usage plugin](https://github.com/kdlbs/kandev-plugin-provider-usage).
