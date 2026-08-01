@@ -1,7 +1,7 @@
 ---
 id: "01-executor-first-selection"
 title: "Enforce executor-first profile selection"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

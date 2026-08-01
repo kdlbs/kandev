@@ -1,7 +1,7 @@
 ---
 id: "02-create-task-e2e"
 title: "Prove portable settings behavior in Create Task"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-executor-first-selection"]
 plan: "plan.md"
@@ -34,7 +34,7 @@ proven across the same boundary used by another browser or an upgraded frontend.
 
 ## Files likely touched
 
-- `apps/web/e2e/tests/task/create-task.spec.ts`
+- `apps/web/e2e/tests/task/create-task-executor-default.spec.ts`
 
 ## Dependencies
 
@@ -53,7 +53,7 @@ proven across the same boundary used by another browser or an upgraded frontend.
 
 ## Verification
 
-- `cd apps/web && pnpm e2e:run tests/task/create-task.spec.ts -- --project=chromium --grep "executor safety default"`
+- `cd apps/web && pnpm e2e:run --project chromium tests/task/create-task-executor-default.spec.ts`
 
 ## Mobile parity
 
@@ -70,5 +70,5 @@ behavior. Existing mobile Create Task specs continue to cover reachability and l
 
 ## Output contract
 
-Report the RED/ GREEN evidence, exact managed-runner result, cleanup behavior, blockers, and update
-this task plus `plan.md` status in the same conversation.
+The focused managed Chromium run passed both scenarios (`2 passed`); each test restores the workspace
+default and backend task-create preference in `finally` cleanup, and no blockers remain.

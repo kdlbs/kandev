@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/task-create-executor-default.md
 created: 2026-08-01
-status: draft
+status: complete
 ---
 
 # Implementation Plan: Task Create Executor Default
@@ -81,20 +81,20 @@ making the Local selection portable across browsers and updates by design.
 - **Scenario:** **GIVEN** backend user settings contain a last-used Local profile and the workspace
   has no executor default, **WHEN** Create Task opens for the seeded repository in a browser
   context, **THEN** the Executor Profile selector shows Worktree.
-  - **File:** `apps/web/e2e/tests/task/create-task.spec.ts`
+  - **File:** `apps/web/e2e/tests/task/create-task-executor-default.spec.ts`
   - **What to verify:** seed the Local profile through `saveUserSettings`, navigate through the
     regular Kanban UI, open the dialog, and assert the visible Worktree selection.
 - **Scenario:** **GIVEN** the workspace explicitly defaults to Local, **WHEN** Create Task opens for
   the seeded repository, **THEN** the selector shows Local even when the saved profile is Worktree.
-  - **File:** `apps/web/e2e/tests/task/create-task.spec.ts`
+  - **File:** `apps/web/e2e/tests/task/create-task-executor-default.spec.ts`
   - **What to verify:** set and later restore `default_executor_id`, assert the visible Local
     profile, and restore the backend last-used profile to Worktree so the worker-scoped fixture
     does not leak state.
 
 ## Implementation Tasks
 
-- [ ] [Task 01: Enforce executor-first profile selection](task-01-executor-first-selection.md)
-- [ ] [Task 02: Prove portable settings behavior in Create Task](task-02-create-task-e2e.md)
+- [x] [Task 01: Enforce executor-first profile selection](task-01-executor-first-selection.md)
+- [x] [Task 02: Prove portable settings behavior in Create Task](task-02-create-task-e2e.md)
 
 Execution is sequential in the primary conversation. No subagent delegation is planned or
 authorized.
@@ -103,9 +103,12 @@ authorized.
 
 Run from the repository root unless noted otherwise:
 
-- `cd apps && pnpm --filter @kandev/web test -- components/task-create-dialog-effects-executor.test.ts`
+- `cd apps/web && pnpm test -- --run components/task-create-dialog-effects-executor.test.ts components/task-create-dialog-executor-wait.test.ts`
 - `cd apps/web && pnpm run typecheck`
-- `cd apps/web && pnpm e2e:run tests/task/create-task.spec.ts -- --project=chromium --grep "executor safety default"`
+- `cd apps/web && pnpm e2e:run --project chromium tests/task/create-task-executor-default.spec.ts`
+
+Completed validation: 14 focused Vitest tests passed, the web typecheck passed, targeted ESLint and
+Prettier checks passed, and the managed Chromium run passed both Create Task scenarios.
 
 The managed E2E runner performs the required production build before Playwright. Frontend
 dependencies are currently absent in this worktree; implementation begins with
