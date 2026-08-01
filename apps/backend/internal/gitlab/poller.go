@@ -175,6 +175,11 @@ func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
 		}
 		return
 	}
+	if clearErr := p.service.ClearTaskMRAutomationError(
+		ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID,
+	); clearErr != nil {
+		p.logger.Debug("gitlab poller: clear MR lifecycle error failed", zap.Error(clearErr))
+	}
 	p.service.publishTaskMRLifecycleSyncEvent(ctx, updated)
 }
 

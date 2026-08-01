@@ -182,6 +182,17 @@ func (s *Service) RecordTaskMRAutomationError(ctx context.Context, taskID, repos
 	return store.RecordTaskMRAutomationError(ctx, taskID, repositoryID, projectPath, mrIID, message)
 }
 
+// ClearTaskMRAutomationError pass-through to the store. Called after a
+// successful lifecycle sync so a recovered failure doesn't linger in
+// last_error and read as an active problem.
+func (s *Service) ClearTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.ClearTaskMRAutomationError(ctx, taskID, repositoryID, projectPath, mrIID)
+}
+
 // IsReviewerOnMR reports whether username currently appears in the MR's
 // Reviewers list — GitLab's assignment-as-request signal, since GitLab has
 // no distinct "review requested" API event (unlike GitHub's requested

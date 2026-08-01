@@ -274,3 +274,57 @@ func TestPoller_RunMRLifecycleSync_RejectsHostChangeSinceLink(t *testing.T) {
 		t.Fatalf("expected last_error recorded for the host mismatch, got %+v", state)
 	}
 }
+
+// TestPoller_RunMRLifecycleSync_ClearsRecoveredError is AC25's converse: a
+// previously recorded sync failure must not linger in last_error once the
+// MR syncs successfully again, or the checkpoint would misreport an active
+// failure indefinitely.
+func TestPoller_RunMRLifecycleSync_ClearsRecoveredError(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	if err := store.SaveConfigForWorkspace(ctx, "ws-1", &GitLabConfig{
+		Host: "https://gitlab.example.com", AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	secrets := &configTestSecrets{values: map[string]string{SecretKeyForWorkspace("ws-1"): "token"}}
+	svc := newWorkspaceConfigService(t, store, secrets)
+	mock := NewMockClient("https://gitlab.example.com")
+	mock.SeedMR("group/subscribed", &MR{
+		IID: 1, State: "opened", HeadBranch: "feat", BaseBranch: "main",
+		WebURL: "https://gitlab.example.com/group/subscribed/-/merge_requests/1",
+	})
+	svc.workspaceClientFn = func(_ context.Context, _ *GitLabConfig, _ string) (Client, error) {
+		return mock, nil
+	}
+
+	subscribed := newTestMR("task-1", "", "group/subscribed", 1)
+	subscribed.Host = "https://gitlab.example.com"
+	if err := store.UpsertTaskMR(ctx, subscribed); err != nil {
+		t.Fatalf("seed MR: %v", err)
+	}
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("enable switch: %v", err)
+	}
+	if err := store.RecordTaskMRAutomationError(ctx, "task-1", "", "group/subscribed", 1, "prior failure"); err != nil {
+		t.Fatalf("seed prior error: %v", err)
+	}
+
+	memBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetEventBus(memBus)
+
+	poller := NewPoller(svc, memBus, newTestLogger(t))
+	poller.runMRLifecycleSync(ctx)
+
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/subscribed", 1)
+	if err != nil {
+		t.Fatalf("get lifecycle state: %v", err)
+	}
+	if state == nil || state.LastError != nil {
+		t.Fatalf("expected last_error cleared after a successful sync, got %+v", state)
+	}
+}
