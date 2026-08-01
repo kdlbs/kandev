@@ -110,9 +110,9 @@ Run from the repository root unless noted otherwise:
 Completed validation: 14 focused Vitest tests passed, the web typecheck passed, targeted ESLint and
 Prettier checks passed, and the managed Chromium run passed both Create Task scenarios.
 
-The managed E2E runner performs the required production build before Playwright. Frontend
-dependencies are currently absent in this worktree; implementation begins with
-`cd apps && pnpm install --frozen-lockfile` if they are still missing.
+The managed E2E runner performs the required production build before Playwright. This worktree ran
+`cd apps && pnpm install --frozen-lockfile` before the recorded validation; fresh worktrees must run
+that prerequisite if frontend dependencies are missing.
 
 ## Risks
 
