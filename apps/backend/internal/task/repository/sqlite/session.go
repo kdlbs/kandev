@@ -186,8 +186,10 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 // so columns can be added in one place. Order MUST match the scan helpers.
 //
 // agent_execution_id and container_id come from executors_running (the single
-// source of truth for active execution state) via LEFT JOIN. All other columns
-// come from task_sessions (aliased ts).
+// source of truth for active execution state) via LEFT JOIN. The effective
+// workspace_path comes from the linked task environment when available so a
+// promoted multi-repo task is correct after a session refresh; all other
+// columns come from task_sessions (aliased ts).
 //
 // ADR 0005: agent_profile_id is the single column for both kanban (FK to a
 // shallow profile) and office (FK to a per-workspace rich profile) sessions —
@@ -195,7 +197,8 @@ func (r *Repository) ListTurnsBySession(ctx context.Context, sessionID string) (
 const taskSessionSelectCols = `ts.id, ts.task_id,
 	COALESCE(er.agent_execution_id, ''), COALESCE(er.container_id, ''),
 	ts.agent_profile_id, ts.execution_profile_id, ts.executor_id, ts.executor_profile_id, ts.environment_id,
-	ts.repository_id, ts.base_branch, ts.base_commit_sha, ts.workspace_path,
+	ts.repository_id, ts.base_branch, ts.base_commit_sha,
+	COALESCE(NULLIF(te.workspace_path, ''), ts.workspace_path),
 	ts.agent_profile_snapshot, ts.executor_snapshot, ts.environment_snapshot, ts.repository_snapshot,
 	ts.state, ts.error_message, ts.metadata, ts.started_at, ts.completed_at, ts.updated_at,
 	ts.is_primary, ts.review_status, ts.is_passthrough, ts.task_environment_id, ts.name, ts.last_read_message_id`
@@ -203,7 +206,8 @@ const taskSessionSelectCols = `ts.id, ts.task_id,
 // taskSessionFromClause is the FROM clause that pairs with taskSessionSelectCols.
 // Always reference task_sessions as `ts` and executors_running as `er` in WHERE/ORDER.
 const taskSessionFromClause = `FROM task_sessions ts
-	LEFT JOIN executors_running er ON er.session_id = ts.id`
+	LEFT JOIN executors_running er ON er.session_id = ts.id
+	LEFT JOIN task_environments te ON te.id = ts.task_environment_id`
 
 // Task Session operations
 

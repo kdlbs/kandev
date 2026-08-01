@@ -234,10 +234,38 @@ describe("session.workspace_sources.updated handler", () => {
     } as never);
 
     expect(setTaskSession).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "s-1", worktree_path: "/new" }),
+      expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
     expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
+  });
+
+  it("does not clear the workspace root when a partial event omits it", () => {
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "IDLE",
+            worktree_path: "/task-root/kandev",
+            workspace_path: "/task-root",
+          },
+        },
+      },
+      setTaskSession,
+    });
+
+    const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
+    handler({
+      id: "msg-workspace-sources-partial",
+      type: "notification",
+      action: "session.workspace_sources.updated",
+      payload: { task_id: "t-1", session_id: "s-1" },
+    } as never);
+
+    expect(setTaskSession).not.toHaveBeenCalled();
   });
 });
 
@@ -907,6 +935,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
         id: "s-1",
         task_environment_id: "env-1",
         worktree_path: "/tmp/kandev/tasks/ws/task-1",
+        workspace_path: "/tmp/kandev/tasks/ws/task-1",
       }),
     );
   });

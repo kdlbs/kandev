@@ -110,6 +110,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
     worktree_path: incoming.worktree_path ?? existing.worktree_path,
     worktree_branch: incoming.worktree_branch ?? existing.worktree_branch,
+    workspace_path: incoming.workspace_path ?? existing.workspace_path,
     repository_id: incoming.repository_id ?? existing.repository_id,
     base_branch: incoming.base_branch ?? existing.base_branch,
     task_environment_id: incoming.task_environment_id ?? existing.task_environment_id,

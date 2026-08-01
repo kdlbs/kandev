@@ -416,6 +416,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Effective task root containing every attached workspace source. */
+  workspace_path?: string;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;

@@ -216,6 +216,49 @@ test.describe("Attach local workspace sources", () => {
     await expect(
       session.files.getByTestId("file-tree-node").filter({ hasText: "plain-local-folder" }),
     ).toBeVisible();
+
+    // Chat links in a multi-repository workspace are absolute on the host but
+    // must resolve relative to the task root (not the primary repository).
+    const taskState = await apiClient.getTask(task.id);
+    const activeSessionId = taskState.primary_session_id;
+    if (!activeSessionId) throw new Error("task has no primary session after source attachment");
+    const linkedRepoPath = repoPaths.find((repoPath) =>
+      repoPath.endsWith("second-local-repository-main"),
+    );
+    if (!linkedRepoPath) throw new Error("attached repository worktree path was not returned");
+    const primaryFilePath = path.join(repoPaths[0], "changes/repository-0.txt");
+    const linkedFilePath = path.join(linkedRepoPath, "second-source.txt");
+    await apiClient.seedSessionMessage(activeSessionId, {
+      type: "message",
+      content: `[primary source](${primaryFilePath}) [second source](${linkedFilePath})`,
+    });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.showSessionContext();
+    const primaryChatLink = session.activeChat().getByRole("link", { name: "primary source" });
+    const siblingChatLink = session.activeChat().getByRole("link", { name: "second source" });
+    await expect(primaryChatLink).toBeVisible({ timeout: 15_000 });
+    await expect(siblingChatLink).toBeVisible({ timeout: 15_000 });
+    await primaryChatLink.click();
+    await expect(testPage.getByTestId("preview-tab-file-editor")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "repository 0",
+    );
+    await expect(testPage.locator(".dv-tab", { hasText: "repository-0.txt" })).toBeVisible({
+      timeout: 15_000,
+    });
+    await session.showSessionContext();
+    await session.activeChat().getByRole("link", { name: "second source" }).click();
+    await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
+      "repository source",
+    );
+    await expect(testPage.locator(".dv-tab", { hasText: "second-source.txt" })).toBeVisible({
+      timeout: 15_000,
+    });
   });
 
   test("explains the disabled action while an active turn is running", async ({
