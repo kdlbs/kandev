@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { IconVolume } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Switch } from "@kandev/ui/switch";
@@ -13,14 +14,28 @@ import {
   setSoundPreferences,
   SOUND_PRESETS,
   type SoundPreferences,
+  type SoundPresetId,
 } from "@/lib/notifications/sound";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+
+/**
+ * Catalog keys for the preset names, keyed by the preset id — the id is the
+ * persisted sentinel and must never be translated. Keys, not `t()` calls: a
+ * module-scope `t` would freeze the names at the boot locale (docs/i18n.md).
+ */
+const SOUND_PRESET_LABEL_KEYS: Record<SoundPresetId, string> = {
+  plim: "settings:soundPresetPlim",
+  chime: "settings:soundPresetChime",
+  ding: "settings:soundPresetDing",
+  pop: "settings:soundPresetPop",
+};
 
 export function NotificationSoundSection({
   onDirtyChange,
 }: {
   onDirtyChange?: (isDirty: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [saved, setSaved] = useState<SoundPreferences>(getSoundPreferences);
   const [prefs, setPrefs] = useState<SoundPreferences>(saved);
   const revision = JSON.stringify(prefs);
@@ -48,17 +63,16 @@ export function NotificationSoundSection({
     >
       <div className="flex items-center justify-between gap-4">
         <div>
-          <div className="text-base font-medium">Notification Sound</div>
+          <div className="text-base font-medium">{t("settings:notificationSound")}</div>
           <p className="text-sm text-muted-foreground">
-            Play a sound on this device when a selected agent turn, question, or Office event
-            occurs.
+            {t("settings:notificationSoundDescription")}
           </p>
         </div>
         <Switch
           checked={prefs.enabled}
           data-settings-dirty={prefs.enabled !== saved.enabled}
           onCheckedChange={(enabled) => setPrefs({ ...prefs, enabled })}
-          aria-label="Enable notification sound"
+          aria-label={t("settings:enableNotificationSound")}
           className="cursor-pointer"
         />
       </div>
@@ -74,7 +88,7 @@ export function NotificationSoundSection({
           >
             <SelectTrigger
               className="w-44 cursor-pointer"
-              aria-label="Notification sound"
+              aria-label={t("settings:notificationSoundSelect")}
               data-settings-dirty={prefs.presetId !== saved.presetId}
             >
               <SelectValue />
@@ -82,7 +96,7 @@ export function NotificationSoundSection({
             <SelectContent>
               {SOUND_PRESETS.map((preset) => (
                 <SelectItem key={preset.id} value={preset.id} className="cursor-pointer">
-                  {preset.label}
+                  {t(SOUND_PRESET_LABEL_KEYS[preset.id])}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -94,13 +108,13 @@ export function NotificationSoundSection({
                   variant="outline"
                   size="icon"
                   className="cursor-pointer"
-                  aria-label="Preview sound"
+                  aria-label={t("settings:previewSound")}
                   onClick={() => playSoundPreset(prefs.presetId)}
                 >
                   <IconVolume className="h-4 w-4" />
                 </Button>
               </TooltipTrigger>
-              <TooltipContent>Preview sound</TooltipContent>
+              <TooltipContent>{t("settings:previewSound")}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </div>

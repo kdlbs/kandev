@@ -30,7 +30,7 @@ export const noLiteralStringOptions = {
     exclude: [
       "^\\s*$",
       "^[^A-Za-z]*$",
-      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Sprites\\.dev)$",
+      "^(Kandev|GitHub|GitLab|Jira|Linear|Slack|Sentry|Azure DevOps|Docker|Codex|OpenCode|Claude|Copilot|Amp|Apprise|Sprites\\.dev)$",
       "^(ACP|MCP|SSH|URL|ID|PR|CI|AI|API|JSON|YAML|LSP|TLS|SQL|JQL)$",
       // Units, version prefixes, and keyboard glyphs — not translatable
       // copy; these show up as fragments beside an interpolated value.
@@ -172,6 +172,9 @@ export const i18nGuardFiles = [
   // Settings → General → Appearance, migrated end-to-end as the worked example:
   // the page, the two sections it owns, and the settings chrome around them.
   "app/settings/general/appearance/**/*.{ts,tsx}",
+  // Settings → General → Notifications; the shared settings chrome it renders
+  // is migrated with the page that owns it, not here.
+  "app/settings/general/notifications/**/*.{ts,tsx}",
   // Settings → General → Secrets.
   "app/settings/general/secrets/**/*.{ts,tsx}",
   // Settings → General → Terminal; the shared settings chrome is migrated with
@@ -181,6 +184,15 @@ export const i18nGuardFiles = [
   "components/settings/general-settings.tsx",
   "components/settings/general-nav.ts",
   "components/settings/language-settings.tsx",
+  "components/settings/notification-events-table.tsx",
+  "components/settings/notification-permission-section.tsx",
+  "components/settings/notification-sound-section.tsx",
+  // A `.ts` entry records that the file is migrated, but the rule cannot
+  // enforce it: `mode: "jsx-only"` means a file with no JSX is never inspected,
+  // so copy added here (toast/dialog/Notification arguments, thrown messages)
+  // is caught only by the pseudo-locale, never by lint.
+  "components/settings/notifications-settings-actions.ts",
+  "components/settings/notifications-settings.tsx",
   "components/settings/secrets-settings.tsx",
   "components/settings/settings-floating-save.tsx",
   "components/settings/settings-layout-client.tsx",
