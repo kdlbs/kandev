@@ -141,15 +141,18 @@ steps:
 
       AFTER SUBMITTING THE REVIEW:
 
-      Use update_task_pr_automation_kandev to enable all three task-bound
-      notifications:
+      Enable all three task-bound lifecycle notifications on whichever
+      provider this task's linked review target is on:
+      - GitHub pull request: use update_task_pr_automation_kandev
+      - GitLab merge request: use update_task_mr_automation_kandev
+      In both cases set:
       - prompt_on_review_requested: true
       - prompt_on_merged: true
       - prompt_on_closed: true
 
-      These settings keep this review task subscribed to the related PR. Kandev
-      will prompt the task again if review is requested after feedback is
-      addressed, or when the PR is merged or closed.
+      These settings keep this review task subscribed to the related PR/MR.
+      Kandev will prompt the task again if review is requested after feedback
+      is addressed, or when the PR/MR is merged or closed.
 
       NOT A FINDING (skip these):
       - Issues on lines or files the PR didn't modify — even if they are real bugs
