@@ -1,0 +1,42 @@
+name: Plugin SDK Release Tag
+
+on:
+  push:
+    tags:
+      - "pluginsdk/v*"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  validate:
+    name: Validate SDK module tag
+    runs-on: ubuntu-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout tagged commit
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Validate nested-module tag and published module
+        working-directory: pluginsdk
+        env:
+          SDK_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$SDK_TAG" =~ ^pluginsdk/v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "invalid SDK tag: $SDK_TAG (expected pluginsdk/vX.Y.Z)" >&2
+            exit 1
+          fi
+          test "$(awk '$1 == "module" { print $2; exit }' go.mod)" = "github.com/kdlbs/kandev/pluginsdk"
+          test "$(GOWORK=off go list -m)" = "github.com/kdlbs/kandev/pluginsdk"
+          GOWORK=off go mod tidy
+          git diff --exit-code -- go.mod go.sum
+          GOWORK=off go vet ./...
+          GOWORK=off go test ./...

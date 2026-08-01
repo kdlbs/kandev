@@ -253,7 +253,7 @@ derived from.
 - **Ephemeral tasks** (quick-chat) are excluded from `ListTasks` unless the
   request sets `TaskFilter.include_ephemeral`.
 
-## 4. SDK (`apps/backend/pkg/pluginsdk`)
+## 4. Standalone SDK module (`github.com/kdlbs/kandev/pluginsdk`)
 
 Public Go module surface (authors import only this):
 
@@ -291,7 +291,7 @@ func Serve(p Plugin, opts ...Option)     // blocks; wires go-plugin server + bro
 SDK types mirror proto but use `map[string]any` for Struct fields. The SDK owns
 all go-plugin/grpc plumbing (handshake, broker for Host, conversions).
 
-### Host data API accessors (`apps/backend/pkg/pluginsdk/host.go`, `data_types.go`)
+### Host data API accessors (`pluginsdk/host.go`, `pluginsdk/data_types.go`)
 
 Each `Host.<Resource>()` call above returns a small reader interface. All
 methods take `context.Context`; list methods take a Go-native `Page{Limit

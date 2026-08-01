@@ -140,9 +140,10 @@ repository above.
 4. Inspect repository-local instructions before editing. Replace template
    identity and example behavior without deleting its packaging, test, or
    release safeguards.
-5. Materialize the plugin as a sibling of the Kandev checkout, or update the
-   template's `go.mod` replacement deliberately. Until the SDK is a standalone
-   module, the default `replace` resolves `../kandev/apps/backend`.
+5. Materialize the plugin as a sibling repository and pin
+   `github.com/kdlbs/kandev/pluginsdk` in its `go.mod`. Use the exact
+   merge-commit pseudo-version while a reviewed SDK change is waiting for its
+   `pluginsdk/vX.Y.Z` tag; do not add a local replacement to a Kandev checkout.
 
 If the requested repository does not exist and cannot be created with the
 available GitHub tooling, stop after producing a precise repository bootstrap
@@ -189,7 +190,8 @@ Run the plugin repository's own formatting, tests, and lint commands first,
 then verify the artifact rather than only the source tree:
 
 1. Build a host-only package with the template's `make package-host` target for
-   the local loop.
+   the local loop; that target should invoke
+   `github.com/kdlbs/kandev/pluginsdk/cmd/plugin-pack`.
 2. Confirm the archive contains `manifest.yaml`, the current host executable,
    optional UI assets, and the generated internal `checksums.txt`. Never author
    the internal checksum file by hand.
@@ -206,7 +208,9 @@ then verify the artifact rather than only the source tree:
    plugin owns either. Verify disable preserves operator data and uninstall
    removes it when lifecycle behavior is part of the change.
 6. Bump the manifest version or uninstall the existing version before
-   reinstalling; Kandev rejects reinstalling the same id and version.
+   reinstalling; Kandev rejects reinstalling the same id and version. PR
+   artifact workflows may instead pass `plugin-pack -version` to give the
+   archived manifest a unique install version without changing source metadata.
 7. Before release, run the repository's full cross-platform package workflow
    and confirm its release asset name is `<id>-<version>.tar.gz`.
 

@@ -5,6 +5,9 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      - "pluginsdk/**"
+      - "go.work"
+      - "go.work.sum"
       # check-make-shells also lints the root Makefile's $(shell ...) probes, so
       # a change there has to be able to trip it.
       - "Makefile"
@@ -17,6 +20,9 @@ on:
     branches: [main]
     paths:
       - "apps/backend/**"
+      - "pluginsdk/**"
+      - "go.work"
+      - "go.work.sum"
       - "Makefile"
       - "scripts/check-make-shells"
       - ".github/workflows/backend-tests.yml"

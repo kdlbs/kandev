@@ -37,23 +37,21 @@ Two more example plugins go deeper on specific surfaces:
 ## Prerequisites
 
 - Go (matching the version in `apps/backend/go.mod`).
-- The kandev plugin SDK, `github.com/kandev/kandev/pkg/pluginsdk`. It is
-  **not yet published as a standalone Go module** — it lives inside the
-  kandev monorepo (`apps/backend/pkg/pluginsdk`), so a plugin repo develops
-  against a local checkout via a `replace` directive:
+- The standalone kandev plugin SDK,
+  `github.com/kdlbs/kandev/pluginsdk`, pinned to a released version (or to the
+  exact merge-commit pseudo-version during SDK development):
 
   ```go
   // go.mod
   module my-plugin
 
-  require github.com/kandev/kandev v0.0.0-00010101000000-000000000000
-
-  replace github.com/kandev/kandev => ../kandev/apps/backend
+  require github.com/kdlbs/kandev/pluginsdk v0.1.0
   ```
 
-  Adjust the relative path to wherever you've checked out the kandev repo.
-  This is what both example plugins do; see their `go.mod` for the exact
-  pinned dependency versions.
+  Do not add a local `replace` to a Kandev checkout: `GOWORK=off` must resolve
+  the same immutable module that CI and other plugin authors consume. See the
+  SDK release tag (`pluginsdk/vX.Y.Z`) or the exact pseudo-version recorded
+  from the reviewed merge commit when developing before a release tag exists.
 
 ## Backend: minimal plugin
 
@@ -73,7 +71,7 @@ credentials to configure.
 // main.go
 package main
 
-import "github.com/kandev/kandev/pkg/pluginsdk"
+import "github.com/kdlbs/kandev/pluginsdk"
 
 func main() {
 	pluginsdk.Serve(&myPlugin{})
@@ -87,7 +85,7 @@ package main
 import (
 	"context"
 
-	"github.com/kandev/kandev/pkg/pluginsdk"
+	"github.com/kdlbs/kandev/pluginsdk"
 )
 
 type myPlugin struct {
@@ -211,7 +209,7 @@ event bus for delivery to any subscriber (including other plugins).
 The data-reader accessors return typed, paginated readers — e.g.
 `host.Tasks().List(ctx, TaskFilter{...}, Page{Limit: 50})` returns
 `([]Task, *PageInfo, error)` with an opaque `PageInfo.NextCursor` for the
-next page. See `pkg/pluginsdk/data_types.go` for the full `Task`,
+next page. See `pluginsdk/data_types.go` for the full `Task`,
 `Workspace`, `Workflow`, `WorkflowStep`, `AgentProfile`, `Repository`,
 `Session`, `Message`, and filter/page types.
 
@@ -746,11 +744,12 @@ checksums.txt.sig                     # optional ed25519 signature
 ```
 
 Cross-compile one executable per platform you declare in
-`runtime.executables`, then pack the staged directory with
-`github.com/kandev/kandev/cmd/plugin-pack`:
+`runtime.executables`, then pack the staged directory with the command shipped
+by the standalone SDK module:
 
 ```
-plugin-pack -dir <staged-dir> -out <id>-<version>.tar.gz [-platform-only]
+go run github.com/kdlbs/kandev/pluginsdk/cmd/plugin-pack \
+  -dir <staged-dir> -out <id>-<version>.tar.gz [-platform-only]
 ```
 
 `plugin-pack` walks the directory, requires `manifest.yaml` to be present,
@@ -758,6 +757,11 @@ and **generates `checksums.txt`** covering every other file — pre-supplying
 either checksum file yourself is a packaging error. `-platform-only`
 restricts the package to the current host's platform, for faster local
 iteration than a full multi-platform build.
+
+For a pull-request artifact, pass `-version <unique-value>` to override only
+the archived manifest version. This leaves the source `manifest.yaml` alone,
+so each downloaded artifact can be installed beside other versions without a
+source-tree version edit.
 
 A sample `Makefile` (trimmed from `kandev-plugin-hello/Makefile`):
 
@@ -776,7 +780,7 @@ package:
 	GOOS=darwin  GOARCH=amd64 go build -o $(STAGE)/server/plugin-darwin-amd64      ./server
 	GOOS=darwin  GOARCH=arm64 go build -o $(STAGE)/server/plugin-darwin-arm64      ./server
 	GOOS=windows GOARCH=amd64 go build -o $(STAGE)/server/plugin-windows-amd64.exe ./server
-	go run github.com/kandev/kandev/cmd/plugin-pack -dir $(STAGE) -out $(PKG_OUT)
+	go run github.com/kdlbs/kandev/pluginsdk/cmd/plugin-pack -dir $(STAGE) -out $(PKG_OUT)
 	rm -rf $(STAGE)
 
 # Faster local loop: host platform only.
@@ -786,7 +790,7 @@ package-host:
 	cp manifest.yaml $(STAGE)/manifest.yaml
 	cp -r ui $(STAGE)/ui
 	go build -o $(STAGE)/server/plugin-$$(go env GOOS)-$$(go env GOARCH)$$(go env GOEXE) ./server
-	go run github.com/kandev/kandev/cmd/plugin-pack -dir $(STAGE) -out $(PKG_OUT) -platform-only
+	go run github.com/kdlbs/kandev/pluginsdk/cmd/plugin-pack -dir $(STAGE) -out $(PKG_OUT) -platform-only
 	rm -rf $(STAGE)
 ```
 

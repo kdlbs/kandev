@@ -13,9 +13,6 @@
 *.out
 coverage.html
 
-# Go workspace file
-go.work
-
 # Dependency directories
 vendor/
 

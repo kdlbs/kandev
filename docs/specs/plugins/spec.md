@@ -61,6 +61,10 @@ surfaces. The core stays small; the ecosystem grows independently.
   There is no manifest-paste registration step.
 - Capability-based access control: a plugin can only call Host RPCs it declared in its
   manifest; undeclared capabilities are rejected with a gRPC `PermissionDenied` status.
+- Plugin authors consume the Go SDK, generated `kandev.plugin.v1` transport,
+  manifest validation, and package builder from the independently versioned
+  `github.com/kdlbs/kandev/pluginsdk` module. Building and packaging a plugin
+  does not require a Kandev source checkout.
 - **Kandev owns the plugin process lifecycle**: it extracts the package, spawns the
   binary, performs the go-plugin handshake, health-checks it (`Ping`), and restarts it
   on crash or health-check failure. Operators no longer run or manage plugin processes
@@ -211,6 +215,21 @@ CREATE TABLE plugin_state (
 ```
 
 ## API surface
+
+### Go authoring module
+
+The supported Go authoring surface is the module
+`github.com/kdlbs/kandev/pluginsdk`. It contains the public `Plugin`, `Host`,
+reader/writer interfaces and DTOs, the generated `kandev.plugin.v1` transport,
+the manifest parser/validator, and `cmd/plugin-pack`. The module version is
+independent from the manifest wire `api_version`; plugins pin an immutable
+semantic or pseudo-version in `go.mod`.
+
+The module is independently fetchable, testable, and usable with `GOWORK=off`.
+Local Kandev development may use the repository's `go.work`, but published
+plugin repositories do not use a filesystem `replace` pointing at Kandev.
+
+Decision: [ADR-2026-08-01-standalone-plugin-sdk-module](../../decisions/2026-08-01-standalone-plugin-sdk-module.md).
 
 ### Plugin management API (operator -> kandev, HTTP)
 
@@ -628,6 +647,16 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   spawn relationship on every process launch.
 
 ## Scenarios
+
+- **GIVEN** a clean checkout containing only a plugin repository, **WHEN** the
+  author runs its tests and package target, **THEN** Go resolves the pinned
+  `github.com/kdlbs/kandev/pluginsdk` version without a sibling Kandev checkout
+  and produces an installer-compatible `.tar.gz`.
+
+- **GIVEN** a plugin pull request, **WHEN** its package workflow succeeds,
+  **THEN** the workflow uploads an all-platform `.tar.gz` whose manifest version
+  uniquely identifies the PR build and whose internal checksums pass Kandev's
+  installer verification; the workflow does not install the artifact anywhere.
 
 - **GIVEN** an operator with a release tarball URL for a Slack notification plugin,
   **WHEN** the operator calls `POST /api/plugins/install` with `{"url": "..."}`,

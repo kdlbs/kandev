@@ -174,6 +174,13 @@ Jira and Linear are the model (per-workspace credentials, 90s auth-health poller
 
 Production Kandev plugins live in dedicated repositories, not in this monorepo. Official plugins use public `kdlbs/kandev-plugin-<slug>` repositories and start from [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template). Use `/create-kandev-plugin` for plugin creation, modification, bug fixes, packaging, release, and marketplace work. When a Kandev Worktree task needs the plugin repository, attach it with `add_branch_to_task_kandev` instead of cloning inside this worktree. Keep host API, SDK, loader, registry, and the in-tree test fixture in this repository.
 
+Plugin repositories consume the standalone, versioned Go module
+`github.com/kdlbs/kandev/pluginsdk`; pin a release tag (or an exact reviewed
+merge-commit pseudo-version before the first tag) and keep `GOWORK=off` passing.
+Use `go run github.com/kdlbs/kandev/pluginsdk/cmd/plugin-pack` to create the
+installable archive. The packer's `-version` flag is reserved for unique PR
+artifacts and changes only the archived manifest, never the source tree.
+
 ### Runtime profiles (prod / dev / e2e)
 
 **`profiles.yaml` at the repo root** is the single source of truth for env-driven runtime defaults — feature flags, mock providers (agent / GitHub / Jira / Linear), debug switches, and e2e tuning knobs. The backend embeds it (`//go:embed` via `apps/backend/internal/profiles/`) and at startup calls `profiles.ApplyProfile()` to write the matching profile's env vars onto its own process, *only when each var is not already set* — so launchers, shells, and per-spec overrides still win.

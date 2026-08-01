@@ -1,0 +1,86 @@
+name: Plugin SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pluginsdk/**"
+      - "apps/backend/cmd/plugin-pack/standalone_compatibility_test.go"
+      - "apps/backend/internal/plugins/pkgtar/**"
+      - "go.work"
+      - "go.work.sum"
+      - ".github/workflows/pluginsdk.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "pluginsdk/**"
+      - "apps/backend/cmd/plugin-pack/standalone_compatibility_test.go"
+      - "apps/backend/internal/plugins/pkgtar/**"
+      - "go.work"
+      - "go.work.sum"
+      - ".github/workflows/pluginsdk.yml"
+
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  validate:
+    name: Validate standalone SDK
+    runs-on: ubuntu-latest
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Mark workspace safe for git
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Check SDK formatting
+        run: |
+          set -euo pipefail
+          mapfile -t sdk_go_files < <(git ls-files -- 'pluginsdk/*.go' 'pluginsdk/**/*.go')
+          if [[ "${#sdk_go_files[@]}" -eq 0 ]]; then
+            echo "No SDK Go files found."
+            exit 1
+          fi
+          unformatted="$(gofmt -l "${sdk_go_files[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            echo "The following SDK files are not gofmt-formatted:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Check SDK module tidy state
+        working-directory: pluginsdk
+        run: |
+          set -euo pipefail
+          GOWORK=off go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+      - name: Run SDK vet and tests
+        working-directory: pluginsdk
+        run: |
+          set -euo pipefail
+          GOWORK=off go vet ./...
+          GOWORK=off go test -race ./...
+
+      - name: Check generated protocol
+        run: |
+          set -euo pipefail
+          make -C pluginsdk proto
+          git diff --exit-code -- pluginsdk/proto
+
+      - name: Check backend installer compatibility
+        working-directory: apps/backend
+        run: |
+          set -euo pipefail
+          GOWORK=off go test ./cmd/plugin-pack ./internal/plugins/pkgtar \
+            -run '^TestStandalonePluginPack_InstallCompatibility$|^TestInstall_' \
+            -count=1
