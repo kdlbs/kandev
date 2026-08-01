@@ -347,6 +347,18 @@ Open a linked MR from the task review surface. Kandev fetches and displays its o
 
 These actions use the connected GitLab user's permissions and do not bypass protected branches, approval requirements, merge rules, or reviewer eligibility. The current product UI exposes notification subscription for linked merge requests; issue subscribe/unsubscribe is implemented in the backend integration but has no issue-detail control in `/gitlab`.
 
+### Automate a linked merge request
+
+For a task with a linked GitLab merge request, open the MR topbar control and expand **Review follow-up**. The automation controls are task-level booleans: **Your review is requested**, **MR merged**, and **MR closed without merging**. Enabling a control applies it to every MR linked to that task; GitLab has no auto-fix or auto-merge automation, so these three lifecycle switches are the only controls.
+
+Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
+
+**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list — GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; a later transition to being a reviewer wakes the agent, including a re-review after changes. Clearing the reviewer assignment rearms the next transition.
+
+**MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session — it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
+
+For a GitLab Review Watch task with any MR lifecycle prompt enabled, the **Auto** cleanup policy retains the terminal task so lifecycle delivery can finish, matching the GitHub review-watch behavior described above.
+
 ### Create review and issue watches
 
 GitLab settings include **Merge request review watches** and **Issue watches**. Each watch selects a workflow and initial step, optional repository/base branch and profile overrides, a task prompt, project paths, raw GitLab query parameters, a 60–3,600 second poll interval, an optional maximum in-flight task count, and an **Auto**, **Always**, or **Never** cleanup policy. Issue watches can also require labels. Leaving project paths empty searches every project visible to the connected user.
