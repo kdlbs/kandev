@@ -32,6 +32,7 @@ const createMRAutomationTablesSQL = `
 		last_lifecycle_prompt_at DATETIME,
 		last_lifecycle_session_id TEXT,
 		last_error TEXT,
+		last_sync_error TEXT,
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
 		PRIMARY KEY (task_id, repository_id, project_path, mr_iid),
@@ -211,7 +212,7 @@ func applyMRAutomationOptionResets(
 const mrLifecycleStateSelectCols = `task_id, repository_id, project_path, mr_iid,
 	review_request_initialized, last_review_requested, last_observed_state,
 	last_lifecycle_event, last_lifecycle_prompt_at, last_lifecycle_session_id,
-	last_error, created_at, updated_at`
+	last_error, last_sync_error, created_at, updated_at`
 
 // GetTaskMRLifecycleState returns the checkpoint row for one linked MR, or
 // nil when no evaluation has run yet (silent-baseline case, AC10).
@@ -328,8 +329,11 @@ func (s *Store) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt TaskMRLi
 	return err
 }
 
-// RecordTaskMRAutomationError persists a lifecycle evaluation error against
-// the per-MR checkpoint row without aborting the caller's poll loop (AC25).
+// RecordTaskMRAutomationError persists a lifecycle *delivery* evaluation
+// error (evaluate/dispatch failure) against the per-MR checkpoint row
+// without aborting the caller's poll loop (AC25). Writes only last_error —
+// see TaskMRLifecycleState's field comment for why this is kept separate
+// from the poller's sync-error column.
 func (s *Store) RecordTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
@@ -343,12 +347,43 @@ func (s *Store) RecordTaskMRAutomationError(ctx context.Context, taskID, reposit
 	return err
 }
 
-// ClearTaskMRAutomationError clears a previously recorded lifecycle error.
-// A blind conditional UPDATE — idempotent, and does not require the row to
-// already exist (matches GitHub's ClearTaskCIError).
+// ClearTaskMRAutomationError clears a previously recorded lifecycle delivery
+// error. A blind conditional UPDATE — idempotent, and does not require the
+// row to already exist (matches GitHub's ClearTaskCIError). Only touches
+// last_error; a sync success does not imply delivery has recovered, so it
+// must not clear this column (that call goes through
+// ClearTaskMRSyncError instead).
 func (s *Store) ClearTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE gitlab_task_mr_state SET last_error = NULL, updated_at = ?
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		time.Now().UTC(), taskID, repositoryID, projectPath, mrIID)
+	return err
+}
+
+// RecordTaskMRSyncError persists a poller sync failure (SyncTaskMRStrict)
+// against the per-MR checkpoint row, in its own column so it cannot clobber
+// (or be clobbered by) a concurrently recorded/cleared lifecycle-delivery
+// error in last_error.
+func (s *Store) RecordTaskMRSyncError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO gitlab_task_mr_state (
+			task_id, repository_id, project_path, mr_iid, last_sync_error, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT(task_id, repository_id, project_path, mr_iid) DO UPDATE SET
+			last_sync_error = excluded.last_sync_error,
+			updated_at = excluded.updated_at`,
+		taskID, repositoryID, projectPath, mrIID, message, now, now)
+	return err
+}
+
+// ClearTaskMRSyncError clears a previously recorded sync error after a sync
+// succeeds. A blind conditional UPDATE — idempotent, does not require the
+// row to already exist, and only touches last_sync_error.
+func (s *Store) ClearTaskMRSyncError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
+	_, err := s.db.ExecContext(ctx, `
+		UPDATE gitlab_task_mr_state SET last_sync_error = NULL, updated_at = ?
 		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
 		time.Now().UTC(), taskID, repositoryID, projectPath, mrIID)
 	return err

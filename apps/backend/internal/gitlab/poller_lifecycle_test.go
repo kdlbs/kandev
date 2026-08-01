@@ -140,8 +140,8 @@ func TestPoller_RunMRLifecycleSync_ErrorOnOneRowDoesNotAbortOthers(t *testing.T)
 	if err != nil {
 		t.Fatalf("get lifecycle state: %v", err)
 	}
-	if state == nil || state.LastError == nil || *state.LastError == "" {
-		t.Fatalf("expected last_error recorded for the broken row, got %+v", state)
+	if state == nil || state.LastSyncError == nil || *state.LastSyncError == "" {
+		t.Fatalf("expected last_sync_error recorded for the broken row, got %+v", state)
 	}
 }
 
@@ -204,8 +204,8 @@ func TestPoller_RunMRLifecycleSync_UsesStrictClient(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get lifecycle state: %v", err)
 	}
-	if state == nil || state.LastError == nil || *state.LastError == "" {
-		t.Fatalf("expected last_error recorded (strict client fails closed), got %+v", state)
+	if state == nil || state.LastSyncError == nil || *state.LastSyncError == "" {
+		t.Fatalf("expected last_sync_error recorded (strict client fails closed), got %+v", state)
 	}
 }
 
@@ -270,8 +270,8 @@ func TestPoller_RunMRLifecycleSync_RejectsHostChangeSinceLink(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get lifecycle state: %v", err)
 	}
-	if state == nil || state.LastError == nil || *state.LastError == "" {
-		t.Fatalf("expected last_error recorded for the host mismatch, got %+v", state)
+	if state == nil || state.LastSyncError == nil || *state.LastSyncError == "" {
+		t.Fatalf("expected last_sync_error recorded for the host mismatch, got %+v", state)
 	}
 }
 
@@ -310,7 +310,7 @@ func TestPoller_RunMRLifecycleSync_ClearsRecoveredError(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatalf("enable switch: %v", err)
 	}
-	if err := store.RecordTaskMRAutomationError(ctx, "task-1", "", "group/subscribed", 1, "prior failure"); err != nil {
+	if err := store.RecordTaskMRSyncError(ctx, "task-1", "", "group/subscribed", 1, "prior failure"); err != nil {
 		t.Fatalf("seed prior error: %v", err)
 	}
 
@@ -324,7 +324,7 @@ func TestPoller_RunMRLifecycleSync_ClearsRecoveredError(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get lifecycle state: %v", err)
 	}
-	if state == nil || state.LastError != nil {
-		t.Fatalf("expected last_error cleared after a successful sync, got %+v", state)
+	if state == nil || state.LastSyncError != nil {
+		t.Fatalf("expected last_sync_error cleared after a successful sync, got %+v", state)
 	}
 }

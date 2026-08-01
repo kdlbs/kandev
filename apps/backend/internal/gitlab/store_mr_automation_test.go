@@ -154,6 +154,57 @@ func TestStore_RecordAndClearTaskMRAutomationError(t *testing.T) {
 	}
 }
 
+// TestStore_SyncErrorAndDeliveryErrorDoNotClobberEachOther proves the fix for
+// a review finding: last_error (lifecycle delivery) and last_sync_error
+// (poller sync) are separate columns, so a poller sync success clearing
+// last_sync_error cannot erase an unresolved delivery error recorded by the
+// orchestrator's evaluation pass, and vice versa.
+func TestStore_SyncErrorAndDeliveryErrorDoNotClobberEachOther(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	if err := store.RecordTaskMRAutomationError(ctx, "task-1", "", "group/a", 1, "delivery failed"); err != nil {
+		t.Fatalf("RecordTaskMRAutomationError: %v", err)
+	}
+	if err := store.RecordTaskMRSyncError(ctx, "task-1", "", "group/a", 1, "sync failed"); err != nil {
+		t.Fatalf("RecordTaskMRSyncError: %v", err)
+	}
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil ||
+		got.LastError == nil || *got.LastError != "delivery failed" ||
+		got.LastSyncError == nil || *got.LastSyncError != "sync failed" {
+		t.Fatalf("expected both errors recorded independently, got %+v err=%v", got, err)
+	}
+
+	// A recovered sync must not erase the still-unresolved delivery error.
+	if err := store.ClearTaskMRSyncError(ctx, "task-1", "", "group/a", 1); err != nil {
+		t.Fatalf("ClearTaskMRSyncError: %v", err)
+	}
+	got, err = store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil || got.LastSyncError != nil {
+		t.Fatalf("expected sync error cleared, got %+v err=%v", got, err)
+	}
+	if got.LastError == nil || *got.LastError != "delivery failed" {
+		t.Fatalf("expected delivery error to survive a sync-error clear, got %+v", got)
+	}
+
+	// A recovered delivery must not erase a still-unresolved sync error.
+	if err := store.RecordTaskMRSyncError(ctx, "task-1", "", "group/a", 1, "sync failed again"); err != nil {
+		t.Fatalf("RecordTaskMRSyncError: %v", err)
+	}
+	if err := store.ClearTaskMRAutomationError(ctx, "task-1", "", "group/a", 1); err != nil {
+		t.Fatalf("ClearTaskMRAutomationError: %v", err)
+	}
+	got, err = store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil || got.LastError != nil {
+		t.Fatalf("expected delivery error cleared, got %+v err=%v", got, err)
+	}
+	if got.LastSyncError == nil || *got.LastSyncError != "sync failed again" {
+		t.Fatalf("expected sync error to survive a delivery-error clear, got %+v", got)
+	}
+}
+
 func TestStore_RebindTaskMRReviewer_ClearsBaselines(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
@@ -402,14 +453,51 @@ func TestStore_MRAutomationTables_FreshDBAndReplay(t *testing.T) {
 		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '', archived_at DATETIME)`); err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
-	if _, err := NewStore(sqlxDB, sqlxDB); err != nil {
+	store, err := NewStore(sqlxDB, sqlxDB)
+	if err != nil {
 		t.Fatalf("fresh-DB NewStore: %v", err)
 	}
+	assertMRAutomationTablesExist(t, sqlxDB)
 
 	// Same-DB replay: open a second Store against the same file/handle and
 	// confirm createTables (and specifically createMRAutomationTables) is a
 	// no-op rather than an error on an existing database.
 	if _, err := NewStore(sqlxDB, sqlxDB); err != nil {
 		t.Fatalf("same-DB replay NewStore: %v", err)
+	}
+	assertMRAutomationTablesExist(t, sqlxDB)
+
+	// A nil error from CREATE TABLE IF NOT EXISTS doesn't prove the columns
+	// this package's mutators depend on actually exist — exercise a
+	// representative write/read round trip through every column added this
+	// session (including the last_sync_error split) as a functional check.
+	ctx := context.Background()
+	if _, err := sqlxDB.Exec(`INSERT INTO tasks (id, workspace_id) VALUES ('task-1', '')`); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := store.RecordTaskMRAutomationError(ctx, "task-1", "", "group/a", 1, "delivery"); err != nil {
+		t.Fatalf("RecordTaskMRAutomationError: %v", err)
+	}
+	if err := store.RecordTaskMRSyncError(ctx, "task-1", "", "group/a", 1, "sync"); err != nil {
+		t.Fatalf("RecordTaskMRSyncError: %v", err)
+	}
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil ||
+		got.LastError == nil || *got.LastError != "delivery" ||
+		got.LastSyncError == nil || *got.LastSyncError != "sync" {
+		t.Fatalf("expected both error columns to round-trip, got %+v err=%v", got, err)
+	}
+}
+
+// assertMRAutomationTablesExist queries sqlite_master directly so a nil error
+// from CREATE TABLE IF NOT EXISTS can't mask a table that was never actually
+// created (e.g. a typo in the DDL that SQLite silently no-ops on replay).
+func assertMRAutomationTablesExist(t *testing.T, sqlxDB *sqlx.DB) {
+	t.Helper()
+	for _, table := range []string{"gitlab_task_mr_options", "gitlab_task_mr_state"} {
+		var name string
+		if err := sqlxDB.Get(&name, `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table); err != nil {
+			t.Fatalf("expected table %q to exist: %v", table, err)
+		}
 	}
 }

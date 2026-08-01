@@ -88,9 +88,16 @@ type TaskMRLifecycleState struct {
 	LastLifecycleEvent       string     `json:"last_lifecycle_event" db:"last_lifecycle_event"`
 	LastLifecyclePromptAt    *time.Time `json:"last_lifecycle_prompt_at,omitempty" db:"last_lifecycle_prompt_at"`
 	LastLifecycleSessionID   *string    `json:"last_lifecycle_session_id,omitempty" db:"last_lifecycle_session_id"`
-	LastError                *string    `json:"last_error,omitempty" db:"last_error"`
-	CreatedAt                time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt                time.Time  `json:"updated_at" db:"updated_at"`
+	// LastError records a lifecycle-delivery failure (evaluate/dispatch), set
+	// by the orchestrator and cleared only by a subsequent successful prompt
+	// delivery. LastSyncError records a poller sync failure (SyncTaskMRStrict)
+	// and is owned exclusively by the poller. The two are intentionally
+	// separate columns: a successful sync must not erase an unresolved
+	// delivery error, and vice versa.
+	LastError     *string   `json:"last_error,omitempty" db:"last_error"`
+	LastSyncError *string   `json:"last_sync_error,omitempty" db:"last_sync_error"`
+	CreatedAt     time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // TaskMRLifecyclePrompt records an accepted lifecycle prompt checkpoint.

@@ -168,14 +168,14 @@ func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
 		p.logger.Debug("gitlab poller: MR lifecycle sync failed",
 			zap.String("task_id", row.TaskID), zap.String("project", row.ProjectPath),
 			zap.Int("iid", row.MRIID), zap.Error(err))
-		if recErr := p.service.RecordTaskMRAutomationError(
+		if recErr := p.service.RecordTaskMRSyncError(
 			ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID, err.Error(),
 		); recErr != nil {
 			p.logger.Debug("gitlab poller: record MR lifecycle error failed", zap.Error(recErr))
 		}
 		return
 	}
-	if clearErr := p.service.ClearTaskMRAutomationError(
+	if clearErr := p.service.ClearTaskMRSyncError(
 		ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID,
 	); clearErr != nil {
 		p.logger.Debug("gitlab poller: clear MR lifecycle error failed", zap.Error(clearErr))

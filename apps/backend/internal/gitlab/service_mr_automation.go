@@ -195,14 +195,37 @@ func (s *Service) RecordTaskMRAutomationError(ctx context.Context, taskID, repos
 }
 
 // ClearTaskMRAutomationError pass-through to the store. Called after a
-// successful lifecycle sync so a recovered failure doesn't linger in
-// last_error and read as an active problem.
+// successful lifecycle prompt delivery so a recovered delivery failure
+// doesn't linger in last_error and read as an active problem.
 func (s *Service) ClearTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
 	store := s.requireStore()
 	if store == nil {
 		return errStoreUnavailable
 	}
 	return store.ClearTaskMRAutomationError(ctx, taskID, repositoryID, projectPath, mrIID)
+}
+
+// RecordTaskMRSyncError pass-through to the store. Called by the poller when
+// a lifecycle sync pass fails — kept in a separate column from
+// RecordTaskMRAutomationError's delivery error so the two concerns can't
+// clobber each other.
+func (s *Service) RecordTaskMRSyncError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.RecordTaskMRSyncError(ctx, taskID, repositoryID, projectPath, mrIID, message)
+}
+
+// ClearTaskMRSyncError pass-through to the store. Called after a successful
+// lifecycle sync so a recovered sync failure doesn't linger in
+// last_sync_error and read as an active problem.
+func (s *Service) ClearTaskMRSyncError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.ClearTaskMRSyncError(ctx, taskID, repositoryID, projectPath, mrIID)
 }
 
 // IsReviewerOnMR reports whether username currently appears in the MR's
