@@ -134,6 +134,12 @@ func TestLoop_StartIsIdempotentAndStopWaitsForFanOut(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	l := NewLoop(time.Millisecond, logger.Default(), h)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(h.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = l.Stop()
+	})
 	ctx := context.Background()
 	go l.Start(ctx)
 	go l.Start(ctx)
@@ -162,7 +168,7 @@ func TestLoop_StartIsIdempotentAndStopWaitsForFanOut(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(h.release)
+	release()
 	select {
 	case <-stopDone:
 	case <-time.After(100 * time.Millisecond):
@@ -181,6 +187,12 @@ func TestLoop_ParentCancellationDrainsFanOut(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	l := NewLoop(time.Millisecond, logger.Default(), h)
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(h.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = l.Stop()
+	})
 	go l.Start(ctx)
 
 	select {
@@ -202,7 +214,7 @@ func TestLoop_ParentCancellationDrainsFanOut(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(h.release)
+	release()
 	select {
 	case <-stopDone:
 	case <-time.After(100 * time.Millisecond):

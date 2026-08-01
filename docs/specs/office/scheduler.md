@@ -241,7 +241,7 @@ Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `pars
 
 ### Recovery sweep (unstarted Office tasks)
 
-Office maintenance performs a recovery sweep separately from the shared queue-drain tick. It finds authoritative Office `TODO` tasks with no prior queued or running run and dispatches them as `task_assigned` runs. It does not infer autonomy from a runner on an ordinary Kanban task.
+Office maintenance performs a recovery sweep separately from the shared queue-drain tick. It finds authoritative Office `TODO` tasks created inside the workspace recovery lookback window and dispatches them as `task_assigned` runs only when no queued, claimed, or finished run exists for the task. The task-creation timestamp is bounded by the lookback; matching run rows are not, so a task that already started is never reclassified as unstarted merely because its prior run is old. Failed and cancelled rows do not block recovery. Assignment on an ordinary Kanban task does not imply autonomy.
 
 Selection:
 
@@ -258,9 +258,9 @@ WHERE t.state = 'TODO'
   AND t.archived_at IS NULL
   AND t.created_at >= NOW() - INTERVAL '<lookback_hours> hours'
   AND NOT EXISTS (
-      SELECT 1 FROM wakeup_requests w
-      WHERE w.payload->>'task_id' = t.id
-        AND w.status IN ('queued', 'claimed', 'finished')
+      SELECT 1 FROM runs r
+      WHERE r.payload->>'task_id' = t.id
+        AND r.status IN ('queued', 'claimed', 'finished')
   )
 ```
 
@@ -666,7 +666,7 @@ A formal per-route authorization model (workspace membership, admin role, RBAC o
 
 Survives a kandev process restart: all `agent_wakeup_requests` rows including `queued`, `claimed` (re-claimed on restart), and `scheduled_retry_at`; all `office_routines`, `office_routine_triggers` (with `next_run_at` advanced), `office_routine_runs` history; `agent_continuation_summaries` (last-good); `runs` rows including `result_json`, `assembled_prompt`, `summary_injected` snapshots.
 
-Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The recovery sweep's idempotency is via the `NOT EXISTS` check on `wakeup_requests` plus the dispatched wakeup's `idempotency_key`.
+Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The unstarted-task recovery sweep suppresses duplicates with its `NOT EXISTS` check on `runs`: any queued, claimed, or finished run of any age blocks redispatch, while failed and cancelled runs do not.
 
 Retention: idempotency-key dedup window 24 hours; summary cap 8 KB per row; routine run history retained for inspection (no automatic prune in scope here); catch-up cap (default 25) drops missed routine ticks beyond it (not recorded individually).
 
@@ -713,7 +713,7 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 
 - **GIVEN** a wakeup for task T fails and a retry is scheduled 10 minutes out, **WHEN** task T is reassigned (or cancelled) before the retry fires, **THEN** the retry is cancelled at promotion time with reason `retry_stale_assignee` (or `retry_task_cancelled`), execution locks are cleared, and a `wakeup_retry_cancelled` activity entry is logged. A PATCH reassign on the API cancels pending retries for the previous assignee immediately.
 
-- **GIVEN** an authoritative Office task in `TODO` state assigned to agent A has no queued or finished wakeup and was created within the lookback window, **WHEN** the recovery sweep runs, **THEN** a `task_assigned` wakeup is dispatched and a `recovery_dispatch` activity entry is logged. Ordinary Kanban tasks, tasks that already have a queued/finished wakeup, and tasks outside `recovery_lookback_hours` are skipped.
+- **GIVEN** an authoritative Office task in `TODO` state assigned to agent A has no queued, claimed, or finished run and was created within the lookback window, **WHEN** the recovery sweep runs, **THEN** a `task_assigned` run is dispatched and a `recovery_dispatch` activity entry is logged. Ordinary Kanban tasks, tasks with a queued, claimed, or finished run of any age, and tasks created outside `recovery_lookback_hours` are skipped.
 
 - **GIVEN** a wakeup for a task that has reached `DONE` state, **WHEN** the staleness check runs at claim time, **THEN** the wakeup is cancelled with reason `task_terminal` and the agent is not launched.
 

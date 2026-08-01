@@ -92,8 +92,8 @@ existing stale-claim policy after restart.
 | Office is enabled but no Office workflow/configuration exists | Generic queue recovery remains available; Office-only recovery and cron work do not scan ordinary Kanban tasks. |
 | A Kanban task has a runner but no explicit `queue_run` action | Office subscribers and recovery ignore it; the user or Kanban workflow controls launch timing. |
 | Shutdown begins while the scheduler is idle | `Stop` cancels the wait and joins before the database closes. |
-| Shutdown begins during a tick | Shutdown waits for the tick and cron handler fan-out to return before repository cleanup. |
-| A scheduler stop fails | The failure is included in the graceful-shutdown error count and database cleanup still occurs after the component has been given its bounded stop opportunity. |
+| Shutdown begins during a tick | Shutdown cancels future ticks and waits for the active tick and cron handler fan-out to return before repository cleanup. The backend does not impose an internal join deadline. |
+| A handler does not return after cancellation | Graceful shutdown remains in progress and repository cleanup does not begin. The launcher or process supervisor may enforce its outer grace period and terminate the process, but the backend never closes SQLite underneath live scheduler work. |
 
 ## Persistence guarantees
 
@@ -117,10 +117,10 @@ existing stale-claim policy after restart.
 - **GIVEN** an ordinary Kanban `TODO` task has a step runner, **WHEN** Office
   assignment subscribers and recovery execute, **THEN** no `task_assigned` run
   is created for that task.
-- **GIVEN** an authoritative Office `TODO` task has a runner and no prior
-  queued, claimed, or finished run inside the recovery window, **WHEN** Office
-  recovery executes, **THEN** exactly one idempotent `task_assigned` run is
-  queued.
+- **GIVEN** an authoritative Office `TODO` task has a runner, was created inside
+  the recovery lookback window, and has no prior queued, claimed, or finished
+  run, **WHEN** Office recovery executes, **THEN** exactly one idempotent
+  `task_assigned` run is queued.
 - **GIVEN** a custom non-Office workflow explicitly executes `queue_run`,
   **WHEN** the row is persisted and signalled, **THEN** the global scheduler
   processes it even though the task is not an Office task.

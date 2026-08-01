@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -140,6 +141,12 @@ func TestScheduler_StartIsIdempotentAndStopWaitsForActiveTick(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	s := scheduler.New(proc, signalCh, time.Hour, newTestLogger(t))
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(proc.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = s.Stop()
+	})
 	go s.Start(ctx)
 	go s.Start(ctx)
 
@@ -170,7 +177,7 @@ func TestScheduler_StartIsIdempotentAndStopWaitsForActiveTick(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(proc.release)
+	release()
 	select {
 	case <-stopDone:
 	case <-time.After(100 * time.Millisecond):
@@ -190,6 +197,12 @@ func TestScheduler_ParentCancellationDrainsActiveTick(t *testing.T) {
 		release: make(chan struct{}),
 	}
 	s := scheduler.New(proc, signalCh, time.Hour, newTestLogger(t))
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(proc.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = s.Stop()
+	})
 	go s.Start(ctx)
 	signalCh <- struct{}{}
 	select {
@@ -212,7 +225,7 @@ func TestScheduler_ParentCancellationDrainsActiveTick(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(proc.release)
+	release()
 	select {
 	case <-stopDone:
 	case <-time.After(100 * time.Millisecond):

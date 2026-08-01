@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -32,6 +33,9 @@ func TestRunGracefulShutdownStopsSchedulersBeforeDatabaseCleanup(t *testing.T) {
 		release: make(chan struct{}),
 		err:     stopErr,
 	}
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(stopper.release) }) }
+	t.Cleanup(release)
 	scheduling := &schedulingRuntime{runs: stopper}
 	dbClosed := make(chan struct{})
 	cleanup := func() {
@@ -62,7 +66,7 @@ func TestRunGracefulShutdownStopsSchedulersBeforeDatabaseCleanup(t *testing.T) {
 	case <-time.After(50 * time.Millisecond):
 	}
 
-	close(stopper.release)
+	release()
 	var shutdownErrs []error
 	select {
 	case shutdownErrs = <-done:

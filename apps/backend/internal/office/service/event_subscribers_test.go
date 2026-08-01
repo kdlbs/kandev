@@ -8,6 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -73,9 +77,15 @@ func (d *queueRunDispatcher) HandleTrigger(
 // fakeDispatcher / nil via svc.SetWorkflowEngineDispatcher.
 func newTestServiceWithBus(t *testing.T) (*service.Service, bus.EventBus) {
 	t.Helper()
-	svc := newTestService(t)
+	return newTestServiceWithBusLogger(t, logger.Default())
+}
+
+func newTestServiceWithBusLogger(
+	t *testing.T, log *logger.Logger,
+) (*service.Service, bus.EventBus) {
+	t.Helper()
+	svc := newTestService(t, service.ServiceOptions{Logger: log})
 	svc.SetSyncHandlers(true)
-	log := logger.Default()
 	eb := bus.NewMemoryEventBus(log)
 	if err := svc.RegisterEventSubscribers(eb); err != nil {
 		t.Fatalf("register subscribers: %v", err)
@@ -339,6 +349,27 @@ func TestTaskAssigned_KanbanRunnerIsIgnored(t *testing.T) {
 		if run.Reason == service.RunReasonTaskAssigned {
 			t.Fatalf("Kanban assignment queued task_assigned run: %#v", run)
 		}
+	}
+}
+
+func TestTaskAssigned_PropagatesTaskLookupFailure(t *testing.T) {
+	core, logs := observer.New(zapcore.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	svc, eb := newTestServiceWithBusLogger(t, log)
+	svc.ExecSQL(t, `DROP TABLE tasks`)
+
+	event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
+		"task_id":                   "task-with-broken-lookup",
+		"assignee_agent_profile_id": "worker-1",
+	})
+	if err := eb.Publish(context.Background(), events.TaskUpdated, event); err != nil {
+		t.Fatalf("publish task update: %v", err)
+	}
+	if logs.FilterMessage("Event handler error").Len() == 0 {
+		t.Fatal("task lookup failure was not surfaced by the event bus")
 	}
 }
 
