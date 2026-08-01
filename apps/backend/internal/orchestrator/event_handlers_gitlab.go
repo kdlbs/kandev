@@ -59,6 +59,9 @@ func (s *Service) subscribeGitLabEvents() {
 	if _, err := s.eventBus.Subscribe(events.GitLabTaskMRUpdated, s.handleGitLabTaskMRUpdated); err != nil {
 		s.logger.Error("subscribe gitlab.task_mr.updated", zap.Error(err))
 	}
+	if _, err := s.eventBus.Subscribe(events.GitLabTaskMROptionsUpdated, s.handleGitLabTaskMROptionsUpdated); err != nil {
+		s.logger.Error("subscribe gitlab.task_mr_options.updated", zap.Error(err))
+	}
 }
 
 // handleGitLabTaskMRUpdated reacts to every observed MR change — from the
@@ -88,6 +91,54 @@ func decodeTaskMRUpdatedEvent(data interface{}) (*gitlab.TaskMRUpdatedEvent, boo
 			return nil, false
 		}
 		var payload gitlab.TaskMRUpdatedEvent
+		if err := json.Unmarshal(raw, &payload); err != nil {
+			return nil, false
+		}
+		return &payload, true
+	default:
+		return nil, false
+	}
+}
+
+// handleGitLabTaskMROptionsUpdated reacts to a task's MR lifecycle switches
+// changing — via the HTTP PATCH endpoint, an MCP tool call, or the
+// orchestrator's own error/recovery state publish — by re-evaluating every
+// MR currently linked to that task. Without this, enabling a switch only
+// took effect on the next poller sweep (up to a minute later) instead of
+// immediately, and MCP or multi-tab changes never reached an already-open
+// UI. A no-op evaluation pass doesn't publish state (see
+// handleTaskMRLifecycleAutomation), so this cannot cascade indefinitely —
+// only a genuine delivery or error re-triggers another round.
+func (s *Service) handleGitLabTaskMROptionsUpdated(ctx context.Context, event *bus.Event) error {
+	resp, ok := decodeTaskMROptionsUpdatedEvent(event.Data)
+	if !ok || resp == nil || resp.TaskID == "" || s.gitlabMRAutomation == nil {
+		return nil
+	}
+	mrs, err := s.gitlabMRAutomation.ListTaskMRsByTask(ctx, resp.TaskID)
+	if err != nil {
+		s.logger.Debug("list task MRs for options-updated evaluation failed",
+			zap.String("task_id", resp.TaskID), zap.Error(err))
+		return nil
+	}
+	for _, mr := range mrs {
+		s.startTaskMRLifecycleAutomation(ctx, mr)
+	}
+	return nil
+}
+
+// decodeTaskMROptionsUpdatedEvent mirrors decodeTaskMRUpdatedEvent: the
+// in-process bus carries the original *gitlab.TaskMRAutomationResponse
+// pointer, NATS round-trips it through JSON into a map.
+func decodeTaskMROptionsUpdatedEvent(data interface{}) (*gitlab.TaskMRAutomationResponse, bool) {
+	switch v := data.(type) {
+	case *gitlab.TaskMRAutomationResponse:
+		return v, true
+	case map[string]interface{}:
+		raw, err := json.Marshal(v)
+		if err != nil {
+			return nil, false
+		}
+		var payload gitlab.TaskMRAutomationResponse
 		if err := json.Unmarshal(raw, &payload); err != nil {
 			return nil, false
 		}

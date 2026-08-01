@@ -68,6 +68,7 @@ type taskMRAgentAutomationService interface {
 	SetTaskMRObservedState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, state string) error
 	RecordTaskMRLifecyclePrompt(ctx context.Context, prompt gitlab.TaskMRLifecyclePrompt) error
 	RecordTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error
+	ListTaskMRsByTask(ctx context.Context, taskID string) ([]*gitlab.TaskMR, error)
 }
 
 type taskMRAgentPromptDecision struct {

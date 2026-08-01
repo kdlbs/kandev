@@ -1,10 +1,14 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // TestDecodeTaskMRUpdatedEvent_TypedPointer is the in-memory event bus shape:
@@ -88,5 +92,101 @@ func TestMRAutomationInFlightKey_SameIdentityProducesSameKey(t *testing.T) {
 
 	if mrAutomationInFlightKey(a) != mrAutomationInFlightKey(b) {
 		t.Fatalf("expected the same in-flight key for the same (task, repository, project, iid) identity")
+	}
+}
+
+// TestDecodeTaskMROptionsUpdatedEvent_TypedPointer is the in-memory event bus
+// shape: event.Data is the original *gitlab.TaskMRAutomationResponse pointer.
+func TestDecodeTaskMROptionsUpdatedEvent_TypedPointer(t *testing.T) {
+	original := &gitlab.TaskMRAutomationResponse{TaskID: "task-1", PromptOnMerged: true}
+	got, ok := decodeTaskMROptionsUpdatedEvent(original)
+	if !ok || got != original {
+		t.Fatalf("expected the original pointer to pass through unchanged, got %+v ok=%v", got, ok)
+	}
+}
+
+// TestDecodeTaskMROptionsUpdatedEvent_MapShape is the NATS event bus shape.
+func TestDecodeTaskMROptionsUpdatedEvent_MapShape(t *testing.T) {
+	original := &gitlab.TaskMRAutomationResponse{TaskID: "task-1", PromptOnMerged: true}
+	raw, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var asMap map[string]interface{}
+	if err := json.Unmarshal(raw, &asMap); err != nil {
+		t.Fatalf("unmarshal to map: %v", err)
+	}
+
+	got, ok := decodeTaskMROptionsUpdatedEvent(asMap)
+	if !ok || got == nil || got.TaskID != "task-1" || !got.PromptOnMerged {
+		t.Fatalf("decoded event does not match original: %+v ok=%v", got, ok)
+	}
+}
+
+// TestDecodeTaskMROptionsUpdatedEvent_UnknownShape covers the defensive
+// default for an unrelated payload.
+func TestDecodeTaskMROptionsUpdatedEvent_UnknownShape(t *testing.T) {
+	got, ok := decodeTaskMROptionsUpdatedEvent(42)
+	if ok || got != nil {
+		t.Fatalf("expected no decode for an unrelated payload, got %+v ok=%v", got, ok)
+	}
+}
+
+// TestHandleGitLabTaskMROptionsUpdated_DispatchesEveryLinkedMR proves the fix
+// for a review finding: enabling a lifecycle switch (or any other options
+// change, from HTTP PATCH, MCP, or the orchestrator's own recovery publish)
+// must evaluate the task's linked MRs immediately rather than waiting for
+// the next poller sweep. Each dispatched MR runs its evaluation in a
+// detached goroutine of unpredictable speed, so this joins on
+// checkpointCalls — an observable side effect inside the eval path — rather
+// than racing the goroutine by peeking at the in-flight map right after the
+// handler returns.
+func TestHandleGitLabTaskMROptionsUpdated_DispatchesEveryLinkedMR(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	automation := &mockGitLabMRAutomationService{
+		options: &gitlab.TaskMRAutomationResponse{PromptOnMerged: true},
+		taskMRs: []*gitlab.TaskMR{
+			{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 1},
+			{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/b", MRIID: 2},
+		},
+		checkpointCalls: make(chan struct{}, 2),
+	}
+	svc.gitlabMRAutomation = automation
+
+	event := &bus.Event{Data: &gitlab.TaskMRAutomationResponse{TaskID: "task-1", PromptOnMerged: true}}
+	if err := svc.handleGitLabTaskMROptionsUpdated(ctx, event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	timeout := time.After(2 * time.Second)
+	for range automation.taskMRs {
+		select {
+		case <-automation.checkpointCalls:
+		case <-timeout:
+			t.Fatal("timed out waiting for lifecycle evaluation to reach the checkpoint read for every linked MR")
+		}
+	}
+}
+
+// TestHandleGitLabTaskMROptionsUpdated_NoTaskIDIsNoop guards against a
+// malformed or empty-payload event silently listing every task's MRs.
+func TestHandleGitLabTaskMROptionsUpdated_NoTaskIDIsNoop(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	automation := &mockGitLabMRAutomationService{
+		taskMRs: []*gitlab.TaskMR{{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 1}},
+	}
+	svc.gitlabMRAutomation = automation
+
+	event := &bus.Event{Data: &gitlab.TaskMRAutomationResponse{}}
+	if err := svc.handleGitLabTaskMROptionsUpdated(ctx, event); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := svc.mrAutomationInFlight.Load(mrAutomationInFlightKey(automation.taskMRs[0])); ok {
+		t.Fatalf("expected no lifecycle automation dispatched for an empty task ID")
 	}
 }

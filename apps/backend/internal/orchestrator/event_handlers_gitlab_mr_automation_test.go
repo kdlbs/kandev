@@ -35,6 +35,16 @@ type mockGitLabMRAutomationService struct {
 	recordedErrorMsgs []string
 
 	prompts []gitlab.TaskMRLifecyclePrompt
+
+	taskMRs    []*gitlab.TaskMR
+	taskMRsErr error
+
+	// checkpointCalls, when non-nil, receives a value on every
+	// GetTaskMRLifecycleState call — an observable, timing-independent
+	// signal that a detached evaluation goroutine actually reached the eval
+	// path, since the goroutine's completion speed is not something a test
+	// can otherwise wait on deterministically.
+	checkpointCalls chan struct{}
 }
 
 func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(context.Context, string) (*gitlab.TaskMRAutomationResponse, error) {
@@ -48,6 +58,12 @@ func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(context.Cont
 }
 
 func (m *mockGitLabMRAutomationService) GetTaskMRLifecycleState(context.Context, string, string, string, int) (*gitlab.TaskMRLifecycleState, error) {
+	if m.checkpointCalls != nil {
+		select {
+		case m.checkpointCalls <- struct{}{}:
+		default:
+		}
+	}
 	if m.checkpointErr != nil {
 		return nil, m.checkpointErr
 	}
@@ -103,6 +119,13 @@ func (m *mockGitLabMRAutomationService) recordedErrors() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.recordedErrorMsgs...)
+}
+
+func (m *mockGitLabMRAutomationService) ListTaskMRsByTask(context.Context, string) ([]*gitlab.TaskMR, error) {
+	if m.taskMRsErr != nil {
+		return nil, m.taskMRsErr
+	}
+	return m.taskMRs, nil
 }
 
 // --- AC10-AC16, AC35: pure decision function ---
