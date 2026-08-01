@@ -1,0 +1,267 @@
+"use client";
+
+import { useEffect, useState, type ReactNode } from "react";
+import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { Label } from "@kandev/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { Switch } from "@kandev/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
+import { useToast } from "@/components/toast-provider";
+import { useTaskMRAutomationOptions } from "@/hooks/domains/gitlab/use-task-mr-automation";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import type { TaskMRAutomationOptions, TaskMRAutomationPatch } from "@/lib/types/gitlab";
+
+/**
+ * Dual-mode help affordance: a tap popover on coarse pointers, a hover
+ * tooltip on fine pointers. Mirrors CIAutomationHelpButton (GitHub).
+ */
+function MRAutomationHelpButton({
+  ariaLabel,
+  testId,
+  children,
+}: {
+  ariaLabel: string;
+  testId: string;
+  children: ReactNode;
+}) {
+  const { isFinePointer } = useResponsiveBreakpoint();
+  const [open, setOpen] = useState(false);
+  const trigger = (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon"
+      data-testid={testId}
+      className="h-5 w-5 cursor-help text-muted-foreground hover:text-foreground"
+      aria-label={ariaLabel}
+    >
+      <IconInfoCircle className="h-3.5 w-3.5" />
+    </Button>
+  );
+  if (!isFinePointer) {
+    return (
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+        <PopoverContent
+          side="top"
+          align="start"
+          portal={false}
+          className="max-w-[280px] text-xs leading-relaxed"
+        >
+          {children}
+        </PopoverContent>
+      </Popover>
+    );
+  }
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-[280px] text-xs leading-relaxed">
+        {children}
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function MRAutomationRow({
+  id,
+  label,
+  checked,
+  disabled,
+  onCheckedChange,
+  help,
+  describedBy,
+}: {
+  id: string;
+  label: string;
+  checked: boolean;
+  disabled: boolean;
+  onCheckedChange: (checked: boolean) => void;
+  help?: ReactNode;
+  describedBy?: string;
+}) {
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+
+  return (
+    <div className={`flex items-center justify-between gap-3 px-1 ${minHeight}`}>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5">
+        <Label htmlFor={id} className="min-w-0 cursor-pointer text-xs leading-5">
+          {label}
+        </Label>
+        {help}
+      </div>
+      <Switch
+        id={id}
+        aria-label={label}
+        aria-describedby={describedBy}
+        checked={checked}
+        disabled={disabled}
+        onCheckedChange={onCheckedChange}
+      />
+    </div>
+  );
+}
+
+function MRAutomationErrorRow({ error }: { error: string }) {
+  return (
+    <div role="alert" className="px-1 text-[11px] text-destructive">
+      <span className="min-w-0 flex-1 truncate">{error}</span>
+    </div>
+  );
+}
+
+function ReviewRequestedPromptRow({
+  taskId,
+  options,
+  disabled,
+  patchOption,
+}: {
+  taskId: string;
+  options: TaskMRAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskMRAutomationPatch) => void;
+}) {
+  const helpID = `task-mr-review-requested-prompt-${taskId}-description`;
+  const help = "Wake the agent when you're added as a reviewer, including re-review after changes.";
+  return (
+    <>
+      <span id={helpID} className="sr-only">
+        {help}
+      </span>
+      <MRAutomationRow
+        id={`task-mr-review-requested-prompt-${taskId}`}
+        label="Your review is requested"
+        describedBy={helpID}
+        checked={Boolean(options?.prompt_on_review_requested)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_review_requested: checked })}
+        help={
+          <MRAutomationHelpButton
+            testId="mr-review-requested-help"
+            ariaLabel="Explain review request notifications"
+          >
+            {help}
+          </MRAutomationHelpButton>
+        }
+      />
+    </>
+  );
+}
+
+function MRAgentPromptRows({
+  taskId,
+  options,
+  disabled,
+  patchOption,
+}: {
+  taskId: string;
+  options: TaskMRAutomationOptions | null;
+  disabled: boolean;
+  patchOption: (patch: TaskMRAutomationPatch) => void;
+}) {
+  const terminalHelpID = `task-mr-terminal-help-${taskId}`;
+  const terminalHelp = "Wake the agent when review work ends. Choose either or both outcomes.";
+  return (
+    <>
+      <ReviewRequestedPromptRow
+        taskId={taskId}
+        options={options}
+        disabled={disabled}
+        patchOption={patchOption}
+      />
+      <span id={terminalHelpID} className="sr-only">
+        {terminalHelp}
+      </span>
+      <MRAutomationRow
+        id={`task-mr-merged-prompt-${taskId}`}
+        label="MR merged"
+        describedBy={terminalHelpID}
+        checked={Boolean(options?.prompt_on_merged)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_merged: checked })}
+        help={
+          <MRAutomationHelpButton
+            testId="mr-terminal-help"
+            ariaLabel="Explain final MR state notifications"
+          >
+            {terminalHelp}
+          </MRAutomationHelpButton>
+        }
+      />
+      <MRAutomationRow
+        id={`task-mr-closed-prompt-${taskId}`}
+        label="MR closed without merging"
+        describedBy={terminalHelpID}
+        checked={Boolean(options?.prompt_on_closed)}
+        disabled={disabled}
+        onCheckedChange={(checked) => patchOption({ prompt_on_closed: checked })}
+      />
+    </>
+  );
+}
+
+/**
+ * Collapsible "Review follow-up" group of three compact switch rows. Renders
+ * inside the GitLab MR topbar dropdown, below the per-MR items. Auto-expands
+ * when any switch is already on so a previously configured task doesn't hide
+ * its active switches. Mirrors ReviewFollowUpSection (GitHub), AC29.
+ */
+export function MRAutomationControls({ taskId }: { taskId: string }) {
+  const { options, saving, error, update } = useTaskMRAutomationOptions(taskId);
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const [open, setOpen] = useState(false);
+  const { toast } = useToast();
+  const lifecycleEnabled = Boolean(
+    options?.prompt_on_review_requested || options?.prompt_on_merged || options?.prompt_on_closed,
+  );
+  const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
+
+  useEffect(() => {
+    if (lifecycleEnabled) setOpen(true);
+  }, [lifecycleEnabled]);
+
+  const patchOption = (patch: TaskMRAutomationPatch) => {
+    update(patch).catch((err) => {
+      toast({
+        title: "Failed to update MR automation",
+        description: err instanceof Error ? err.message : "The setting was not saved.",
+        variant: "error",
+      });
+    });
+  };
+
+  return (
+    <div data-testid="mr-automation-controls">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid="mr-review-follow-up-trigger"
+            aria-label="Toggle review follow-up automation"
+            className={`w-full cursor-pointer justify-between px-1 text-xs text-muted-foreground ${minHeight}`}
+          >
+            Review follow-up
+            <IconChevronDown
+              aria-hidden="true"
+              className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+            />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="flex flex-col gap-1">
+          <MRAgentPromptRows
+            taskId={taskId}
+            options={options}
+            disabled={saving}
+            patchOption={patchOption}
+          />
+          {error ? <MRAutomationErrorRow error={error} /> : null}
+        </CollapsibleContent>
+      </Collapsible>
+    </div>
+  );
+}

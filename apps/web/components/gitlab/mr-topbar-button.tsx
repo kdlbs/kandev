@@ -32,6 +32,7 @@ import { deleteTaskMR } from "@/lib/api/domains/gitlab-api";
 import type { TaskMR } from "@/lib/types/gitlab";
 import type { Repository } from "@/lib/types/http";
 import { TaskMRLinkDialog } from "./task-mr-link-dialog";
+import { MRAutomationControls } from "./mr-automation-controls";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { mrTaskKey } from "./mr-detail-panel";
 import { useTranslation } from "react-i18next";
@@ -119,6 +120,7 @@ function MRTriggerContent({
 }
 
 function MRMenuButton({
+  taskId,
   mrs,
   canLink,
   compact,
@@ -126,6 +128,7 @@ function MRMenuButton({
   onLink,
   onUnlink,
 }: {
+  taskId: string;
   mrs: TaskMR[];
   canLink: boolean;
   compact: boolean;
@@ -201,6 +204,8 @@ function MRMenuButton({
             </DropdownMenuItem>
           </div>
         ))}
+        <DropdownMenuSeparator />
+        <MRAutomationControls taskId={taskId} />
         {canLink ? (
           <>
             <DropdownMenuSeparator />
@@ -219,6 +224,7 @@ const EMPTY_REPOSITORIES: Repository[] = [];
 const EMPTY_TASK_REPOSITORIES: Array<{ repository_id: string }> = [];
 
 function MRTopbarControl({
+  taskId,
   mrs,
   gitlabAvailable,
   compact,
@@ -226,6 +232,7 @@ function MRTopbarControl({
   onLink,
   onUnlink,
 }: {
+  taskId: string;
   mrs: TaskMR[];
   gitlabAvailable: boolean;
   compact: boolean;
@@ -236,6 +243,7 @@ function MRTopbarControl({
   if (mrs.length > 0) {
     return (
       <MRMenuButton
+        taskId={taskId}
         mrs={mrs}
         canLink={gitlabAvailable}
         compact={compact}
@@ -290,6 +298,7 @@ export const MRTopbarButton = memo(function MRTopbarButton({
   return (
     <>
       <MRTopbarControl
+        taskId={activeTaskId}
         mrs={mrs}
         gitlabAvailable={gitlabAvailable}
         compact={compact}
