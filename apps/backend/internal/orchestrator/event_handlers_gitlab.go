@@ -20,6 +20,14 @@ func (s *Service) SetGitLabService(svc GitLabWatchService) {
 	s.gitlabIssueSource = NewGitLabIssueWatcherSource(svc, s.logger)
 }
 
+// SetGitLabMRLinkService wires the auto-link surface into the orchestrator so
+// push detection and the on-demand check can find and associate merge
+// requests opened outside Kandev's own Create-PR action. Mirrors
+// SetGitHubService.
+func (s *Service) SetGitLabMRLinkService(svc GitLabMRLinkService) {
+	s.gitlabMRLinkService = svc
+}
+
 // SetGitLabCredentialResolver binds execution auth to the task workspace.
 func (s *Service) SetGitLabCredentialResolver(resolver executor.GitLabCredentialResolver) {
 	s.executor.SetGitLabCredentialResolver(resolver)

@@ -47,6 +47,41 @@ existence leak). Jira/Linear/Slack follow this; **Sentry and GitLab's
 `ListAllIssueWatches` still need the same filter** — the WS gateway backstop does
 not read `workspace_id`, so GitLab's `workspace_id`-keyed WS list is unscoped too.
 
+## Auto-link guarantee (GitHub pull requests / GitLab merge requests)
+
+A code-host PR/MR opened on a task's session branch gets linked to the task
+without a manual step, on both providers, through three independent paths.
+"Auto-link" here means: a `github_task_prs` / `gitlab_task_mrs` row is
+created or updated, and a refresh watch (`github_pr_watches` /
+`gitlab_mr_watches`) is created so ongoing review/CI/pipeline status keeps
+syncing.
+
+| Trigger | GitHub | GitLab |
+| --- | --- | --- |
+| Kandev's own Create-PR action (`worktree.create_pr`) | ✅ `gateway.go` → `createdChangeAssociationRouter.associate` → `associateGitHub` | ✅ same router → `associateGitLab` → `gitlab.Service.AssociateExistingMRByURL` |
+| Push detected on the session branch (agent/CLI push, e.g. `gh pr create` / `glab mr create`, or a human pushing directly) | ✅ `event_handlers_git.go`'s `trackPushAndAssociatePR` → `event_handlers_github.go`'s `detectPushAndAssociatePR` (retries `[0, 30s, 60s]`) | ✅ same `trackPushAndAssociatePR` dispatches by repository provider → `event_handlers_gitlab_mr.go`'s `detectPushAndAssociateMR` (same retry shape) → `gitlab.Service.AutoLinkMRForBranch` |
+| On-demand check (no UI trigger today; callable via WS action) | ✅ `Service.CheckSessionPR`, `ws.ActionGitHubCheckSessionPR` (`github.check_session_pr`) | ✅ `Service.CheckSessionMR`, `ws.ActionGitLabCheckSessionMR` (`gitlab.check_session_mr`) |
+| Background poller reconciliation | ✅ `github.Poller` iterates `github_pr_watches`, upserts `github_task_prs` | ✅ `gitlab.Poller.runMRMonitor` iterates `gitlab_mr_watches`; `CheckMRWatch` upserts `gitlab_task_mrs` and publishes `gitlab.task_mr.updated` on every poll |
+| Manual URL linking | ✅ `POST /api/v1/github/task-prs` | ✅ `POST /api/v1/gitlab/task-mrs` (`AssociateExistingMRByURL`) |
+
+Provider dispatch is structural, not a runtime flag: `trackPushAndAssociatePR`
+resolves the pushing repository's `provider` column once and routes to
+exactly one provider's detect function, so a push on a GitHub repository
+issues zero GitLab client calls and vice versa. Multi-repository and
+multi-branch tasks scope every association/watch by `(repository_id,
+branch)` on both providers, so linking one repo/branch never clobbers a
+sibling.
+
+**Does not trigger auto-link on either provider:**
+
+- Opening the PR/MR in the code host's web UI with no corresponding push
+  event reaching Kandev (e.g. the agent's worktree was never pushed) — there
+  is nothing for push detection to observe.
+- **Azure DevOps** (`internal/azuredevops`) has no auto-link of any kind —
+  it persists PR summaries against tasks but has no watch loop or push
+  detection. Same gap GitHub/GitLab had before this guarantee; file
+  separately if wanted.
+
 ## Where Jira and Linear deliberately diverge
 
 - **Issue model:** Jira uses transitions + JQL; Linear uses state IDs + structured filters. Don't merge these schemas — the upstream APIs are genuinely different.

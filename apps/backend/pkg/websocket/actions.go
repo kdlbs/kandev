@@ -446,6 +446,7 @@ const (
 	ActionGitHubTaskPRSync           = "github.task_pr.sync"
 	ActionGitHubStats                = "github.stats"
 	ActionGitHubCheckSessionPR       = "github.check_session_pr"
+	ActionGitLabCheckSessionMR       = "gitlab.check_session_mr"
 
 	// Issue watch actions
 	ActionGitHubIssueWatchesList = "github.issue_watches.list"

@@ -239,13 +239,48 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 		zap.String("repository_name", data.Status.RepositoryName),
 		zap.String("branch", data.Status.Branch),
 		zap.Bool("first_observation", !loaded))
-	go s.detectPushAndAssociatePR(
+	go s.dispatchPushDetection(
 		context.Background(),
 		data.SessionID,
 		data.TaskID,
 		data.Status.RepositoryName,
 		data.Status.Branch,
 	)
+}
+
+// dispatchPushDetection routes one push-detection run to the right
+// provider's association logic, so the two providers' code paths issue zero
+// calls into each other's client. GitHub's proven detectPushAndAssociatePR is
+// called verbatim for every non-GitLab (including unknown/legacy-empty
+// provider) repository — this wraps it, it does not replace it. Extracted
+// from trackPushAndAssociatePR to keep that function inside the statement
+// budget.
+func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == "gitlab" {
+		s.detectPushAndAssociateMR(ctx, sessionID, taskID, repositoryName, branch)
+		return
+	}
+	s.detectPushAndAssociatePR(ctx, sessionID, taskID, repositoryName, branch)
+}
+
+// resolvePushRepositoryProvider looks up the provider ("github", "gitlab", or
+// "" when unknown/unresolvable) of the repository backing this push, reusing
+// resolvePushRepo's owner/name matching rather than re-deriving it, so
+// dispatchPushDetection can route without duplicating that logic.
+func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, taskID, repositoryName string) string {
+	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if repositoryID == "" {
+		return ""
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return ""
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || repoObj == nil {
+		return ""
+	}
+	return repoObj.Provider
 }
 
 // shouldFirePushDetection decides whether to kick off PR association for one

@@ -400,6 +400,12 @@ type Service struct {
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
 
+	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
+	// Create-PR action, mirroring what githubService does for PRs. Separate
+	// from gitlabService (the review/issue watch surface) — see
+	// GitLabMRLinkService's doc comment.
+	gitlabMRLinkService GitLabMRLinkService
+
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
 

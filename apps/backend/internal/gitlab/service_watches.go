@@ -48,6 +48,34 @@ func (s *Service) CreateMRWatch(ctx context.Context, sessionID, taskID, reposito
 	return w, nil
 }
 
+// EnsureMRWatch is the idempotent get-or-create counterpart to CreateMRWatch,
+// keyed by (sessionID, repositoryID, branch). Returns the existing row when
+// one is already present, backfilling mr_iid in place if it was previously
+// unknown (0) and a real iid is now available. Otherwise creates a new watch.
+// Safe to call repeatedly for the same (session, repository, branch) triple —
+// callers on the auto-link and on-demand-check paths call this on every push
+// without checking for an existing row themselves.
+func (s *Service) EnsureMRWatch(ctx context.Context, sessionID, taskID, repositoryID, projectPath string, iid int, branch string) (*MRWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	existing, err := store.GetMRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		return s.CreateMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, iid, branch)
+	}
+	if existing.MRIID <= 0 && iid > 0 {
+		if err := store.UpdateMRWatchMRIID(ctx, existing.ID, iid); err != nil {
+			return nil, fmt.Errorf("update MR watch iid: %w", err)
+		}
+		existing.MRIID = iid
+	}
+	return existing, nil
+}
+
 // GetMRWatchBySession fetches the legacy single-repo watch.
 func (s *Service) GetMRWatchBySession(ctx context.Context, sessionID string) (*MRWatch, error) {
 	store := s.requireStore()
@@ -197,7 +225,29 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 	if notable {
 		s.publishMRFeedbackEvent(ctx, watch, status)
 	}
+	s.refreshTaskMRFromWatch(ctx, store, client, watch, status)
 	return status, notable, nil
+}
+
+// refreshTaskMRFromWatch keeps gitlab_task_mrs in sync with every poll, not
+// just the ones the caller found "notable" — otherwise the topbar MR surface
+// (state, pipeline_state, approval_state, merge_status) only updates on a
+// pipeline/approval transition and misses everything else (title, merge
+// state, review comments' side effects, etc). Best-effort: a failure here
+// must not fail the poll cycle, since UpdateMRWatchTimestamps above already
+// recorded a successful check.
+func (s *Service) refreshTaskMRFromWatch(ctx context.Context, store *Store, client Client, watch *MRWatch, status *MRStatus) {
+	workspaceID, err := store.WorkspaceIDForTask(ctx, watch.TaskID)
+	if err != nil || workspaceID == "" {
+		return
+	}
+	association := taskMRFromStatus(watch.TaskID, watch.RepositoryID, client.Host(), watch.ProjectPath, status)
+	if err := store.UpsertTaskMR(ctx, association); err != nil {
+		s.logger.Warn("failed to refresh task MR from watch",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+		return
+	}
+	s.publishTaskMRUpdated(ctx, workspaceID, association)
 }
 
 // --- Review Watch ---

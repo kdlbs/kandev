@@ -111,7 +111,7 @@ const createTablesSQL = `
 		last_approval_state TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		UNIQUE(session_id, repository_id)
+		UNIQUE(session_id, repository_id, branch)
 	);
 	CREATE INDEX IF NOT EXISTS idx_gitlab_mr_watches_task_id ON gitlab_mr_watches(task_id);
 
@@ -216,7 +216,87 @@ func (s *Store) createTables() error {
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
-	return s.migrateWatchColumns()
+	if err := s.migrateWatchColumns(); err != nil {
+		return err
+	}
+	return s.migrateMRWatchUniqueKey()
+}
+
+// migrateMRWatchUniqueKey rebuilds gitlab_mr_watches to drop the legacy
+// UNIQUE(session_id, repository_id) constraint and replace it with
+// UNIQUE(session_id, repository_id, branch), so one session can hold a watch
+// per branch on the same repository (multi-branch tasks) instead of
+// colliding on the second branch's insert. SQLite can't ALTER TABLE DROP
+// CONSTRAINT, so this uses the same copy-and-rename rebuild as
+// github.Store.migratePRTablesForMultiRepo. Idempotent: only runs when the
+// legacy constraint string is found in sqlite_master, so fresh DBs and
+// already-migrated DBs are no-ops.
+func (s *Store) migrateMRWatchUniqueKey() error {
+	return s.rebuildIfHasLegacyConstraint(
+		"gitlab_mr_watches",
+		"UNIQUE(session_id, repository_id)\n",
+		`CREATE TABLE gitlab_mr_watches_new (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			project_path TEXT NOT NULL,
+			mr_iid INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at DATETIME,
+			last_note_at DATETIME,
+			last_pipeline_state TEXT DEFAULT '',
+			last_approval_state TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(session_id, repository_id, branch)
+		)`,
+		`INSERT INTO gitlab_mr_watches_new (
+			id, session_id, task_id, repository_id, project_path, mr_iid, branch,
+			last_checked_at, last_note_at, last_pipeline_state, last_approval_state,
+			created_at, updated_at
+		) SELECT
+			id, session_id, task_id, COALESCE(repository_id, ''), project_path, mr_iid, branch,
+			last_checked_at, last_note_at, last_pipeline_state, last_approval_state,
+			created_at, updated_at
+		FROM gitlab_mr_watches`,
+	)
+}
+
+// rebuildIfHasLegacyConstraint checks the table's stored CREATE statement in
+// sqlite_master for the literal legacyConstraint substring; if present, runs
+// the table rebuild (create new, copy data, drop old, rename) inside a
+// transaction. No-op when the legacy substring is absent — fresh installs
+// already use the new schema and previously-migrated databases skip too.
+// Mirrors github.Store.rebuildIfHasLegacyConstraint.
+func (s *Store) rebuildIfHasLegacyConstraint(table, legacyConstraint, createNew, copyData string) error {
+	var existingSQL string
+	row := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table)
+	if err := row.Scan(&existingSQL); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if !strings.Contains(existingSQL, legacyConstraint) {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		createNew,
+		copyData,
+		"DROP TABLE " + table,
+		"ALTER TABLE " + table + "_new RENAME TO " + table,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("rebuild %s: %w", table, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) migrateConfigRevision() error {

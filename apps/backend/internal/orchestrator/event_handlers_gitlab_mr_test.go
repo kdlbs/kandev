@@ -1,0 +1,250 @@
+package orchestrator
+
+import (
+	"context"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/task/models"
+)
+
+// fakeGitLabMRLinkService implements GitLabMRLinkService for testing.
+type fakeGitLabMRLinkService struct {
+	mu sync.Mutex
+
+	autoLinkCalls int
+	autoLinkFunc  func(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error)
+	// lastAutoLinkRepositoryID records the repositoryID argument of the most
+	// recent AutoLinkMRForBranch call, so multi-repo tests can assert scoping.
+	lastAutoLinkRepositoryID string
+
+	ensureWatchCalls int
+
+	taskMRs map[string][]*gitlab.TaskMR
+}
+
+func (f *fakeGitLabMRLinkService) AutoLinkMRForBranch(
+	ctx context.Context, workspaceID, sessionID, taskID, repositoryID, projectPath, branch string,
+) (*gitlab.TaskMR, error) {
+	f.mu.Lock()
+	f.autoLinkCalls++
+	f.lastAutoLinkRepositoryID = repositoryID
+	fn := f.autoLinkFunc
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch)
+	}
+	return nil, nil
+}
+
+func (f *fakeGitLabMRLinkService) EnsureMRWatch(
+	_ context.Context, _, _, _, _ string, _ int, _ string,
+) (*gitlab.MRWatch, error) {
+	f.mu.Lock()
+	f.ensureWatchCalls++
+	f.mu.Unlock()
+	return &gitlab.MRWatch{}, nil
+}
+
+func (f *fakeGitLabMRLinkService) ListTaskMRsByTask(_ context.Context, taskID string) ([]*gitlab.TaskMR, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.taskMRs[taskID], nil
+}
+
+// seedGitLabSessionWithRepo mirrors event_handlers_github_test.go's
+// seedSessionWithRepo, but tags the repository as a GitLab provider so
+// resolvePushRepo/resolvePushRepositoryProvider route to the GitLab path.
+func seedGitLabSessionWithRepo(t *testing.T) (*Service, *fakeGitLabMRLinkService) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+
+	repoObj := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "myproj",
+		SourceType: "provider", Provider: "gitlab",
+		ProviderOwner: "group", ProviderName: "myproj",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateRepository(ctx, repoObj); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "tr1", TaskID: "t1", RepositoryID: "repo1", CheckoutBranch: "feat/a",
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("create task repository: %v", err)
+	}
+
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	session.RepositoryID = "repo1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
+	svc.SetGitLabMRLinkService(fake)
+	return svc, fake
+}
+
+func TestDetectPushAndAssociateMR_Immediate(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 5, HeadBranch: branch}, nil
+	}
+
+	svc.detectPushAndAssociateMR(context.Background(), "s1", "t1", "", "feat/a")
+
+	if fake.autoLinkCalls != 1 {
+		t.Fatalf("expected 1 AutoLinkMRForBranch call, got %d", fake.autoLinkCalls)
+	}
+	if fake.lastAutoLinkRepositoryID != "repo1" {
+		t.Fatalf("repositoryID = %q, want repo1", fake.lastAutoLinkRepositoryID)
+	}
+}
+
+func TestDetectPushAndAssociateMR_AlreadyLinkedIsNoOp(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+	fake.taskMRs["t1"] = []*gitlab.TaskMR{
+		{TaskID: "t1", RepositoryID: "repo1", HeadBranch: "feat/a", MRIID: 9},
+	}
+
+	svc.detectPushAndAssociateMR(context.Background(), "s1", "t1", "", "feat/a")
+
+	if fake.autoLinkCalls != 0 {
+		t.Fatalf("expected no AutoLinkMRForBranch calls when already linked, got %d", fake.autoLinkCalls)
+	}
+}
+
+func TestDetectPushAndAssociateMR_NoServiceIsNoOp(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	// Must not panic with gitlabMRLinkService unwired.
+	svc.detectPushAndAssociateMR(context.Background(), "s1", "t1", "", "feat/a")
+}
+
+func TestTrackPushDispatchesByProvider_GitLabRepoCallsZeroGitHub(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 1, HeadBranch: branch}, nil
+	}
+	ghSvc := &mockGitHubService{}
+	svc.SetGitHubService(ghSvc)
+
+	svc.dispatchPushDetection(context.Background(), "s1", "t1", "", "feat/a")
+
+	if fake.autoLinkCalls != 1 {
+		t.Fatalf("expected the GitLab path to run, got %d AutoLinkMRForBranch calls", fake.autoLinkCalls)
+	}
+	if ghSvc.associateCalls != 0 || ghSvc.createWatchCalls != 0 || ghSvc.getTaskPRCalls != 0 {
+		t.Fatalf("expected zero GitHub calls for a GitLab-provider repository, got associate=%d createWatch=%d getTaskPR=%d",
+			ghSvc.associateCalls, ghSvc.createWatchCalls, ghSvc.getTaskPRCalls)
+	}
+}
+
+func TestTrackPushDispatchesByProvider_GitHubRepoCallsZeroGitLab(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	repoObj := &models.Repository{
+		ID: "repo1", WorkspaceID: "ws1", Name: "myrepo",
+		SourceType: "provider", Provider: "github",
+		ProviderOwner: "myorg", ProviderName: "myrepo",
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.CreateRepository(ctx, repoObj); err != nil {
+		t.Fatalf("create repository: %v", err)
+	}
+	session, _ := repo.GetTaskSession(ctx, "s1")
+	session.RepositoryID = "repo1"
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("update session: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &mockGitHubService{
+		prWatch: &github.PRWatch{
+			ID: "w1", SessionID: "s1", TaskID: "t1",
+			Owner: "myorg", Repo: "myrepo", PRNumber: 10, Branch: "feature-branch",
+		},
+	}
+	svc.SetGitHubService(ghSvc)
+	fake := &fakeGitLabMRLinkService{taskMRs: make(map[string][]*gitlab.TaskMR)}
+	svc.SetGitLabMRLinkService(fake)
+
+	svc.dispatchPushDetection(ctx, "s1", "t1", "", "feature-branch")
+
+	if fake.autoLinkCalls != 0 || fake.ensureWatchCalls != 0 {
+		t.Fatalf("expected zero GitLab calls for a GitHub-provider repository, got autoLink=%d ensureWatch=%d",
+			fake.autoLinkCalls, fake.ensureWatchCalls)
+	}
+}
+
+func TestCheckSessionMR_Found(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 3, HeadBranch: branch}, nil
+	}
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true when an open MR exists on the session branch")
+	}
+}
+
+func TestCheckSessionMR_NotFound(t *testing.T) {
+	svc, _ := seedGitLabSessionWithRepo(t)
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false when no MR is open on the session branch")
+	}
+}
+
+func TestCheckSessionMRDeniesForeignSession(t *testing.T) {
+	called := false
+	s := &Service{
+		logger:             scopeTestLogger(t),
+		sessionAccessCheck: denyingChecker(&called),
+	}
+
+	found, err := s.CheckSessionMR(context.Background(), "task-b", "sess-b")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if !called {
+		t.Fatal("session access checker was not consulted before the early return")
+	}
+	if found {
+		t.Error("found = true; a denied session must not report an MR")
+	}
+}
+
+func TestCheckSessionMRDeniesOwnSessionPairedWithForeignTask(t *testing.T) {
+	s := ownSessionForeignTask()
+	s.logger = scopeTestLogger(t)
+
+	found, err := s.CheckSessionMR(context.Background(), "task-victim", "sess-mine")
+
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if found {
+		t.Error("found = true; an owned session must not unlock another user's task")
+	}
+}

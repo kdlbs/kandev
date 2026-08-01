@@ -32,6 +32,17 @@ type GitLabWatchService interface {
 	DisableIssueWatchWithError(context.Context, string, string) error
 }
 
+// GitLabMRLinkService is the auto-link surface used by push detection and the
+// on-demand check to find and associate merge requests opened outside
+// Kandev's own Create-PR action. Kept separate from GitLabWatchService (the
+// review/issue watch dedup surface) so a test double for one need not grow to
+// satisfy the other.
+type GitLabMRLinkService interface {
+	AutoLinkMRForBranch(ctx context.Context, workspaceID, sessionID, taskID, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error)
+	EnsureMRWatch(ctx context.Context, sessionID, taskID, repositoryID, projectPath string, iid int, branch string) (*gitlab.MRWatch, error)
+	ListTaskMRsByTask(ctx context.Context, taskID string) ([]*gitlab.TaskMR, error)
+}
+
 type GitLabReviewWatcherSource struct {
 	service GitLabWatchService
 	logger  *logger.Logger

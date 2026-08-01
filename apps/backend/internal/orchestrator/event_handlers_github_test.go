@@ -12,6 +12,14 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// repoBranchCall records one (repositoryID, branch) pair observed by a
+// mockGitHubService call, so multi-branch tests can assert per-call scoping
+// instead of only the most recent call's arguments.
+type repoBranchCall struct {
+	RepositoryID string
+	Branch       string
+}
+
 // mockGitHubService implements GitHubService for testing.
 type mockGitHubService struct {
 	mu sync.Mutex
@@ -47,6 +55,12 @@ type mockGitHubService struct {
 	lastAssociateRepositoryID   string
 	lastCreateWatchWorkspaceID  string
 	lastAssociateWorkspaceID    string
+	// createWatchLog/associateLog record every call (not just the last), so
+	// multi-branch tests can assert each branch got its own watch/association
+	// scoped to the right repository, rather than only inspecting whichever
+	// call happened to run last.
+	createWatchLog []repoBranchCall
+	associateLog   []repoBranchCall
 
 	// Review PR reservation tracking.
 	reserveCalls   int
@@ -304,6 +318,7 @@ func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID,
 	m.createWatchCalls++
 	m.createWatchBranch = branch
 	m.lastCreateWatchRepositoryID = repositoryID
+	m.createWatchLog = append(m.createWatchLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
 	return &github.PRWatch{}, nil
 }
 func (m *mockGitHubService) CreatePRWatchForWorkspace(
@@ -312,9 +327,14 @@ func (m *mockGitHubService) CreatePRWatchForWorkspace(
 	m.lastCreateWatchWorkspaceID = workspaceID
 	return m.CreatePRWatch(ctx, sessionID, taskID, repositoryID, owner, repo, prNumber, branch)
 }
-func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, _ *github.PR) (*github.TaskPR, error) {
+func (m *mockGitHubService) AssociatePRWithTask(_ context.Context, _, repositoryID string, pr *github.PR) (*github.TaskPR, error) {
 	m.associateCalls++
 	m.lastAssociateRepositoryID = repositoryID
+	branch := ""
+	if pr != nil {
+		branch = pr.HeadBranch
+	}
+	m.associateLog = append(m.associateLog, repoBranchCall{RepositoryID: repositoryID, Branch: branch})
 	return &github.TaskPR{}, nil
 }
 func (m *mockGitHubService) AssociatePRWithTaskForWorkspace(
