@@ -50,6 +50,7 @@ func (s *Service) handleTaskMRLifecycleAutomation(ctx context.Context, mr *gitla
 			zap.Int("mr_iid", mr.MRIID),
 			zap.Error(err))
 		s.recordMRAutomationError(ctx, mr, err)
+		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 		return nil
 	}
 	if delivered {

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -507,6 +508,43 @@ func TestHandleTaskMRLifecycleAutomation_ArchivedTaskDiscardsSilently(t *testing
 
 	if err := svc.handleTaskMRLifecycleAutomation(ctx, mr); err != nil {
 		t.Fatalf("archived task should discard silently, got err: %v", err)
+	}
+}
+
+// TestHandleTaskMRLifecycleAutomation_PublishesStateOnEvaluationError proves
+// a review finding: a lifecycle evaluation failure is recorded via
+// RecordTaskMRAutomationError but was never pushed to connected clients, so
+// the Review follow-up UI kept a stale MRStates.LastError until a manual
+// refetch. Matches GitHub's handleTaskPRLifecycleAutomation, which publishes
+// state right after recording its own CI/lifecycle error.
+func TestHandleTaskMRLifecycleAutomation_PublishesStateOnEvaluationError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	eb := &recordingEventBus{}
+	svc.eventBus = eb
+	automation := &mockGitLabMRAutomationService{
+		options:       &gitlab.TaskMRAutomationResponse{PromptOnMerged: true},
+		checkpointErr: errors.New("checkpoint store unavailable"),
+	}
+	svc.gitlabMRAutomation = automation
+	mr := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/project", MRIID: 1, State: gitlabMRStateMerged}
+
+	if err := svc.handleTaskMRLifecycleAutomation(ctx, mr); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := automation.recordedErrors(); len(got) != 1 {
+		t.Fatalf("expected exactly one recorded error, got %+v", got)
+	}
+	var published bool
+	for _, e := range eb.events {
+		if e.subject == events.GitLabTaskMROptionsUpdated {
+			published = true
+		}
+	}
+	if !published {
+		t.Fatalf("expected gitlab.task_mr_options.updated to be published after recording the error, got events: %+v", eb.events)
 	}
 }
 
