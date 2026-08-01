@@ -246,8 +246,13 @@ func canonicalTaskMRURL(mr *gitlab.TaskMR) (string, error) {
 
 func canonicalMRHost(rawHost string) (string, error) {
 	parsed, err := url.Parse(strings.TrimSpace(rawHost))
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Path != "" || parsed.User != nil {
+	if err != nil || parsed.Host == "" || parsed.Path != "" || parsed.User != nil {
 		return "", fmt.Errorf("invalid GitLab merge request host")
+	}
+	// Restrict to HTTP(S) so a stored host with a non-web scheme can never
+	// produce a notification URL the client would treat as a live link.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", fmt.Errorf("invalid GitLab merge request host: unsupported scheme %q", parsed.Scheme)
 	}
 	return parsed.Scheme + "://" + parsed.Host, nil
 }

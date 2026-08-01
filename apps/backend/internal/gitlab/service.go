@@ -546,6 +546,10 @@ func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectP
 	return s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)
 }
 
+// ErrTaskMRHostMismatch marks every rejection path of the SyncTaskMRStrict
+// host guard below.
+var ErrTaskMRHostMismatch = errors.New("gitlab: workspace host does not match the linked MR's host")
+
 // SyncTaskMRStrict is SyncTaskMR's workspace-scoped-only variant, required
 // for every MR lifecycle-automation call site (AC32 — see
 // clientForTaskStrict's doc comment). Unlike SyncTaskMR, it never falls back
@@ -553,19 +557,28 @@ func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectP
 // fails closed instead of syncing against the wrong GitLab account when
 // workspace secrets are not yet configured.
 //
-// existingHost, when non-empty, must match the resolved client's host. A
-// mismatch means the workspace's GitLab connection changed host since this
-// MR was linked; failing closed here avoids querying (and then emitting
-// lifecycle automation for) an unrelated MR that happens to share the same
-// project path and IID on the new host.
+// existingHost must identify the same GitLab origin as the resolved client
+// (compared via sameConfiguredOrigin, so an explicit default port or casing
+// difference still matches). A mismatch means the workspace's GitLab
+// connection changed host since this MR was linked; failing closed here
+// avoids querying (and then emitting lifecycle automation for) an unrelated
+// MR that happens to share the same project path and IID on the new host.
+// An empty existingHost (a legacy row predating this column, or any other
+// unknown-identity case) also fails closed — apps/backend/AGENTS.md's
+// provider-identity rule treats an empty host as unknown identity, not as
+// "skip the check."
 func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, projectPath string, iid int, existingHost string) (*TaskMR, error) {
 	client, err := s.clientForTaskStrict(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	if existingHost != "" && client.Host() != existingHost {
+	// validateHost (which sameConfiguredOrigin calls on both sides) defaults
+	// an empty host to DefaultHost, which would make an unknown-identity row
+	// silently pass this check instead of failing closed — reject it here
+	// explicitly, before origin comparison ever runs.
+	if existingHost == "" || !sameConfiguredOrigin(client.Host(), existingHost) {
 		return nil, fmt.Errorf(
-			"gitlab: workspace host changed from %s to %s since this MR was linked", existingHost, client.Host(),
+			"%w: workspace host %s, linked MR host %q", ErrTaskMRHostMismatch, client.Host(), existingHost,
 		)
 	}
 	return s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)

@@ -343,6 +343,11 @@ func TestCanonicalTaskMRURL(t *testing.T) {
 			mr:      &gitlab.TaskMR{Host: "gitlab.example.com", ProjectPath: "group/project", MRIID: 1},
 			wantErr: true,
 		},
+		{
+			name:    "non-HTTP(S) scheme is rejected",
+			mr:      &gitlab.TaskMR{Host: "javascript://gitlab.example.com", ProjectPath: "group/project", MRIID: 1},
+			wantErr: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

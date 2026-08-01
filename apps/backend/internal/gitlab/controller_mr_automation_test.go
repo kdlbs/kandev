@@ -89,6 +89,40 @@ func TestControllerPatchTaskMRAutomation_EmptyBodyRejected(t *testing.T) {
 	}
 }
 
+func TestControllerPatchTaskMRAutomation_RejectsTrailingContent(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	body := `{"prompt_on_merged":true}{"prompt_on_merged":false}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestControllerGetTaskMRAutomation_UnknownTaskNotFound(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/gitlab/tasks/does-not-exist/mr-automation", nil)
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestControllerPatchTaskMRAutomation_UnknownTaskNotFound(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/does-not-exist/mr-automation",
+		strings.NewReader(`{"prompt_on_merged":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
 func TestControllerPatchTaskMRAutomation_RejectsLifecycleOverrides(t *testing.T) {
 	router, _ := newMRAutomationControllerFixture(t)
 	for _, key := range []string{"review_prompt_override", "merged_prompt_override", "closed_prompt_override"} {

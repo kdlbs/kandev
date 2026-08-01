@@ -3,10 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/gitlab"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -51,9 +53,22 @@ func (h *Handlers) handleGetTaskMRAutomation(ctx context.Context, msg *ws.Messag
 	}
 	options, err := h.taskMRAutomation.GetTaskMRAutomationResponse(ctx, taskID)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get MR automation options: "+err.Error(), nil)
+		return h.mrAutomationErrorResponse(msg, taskID, "get task MR automation failed", err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, options)
+}
+
+// mrAutomationErrorResponse logs the underlying cause server-side and returns
+// a stable, sanitized client message — a database/GitLab-client error must
+// not reach the MCP caller verbatim. A denied task-visibility check (opt-in
+// auth) is reported as not-found, matching the "foreign workspace is
+// indistinguishable from nonexistent" convention used elsewhere.
+func (h *Handlers) mrAutomationErrorResponse(msg *ws.Message, taskID, logMsg string, err error) (*ws.Message, error) {
+	if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+	}
+	h.logger.Error(logMsg, zap.String("task_id", taskID), zap.Error(err))
+	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to process MR automation request", nil)
 }
 
 func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -89,7 +104,7 @@ func (h *Handlers) handleUpdateTaskMRAutomation(ctx context.Context, msg *ws.Mes
 	}
 	options, err := h.taskMRAutomation.UpdateTaskMRAutomationOptions(ctx, taskID, patch)
 	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update MR automation options: "+err.Error(), nil)
+		return h.mrAutomationErrorResponse(msg, taskID, "update task MR automation failed", err)
 	}
 	if h.eventBus != nil {
 		event := bus.NewEvent(events.GitLabTaskMROptionsUpdated, "mcp", options)

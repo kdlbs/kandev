@@ -16,6 +16,14 @@ func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
+	// WorkspaceIDForTask also validates the task row exists — unlike
+	// authorizeTaskMRAccess (a no-op for unscoped/auth-disabled callers),
+	// this rejects an unknown task ID unconditionally instead of returning
+	// an implicit all-false default for it.
+	workspaceID, err := store.WorkspaceIDForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	opts, err := store.GetTaskMRAutomationOptions(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -24,7 +32,6 @@ func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string
 	if err != nil {
 		return nil, err
 	}
-	workspaceID, _ := store.WorkspaceIDForTask(ctx, taskID)
 	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
 }
 
@@ -56,6 +63,12 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if store == nil {
 		return nil, errStoreUnavailable
 	}
+	// See the identical check in GetTaskMRAutomationResponse: rejects an
+	// unknown task ID before it can create an orphan options row.
+	workspaceID, err := store.WorkspaceIDForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
 	reviewerUsername, err := s.resolveReviewerUsernameForPatch(ctx, taskID, patch)
 	if err != nil {
 		return nil, err
@@ -68,7 +81,6 @@ func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID stri
 	if err != nil {
 		return nil, err
 	}
-	workspaceID, _ := store.WorkspaceIDForTask(ctx, taskID)
 	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
 }
 

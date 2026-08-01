@@ -16,6 +16,7 @@ func TestDeleteReviewMRTaskIfTerminal_RetainsWhenLifecyclePromptsEnabled(t *test
 	const project = "team/repo"
 	mock := NewMockClient(svc.Host())
 	mock.SeedMR(project, &MR{IID: 7, State: gitlabStateMerged})
+	seedTask(t, svc.store, "task-subscribed", "")
 
 	if _, err := svc.store.UpdateTaskMRAutomationOptions(ctx, "task-subscribed", TaskMRAutomationPatch{
 		PromptOnMerged: boolPtr(true),
@@ -44,6 +45,7 @@ func TestDeleteReviewMRTaskIfTerminal_AlwaysPolicyIgnoresLifecyclePrompts(t *tes
 	const project = "team/repo"
 	mock := NewMockClient(svc.Host())
 	mock.SeedMR(project, &MR{IID: 7, State: gitlabStateMerged})
+	seedTask(t, svc.store, "task-subscribed", "")
 
 	if _, err := svc.store.UpdateTaskMRAutomationOptions(ctx, "task-subscribed", TaskMRAutomationPatch{
 		PromptOnMerged: boolPtr(true),

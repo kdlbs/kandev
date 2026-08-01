@@ -308,13 +308,21 @@ func removeLifecyclePromptFields(result map[string]interface{}) {
 	}
 }
 
+// mrAutomationToolError logs the underlying backend error (which may still
+// carry database/GitLab-client detail forwarded from the dispatcher) and
+// returns a stable, sanitized tool error to the MCP client.
+func (s *Server) mrAutomationToolError(logMsg string, err error) (*mcp.CallToolResult, error) {
+	s.logger.Error(logMsg, zap.Error(err))
+	return mcp.NewToolResultError("failed to process MR automation request"), nil
+}
+
 func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(
 			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
 		); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return s.mrAutomationToolError("get task MR automation failed", err)
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil
@@ -338,7 +346,7 @@ func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
 		}
 		var result map[string]interface{}
 		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
-			return mcp.NewToolResultError(err.Error()), nil
+			return s.mrAutomationToolError("update task MR automation failed", err)
 		}
 		data, _ := json.MarshalIndent(result, "", "  ")
 		return mcp.NewToolResultText(string(data)), nil

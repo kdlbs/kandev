@@ -69,11 +69,13 @@ func (c *Controller) httpPatchTaskMRAutomation(ctx *gin.Context) {
 }
 
 // writeMRAutomationTaskNotFound maps the scoped-visibility denial from
-// Service.authorizeTaskMRAccess to a 404, matching the "foreign workspace is
-// indistinguishable from nonexistent" no-existence-leak convention
-// (task/service/service_access.go) instead of a generic 500.
+// Service.authorizeTaskMRAccess, and an unknown task ID from
+// store.WorkspaceIDForTask (ErrNotConfigured), to a 404 — matching the
+// "foreign workspace is indistinguishable from nonexistent" no-existence-leak
+// convention (task/service/service_access.go) instead of a generic 500.
 func writeMRAutomationTaskNotFound(ctx *gin.Context, err error) bool {
-	if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+	if errors.Is(err, repoerrors.ErrTaskNotFound) || errors.Is(err, repoerrors.ErrWorkspaceNotFound) ||
+		errors.Is(err, ErrNotConfigured) {
 		ctx.JSON(http.StatusNotFound, gin.H{responseErrorKey: "task not found"})
 		return true
 	}
@@ -84,10 +86,20 @@ func parseTaskMRAutomationPatch(ctx *gin.Context) (TaskMRAutomationPatch, error)
 	if ctx.Request.Body == nil || ctx.Request.ContentLength == 0 {
 		return TaskMRAutomationPatch{}, nil
 	}
+	decoder := json.NewDecoder(ctx.Request.Body)
 	var raw map[string]json.RawMessage
-	if err := json.NewDecoder(ctx.Request.Body).Decode(&raw); err != nil {
+	if err := decoder.Decode(&raw); err != nil {
 		if errors.Is(err, io.EOF) {
 			return TaskMRAutomationPatch{}, nil
+		}
+		return TaskMRAutomationPatch{}, err
+	}
+	// Decode stops after the first JSON value, so a body like `{...}{...}`
+	// would otherwise silently apply only the first object and ignore the
+	// rest. Requiring EOF here rejects any trailing content as malformed.
+	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
+		if err == nil {
+			err = errors.New("unexpected trailing content after JSON body")
 		}
 		return TaskMRAutomationPatch{}, err
 	}

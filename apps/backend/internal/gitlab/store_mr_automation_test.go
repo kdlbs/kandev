@@ -29,6 +29,7 @@ func TestStore_GetTaskMRAutomationOptions_ImplicitDefault(t *testing.T) {
 func TestStore_UpdateTaskMRAutomationOptions_RoundTrip(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 	updated, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
 		PromptOnMerged: boolPtr(true),
 	}, nil)
@@ -62,6 +63,7 @@ func TestStore_UpdateTaskMRAutomationOptions_RoundTrip(t *testing.T) {
 func TestStore_TaskMRLifecycleState_CheckpointIsolation(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 
 	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "group/a", 1, "open"); err != nil {
 		t.Fatalf("SetTaskMRObservedState a: %v", err)
@@ -100,6 +102,7 @@ func TestStore_GetTaskMRLifecycleState_NilWhenAbsent(t *testing.T) {
 func TestStore_SetTaskMRReviewRequestState(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 	if err := store.SetTaskMRReviewRequestState(ctx, "task-1", "", "group/a", 1, true); err != nil {
 		t.Fatalf("SetTaskMRReviewRequestState: %v", err)
 	}
@@ -112,6 +115,7 @@ func TestStore_SetTaskMRReviewRequestState(t *testing.T) {
 func TestStore_RecordTaskMRLifecyclePrompt(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 	err := store.RecordTaskMRLifecyclePrompt(ctx, TaskMRLifecyclePrompt{
 		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
 		Event: mrLifecycleEventMerged, SessionID: "sess-1",
@@ -133,6 +137,7 @@ func TestStore_RecordTaskMRLifecyclePrompt(t *testing.T) {
 func TestStore_RecordAndClearTaskMRAutomationError(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 	if err := store.RecordTaskMRAutomationError(ctx, "task-1", "", "group/a", 1, "boom"); err != nil {
 		t.Fatalf("RecordTaskMRAutomationError: %v", err)
 	}
@@ -152,6 +157,7 @@ func TestStore_RecordAndClearTaskMRAutomationError(t *testing.T) {
 func TestStore_RebindTaskMRReviewer_ClearsBaselines(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 	alice := "alice"
 	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
 		PromptOnReviewRequested: boolPtr(true),
@@ -207,6 +213,7 @@ func TestStore_RebindTaskMRReviewer_ClearsBaselines(t *testing.T) {
 func TestStore_UpdateTaskMRAutomationOptions_ResendingSameSwitchResetsBaselineOnIdentityChange(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
 	alice := "alice"
 	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
 		PromptOnReviewRequested: boolPtr(true),
@@ -234,6 +241,115 @@ func TestStore_UpdateTaskMRAutomationOptions_ResendingSameSwitchResetsBaselineOn
 	}
 	if got.ReviewRequestInitialized || got.LastReviewRequested {
 		t.Fatalf("expected review baseline reset after identity change even with an unchanged switch: %+v", got)
+	}
+}
+
+// TestStore_UpdateTaskMRAutomationOptions_ReenablingMergedSwitchResetsCheckpoint
+// is the P1 finding: an MR that reached the merged state while the switch was
+// off must not stay permanently suppressed once the switch is re-enabled.
+func TestStore_UpdateTaskMRAutomationOptions_ReenablingMergedSwitchResetsCheckpoint(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("enable switch: %v", err)
+	}
+	if err := store.RecordTaskMRLifecyclePrompt(ctx, TaskMRLifecyclePrompt{
+		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
+		Event: gitlabStateMerged, PromptedAt: time.Now().UTC(), ObservedState: gitlabStateMerged,
+	}); err != nil {
+		t.Fatalf("record merged prompt: %v", err)
+	}
+
+	// Disable, then re-enable — the checkpoint from the still-merged MR must
+	// not survive, or the re-enabled switch would never fire for it again.
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(false),
+	}, nil); err != nil {
+		t.Fatalf("disable switch: %v", err)
+	}
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("re-enable switch: %v", err)
+	}
+
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
+	if got.LastObservedState != "" || got.LastLifecycleEvent != "" {
+		t.Fatalf("expected terminal checkpoint reset after re-enabling the switch, got %+v", got)
+	}
+}
+
+// TestStore_ObservedStateAndErrorMutatorsDoNotClobberEachOther pins the
+// data-integrity fix directly: SetTaskMRObservedState and
+// RecordTaskMRAutomationError each write only their own column now, so
+// calling one after the other must not erase the first one's write (the
+// previous full-row-upsert implementation would have lost this on a
+// concurrent — or here, simply interleaved — pair of calls).
+func TestStore_ObservedStateAndErrorMutatorsDoNotClobberEachOther(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "group/a", 1, "opened"); err != nil {
+		t.Fatalf("SetTaskMRObservedState: %v", err)
+	}
+	if err := store.RecordTaskMRAutomationError(ctx, "task-1", "", "group/a", 1, "transient failure"); err != nil {
+		t.Fatalf("RecordTaskMRAutomationError: %v", err)
+	}
+
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
+	if got.LastObservedState != "opened" {
+		t.Fatalf("RecordTaskMRAutomationError clobbered last_observed_state: %+v", got)
+	}
+	if got.LastError == nil || *got.LastError != "transient failure" {
+		t.Fatalf("expected last_error set: %+v", got)
+	}
+}
+
+// TestStore_TaskDeleteCascadesMRAutomationRows is the FK-cascade finding: a
+// hard-deleted task must not leave its MR automation options or lifecycle
+// checkpoints behind — both tables declare ON DELETE CASCADE against tasks.
+func TestStore_TaskDeleteCascadesMRAutomationRows(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("seed options: %v", err)
+	}
+	if err := store.SetTaskMRObservedState(ctx, "task-1", "", "group/a", 1, "opened"); err != nil {
+		t.Fatalf("seed checkpoint: %v", err)
+	}
+
+	if _, err := store.db.ExecContext(ctx, `DELETE FROM tasks WHERE id = ?`, "task-1"); err != nil {
+		t.Fatalf("delete task: %v", err)
+	}
+
+	opts, err := store.GetTaskMRAutomationOptions(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("GetTaskMRAutomationOptions: %v", err)
+	}
+	if opts.PromptOnMerged {
+		t.Fatalf("expected options row cascaded away, got %+v", opts)
+	}
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil {
+		t.Fatalf("GetTaskMRLifecycleState: %v", err)
+	}
+	if state != nil {
+		t.Fatalf("expected lifecycle state row cascaded away, got %+v", state)
 	}
 }
 
