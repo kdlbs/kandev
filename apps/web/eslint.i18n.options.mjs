@@ -14,7 +14,12 @@ export const noLiteralStringOptions = {
   // now checked, so the `words.exclude` list below has to carry the
   // weight of separating copy from prop enum values.
   mode: "jsx-only",
-  "should-validate-template": false,
+  // Template literals in JSX ARE copy: `Select task ${title}`, `${label} tasks,
+  // over WIP limit`. Leaving them unchecked was the largest hole in the guard, and
+  // turning it on measured cheap — +2 to +5 findings per un-migrated directory,
+  // every one of them a real string, and zero new findings across the allowlist
+  // (className templates are already covered by the Tailwind patterns below).
+  "should-validate-template": true,
   // Brand/proper nouns and symbol-only strings are not translatable copy.
   //
   // NOTE: the plugin wraps each pattern as `^<pattern>$`
@@ -62,6 +67,14 @@ export const noLiteralStringOptions = {
       ".*(calc|env|url|var)\\(.*",
       "\\{.*\\}",
       "[A-Z][A-Z0-9_]*\\.[a-z]{2,4}",
+      // Static chunks of an interpolated DOM id. With
+      // `should-validate-template` on, the plugin checks each literal chunk of a
+      // template separately, so `startup-page-${v}-label` arrives as
+      // "startup-page-" and "-label" — kebab/snake fragments with a dangling
+      // separator, which the token patterns above do not cover. Copy chunks
+      // ("Select task ", " tasks, over WIP limit") carry a capital, a space or
+      // punctuation and so still get flagged.
+      "[a-z0-9]*(?:[-_][a-z0-9]*)*",
       // Single lowercase/camel/kebab tokens are prop enum values,
       // classnames, and identifiers (variant="ghost", side="top",
       // value="work-items") — never display copy, which is capitalized

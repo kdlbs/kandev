@@ -26,7 +26,6 @@ import { Dialog } from "@kandev/ui/dialog";
 - Use `useTouchDrawer` when a hover/popover disclosure needs a coarse-pointer `Drawer` alternative. Width-based phone composition and pointer-based disclosure behavior are related but not interchangeable.
 - Existing Radix DropdownMenu and ContextMenu surfaces receive inset, safe-area-aware bottom-sheet treatment below 640px in `app/globals.css`. Reuse those primitives for contextual actions and add focused coverage for long or nested menus instead of creating a parallel mobile menu.
 - Mobile capability parity does not require desktop layout parity. Load `/mobile-parity` for the Kandev surface decision guide, mobile design contract, and verification requirements.
-- For container-query layouts, test just below and at the breakpoint plus the component's minimum supported width; preserve action order and prove clipped controls remain hit-target reachable.
 
 ## Data Flow Pattern (Critical)
 
@@ -68,19 +67,6 @@ lib/api/domains/                    # API clients
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
-
-**Same-resource refreshes:** Preserve an already-loaded snapshot while
-refreshing the same workspace or resource. Surface the refresh separately for
-the local spinner, busy control, or disabled action; clear data only for the
-initial load or an identity change. A deferred hook test should show stale
-content with `loading=true`, and desktop/mobile E2E should keep the content
-visible during refresh.
-
-**Live update provenance:** A WebSocket snapshot may omit optional fields that
-the boot payload or hydrated store already established. Merge those fields in
-provenance order—live payload, persisted session metadata, then existing store
-value—rather than replacing known immutable metadata with `undefined`. Add a
-handler regression test for an omitted-field update.
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow
 [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).
@@ -233,9 +219,16 @@ drifting back. Never delete an entry to make a build pass. Use
 `pnpm run lint:i18n <path>` to preview the guard on a path that is not on the
 list yet.
 
-The rule also **only sees plain literals in JSX** — template literals,
-`confirm()` arguments and copy in plain `.ts` helpers are invisible to it, so a
-clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
+Separately, `pnpm run i18n:ratchet` (pre-commit + CI) guards **new code
+everywhere**, regardless of the allowlist: a file you added must be clean outright,
+and a file you modified is judged on the lines you touched. Untouched literals are
+never reported, so it cannot ask you to migrate code you did not write — the same
+contract as `golangci-lint --new-from-rev` for Go.
+
+The rule **only sees literals in JSX** — `confirm()` arguments and copy in plain
+`.ts` helpers are invisible to it — and it **skips anything assigned to a
+SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
+silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
 drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
 **pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
 check — any plain-English text under it was never externalized. The tooling needs
@@ -273,6 +266,3 @@ When you hit a limit, extract a helper function, custom hook, or sub-component. 
   solely because `mouseenter` or `pointerMove` failed in jsdom.
 - In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper.
 - Shared E2E helpers that inspect mounted React/DOM internals must be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
-- When seeded data can create multiple tasks or repositories, scope actions to
-  the seeded/API ID or an exact labelled container. Do not use `.first()` on a
-  generic action locator unless list order is the tested contract.
