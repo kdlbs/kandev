@@ -30,7 +30,7 @@ func TestDecodeTaskMRUpdatedEvent_TypedPointer(t *testing.T) {
 func TestDecodeTaskMRUpdatedEvent_MapShape(t *testing.T) {
 	original := &gitlab.TaskMRUpdatedEvent{
 		WorkspaceID: "ws-1",
-		TaskMR:      &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 1, State: "merged"},
+		TaskMR:      &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/a", MRIID: 1, State: gitlabMRStateMerged},
 	}
 	raw, err := json.Marshal(original)
 	if err != nil {
@@ -46,7 +46,7 @@ func TestDecodeTaskMRUpdatedEvent_MapShape(t *testing.T) {
 		t.Fatalf("expected a decoded event, got %+v ok=%v", got, ok)
 	}
 	if got.WorkspaceID != "ws-1" || got.TaskID != "task-1" || got.RepositoryID != "repo-1" ||
-		got.ProjectPath != "group/a" || got.MRIID != 1 || got.State != "merged" {
+		got.ProjectPath != "group/a" || got.MRIID != 1 || got.State != gitlabMRStateMerged {
 		t.Fatalf("decoded event does not match original: %+v", got)
 	}
 }

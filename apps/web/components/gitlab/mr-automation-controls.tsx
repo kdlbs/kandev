@@ -210,7 +210,7 @@ function MRAgentPromptRows({
  * its active switches. Mirrors ReviewFollowUpSection (GitHub), AC29.
  */
 export function MRAutomationControls({ taskId }: { taskId: string }) {
-  const { options, saving, error, update } = useTaskMRAutomationOptions(taskId);
+  const { options, loading, saving, error, update } = useTaskMRAutomationOptions(taskId);
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
@@ -256,7 +256,7 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
           <MRAgentPromptRows
             taskId={taskId}
             options={options}
-            disabled={saving}
+            disabled={saving || loading || !options}
             patchOption={patchOption}
           />
           {error ? <MRAutomationErrorRow error={error} /> : null}

@@ -552,10 +552,21 @@ func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectP
 // to the ambient/legacy Service.Client() singleton, so the lifecycle poller
 // fails closed instead of syncing against the wrong GitLab account when
 // workspace secrets are not yet configured.
-func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
+//
+// existingHost, when non-empty, must match the resolved client's host. A
+// mismatch means the workspace's GitLab connection changed host since this
+// MR was linked; failing closed here avoids querying (and then emitting
+// lifecycle automation for) an unrelated MR that happens to share the same
+// project path and IID on the new host.
+func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, projectPath string, iid int, existingHost string) (*TaskMR, error) {
 	client, err := s.clientForTaskStrict(ctx, taskID)
 	if err != nil {
 		return nil, err
+	}
+	if existingHost != "" && client.Host() != existingHost {
+		return nil, fmt.Errorf(
+			"gitlab: workspace host changed from %s to %s since this MR was linked", existingHost, client.Host(),
+		)
 	}
 	return s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)
 }

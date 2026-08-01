@@ -7,6 +7,7 @@ import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 const hookMocks = vi.hoisted(() => ({
   error: null as string | null,
   options: null as TaskMRAutomationOptions | null,
+  loading: false,
   updateMock: vi.fn(),
 }));
 
@@ -24,8 +25,8 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 
 vi.mock("@/hooks/domains/gitlab/use-task-mr-automation", () => ({
   useTaskMRAutomationOptions: () => ({
-    options: hookMocks.options ?? makeOptions(),
-    loading: false,
+    options: hookMocks.options,
+    loading: hookMocks.loading,
     saving: false,
     error: hookMocks.error,
     refresh: vi.fn(),
@@ -65,7 +66,8 @@ function renderControls() {
 
 function resetHookMocks() {
   hookMocks.error = null;
-  hookMocks.options = null;
+  hookMocks.options = makeOptions();
+  hookMocks.loading = false;
   hookMocks.updateMock.mockReset();
   hookMocks.updateMock.mockResolvedValue(makeOptions());
   responsiveMock.isFinePointer = true;
@@ -140,6 +142,36 @@ describe("MRAutomationControls", () => {
     expect(hookMocks.updateMock).toHaveBeenCalledWith({ prompt_on_closed: true });
   });
 
+  it("surfaces an error from the hook", () => {
+    hookMocks.error = "network down";
+    renderControls();
+    fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
+    expect(screen.getByRole("alert").textContent).toContain("network down");
+  });
+
+  it("disables the switches until options have loaded", () => {
+    hookMocks.options = null;
+    hookMocks.loading = true;
+    renderControls();
+    fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
+
+    expect((screen.getByLabelText(REVIEW_REQUESTED_LABEL) as HTMLButtonElement).disabled).toBe(
+      true,
+    );
+    expect((screen.getByLabelText(MERGED_LABEL) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText(CLOSED_LABEL) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("MRAutomationControls help affordance", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
   it("shows the help affordance via keyboard focus (AC29)", () => {
     renderControls();
     fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
@@ -181,12 +213,5 @@ describe("MRAutomationControls", () => {
     responsiveMock.isMobile = true;
     renderControls();
     expect(screen.getByTestId(FOLLOW_UP_TRIGGER).classList.contains("min-h-11")).toBe(true);
-  });
-
-  it("surfaces an error from the hook", () => {
-    hookMocks.error = "network down";
-    renderControls();
-    fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
-    expect(screen.getByRole("alert").textContent).toContain("network down");
   });
 });

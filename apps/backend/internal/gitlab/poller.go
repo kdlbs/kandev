@@ -163,7 +163,7 @@ func (p *Poller) runMRLifecycleSync(ctx context.Context) {
 }
 
 func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
-	updated, err := p.service.SyncTaskMRStrict(ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID)
+	updated, err := p.service.SyncTaskMRStrict(ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID, row.Host)
 	if err != nil {
 		p.logger.Debug("gitlab poller: MR lifecycle sync failed",
 			zap.String("task_id", row.TaskID), zap.String("project", row.ProjectPath),

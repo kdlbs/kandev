@@ -37,10 +37,14 @@ func TestPoller_RunMRLifecycleSync_SyncsSubscribedRowsAndPublishes(t *testing.T)
 		return mock, nil
 	}
 
-	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "", "group/subscribed", 1)); err != nil {
+	subscribed := newTestMR("task-1", "", "group/subscribed", 1)
+	subscribed.Host = "https://gitlab.example.com"
+	if err := store.UpsertTaskMR(ctx, subscribed); err != nil {
 		t.Fatalf("seed subscribed MR: %v", err)
 	}
-	if err := store.UpsertTaskMR(ctx, newTestMR("task-2", "", "group/unsubscribed", 2)); err != nil {
+	unsubscribed := newTestMR("task-2", "", "group/unsubscribed", 2)
+	unsubscribed.Host = "https://gitlab.example.com"
+	if err := store.UpsertTaskMR(ctx, unsubscribed); err != nil {
 		t.Fatalf("seed unsubscribed MR: %v", err)
 	}
 	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
@@ -96,10 +100,14 @@ func TestPoller_RunMRLifecycleSync_ErrorOnOneRowDoesNotAbortOthers(t *testing.T)
 		return mock, nil
 	}
 
-	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "", "group/broken", 1)); err != nil {
+	broken := newTestMR("task-1", "", "group/broken", 1)
+	broken.Host = "https://gitlab.example.com"
+	if err := store.UpsertTaskMR(ctx, broken); err != nil {
 		t.Fatalf("seed broken MR: %v", err)
 	}
-	if err := store.UpsertTaskMR(ctx, newTestMR("task-2", "", "group/ok", 2)); err != nil {
+	ok := newTestMR("task-2", "", "group/ok", 2)
+	ok.Host = "https://gitlab.example.com"
+	if err := store.UpsertTaskMR(ctx, ok); err != nil {
 		t.Fatalf("seed ok MR: %v", err)
 	}
 	for _, taskID := range []string{"task-1", "task-2"} {
@@ -198,5 +206,71 @@ func TestPoller_RunMRLifecycleSync_UsesStrictClient(t *testing.T) {
 	}
 	if state == nil || state.LastError == nil || *state.LastError == "" {
 		t.Fatalf("expected last_error recorded (strict client fails closed), got %+v", state)
+	}
+}
+
+// TestPoller_RunMRLifecycleSync_RejectsHostChangeSinceLink guards against
+// syncing a same-path MR on a newly configured GitLab host: if the
+// workspace's connection host changed since this MR was linked, the
+// project_path+IID pair could coincidentally resolve to an unrelated MR on
+// the new host. The sync must fail (recording the checkpoint error) rather
+// than silently overwrite the row and emit lifecycle automation for it.
+func TestPoller_RunMRLifecycleSync_RejectsHostChangeSinceLink(t *testing.T) {
+	ctx := context.Background()
+	store := newTestStore(t)
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	if err := store.SaveConfigForWorkspace(ctx, "ws-1", &GitLabConfig{
+		Host: "https://gitlab.new.example.com", AuthMethod: AuthMethodPAT,
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	secrets := &configTestSecrets{values: map[string]string{SecretKeyForWorkspace("ws-1"): "token"}}
+	svc := newWorkspaceConfigService(t, store, secrets)
+	mock := NewMockClient("https://gitlab.new.example.com")
+	mock.SeedMR("group/subscribed", &MR{
+		IID: 1, State: "opened", HeadBranch: "feat", BaseBranch: "main",
+		WebURL: "https://gitlab.new.example.com/group/subscribed/-/merge_requests/1",
+	})
+	svc.workspaceClientFn = func(_ context.Context, _ *GitLabConfig, _ string) (Client, error) {
+		return mock, nil
+	}
+
+	// Linked while the workspace pointed at the OLD host.
+	linked := newTestMR("task-1", "", "group/subscribed", 1)
+	linked.Host = "https://gitlab.old.example.com"
+	if err := store.UpsertTaskMR(ctx, linked); err != nil {
+		t.Fatalf("seed linked MR: %v", err)
+	}
+	if _, err := store.UpdateTaskMRAutomationOptions(ctx, "task-1", TaskMRAutomationPatch{
+		PromptOnMerged: boolPtr(true),
+	}, nil); err != nil {
+		t.Fatalf("enable switch: %v", err)
+	}
+
+	memBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetEventBus(memBus)
+	var received []*TaskMRUpdatedEvent
+	if _, err := memBus.Subscribe(events.GitLabTaskMRUpdated, func(_ context.Context, e *bus.Event) error {
+		if payload, ok := e.Data.(*TaskMRUpdatedEvent); ok {
+			received = append(received, payload)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	poller := NewPoller(svc, memBus, newTestLogger(t))
+	poller.runMRLifecycleSync(ctx)
+
+	if len(received) != 0 {
+		t.Fatalf("expected no sync across a host change, got %+v", received)
+	}
+	state, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/subscribed", 1)
+	if err != nil {
+		t.Fatalf("get lifecycle state: %v", err)
+	}
+	if state == nil || state.LastError == nil || *state.LastError == "" {
+		t.Fatalf("expected last_error recorded for the host mismatch, got %+v", state)
 	}
 }

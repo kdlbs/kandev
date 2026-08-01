@@ -32,7 +32,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-describe("useTaskMRAutomationOptions", () => {
+describe("useTaskMRAutomationOptions fetching", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("fetches options on mount for a given taskId", async () => {
@@ -49,6 +49,10 @@ describe("useTaskMRAutomationOptions", () => {
     renderHook(() => useTaskMRAutomationOptions(null));
     expect(api.getTaskMRAutomation).not.toHaveBeenCalled();
   });
+});
+
+describe("useTaskMRAutomationOptions optimistic updates", () => {
+  beforeEach(() => vi.clearAllMocks());
 
   it("applies an optimistic update immediately, then reconciles with the server response", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
@@ -90,6 +94,10 @@ describe("useTaskMRAutomationOptions", () => {
     expect(result.current.error).toBe("network down");
     expect(result.current.saving).toBe(false);
   });
+});
+
+describe("useTaskMRAutomationOptions races", () => {
+  beforeEach(() => vi.clearAllMocks());
 
   it("does not let a concurrent refresh discard an update's response (independent generations)", async () => {
     api.getTaskMRAutomation.mockResolvedValue(baseOptions());
@@ -124,6 +132,37 @@ describe("useTaskMRAutomationOptions", () => {
     expect(result.current.options?.prompt_on_merged).toBe(true);
   });
 
+  it("does not let a refresh started before a save overwrite the saved result", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions());
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"));
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    // A manual refresh starts and stays in flight...
+    const refresh = deferred<TaskMRAutomationOptions>();
+    api.getTaskMRAutomation.mockReturnValueOnce(refresh.promise);
+    act(() => {
+      void result.current.refresh();
+    });
+
+    // ...while a save starts and completes first.
+    api.updateTaskMRAutomation.mockResolvedValue(baseOptions({ prompt_on_merged: true }));
+    await act(async () => {
+      await result.current.update({ prompt_on_merged: true });
+    });
+    expect(result.current.options?.prompt_on_merged).toBe(true);
+
+    // The stale refresh (started before the save) now resolves with
+    // pre-save data — it must not flip the saved switch back off.
+    await act(async () => {
+      refresh.resolve(baseOptions({ prompt_on_merged: false }));
+    });
+    expect(result.current.options?.prompt_on_merged).toBe(true);
+  });
+});
+
+describe("useTaskMRAutomationOptions task switching", () => {
+  beforeEach(() => vi.clearAllMocks());
+
   it("does not leak a stale task's response after switching taskId", async () => {
     const taskA = deferred<TaskMRAutomationOptions>();
     api.getTaskMRAutomation.mockImplementation((taskId: string) =>
@@ -145,5 +184,27 @@ describe("useTaskMRAutomationOptions", () => {
       taskA.resolve(baseOptions({ task_id: "task-a" }));
     });
     expect(result.current.options?.task_id).toBe("task-b");
+  });
+
+  it("reloads options when returning to a task whose intermediate switch never resolved", async () => {
+    api.getTaskMRAutomation.mockResolvedValueOnce(baseOptions({ task_id: "task-a" }));
+    const { result, rerender } = renderHook(
+      ({ taskId }: { taskId: string | null }) => useTaskMRAutomationOptions(taskId),
+      { initialProps: { taskId: "task-a" } },
+    );
+    await waitFor(() => expect(result.current.options?.task_id).toBe("task-a"));
+
+    // Switch to task-b, but its fetch never resolves before switching back
+    // — so nothing ever marks task-b (or re-marks task-a) as loaded.
+    const taskB = deferred<TaskMRAutomationOptions>();
+    api.getTaskMRAutomation.mockReturnValueOnce(taskB.promise);
+    rerender({ taskId: "task-b" });
+    await waitFor(() => expect(result.current.options).toBeNull());
+
+    // Switch back to task-a before task-b's fetch resolves. This must
+    // re-fetch task-a, not leave options stuck at null.
+    api.getTaskMRAutomation.mockResolvedValueOnce(baseOptions({ task_id: "task-a" }));
+    rerender({ taskId: "task-a" });
+    await waitFor(() => expect(result.current.options?.task_id).toBe("task-a"));
   });
 });

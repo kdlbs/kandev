@@ -21,6 +21,14 @@ function errorMessage(error: unknown): string {
  * "current" for that taskId (activeTaskIdRef), so a response for a task the
  * caller has since switched away from can never leak into the displayed
  * state.
+ *
+ * refresh's own response is further gated on updateSettleCounterRef: a GET
+ * can be in flight when a PATCH starts and resolve afterward with pre-patch
+ * data (the server hadn't processed the PATCH yet when the GET ran). Since
+ * that GET's own generation check alone can't detect this — it's still
+ * "current" — refresh additionally requires that no update has settled since
+ * it started; update bumps the counter in its `finally` regardless of
+ * success/failure so a stale GET can never flip a just-saved switch back.
  */
 export function useTaskMRAutomationOptions(taskId: string | null) {
   const [options, setOptions] = useState<TaskMRAutomationOptions | null>(null);
@@ -29,7 +37,7 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
   const [error, setError] = useState<string | null>(null);
   const refreshRequestRef = useRef<Record<string, number>>({});
   const updateRequestRef = useRef<Record<string, number>>({});
-  const loadedForTaskRef = useRef<string | null>(null);
+  const updateSettleCounterRef = useRef<Record<string, number>>({});
   const activeTaskIdRef = useRef<string | null>(taskId);
   activeTaskIdRef.current = taskId;
 
@@ -43,13 +51,15 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
     if (!taskId) return null;
     const requestId = (refreshRequestRef.current[taskId] ?? 0) + 1;
     refreshRequestRef.current[taskId] = requestId;
+    const settleCounterAtStart = updateSettleCounterRef.current[taskId] ?? 0;
     setLoading(true);
     setError(null);
     try {
       const response = await getTaskMRAutomation(taskId, { cache: "no-store" });
-      if (isCurrent(taskId, refreshRequestRef.current, requestId)) {
+      const noNewerUpdateSettled =
+        (updateSettleCounterRef.current[taskId] ?? 0) === settleCounterAtStart;
+      if (isCurrent(taskId, refreshRequestRef.current, requestId) && noNewerUpdateSettled) {
         setOptions(response);
-        loadedForTaskRef.current = taskId;
       }
       return response;
     } catch (err) {
@@ -87,6 +97,7 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
         }
         throw err;
       } finally {
+        updateSettleCounterRef.current[taskId] = (updateSettleCounterRef.current[taskId] ?? 0) + 1;
         if (isCurrent(taskId, updateRequestRef.current, requestId)) {
           setSaving(false);
         }
@@ -101,15 +112,16 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
       setError(null);
       setSaving(false);
       setLoading(false);
-      loadedForTaskRef.current = null;
       return;
     }
-    if (loadedForTaskRef.current === taskId) return;
     // Reset to a clean slate for the new task immediately — the previous
     // task's options/saving/error state must not remain visible (or
-    // actionable) while the new task's options are still loading, regardless
-    // of how a still-in-flight request for the previous task eventually
-    // settles (isCurrent above ensures it can no longer write to state).
+    // actionable) while this task's options are (re-)loading, regardless of
+    // how a still-in-flight request for the previous task eventually settles
+    // (isCurrent above ensures it can no longer write to state). Always
+    // re-fetches, including when returning to a task visited earlier in this
+    // hook's lifetime — options was just cleared above, so skipping the
+    // fetch here would leave it permanently null.
     setOptions(null);
     setError(null);
     setSaving(false);
