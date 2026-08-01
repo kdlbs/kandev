@@ -252,9 +252,10 @@ export function useTaskSubmitHandlers({
       : (descriptionInputRef.current?.getValue() ?? "");
     const trimmedDescription = description.trim();
     const repositoriesPayload = isStartedEdit ? [] : getRepositoriesPayload();
+    const titleChanged = trimmedTitle !== editingTask.title;
 
     const updatePayload: Parameters<typeof updateTask>[1] = {
-      title: trimmedTitle,
+      ...(titleChanged && { title: trimmedTitle }),
       ...(!isStartedEdit && { description: trimmedDescription }),
       ...(repositoriesPayload.length > 0 && { repositories: repositoriesPayload }),
     };

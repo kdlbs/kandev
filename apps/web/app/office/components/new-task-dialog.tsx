@@ -18,6 +18,7 @@ import {
   EMPTY_STAGES,
   type StagesDraft,
 } from "./new-task-stages";
+import { clampTaskTitleInput, TASK_TITLE_MAX_LENGTH } from "@/lib/task-title";
 
 function buildMetadata(draft: IssueDraft): Record<string, unknown> | undefined {
   const meta: Record<string, unknown> = {};
@@ -148,7 +149,8 @@ function NewIssueDialogBody({
         <Textarea
           placeholder="Task title"
           value={draft.title}
-          onChange={(e) => updateDraft({ title: e.target.value })}
+          maxLength={TASK_TITLE_MAX_LENGTH}
+          onChange={(e) => updateDraft({ title: clampTaskTitleInput(e.target.value) })}
           className="text-lg font-medium border-0 resize-none focus-visible:ring-0 min-h-[40px]"
           rows={1}
           autoFocus

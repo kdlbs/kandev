@@ -17,6 +17,7 @@ import { PromptSection } from "./prompt-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
+import { clampTaskTitleInput, TASK_TITLE_MAX_LENGTH } from "@/lib/task-title";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
@@ -162,8 +163,11 @@ export function ThenSection({
           <Label className="text-xs">Task title</Label>
           <Input
             value={form.taskTitleTemplate}
+            maxLength={TASK_TITLE_MAX_LENGTH}
             data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
-            onChange={(event) => updateField("taskTitleTemplate", event.target.value)}
+            onChange={(event) =>
+              updateField("taskTitleTemplate", clampTaskTitleInput(event.target.value))
+            }
             placeholder={defaultTaskTitle || "[Auto] automation name"}
           />
           <p className="text-xs text-muted-foreground">

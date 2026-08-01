@@ -49,6 +49,7 @@ import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-creat
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
 
@@ -313,7 +314,7 @@ function useEnhanceForDialog(
 function useJiraImportHandler(fs: DialogFormState) {
   return useCallback(
     (ticket: JiraTicket) => {
-      const title = `[${ticket.key}] ${ticket.summary}`;
+      const title = truncateRemoteTaskTitle(`[${ticket.key}] ${ticket.summary}`);
       fs.setTaskName(title);
       fs.setHasTitle(true);
       const description = ticket.description?.trim()
@@ -329,7 +330,7 @@ function useJiraImportHandler(fs: DialogFormState) {
 function useLinearImportHandler(fs: DialogFormState) {
   return useCallback(
     (issue: LinearIssue) => {
-      const title = `[${issue.identifier}] ${issue.title}`;
+      const title = truncateRemoteTaskTitle(`[${issue.identifier}] ${issue.title}`);
       fs.setTaskName(title);
       fs.setHasTitle(true);
       const description = issue.description?.trim()

@@ -9,6 +9,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { associateAzureDevOpsPullRequest } from "@/lib/api/domains/azure-devops-api";
 import type { AzureDevOpsPullRequest, AzureDevOpsWorkItem } from "@/lib/types/azure-devops";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 export type AzureDevOpsLaunchPayload =
   | { kind: "work-item"; item: AzureDevOpsWorkItem }
@@ -24,7 +25,7 @@ function launchText(payload: AzureDevOpsLaunchPayload) {
   if (payload.kind === "work-item") {
     const item = payload.item;
     return {
-      title: `${item.type} ${item.id}: ${item.title}`,
+      title: truncateRemoteTaskTitle(`${item.type} ${item.id}: ${item.title}`),
       description: [
         `Azure DevOps work item: ${item.id}`,
         `URL: ${item.webUrl ?? item.apiUrl ?? ""}`,
@@ -37,7 +38,7 @@ function launchText(payload: AzureDevOpsLaunchPayload) {
   }
   const pullRequest = payload.pullRequest;
   return {
-    title: `Review PR ${pullRequest.id}: ${pullRequest.title}`,
+    title: truncateRemoteTaskTitle(`Review PR ${pullRequest.id}: ${pullRequest.title}`),
     description: [
       `Azure DevOps pull request: ${pullRequest.webUrl}`,
       "",

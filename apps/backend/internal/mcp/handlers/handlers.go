@@ -697,6 +697,8 @@ func classifyCreateTaskError(err error) string {
 	switch {
 	case errors.Is(err, service.ErrWIPLimitExceeded):
 		return ws.ErrorCodeConflict
+	case errors.Is(err, service.ErrTaskTitleTooLong):
+		return ws.ErrorCodeValidation
 	case errors.Is(err, service.ErrSubtaskDepthExceeded),
 		errors.Is(err, service.ErrInvalidTaskWorkflow),
 		isMCPWorkflowNotFoundError(err):

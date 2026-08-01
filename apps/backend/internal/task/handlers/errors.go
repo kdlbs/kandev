@@ -79,6 +79,9 @@ func isValidationError(err error) bool {
 	if errors.Is(err, service.ErrInvalidParent) {
 		return true
 	}
+	if errors.Is(err, service.ErrTaskTitleTooLong) {
+		return true
+	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "pending approval") ||
 		strings.Contains(msg, "validation") ||
