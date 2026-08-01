@@ -86,6 +86,16 @@ Files:
 - `apps/web/lib/ws/handlers/agent-session.ts`
 - `apps/web/lib/ws/handlers/agent-session.test.ts`
 - `apps/web/app/office/tasks/[id]/office-dockview-layout.tsx`
+- `apps/web/components/task/file-browser-path.ts`
+- `apps/web/components/task/file-browser-path.test.ts`
+- `apps/web/components/task/file-tab-content.tsx`
+- `apps/web/components/task/file-tab-content.test.tsx`
+- `apps/web/components/task/file-editor-panel.tsx`
+- `apps/web/components/task/file-editor-panel.image.test.tsx`
+- `apps/web/components/task/mobile/mobile-file-viewer-panel.tsx`
+- `apps/web/components/task/mobile/mobile-file-viewer-panel.test.tsx`
+- `apps/web/hooks/use-lsp-file-opener.ts`
+- `apps/web/hooks/use-lsp-file-opener.test.ts`
 
 Changes:
 
@@ -118,7 +128,8 @@ Changes:
 - Add one pure resolver that selects `workspace_path` first and falls back to `worktree_path` for
   backward compatibility.
 - Use that resolver wherever the session root is passed into shared chat Markdown/tool rendering,
-  the fallback Markdown link context, and the Files browser root.
+  the fallback Markdown link context, the Files browser root, desktop/mobile file viewers, and LSP
+  navigation.
 - Keep the existing Markdown safety checks: traversal, unrelated host absolute paths, and paths
   outside the known workspace remain rejected.
 - When the task root is `<task-root>`, resolve absolute links under the primary repository to
@@ -134,6 +145,8 @@ Changes:
 - Extend session store and WS tests to prove `workspace_path` survives refresh races while
   `worktree_path` remains unchanged.
 - Cover the pure root selector independently so all chat/File consumers share one precedence rule.
+- Cover workspace-relative LSP conversion, registration, cleanup, and cursor scrolling with
+  distinct workspace and primary worktree paths.
 
 ---
 
@@ -188,7 +201,12 @@ rtk pnpm exec vitest run \
   lib/session-workspace-path.test.ts \
   lib/state/slices/session/session-slice.upsert.test.ts \
   lib/ws/handlers/agent-session.test.ts \
-  components/shared/markdown-components.test.tsx
+  components/shared/markdown-components.test.tsx \
+  components/task/file-browser-path.test.ts \
+  components/task/file-tab-content.test.tsx \
+  components/task/mobile/mobile-file-viewer-panel.test.tsx \
+  components/task/file-editor-panel.image.test.tsx \
+  hooks/use-lsp-file-opener.test.ts
 rtk pnpm run typecheck
 rtk pnpm e2e:run --host --no-build tests/task/add-workspace-sources.spec.ts --grep "adds a local repository"
 rtk pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-add-workspace-sources.spec.ts
@@ -233,7 +251,7 @@ None.
 
 - `make -C apps/backend test` — passed.
 - Focused Vitest suite (workspace selector, session merge/WS handlers, file viewers, LSP paths, and
-  Markdown links) — 112 tests passed in 9 files.
+  Markdown links) — 115 tests passed in 9 files.
 - `rtk pnpm run typecheck` — passed.
 - Targeted ESLint on changed frontend files — passed with zero warnings.
 - Desktop Chromium add-sources regression — passed; absolute links opened in both the primary and
