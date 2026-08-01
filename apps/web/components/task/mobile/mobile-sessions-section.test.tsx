@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MobileSessionsPicker } from "./mobile-sessions-section";
 import type { AgentProfileOption } from "@/lib/state/slices";
-import type { TaskSession } from "@/lib/types/http";
+import { repositoryId, type Repository, type TaskSession } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
   activeSessionId: "session-a" as string | null,
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
+  repositoriesByWorkspaceId: {} as Record<string, Repository[]>,
   messagesBySession: {} as Record<string, unknown[]>,
+  setActiveSession: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -22,8 +24,9 @@ vi.mock("@/components/state-provider", () => ({
       tasks: { activeSessionId: mocks.activeSessionId },
       agentProfiles: { items: mocks.agentProfiles },
       kanban: { tasks: [{ id: "task-1", primarySessionId: "session-a" }] },
+      repositories: { itemsByWorkspaceId: mocks.repositoriesByWorkspaceId },
       messages: { bySession: mocks.messagesBySession },
-      setActiveSession: vi.fn(),
+      setActiveSession: mocks.setActiveSession,
     }),
 }));
 
@@ -80,6 +83,29 @@ function profile(id: string, label: string, agentName: string): AgentProfileOpti
   };
 }
 
+function repository(id: string, name: string): Repository {
+  return {
+    id,
+    workspace_id: "workspace-1",
+    name,
+    source_type: "local",
+    local_path: `/tmp/${name}`,
+    provider: "",
+    provider_repo_id: "",
+    provider_owner: "",
+    provider_name: "",
+    default_branch: "main",
+    worktree_branch_prefix: "kandev/",
+    pull_before_worktree: false,
+    setup_script: "",
+    cleanup_script: "",
+    dev_script: "",
+    copy_files: "",
+    created_at: START_TIME,
+    updated_at: START_TIME,
+  } as Repository;
+}
+
 afterEach(cleanup);
 
 beforeEach(() => {
@@ -92,6 +118,9 @@ beforeEach(() => {
     profile("profile-a", "Alpha", "claude"),
     profile("profile-b", "Beta", "codex"),
   ];
+  mocks.repositoriesByWorkspaceId = {};
+  mocks.messagesBySession = {};
+  mocks.setActiveSession.mockReset();
 });
 
 describe("MobileSessionsPicker selection", () => {
@@ -118,6 +147,41 @@ describe("MobileSessionsPicker selection", () => {
     const pill = screen.getByTestId(PILL_TESTID);
     expect(within(pill).getByTestId("mobile-session-agent-icon")).toBeTruthy();
     expect(within(pill).getByTestId("agent-logo-codex")).toBeTruthy();
+  });
+
+  it("disambiguates repository-bound sessions without a workflow task snapshot", () => {
+    mocks.sessions = [
+      session(SESSION_A, "profile-a", START_TIME, {
+        repository_id: repositoryId("repository-a"),
+      }),
+      session("session-b", "profile-a", SECOND_TIME, {
+        repository_id: repositoryId("repository-b"),
+      }),
+    ];
+    mocks.agentProfiles = [profile("profile-a", "Alpha", "claude")];
+    mocks.repositoriesByWorkspaceId = {
+      "workspace-1": [repository("repository-a", "Frontend"), repository("repository-b", "API")],
+    };
+
+    render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "Active session: Alpha. Repository: Frontend. Tap to switch.",
+      }),
+    ).toBeTruthy();
+    expect(screen.getByTestId(PILL_TESTID).textContent).toContain("Alpha · Frontend");
+
+    fireEvent.click(screen.getByTestId(PILL_TESTID));
+    expect(
+      within(screen.getByTestId("mobile-session-row-session-a")).getByText("Frontend"),
+    ).toBeTruthy();
+    expect(
+      within(screen.getByTestId("mobile-session-row-session-b")).getByText("API"),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("mobile-session-row-session-b"));
+    expect(mocks.setActiveSession).toHaveBeenCalledWith(TASK_ID, "session-b");
   });
 });
 

@@ -56,7 +56,7 @@ describe("AnchoredPromptBarSettings", () => {
     ).toBe("unchecked");
     expect(
       screen.getByRole("switch", { name: AUTO_SCROLL_CONTROL_LABEL }).getAttribute(DATA_STATE),
-    ).toBe("checked");
+    ).toBe("unchecked");
     screen.getByText(/desktop only/i);
     screen.getByText(/show scroll to last prompt/i);
   });
@@ -115,7 +115,7 @@ describe("AnchoredPromptBarSettings", () => {
 
     await waitFor(() =>
       expect(updateUserSettings).toHaveBeenCalledWith({
-        show_transcript_auto_scroll_control: false,
+        show_transcript_auto_scroll_control: true,
       }),
     );
   });

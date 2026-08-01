@@ -252,4 +252,39 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     "scrollWidth",
     await testPage.evaluate(() => innerWidth),
   );
+
+  // The mobile chat surface must use the task workspace root when opening an
+  // absolute link into the attached repository.
+  const taskState = await apiClient.getTask(task.id);
+  const activeSessionId = taskState.primary_session_id;
+  expect(activeSessionId).toBeTruthy();
+  const sessionData = await apiClient.listTaskSessions(task.id);
+  const linkedRepoPath = sessionData.sessions
+    .flatMap((item) => item.worktrees ?? [])
+    .map((worktree) => worktree.worktree_path)
+    .find((worktreePath) => worktreePath?.endsWith("mobile-local-repository-main"));
+  expect(linkedRepoPath).toBeTruthy();
+  await apiClient.seedSessionMessage(activeSessionId!, {
+    type: "message",
+    content: `[mobile source](${path.join(linkedRepoPath!, "mobile-repository.txt")})`,
+  });
+
+  await testPage.reload();
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+  await testPage.getByRole("button", { name: "Chat" }).tap();
+  const chatLink = session.activeChat().getByRole("link", { name: "mobile source" });
+  await expect(chatLink).toBeVisible({ timeout: 15_000 });
+  await chatLink.tap();
+  const viewer = testPage.getByTestId("mobile-file-viewer-panel");
+  await expect(viewer).toBeVisible({ timeout: 15_000 });
+  await expect(viewer.locator(".cm-line").filter({ hasText: "repository source" })).toBeVisible();
+  await expect(viewer.getByRole("button", { name: "Close" })).toBeVisible();
+  await expect(
+    viewer.getByText("mobile-local-repository-main/mobile-repository.txt"),
+  ).toBeVisible();
+  await expect(testPage.locator("html")).toHaveJSProperty(
+    "scrollWidth",
+    await testPage.evaluate(() => innerWidth),
+  );
 });

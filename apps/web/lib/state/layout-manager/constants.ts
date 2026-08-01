@@ -23,6 +23,7 @@ export const REUSABLE_PANEL_IDS = [
   "chat",
   "files",
   "changes",
+  "pr-detail",
   TERMINAL_DEFAULT_ID,
   "plan",
   "browser",
@@ -76,7 +77,7 @@ export const PANEL_REGISTRY: Record<string, Omit<LayoutPanel, "id">> = {
     title: "Terminal",
     params: { terminalId: "shell-default" },
   },
-  "pr-detail": { component: "pr-detail", title: "Pull Request" },
+  "pr-detail": { component: "pr-detail", title: "PR Details" },
   "mr-detail": { component: "mr-detail", title: "Merge Request" },
 };
 

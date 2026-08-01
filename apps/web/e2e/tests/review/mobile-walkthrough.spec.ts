@@ -82,6 +82,7 @@ test.describe("Mobile code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-setup", "changes ready");
 
@@ -90,6 +91,24 @@ test.describe("Mobile code walkthrough", () => {
     await expect(changes).toBeVisible({ timeout: 15_000 });
     const request = changes.getByTestId("changes-request-walkthrough");
     await expect(request).toBeEnabled({ timeout: 30_000 });
+    await expect(request.getByText("Walkthrough", { exact: true })).toBeVisible();
+    const [changesBox, requestBox] = await Promise.all([
+      changes.boundingBox(),
+      request.boundingBox(),
+    ]);
+    if (!changesBox || !requestBox) throw new Error("Mobile Changes toolbar geometry unavailable");
+    expect(requestBox.x).toBeGreaterThanOrEqual(changesBox.x);
+    expect(requestBox.x + requestBox.width).toBeLessThanOrEqual(
+      changesBox.x + changesBox.width + 1,
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await prCapture.screenshot("mobile-changes-walkthrough", {
+      caption: "Mobile Changes keeps the Walkthrough action within the viewport",
+    });
     await request.click();
 
     await testPage.getByRole("button", { name: "Chat" }).click();

@@ -29,6 +29,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
     setSessionAgentctlStatus: vi.fn(),
     setSessionFailureNotification: vi.fn(),
     setContextWindow: vi.fn(),
+    clearContextWindow: vi.fn(),
     clearLegacyGitStatusEntry: vi.fn(),
     bumpSessionCommitsRefetch: vi.fn(),
     bumpWorkspaceFilesRefresh: vi.fn(),
@@ -48,6 +49,7 @@ const STATE_CHANGED_EVENT = "session.state_changed";
 const ACTIVITY_EVENT = "session.activity_changed";
 const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
 const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
+const TASK_ROOT = "/task-root";
 
 function makeMessage(payload: TaskSessionStateChangedPayload) {
   return {
@@ -233,10 +235,38 @@ describe("session.workspace_sources.updated handler", () => {
     } as never);
 
     expect(setTaskSession).toHaveBeenCalledWith(
-      expect.objectContaining({ id: "s-1", worktree_path: "/new" }),
+      expect.objectContaining({ id: "s-1", worktree_path: "/old", workspace_path: "/new" }),
     );
     expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
     expect(store.getState().reconcileWorkspaceSourcesAdopted).toHaveBeenCalledWith(["s-1"]);
+  });
+
+  it("does not clear the workspace root when a partial event omits it", () => {
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "IDLE",
+            worktree_path: "/task-root/kandev",
+            workspace_path: TASK_ROOT,
+          },
+        },
+      },
+      setTaskSession,
+    });
+
+    const handler = registerTaskSessionHandlers(store)["session.workspace_sources.updated"]!;
+    handler({
+      id: "msg-workspace-sources-partial",
+      type: "notification",
+      action: "session.workspace_sources.updated",
+      payload: { task_id: "t-1", session_id: "s-1" },
+    } as never);
+
+    expect(setTaskSession).not.toHaveBeenCalled();
   });
 });
 
@@ -315,6 +345,54 @@ describe("session.state_changed context window provenance", () => {
       "s-1",
       expect.objectContaining({ source: "acp" }),
     );
+  });
+
+  it("clears the cached reading when a full session snapshot explicitly clears it", () => {
+    const clearContextWindow = vi.fn();
+    const store = makeStore({ clearContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        session_metadata: { context_window: null },
+      }),
+    );
+
+    expect(clearContextWindow).toHaveBeenCalledWith("s-1");
+  });
+
+  it("clears the cached reading when a partial metadata patch explicitly clears it", () => {
+    const clearContextWindow = vi.fn();
+    const store = makeStore({ clearContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { context_window: null },
+      }),
+    );
+
+    expect(clearContextWindow).toHaveBeenCalledWith("s-1");
+  });
+
+  it("does not clear usage for unrelated metadata patches", () => {
+    const clearContextWindow = vi.fn();
+    const store = makeStore({ clearContextWindow });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        metadata: { plan_mode: true },
+      }),
+    );
+
+    expect(clearContextWindow).not.toHaveBeenCalled();
   });
 });
 
@@ -858,6 +936,7 @@ describe("session.state_changed → agentctl ready fallback", () => {
         id: "s-1",
         task_environment_id: "env-1",
         worktree_path: "/tmp/kandev/tasks/ws/task-1",
+        workspace_path: "/tmp/kandev/tasks/ws/task-1",
       }),
     );
   });
@@ -891,6 +970,71 @@ describe("session.state_changed → agentctl ready fallback", () => {
     expect(upsertTaskSessionFromEvent).toHaveBeenCalledWith(
       "t-1",
       expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
+    );
+  });
+
+  it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {
+    const upsertTaskSessionFromEvent = vi.fn();
+    const setTaskSession = vi.fn();
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            repository_id: "primary-repo",
+            worktree_id: "primary-worktree",
+            worktree_path: "/task-root/kandev",
+            worktree_branch: "main",
+          },
+        },
+      },
+      sessionAgentctl: { itemsBySessionId: {} },
+      sessionWorktreesBySessionId: { itemsBySessionId: { "s-1": ["primary-worktree"] } },
+      setSessionAgentctlStatus: vi.fn(),
+      setTaskSession,
+      upsertTaskSessionFromEvent,
+      setWorktree: vi.fn(),
+      setSessionWorktrees: vi.fn(),
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        agent_execution_id: "ae-sibling",
+        task_environment_id: "env-1",
+        worktree_id: "sibling-worktree",
+        worktree_path: "/task-root/second-repository-main",
+        worktree_branch: "main",
+        workspace_path: TASK_ROOT,
+      },
+    });
+
+    const upsertPayload = upsertTaskSessionFromEvent.mock.calls[0]?.[1];
+    expect(upsertPayload).toEqual(
+      expect.objectContaining({
+        id: "s-1",
+        task_environment_id: "env-1",
+        workspace_path: TASK_ROOT,
+      }),
+    );
+    expect(upsertPayload).not.toHaveProperty("worktree_id");
+    expect(upsertPayload).not.toHaveProperty("worktree_path");
+    expect(upsertPayload).not.toHaveProperty("worktree_branch");
+    expect(setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        worktree_id: "primary-worktree",
+        worktree_path: "/task-root/kandev",
+        worktree_branch: "main",
+        workspace_path: TASK_ROOT,
+      }),
     );
   });
 

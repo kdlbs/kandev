@@ -195,6 +195,8 @@ export const test = backendFixture.extend<
       // test renders cards with data-testid="pipeline-task-<id>" instead of
       // "task-card-<id>", breaking taskCardByTitle locators.
       kanban_view_mode: "",
+      // Keep startup routing deterministic for tests that open bare home.
+      startup_page: "task_overview",
       // Reset to the default (off). Anchored-bar tests flip this via
       // saveUserSettings; without this reset it would leak into unrelated
       // tests running later in the same worker.
@@ -290,6 +292,7 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     sidebar_views: [],
     saved_layouts: [],
     kanban_view_mode: "",
+    startup_page: "task_overview",
     show_anchored_prompt_bar: false,
     show_scroll_to_last_prompt: true,
     show_scroll_to_start: false,

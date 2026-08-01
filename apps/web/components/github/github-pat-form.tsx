@@ -1,56 +1,30 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { IconEye, IconEyeOff } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import { Spinner } from "@kandev/ui/spinner";
-import { useToast } from "@/components/toast-provider";
-import { setGitHubWorkspaceConnection } from "@/lib/api/domains/github-api";
 
 export function GitHubPATForm({
   workspaceId,
-  onSaved,
+  value,
+  onChange,
+  disabled,
 }: {
   workspaceId: string;
-  onSaved: () => void;
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
 }) {
-  const [token, setToken] = useState("");
   const [visible, setVisible] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const { toast } = useToast();
 
   useEffect(() => {
-    setToken("");
     setVisible(false);
-    setSaving(false);
   }, [workspaceId]);
 
-  const submit = useCallback(
-    async (event: React.FormEvent) => {
-      event.preventDefault();
-      if (!token.trim()) return;
-      setSaving(true);
-      try {
-        await setGitHubWorkspaceConnection(workspaceId, { source: "pat", token: token.trim() });
-        setToken("");
-        toast({ description: "Workspace GitHub token connected", variant: "success" });
-        onSaved();
-      } catch (error) {
-        toast({
-          description: error instanceof Error ? error.message : "Connection failed",
-          variant: "error",
-        });
-      } finally {
-        setSaving(false);
-      }
-    },
-    [onSaved, toast, token, workspaceId],
-  );
-
   return (
-    <form onSubmit={submit} className="space-y-3">
+    <div className="space-y-3">
       <div className="space-y-1">
         <Label htmlFor="github-workspace-token">Personal access token</Label>
         <p className="text-xs text-muted-foreground">
@@ -62,10 +36,11 @@ export function GitHubPATForm({
           <Input
             id="github-workspace-token"
             type={visible ? "text" : "password"}
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
+            value={value}
+            onChange={(event) => onChange(event.target.value)}
             placeholder="ghp_xxxxxxxxxxxx"
             autoComplete="off"
+            disabled={disabled}
             className="h-11 pr-11 font-mono"
           />
           <Button
@@ -74,16 +49,13 @@ export function GitHubPATForm({
             size="icon"
             className="absolute right-0 top-0 h-11 w-11 cursor-pointer"
             onClick={() => setVisible((current) => !current)}
+            disabled={disabled}
             aria-label={visible ? "Hide token" : "Show token"}
           >
             {visible ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
           </Button>
         </div>
-        <Button type="submit" disabled={!token.trim() || saving} className="h-11 cursor-pointer">
-          {saving && <Spinner className="mr-2 h-4 w-4" />}
-          Connect token
-        </Button>
       </div>
-    </form>
+    </div>
   );
 }

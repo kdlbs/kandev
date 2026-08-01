@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   isTaskDetailPath,
   linkToTask,
+  linkToTaskOverview,
   linkToTasks,
   normalizePathname,
   replaceTaskUrl,
@@ -20,6 +21,16 @@ describe("task links", () => {
   it("keeps /tasks for the task list route", () => {
     expect(linkToTasks()).toBe("/tasks");
     expect(linkToTasks("workspace-123")).toBe("/tasks?workspace=workspace-123");
+  });
+
+  it("marks deliberate overview navigation so startup routing does not resume a task", () => {
+    expect(linkToTaskOverview()).toBe("/?home=overview");
+    expect(linkToTaskOverview({ workspaceId: "workspace 123" })).toBe(
+      "/?home=overview&workspaceId=workspace+123",
+    );
+    expect(linkToTaskOverview({ workflowId: "workflow-123" })).toBe(
+      "/?home=overview&workflowId=workflow-123",
+    );
   });
 
   it("replaces the browser URL with the canonical task detail route", () => {

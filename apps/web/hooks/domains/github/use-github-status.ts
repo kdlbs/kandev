@@ -82,9 +82,8 @@ export function useGitHubStatus(requestedWorkspaceId?: string | null) {
   const refresh = useCallback(() => {
     invalidateSystemHealth();
     if (!workspaceId) return;
-    resetGitHubStatus(workspaceId);
     doFetch();
-  }, [doFetch, invalidateSystemHealth, resetGitHubStatus, workspaceId]);
+  }, [doFetch, invalidateSystemHealth, workspaceId]);
 
   return {
     workspaceId,

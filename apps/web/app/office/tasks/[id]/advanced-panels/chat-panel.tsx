@@ -15,6 +15,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import type { Message } from "@/lib/types/http";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 
 type AdvancedChatPanelProps = {
   taskId: string;
@@ -210,7 +211,7 @@ export function AdvancedChatPanel({ taskId, sessionId, hideInput }: AdvancedChat
         isLoading={isLoading}
         taskId={taskId}
         sessionId={sessionId}
-        worktreePath={session?.worktree_path}
+        worktreePath={getSessionWorkspacePath(session)}
         onOpenFile={openFile}
         activeTurnId={activeTurnId}
         scrollRef={scrollRef}

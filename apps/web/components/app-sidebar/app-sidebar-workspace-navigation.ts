@@ -1,3 +1,5 @@
+import { linkToTaskOverview } from "@/lib/links";
+
 export type SidebarWorkspace = {
   id: string;
   office_workflow_id?: string | null;
@@ -13,9 +15,9 @@ export function isOfficeWorkspace(workspace: SidebarWorkspace | undefined): bool
 }
 
 export function workspaceHomeHref(workspace: SidebarWorkspace | undefined): string {
-  if (!workspace) return "/";
-  const path = isOfficeWorkspace(workspace) ? "/office" : "/";
-  return `${path}?workspaceId=${workspace.id}`;
+  if (!workspace) return linkToTaskOverview();
+  if (!isOfficeWorkspace(workspace)) return linkToTaskOverview({ workspaceId: workspace.id });
+  return `/office?workspaceId=${workspace.id}`;
 }
 
 export function rememberLastKanbanWorkspace(workspace: SidebarWorkspace | undefined): void {

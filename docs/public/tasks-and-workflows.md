@@ -172,6 +172,8 @@ foreground-generating Claude turns retain the coarse queueing behavior.
 
 On desktop and tablet, the header switches between **Kanban**, **Pipeline**, and **List**. Kanban and Pipeline show the same workflow steps in different layouts. Kandev remembers the last selected view in that browser on the current device. Phones offer **Kanban** and **List** only; a saved desktop Pipeline preference is kept but shown as Kanban on the phone.
 
+Under **Settings → General → Appearance → Startup Page**, choose **Task overview** (the default) or **Last visited task**. The latter resumes the most recently opened task in the current workspace on that device when Kandev starts or you open bare Home. It does not change an explicit task or workflow link. Home navigation and a task's Back action always return to the task overview; when there is no matching local recent task, Kandev opens the overview instead.
+
 - Search matches tasks without changing their state.
 - The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.

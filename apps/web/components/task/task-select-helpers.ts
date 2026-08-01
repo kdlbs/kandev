@@ -7,12 +7,7 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { TaskSession } from "@/lib/types/http";
-import {
-  performLayoutSwitch,
-  releaseLayoutToDefault,
-  useDockviewStore,
-} from "@/lib/state/dockview-store";
-import { INTENT_PR_REVIEW } from "@/lib/state/layout-manager";
+import { performLayoutSwitch, releaseLayoutToDefault } from "@/lib/state/dockview-store";
 import { replaceTaskUrl } from "@/lib/links";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildPrepareRequest } from "@/lib/services/session-launch-helpers";
@@ -154,10 +149,6 @@ export async function prepareAndSwitchTask(
       // switchEnvLayout would call saveOutgoingEnv(envA) a second time and
       // overwrite envA's correctly-persisted layout with the default.
       switchToSession(taskId, resp.session_id, null);
-      if ((store.getState().taskPRs.byTaskId[taskId]?.length ?? 0) > 0) {
-        const { api, buildDefaultLayout } = useDockviewStore.getState();
-        if (api) buildDefaultLayout(api, INTENT_PR_REVIEW);
-      }
       return true;
     }
     return false;

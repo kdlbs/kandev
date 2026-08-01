@@ -4,12 +4,24 @@ import { ToastProvider } from "@/components/toast-provider";
 import type { GitHubStatus } from "@/lib/types/github";
 import { GitHubPersonalSettings } from "./github-status";
 
-const mocks = vi.hoisted(() => ({ status: null as GitHubStatus | null }));
+const mocks = vi.hoisted(() => ({
+  status: null as GitHubStatus | null,
+  loading: false,
+}));
 vi.mock("@/hooks/domains/github/use-github-status", () => ({
-  useGitHubStatus: () => ({ status: mocks.status, loaded: true, loading: false, refresh: vi.fn() }),
+  useGitHubStatus: () => ({
+    status: mocks.status,
+    loaded: true,
+    loading: mocks.loading,
+    refresh: vi.fn(),
+  }),
 }));
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  mocks.status = null;
+  mocks.loading = false;
+});
 
 function renderPersonal() {
   return render(
@@ -47,11 +59,11 @@ function status(source: "pat" | "gh_cli" | "github_app_installation"): GitHubSta
 }
 
 describe("GitHubPersonalSettings", () => {
-  it.each(["pat", "gh_cli"] as const)("explains the shared human identity for %s", (source) => {
+  it.each(["pat", "gh_cli"] as const)("does not separate the shared identity for %s", (source) => {
     mocks.status = status(source);
     renderPersonal();
-    expect(screen.getByText("My GitHub identity")).toBeTruthy();
-    expect(screen.getByText(/same human account selected for workspace access/)).toBeTruthy();
+    expect(screen.queryByText("My GitHub identity")).toBeNull();
+    expect(screen.queryByTestId("github-personal-identity")).toBeNull();
     expect(screen.queryByRole("button", { name: /Connect identity/ })).toBeNull();
   });
 
@@ -60,5 +72,14 @@ describe("GitHubPersonalSettings", () => {
     renderPersonal();
     expect(screen.getByRole("button", { name: /Connect identity/ })).toBeTruthy();
     expect(screen.getByText(/never given to managed agents/)).toBeTruthy();
+  });
+
+  it("keeps the current identity visible while refreshing", () => {
+    mocks.status = status("github_app_installation");
+    mocks.loading = true;
+    renderPersonal();
+
+    expect(screen.getByTestId("github-personal-identity")).toBeTruthy();
+    expect(screen.getByText("octocat", { exact: true })).toBeTruthy();
   });
 });

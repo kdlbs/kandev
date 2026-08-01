@@ -68,6 +68,28 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsMapsStartupPage(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{
+		StartupPage: models.StartupPageTaskOverview,
+	}}
+	controller := NewController(service.NewService(repo, nil, log))
+	want := models.StartupPageLastTask
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		StartupPage: &want,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if response.Settings.StartupPage != want {
+		t.Fatalf("StartupPage = %q, want %q", response.Settings.StartupPage, want)
+	}
+}
+
 func TestSystemMetricsDisplayPatch(t *testing.T) {
 	t.Run("nil patch stays nil", func(t *testing.T) {
 		if got := systemMetricsDisplayPatch(nil); got != nil {

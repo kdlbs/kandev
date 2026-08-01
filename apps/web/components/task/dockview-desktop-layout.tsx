@@ -36,12 +36,8 @@ import { SessionTab } from "./session-tab";
 import { TerminalTab } from "./terminal-tab";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { setupSessionTabSync } from "./dockview-session-tab-sync";
-import {
-  setupChatPanelSafetyNet,
-  useAutoSessionTab,
-  useAutoPRPanel,
-} from "./dockview-session-tabs";
-import { useAutoMRPanel } from "./dockview-auto-mr-panel";
+import { setupChatPanelSafetyNet, useAutoSessionTab } from "./dockview-session-tabs";
+import { useSyncReviewPanel } from "./dockview-review-panel-sync";
 import {
   useCompactDockviewDefault,
   useDockviewUnmountCleanup,
@@ -412,8 +408,7 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
   useAutoSessionTab(effectiveSessionId);
   useChangesPanelAutoFocus(changesFocusKey);
 
-  useAutoPRPanel();
-  useAutoMRPanel();
+  useSyncReviewPanel();
   useDockviewUnmountCleanup(saveTimerRef, readyDisposersRef);
 
   // Visual masking: hide the dockview container during slow-path layout

@@ -67,13 +67,13 @@ managed repository clones. When both environment variables are set, `GH_TOKEN` t
 matching GitHub CLI behavior. Its token remains in memory during use. Choosing a new workspace
 connection leaves compatibility mode permanently.
 
-The status panel identifies the selected source, verified actor, connection state, rate limits, and any missing App capabilities. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
+The status panel identifies the selected source, verified actor, connection state, and any missing App capabilities. When GitHub has reported quota data, use **Show GitHub API limits** to inspect the remaining API requests, GraphQL query points, Search requests, and reset times for that workspace connection. The disclosure appears as a tooltip on desktop and a tap-accessible drawer on touch devices. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
 
 ### Automation and personal identity
 
-PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions.
+PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
 
-A GitHub App installation is an automation identity, not a person. App-backed repository discovery, watches, task Git operations, pull-request creation, reviews, and merges are attributed to the App when the App is the effective actor. To see pull requests or issues assigned to the current user, connect **My GitHub identity** in that workspace. This is a GitHub App user authorization, stored per Kandev user and workspace.
+A GitHub App installation is an automation identity, not a person. App-backed repository discovery, watches, task Git operations, pull-request creation, reviews, and merges are attributed to the App when the App is the effective actor. App-backed workspaces therefore show a separate **My GitHub identity** section where you can connect the human account used to see pull requests or issues assigned to the current user. This is a GitHub App user authorization, stored per Kandev user and workspace.
 
 Kandev routes credentials as follows:
 
@@ -94,13 +94,23 @@ must be scoped and rotated independently.
 
 ### Choose task Git credentials
 
-The **Task Git credentials** setting is separate from the workspace automation connection. It
-controls how GitHub HTTPS and `gh` authenticate *inside newly launched task processes*:
+Within **Workspace GitHub access**, select **Connect GitHub** or **Change connection** to manage
+both the workspace automation connection and **Task Git access**. The page keeps a compact summary
+of the saved task access mode. Task Git access controls how GitHub HTTPS and `gh` authenticate
+*inside newly launched task processes*:
+
+For PAT or GitHub CLI connections, choose the connection and task-access settings first, then
+select **Save changes** once. GitHub App creation, import, and installation remain separate
+GitHub workflows. The help control beside **Task Git access** explains the effective credential
+path on desktop hover or focus and in a touch-accessible drawer on mobile.
 
 - **Managed workspace credentials** (the default) uses the selected workspace PAT, named GitHub
-  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. The task
-  receives neither the stored PAT nor an App private key. An executor-profile `GH_TOKEN` or
-  `GITHUB_TOKEN` deliberately takes precedence for that task.
+  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
+  configures `agentctl` as Git's credential helper so an attached repository can redeem its
+  matching lease on demand; the returned credential is not written to the repository or Git
+  configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
+  PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
+  precedence for that task.
 - **Inherit executor Git credentials** does not install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).
   Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
@@ -108,6 +118,13 @@ controls how GitHub HTTPS and `gh` authenticate *inside newly launched task proc
   host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
   match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
   origin. Repositories you registered from an existing local checkout are never rewritten.
+
+If Git rejects a managed checkout with **detected dubious ownership**, the Kandev service account
+and the checkout owner do not match. Repository preparation stops and the session error identifies
+the ownership boundary; inspect the service unit and the managed home/repository owner, then
+preserve or deliberately reconcile the service account. The diagnostic is credential-safe and
+bounded. Do not add `safe.directory=*` or let Kandev recursively chown the checkout: those actions
+hide an installation identity problem instead of fixing it.
 
 Selecting a GitHub CLI workspace connection does not implicitly select host Git credentials; use
 the explicit inheritance mode when that is the intended boundary. The Changes panel's branch

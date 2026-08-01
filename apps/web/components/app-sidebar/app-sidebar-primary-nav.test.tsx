@@ -76,4 +76,12 @@ describe("AppSidebarPrimaryNav", () => {
 
     expect(screen.queryByRole("button", { name: "Quick Chat" })).toBeNull();
   });
+
+  it("links Home to an explicit overview while keeping it active at the root route", () => {
+    renderNav(false);
+
+    const home = screen.getByRole("link", { name: "Home" });
+    expect(home.getAttribute("href")).toBe("/?home=overview&workspaceId=ws-1");
+    expect(home.className).toContain("before:bg-primary");
+  });
 });

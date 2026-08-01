@@ -17,6 +17,7 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 import { syncOpenFileFromWorkspace } from "@/hooks/file-editors-sync";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 import { FileViewerExternalLink } from "./file-viewer-header";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 
 type FileCategory = "image" | "binary" | "text";
 
@@ -327,7 +328,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
     return <LoadingFilePanel />;
   }
 
-  const worktreePath = activeSession?.worktree_path ?? undefined;
+  const worktreePath = getSessionWorkspacePath(activeSession);
   const repositoryId = activeSession?.repository_id ?? undefined;
   const category = resolveFileCategory(isBinary, path);
   if (category !== "text") {

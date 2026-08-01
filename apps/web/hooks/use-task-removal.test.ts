@@ -8,6 +8,7 @@ const listTaskSessionsMock = vi.fn();
 const fetchTaskMock = vi.fn();
 
 vi.mock("@/lib/links", () => ({
+  linkToTaskOverview: () => "/?home=overview",
   replaceTaskUrl: (...args: unknown[]) => replaceTaskUrlMock(...args),
 }));
 
@@ -254,7 +255,7 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
     expect(replaceTaskUrlMock).not.toHaveBeenCalled();
   });
 
-  it("redirects to / when no remaining tasks AND user still on removed task", async () => {
+  it("redirects to the explicit overview when no remaining tasks AND user is still on removed task", async () => {
     const store = makeStore({
       activeTaskId: "task-A",
       activeSessionId: "sess-A",
@@ -283,7 +284,7 @@ describe("useTaskRemoval — switch guard (WS-clear fallback)", () => {
         wasActiveSessionId: "sess-A",
       });
       expect(removeResult.switchedTaskId).toBeNull();
-      expect(hrefSetter).toHaveBeenCalledWith("/");
+      expect(hrefSetter).toHaveBeenCalledWith("/?home=overview");
     } finally {
       Object.defineProperty(window, "location", {
         configurable: true,
@@ -330,7 +331,7 @@ describe("useTaskRemoval — next task selection", () => {
       expect(removal.switchedTaskId).toBeNull();
       expect(store.getRecorded().setActiveSession).not.toHaveBeenCalled();
       expect(replaceTaskUrlMock).not.toHaveBeenCalled();
-      expect(hrefSetter).toHaveBeenCalledWith("/");
+      expect(hrefSetter).toHaveBeenCalledWith("/?home=overview");
     } finally {
       Object.defineProperty(window, "location", {
         configurable: true,

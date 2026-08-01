@@ -187,7 +187,7 @@ describe("AppSidebarFooter", () => {
     expect(screen.queryByRole("button", { name: "Office" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
   });
 
   it("remembers the current office workspace when toggling back to kanban", () => {
@@ -200,7 +200,7 @@ describe("AppSidebarFooter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
     expect(document.cookie).toContain("office-active-workspace=office-2");
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
   });
   it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
     pathname = DEFAULT_PATHNAME;

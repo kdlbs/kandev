@@ -78,14 +78,22 @@ describe("built-in layout profiles", () => {
     first.layout.columns[0].groups[0].panels.length = 0;
 
     expect(
-      getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID).layout.columns[0].groups[0].panels,
-    ).toHaveLength(1);
+      getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID).layout.columns[0].groups[0].panels.map(
+        (panel) => panel.id,
+      ),
+    ).toEqual(["chat", "pr-detail"]);
   });
 });
 
 describe("validateReusableLayout", () => {
   it("accepts one Agent and unique reusable optional panels", () => {
     const result = validateReusableLayout(reusableLayout());
+
+    expect(result).toMatchObject({ valid: true, issues: [] });
+  });
+
+  it("accepts canonical PR Details as reusable layout content", () => {
+    const result = validateReusableLayout(reusableLayout(["chat", "pr-detail"]));
 
     expect(result).toMatchObject({ valid: true, issues: [] });
   });
@@ -110,7 +118,9 @@ describe("validateReusableLayout", () => {
     });
     expect(input).toEqual(snapshot);
   });
+});
 
+describe("validateReusableLayout failures", () => {
   it.each([
     {
       name: "a missing Agent",
@@ -124,7 +134,27 @@ describe("validateReusableLayout", () => {
     },
     {
       name: "an unsupported panel",
-      layout: reusableLayout(["chat", "pr-detail"]),
+      layout: {
+        columns: [
+          {
+            id: CENTER_COLUMN_ID,
+            groups: [
+              {
+                id: "group-center",
+                panels: [
+                  panel("chat"),
+                  {
+                    id: "pr-detail|owner/repository/123",
+                    component: "pr-detail",
+                    title: "Pull Request",
+                  },
+                ],
+                activePanel: "chat",
+              },
+            ],
+          },
+        ],
+      },
       code: "unsupported-panel",
     },
     {

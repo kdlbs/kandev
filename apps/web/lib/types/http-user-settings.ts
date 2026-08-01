@@ -2,6 +2,7 @@ import type { WorkspaceId } from "./ids";
 import type { VoiceModeSettings } from "./http-voice";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
+export type StartupPage = "task_overview" | "last_task";
 
 export type SavedLayout = {
   id: string;
@@ -49,6 +50,7 @@ export type UserSettings = {
   user_id: string;
   workspace_id: WorkspaceId;
   kanban_view_mode?: string;
+  startup_page?: StartupPage;
   workflow_filter_id?: string;
   repository_ids: string[];
   tasks_list_sort?: string;
@@ -105,6 +107,7 @@ export type UserSettingsUpdatePayload = {
   workspace_id?: string;
   workflow_filter_id?: string;
   kanban_view_mode?: string;
+  startup_page?: StartupPage;
   repository_ids?: string[];
   tasks_list_sort?: string;
   tasks_list_group?: string;

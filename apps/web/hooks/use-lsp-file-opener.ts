@@ -2,12 +2,20 @@
 
 import { useEffect } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import {
   useFileEditors,
   setPendingCursorPosition,
   scrollEditorIfMounted,
 } from "@/hooks/use-file-editors";
 import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
+
+export function toWorkspaceRelativePath(filePath: string, workspacePath: string | null): string {
+  const normalizedWorkspacePath = workspacePath?.replace(/\/+$/, "") ?? "";
+  if (!normalizedWorkspacePath) return filePath;
+  const workspacePrefix = `${normalizedWorkspacePath}/`;
+  return filePath.startsWith(workspacePrefix) ? filePath.slice(workspacePrefix.length) : filePath;
+}
 
 /**
  * Connects LSP Go-to-Definition / Find References navigation to dockview file tabs.
@@ -17,11 +25,11 @@ import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 export function useLspFileOpener() {
   const { openFile } = useFileEditors();
 
-  const worktreePath = useAppStore((state) => {
+  const workspacePath = useAppStore((state) => {
     const sessionId = state.tasks.activeSessionId;
     if (!sessionId) return null;
     const session = state.taskSessions.items[sessionId];
-    return session?.worktree_path ?? null;
+    return getSessionWorkspacePath(session) ?? null;
   });
 
   useEffect(() => {
@@ -33,10 +41,7 @@ export function useLspFileOpener() {
       lspClientManager.disposePlaceholderModel(uri);
 
       // Convert absolute path to workspace-relative path
-      let relativePath = filePath;
-      if (worktreePath && filePath.startsWith(worktreePath)) {
-        relativePath = filePath.slice(worktreePath.length + 1); // +1 for the trailing /
-      }
+      const relativePath = toWorkspaceRelativePath(filePath, workspacePath);
 
       // Set pending cursor position so the editor jumps to the correct line/column.
       // For new files: consumed by handleEditorDidMount when the editor mounts.
@@ -50,7 +55,7 @@ export function useLspFileOpener() {
       // For already-open files, the editor is already mounted so handleEditorDidMount
       // won't fire. Scroll the editor directly.
       if (line) {
-        scrollEditorIfMounted(relativePath, worktreePath, line, column ?? 1);
+        scrollEditorIfMounted(relativePath, workspacePath, line, column ?? 1);
       }
     };
 
@@ -61,5 +66,5 @@ export function useLspFileOpener() {
         lspClientManager.setFileOpener(null);
       }
     };
-  }, [openFile, worktreePath]);
+  }, [openFile, workspacePath]);
 }

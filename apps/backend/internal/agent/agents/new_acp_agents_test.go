@@ -154,7 +154,7 @@ grep -qxF 'export PATH="$HOME/.local/bin:$PATH"' "$HOME/.bashrc" 2>/dev/null || 
 		id: "hermes-acp", displayName: "Hermes", detectBinaries: []string{"hermes"},
 		expectedArgv:       []string{"hermes", "acp"},
 		inferenceArgv:      []string{"hermes", "acp"},
-		passthroughArgv:    []string{"hermes"},
+		passthroughArgv:    []string{"hermes", "chat"},
 		installViaNpm:      false,
 		sessionDirTemplate: "{home}/.hermes",
 	}},

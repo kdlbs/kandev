@@ -1,6 +1,7 @@
 ---
 status: building
 created: 2026-07-24
+amended: 2026-07-31
 owner: tbd
 ---
 
@@ -61,6 +62,11 @@ the local single-user install with a login screen it never asked for.
   anonymous visitors), `/api/v1/features`, credential endpoints
   (login/setup/invite-accept), and self-authenticating webhooks (automation
   `X-Webhook-Secret`, office channel HMAC, plugin webhooks).
+- **Session challenges are distinct from provider authentication failures.**
+  The browser clears its Kandev identity and opens `/login` only when a 401 is
+  a Kandev session challenge. A third-party integration may also return 401
+  when GitHub, GitLab, Jira, or Linear rejects its own credential; that failure
+  remains on the current page and is rendered by the integration surface.
 - **Disable.** An admin can turn auth off again (unless env-forced).
   Ownership data is retained; everyone reaching the instance has full access
   again.
@@ -80,6 +86,19 @@ the local single-user install with a login screen it never asked for.
 - A server bound to non-loopback interfaces with auth disabled logs a
   prominent startup warning.
 - Sessions/PATs of disabled users fail closed immediately.
+- Third-party provider authentication failures do not clear the authenticated
+  Kandev user, replace the current route, or trigger a login redirect.
+
+## Scenarios
+
+- **GIVEN** an authenticated Kandev browser session, **WHEN** a protected API
+  request receives a Kandev session challenge, **THEN** the browser clears the
+  stale Kandev identity and navigates to `/login`.
+- **GIVEN** an authenticated Kandev browser session and an expired or invalid
+  third-party integration credential, **WHEN** GitHub, GitLab, Jira, or Linear
+  data loading returns 401 without a Kandev session challenge, **THEN** the
+  browser stays on the integration route and displays the provider loading
+  error.
 
 ## Known v1 limits
 

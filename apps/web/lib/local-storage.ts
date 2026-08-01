@@ -403,30 +403,6 @@ export function removeEnvMaximizeState(envId: string): void {
   }
 }
 
-// PR panel "offered" flag — tracks whether the auto-show PR panel was offered
-// for a session. If offered and then closed by the user, we respect the dismissal.
-const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";
-
-/** Whether the auto-show PR panel was already offered for this session. */
-export function wasPRPanelOffered(sessionId: string): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    return window.sessionStorage.getItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`) === "1";
-  } catch {
-    return false;
-  }
-}
-
-/** Record that the auto-show PR panel was offered for this session. */
-export function markPRPanelOffered(sessionId: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`, "1");
-  } catch {
-    // Ignore write failures
-  }
-}
-
 // PR merged banner dismissal — per-task, survives reload + task switch within
 // the tab session, resets on tab close.
 const PR_MERGED_BANNER_DISMISSED_PREFIX = "kandev.pr-merged-banner-dismissed.";
@@ -765,7 +741,6 @@ export function cleanupTaskStorage(
   // Session-keyed storage — drafts, files panel state, scroll, etc.
   for (const sessionId of sessionIds) {
     removeStoredQuickChatName(sessionId);
-    removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);

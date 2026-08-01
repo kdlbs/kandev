@@ -7,18 +7,18 @@ export type GitHubAutomationMethod = "pat" | "cli" | "app";
 
 const methods = [
   {
-    value: "pat" as const,
-    label: "Personal access token",
-    description:
-      "Stored encrypted by Kandev. Workspace automation and managed task GitHub HTTPS/gh act as your account.",
-    icon: IconKey,
-  },
-  {
     value: "cli" as const,
     label: "GitHub CLI account",
     description:
       "Resolved from one named host account when needed. Managed tasks receive a scoped brokered identity; host Git is not inherited unless selected below.",
     icon: IconTerminal2,
+  },
+  {
+    value: "pat" as const,
+    label: "Personal access token",
+    description:
+      "Stored encrypted by Kandev. Workspace automation and managed task GitHub HTTPS/gh act as your account.",
+    icon: IconKey,
   },
   {
     value: "app" as const,

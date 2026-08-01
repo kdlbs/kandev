@@ -1,5 +1,5 @@
-import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
 import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 
@@ -7,13 +7,15 @@ vi.mock("./file-image-viewer", () => ({
   FileImageViewer: ({
     path,
     content,
+    worktreePath,
     headerActions,
   }: {
     path: string;
     content: string;
+    worktreePath?: string;
     headerActions?: React.ReactNode;
   }) => (
-    <div data-testid="image-viewer" data-path={path}>
+    <div data-testid="image-viewer" data-path={path} data-worktree-path={worktreePath}>
       {content}
       {headerActions}
     </div>
@@ -33,7 +35,11 @@ vi.mock("@/components/state-provider", () => ({
       tasks: { activeSessionId: "session-1", activeTaskId: "task-1" },
       taskSessions: {
         items: {
-          "session-1": { worktree_path: "/tmp/worktree", repository_id: "repo-1" },
+          "session-1": {
+            workspace_path: "/tmp/task-root",
+            worktree_path: "/tmp/task-root/kandev",
+            repository_id: "repo-1",
+          },
         },
       },
     }),
@@ -60,6 +66,8 @@ import { FileEditorPanel } from "./file-editor-panel";
 const PREVIEW_PANEL_ID = "preview:file-editor";
 const IMAGE_VIEWER_TEST_ID = "image-viewer";
 const SHARED_IMAGE_PATH = "docs/shared.png";
+const REPO_A_CONTENT = "content-from-repo-a";
+const REPO_B_CONTENT = "content-from-repo-b";
 
 const makeImageState = (path: string, content: string): FileEditorState => ({
   path,
@@ -70,6 +78,8 @@ const makeImageState = (path: string, content: string): FileEditorState => ({
   isDirty: false,
   isBinary: true,
 });
+
+afterEach(cleanup);
 
 function seedImage(path: string, content: string, repo?: string) {
   useDockviewStore.getState().setFileState(buildRepoScopedItemId(path, repo), {
@@ -104,8 +114,8 @@ describe("FileEditorPanel image preview", () => {
 
   it("shows different image content for the same path across repos", () => {
     act(() => {
-      seedImage(SHARED_IMAGE_PATH, "content-from-repo-a", "repo-a");
-      seedImage(SHARED_IMAGE_PATH, "content-from-repo-b", "repo-b");
+      seedImage(SHARED_IMAGE_PATH, REPO_A_CONTENT, "repo-a");
+      seedImage(SHARED_IMAGE_PATH, REPO_B_CONTENT, "repo-b");
     });
     const { rerender } = render(
       <FileEditorPanel
@@ -114,7 +124,7 @@ describe("FileEditorPanel image preview", () => {
       />,
     );
 
-    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("content-from-repo-a");
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe(REPO_A_CONTENT);
 
     rerender(
       <FileEditorPanel
@@ -123,11 +133,11 @@ describe("FileEditorPanel image preview", () => {
       />,
     );
 
-    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe("content-from-repo-b");
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).textContent).toBe(REPO_B_CONTENT);
   });
 
   it("shows the shared external action in the docked desktop image header", () => {
-    act(() => seedImage(SHARED_IMAGE_PATH, "content-from-repo-a", "repo-a"));
+    act(() => seedImage(SHARED_IMAGE_PATH, REPO_A_CONTENT, "repo-a"));
 
     render(
       <FileEditorPanel
@@ -147,5 +157,20 @@ describe("FileEditorPanel image preview", () => {
       repositoryName: "repo-a",
       size: "sm",
     });
+  });
+
+  it("uses the effective workspace path for docked desktop viewers", () => {
+    act(() => seedImage(SHARED_IMAGE_PATH, REPO_A_CONTENT, "repo-a"));
+
+    render(
+      <FileEditorPanel
+        panelId={PREVIEW_PANEL_ID}
+        params={{ path: SHARED_IMAGE_PATH, repo: "repo-a" }}
+      />,
+    );
+
+    expect(screen.getByTestId(IMAGE_VIEWER_TEST_ID).getAttribute("data-worktree-path")).toBe(
+      "/tmp/task-root",
+    );
   });
 });

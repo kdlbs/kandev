@@ -83,7 +83,10 @@ test.describe("Quick Chat entry points on mobile", () => {
     await testPage.waitForLoadState("networkidle");
 
     const homeLink = testPage.getByRole("link", { name: "Kandev home" });
-    await expect(homeLink).toHaveAttribute("href", `/?workspaceId=${seedData.workspaceId}`);
+    await expect(homeLink).toHaveAttribute(
+      "href",
+      `/?home=overview&workspaceId=${seedData.workspaceId}`,
+    );
 
     await homeLink.click();
 

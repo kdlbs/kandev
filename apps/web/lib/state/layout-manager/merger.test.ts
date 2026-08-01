@@ -132,6 +132,32 @@ describe("mergePanelsIntoPreset", () => {
     expect(panelIdsIn(result, "right")).toEqual(["files", "changes"]);
   });
 
+  it("keeps Agent selected when leaving Plan for Default with PR Details", () => {
+    const currentState = makeLayoutWithSide(
+      [
+        { id: SESSION_ABC, component: "chat" },
+        { id: "pr-detail", component: "pr-detail" },
+      ],
+      "plan",
+      [{ id: "plan", component: "plan" }],
+    );
+    const targetPreset = makeLayoutWithSide(
+      [
+        { id: "chat", component: "chat" },
+        { id: "pr-detail", component: "pr-detail" },
+      ],
+      "right",
+      [{ id: "files", component: "files" }],
+    );
+    targetPreset.columns[1]!.groups[0]!.activePanel = "chat";
+
+    const result = mergePanelsIntoPreset(currentState, targetPreset);
+    const center = result.columns.find((column) => column.id === "center")!.groups[0]!;
+
+    expect(center.panels.map((panel) => panel.id)).toEqual([SESSION_ABC, "pr-detail", "plan"]);
+    expect(center.activePanel).toBe(SESSION_ABC);
+  });
+
   it("places surviving browser/vscode/pr-detail in center, files/changes in the side column", () => {
     // Switching from a content preset (vscode/preview/etc.) back to default:
     // main-content surfaces (browser, vscode, pr-detail) must follow the chat

@@ -6,7 +6,13 @@ export function defaultLayout(): LayoutState {
     columns: [
       {
         id: "center",
-        groups: [{ id: CENTER_GROUP, panels: [panel("chat")] }],
+        groups: [
+          {
+            id: CENTER_GROUP,
+            activePanel: "chat",
+            panels: [panel("chat"), panel("pr-detail")],
+          },
+        ],
       },
       {
         id: "right",
@@ -29,7 +35,13 @@ export function compactLayout(): LayoutState {
         groups: [
           {
             id: CENTER_GROUP,
-            panels: [panel("chat"), panel("files"), panel("changes"), panel("terminal-default")],
+            panels: [
+              panel("chat"),
+              panel("files"),
+              panel("changes"),
+              panel("pr-detail"),
+              panel("terminal-default"),
+            ],
           },
         ],
       },

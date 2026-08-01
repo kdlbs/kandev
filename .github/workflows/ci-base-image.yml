@@ -25,6 +25,9 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/kdlbs/kandev-ci
+  POSTGRES_DIGEST: sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+  POSTGRES_SOURCE: docker.io/library/postgres:16@sha256:fe03a7605299a34ddf5e4f285dff78c3d7190a576b3c6b46f2fcff69f4bffd54
+  POSTGRES_TARGET: ghcr.io/kdlbs/kandev-ci:postgres-16
 
 jobs:
   build-and-push:
@@ -50,6 +53,31 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Service containers are pulled before any job step can add retries. Keep
+      # the Postgres image beside the job image in GHCR so backend CI has one
+      # registry dependency. A single image-index source is copied byte-for-byte,
+      # so the upstream digest remains valid at the mirrored location.
+      - name: Mirror Postgres to GHCR
+        if: |
+          github.event_name == 'workflow_dispatch'
+          || (github.event_name == 'push' && github.ref == 'refs/heads/main')
+        run: |
+          set -euo pipefail
+
+          docker buildx imagetools create \
+            --tag "${POSTGRES_TARGET}" \
+            "${POSTGRES_SOURCE}"
+
+          mirrored_digest="sha256:$(
+            docker buildx imagetools inspect --raw "${POSTGRES_TARGET}" \
+              | sha256sum \
+              | cut -d ' ' -f 1
+          )"
+          if [[ "${mirrored_digest}" != "${POSTGRES_DIGEST}" ]]; then
+            echo "::error::Postgres mirror digest ${mirrored_digest} does not match ${POSTGRES_DIGEST}"
+            exit 1
+          fi
 
       - name: Compute image tag
         id: tag
@@ -111,6 +139,7 @@ jobs:
             echo ""
             echo "- runtime: \`${IMAGE_NAME}:runtime-sha-${IMAGE_TAG}\` / \`runtime-latest\`"
             echo "- build:   \`${IMAGE_NAME}:build-sha-${IMAGE_TAG}\` / \`build-latest\`"
+            echo "- postgres: \`${POSTGRES_TARGET}@${POSTGRES_DIGEST}\`"
             echo "- pushed:  \`${PUSHED}\`"
           } >> "$GITHUB_STEP_SUMMARY"
         env:

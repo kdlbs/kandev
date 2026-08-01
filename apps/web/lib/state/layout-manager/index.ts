@@ -86,7 +86,6 @@ export { layoutStructuresMatch, savedLayoutMatchesLive } from "./comparator";
 export {
   INTENT_COMPACT,
   INTENT_PLAN,
-  INTENT_PR_REVIEW,
   injectIntentPanels,
   applyActivePanelOverrides,
   resolveNamedIntent,

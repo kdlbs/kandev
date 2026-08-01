@@ -51,7 +51,14 @@ export type TipTapInputHandle = {
 };
 
 const lowlightInstance = createLowlight(common);
-export const TIPTAP_EDITOR_TEXT_SIZE_CLASS = "text-base leading-relaxed lg:text-sm";
+/** Viewport-width-independent on purpose. The 16px floor that stops iOS Safari
+ *  from auto-zooming a focused field is owned by the `@media (any-pointer:
+ *  coarse)` rule in `app/globals.css`, which is keyed on the input device
+ *  rather than the window size. A width breakpoint here (the old
+ *  `text-base … lg:text-sm`) made the composer text jump from 14px to 16px when
+ *  a desktop window was dragged narrower than `lg`, which is not a touch
+ *  device and needs no zoom guard. */
+export const TIPTAP_EDITOR_TEXT_SIZE_CLASS = "text-sm leading-relaxed";
 
 type UseTipTapEditorOptions = {
   value: string;
