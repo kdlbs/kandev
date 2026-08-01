@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/entityrefs"
@@ -40,6 +41,138 @@ func entityRefs(ids ...string) []interface{} {
 		})
 	}
 	return out
+}
+
+func manyEntityRefs(count int) []interface{} {
+	return manyEntityRefsFrom(1, count)
+}
+
+func manyEntityRefsFrom(start, count int) []interface{} {
+	ids := make([]string, count)
+	for i := range ids {
+		ids[i] = fmt.Sprintf("%d", start+i)
+	}
+	return entityRefs(ids...)
+}
+
+// TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow asserts a merge whose
+// deduplicated reference union would exceed the per-message cap is rejected
+// atomically: both rows keep their persisted references and the queue count is
+// unchanged.
+func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
+		map[string]interface{}{MetadataEntityReferences: manyEntityRefs(maxEntityReferencesPerMessage)})
+	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
+		map[string]interface{}{MetadataEntityReferences: entityRefs(fmt.Sprintf("%d", maxEntityReferencesPerMessage+1))})
+
+	if _, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user"); !errors.Is(err, ErrMergeReferenceOverflow) {
+		t.Fatalf("merge error = %v, want ErrMergeReferenceOverflow", err)
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 2 {
+		t.Errorf("count after rejected overflow merge = %d, want 2", count)
+	}
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	for _, e := range entries {
+		refs := entityrefs.NormalizePersisted(e.Metadata[MetadataEntityReferences])
+		if len(refs) != maxEntityReferencesPerMessage {
+			t.Errorf("entry %s refs len = %d, want %d (untouched)", e.ID, len(refs), maxEntityReferencesPerMessage)
+		}
+		if e.ID == source.ID && e.Content != "second" {
+			t.Errorf("source content changed after rejected merge = %q", e.Content)
+		}
+	}
+}
+
+// TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow_DedupeWithinLimit
+// asserts overlapping references stay within the cap after deduplication, so
+// merging two cap-sized lists of identical references succeeds.
+func TestSQLiteRepository_MergeIntoAbove_ReferenceOverflow_DedupeWithinLimit(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	refs := manyEntityRefs(maxEntityReferencesPerMessage)
+	insertTestEntry(t, repo, "s1", "t1", "first", "user", nil,
+		map[string]interface{}{MetadataEntityReferences: refs})
+	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil,
+		map[string]interface{}{MetadataEntityReferences: refs})
+
+	merged, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	union := entityrefs.NormalizePersisted(merged.Metadata[MetadataEntityReferences])
+	if len(union) != maxEntityReferencesPerMessage {
+		t.Errorf("merged refs len = %d, want %d (deduped)", len(union), maxEntityReferencesPerMessage)
+	}
+}
+
+// TestSQLiteRepository_MergeDrainOrdering_DrainWins drains the source before the
+// merge runs, so the merge must report ErrEntryNotFound without touching the
+// target or losing content — the drain-wins ordering of the merge/drain race.
+func TestSQLiteRepository_MergeDrainOrdering_DrainWins(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil, nil)
+	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil, nil)
+
+	if _, err := repo.TakeByID(ctx, "s1", source.ID); err != nil {
+		t.Fatalf("drain source: %v", err)
+	}
+	if _, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user"); !errors.Is(err, ErrEntryNotFound) {
+		t.Fatalf("merge after drain error = %v, want ErrEntryNotFound", err)
+	}
+	kept, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(kept) != 1 {
+		t.Fatalf("kept entries = %d, want 1", len(kept))
+	}
+	if kept[0].ID != target.ID || kept[0].Content != "first" {
+		t.Errorf("kept entry = %s %q, want target %q", kept[0].ID, kept[0].Content, "first")
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 1 {
+		t.Errorf("count after drain-wins = %d, want 1", count)
+	}
+}
+
+// TestSQLiteRepository_MergeDrainOrdering_MergeWins merges before the drain runs,
+// so the merged entry — not the source — is what later drains, preserving the
+// combined content.
+func TestSQLiteRepository_MergeDrainOrdering_MergeWins(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	target := insertTestEntry(t, repo, "s1", "t1", "first", "user", nil, nil)
+	source := insertTestEntry(t, repo, "s1", "t1", "second", "user", nil, nil)
+
+	merged, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "user")
+	if err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	drained, err := repo.TakeHead(ctx, "s1")
+	if err != nil {
+		t.Fatalf("drain after merge: %v", err)
+	}
+	if drained.ID != target.ID || drained.ID != merged.ID {
+		t.Errorf("drained id = %s, want merged target %s", drained.ID, merged.ID)
+	}
+	if drained.Content != "first\n\nsecond" {
+		t.Errorf("drained content = %q, want combined content", drained.Content)
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 0 {
+		t.Errorf("count after merge-wins = %d, want 0", count)
+	}
 }
 
 // TestSQLiteRepository_MergeIntoAbove_UserMergesIntoUser covers the user↔user
@@ -209,6 +342,26 @@ func TestSQLiteRepository_MergeIntoAbove_WrongCallerRejected(t *testing.T) {
 
 	if _, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "bob"); !errors.Is(err, ErrNoMergeTarget) {
 		t.Fatalf("merge error = %v, want ErrNoMergeTarget", err)
+	}
+}
+
+// TestSQLiteRepository_MergeIntoAbove_SourceOwnerMismatch asserts the source
+// entry must be owned by the caller even when the target above is: a caller
+// must not be able to fold and delete another user's queued message into one of
+// their own rows.
+func TestSQLiteRepository_MergeIntoAbove_SourceOwnerMismatch(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	insertTestEntry(t, repo, "s1", "t1", "above", "bob", nil, nil)
+	source := insertTestEntry(t, repo, "s1", "t1", "someone else's message", "alice", nil, nil)
+
+	if _, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "bob"); !errors.Is(err, ErrNoMergeTarget) {
+		t.Fatalf("merge error = %v, want ErrNoMergeTarget", err)
+	}
+	count, _ := repo.CountBySession(ctx, "s1")
+	if count != 2 {
+		t.Errorf("count after rejected merge = %d, want 2", count)
 	}
 }
 

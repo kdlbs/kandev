@@ -348,7 +348,9 @@ func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID
 }
 
 // MergeIntoAbove folds the source entry into the entry directly above it within
-// the same session, mirroring the sqlite repository's semantics. See
+// the same session, mirroring the sqlite repository's semantics. The target is
+// the entry with the greatest position strictly below the source's — the slice
+// may not be position-sorted after ReplaceSession. See
 // Repository.MergeIntoAbove for the merge rules and error mapping.
 func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
 	r.mu.Lock()
@@ -367,18 +369,31 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 	if sourceIndex < 0 {
 		return nil, ErrEntryNotFound
 	}
-	if sourceIndex == 0 {
+	source := list[sourceIndex]
+
+	var target *QueuedMessage
+	for _, m := range list {
+		if m.Position >= source.Position {
+			continue
+		}
+		if target == nil || m.Position > target.Position {
+			target = m
+		}
+	}
+	if target == nil {
 		return nil, ErrNoMergeTarget
 	}
-	source := list[sourceIndex]
-	target := list[sourceIndex-1]
 	if !mergeAllowed(source, target, queuedBy) {
 		return nil, ErrNoMergeTarget
 	}
 
 	target.Content = joinMergeContent(target.Content, source.Content)
 	target.Attachments = append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
-	target.Metadata = mergeEntryMetadata(target.Metadata, source.Metadata)
+	metadata, err := mergeEntryMetadata(target.Metadata, source.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	target.Metadata = metadata
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {
 		delete(r.entries, sessionID)

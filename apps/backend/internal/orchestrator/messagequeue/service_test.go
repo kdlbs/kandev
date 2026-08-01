@@ -820,3 +820,29 @@ func TestService_MergeIntoAbove(t *testing.T) {
 	_, err = svc.MergeIntoAbove(ctx, "s", "missing", "alice")
 	assert.ErrorIs(t, err, ErrEntryNotFound)
 }
+
+// TestMemoryRepository_MergeIntoAbove_UnsortedSlice proves the memory repo
+// selects the merge target by greatest position strictly below the source's,
+// not by slice order. ReplaceSession can persist an unsorted snapshot, so a
+// slice-adjacent target would be wrong: here the source (position 3) sits
+// between an unrelated entry (position 1) and the true target (position 2).
+func TestMemoryRepository_MergeIntoAbove_UnsortedSlice(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+
+	err := repo.ReplaceSession(ctx, "s1", []QueuedMessage{
+		{ID: "unrelated", SessionID: "s1", TaskID: "t1", Position: 1, Content: "other", QueuedBy: "alice"},
+		{ID: "source", SessionID: "s1", TaskID: "t1", Position: 3, Content: "src", QueuedBy: "alice"},
+		{ID: "target", SessionID: "s1", TaskID: "t1", Position: 2, Content: "tgt", QueuedBy: "alice"},
+	}, nil)
+	require.NoError(t, err)
+
+	merged, err := repo.MergeIntoAbove(ctx, "s1", "source", "alice")
+	require.NoError(t, err)
+	assert.Equal(t, "target", merged.ID)
+	assert.Equal(t, "tgt\n\nsrc", merged.Content)
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	require.NoError(t, err)
+	assert.Len(t, entries, 2)
+}

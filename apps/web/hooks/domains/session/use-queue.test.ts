@@ -229,6 +229,22 @@ describe("useQueue mergeEntry", () => {
     expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
   });
 
+  it("forwards an explicit user_id on merge", async () => {
+    queueApiMock.mergeQueuedEntry.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.mergeEntry("q-2", "alice");
+    });
+
+    expect(queueApiMock.mergeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-2",
+      user_id: "alice",
+    });
+  });
+
   it("refetches the queue when the merge target was already drained", async () => {
     queueApiMock.mergeQueuedEntry.mockRejectedValue(new queueApiMock.QueueEntryNotFoundError());
     const { result } = renderHook(() => useQueue(SESSION_ID));

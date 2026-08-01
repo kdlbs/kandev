@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { entityReferenceMarkdown } from "@/lib/entity-references/message-references";
+import { QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 
 const useQueueMock = vi.fn();
 
@@ -347,6 +348,18 @@ describe("QueueAffordance merge wiring", () => {
     expect(screen.queryByTestId("queue-entry-merge")).toBeNull();
   });
 
+  it("hides the merge control for agent rows from different sender tasks", () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "agent a", queued_by: "agent", metadata: { sender_task_id: "task-7" } }),
+      entry({ id: "q-2", content: "agent b", queued_by: "agent", metadata: { sender_task_id: "task-8" } }),
+    ]);
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    expect(screen.queryByTestId("queue-entry-merge")).toBeNull();
+  });
+
   it("toasts an error when the merge fails", async () => {
     const { toast } = await import("sonner");
     const state = queueState([
@@ -364,5 +377,39 @@ describe("QueueAffordance merge wiring", () => {
     await waitFor(() =>
       expect(toast.error).toHaveBeenCalledWith("Failed to merge queued messages."),
     );
+  });
+
+  it("does not toast on a drain race (QueueEntryNotFoundError)", async () => {
+    const { toast } = await import("sonner");
+    const state = queueState([
+      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
+      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+    ]);
+    state.mergeEntry = vi.fn(async () => {
+      throw new QueueEntryNotFoundError();
+    });
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    fireEvent.click(screen.getAllByTestId("queue-entry-merge")[0]);
+    await waitFor(() => expect(state.mergeEntry).toHaveBeenCalledTimes(1));
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("serializes rapid double-clicks on the same merge row", async () => {
+    const state = queueState([
+      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
+      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+    ]);
+    state.mergeEntry = vi.fn(async () => {});
+    useQueueMock.mockReturnValue(state);
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+    const button = screen.getAllByTestId("queue-entry-merge")[0];
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(state.mergeEntry).toHaveBeenCalledTimes(1));
   });
 });

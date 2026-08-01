@@ -320,6 +320,7 @@ describe("QueuedGhostMessage merge control", () => {
         })}
         canEdit={false}
         canMerge
+        onMerge={vi.fn()}
         onSave={async () => {}}
         onRemove={() => {}}
       />,
@@ -357,20 +358,61 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
     expect(canMergeEntry(entry({ queued_by: "" }))).toBe(false);
   });
 
-  it("allows user behind user", () => {
+  it("treats server entries as non-mergeable", () => {
+    expect(canMergeEntry(entry({ queued_by: "server" }))).toBe(false);
+  });
+
+  it("allows user behind user owned by the caller", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "user-1" });
+    expect(canMergeWithAbove(below, above, "user-1")).toBe(true);
+  });
+
+  it("allows user rows under the default user caller identity", () => {
+    const above = entry({ id: "q-a", queued_by: "user" });
+    const below = entry({ id: "q-b", queued_by: "user" });
     expect(canMergeWithAbove(below, above)).toBe(true);
   });
 
-  it("allows agent behind agent", () => {
+  it("rejects user behind user owned by a different owner", () => {
+    const above = entry({ id: "q-a", queued_by: "user-1" });
+    const below = entry({ id: "q-b", queued_by: "user-2" });
+    expect(canMergeWithAbove(below, above, "user-1")).toBe(false);
+    expect(canMergeWithAbove(below, above, "user-2")).toBe(false);
+  });
+
+  it("rejects user rows the caller does not own", () => {
+    const above = entry({ id: "q-a", queued_by: "user-1" });
+    const below = entry({ id: "q-b", queued_by: "user-1" });
+    expect(canMergeWithAbove(below, above, "user-2")).toBe(false);
+  });
+
+  it("rejects user behind a server row", () => {
+    const above = entry({ id: "q-a", queued_by: "server" });
+    const below = entry({ id: "q-b", queued_by: "user-1" });
+    expect(canMergeWithAbove(below, above, "user-1")).toBe(false);
+  });
+
+  it("allows agent behind agent from the same sender task", () => {
+    const above = entry({ id: "q-a", queued_by: "agent", metadata: { sender_task_id: "task-7" } });
+    const below = entry({ id: "q-b", queued_by: "agent", metadata: { sender_task_id: "task-7" } });
+    expect(canMergeWithAbove(below, above)).toBe(true);
+  });
+
+  it("rejects agent behind agent from different sender tasks", () => {
+    const above = entry({ id: "q-a", queued_by: "agent", metadata: { sender_task_id: "task-7" } });
+    const below = entry({ id: "q-b", queued_by: "agent", metadata: { sender_task_id: "task-8" } });
+    expect(canMergeWithAbove(below, above)).toBe(false);
+  });
+
+  it("rejects agent behind agent when sender_task_id is missing", () => {
     const above = entry({ id: "q-a", queued_by: "agent" });
     const below = entry({ id: "q-b", queued_by: "agent" });
-    expect(canMergeWithAbove(below, above)).toBe(true);
+    expect(canMergeWithAbove(below, above)).toBe(false);
   });
 
   it("rejects user behind agent and agent behind user", () => {
-    const agent = entry({ id: "q-a", queued_by: "agent" });
+    const agent = entry({ id: "q-a", queued_by: "agent", metadata: { sender_task_id: "task-7" } });
     const user = entry({ id: "q-b", queued_by: "user-1" });
     expect(canMergeWithAbove(user, agent)).toBe(false);
     expect(canMergeWithAbove(agent, user)).toBe(false);
@@ -383,6 +425,12 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
   it("rejects a workflow entry behind a user entry", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "workflow" });
+    expect(canMergeWithAbove(below, above)).toBe(false);
+  });
+
+  it("rejects a server entry behind a user entry", () => {
+    const above = entry({ id: "q-a", queued_by: "user-1" });
+    const below = entry({ id: "q-b", queued_by: "server" });
     expect(canMergeWithAbove(below, above)).toBe(false);
   });
 });

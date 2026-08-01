@@ -22,6 +22,12 @@ const (
 
 // IsReservedQueuedBy reports identities owned by backend dispatch paths.
 // WebSocket/MCP clients may create and mutate only user-owned entries.
+//
+// MergeIntoAbove is the single controlled exception: a client with session
+// access may fold one agent-owned entry into the agent-owned entry above it
+// when both carry the same sender_task_id. That preserves the reserved row's
+// provenance (the merged entry keeps the target's identity) while consolidating
+// additive prompts from one agent into a single delivery. See ADR 0051.
 func IsReservedQueuedBy(queuedBy string) bool {
 	switch queuedBy {
 	case QueuedByAgent, QueuedByWorkflow, QueuedByServer:

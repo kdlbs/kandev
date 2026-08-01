@@ -329,6 +329,7 @@ message.queue.append
 message.queue.cancel
 message.queue.drain
 message.queue.get
+message.queue.merge
 message.queue.remove
 message.queue.update
 message.search

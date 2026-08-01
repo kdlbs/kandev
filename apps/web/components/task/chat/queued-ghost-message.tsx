@@ -115,16 +115,37 @@ function senderKindOf(entry: QueuedMessage): SenderKind {
   return "user";
 }
 
-/** A message may serve as a merge source or target only when its sender kind is "user" or "agent". */
+/** A message may serve as a merge source or target only when its sender kind is
+ * "user" or "agent". Server-owned rows (queued_by="server") are reserved
+ * backend rows and are never mergeable. */
 export function canMergeEntry(entry: QueuedMessage): boolean {
+  if (entry.queued_by === "server") return false;
   const kind = senderKindOf(entry);
   return kind === "user" || kind === "agent";
 }
 
-/** Two messages may merge when both are mergeable and share the same sender kind. */
-export function canMergeWithAbove(entry: QueuedMessage, above: QueuedMessage | undefined): boolean {
+/** Two messages may merge when both are mergeable and share the same sender
+ * kind. Agent entries additionally require an identical non-empty
+ * sender_task_id; user entries require both rows to be owned by the caller
+ * identity (callerId defaults to the backend's QueuedByUser, which is what the
+ * SPA sends when it omits user_id). Mirrors the backend's mergeAllowed
+ * predicate so the button never appears for merges the server would reject. */
+export function canMergeWithAbove(
+  entry: QueuedMessage,
+  above: QueuedMessage | undefined,
+  callerId = "user",
+): boolean {
   if (!above) return false;
-  return canMergeEntry(entry) && senderKindOf(entry) === senderKindOf(above);
+  if (!canMergeEntry(entry) || !canMergeEntry(above)) return false;
+  if (senderKindOf(entry) !== senderKindOf(above)) return false;
+  if (senderKindOf(entry) === "agent") {
+    const senderTaskId = getSenderTaskInfo(entry)?.id;
+    return senderTaskId !== undefined && senderTaskId === getSenderTaskInfo(above)?.id;
+  }
+  if (senderKindOf(entry) === "user") {
+    return callerId !== "" && entry.queued_by === callerId && above.queued_by === callerId;
+  }
+  return false;
 }
 
 function senderLabel(entry: QueuedMessage): string {

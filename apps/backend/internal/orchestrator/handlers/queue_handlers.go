@@ -21,7 +21,11 @@ const (
 	queueErrorCodeEntryNotFound = "entry_not_found"
 	queueErrorCodeSessionBusy   = "session_busy"
 	queueErrorCodeNotPromptable = "session_not_promptable"
-	queueInvalidReferences      = "Invalid entity references"
+	// queueErrorCodeMergeReferenceOverflow is surfaced when a merge would push
+	// the combined entity references past the per-message cap; the merge is
+	// rejected atomically instead of dropping persisted references.
+	queueErrorCodeMergeReferenceOverflow = "merge_reference_overflow"
+	queueInvalidReferences               = "Invalid entity references"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -390,6 +394,9 @@ func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (
 		}
 		if errors.Is(err, messagequeue.ErrNoMergeTarget) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "No mergeable message above this entry", nil)
+		}
+		if errors.Is(err, messagequeue.ErrMergeReferenceOverflow) {
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeMergeReferenceOverflow, err.Error(), nil)
 		}
 		h.logger.Error("failed to merge queued message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to merge queued message", nil)

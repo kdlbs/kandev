@@ -1,5 +1,5 @@
 ---
-status: approved
+status: shipped
 created: 2026-07-31
 owner: kandev
 ---
@@ -29,6 +29,12 @@ above it — before the agent picks them up.
 - Attachments from both messages are carried over to the merged message.
 - Entity references from both messages are carried over to the merged message,
   deduplicated by canonical reference.
+- Merging is **rejected atomically** when the deduplicated reference union
+  would exceed the per-message reference cap (100, mirroring
+  `entityrefs.maxReferencesPerMessage`). Nothing is truncated: both rows keep
+  the references they already persisted, and the merge reports
+  `merge_reference_overflow` instead of silently dropping source references at
+  dispatch time.
 - The merge is atomic and race-safe: a concurrent queue drain can either win
   entirely (both rows untouched) or lose entirely (both rows updated); it can
   never interleave between updating the above message and removing the folded
@@ -78,6 +84,8 @@ Errors:
   an agent message from a different sender task), the folded message is a
   non-mergeable kind (workflow/system), or `session_id` / `entry_id` is
   missing.
+- `merge_reference_overflow` — the combined entity references exceed the
+  per-message cap; both rows are left untouched.
 
 After a successful merge the backend publishes the standard
 `message.queue.status_changed` event so all connected clients refresh their
@@ -105,7 +113,14 @@ No schema change. The merge reuses the existing `queued_messages` table:
 - For an agent-kind merge, both entries must have `queued_by` equal to `agent`
   and the source's `sender_task_id` metadata must match the target's; the merge
   is otherwise rejected because the merged entry keeps the target's sender
-  identity.
+  identity. This is a deliberate carve-out of the ADR 0051 boundary that
+  reserves agent-owned rows for backend mutation: consolidating additive
+  one-way prompts from a single inter-task agent preserves the reserved row's
+  provenance (the merged entry keeps the target's identity and the source's
+  `sender_task_id`-matched lineage) while reducing deliveries. The gate is
+  strict — identical non-empty `sender_task_id`, never caller-tunable — so a
+  client still cannot move, delete, or reorder agent-owned rows outside that
+  exact fold.
 - Workflow and system messages are never a merge source or target.
 - The WS handler rejects client-supplied reserved `user_id` values, exactly like
   the update handler.
@@ -117,7 +132,12 @@ No schema change. The merge reuses the existing `queued_messages` table:
   `entry_not_found` and the frontend refetches the queue to resync, matching the
   existing edit/remove resync path.
 - **Drain interleave:** the update-above and delete-source writes run inside one
-  transaction, so a concurrent drain can never observe a half-merged queue.
+  transaction (serialized per session by the repository's per-session lock and
+  guarded by affected-row counts), so a concurrent drain can never observe a
+  half-merged queue.
+- **Reference overflow:** a merge whose deduplicated reference union exceeds the
+  per-message cap is rejected atomically (`merge_reference_overflow`); the
+  frontend surfaces a focused toast and the queue is unchanged.
 - **Merge failure:** the frontend shows the existing toast error pattern and
   refetches; no partial state is left behind.
 
@@ -159,6 +179,10 @@ No schema change. The merge reuses the existing `queued_messages` table:
 - **GIVEN** an above message with empty content (attachments only), **WHEN**
   the user merges a message into it, **THEN** the merged content is exactly the
   folded message's content (no leading blank line) and attachments combine.
+- **GIVEN** two messages whose deduplicated entity-reference union exceeds 100,
+  **WHEN** the user clicks **Merge with above** on the later one, **THEN** the
+  backend returns `merge_reference_overflow`, both rows keep their references,
+  and the frontend shows a focused error toast.
 
 ## Out of scope
 

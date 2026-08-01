@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import {
@@ -83,14 +83,25 @@ function useQueueActions({
   setQueueLoading,
   metaMax,
 }: QueueActionsArgs) {
+  // Monotonic per-session refetch version. Concurrent mutations (merge, edit,
+  // remove, drain) all refetch; without a guard an older in-flight
+  // getQueueStatus response can land after a newer one and restore a stale
+  // snapshot (e.g. the pre-merge row). Discard any response that is no longer
+  // the latest issued for its session.
+  const refetchVersion = useRef<Record<string, number>>({});
   const refetch = useCallback(
     async (sid: string) => {
+      const version = (refetchVersion.current[sid] ?? 0) + 1;
+      refetchVersion.current[sid] = version;
       try {
         setQueueLoading(sid, true);
         const status = await getQueueStatus(sid);
+        if (refetchVersion.current[sid] !== version) return;
         setQueueEntries(sid, status.entries ?? [], { count: status.count, max: status.max });
       } finally {
-        setQueueLoading(sid, false);
+        if (refetchVersion.current[sid] === version) {
+          setQueueLoading(sid, false);
+        }
       }
     },
     [setQueueEntries, setQueueLoading],
@@ -203,10 +214,10 @@ function useEntryMutations({ sessionId, removeQueueEntry, refetch }: EntryMutati
   );
 
   const mergeEntry = useCallback(
-    async (entryId: string) => {
+    async (entryId: string, userId?: string) => {
       if (!sessionId) return;
       try {
-        await mergeQueuedEntry({ session_id: sessionId, entry_id: entryId });
+        await mergeQueuedEntry({ session_id: sessionId, entry_id: entryId, user_id: userId });
         await refetch(sessionId);
       } catch (err) {
         if (err instanceof QueueEntryNotFoundError) {

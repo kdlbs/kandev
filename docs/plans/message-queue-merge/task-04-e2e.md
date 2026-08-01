@@ -19,7 +19,7 @@ spec: ../../specs/ui/message-queue-merge.md
 
 ## Verification
 
-- `cd apps/web && pnpm e2e:run --host tests/chat/message-queue.spec.ts --project=chromium`
+- `cd apps/web && pnpm e2e:run --host tests/chat/message-queue.spec.ts`
 
 ## Files
 

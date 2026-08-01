@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
@@ -9,6 +9,7 @@ import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
+import { MergeReferenceOverflowError, QueueEntryNotFoundError } from "@/lib/api/domains/queue-api";
 import { useQueue } from "@/hooks/domains/session/use-queue";
 import {
   canMergeWithAbove,
@@ -94,6 +95,11 @@ function useQueuePanelHandlers({
   removeEntry,
   mergeEntry,
 }: QueuePanelHandlerArgs) {
+  // Tracks merge requests still in flight so a rapid second click on the same
+  // row cannot fire a second request for an entry that is already gone — the
+  // first click's success refetch removes the row and the second would surface
+  // a spurious "not found" error.
+  const pendingMerges = useRef(new Set<string>());
   const handleSave = useCallback(
     async (entryId: string, content: string, entityReferences: EntityReference[]) => {
       await editEntry(entryId, content, undefined, entityReferences);
@@ -113,11 +119,23 @@ function useQueuePanelHandlers({
   );
   const handleMerge = useCallback(
     async (entryId: string) => {
+      if (pendingMerges.current.has(entryId)) return;
+      pendingMerges.current.add(entryId);
       try {
         await mergeEntry(entryId);
       } catch (err) {
+        // A drain race (QueueEntryNotFoundError) already triggered a refetch in
+        // mergeEntry, so the queue view is resynced — no toast needed for the
+        // benign, self-recovering case.
+        if (err instanceof QueueEntryNotFoundError) return;
+        if (err instanceof MergeReferenceOverflowError) {
+          toast.error("Too many entity references to merge these queued messages.");
+          return;
+        }
         console.error("Failed to merge queued entry:", err);
         toast.error("Failed to merge queued messages.");
+      } finally {
+        pendingMerges.current.delete(entryId);
       }
     },
     [mergeEntry],
