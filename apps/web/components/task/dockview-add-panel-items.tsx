@@ -87,7 +87,7 @@ function PRPanelMenuItems({ prs, onOpenPR }: { prs: TaskPR[]; onOpenPR: (pr: Tas
             data-testid={`add-panel-pr-item-${prIdentitySlug(pr)}`}
           >
             <IconGitPullRequest className={MENU_ICON_CLASS} />
-            {`${prPanelLabel(pr.pr_number)} — ${pr.repo}`}
+            {`${prPanelLabel(pr.pr_number)} — ${pr.owner}/${pr.repo}`}
           </DropdownMenuItem>
         ))}
       </DropdownMenuSubContent>

@@ -149,9 +149,9 @@ describe("AddPanelMenuItems — linked PR rows", () => {
     const webRow = screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-web-42`);
     const apiRow = screen.getByTestId(`${PR_ITEM_TEST_ID_PREFIX}acme-api-77`);
     expect(webRow.textContent).toContain("PR #42");
-    expect(webRow.textContent).toContain("web");
+    expect(webRow.textContent).toContain("acme/web");
     expect(apiRow.textContent).toContain("PR #77");
-    expect(apiRow.textContent).toContain("api");
+    expect(apiRow.textContent).toContain("acme/api");
   });
 
   it("opens the selected PR panel with its task key and the active session", async () => {
