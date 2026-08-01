@@ -345,9 +345,13 @@ describe("useQueue clearAll", () => {
 
     // The stale pre-clear snapshot must never be applied; the empty snapshot
     // from clearAll stays the last one written.
-    expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(SESSION_ID, [entry({ id: "pre-clear" })], {
-      count: 1,
-      max: 10,
-    });
+    expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(
+      SESSION_ID,
+      [entry({ id: "pre-clear" })],
+      {
+        count: 1,
+        max: 10,
+      },
+    );
   });
 });
