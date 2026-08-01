@@ -295,6 +295,10 @@ const (
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
 	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
+
+	// GitLabTaskMROptionsUpdated fires after a task's MR lifecycle
+	// notification switches change (HTTP PATCH or MCP tool call).
+	GitLabTaskMROptionsUpdated = "gitlab.task_mr_options.updated"
 )
 
 // Event types for Jira integration

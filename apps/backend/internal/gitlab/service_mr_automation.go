@@ -1,0 +1,182 @@
+package gitlab
+
+import (
+	"context"
+	"errors"
+	"strings"
+)
+
+// GetTaskMRAutomationResponse returns a task's MR automation options plus
+// its per-MR lifecycle checkpoints (AC1).
+func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string) (*TaskMRAutomationResponse, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	opts, err := store.GetTaskMRAutomationOptions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	states, err := store.ListTaskMRLifecycleStates(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return taskMRAutomationResponseFromOptions(opts, states), nil
+}
+
+func taskMRAutomationResponseFromOptions(opts *TaskMRAutomationOptions, states []*TaskMRLifecycleState) *TaskMRAutomationResponse {
+	return &TaskMRAutomationResponse{
+		TaskID:                  opts.TaskID,
+		PromptOnReviewRequested: opts.PromptOnReviewRequested,
+		PromptOnMerged:          opts.PromptOnMerged,
+		PromptOnClosed:          opts.PromptOnClosed,
+		ReviewReviewerUsername:  opts.ReviewReviewerUsername,
+		UpdatedAt:               opts.UpdatedAt,
+		MRStates:                states,
+	}
+}
+
+// UpdateTaskMRAutomationOptions applies a partial update. When the patch
+// turns prompt_on_review_requested on, the workspace's authenticated GitLab
+// username is resolved and persisted (AC5); turning it off clears the
+// stored username. Resolution always goes through the strict, non-ambient
+// workspace client (AC32).
+func (s *Service) UpdateTaskMRAutomationOptions(ctx context.Context, taskID string, patch TaskMRAutomationPatch) (*TaskMRAutomationResponse, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	reviewerUsername, err := s.resolveReviewerUsernameForPatch(ctx, taskID, patch)
+	if err != nil {
+		return nil, err
+	}
+	opts, err := store.UpdateTaskMRAutomationOptions(ctx, taskID, patch, reviewerUsername)
+	if err != nil {
+		return nil, err
+	}
+	states, err := store.ListTaskMRLifecycleStates(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return taskMRAutomationResponseFromOptions(opts, states), nil
+}
+
+func (s *Service) resolveReviewerUsernameForPatch(ctx context.Context, taskID string, patch TaskMRAutomationPatch) (*string, error) {
+	if patch.PromptOnReviewRequested == nil {
+		return nil, nil
+	}
+	if !*patch.PromptOnReviewRequested {
+		empty := ""
+		return &empty, nil
+	}
+	username, err := s.resolveAuthenticatedUsernameStrict(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	return &username, nil
+}
+
+func (s *Service) resolveAuthenticatedUsernameStrict(ctx context.Context, taskID string) (string, error) {
+	client, err := s.clientForTaskStrict(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	username, err := client.GetAuthenticatedUser(ctx)
+	if err != nil {
+		return "", err
+	}
+	if strings.TrimSpace(username) == "" {
+		return "", errors.New("gitlab: cannot resolve authenticated user")
+	}
+	return username, nil
+}
+
+// HasEnabledTaskMRAgentPrompts reports whether any lifecycle switch is on,
+// used by cleanup retention (AC24) and by the poll/evaluation gate (AC16).
+func (s *Service) HasEnabledTaskMRAgentPrompts(ctx context.Context, taskID string) (bool, error) {
+	store := s.requireStore()
+	if store == nil {
+		return false, errStoreUnavailable
+	}
+	opts, err := store.GetTaskMRAutomationOptions(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return opts.PromptOnReviewRequested || opts.PromptOnMerged || opts.PromptOnClosed, nil
+}
+
+// RebindTaskMRReviewer re-resolves the workspace's authenticated GitLab
+// username against the strict client and, when it changed, atomically
+// clears every review-request baseline for the task (risk 3 in the plan).
+// Returns the current username.
+func (s *Service) RebindTaskMRReviewer(ctx context.Context, taskID string) (string, bool, error) {
+	store := s.requireStore()
+	if store == nil {
+		return "", false, errStoreUnavailable
+	}
+	username, err := s.resolveAuthenticatedUsernameStrict(ctx, taskID)
+	if err != nil {
+		return "", false, err
+	}
+	changed, err := store.RebindTaskMRReviewer(ctx, taskID, username)
+	if err != nil {
+		return "", false, err
+	}
+	return username, changed, nil
+}
+
+// GetTaskMRLifecycleState exposes the per-MR checkpoint to the orchestrator
+// lifecycle evaluator.
+func (s *Service) GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*TaskMRLifecycleState, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.GetTaskMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
+}
+
+// SetTaskMRReviewRequestState pass-through to the store.
+func (s *Service) SetTaskMRReviewRequestState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, requested bool) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.SetTaskMRReviewRequestState(ctx, taskID, repositoryID, projectPath, mrIID, requested)
+}
+
+// SetTaskMRObservedState pass-through to the store.
+func (s *Service) SetTaskMRObservedState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, state string) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.SetTaskMRObservedState(ctx, taskID, repositoryID, projectPath, mrIID, state)
+}
+
+// RecordTaskMRLifecyclePrompt pass-through to the store.
+func (s *Service) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt TaskMRLifecyclePrompt) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.RecordTaskMRLifecyclePrompt(ctx, prompt)
+}
+
+// RecordTaskMRAutomationError pass-through to the store (AC25).
+func (s *Service) RecordTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.RecordTaskMRAutomationError(ctx, taskID, repositoryID, projectPath, mrIID, message)
+}
+
+// ListLifecycleSubscribedTaskMRs pass-through to the store, used by the
+// poller's lifecycle sync pass (AC22).
+func (s *Service) ListLifecycleSubscribedTaskMRs(ctx context.Context) ([]*TaskMR, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	return store.ListLifecycleSubscribedTaskMRs(ctx)
+}

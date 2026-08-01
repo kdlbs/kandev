@@ -213,6 +213,9 @@ func (s *Store) createTables() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
+	if err := s.createMRAutomationTables(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
