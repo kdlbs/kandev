@@ -187,6 +187,14 @@ func TestTrackPushDispatchesByProvider_GitHubRepoCallsZeroGitLab(t *testing.T) {
 		t.Fatalf("expected zero GitLab calls for a GitHub-provider repository, got autoLink=%d ensureWatch=%d",
 			fake.autoLinkCalls, fake.ensureWatchCalls)
 	}
+	// Positively assert the GitHub path actually ran — zero GitLab calls
+	// alone can't distinguish "routed to GitHub" from "routed nowhere",
+	// which would silently pass this test even if dispatchPushDetection's
+	// routing broke entirely.
+	if ghSvc.getPRWatchBySessionRepoAndBranchCalls != 1 {
+		t.Fatalf("expected detectPushAndAssociatePR to look up the PR watch exactly once, got %d",
+			ghSvc.getPRWatchBySessionRepoAndBranchCalls)
+	}
 }
 
 func TestCheckSessionMR_Found(t *testing.T) {
@@ -213,6 +221,77 @@ func TestCheckSessionMR_NotFound(t *testing.T) {
 	}
 	if found {
 		t.Fatal("expected found=false when no MR is open on the session branch")
+	}
+}
+
+// TestCheckSessionMR_ScopesToCurrentBranchNotAnyLinkedMR guards against a
+// multi-repo/multi-branch regression: a task that already has an MR linked
+// on a DIFFERENT (repository, branch) than the caller's current session must
+// not short-circuit as "found" on that unrelated association — it must still
+// search and link the current branch's own MR.
+func TestCheckSessionMR_ScopesToCurrentBranchNotAnyLinkedMR(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+	// An MR already linked on a sibling branch of the same repo.
+	fake.taskMRs["t1"] = []*gitlab.TaskMR{
+		{TaskID: "t1", RepositoryID: "repo1", HeadBranch: "feat/other", MRIID: 99},
+	}
+	fake.autoLinkFunc = func(_ context.Context, _, _, _, repositoryID, projectPath, branch string) (*gitlab.TaskMR, error) {
+		return &gitlab.TaskMR{TaskID: "t1", RepositoryID: repositoryID, ProjectPath: projectPath, MRIID: 3, HeadBranch: branch}, nil
+	}
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true after linking the current branch's own MR")
+	}
+	if fake.autoLinkCalls != 1 {
+		t.Fatalf("expected AutoLinkMRForBranch to run for the current branch despite a sibling-branch association, got %d calls", fake.autoLinkCalls)
+	}
+}
+
+// TestCheckSessionMR_EnsuresWatchForAlreadyLinkedMR covers the case an
+// already-linked MR (via Create-MR action or manual URL linking, which write
+// gitlab_task_mrs but no watch) is found for the exact current (repository,
+// branch): the check must ensure its watch rather than just reporting found.
+func TestCheckSessionMR_EnsuresWatchForAlreadyLinkedMR(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+	fake.taskMRs["t1"] = []*gitlab.TaskMR{
+		{TaskID: "t1", RepositoryID: "repo1", ProjectPath: "group/myproj", HeadBranch: "feat/a", MRIID: 7},
+	}
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if !found {
+		t.Fatal("expected found=true for an already-linked MR on the current branch")
+	}
+	if fake.autoLinkCalls != 0 {
+		t.Fatalf("expected no re-link search for an already-linked MR, got %d auto-link calls", fake.autoLinkCalls)
+	}
+	if fake.ensureWatchCalls != 1 {
+		t.Fatalf("expected the missing watch to be ensured exactly once, got %d", fake.ensureWatchCalls)
+	}
+}
+
+// TestCheckSessionMR_EnsuresWatchWhenNoMRFound mirrors CheckSessionPR's
+// EnsurePRWatchForWorkspace-before-lookup ordering: even when no MR is open
+// yet, a watch must exist afterward so the background poller keeps checking
+// this branch instead of the caller needing to poll again themselves.
+func TestCheckSessionMR_EnsuresWatchWhenNoMRFound(t *testing.T) {
+	svc, fake := seedGitLabSessionWithRepo(t)
+
+	found, err := svc.CheckSessionMR(context.Background(), "t1", "s1")
+	if err != nil {
+		t.Fatalf("CheckSessionMR: %v", err)
+	}
+	if found {
+		t.Fatal("expected found=false when no MR is open")
+	}
+	if fake.ensureWatchCalls != 1 {
+		t.Fatalf("expected a placeholder watch to be ensured even when no MR was found, got %d ensure-watch calls", fake.ensureWatchCalls)
 	}
 }
 

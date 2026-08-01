@@ -3,6 +3,7 @@ package gitlab
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 )
@@ -26,6 +27,17 @@ func (s *Service) AutoLinkMRForBranch(
 	ctx context.Context,
 	workspaceID, sessionID, taskID, repositoryID, projectPath, branch string,
 ) (*TaskMR, error) {
+	// A blank branch must never reach FindMRByBranch: PATClient interpolates
+	// it into `?source_branch=&state=opened&per_page=1`, a query with no
+	// effective source-branch filter, so GitLab would answer with an
+	// arbitrary open MR of the project and the wrong MR would get linked.
+	// Git refs cannot contain whitespace, so a whitespace-only value is
+	// equally invalid. Guarded here — not just at orchestrator call sites —
+	// so every caller of this service method gets the same safety guarantee.
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return nil, nil
+	}
 	store := s.requireStore()
 	if store == nil {
 		return nil, errStoreUnavailable

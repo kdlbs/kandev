@@ -71,3 +71,48 @@ func TestCheckMRWatch_RefreshesTaskMRAndPublishes(t *testing.T) {
 		t.Fatal("expected gitlab.task_mr.updated to be published")
 	}
 }
+
+// TestCheckMRWatch_RejectsMismatchedIdentityOnRefresh guards the refresh path
+// the same way AutoLinkMRForBranch and AssociateExistingMRByURL already are:
+// a status response whose MR doesn't actually match the watch's (host,
+// project, iid) — a client bug, or a race where the watch's mr_iid was
+// updated between fetch and refresh — must not create or overwrite the
+// task-MR association.
+func TestCheckMRWatch_RejectsMismatchedIdentityOnRefresh(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+
+	client := NewMockClient("https://gitlab.com")
+	svc := NewService("https://gitlab.com", client, "none", nil, newTestLogger(t))
+	svc.SetStore(store)
+
+	watch := &MRWatch{
+		SessionID: "sess-1", TaskID: "task-1", RepositoryID: "repo-1",
+		ProjectPath: "group/proj", MRIID: 5, Branch: "feat/a",
+	}
+	if err := store.CreateMRWatch(ctx, watch); err != nil {
+		t.Fatalf("create watch: %v", err)
+	}
+
+	// GetMRStatus is keyed by (projectPath, iid) — the watch's own
+	// (group/proj, 5) — but the seeded MR's WebURL points at a different
+	// project, simulating a misbehaving/mismatched client response.
+	client.SeedMR("group/proj", &MR{
+		IID: 5, State: mrStateOpen, HeadBranch: "feat/a", Title: "Wrong URL",
+		WebURL: "https://gitlab.com/group/other/-/merge_requests/5",
+	})
+
+	if _, _, err := svc.CheckMRWatch(ctx, watch); err != nil {
+		t.Fatalf("check watch: %v", err)
+	}
+
+	mrs, err := store.ListTaskMRsByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list task MRs: %v", err)
+	}
+	if len(mrs) != 0 {
+		t.Fatalf("expected no task MR row for a mismatched identity response, got %+v", mrs)
+	}
+}

@@ -250,6 +250,15 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 // must not fail the poll cycle, since UpdateMRWatchTimestamps above already
 // recorded a successful check.
 func (s *Service) refreshTaskMRFromWatch(ctx context.Context, store *Store, client Client, watch *MRWatch, status *MRStatus) {
+	// A response that doesn't actually match this watch's (host, project,
+	// iid) — a client bug, or a mismatched mock in tests — must not create or
+	// overwrite a task-MR association. Same check the manual-link and
+	// auto-link paths already run before trusting a fetched MR.
+	if err := validateReturnedMRIdentity(status, client.Host(), watch.ProjectPath, watch.MRIID); err != nil {
+		s.logger.Warn("dropping MR watch refresh with mismatched identity",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+		return
+	}
 	workspaceID, err := store.WorkspaceIDForTask(ctx, watch.TaskID)
 	if err != nil || workspaceID == "" {
 		return

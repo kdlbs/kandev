@@ -50,19 +50,23 @@ not read `workspace_id`, so GitLab's `workspace_id`-keyed WS list is unscoped to
 ## Auto-link guarantee (GitHub pull requests / GitLab merge requests)
 
 A code-host PR/MR opened on a task's session branch gets linked to the task
-without a manual step, on both providers, through three independent paths.
-"Auto-link" here means: a `github_task_prs` / `gitlab_task_mrs` row is
-created or updated, and a refresh watch (`github_pr_watches` /
+without a manual step, on both providers, through three independent
+*discovery* paths (rows 1–3 below find and create the association). Two more
+rows exist alongside them: manual URL linking is an explicit user action, not
+discovery, and the background poller only *refreshes* an association that
+discovery already created — it never discovers a not-yet-linked PR/MR on its
+own. "Auto-link" (discovery) means: a `github_task_prs` / `gitlab_task_mrs`
+row is created, and a refresh watch (`github_pr_watches` /
 `gitlab_mr_watches`) is created so ongoing review/CI/pipeline status keeps
-syncing.
+syncing via the poller from then on.
 
-| Trigger | GitHub | GitLab |
-| --- | --- | --- |
-| Kandev's own Create-PR action (`worktree.create_pr`) | ✅ `gateway.go` → `createdChangeAssociationRouter.associate` → `associateGitHub` | ✅ same router → `associateGitLab` → `gitlab.Service.AssociateExistingMRByURL` |
-| Push detected on the session branch (agent/CLI push, e.g. `gh pr create` / `glab mr create`, or a human pushing directly) | ✅ `event_handlers_git.go`'s `trackPushAndAssociatePR` → `event_handlers_github.go`'s `detectPushAndAssociatePR` (retries `[0, 30s, 60s]`) | ✅ same `trackPushAndAssociatePR` dispatches by repository provider → `event_handlers_gitlab_mr.go`'s `detectPushAndAssociateMR` (same retry shape) → `gitlab.Service.AutoLinkMRForBranch` |
-| On-demand check (no UI trigger today; callable via WS action) | ✅ `Service.CheckSessionPR`, `ws.ActionGitHubCheckSessionPR` (`github.check_session_pr`) | ✅ `Service.CheckSessionMR`, `ws.ActionGitLabCheckSessionMR` (`gitlab.check_session_mr`) |
-| Background poller reconciliation | ✅ `github.Poller` iterates `github_pr_watches`, upserts `github_task_prs` | ✅ `gitlab.Poller.runMRMonitor` iterates `gitlab_mr_watches`; `CheckMRWatch` upserts `gitlab_task_mrs` and publishes `gitlab.task_mr.updated` on every poll |
-| Manual URL linking | ✅ `POST /api/v1/github/task-prs` | ✅ `POST /api/v1/gitlab/task-mrs` (`AssociateExistingMRByURL`) |
+| Trigger | Role | GitHub | GitLab |
+| --- | --- | --- | --- |
+| Kandev's own Create-PR action (`worktree.create_pr`) | Discovery | ✅ `gateway.go` → `createdChangeAssociationRouter.associate` → `associateGitHub` | ✅ same router → `associateGitLab` → `gitlab.Service.AssociateExistingMRByURL` |
+| Push detected on the session branch (agent/CLI push, e.g. `gh pr create` / `glab mr create`, or a human pushing directly) | Discovery | ✅ `event_handlers_git.go`'s `trackPushAndAssociatePR` → `event_handlers_github.go`'s `detectPushAndAssociatePR` (retries `[0, 30s, 60s]`) | ✅ same `trackPushAndAssociatePR` dispatches by repository provider → `event_handlers_gitlab_mr.go`'s `detectPushAndAssociateMR` (same retry shape) → `gitlab.Service.AutoLinkMRForBranch` |
+| On-demand check (no UI trigger today; callable via WS action) | Discovery | ✅ `Service.CheckSessionPR`, `ws.ActionGitHubCheckSessionPR` (`github.check_session_pr`) | ✅ `Service.CheckSessionMR`, `ws.ActionGitLabCheckSessionMR` (`gitlab.check_session_mr`) |
+| Manual URL linking | Explicit (not auto-link) | ✅ `POST /api/v1/github/task-prs` | ✅ `POST /api/v1/gitlab/task-mrs` (`AssociateExistingMRByURL`) |
+| Background poller | Refresh-only — does not discover a new PR/MR, only updates an existing watch's association | `github.Poller` iterates `github_pr_watches`, upserts `github_task_prs` | `gitlab.Poller.runMRMonitor` iterates `gitlab_mr_watches`; `CheckMRWatch` upserts `gitlab_task_mrs` and publishes `gitlab.task_mr.updated` on every poll |
 
 Provider dispatch is structural, not a runtime flag: `trackPushAndAssociatePR`
 resolves the pushing repository's `provider` column once and routes to

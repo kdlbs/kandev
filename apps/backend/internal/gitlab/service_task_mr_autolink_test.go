@@ -187,3 +187,36 @@ func TestAutoLinkMRForBranch_MultiRepoScoping(t *testing.T) {
 		t.Fatalf("cross-repo overwrite: %+v", byRepo)
 	}
 }
+
+// TestAutoLinkMRForBranch_RejectsBlankBranch guards this at the service
+// layer directly (not just at the orchestrator's push-detection call site):
+// a blank branch must never reach FindMRByBranch, which would otherwise
+// interpolate it into a query with no effective source-branch filter and
+// link an arbitrary open MR of the project to the task.
+func TestAutoLinkMRForBranch_RejectsBlankBranch(t *testing.T) {
+	const host = "https://gitlab.acme.test"
+	for _, branch := range []string{"", "   ", "\t\n"} {
+		t.Run("branch="+branch, func(t *testing.T) {
+			svc, store, client := newTaskMRLinkService(t, host)
+			seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+			setTaskMRRepositoryIdentity(t, store, "repo-1", host, "group/proj")
+			client.SeedMR("group/proj", &MR{
+				IID: 7, Title: "Feat A", HeadBranch: "feat/a", State: mrStateOpen,
+				WebURL: host + "/group/proj/-/merge_requests/7", CreatedAt: time.Now().UTC(),
+			})
+
+			assoc, err := svc.AutoLinkMRForBranch(context.Background(), "ws-1", "sess-1", "task-1", "repo-1", "group/proj", branch)
+			if err != nil {
+				t.Fatalf("AutoLinkMRForBranch: %v", err)
+			}
+			if assoc != nil {
+				t.Fatalf("expected nil association for a blank branch, got %+v", assoc)
+			}
+
+			rows, _ := store.ListTaskMRsByTask(context.Background(), "task-1")
+			if len(rows) != 0 {
+				t.Fatalf("expected no association created for a blank branch, got %d rows", len(rows))
+			}
+		})
+	}
+}

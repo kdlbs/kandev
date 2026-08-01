@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 )
 
 // gitSnapshotPersistInterval is the minimum time between persisted live git
@@ -280,7 +281,28 @@ func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, 
 	if err != nil || repoObj == nil {
 		return ""
 	}
-	return repoObj.Provider
+	if repoObj.Provider != "" {
+		return repoObj.Provider
+	}
+	// The row may not yet reflect a provider resolvePushRepo's own call just
+	// derived from the local git remote: matchPushRepo/resolveSessionRepo
+	// compute it in-memory and persist it via a detached backfill goroutine,
+	// so this read can race ahead of that write on the very first push from a
+	// repository with no durable provider yet. Recompute live from the same
+	// local checkout instead of trusting a possibly-stale empty column.
+	// ResolveGitRemoteProvider only recognizes github.com remotes, so this
+	// closes the race for a repository whose remote is GitHub; a GitLab-only
+	// local checkout with no durable provider tag yet still returns "" here
+	// (same as before), which falls through to the GitHub push-detection
+	// path and finds nothing — no worse than today's un-auto-linked gap, and
+	// AutoLinkMRForBranch's own identity check fails closed regardless if
+	// that path is ever reached with a real association attempt.
+	if repoObj.LocalPath != "" {
+		if provider, owner, _ := service.ResolveGitRemoteProvider(repoObj.LocalPath); owner != "" {
+			return provider
+		}
+	}
+	return ""
 }
 
 // shouldFirePushDetection decides whether to kick off PR association for one

@@ -83,6 +83,13 @@ func (s *Service) detectPushAndAssociateMR(
 			zap.String("repository_name", repositoryName),
 			zap.Int("mr_iid", assoc.MRIID),
 			zap.String("branch", branch))
+		// AutoLinkMRForBranch already tries to ensure the watch itself, but
+		// only logs a failure rather than surfacing it — this is the push
+		// path's last attempt (retries are exhausted once we return), so
+		// give the idempotent get-or-create one more chance here rather than
+		// declaring the link complete with the association persisted but no
+		// watch to keep its status polled.
+		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, assoc)
 		return
 	}
 	s.logger.Warn("exhausted all retries, no gitlab MR found after push",
@@ -146,26 +153,43 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 		return false, nil
 	}
 
-	// Already associated (any repository/branch on this task) — nothing to do.
-	if existing, err := s.gitlabMRLinkService.ListTaskMRsByTask(ctx, taskID); err == nil && len(existing) > 0 {
-		return true, nil
-	}
-
 	owner, repoName, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, "")
 	if owner == "" || repoName == "" || repositoryID == "" {
 		return false, nil
 	}
-	branch := s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
+	branch := strings.TrimSpace(s.resolvePRWatchBranch(ctx, taskID, sessionID, ""))
 	if branch == "" {
 		return false, nil
 	}
+	projectPath := owner + "/" + repoName
+
+	// Already associated for this exact (repository, branch) — ensure its
+	// watch exists (Create-MR action / manual URL linking writes
+	// gitlab_task_mrs but no watch) and return without re-searching. Scoped
+	// to (repositoryID, branch) rather than "any MR linked to the task", so a
+	// multi-repo/multi-branch task's on-demand check for one branch isn't
+	// short-circuited by a sibling branch's already-linked MR.
+	if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
+		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
+		return true, nil
+	}
+
 	workspaceID := s.taskWorkspaceID(ctx, taskID)
 	if workspaceID == "" {
 		return false, nil
 	}
 
+	// Ensure a watch exists (mr_iid=0, backfilled by AutoLinkMRForBranch on a
+	// match) before searching, so the background poller keeps checking this
+	// branch even when no MR is open yet — mirrors CheckSessionPR's
+	// EnsurePRWatchForWorkspace-before-lookup ordering.
+	if _, err := s.gitlabMRLinkService.EnsureMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, 0, branch); err != nil {
+		s.logger.Warn("failed to ensure MR watch during check",
+			zap.String("session_id", sessionID), zap.Error(err))
+	}
+
 	assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
-		ctx, workspaceID, sessionID, taskID, repositoryID, owner+"/"+repoName, branch,
+		ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
 	)
 	if err != nil || assoc == nil {
 		return false, nil

@@ -213,8 +213,14 @@ func (s *Service) AssociateExistingMRByURLForSession(
 	if err != nil {
 		return nil, err
 	}
+	// A cancelable ctx (e.g. an HTTP request context that times out right
+	// after the association commits) must not skip this: the association
+	// already succeeded and is returned as a success below, so a canceled
+	// EnsureMRWatch would silently leave that MR with no refresh watch until
+	// another push recreates it. Detach from ctx's cancellation the same way
+	// DeleteReviewWatch does for its own post-commit side effect.
 	if _, err := s.EnsureMRWatch(
-		ctx, sessionID, taskID, association.RepositoryID, association.ProjectPath,
+		context.WithoutCancel(ctx), sessionID, taskID, association.RepositoryID, association.ProjectPath,
 		association.MRIID, association.HeadBranch,
 	); err != nil {
 		s.logger.Warn("failed to ensure MR watch after URL association",

@@ -33,20 +33,26 @@ type mockGitHubService struct {
 	triggerPRSyncAllErr   error
 	triggerPRSyncAllCalls int
 	getTaskPRCalls        int
-	exactTaskPRCalls      int
-	lastExactPRLookup     github.PRFeedbackEvent
-	prWatch               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
-	ensureWatchCalls      int
-	createWatchCalls      int
-	associateCalls        int
-	updateBranchCalls     int
-	updatePRNumberCalls   int
-	resetWatchCalls       int
-	resetWatchBranch      string
-	ensureWatchBranch     string
-	createWatchBranch     string
-	updatedBranch         string
-	updatedPRNumber       int
+	// getPRWatchBySessionRepoAndBranchCalls counts detectPushAndAssociatePR's
+	// entry-point watch lookup, so provider-isolation tests can positively
+	// assert the GitHub path actually ran rather than only asserting GitLab
+	// calls stayed at zero (which can't distinguish "routed to GitHub" from
+	// "routed nowhere").
+	getPRWatchBySessionRepoAndBranchCalls int
+	exactTaskPRCalls                      int
+	lastExactPRLookup                     github.PRFeedbackEvent
+	prWatch                               *github.PRWatch // returned by GetPRWatchBySession (nil = no watch)
+	ensureWatchCalls                      int
+	createWatchCalls                      int
+	associateCalls                        int
+	updateBranchCalls                     int
+	updatePRNumberCalls                   int
+	resetWatchCalls                       int
+	resetWatchBranch                      string
+	ensureWatchBranch                     string
+	createWatchBranch                     string
+	updatedBranch                         string
+	updatedPRNumber                       int
 	// repository_id captured by the most recent CreatePRWatch /
 	// AssociatePRWithTask call. Used by the multi-repo push tests to assert
 	// the per-repo scoping (an empty value indicates the legacy single-repo
@@ -312,6 +318,7 @@ func (m *mockGitHubService) GetPRWatchBySessionAndRepo(_ context.Context, _, _ s
 	return m.prWatch, nil
 }
 func (m *mockGitHubService) GetPRWatchBySessionRepoAndBranch(_ context.Context, _, _, _ string) (*github.PRWatch, error) {
+	m.getPRWatchBySessionRepoAndBranchCalls++
 	return m.prWatch, nil
 }
 func (m *mockGitHubService) CreatePRWatch(_ context.Context, _, _, repositoryID, _, _ string, _ int, branch string) (*github.PRWatch, error) {
