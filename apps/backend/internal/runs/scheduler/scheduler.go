@@ -125,22 +125,18 @@ func (s *Scheduler) Start(ctx context.Context) {
 // return. It is safe to call repeatedly and concurrently with Start.
 func (s *Scheduler) Stop() error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	if !s.started {
-		s.mu.Unlock()
 		return nil
 	}
-	cancel := s.cancel
-	s.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
+	if s.cancel != nil {
+		s.cancel()
 	}
 	s.wg.Wait()
 
-	s.mu.Lock()
 	s.started = false
 	s.cancel = nil
-	s.mu.Unlock()
 	s.log.Info("runs scheduler stopped")
 	return nil
 }

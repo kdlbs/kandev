@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -45,6 +46,14 @@ func TestNewLoop_FallsBackToDefaultInterval(t *testing.T) {
 	l := NewLoop(0, logger.Default())
 	if l.interval != DefaultTickInterval {
 		t.Fatalf("interval = %v, want %v", l.interval, DefaultTickInterval)
+	}
+}
+
+func TestNewLoop_IgnoresNilHandlers(t *testing.T) {
+	handler := &recordHandler{name: "configured"}
+	l := NewLoop(time.Second, logger.Default(), handler, nil)
+	if len(l.handlers) != 1 || l.handlers[0] != handler {
+		t.Fatalf("handlers = %#v, want only configured handler", l.handlers)
 	}
 }
 
@@ -198,6 +207,83 @@ func TestLoop_ParentCancellationDrainsFanOut(t *testing.T) {
 	case <-stopDone:
 	case <-time.After(100 * time.Millisecond):
 		t.Fatal("Stop did not finish after handler fan-out drained")
+	}
+}
+
+type cancelBlockingHandler struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (h *cancelBlockingHandler) Name() string { return "cancel_blocking" }
+func (h *cancelBlockingHandler) Tick(ctx context.Context) error {
+	close(h.entered)
+	<-ctx.Done()
+	<-h.release
+	return nil
+}
+
+func TestLoop_ConcurrentStopUsesOneLifecycleTransition(t *testing.T) {
+	handler := &cancelBlockingHandler{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	loop := NewLoop(time.Millisecond, logger.Default(), handler)
+	loop.Start(context.Background())
+
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(handler.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = loop.Stop()
+	})
+
+	select {
+	case <-handler.entered:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("cron loop did not enter handler tick")
+	}
+
+	firstCancel := make(chan struct{})
+	secondCancel := make(chan struct{})
+	var cancelCalls atomic.Int32
+	loop.mu.Lock()
+	originalCancel := loop.cancel
+	loop.cancel = func() {
+		switch cancelCalls.Add(1) {
+		case 1:
+			close(firstCancel)
+		case 2:
+			close(secondCancel)
+		}
+		originalCancel()
+	}
+	stopDone := make(chan error, 2)
+	go func() { stopDone <- loop.Stop() }()
+	go func() { stopDone <- loop.Stop() }()
+	loop.mu.Unlock()
+
+	select {
+	case <-firstCancel:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Stop did not cancel the cron loop")
+	}
+	select {
+	case <-secondCancel:
+		t.Fatal("concurrent Stop started a second lifecycle transition")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	for range 2 {
+		select {
+		case err := <-stopDone:
+			if err != nil {
+				t.Fatalf("Stop returned error: %v", err)
+			}
+		case <-time.After(100 * time.Millisecond):
+			t.Fatal("concurrent Stop did not return after fan-out drained")
+		}
 	}
 }
 

@@ -75,9 +75,15 @@ func NewLoop(interval time.Duration, log *logger.Logger, handlers ...Handler) *L
 	if interval <= 0 {
 		interval = DefaultTickInterval
 	}
+	configured := make([]Handler, 0, len(handlers))
+	for _, handler := range handlers {
+		if handler != nil {
+			configured = append(configured, handler)
+		}
+	}
 	return &Loop{
 		interval: interval,
-		handlers: handlers,
+		handlers: configured,
 		log:      log.WithFields(zap.String("component", "scheduler-cron")),
 	}
 }
@@ -109,22 +115,18 @@ func (l *Loop) Start(ctx context.Context) {
 // safe to call repeatedly and concurrently with Start.
 func (l *Loop) Stop() error {
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	if !l.started {
-		l.mu.Unlock()
 		return nil
 	}
-	cancel := l.cancel
-	l.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
+	if l.cancel != nil {
+		l.cancel()
 	}
 	l.wg.Wait()
 
-	l.mu.Lock()
 	l.started = false
 	l.cancel = nil
-	l.mu.Unlock()
 	l.log.Info("cron loop stopped")
 	return nil
 }
