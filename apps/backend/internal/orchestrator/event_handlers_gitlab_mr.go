@@ -2,9 +2,12 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/gitlab"
 )
 
 // detectPushAndAssociateMR is the GitLab twin of detectPushAndAssociatePR: on
@@ -18,6 +21,17 @@ func (s *Service) detectPushAndAssociateMR(
 	if s.gitlabMRLinkService == nil {
 		return
 	}
+	// An empty branch must never reach FindMRByBranch: it builds
+	// `?source_branch=&state=opened&per_page=1`, which carries no effective
+	// source-branch filter, so GitLab answers with an arbitrary open MR of the
+	// project and we would link the wrong merge request to the task. Git refs
+	// cannot contain spaces, so a whitespace-only value is equally invalid.
+	// CheckSessionMR already refuses an empty branch; this is the same guard on
+	// the push path.
+	branch = strings.TrimSpace(branch)
+	if branch == "" {
+		return
+	}
 	workspaceID := s.taskWorkspaceID(ctx, taskID)
 	if workspaceID == "" {
 		return
@@ -28,9 +42,14 @@ func (s *Service) detectPushAndAssociateMR(
 	}
 	projectPath := owner + "/" + repoName
 
-	// Already linked for this (task, repository, branch) — nothing to do.
-	// Mirrors GitHub's existing-watch short-circuit in detectPushAndAssociatePR.
-	if s.gitlabTaskMRExists(ctx, taskID, repositoryID, branch) {
+	// Already linked for this (task, repository, branch) — don't re-link, but
+	// still make sure the refresh watch exists. AssociateExistingMRByURL (the
+	// Create-MR action and manual URL linking) writes gitlab_task_mrs without
+	// a watch, so returning outright here would leave the association with
+	// nothing for Poller.runMRMonitor to poll and its review/pipeline status
+	// would never update.
+	if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
+		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
 		return
 	}
 
@@ -42,7 +61,8 @@ func (s *Service) detectPushAndAssociateMR(
 				return
 			case <-time.After(delay):
 			}
-			if s.gitlabTaskMRExists(ctx, taskID, repositoryID, branch) {
+			if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
+				s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
 				return
 			}
 		}
@@ -72,20 +92,39 @@ func (s *Service) detectPushAndAssociateMR(
 		zap.String("branch", branch))
 }
 
-// gitlabTaskMRExists reports whether taskID already has an association for
-// (repositoryID, branch), so retries and duplicate push events don't refetch
-// or re-link an MR that's already linked.
-func (s *Service) gitlabTaskMRExists(ctx context.Context, taskID, repositoryID, branch string) bool {
+// ensureWatchForLinkedMR creates the refresh watch for an association that
+// already exists, covering the MRs linked by AssociateExistingMRByURL (the
+// Create-MR action and manual URL linking), which persists gitlab_task_mrs
+// but no watch. Best-effort: the association is already correct, so a watch
+// failure must not turn push detection into an error path.
+func (s *Service) ensureWatchForLinkedMR(
+	ctx context.Context, sessionID, taskID, repositoryID string, mr *gitlab.TaskMR,
+) {
+	if _, err := s.gitlabMRLinkService.EnsureMRWatch(
+		ctx, sessionID, taskID, repositoryID, mr.ProjectPath, mr.MRIID, mr.HeadBranch,
+	); err != nil {
+		s.logger.Warn("failed to ensure MR watch for already-linked merge request",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Int("mr_iid", mr.MRIID),
+			zap.Error(err))
+	}
+}
+
+// gitlabTaskMRFor returns taskID's existing association for (repositoryID,
+// branch), or nil when there is none, so retries and duplicate push events
+// don't refetch or re-link an MR that's already linked.
+func (s *Service) gitlabTaskMRFor(ctx context.Context, taskID, repositoryID, branch string) *gitlab.TaskMR {
 	mrs, err := s.gitlabMRLinkService.ListTaskMRsByTask(ctx, taskID)
 	if err != nil {
-		return false
+		return nil
 	}
 	for _, mr := range mrs {
 		if mr.RepositoryID == repositoryID && mr.HeadBranch == branch {
-			return true
+			return mr
 		}
 	}
-	return false
+	return nil
 }
 
 // CheckSessionMR checks whether an open GitLab merge request exists for a

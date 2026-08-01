@@ -219,7 +219,26 @@ func (s *Store) createTables() error {
 	if err := s.migrateWatchColumns(); err != nil {
 		return err
 	}
-	return s.migrateMRWatchUniqueKey()
+	if err := s.migrateMRWatchUniqueKey(); err != nil {
+		return err
+	}
+	return s.ensureMRWatchIndexes()
+}
+
+// ensureMRWatchIndexes re-creates gitlab_mr_watches' indexes after
+// migrateMRWatchUniqueKey. The rebuild DROPs the old table, and SQLite drops
+// a table's indexes with it, so the index created by createTablesSQL earlier
+// in this same call is gone by the time the rebuild finishes — leaving the
+// table unindexed until the next process start. github.Store.initSchema
+// avoids this by running its index creation after the equivalent
+// migratePRTablesForMultiRepo rebuild; this is the same ordering.
+func (s *Store) ensureMRWatchIndexes() error {
+	if _, err := s.db.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_gitlab_mr_watches_task_id ON gitlab_mr_watches(task_id)`,
+	); err != nil {
+		return fmt.Errorf("recreate gitlab_mr_watches indexes: %w", err)
+	}
+	return nil
 }
 
 // migrateMRWatchUniqueKey rebuilds gitlab_mr_watches to drop the legacy

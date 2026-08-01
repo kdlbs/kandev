@@ -65,7 +65,20 @@ func (s *Service) EnsureMRWatch(ctx context.Context, sessionID, taskID, reposito
 		return nil, err
 	}
 	if existing == nil {
-		return s.CreateMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, iid, branch)
+		w, createErr := s.CreateMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, iid, branch)
+		if createErr == nil {
+			return w, nil
+		}
+		// Lost the race with a concurrent EnsureMRWatch for the same triple
+		// (push detection and the on-demand check can both run for one
+		// session): the UNIQUE(session_id, repository_id, branch) constraint
+		// rejected our INSERT because the row we were about to create now
+		// exists. Re-read and return it — the caller's intent is satisfied.
+		// Any other failure is still reported.
+		if raced, getErr := store.GetMRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch); getErr == nil && raced != nil {
+			return raced, nil
+		}
+		return nil, createErr
 	}
 	if existing.MRIID <= 0 && iid > 0 {
 		if err := store.UpdateMRWatchMRIID(ctx, existing.ID, iid); err != nil {

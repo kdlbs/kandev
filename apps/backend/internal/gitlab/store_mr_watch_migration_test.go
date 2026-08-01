@@ -154,3 +154,24 @@ func TestMigrateMRWatchUniqueKey_FreshDBAllowsMultiBranch(t *testing.T) {
 		t.Fatalf("expected 2 watches on a fresh DB, got %d", len(all))
 	}
 }
+
+// The rebuild DROPs gitlab_mr_watches, and SQLite drops a table's indexes
+// along with it — including the one createTablesSQL created earlier in the
+// same createTables() call. Without an explicit re-create, a migrating boot
+// leaves the table unindexed until the next process start.
+func TestMigrateMRWatchUniqueKey_PreservesTaskIndex(t *testing.T) {
+	store := newLegacyMRWatchStore(t)
+
+	var names []string
+	if err := store.ro.Select(&names,
+		`SELECT name FROM sqlite_master
+		 WHERE type='index' AND tbl_name='gitlab_mr_watches' AND name NOT LIKE 'sqlite_%'`); err != nil {
+		t.Fatalf("query indexes: %v", err)
+	}
+	for _, n := range names {
+		if n == "idx_gitlab_mr_watches_task_id" {
+			return
+		}
+	}
+	t.Fatalf("idx_gitlab_mr_watches_task_id missing after migration, got %v", names)
+}
