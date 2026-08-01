@@ -25,6 +25,7 @@ import {
   useDialogAttachments,
 } from "./session-dialog-shared";
 import { ContextZone } from "./chat/context-items/context-zone";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
   if (!show || !branch) return null;
@@ -426,7 +427,7 @@ export function SubtaskFormBody({
         <Input
           id="subtask-title-input"
           value={title}
-          onChange={(e) => setTitle(e.target.value)}
+          onChange={(e) => setTitle(clampTaskTitleInput(e.target.value))}
           placeholder="Subtask title"
           className="min-w-0 max-w-full text-sm"
           data-testid="subtask-title-input"

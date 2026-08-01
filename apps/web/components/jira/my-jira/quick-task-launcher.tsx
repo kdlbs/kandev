@@ -6,6 +6,7 @@ import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { JiraTaskPreset } from "./presets";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 export type JiraLaunchPayload = {
   ticket: JiraTicket;
@@ -22,7 +23,7 @@ type QuickTaskLauncherProps = {
 
 function buildDialogState(payload: JiraLaunchPayload) {
   const { ticket, preset } = payload;
-  const title = `${ticket.key}: ${ticket.summary}`;
+  const title = truncateRemoteTaskTitle(`${ticket.key}: ${ticket.summary}`);
   const description = preset.prompt({
     url: ticket.url,
     key: ticket.key,

@@ -180,6 +180,29 @@ beforeEach(() => {
 });
 
 describe("useTaskSubmitHandlers — started task edits", () => {
+  it("preserves a legacy overlong title when it was not edited", async () => {
+    const legacyTitle = "x".repeat(80);
+    const deps = makeDeps({
+      isEditMode: true,
+      taskName: legacyTitle,
+      editingTask: {
+        id: TASK_ID,
+        title: legacyTitle,
+        description: ORIGINAL_PROMPT,
+        workflowStepId: "step-1",
+        state: "IN_PROGRESS",
+      },
+      descriptionInputRef: makeRef(""),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(updateTaskMock).toHaveBeenCalledWith(TASK_ID, {});
+  });
+
   it("updates only the title so a locked prompt cannot be cleared", async () => {
     buildRepositoriesPayloadMock.mockReturnValue([
       { repository_id: "repo-1", base_branch: "main" },

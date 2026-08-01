@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +36,13 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	require.True(t, ok, "schema should have properties")
 	assert.Contains(t, props, "parent_id", "create_task schema must expose parent_id")
 	assert.Contains(t, props, "title")
+	titleProp, ok := props["title"].(map[string]interface{})
+	require.True(t, ok, "title should be an object")
+	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
+	titleDesc, ok := titleProp["description"].(string)
+	require.True(t, ok, "title should have a description")
+	assert.Contains(t, titleDesc, "concise")
+	assert.Contains(t, titleDesc, "60")
 	assert.Contains(t, props, "workspace_id")
 	assert.Contains(t, props, "workflow_id")
 	assert.Contains(t, props, "workflow_step_id")
@@ -94,6 +102,23 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["parent_id"], "parent_id should not be required")
 	assert.False(t, requiredSet["workspace_id"], "workspace_id should not be required")
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
+}
+
+func TestUpdateTask_ToolSchema_HasTitleMaxLength(t *testing.T) {
+	s := newTaskModeServer(t, &testBackend{}, "task-current")
+
+	tool, ok := s.mcpServer.ListTools()["update_task_kandev"]
+	require.True(t, ok, "update_task tool not registered")
+	schema, err := json.Marshal(tool.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "schema should have properties")
+	titleProp, ok := props["title"].(map[string]interface{})
+	require.True(t, ok, "title should be an object")
+	assert.Equal(t, float64(service.TaskTitleMaxLength), titleProp["maxLength"])
 }
 
 func TestCreateTask_PromptCanonical(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -310,17 +311,17 @@ func (s *Service) resolveAutomationTaskTitle(a *automation.Automation, evt *auto
 	if a.TaskTitleTemplate != "" {
 		title := automation.InterpolatePrompt(a.TaskTitleTemplate, evt.TriggerType, evt.TriggerData)
 		if title != "" {
-			return title
+			return taskservice.TruncateTaskTitle(title)
 		}
 	}
 	// Fall back to trigger type default from registry.
 	if info := automation.GetTriggerTypeInfo(evt.TriggerType); info != nil && info.DefaultTaskTitle != "" {
 		title := automation.InterpolatePrompt(info.DefaultTaskTitle, evt.TriggerType, evt.TriggerData)
 		if title != "" {
-			return title
+			return taskservice.TruncateTaskTitle(title)
 		}
 	}
-	return fmt.Sprintf("[Auto] %s", a.Name)
+	return taskservice.TruncateTaskTitle(fmt.Sprintf("[Auto] %s", a.Name))
 }
 
 // associateAutomationPR links a task to a GitHub PR using trigger data.

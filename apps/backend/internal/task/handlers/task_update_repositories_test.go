@@ -133,6 +133,36 @@ func TestWSUpdateTaskTitleOnlyPreservesRepositories(t *testing.T) {
 	assert.Equal(t, []string{"repo-1"}, decodeTaskRepositoryIDs(t, resp.Payload))
 }
 
+func TestHTTPUpdateTaskRejectsOverlongTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h, repo := newUpdateTaskHandlers(t)
+
+	rec := doUpdateTaskRequest(t, h, `{"title":"xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"}`)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+	assert.False(t, repo.deleteReposCalled, "rejected title must not touch task repositories")
+}
+
+func TestWSUpdateTaskReturnsValidationErrorForOverlongTitle(t *testing.T) {
+	h, repo := newUpdateTaskHandlers(t)
+
+	msg, err := ws.NewRequest("msg-title", ws.ActionTaskUpdate, map[string]any{
+		"id":    "task-1",
+		"title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsUpdateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "60")
+	assert.False(t, repo.deleteReposCalled, "rejected title must not touch task repositories")
+}
+
 func TestConvertUpdateRepositories(t *testing.T) {
 	assert.Nil(t, convertUpdateRepositories(false, nil), "absent field must stay nil")
 

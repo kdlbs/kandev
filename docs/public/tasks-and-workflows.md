@@ -48,7 +48,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
   caption="A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review."
 />
 
-1. Enter a title.
+1. Enter a concise title of up to 60 characters. Titles prefilled from a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the detailed context belongs in the description.
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 

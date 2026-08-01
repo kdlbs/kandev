@@ -26,6 +26,7 @@ import {
 } from "@/components/task-create-dialog-repositories-state";
 import { useDialogComputed } from "@/components/task-create-dialog-computed";
 import { createDebugLogger } from "@/lib/debug/log";
+import { clampTaskTitleInput, truncateRemoteTaskTitle } from "@/lib/task-title";
 
 const stateDebug = createDebugLogger("task-create:state");
 
@@ -136,8 +137,14 @@ function resolveFormDefaults(
     !hasUserContent(initialValues) && workspaceId ? getTaskCreateDraft(workspaceId) : null;
   const initTitle = initialValues?.title ?? "";
   const initDesc = initialValues?.description ?? "";
+  let name = initTitle;
+  if (draft?.title) {
+    name = clampTaskTitleInput(draft.title);
+  } else if (initialValues?.githubUrl) {
+    name = truncateRemoteTaskTitle(initTitle);
+  }
   return {
-    name: draft?.title ?? initTitle,
+    name,
     description: draft?.description ?? initDesc,
     source: resolveDefaultsSource(Boolean(draft), initialValues),
   };
@@ -493,6 +500,7 @@ function useTitleAutofillFromPrimaryGitHubInfo(args: {
   const suggested = primaryRemoteUrl
     ? prInfoByUrl.info(primaryRemoteUrl)?.suggestedTitle
     : undefined;
+  const boundedSuggested = suggested ? truncateRemoteTaskTitle(suggested) : undefined;
 
   // Reset ownership-tracking when the URL changes — switching to a different
   // PR URL grants a fresh autofill opportunity even if the user previously
@@ -521,18 +529,18 @@ function useTitleAutofillFromPrimaryGitHubInfo(args: {
 
   useEffect(() => {
     if (!open) return;
-    if (!suggested) return;
+    if (!boundedSuggested) return;
     if (lastAutoFilledRef.current === USER_CLEARED_SENTINEL) return;
     const trimmed = taskName.trim();
     // Two writeable states: title is empty AND we haven't auto-filled yet, or
     // title equals our last auto-fill (so a fresh PR URL replaces a previous
     // PR's auto-filled title).
     if (trimmed && taskName !== lastAutoFilledRef.current) return;
-    if (taskName === suggested) return;
-    lastAutoFilledRef.current = suggested;
-    setTaskName(suggested);
+    if (taskName === boundedSuggested) return;
+    lastAutoFilledRef.current = boundedSuggested;
+    setTaskName(boundedSuggested);
     setHasTitle(true);
-  }, [open, suggested, taskName, setTaskName, setHasTitle]);
+  }, [open, boundedSuggested, taskName, setTaskName, setHasTitle]);
 }
 
 export type { DialogFormState } from "@/components/task-create-dialog-types";

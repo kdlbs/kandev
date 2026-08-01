@@ -3,12 +3,14 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // seedAutomationWorkspaceRepos creates a workspace with the given repository
@@ -86,6 +88,21 @@ func TestResolveAutomationRepository_EmptyListFallsBackToWorkspace(t *testing.T)
 
 	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-only" {
 		t.Fatalf("expected fallback to the workspace's only repository, got %+v", resolved)
+	}
+}
+
+func TestResolveAutomationTaskTitleTruncatesRenderedTitle(t *testing.T) {
+	svc := &Service{}
+	longTitle := strings.Repeat("x", taskservice.TaskTitleMaxLength+20)
+	a := &automation.Automation{TaskTitleTemplate: "{{pr.title}}"}
+	evt := &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeGitHubPR,
+		TriggerData: json.RawMessage(`{"title":"` + longTitle + `"}`),
+	}
+
+	got := svc.resolveAutomationTaskTitle(a, evt)
+	if got != strings.Repeat("x", taskservice.TaskTitleMaxLength-1)+"…" {
+		t.Fatalf("resolved title = %q, want rendered title truncated with ellipsis", got)
 	}
 }
 

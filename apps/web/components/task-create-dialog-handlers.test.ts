@@ -1,6 +1,7 @@
+import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
 import type { Executor, Repository } from "@/lib/types/http";
+import type { DialogFormState } from "@/components/task-create-dialog-types";
 import {
   applyCreatedLocalRepository,
   findDirectLocalExecutorProfile,
@@ -164,6 +165,24 @@ describe("repository source changes", () => {
 
     expect(fs.setExecutorId).toHaveBeenCalledWith("");
     expect(fs.setExecutorProfileId).toHaveBeenCalledWith("");
+  });
+});
+
+describe("task title handling", () => {
+  it("clamps astral Unicode input before updating the dialog state", () => {
+    const setTaskName = vi.fn();
+    const setHasTitle = vi.fn();
+    const fs = {
+      executorProfileId: "",
+      setTaskName,
+      setHasTitle,
+    } as unknown as DialogFormState;
+    const { result } = renderHook(() => useDialogHandlers(fs, []));
+
+    act(() => result.current.handleTaskNameChange("😀".repeat(80)));
+
+    expect(setTaskName).toHaveBeenCalledWith("😀".repeat(60));
+    expect(setHasTitle).toHaveBeenCalledWith(true);
   });
 });
 

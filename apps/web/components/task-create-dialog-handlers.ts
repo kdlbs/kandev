@@ -5,6 +5,7 @@ import type { Executor, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 type TaskCreateLastUsedPatch = {
   repository_id?: string | null;
@@ -275,8 +276,9 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
   );
   const handleTaskNameChange = useCallback(
     (value: string) => {
-      fs.setTaskName(value);
-      fs.setHasTitle(value.trim().length > 0);
+      const boundedValue = clampTaskTitleInput(value);
+      fs.setTaskName(boundedValue);
+      fs.setHasTitle(boundedValue.trim().length > 0);
     },
     [fs],
   );

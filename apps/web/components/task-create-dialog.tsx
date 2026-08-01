@@ -49,6 +49,7 @@ import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-creat
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
 
@@ -310,35 +311,34 @@ function useEnhanceForDialog(
   };
 }
 
-function useJiraImportHandler(fs: DialogFormState) {
+function useJiraImportHandler(fs: DialogFormState, handleTaskNameChange: (value: string) => void) {
   return useCallback(
     (ticket: JiraTicket) => {
-      const title = `[${ticket.key}] ${ticket.summary}`;
-      fs.setTaskName(title);
-      fs.setHasTitle(true);
+      handleTaskNameChange(truncateRemoteTaskTitle(`[${ticket.key}] ${ticket.summary}`));
       const description = ticket.description?.trim()
         ? `${ticket.description}\n\n---\nJira: ${ticket.url}`
         : `Jira: ${ticket.url}`;
       fs.descriptionInputRef.current?.setValue(description);
       fs.setHasDescription(true);
     },
-    [fs],
+    [fs, handleTaskNameChange],
   );
 }
 
-function useLinearImportHandler(fs: DialogFormState) {
+function useLinearImportHandler(
+  fs: DialogFormState,
+  handleTaskNameChange: (value: string) => void,
+) {
   return useCallback(
     (issue: LinearIssue) => {
-      const title = `[${issue.identifier}] ${issue.title}`;
-      fs.setTaskName(title);
-      fs.setHasTitle(true);
+      handleTaskNameChange(truncateRemoteTaskTitle(`[${issue.identifier}] ${issue.title}`));
       const description = issue.description?.trim()
         ? `${issue.description}\n\n---\nLinear: ${issue.url}`
         : `Linear: ${issue.url}`;
       fs.descriptionInputRef.current?.setValue(description);
       fs.setHasDescription(true);
     },
-    [fs],
+    [fs, handleTaskNameChange],
   );
 }
 
@@ -523,8 +523,8 @@ export function useTaskCreateDialogSetup(
     userSettingsLoaded,
     guardedHandleSubmit,
     enhance: useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open),
-    handleJiraImport: useJiraImportHandler(fs),
-    handleLinearImport: useLinearImportHandler(fs),
+    handleJiraImport: useJiraImportHandler(fs, handlers.handleTaskNameChange),
+    handleLinearImport: useLinearImportHandler(fs, handlers.handleTaskNameChange),
   };
 }
 

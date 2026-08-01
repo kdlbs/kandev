@@ -10,6 +10,7 @@ import { linkToTask } from "@/lib/links";
 import { useRouter } from "@/lib/routing/client-router";
 import type { Issue, MR } from "@/lib/types/gitlab";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 export type GitLabTaskPreset = {
   id: string;
@@ -81,7 +82,7 @@ function buildInitialValues(
   const repository = projectRepository(item.project_path, configuredHost, repositories);
   const branch = payload.kind === "mr" && repository ? payload.mr.head_branch : undefined;
   return {
-    title: `${payload.preset.label}: ${item.title}`,
+    title: truncateRemoteTaskTitle(`${payload.preset.label}: ${item.title}`),
     description: payload.preset.prompt({ url: item.web_url, title: item.title }),
     repositoryId: repository?.id,
     branch,

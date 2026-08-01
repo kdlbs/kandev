@@ -52,6 +52,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [documents](tasks/documents.md) | shipped |
 | [execution-stages](tasks/execution-stages.md) | shipped |
 | [labels](tasks/labels.md) | shipped |
+| [title-length-limit](tasks/title-length-limit.md) | complete |
 | [model-unification](tasks/model-unification.md) | draft |
 | [without-repositories](tasks/without-repositories.md) | draft |
 | [attach-workspace-sources](tasks/attach-workspace-sources.md) | building |
