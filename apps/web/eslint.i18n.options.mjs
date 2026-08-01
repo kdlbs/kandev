@@ -74,7 +74,7 @@ export const noLiteralStringOptions = {
       // separator, which the token patterns above do not cover. Copy chunks
       // ("Select task ", " tasks, over WIP limit") carry a capital, a space or
       // punctuation and so still get flagged.
-      "[a-z0-9]*(?:[-_][a-z0-9]*)*",
+      "[a-z0-9]+(?:[-_][a-z0-9]*)*|[-_][a-z0-9]+(?:[-_][a-z0-9]*)*",
       // Single lowercase/camel/kebab tokens are prop enum values,
       // classnames, and identifiers (variant="ghost", side="top",
       // value="work-items") — never display copy, which is capitalized

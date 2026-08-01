@@ -25,7 +25,7 @@
     "licenses:gen": "tsx scripts/generate-licenses.ts",
     "i18n:pseudo": "node scripts/generate-pseudo-locale.mjs",
     "i18n:check": "node scripts/check-i18n-keys.mjs && node scripts/check-trans-indices.mjs && node scripts/check-inline-plurals.mjs && node scripts/check-module-scope-t.mjs",
-    "i18n:ratchet": "node scripts/check-new-code-i18n.mjs && node scripts/check-guard-allowlist.mjs"
+    "i18n:ratchet": "node scripts/run-i18n-ratchet.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",

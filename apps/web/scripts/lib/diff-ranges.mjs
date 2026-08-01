@@ -26,6 +26,15 @@ export function parseAddedLineRanges(diffText) {
   let current = null;
 
   for (const line of diffText.split("\n")) {
+    // Every file entry starts here, so reset first. Entries that emit no `+++`
+    // header at all — a 100%-similarity rename, a binary file, a mode-only
+    // change — would otherwise leave the PREVIOUS file selected, and any hunk
+    // that followed would be attributed to it. Not reachable with today's git
+    // output, but it is a one-line invariant instead of a standing assumption.
+    if (line.startsWith("diff --git ")) {
+      current = null;
+      continue;
+    }
     if (line.startsWith("+++ ")) {
       const target = line.slice(4).trim();
       // `+++ /dev/null` marks a deletion; `+++ b/path` is the new file.

@@ -13,45 +13,27 @@
  *
  * Usage: node scripts/check-guard-allowlist.mjs [--base <ref-or-sha>]
  */
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const WEB_DIR = path.resolve(import.meta.dirname, "..");
-const REPO_ROOT = path.resolve(WEB_DIR, "..", "..");
+import { git, REPO_ROOT, resolveBase, WEB_DIR } from "./lib/git-base.mjs";
+
 const OPTIONS_PATH = "apps/web/eslint.i18n.options.mjs";
 
-function git(args) {
-  return execFileSync("git", args, { cwd: REPO_ROOT, encoding: "utf8" });
-}
-
-function resolveBase() {
-  const flag = process.argv.indexOf("--base");
-  const requested = flag !== -1 && process.argv[flag + 1] ? process.argv[flag + 1] : "origin/main";
-  try {
-    return git(["merge-base", requested, "HEAD"]).trim();
-  } catch {
-    return null;
-  }
-}
-
-const base = resolveBase();
-if (!base) {
-  console.log("⚠ guard allowlist check skipped — no base ref (pass --base <sha>)");
+const resolved = resolveBase();
+if (resolved.skip) {
+  console.log(`⚠ guard allowlist check skipped — ${resolved.skip}`);
   process.exit(0);
 }
+const { base } = resolved;
 
 let baseSource;
 try {
   // stderr silenced: "exists on disk, but not in <rev>" is the expected result
   // for any branch forked before the options module landed, and printing a
   // `fatal:` line there reads as a failure in CI logs when it is not one.
-  baseSource = execFileSync("git", ["show", `${base}:${OPTIONS_PATH}`], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  });
+  baseSource = git(["show", `${base}:${OPTIONS_PATH}`], { quiet: true });
 } catch {
   // The options module does not exist at the base commit, so nothing can have
   // been removed from it. True for any branch forked before i18n landed.
@@ -82,11 +64,20 @@ const before = await guardFilesFrom(baseSource);
 const after = await guardFilesFrom(fs.readFileSync(path.join(REPO_ROOT, OPTIONS_PATH), "utf8"));
 
 const afterSet = new Set(after);
-// A glob whose file is gone was removed for a legitimate reason.
+/**
+ * An entry may be removed once its path is genuinely gone — a deleted or renamed
+ * file, or a migrated directory that was later deleted wholesale. Only a removal
+ * whose target still EXISTS un-protects live code, so that is all we flag.
+ *
+ * Globs are resolved rather than assumed live: flagging every removed glob would
+ * block the legitimate flow of migrating `components/foo/**`, listing it, then
+ * deleting `foo/` entirely.
+ */
 const removed = before.filter((entry) => {
   if (afterSet.has(entry)) return false;
-  const isGlob = /[*?[\]{}]/.test(entry);
-  if (isGlob) return true;
+  if (/[*?[\]{}]/.test(entry)) {
+    return fs.globSync(entry, { cwd: WEB_DIR }).length > 0;
+  }
   return fs.existsSync(path.join(WEB_DIR, entry));
 });
 

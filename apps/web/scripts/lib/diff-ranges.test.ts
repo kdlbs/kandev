@@ -64,6 +64,51 @@ describe("parseAddedLineRanges", () => {
   it("returns nothing for an empty diff", () => {
     expect(parseAddedLineRanges("").size).toBe(0);
   });
+
+  it("ignores a pure rename, which emits no headers or hunks", () => {
+    // A plain `git mv` must cost nothing: attributing the moved file's existing
+    // lines would demand a full migration for a file nobody edited.
+    const diff = [
+      "diff --git a/old.tsx b/new.tsx",
+      "similarity index 100%",
+      "rename from old.tsx",
+      "rename to new.tsx",
+    ].join("\n");
+    expect(parseAddedLineRanges(diff).size).toBe(0);
+  });
+
+  it("does not attribute a later hunk to the file before a headerless entry", () => {
+    // A binary entry emits no `+++`, so without resetting on `diff --git` the
+    // previous file would stay selected and absorb the next hunk.
+    const diff = [
+      "diff --git a/a.tsx b/a.tsx",
+      OLD_A,
+      NEW_A,
+      "@@ -1 +1 @@",
+      "+a",
+      "diff --git a/img.png b/img.png",
+      "Binary files a/img.png and b/img.png differ",
+      "@@ -99,0 +99,3 @@",
+      "+not really a hunk",
+    ].join("\n");
+    const ranges = parseAddedLineRanges(diff);
+    expect(ranges.get("a.tsx")).toEqual([[1, 1]]);
+    expect(ranges.has("img.png")).toBe(false);
+  });
+
+  it("keeps a rename-plus-edit scoped to the edited lines only", () => {
+    const diff = [
+      "diff --git a/old.tsx b/new.tsx",
+      "similarity index 92%",
+      "rename from old.tsx",
+      "rename to new.tsx",
+      "--- a/old.tsx",
+      "+++ b/new.tsx",
+      "@@ -2,0 +3 @@",
+      "+const added = 1;",
+    ].join("\n");
+    expect(parseAddedLineRanges(diff).get("new.tsx")).toEqual([[3, 3]]);
+  });
 });
 
 describe("lineInRanges", () => {
