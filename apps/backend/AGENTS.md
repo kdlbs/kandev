@@ -275,27 +275,6 @@ Every long-running goroutine must have a single owner with explicit start and st
 
 You may still list the column in the `CREATE TABLE` so fresh DBs get it inline, but the migration is the source of truth for evolution and must stand alone. New columns also need: the struct field in `models/`, the DTO field + `ToAPI` in `pkg/api/v1/`, and every `CreateX`/`UpdateX`/bulk write in the repo that should set it.
 
-## Internationalization
-
-`internal/i18n` covers only what Go renders **directly to a browser**, which today
-is just the SPA-unavailable error pages. Everything else stays English by design —
-the ~1,100 `http.Error` / `gin.H{"error": …}` strings are diagnostics the SPA maps
-onto its own translated copy, and log lines, agent/ACP output, and CLI output are
-not display copy. The shared-task artifacts (`share.html`, gist README and
-description) are server-rendered and in scope for localization, but not done yet.
-
-- `i18n.T(locale, key)` for lookup, `i18n.FromRequest(r)` at the HTTP boundary.
-- The package has no placeholder interpolation and no context-carried locale.
-  Both are needed for the share artifacts; add them with that work rather than
-  ahead of it.
-- Catalogs are embedded JSON (`internal/i18n/locales/<locale>.json`). `pseudo` is
-  **generated** — run `pnpm run i18n:pseudo` from `apps/web`, which writes both
-  the frontend and backend catalogs. A per-package test fails if an `en` key is
-  missing from `pseudo`.
-- **For new user-facing output, prefer returning a stable error code** the
-  frontend translates. Reach for `i18n.T` only when Go itself writes the bytes a
-  user reads.
-
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
@@ -317,4 +296,5 @@ golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping
 - `internal/integrations/AGENTS.md` — playbook for adding a new third-party integration (Jira/Linear pattern)
+- `docs/i18n.md` ("Backend") — `internal/i18n` covers only what Go renders straight to a browser (today: the SPA-unavailable error pages). Everything else stays English by design; for new user-facing output prefer a stable error code the frontend translates.
 - `cmd/mock-agent/AGENTS.md` — predefined `/e2e:<name>` scenarios vs inline `e2e:...` scripts, recipe for adding a scenario, and the rebuild-before-e2e requirement
