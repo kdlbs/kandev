@@ -7,7 +7,6 @@ export type BackendMessageType =
   | "agent.updated"
   | "terminal.output"
   | "diff.update"
-  | "system.error"
   | "workspace.created"
   | "workspace.updated"
   | "workspace.deleted"
@@ -75,11 +74,6 @@ export type DiffUpdatePayload = {
   }>;
 };
 
-export type SystemErrorPayload = {
-  message: string;
-  code?: string;
-};
-
 export type TaskSessionNotificationPayload = {
   task_id: string;
   session_id: string;
@@ -133,7 +127,6 @@ export type BackendMessageMap = {
   "agent.updated": BackendMessage<"agent.updated", AgentUpdatePayload>;
   "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
   "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
-  "system.error": BackendMessage<"system.error", SystemErrorPayload>;
   "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
   "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;
   "workspace.deleted": BackendMessage<"workspace.deleted", WorkspacePayload>;

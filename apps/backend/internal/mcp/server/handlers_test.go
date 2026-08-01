@@ -39,6 +39,16 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, props, "workflow_id")
 	assert.Contains(t, props, "workflow_step_id")
 	assert.Contains(t, props, "workspace_mode")
+	assert.Contains(t, props, "prompt")
+	assert.NotContains(t, props, "description", "legacy alias must not increase the advertised schema")
+	assert.Contains(t, tool.Tool.Description, "'prompt' is the sub-agent's initial prompt")
+	assert.NotContains(t, tool.Tool.Description, "'description' is the sub-agent's initial prompt")
+	promptProp, ok := props["prompt"].(map[string]interface{})
+	require.True(t, ok, "prompt schema should be an object")
+	promptDesc, ok := promptProp["description"].(string)
+	require.True(t, ok, "prompt should have a description")
+	assert.Contains(t, promptDesc, "For auto-started subtasks")
+	assert.NotContains(t, promptDesc, "REQUIRED")
 	assert.Contains(t, tool.Tool.Description, "explicit agent_profile_id always wins")
 	assert.Contains(t, tool.Tool.Description, "current_task")
 	assert.Contains(t, tool.Tool.Description, "workspace_default")
@@ -84,6 +94,76 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.False(t, requiredSet["parent_id"], "parent_id should not be required")
 	assert.False(t, requiredSet["workspace_id"], "workspace_id should not be required")
 	assert.False(t, requiredSet["workflow_id"], "workflow_id should not be required")
+}
+
+func TestCreateTask_PromptCanonical(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":     "Review lane",
+		"parent_id": "self",
+		"prompt":    "Review the authentication changes in detail.",
+	})
+
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Review the authentication changes in detail.", payload["description"])
+	assert.NotContains(t, payload, "prompt")
+}
+
+func TestCreateTask_DescriptionCompatibility(t *testing.T) {
+	backend := &testBackend{
+		response: map[string]interface{}{"id": "subtask-1", "parent_id": "task-current"},
+	}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":       "Review lane",
+		"parent_id":   "self",
+		"description": "Review the authentication changes in detail.",
+	})
+
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "Review the authentication changes in detail.", payload["description"])
+	assert.NotContains(t, payload, "prompt")
+}
+
+func TestCreateTask_RejectsConflictingContext(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":       "Review lane",
+		"description": "Short label",
+		"prompt":      "Detailed review instructions",
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	require.NotEmpty(t, result.Content)
+	content, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, content.Text, "description")
+	assert.Contains(t, content.Text, "prompt")
+}
+
+func TestCreateTask_RejectsUnknownArguments(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "create_task_kandev", map[string]interface{}{
+		"title":        "Review lane",
+		"instructions": "Detailed review instructions",
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
 }
 
 func TestCreateTask_SelfResolvesToTaskID(t *testing.T) {
@@ -528,12 +608,10 @@ func TestMessageTask_ForwardsToBackend(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "message_task_kandev", map[string]interface{}{
-		"task_id":           "task-target",
-		"session_id":        "sess-target",
-		"prompt":            "follow up",
-		"delivery_mode":     "interrupt",
-		"sender_task_id":    "spoofed-task",
-		"sender_session_id": "spoofed-session",
+		"task_id":       "task-target",
+		"session_id":    "sess-target",
+		"prompt":        "follow up",
+		"delivery_mode": "interrupt",
 	})
 
 	assert.False(t, result.IsError)
@@ -638,12 +716,7 @@ func TestStopTask_ForwardsTrustedSenderToBackend(t *testing.T) {
 	s := newTaskModeServer(t, backend, "task-current")
 
 	result := callTool(t, s, "stop_task_kandev", map[string]interface{}{
-		"task_id":           "task-target",
-		"sender_task_id":    "spoofed-task",
-		"sender_session_id": "spoofed-session",
-		"session_id":        "spoofed-target-session",
-		"reason":            "unsafe caller-controlled reason",
-		"force":             true,
+		"task_id": "task-target",
 	})
 
 	assert.False(t, result.IsError)

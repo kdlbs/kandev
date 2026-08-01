@@ -14,9 +14,11 @@
 #     on the host and are served by the Go backend.
 #   • Runs N shards concurrently (--shards N): N isolated containers in docker
 #     mode, or N host processes with distinct E2E_PORT_OFFSET + output dirs.
-#   • Never leaves root-owned junk in the repo: points Playwright output at a
-#     container-local dir. `clean`
-#     removes any pre-existing root-owned artifacts via a throwaway container.
+#   • Never leaves root-owned junk in the repo: points normal Playwright output
+#     at a container-local dir. With CAPTURE_PR_ASSETS, captures are written to
+#     the mounted workspace and ownership is restored after the run. `clean`
+#     removes any pre-existing root-owned normal artifacts via a throwaway
+#     container.
 #
 # Usage:
 #   run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
@@ -59,14 +61,35 @@ resolve_runtime_image() {
 # --- clean: remove build/test artifacts, including root-owned ones from prior
 # docker runs (host user can't rm root-owned files, so shell out to a container).
 clean_artifacts() {
-  log "cleaning e2e/test-results, blob-report, and /tmp shard logs"
-  rm -rf "$WEB_DIR"/e2e/test-results* "$WEB_DIR"/e2e/blob-report 2>/dev/null
+  log "cleaning e2e/test-results, blob-report, PR assets, and /tmp shard logs"
+  rm -rf "$WEB_DIR"/e2e/test-results* "$WEB_DIR"/e2e/blob-report "$WEB_DIR"/.pr-assets 2>/dev/null
   rm -f /tmp/e2e-host-shard-*.log /tmp/e2e-docker-shard-*.log 2>/dev/null
   if docker_up; then
     docker run --rm -v "$WEB_DIR":/web alpine sh -c \
-      'rm -rf /web/e2e/test-results* /web/e2e/blob-report' \
+      'rm -rf /web/e2e/test-results* /web/e2e/blob-report /web/.pr-assets' \
       2>/dev/null || true
   fi
+}
+
+prepare_pr_assets() {
+  [[ -n "${CAPTURE_PR_ASSETS:-}" ]] || return
+  log "preparing PR asset directory"
+  rm -rf "$WEB_DIR/.pr-assets" 2>/dev/null || true
+  if [[ -e "$WEB_DIR/.pr-assets" ]]; then
+    docker_up || die "cannot remove root-owned PR assets without Docker; run e2e:clean where Docker is available"
+    docker run --rm -v "$WEB_DIR":/web alpine sh -c 'rm -rf /web/.pr-assets' \
+      >/dev/null || die "failed to remove root-owned PR assets"
+  fi
+  mkdir -p "$WEB_DIR/.pr-assets"
+}
+
+restore_pr_asset_ownership() {
+  [[ -n "${CAPTURE_PR_ASSETS:-}" ]] || return 0
+  docker run --rm -v "$WEB_DIR":/web alpine sh -c "chown -R $(id -u):$(id -g) /web/.pr-assets" \
+    >/dev/null || {
+      log "failed to restore PR asset ownership"
+      return 1
+    }
 }
 
 build_fe() {
@@ -168,6 +191,7 @@ STRICT_ENV=()
 # HOST mode
 # ---------------------------------------------------------------------------
 run_host() {
+  prepare_pr_assets
   [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; build_plugin_package; }
   local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
   if [[ "$SHARDS" -le 1 ]]; then
@@ -198,10 +222,13 @@ run_docker() {
   local img; img="$(resolve_runtime_image)"
   log "runtime image: $img"
   clean_artifacts
+  prepare_pr_assets
   [[ "$DO_BUILD" == 1 ]] && { build_backend_for_docker "$img"; build_fe; build_plugin_package; }
 
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
+  local capture_flag=()
+  [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
   local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\""
 
   run_one() {  # $1=shard index (or 0 for unsharded)
@@ -210,13 +237,19 @@ run_docker() {
     docker run --rm --ipc=host \
       -v "$REPO_ROOT":/work -w /work/apps/web \
       ${strict_flag[@]+"${strict_flag[@]}"} \
+      ${capture_flag[@]+"${capture_flag[@]}"} \
       -e NODE_OPTIONS=--dns-result-order=ipv4first \
       -e PLAYWRIGHT_BROWSERS_PATH=/ms-playwright \
       "$img" \
       bash -lc "$pw $shardflag --output=$out --reporter=list \"\$@\"" e2e-runner ${PW_ARGS[@]+"${PW_ARGS[@]}"}
   }
 
-  if [[ "$SHARDS" -le 1 ]]; then run_one 0; return $?; fi
+  if [[ "$SHARDS" -le 1 ]]; then
+    run_one 0
+    local rc=$?
+    restore_pr_asset_ownership || return 1
+    return $rc
+  fi
   log "running $SHARDS isolated containers"
   local pids=() rc=0 i
   for ((i=1; i<=SHARDS; i++)); do
@@ -227,6 +260,7 @@ run_docker() {
   for ((i=1; i<=SHARDS; i++)); do
     printf '  shard %s: %s\n' "$i" "$(grep -Eo '[0-9]+ (passed|failed|flaky)' "/tmp/e2e-docker-shard-$i.log" | tr '\n' ' ')" >&2
   done
+  restore_pr_asset_ownership || return 1
   log "docker shard logs: /tmp/e2e-docker-shard-*.log"
   return $rc
 }

@@ -93,12 +93,14 @@ type Server struct {
 	httpServer         *server.StreamableHTTPServer
 	logger             *logger.Logger
 	mcpLogger          *zap.Logger // optional file logger for MCP debug traces
-	mu                 sync.Mutex
+	mu                 sync.RWMutex
 	running            bool
 	attachmentMu       sync.RWMutex
 	attachmentAttempt  streams.MCPAttachmentAttempt
 	attachmentAttempts map[string]streams.MCPAttachmentAttempt
 	attachmentReporter func(streams.MCPAttachmentEvidence)
+	validatorMu        sync.RWMutex
+	toolValidators     map[string]toolArgumentValidator
 }
 
 // New creates a new MCP server for agentctl.
@@ -363,7 +365,14 @@ func (s *Server) wrapHandler(toolName string, handler server.ToolHandlerFunc) se
 				zap.Any("args", args))
 		}
 
-		result, err := handler(ctx, req)
+		validatedReq, validationErr := s.validateToolArguments(toolName, req)
+		var result *mcp.CallToolResult
+		var err error
+		if validationErr != nil {
+			result = mcp.NewToolResultError(validationErr.Error())
+		} else {
+			result, err = handler(ctx, validatedReq)
+		}
 		duration := time.Since(start)
 
 		switch {
@@ -510,6 +519,7 @@ func (s *Server) registerTools() {
 		zap.String("mode", s.mode),
 		zap.Int("count", count),
 		zap.Bool("disable_ask_question", s.disableAskQuestion))
+	s.rebuildToolArgumentValidators()
 }
 
 func (s *Server) registerKanbanTools() {
@@ -701,8 +711,8 @@ IMPORTANT:
   - Different repo (you passed repository_url / repository_id / local_path): subtask defaults to that repo's default_branch
   - Pass base_branch explicitly to override either default. Use list_repositories_kandev to see each repo's default_branch.
 - Top-level tasks need a repository via repository_url, repository_id, or local_path
-- 'description' is the sub-agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
+- 'prompt' is the sub-agent's initial prompt — be specific and detailed
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later, or creating a tracking task with no immediate work), and still pass agent_profile_id unless it can be inherited. When in doubt, leave it true.
 - Kanban subtasks cannot have their own subtasks (max nesting depth is 1). To break work down further, create a sibling under the same parent. (Office task trees are exempt.)`
 	parentDesc := "Parent task ID for subtasks. Use 'self' to create a subtask of your current task (RECOMMENDED for plan phases, delegated work). Omit only for unrelated top-level tasks."
 	agentProfileDesc := "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits the current/source or parent profile before workflow/workspace defaults; workspace_default skips those task profiles, then uses workflow profiles before the target workspace default. start_agent=false still needs a resolvable profile for later manual start."
@@ -716,8 +726,8 @@ IMPORTANT:
 - An explicit agent_profile_id always wins. When omitted, the saved user policy applies: current_task inherits a parent profile before workflow and target-workspace defaults; workspace_default skips the parent profile, honors workflow profiles first, then uses the target workspace default. External mode has no current/source task.
 - Executor and executor-profile inheritance from a parent is unchanged by either saved agent-profile policy.
 - Every created task must have a resolvable agent profile. start_agent=false still records the profile for a later manual start.
-- 'description' is the agent's initial prompt — be specific and detailed
-- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the description. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
+- 'prompt' is the agent's initial prompt — be specific and detailed
+- start_agent defaults to true and is what you want in nearly every case — the new task auto-launches an agent that immediately works on the prompt. Pass start_agent=false ONLY for an explicit placeholder (e.g. queuing work the user will start later), and still pass agent_profile_id unless a default exists. When in doubt, leave it true.
 - Use parent_id only when delegating to a known existing task by its ID`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
 		agentProfileDesc = "Agent profile ID to use. Explicit agent_profile_id always wins. When omitted, current_task inherits a parent profile before workflow/workspace defaults; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode has no current/source task. start_agent=false still needs a resolvable profile for later manual start."
@@ -732,10 +742,10 @@ IMPORTANT:
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
 			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.Description("The task title")),
-			mcp.WithString("description", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. REQUIRED for subtasks: without a description the sub-agent starts with no context and cannot do useful work. Be specific and detailed.")),
+			mcp.WithString("prompt", mcp.Description("The initial prompt for the sub-agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the sub-agent without task-specific context.")),
 			mcp.WithString("agent_profile_id", mcp.Description(agentProfileDesc)),
 			mcp.WithString("executor_profile_id", mcp.Description("Executor profile ID to use (determines the runtime environment: local, worktree, docker, etc.). For subtasks, inherited from the parent session. For top-level tasks, ask the user which executor profile they want if not already known.")),
-			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the description is preserved but no work happens automatically.")),
+			mcp.WithBoolean("start_agent", mcp.Description("Whether to auto-start an agent on the created task. Default: true — leave it true unless you specifically want a placeholder task with no agent running. Setting false leaves the task waiting for the user to click 'Start agent' in the UI; the prompt is preserved but no work happens automatically.")),
 			mcp.WithString("repository_id", mcp.Description("Repository ID. Required for top-level tasks unless local_path or repository_url is provided. For subtasks: optional — supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("local_path", mcp.Description("Local repository folder path (e.g. '/Users/me/projects/myrepo'). Will create/find the repository automatically. Preferred for local worktree flow. For subtasks: supply only when the subtask should target a different repo than the parent.")),
 			mcp.WithString("repository_url", mcp.Description("GitHub repository URL (e.g. 'https://github.com/owner/repo'). The repository will be cloned automatically on first use. For subtasks: supply only when the subtask should target a different repo than the parent.")),

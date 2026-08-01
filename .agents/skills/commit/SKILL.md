@@ -86,6 +86,14 @@ explicitly requests task tracking.
      Mention that you wired it up. Subsequent commits will run hooks automatically.
    - If both checks pass, no output needed.
 
+   - Before the first commit, ensure the worktree can run the commit-msg
+     dependency. If `apps/node_modules/.bin/commitlint` is absent, install it
+     from `apps/` before committing:
+     ```bash
+     cd apps && pnpm install --frozen-lockfile
+     ```
+     Retry the normal commit after the install; never bypass the hook.
+
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
 3. **Capture the parent SHA and preserve hook evidence:**
@@ -109,9 +117,24 @@ qualifies as a successful hook receipt.
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG"
+   if command -v rtk >/dev/null 2>&1; then
+     rtk proxy git commit -m "type(scope): description"
+   else
+     git commit -m "type(scope): description"
+   fi 2>&1 | tee "$COMMIT_LOG" >/dev/null
    ```
-   Remove the temporary log after copying the receipt into the handoff.
+   Read the log to extract the hook receipt, rather than printing the full
+   stream again. Remove the exact temporary file after copying the receipt into
+   the handoff:
+   ```bash
+   unlink "$COMMIT_LOG"
+   ```
+
+   If a hook fails only because another worktree is already running
+   golangci-lint (for example, `parallel golangci-lint is running`), wait for
+   that run to finish and retry the same commit. Do not bypass hooks or change
+   code for this transient lock; verify the retry has a normal hook receipt and
+   a clean worktree.
 
 6. **Return a hook receipt:** After a successful commit, report:
    ```text

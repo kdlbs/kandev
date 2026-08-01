@@ -152,7 +152,7 @@ func (s *Server) createTaskHandler() server.ToolHandlerFunc {
 			"workflow_step_id":    workflowStepID,
 			"workspace_mode":      req.GetString("workspace_mode", ""),
 			"title":               title,
-			"description":         req.GetString("description", ""),
+			"description":         req.GetString("prompt", ""),
 			"agent_profile_id":    req.GetString("agent_profile_id", ""),
 			"executor_profile_id": req.GetString("executor_profile_id", ""),
 			"source_task_id":      s.taskID,
