@@ -531,3 +531,41 @@ type failingGetTaskRepo struct {
 func (r *failingGetTaskRepo) GetTask(ctx context.Context, taskID string) (*models.Task, error) {
 	return nil, r.err
 }
+
+// TestGitLabMRStateConstantsMatchNormalizedVocabulary pins the orchestrator's
+// state constants to the exact strings gitlab.normalizeMRState emits, which
+// is a cross-package contract no other test covers.
+//
+// Every other assertion in this file compares against the constants
+// themselves (mrState: gitlabMRStateOpen, ...), so they all keep passing if a
+// constant's *value* drifts from what the gitlab package actually stores on
+// TaskMR.State. The failure is silent and total: GitLab's REST API reports an
+// open MR as "opened", and only convertRawMR's normalization turns that into
+// "open". If either side stops agreeing, currentTaskMRReviewRequest's
+// `mr.State != gitlabMRStateOpen` guard short-circuits for every open MR, so
+// review-requested notifications never evaluate and never fire — with no test
+// failure anywhere. (Observed live during QA against a mock-seeded MR whose
+// raw "opened" state bypassed normalization: review_request_initialized
+// stayed 0 forever.)
+//
+// gitlab.TestNormalizeMRState pins the producing side; this pins the
+// consuming side. The literals below must not be replaced by the constants.
+func TestGitLabMRStateConstantsMatchNormalizedVocabulary(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		got    string
+		want   string
+		rawAPI string
+	}{
+		{name: "open", got: gitlabMRStateOpen, want: "open", rawAPI: "opened"},
+		{name: "merged", got: gitlabMRStateMerged, want: "merged", rawAPI: "merged"},
+		{name: "closed", got: gitlabMRStateClosed, want: "closed", rawAPI: "closed"},
+		{name: "locked", got: gitlabMRStateLocked, want: "locked", rawAPI: "locked"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, tc.got,
+				"orchestrator constant drifted from gitlab.normalizeMRState(%q) output; "+
+					"lifecycle evaluation would silently stop matching this state", tc.rawAPI)
+		})
+	}
+}
