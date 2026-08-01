@@ -38,6 +38,7 @@ import { QueueAffordance } from "./queued-ghost-list";
 const SESSION_ID = "sess-1";
 const CHIP_ID = "queue-chip";
 const PANEL_ID = "queued-ghost-list";
+const QUEUED_BY_USER = "user-1";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -47,7 +48,7 @@ function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
     content: "hello world",
     plan_mode: false,
     queued_at: "2026-05-18T00:00:00Z",
-    queued_by: "user-1",
+    queued_by: QUEUED_BY_USER,
     ...overrides,
   };
 }
@@ -321,8 +322,8 @@ describe("QueueAffordance entity-reference edits", () => {
 describe("QueueAffordance merge wiring", () => {
   it("shows a merge control on the second row and calls mergeEntry with its id", () => {
     const state = queueState([
-      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
-      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+      entry({ id: "q-1", content: "first", queued_by: QUEUED_BY_USER }),
+      entry({ id: "q-2", content: "second", queued_by: QUEUED_BY_USER }),
     ]);
     useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
@@ -339,7 +340,7 @@ describe("QueueAffordance merge wiring", () => {
   it("hides the merge control when the rows have mismatched sender kinds", () => {
     const state = queueState([
       entry({ id: "q-1", content: "agent", queued_by: "agent" }),
-      entry({ id: "q-2", content: "user", queued_by: "user-1" }),
+      entry({ id: "q-2", content: "user", queued_by: QUEUED_BY_USER }),
     ]);
     useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
@@ -373,8 +374,8 @@ describe("QueueAffordance merge wiring", () => {
   it("toasts an error when the merge fails", async () => {
     const { toast } = await import("sonner");
     const state = queueState([
-      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
-      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+      entry({ id: "q-1", content: "first", queued_by: QUEUED_BY_USER }),
+      entry({ id: "q-2", content: "second", queued_by: QUEUED_BY_USER }),
     ]);
     state.mergeEntry = vi.fn(async () => {
       throw new Error("boom");
@@ -392,8 +393,8 @@ describe("QueueAffordance merge wiring", () => {
   it("does not toast on a drain race (QueueEntryNotFoundError)", async () => {
     const { toast } = await import("sonner");
     const state = queueState([
-      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
-      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+      entry({ id: "q-1", content: "first", queued_by: QUEUED_BY_USER }),
+      entry({ id: "q-2", content: "second", queued_by: QUEUED_BY_USER }),
     ]);
     state.mergeEntry = vi.fn(async () => {
       throw new QueueEntryNotFoundError();
@@ -409,8 +410,8 @@ describe("QueueAffordance merge wiring", () => {
 
   it("serializes rapid double-clicks on the same merge row", async () => {
     const state = queueState([
-      entry({ id: "q-1", content: "first", queued_by: "user-1" }),
-      entry({ id: "q-2", content: "second", queued_by: "user-1" }),
+      entry({ id: "q-1", content: "first", queued_by: QUEUED_BY_USER }),
+      entry({ id: "q-2", content: "second", queued_by: QUEUED_BY_USER }),
     ]);
     state.mergeEntry = vi.fn(async () => {});
     useQueueMock.mockReturnValue(state);
