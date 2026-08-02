@@ -148,7 +148,7 @@ Workflow-generated phase text such as `[IMPROVE PHASE]`, "implement the
 requested change", TDD checklists, verification commands, or commit steps does
 not opt a feature or behavior-changing fix out of spec-driven development. If
 the request neither references an existing reviewed package nor explicitly asks
-to implement a package created by the preceding design turn, run
+to implement a package created during a prior design turn, run
 `spec-driven-development` through the plan/task checkpoint and stop before
 production or permanent test changes. End that turn at the design-package
 handoff; do not ask for approval or a model switch. A generic implementation

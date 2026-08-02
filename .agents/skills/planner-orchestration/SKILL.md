@@ -26,7 +26,7 @@ conversation so the active model, transcript, and costs are visible in one place
    switches the main session if desired, and sends a later explicit
    implementation request. The files may remain `draft`/`pending`; do not wait
    for a separate approval marker.
-3. **Execution checkpoint.** After that explicit request, read the reviewed
+3. **Execution checkpoint.** After that explicit request, read the
    task file, mark it `in_progress`, implement with `/tdd`, run its exact
    targeted checks, and mark it `done`. Work sequentially through the plan by
    default. The user, not the harness, chooses the active implementation model.

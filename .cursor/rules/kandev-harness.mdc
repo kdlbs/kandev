@@ -14,7 +14,7 @@ Use the shared Kandev harness as the source of truth:
 
 For harness edits, load `.agents/skills/harness-improvement/SKILL.md` and the relevant bundled references under `.agents/skills/harness-improvement/references/`. Use `references/platforms/` before external docs.
 
-Use the strongest available model for specs/plans when appropriate, then return
+Use the strongest available model for specs/plans, then return
 a design-package handoff and end the turn. Do not ask for approval or a model
 switch; the user reviews the files, changes the model if desired, and later
 asks to implement. Plans may mark parallel-safe waves; the feature and fix
