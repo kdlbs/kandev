@@ -90,14 +90,7 @@ const (
 // If baseCommit is empty, returns recent commits (limited by limit parameter).
 // Stats (files changed, insertions, deletions) are fetched in-band via --shortstat
 // to avoid an N+1 git-show call per commit.
-// boundBaseRange caps the divergence-range walk at limit. Only the multi-repo
-// fan-out sets it: that path merges every repository's commits, sorts by date
-// and truncates to limit, so no single repository can contribute more than
-// limit commits to what the caller sees — anything beyond it is computed only
-// to be discarded, at one --shortstat diff per commit. The single-repo path
-// leaves it false, because there the result goes straight to the client and
-// capping would silently drop commits it would otherwise display.
-func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int, boundBaseRange bool) (*GitLogResult, error) {
+func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int) (*GitLogResult, error) {
 	result := &GitLogResult{
 		Commits: make([]*GitCommitInfo, 0),
 	}
@@ -120,13 +113,6 @@ func (g *GitOperator) GetLog(ctx context.Context, baseCommit string, limit int, 
 		// "recent N commits" path so future history-view callers (activity
 		// widgets, etc.) keep getting the full graph.
 		args = append(args, "--first-parent", baseCommit+"..HEAD")
-		// The range is normally the only bound here, and --shortstat means one
-		// diff per commit in it — on a branch far from its base that is a lot
-		// of work. boundBaseRange caps it for callers that provably cannot
-		// display more than limit commits anyway; see GetLog's doc comment.
-		if boundBaseRange && limit > 0 {
-			args = append(args, fmt.Sprintf("-n%d", limit))
-		}
 	case limit > 0:
 		args = append(args, fmt.Sprintf("-n%d", limit))
 	default:

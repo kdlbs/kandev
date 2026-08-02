@@ -2,7 +2,6 @@ package process
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -33,7 +32,7 @@ func TestGetLog_NoBaseReturnsFullGraph(t *testing.T) {
 	runGit(t, repoDir, "merge", "--no-ff", "-m", "Merge side", "side")
 
 	gitOp := NewGitOperator(repoDir, log, nil)
-	result, err := gitOp.GetLog(ctx, "", 0, false)
+	result, err := gitOp.GetLog(ctx, "", 0)
 	if err != nil {
 		t.Fatalf("GetLog returned error: %v", err)
 	}
@@ -100,7 +99,7 @@ func TestGetLog_StaleLocalBranchScenario(t *testing.T) {
 	if staleMergeBase != staleLocalMain {
 		t.Fatalf("expected stale merge-base = %s, got %s", staleLocalMain, staleMergeBase)
 	}
-	staleResult, err := gitOp.GetLog(ctx, staleMergeBase, 0, false)
+	staleResult, err := gitOp.GetLog(ctx, staleMergeBase, 0)
 	if err != nil {
 		t.Fatalf("GetLog with stale base failed: %v", err)
 	}
@@ -117,7 +116,7 @@ func TestGetLog_StaleLocalBranchScenario(t *testing.T) {
 	if correctMergeBase != advancedMain {
 		t.Fatalf("expected correct merge-base = %s, got %s", advancedMain, correctMergeBase)
 	}
-	correctResult, err := gitOp.GetLog(ctx, correctMergeBase, 0, false)
+	correctResult, err := gitOp.GetLog(ctx, correctMergeBase, 0)
 	if err != nil {
 		t.Fatalf("GetLog with correct base failed: %v", err)
 	}
@@ -171,7 +170,7 @@ func TestGetLog_FirstParentSkipsMergedInCommits(t *testing.T) {
 	postMerge := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
 
 	gitOp := NewGitOperator(repoDir, log, nil)
-	result, err := gitOp.GetLog(ctx, branchPoint, 0, false)
+	result, err := gitOp.GetLog(ctx, branchPoint, 0)
 	if err != nil {
 		t.Fatalf("GetLog returned error: %v", err)
 	}
@@ -277,55 +276,5 @@ func TestIsAncestor(t *testing.T) {
 				t.Errorf("IsAncestor(%s, %s) = %v, want %v", tc.ancestor, tc.descendant, got, tc.want)
 			}
 		})
-	}
-}
-
-// TestGetLog_BoundBaseRangeCapsCommits pins the bound the multi-repo fan-out
-// relies on. Without it the divergence range is the only limit, and --shortstat
-// runs one diff per commit in it — work the fan-out then discards, since it
-// truncates the merged result to the same limit.
-func TestGetLog_BoundBaseRangeCapsCommits(t *testing.T) {
-	isolateTestGitEnv(t)
-
-	repoDir, cleanup := setupTestRepo(t)
-	t.Cleanup(cleanup)
-
-	log := newTestLogger(t)
-	ctx := context.Background()
-	base := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
-
-	const commits = 12
-	for i := 0; i < commits; i++ {
-		writeFile(t, repoDir, fmt.Sprintf("file%d.txt", i), fmt.Sprintf("content %d", i))
-		runGit(t, repoDir, "add", ".")
-		runGit(t, repoDir, "commit", "-m", fmt.Sprintf("commit %d", i))
-	}
-
-	gitOp := NewGitOperator(repoDir, log, nil)
-
-	// Unbounded: the range is the only limit, so every commit comes back.
-	unbounded, err := gitOp.GetLog(ctx, base, 5, false)
-	if err != nil {
-		t.Fatalf("GetLog unbounded: %v", err)
-	}
-	if len(unbounded.Commits) != commits {
-		t.Errorf("unbounded returned %d commits, want all %d", len(unbounded.Commits), commits)
-	}
-
-	// Bounded: the limit applies even though a base commit was given.
-	bounded, err := gitOp.GetLog(ctx, base, 5, true)
-	if err != nil {
-		t.Fatalf("GetLog bounded: %v", err)
-	}
-	if len(bounded.Commits) != 5 {
-		t.Errorf("bounded returned %d commits, want 5", len(bounded.Commits))
-	}
-
-	// And it keeps the newest ones, which is what the merge would have kept.
-	if len(bounded.Commits) > 0 && len(unbounded.Commits) > 0 {
-		if bounded.Commits[0].CommitSHA != unbounded.Commits[0].CommitSHA {
-			t.Errorf("bounded dropped the newest commit: got %s, want %s",
-				bounded.Commits[0].CommitSHA, unbounded.Commits[0].CommitSHA)
-		}
 	}
 }

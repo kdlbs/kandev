@@ -3,12 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -17,17 +20,17 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 )
 
-// TestFanOutReposRunsConcurrently proves the fan-out is concurrent without
-// measuring how long anything takes. Every collect call blocks on a gate that
-// opens only once all of them have arrived, so serial execution cannot pass:
-// the first call would wait on the gate forever and the rest would never start.
-// The timeout is a failure detector rather than a threshold — a correct
-// implementation reaches the barrier immediately, however slow the machine.
+// TestFanOutReposRunsConcurrently proves parallelism without measuring how long
+// anything takes. Every collect call blocks on a gate that opens only once
+// maxGitFanout of them have arrived, so serial execution cannot pass: the first
+// would wait on the gate forever and the rest would never start. The timeout is
+// a failure detector rather than a threshold, so machine speed does not enter
+// into it.
 //
 // The gate is plain channels rather than the git shim in
 // git_status_fresh_concurrency_test.go, which is //go:build !windows because it
-// needs mkfifo. This one runs everywhere and exercises the shared helper both
-// multi-repo handlers now use.
+// needs mkfifo. This one runs everywhere and covers the shared helper both
+// multi-repo handlers use.
 func TestFanOutReposRunsConcurrently(t *testing.T) {
 	subpaths := []string{"frontend", "backend", "shared"}
 
@@ -37,23 +40,14 @@ func TestFanOutReposRunsConcurrently(t *testing.T) {
 
 	done := make(chan []string, 1)
 	go func() {
-		done <- fanOutRepos(subpaths, func(sub string) string {
+		done <- fanOutRepos(context.Background(), subpaths, func(_ context.Context, sub string) string {
 			arrived.Done()
 			<-gate
 			return sub
 		})
 	}()
 
-	allArrived := make(chan struct{})
-	go func() {
-		arrived.Wait()
-		close(allArrived)
-	}()
-	select {
-	case <-allArrived:
-	case <-time.After(10 * time.Second):
-		t.Fatal("not every repository entered the fan-out; the work is running serially")
-	}
+	waitOrFail(t, &arrived, "not every repository entered the fan-out; the work is running serially")
 	close(gate)
 
 	select {
@@ -70,6 +64,117 @@ func TestFanOutReposRunsConcurrently(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("fan-out did not return after the gate opened")
+	}
+}
+
+// TestFanOutReposRespectsLimit pins the bound. With more repositories than
+// maxGitFanout, the group must admit exactly maxGitFanout at once — enough to
+// parallelise, never enough for one request to take the whole shared git
+// budget from the background pollers.
+func TestFanOutReposRespectsLimit(t *testing.T) {
+	subpaths := make([]string, maxGitFanout+4)
+	for i := range subpaths {
+		subpaths[i] = fmt.Sprintf("repo%d", i)
+	}
+
+	var inFlight, peak int64
+	admitted := make(chan struct{}, len(subpaths))
+	release := make(chan struct{})
+
+	done := make(chan []string, 1)
+	go func() {
+		done <- fanOutRepos(context.Background(), subpaths, func(_ context.Context, sub string) string {
+			cur := atomic.AddInt64(&inFlight, 1)
+			for {
+				old := atomic.LoadInt64(&peak)
+				if cur <= old || atomic.CompareAndSwapInt64(&peak, old, cur) {
+					break
+				}
+			}
+			admitted <- struct{}{}
+			<-release
+			atomic.AddInt64(&inFlight, -1)
+			return sub
+		})
+	}()
+
+	// Reading exactly maxGitFanout admissions blocks until the group is full,
+	// which is the parallelism half. It cannot over-read: the rest are held
+	// behind SetLimit until we release these.
+	for i := 0; i < maxGitFanout; i++ {
+		select {
+		case <-admitted:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("only %d of %d workers were admitted; the group is not parallel", i, maxGitFanout)
+		}
+	}
+	if got := atomic.LoadInt64(&peak); got > maxGitFanout {
+		t.Fatalf("peak concurrency = %d, want at most %d", got, maxGitFanout)
+	}
+
+	close(release)
+	select {
+	case got := <-done:
+		if len(got) != len(subpaths) {
+			t.Fatalf("got %d results, want %d", len(got), len(subpaths))
+		}
+	case <-time.After(20 * time.Second):
+		t.Fatal("fan-out did not drain after the gate opened")
+	}
+	if got := atomic.LoadInt64(&peak); got != maxGitFanout {
+		t.Errorf("peak concurrency = %d, want exactly %d", got, maxGitFanout)
+	}
+}
+
+// TestFanOutReposPropagatesCancellation proves the context handed to each
+// collect call is derived from the caller's, so a client that disconnects stops
+// the git work in every repository rather than only the ones not yet started.
+func TestFanOutReposPropagatesCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	subpaths := []string{"frontend", "backend"}
+
+	var arrived sync.WaitGroup
+	arrived.Add(len(subpaths))
+	observed := make(chan error, len(subpaths))
+
+	done := make(chan []string, 1)
+	go func() {
+		done <- fanOutRepos(ctx, subpaths, func(callCtx context.Context, sub string) string {
+			arrived.Done()
+			<-callCtx.Done()
+			observed <- callCtx.Err()
+			return sub
+		})
+	}()
+
+	waitOrFail(t, &arrived, "workers did not start")
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("fan-out did not return after cancellation; the context is not reaching the workers")
+	}
+	for i := 0; i < len(subpaths); i++ {
+		if err := <-observed; !errors.Is(err, context.Canceled) {
+			t.Errorf("worker %d saw %v, want context.Canceled", i, err)
+		}
+	}
+}
+
+// waitOrFail blocks on wg and fails with msg if it does not complete, so the
+// barrier reads the same way in every test above.
+func waitOrFail(t *testing.T, wg *sync.WaitGroup, msg string) {
+	t.Helper()
+	ready := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(ready)
+	}()
+	select {
+	case <-ready:
+	case <-time.After(10 * time.Second):
+		t.Fatal(msg)
 	}
 }
 

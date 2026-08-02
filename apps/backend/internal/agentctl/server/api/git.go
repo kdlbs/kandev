@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 // safeBranchRefPattern mirrors the one in workspace_git_status.go so the
@@ -677,7 +678,7 @@ func (s *Server) handleGitLog(c *gin.Context) {
 	// passing c compiles but hands over a context whose Done() is nil unless
 	// ContextWithFallback is set — which it is not here. The git subprocesses
 	// would then outlive a client disconnect.
-	result, err := s.runGitLogForRepo(c.Request.Context(), req, limit, req.Repo, false)
+	result, err := s.runGitLogForRepo(c.Request.Context(), req, limit, req.Repo)
 	if err != nil {
 		s.handleGitError(c, "log", err)
 		return
@@ -708,7 +709,6 @@ func (s *Server) runGitLogForRepo(
 	req GitLogRequest,
 	limit int,
 	repo string,
-	boundBaseRange bool,
 ) (*process.GitLogResult, error) {
 	gitOp, gitOpErr := s.procMgr.GitOperatorFor(repo)
 	if gitOpErr != nil {
@@ -764,7 +764,7 @@ func (s *Server) runGitLogForRepo(
 		)
 	}
 
-	return gitOp.GetLog(ctx, baseCommit, limit, boundBaseRange)
+	return gitOp.GetLog(ctx, baseCommit, limit)
 }
 
 // perRepoLogOutcome captures the outcome of running git log against a single
@@ -863,7 +863,7 @@ func (s *Server) handleGitLogMultiRepo(
 	// 60s singleflight budget and the caller would see a timeout rather than a
 	// slow answer. Writing by index keeps the merge order deterministic.
 	ctx := c.Request.Context()
-	outcomes := fanOutRepos(subpaths, func(sub string) perRepoLogOutcome {
+	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) perRepoLogOutcome {
 		return s.collectLogForRepo(ctx, req, limit, sub)
 	})
 
@@ -892,7 +892,7 @@ func (s *Server) collectLogForRepo(
 	if base := s.resolvePerRepoBase(ctx, sub); base != "" {
 		perRepoReq.Since = base
 	}
-	result, err := s.runGitLogForRepo(ctx, perRepoReq, limit, sub, true)
+	result, err := s.runGitLogForRepo(ctx, perRepoReq, limit, sub)
 	if err != nil {
 		s.logger.Warn("git log for repo failed",
 			zap.String("repo", sub), zap.Error(err))
@@ -1022,7 +1022,7 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 	// over repositories, which on Windows is enough to blow the gateway's 60s
 	// budget on a task with many repos.
 	ctx := c.Request.Context()
-	outcomes := fanOutRepos(subpaths, func(sub string) perRepoDiffOutcome {
+	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) perRepoDiffOutcome {
 		return s.collectCumulativeDiffForRepo(ctx, sub)
 	})
 
@@ -1099,20 +1099,31 @@ func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) p
 // work, a task with a dozen repositories could exceed the gateway's 60s budget
 // and the caller would see a timeout instead of a slow answer.
 //
-// Concurrency is deliberately unbounded here: the process-wide git throttle in
-// common/subproc already caps how many subprocesses run at once, so a second
-// limit would only add a queue in front of that one.
-func fanOutRepos[T any](subpaths []string, collect func(sub string) T) []T {
+// Concurrency is bounded so a single request cannot occupy the whole shared git
+// budget. The process-wide throttle in common/subproc caps subprocesses at 12 by
+// default, and it is shared with background workspace polling — an unbounded
+// fan-out over a dozen repositories takes all of it, which is what pushed the
+// pollers into their own command timeouts.
+//
+// maxGitFanout is a judgement call rather than a derived number: subproc exposes
+// no public accessor for its cap, and the admission design being discussed in
+// #2150 is where the real answer belongs. Until then this leaves headroom for
+// polling while still parallelising the common case.
+const maxGitFanout = 8
+
+func fanOutRepos[T any](ctx context.Context, subpaths []string, collect func(context.Context, string) T) []T {
 	results := make([]T, len(subpaths))
-	var wg sync.WaitGroup
+	group, groupCtx := errgroup.WithContext(ctx)
+	group.SetLimit(maxGitFanout)
 	for i, sub := range subpaths {
-		wg.Add(1)
-		go func(i int, sub string) {
-			defer wg.Done()
-			results[i] = collect(sub)
-		}(i, sub)
+		group.Go(func() error {
+			results[i] = collect(groupCtx, sub)
+			return nil
+		})
 	}
-	wg.Wait()
+	// collect never returns an error — per-repository failures travel inside T
+	// so the merge can report them — so Wait only surfaces context cancellation.
+	_ = group.Wait()
 	return results
 }
 
