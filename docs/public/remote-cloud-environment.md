@@ -9,6 +9,13 @@ This is a contributor guide for cloning, building, testing, and running the Kand
 
 To operate the Kandev control plane on a remote host, use [Run as a service](run-as-a-service.md), [Docker](docker.md), or the experimental [Kubernetes guidance](k8s.md). To keep the control plane elsewhere and run agent tasks remotely, configure a Sprites or SSH [executor profile](executors.md). Those product paths do not use this guide's source bootstrap, development ports, `.kandev-dev` state, or test tooling.
 
+## Quick path
+
+1. Clone the repository in the disposable VM.
+2. Run `scripts/bootstrap-dev-env`.
+3. Start `make dev` and forward only the backend URL.
+4. Keep the VM, forwarded ports, credentials, and `.kandev-dev` state private.
+
 ## Before you start
 
 You need:
@@ -140,6 +147,9 @@ export AZURE_DEVOPS_EXT_PAT='...'
 
 The Azure tooling is optional and only needed for Azure Repos operations. See [Git operations](git-operations.md#create-a-pull-request-or-merge-request).
 
+<details>
+<summary>Development state, E2E, and executor limitations</summary>
+
 ## Development state and persistence
 
 Normal `make dev` isolates state under `<checkout>/.kandev-dev/`, including its SQLite database, logs, task workspaces, and other Kandev home data. It does not use `~/.kandev` by default. The selected development profile uses embedded SQLite and the in-memory event bus, so PostgreSQL and NATS are not prerequisites.
@@ -218,6 +228,8 @@ Rerun the installer after correcting network, disk, or unzip failures.
 Local and Worktree executors run inside the development VM and need their agent CLIs there. A Local Docker profile additionally needs a usable Docker API and privileges to build images and bind ports. Many hosted sandboxes do not expose a Docker daemon or prohibit nested containers; in that case, disable or avoid Docker profiles rather than mounting an untrusted daemon socket.
 
 SSH and Sprites profiles still use their normal remote credentials and network paths. The fact that Kandev itself is already on a cloud VM does not convert a Local executor into a managed remote executor. See [Executors](executors.md#current-support).
+
+</details>
 
 ## Troubleshooting
 

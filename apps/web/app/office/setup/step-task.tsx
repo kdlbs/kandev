@@ -3,6 +3,7 @@
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
+import { clampTaskTitleInput } from "@/lib/task-title";
 import {
   DEFAULT_ONBOARDING_TASK_DESCRIPTION,
   DEFAULT_ONBOARDING_TASK_TITLE,
@@ -34,7 +35,7 @@ export function StepTask({ agentName, taskTitle, taskDescription, onChange }: St
           <Input
             id="task-title"
             value={taskTitle}
-            onChange={(e) => onChange({ taskTitle: e.target.value })}
+            onChange={(e) => onChange({ taskTitle: clampTaskTitleInput(e.target.value) })}
             placeholder={DEFAULT_ONBOARDING_TASK_TITLE}
             className="mt-1"
             autoFocus

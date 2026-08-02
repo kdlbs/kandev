@@ -674,11 +674,17 @@ func (s *Service) queueTaskAssignedRun(
 	if taskID == "" {
 		return nil
 	}
-	if agentProfileID == "" && fallbackToStoredRunner {
-		fields, err := s.repo.GetTaskExecutionFields(ctx, taskID)
-		if err != nil || fields == nil {
+	fields, err := s.repo.GetTaskExecutionFields(ctx, taskID)
+	if err != nil {
+		if errors.Is(err, sqlite.ErrTaskNotFound) {
 			return nil
 		}
+		return fmt.Errorf("get task execution fields for assignment: %w", err)
+	}
+	if fields == nil || !fields.IsFromOffice {
+		return nil
+	}
+	if agentProfileID == "" && fallbackToStoredRunner {
 		agentProfileID = fields.AssigneeAgentProfileID
 	}
 	if agentProfileID == "" {

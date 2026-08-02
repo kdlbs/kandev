@@ -143,8 +143,7 @@ test.describe("sidebar scrolling", () => {
     apiClient,
     seedData,
   }) => {
-    const longTitle =
-      "Long sidebar title that should scroll on hover and leave room for task actions ".repeat(4);
+    const longTitle = "Long sidebar title scrolls on hover with room for actions";
     const task = await apiClient.createTask(seedData.workspaceId, longTitle, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,

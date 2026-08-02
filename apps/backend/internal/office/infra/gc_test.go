@@ -88,6 +88,12 @@ func newTestGC(
 	if err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		office_workflow_id TEXT DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
 
 	// ADR 0005 Wave F: GetTaskExecutionFields and other office reads
 	// use a correlated subquery to workflow_step_participants /

@@ -62,7 +62,7 @@ test.describe("compact desktop responsive layout", () => {
     }
     const parent = await apiClient.createTask(
       seedData.workspaceId,
-      "A deliberately long parent task title that must remain inside the compact kanban card",
+      "A deliberately long parent task title in compact kanban card",
       {
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,

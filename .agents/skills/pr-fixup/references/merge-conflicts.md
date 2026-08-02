@@ -37,6 +37,10 @@ If `git ls-files -u` prints entries, or conflict markers are present in tracked 
    git merge --no-edit origin/<baseRefName>
    ```
    Use `git rebase origin/<baseRefName>` only when the branch already uses a rebase-style history or the user asks for it. If a rebase is used and succeeds, the push later may need `git push --force-with-lease`.
+   Never add `--no-verify` to this merge or to the commit that completes it unless
+   the user explicitly authorizes bypassing hooks. If the merge commit fails or
+   exits ambiguously, inspect and report the hook result; do not bypass it just
+   to finish the conflict resolution.
 3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files.
 4. Confirm the conflict is gone before continuing:
    ```bash

@@ -5,6 +5,7 @@ import { useCallback, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Input } from "@kandev/ui/input";
 import { Button } from "@kandev/ui/button";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 type TaskRenameDialogProps = {
   open: boolean;
@@ -43,7 +44,7 @@ function TaskRenameForm({
         ref={inputRef}
         autoFocus
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => setValue(clampTaskTitleInput(e.target.value))}
         onFocus={(e) => e.target.select()}
         placeholder="Task title"
       />

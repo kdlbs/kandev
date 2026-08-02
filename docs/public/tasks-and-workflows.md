@@ -5,7 +5,13 @@ description: "Create scoped tasks, configure workflow behavior, use plans, and m
 
 # Tasks and Workflows
 
-A task is the unit of work. A workflow is the ordered process that task follows. Keeping those two concerns separate lets the same repository use different processes for a quick fix, a planned feature, or a human-reviewed change.
+A task is the work to deliver. A workflow is the sequence of steps it follows. Use a task for the outcome and a workflow for the review process.
+
+## Quick path
+
+1. Add a repository to a workspace.
+2. Create a task with a clear outcome, a compatible agent, and an executor.
+3. Start the agent, review its changes, and move the task through the human gate.
 
 ## Understand the model
 
@@ -48,7 +54,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
   caption="A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review."
 />
 
-1. Enter a title.
+1. Enter a concise title of up to 60 characters. Titles prefilled from a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the detailed context belongs in the description.
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
@@ -71,6 +77,11 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
 Kandev remembers draft or recently used repository, branch, executor, and profile choices. Review the restored values before submitting, especially after changing workspace.
 
 Creating a repository is available only in an unlocked, single-repository **New Task** form. Kandev rejects an existing target path, creates no initial files or commit, registers the repository in the workspace, and switches the task to a direct **Local** executor profile. If no direct Local profile is available, repository creation stays disabled. Add more repository rows only after selecting existing repositories; empty multi-repository worktrees are not supported.
+
+> **Local changes:** creating a fresh local branch can discard dirty files only after explicit consent. Save or commit important work before approving it.
+
+<details>
+<summary>Advanced task creation: agent-created tasks, long transcripts, multiple sources, and attachments</summary>
 
 ### Choose the profile for tasks created by agents
 
@@ -115,7 +126,12 @@ If Kandev cannot resolve a pasted remote URL or its branch, the repository row k
 
 Changes and review are scoped by repository. State the expected deliverable, base branch, and pull-request target for every attachment. See [Coordinate work](coordination.md) for adding branches after creation and splitting multi-repository work.
 
+</details>
+
 ### Add sources to an existing task
+
+<details>
+<summary>Adding sources details</summary>
 
 For a non-archived, repository-backed task, open the **Files** panel and choose **Workspace actions → Add Repositories to workspace**. Use **Add repository** to choose a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. Use **Add folder** for an arbitrary local folder when the executor supports it. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
 
@@ -144,6 +160,8 @@ Folders are live host paths and are available only to **Local/Local PC** and **W
 The task prompt supports image, audio, and resource attachments. The backend accepts at most 10 attachments and rejects an encoded item or encoded batch larger than 10 MB. The picker also applies a 10 MB raw-file and 20 MB raw-total guard, so encoding overhead can make the backend limit stricter than the picker limit.
 
 Creating a fresh local branch is available only with the local executor. If the checkout is dirty, Kandev lists the affected paths and requires explicit consent before discarding those local changes. If another path becomes dirty after the warning, creation fails with a conflict and asks for consent again. Save or commit work before approving this operation.
+
+</details>
 
 ## Start a task
 
@@ -187,6 +205,9 @@ Under **Settings → General → Appearance → Startup Page**, choose **Task ov
 On phones, Kanban focuses one workflow and one step at a time. The board navigator always names both; open it to choose either level, or use the previous/next controls and horizontal swipe to move between steps. Choosing a workflow makes it the active workflow for board actions and task creation. Tap a card to open that task directly. Its **More options** menu opens as a touch-sized bottom surface; **Move to** changes the task's workflow or step. **Edit** can still rename a task after work starts, while its original prompt remains locked.
 
 Regular Kanban does not currently expose label editing or label filters. Do not design a supported Kanban process around labels.
+
+<details>
+<summary>Configure a workflow, its steps, automation, and human gates</summary>
 
 ## Configure a workflow
 
@@ -268,6 +289,8 @@ For a Review or Approval step:
 An entry action can auto-start an agent, and turn completion can move the task into another step that auto-starts again. Trace the entire cycle before enabling it. WIP limits stop over-capacity moves but are not compute budgets. Keep a **Do nothing** transition wherever a person must decide whether work continues.
 
 For examples and portability, see [Workflow tips](workflow-tips.md), [Workflow import and export](workflow-import-export.md), and [Workflow sync](workflow-sync.md).
+
+</details>
 
 ## Use the task plan
 

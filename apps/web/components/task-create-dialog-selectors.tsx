@@ -37,6 +37,7 @@ import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -310,7 +311,7 @@ export const InlineTaskName = memo(function InlineTaskName({
       ref={inputRef}
       type="text"
       value={value}
-      onChange={(e) => onChange(e.target.value)}
+      onChange={(e) => onChange(clampTaskTitleInput(e.target.value))}
       placeholder="Task name"
       data-testid="task-title-input"
       className="w-full min-w-0 max-w-full border border-input bg-input/20 dark:bg-input/30 text-sm font-medium rounded-md px-3 py-2 placeholder:text-muted-foreground/70 outline-none focus-visible:border-ring transition-colors"

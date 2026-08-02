@@ -9,6 +9,39 @@ The published docs have two audiences:
 
 Keep implementation detail in contributor pages. A user guide should explain the supported behavior and link here when internal context is useful.
 
+## Write for scanning
+
+Readers should be able to complete the common path without reading a full
+reference. Prefer this structure:
+
+1. Open with one sentence that says who the page is for and what it enables.
+2. Put the common path in a short numbered list near the top.
+3. Use bullets for choices, limits, prerequisites, and consequences.
+4. Keep paragraphs to one idea and normally no more than three sentences.
+5. Link to the owning reference instead of repeating its detail.
+
+Use a table only when readers must compare several options. Do not turn a
+page into a complete inventory of UI labels, implementation behavior, or
+exception cases.
+
+Put useful but non-essential detail behind a native disclosure. Good candidates
+include exhaustive provider differences, compatibility notes, rare recovery
+paths, and background implementation behavior. Do not hide the required steps,
+security warnings, destructive effects, or a limitation that changes whether a
+feature can be used.
+
+```md
+<details>
+<summary>Advanced configuration and edge cases</summary>
+
+Keep the detail concise, and link to the full reference when it grows.
+</details>
+```
+
+Reference pages may be longer, but should still start with the most common
+configuration or request and progressively disclose the rest. Delete repeated
+explanations; one page should own each detailed contract.
+
 ## Update an existing page
 
 Edit the Markdown source and verify every command, setting, label, default, platform claim, and screenshot against current source or tests. Preserve the filename when possible: it is the public slug.
@@ -62,7 +95,7 @@ Place the indicator immediately after a descriptive heading that names the exper
 4. Add the slug, without `.md`, exactly once to `docs/public/meta.json` under the correct audience heading. Its position controls sidebar order. `README.md` is the maintenance guide and is not a published page.
 5. Add the page to at least one area in `docs/public/coverage.json`, with current implementation and test evidence.
 6. Link the page from the relevant overview and neighboring guides.
-7. Include prerequisites, a concrete workflow, exact configuration, failure modes or limits, and related pages where applicable.
+7. Include a short common path, then only the prerequisites, exact configuration, limits, and related pages needed for that path. Put secondary detail in a disclosure or the owning reference page.
 
 The validator rejects missing frontmatter, pages absent from navigation or coverage, duplicate or unknown navigation entries, broken local files or heading fragments, missing assets, and site-root links.
 

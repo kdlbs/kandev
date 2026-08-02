@@ -4,6 +4,7 @@ import { computeDialogDefaultStepId } from "./task-create-dialog-defaults";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import { useDialogFormState } from "./task-create-dialog-state";
 import { buildRepositoriesPayload } from "./task-create-dialog-helpers";
+import { TASK_TITLE_MAX_LENGTH } from "@/lib/task-title";
 
 // `useBranchesByURL` triggers a real network ensure() when given a URL — stub
 // it so the dialog state hook can mount in JSDOM without hitting fetch. The
@@ -357,6 +358,22 @@ describe("useDialogFormState — title autofill from first row GitHub URL info",
     expect(result.current.hasTitle).toBe(true);
   });
 
+  it("truncates a long remote PR title to the shared limit", () => {
+    const longTitle = "PR #42: " + "x".repeat(100);
+    seedPRInfo(PR_URL_42, 42, longTitle);
+    const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
+    act(() => {
+      result.current.setUseRemote(true);
+    });
+    const key = result.current.remoteRepos[0]?.key;
+    act(() => {
+      result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
+    });
+
+    expect(result.current.taskName).toHaveLength(TASK_TITLE_MAX_LENGTH);
+    expect(result.current.taskName.endsWith("…")).toBe(true);
+  });
+
   it("does NOT overwrite a title the user typed themselves", () => {
     seedPRInfo(PR_URL_42, 42, PR_TITLE_42);
     const { result } = renderHook(() => useDialogFormState(true, "ws-1", null));
@@ -369,6 +386,12 @@ describe("useDialogFormState — title autofill from first row GitHub URL info",
       result.current.updateRemoteRepo(key!, { url: PR_URL_42 });
     });
     expect(result.current.taskName).toBe(USER_TYPED_TITLE);
+  });
+});
+
+describe("useDialogFormState — title autofill after title ownership", () => {
+  beforeEach(() => {
+    prInfoMap.clear();
   });
 
   it("does NOT re-apply autofill after the user clears the title (user took ownership)", () => {

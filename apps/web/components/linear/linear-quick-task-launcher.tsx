@@ -5,6 +5,7 @@ import { useRouter } from "@/lib/routing/client-router";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import type { Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import type { LinearIssue } from "@/lib/types/linear";
+import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 type QuickTaskLauncherProps = {
   workspaceId: string | null;
@@ -18,7 +19,7 @@ type QuickTaskLauncherProps = {
 // the Jira prompt shape so users coming from either integration get a
 // consistent skeleton.
 function buildDialogState(issue: LinearIssue) {
-  const title = `${issue.identifier}: ${issue.title}`;
+  const title = truncateRemoteTaskTitle(`${issue.identifier}: ${issue.title}`);
   const description = [
     `Linear issue: ${issue.identifier}`,
     `URL: ${issue.url}`,

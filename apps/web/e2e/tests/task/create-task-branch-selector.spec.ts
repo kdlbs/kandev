@@ -2,6 +2,7 @@ import path from "node:path";
 import fs from "node:fs";
 import { execSync } from "node:child_process";
 import { test, expect } from "../../fixtures/test-base";
+import { expectWebkitDialogMotion } from "../../helpers/dialog-webkit-metrics";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
@@ -331,6 +332,9 @@ test.describe("Fresh-branch flow", () => {
       fs.writeFileSync(path.join(setup.repoDir, "WIP.txt"), "draft");
 
       await openDialogWithLocalProfile(testPage, setup.profileName, setup.repoName);
+      await testPage.locator("html").evaluate((root) => {
+        root.setAttribute("data-rendering-engine", "webkit");
+      });
       await testPage.getByTestId("fresh-branch-toggle").click();
       // Submit triggers the dirty preflight; the modal lists WIP.txt.
       await testPage.getByTestId("submit-start-agent").click();
@@ -338,6 +342,11 @@ test.describe("Fresh-branch flow", () => {
       const modal = testPage.getByTestId("discard-local-changes-dialog");
       await expect(modal).toBeVisible({ timeout: 5_000 });
       await expect(testPage.getByTestId("discard-local-changes-files")).toContainText("WIP.txt");
+      await expectWebkitDialogMotion(modal, {
+        overlaySelector: '[data-slot="alert-dialog-overlay"]',
+        contentZIndex: "53",
+        overlayZIndex: "52",
+      });
 
       // Cancel returns to the form with the toggle still on.
       await testPage.getByTestId("discard-local-changes-cancel").click();

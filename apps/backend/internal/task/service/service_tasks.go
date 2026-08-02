@@ -285,6 +285,9 @@ func (s *Service) inheritParentRepositories(ctx context.Context, req *CreateTask
 
 // validateCreateTaskRequest validates constraints for task creation.
 func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
+	if err := validateTaskTitle(req.Title); err != nil {
+		return err
+	}
 	isOffice := isOfficeRequest(req)
 	if !req.IsEphemeral && !isOffice && req.WorkflowID == "" {
 		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
@@ -1125,6 +1128,11 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequest) (*models.Task, error) {
 	if err := s.authorizeTaskID(ctx, id); err != nil {
 		return nil, err
+	}
+	if req.Title != nil {
+		if err := validateTaskTitle(*req.Title); err != nil {
+			return nil, err
+		}
 	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {

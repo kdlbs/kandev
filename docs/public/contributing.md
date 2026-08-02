@@ -7,6 +7,13 @@ description: "Set up Kandev, find the owning subsystem, run focused checks, upda
 
 Kandev combines a Go server and native launcher, a Vite/React web client, a TypeScript development supervisor and npm shim, a Tauri desktop shell, and task-environment helpers. Begin at the subsystem that owns the behavior; do not recreate its rules in a neighboring layer.
 
+## Quick path
+
+1. Run `make bootstrap` once in a fresh checkout.
+2. Use `make dev` for normal full-stack work.
+3. Find the owning backend, web, CLI, desktop, or runtime boundary before editing.
+4. Run focused checks, update public docs, and leave a small reviewable diff.
+
 ## Set up the repository
 
 The pinned toolchain in `mise.toml` currently includes Node 24, pnpm 9.15.9, Go 1.26.0, and supporting tools.

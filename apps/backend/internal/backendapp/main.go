@@ -95,6 +95,7 @@ import (
 	// Runs queue (Phase 3 of task-model-unification)
 	runsscheduler "github.com/kandev/kandev/internal/runs/scheduler"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
+	schedulercron "github.com/kandev/kandev/internal/scheduler/cron"
 
 	// Workflow engine adapters (Phase 3.2 of task-model-unification)
 	officeengineadapters "github.com/kandev/kandev/internal/office/engine_adapters"
@@ -787,11 +788,16 @@ func startGatewayAndServe(
 	}
 
 	// ============================================
-	// ORCHESTRATE CONFIG LOADER + WAKEUP SCHEDULER
+	// OFFICE FEATURES + GLOBAL RUN SCHEDULING
 	// ============================================
-	if ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry); !ok {
+	runProcessorSvc, ok := initOfficeServices(ctx, cfg, log, repos, services, orchestratorSvc, eventBus, agentctlBinaryPath, addCleanup, lifecycleMgr, agentRegistry)
+	if !ok {
 		return false
 	}
+	scheduling := startSchedulingRuntime(
+		ctx, repos, services, eventBus, orchestratorSvc, runProcessorSvc, log,
+	)
+	addCleanup(scheduling.Stop)
 
 	// Wire subscription usage provider into the office agents service so the
 	// /agents/:id/utilization endpoint can fetch live utilization data.
@@ -882,7 +888,7 @@ func startGatewayAndServe(
 	// and any subsequent /health call will land on a wired route.
 	go waitListenerThenMarkReady(listeners.probeAddr(), log)
 
-	awaitShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	awaitShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 	return true
 }
 
@@ -944,9 +950,10 @@ func waitListenerThenMarkReady(listenAddr string, log *logger.Logger) {
 	}
 }
 
-// initOfficeServices constructs the office service with all dependencies, then
-// sets up the reconciler, event subscribers, scheduler, and garbage collector.
-// Returns false if a fatal error prevents startup.
+// initOfficeServices constructs the run processor service for every backend and
+// adds Office-only services, reconciliation, and subscribers when the feature
+// is enabled. Global run and cron scheduling starts separately so this feature
+// gate cannot disable workflow-generic queue_run dispatch.
 func initOfficeServices(
 	ctx context.Context,
 	cfg *config.Config,
@@ -959,45 +966,24 @@ func initOfficeServices(
 	addCleanup func(func() error),
 	lifecycleMgr *lifecycle.Manager,
 	agentRegistry *registry.Registry,
-) bool {
-	// Feature gate: when features.office is off (the production default),
-	// skip every Office construction step. Downstream call sites
-	// (helpers.go route registration, cron scheduler, skill backfill,
-	// usage-provider wiring) already nil-check services.Office /
-	// services.OfficeSvcs, so leaving them nil is safe.
-	// See docs/decisions/0007-runtime-feature-flags.md.
-	if !cfg.Features.Office {
-		log.Info("Office feature disabled (features.office=false); skipping initialization")
-		return true
-	}
-
+) (*officeservice.Service, bool) {
 	configBasePath := cfg.ResolvedHomeDir()
-	cfgLoader, cfgWriter := initOfficeConfigLoader(configBasePath, log, addCleanup)
-
-	apiPort := cfg.Server.Port
-	if apiPort == 0 {
-		apiPort = ports.Backend
+	var cfgLoader *configloader.ConfigLoader
+	var cfgWriter *configloader.FileWriter
+	if cfg.Features.Office {
+		cfgLoader, cfgWriter = initOfficeConfigLoader(configBasePath, log, addCleanup)
 	}
 
-	taskStarter := newOfficeTaskStarter(orchestratorSvc)
+	runProcessorSvc := newRunProcessorService(
+		cfg, repos, services, orchestratorSvc, eventBus,
+		agentctlBinaryPath, cfgLoader, cfgWriter, log,
+	)
+	if !cfg.Features.Office {
+		log.Info("Office feature disabled; Office services skipped while global run scheduling remains enabled")
+		return runProcessorSvc, true
+	}
 
-	// Construct the office service with all dependencies at once so the
-	// compiler catches missing fields rather than failing at runtime.
-	services.Office = officeservice.NewService(officeservice.ServiceOptions{
-		Repo:               repos.Office,
-		Logger:             log,
-		CfgLoader:          cfgLoader,
-		CfgWriter:          cfgWriter,
-		WorkspaceCreator:   &taskWorkspaceCreatorAdapter{taskSvc: services.Task},
-		TaskWorkspace:      services.Task,
-		TaskCreator:        &taskCreatorAdapter{taskSvc: services.Task},
-		TaskPRs:            &taskPRListerAdapter{gh: services.GitHub},
-		APIBaseURL:         fmt.Sprintf("http://localhost:%d/api/v1", apiPort),
-		TaskStarter:        taskStarter,
-		TaskCanceller:      orchestratorSvc,
-		AgentctlBinaryPath: agentctlBinaryPath,
-		EventBus:           eventBus,
-	})
+	services.Office = runProcessorSvc
 	log.Info("Office service constructed with all dependencies")
 
 	// office-costs Wave B: lazy models.dev pricing lookup. The Client
@@ -1046,14 +1032,46 @@ func initOfficeServices(
 	// receive defaults; curated lists are left alone.
 	backfillAgentDefaultSkills(ctx, services, log)
 
-	// Register event subscribers and start scheduler
+	// Register Office-only event subscribers. Global scheduling starts after
+	// this initializer returns, regardless of the feature flag.
 	if err := services.Office.RegisterEventSubscribers(eventBus); err != nil {
 		log.Error("Failed to register office event subscribers", zap.Error(err))
-		return false
+		return nil, false
 	}
 
-	startOfficeSchedulersAndGC(ctx, cfg, repos, services, eventBus, orchestratorSvc, log)
-	return true
+	return runProcessorSvc, true
+}
+
+func newRunProcessorService(
+	cfg *config.Config,
+	repos *Repositories,
+	services *Services,
+	orchestratorSvc *orchestrator.Service,
+	eventBus bus.EventBus,
+	agentctlBinaryPath string,
+	cfgLoader *configloader.ConfigLoader,
+	cfgWriter *configloader.FileWriter,
+	log *logger.Logger,
+) *officeservice.Service {
+	apiPort := cfg.Server.Port
+	if apiPort == 0 {
+		apiPort = ports.Backend
+	}
+	return officeservice.NewService(officeservice.ServiceOptions{
+		Repo:               repos.Office,
+		Logger:             log,
+		CfgLoader:          cfgLoader,
+		CfgWriter:          cfgWriter,
+		WorkspaceCreator:   &taskWorkspaceCreatorAdapter{taskSvc: services.Task},
+		TaskWorkspace:      services.Task,
+		TaskCreator:        &taskCreatorAdapter{taskSvc: services.Task},
+		TaskPRs:            &taskPRListerAdapter{gh: services.GitHub},
+		APIBaseURL:         fmt.Sprintf("http://localhost:%d/api/v1", apiPort),
+		TaskStarter:        newOfficeTaskStarter(orchestratorSvc),
+		TaskCanceller:      orchestratorSvc,
+		AgentctlBinaryPath: agentctlBinaryPath,
+		EventBus:           eventBus,
+	})
 }
 
 // wireOfficeSvcsDependencies wires inter-service dependencies into the
@@ -1203,21 +1221,21 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
 		})
 }
 
-// startOfficeSchedulersAndGC wires the runs service, workflow engine dispatcher,
-// runs scheduler, cron scheduler, and GC sweep. Extracted to keep
-// initOfficeServices within funlen limits.
-func startOfficeSchedulersAndGC(
+// startSchedulingRuntime wires the backend-wide runs service, workflow engine
+// dispatcher, runs scheduler, and shared cron loop. Office recovery is attached
+// only when Office feature services were initialized.
+func startSchedulingRuntime(
 	ctx context.Context,
-	cfg *config.Config,
 	repos *Repositories,
 	services *Services,
 	eventBus bus.EventBus,
 	orchestratorSvc *orchestrator.Service,
+	runProcessorSvc *officeservice.Service,
 	log *logger.Logger,
-) {
-	log.Info("Office scheduler wired to orchestrator StartTask")
+) *schedulingRuntime {
+	log.Info("Global run processor wired to orchestrator StartTask")
 	orchScheduler := officeservice.NewSchedulerIntegration(
-		services.Office, runsscheduler.TickIntervalFromEnv(),
+		runProcessorSvc, runsscheduler.TickIntervalFromEnv(),
 	)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
@@ -1229,12 +1247,12 @@ func startOfficeSchedulersAndGC(
 	runsSvc := runsservice.New(
 		repos.Office.RunsRepository(), eventBus, log, nil,
 	)
-	services.Office.SetRunsService(runsSvc)
+	runProcessorSvc.SetRunsService(runsSvc)
 	// Phase 4 (ADR-0004): wire the workflow engine's dependencies and a
 	// dispatcher so office event subscribers route through the engine
 	// unconditionally.
 	engineDispatcher := wireWorkflowEngineForOffice(
-		orchestratorSvc, services.Office, services.Task, services.Workflow, repos, runsSvc, log,
+		orchestratorSvc, runProcessorSvc, services.Task, services.Workflow, repos, runsSvc, log,
 	)
 	if services.OfficeSvcs != nil {
 		services.OfficeSvcs.Dashboard.SetWorkflowEngineDispatcher(engineDispatcher)
@@ -1245,7 +1263,7 @@ func startOfficeSchedulersAndGC(
 		orchScheduler, runsSvc.SubscribeSignal(),
 		runsscheduler.TickIntervalFromEnv(), log,
 	)
-	go runScheduler.Start(ctx)
+	runScheduler.Start(ctx)
 	log.Info("Runs scheduler started",
 		zap.Duration("tick", runsscheduler.TickIntervalFromEnv()))
 	// Phase 5 (ADR-0004): start the shared cron loop. The routines handler
@@ -1255,7 +1273,14 @@ func startOfficeSchedulersAndGC(
 	if services.OfficeSvcs != nil {
 		officeRoutines = services.OfficeSvcs.Routines
 	}
-	startCronScheduler(ctx, repos, engineDispatcher, officeRoutines, log)
+	var officeRecovery schedulercron.Handler
+	if services.Office != nil {
+		officeRecovery = officeservice.NewOfficeRecoveryHandler(orchScheduler)
+	}
+	cronLoop := startCronScheduler(
+		ctx, repos, engineDispatcher, officeRoutines, officeRecovery, log,
+	)
+	return &schedulingRuntime{runs: runScheduler, cron: cronLoop}
 }
 
 // wireWorkflowEngineForOffice composes the Phase 2 (ADR-0004)
@@ -1823,6 +1848,7 @@ func buildHTTPServer(
 func awaitShutdown(
 	server *http.Server,
 	listeners *serverListeners,
+	scheduling *schedulingRuntime,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
@@ -1849,5 +1875,5 @@ func awaitShutdown(
 	log.Info("Received shutdown signal",
 		zap.String("signal", sig.String()),
 		zap.Int("pid", os.Getpid()))
-	runGracefulShutdown(server, listeners, orchestratorSvc, lifecycleMgr, runCleanups, log)
+	runGracefulShutdown(server, listeners, scheduling, orchestratorSvc, lifecycleMgr, runCleanups, log)
 }

@@ -5,6 +5,7 @@ import type { Executor, Repository } from "@/lib/types/http";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 type TaskCreateLastUsedPatch = {
   repository_id?: string | null;
@@ -225,10 +226,16 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
   const handleRowRepositoryChange = useCallback(
     (key: string, value: string) => {
       const isWorkspaceRepo = repositories.some((r: Repository) => r.id === value);
+      const wasLocalPath = Boolean(fs.repositories.find((row) => row.key === key)?.localPath);
+      const isLocalPath = !isWorkspaceRepo && Boolean(value);
       const patch: Partial<TaskRepoRow> = isWorkspaceRepo
         ? { repositoryId: value, localPath: undefined, branch: "" }
         : { repositoryId: undefined, localPath: value, branch: "" };
       fs.updateRepository(key, patch);
+      if (wasLocalPath !== isLocalPath) {
+        fs.setExecutorId("");
+        fs.setExecutorProfileId("");
+      }
       if (isWorkspaceRepo) {
         syncTaskCreateLastUsed({ repository_id: value, branch: null });
       } else {
@@ -269,8 +276,9 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
   );
   const handleTaskNameChange = useCallback(
     (value: string) => {
-      fs.setTaskName(value);
-      fs.setHasTitle(value.trim().length > 0);
+      const boundedValue = clampTaskTitleInput(value);
+      fs.setTaskName(boundedValue);
+      fs.setHasTitle(boundedValue.trim().length > 0);
     },
     [fs],
   );

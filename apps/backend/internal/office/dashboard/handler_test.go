@@ -149,6 +149,13 @@ func newTestDeps(t *testing.T) *testDeps {
 	if err != nil {
 		t.Fatalf("create tasks table: %v", err)
 	}
+	_, err = db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		office_workflow_id TEXT DEFAULT ''
+	)`)
+	if err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
 
 	// workflows is referenced by FKs on workflow_steps (workflow store
 	// schema). Create it before NewWithDB so the workflow repo's

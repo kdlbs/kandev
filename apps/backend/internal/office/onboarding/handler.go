@@ -1,10 +1,12 @@
 package onboarding
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/logger"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
 )
@@ -66,7 +68,11 @@ func (h *Handler) completeOnboarding(c *gin.Context) {
 
 	result, err := h.svc.CompleteOnboarding(c.Request.Context(), CompleteRequest(req))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, taskservice.ErrTaskTitleTooLong) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusCreated, OnboardingCompleteResponse{

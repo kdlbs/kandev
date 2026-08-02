@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 export type IssueDraft = {
   title: string;
@@ -45,7 +46,10 @@ export function useIssueDraft(
     if (typeof window === "undefined") return { ...EMPTY_DRAFT, ...defaults };
     try {
       const stored = localStorage.getItem(key);
-      if (stored) return JSON.parse(stored) as IssueDraft;
+      if (stored) {
+        const parsed = JSON.parse(stored) as IssueDraft;
+        return { ...parsed, title: clampTaskTitleInput(parsed.title ?? "") };
+      }
     } catch {
       // ignore
     }

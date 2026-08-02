@@ -36,6 +36,15 @@ type RuntimeConfig struct {
 	APIPrefix     string `json:"apiPrefix"`
 	WebSocketPath string `json:"webSocketPath"`
 	Debug         bool   `json:"debug,omitempty"`
+	// NonProduction marks a dev or e2e build. Distinct from Debug (which the SPA
+	// uses for verbose logging): this gates QA-only UI such as the pseudo-locale
+	// option, which the e2e harness needs even though it serves a PRODUCTION
+	// frontend bundle — so `import.meta.env.PROD` cannot answer this question.
+	NonProduction bool `json:"nonProduction,omitempty"`
+	// Locale is the active UI locale (BCP-47-ish tag) the SPA should activate
+	// before first paint. Sourced from the kandev_locale cookie; defaults to
+	// "en". Also drives the shell's <html lang> so first paint matches.
+	Locale string `json:"locale,omitempty"`
 }
 
 // BootError is a serializable non-fatal boot-data error for partial hydration.

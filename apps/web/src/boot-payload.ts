@@ -17,6 +17,14 @@ export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
   debug?: boolean;
+  /**
+   * True for a dev or e2e build. The e2e harness serves a PRODUCTION bundle, so
+   * `import.meta.env.PROD` cannot distinguish it from a real release — this flag
+   * is what gates QA-only UI such as the pseudo-locale option.
+   */
+  nonProduction?: boolean;
+  /** Active UI locale from the kandev_locale cookie; drives first-paint i18n. */
+  locale?: string;
 };
 
 export type BootRouteData = {
@@ -134,6 +142,8 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
     debug: value.debug === true ? true : undefined,
+    nonProduction: value.nonProduction === true ? true : undefined,
+    locale: readString(value.locale),
   };
 }
 

@@ -60,6 +60,11 @@ type Loop struct {
 	interval time.Duration
 	handlers []Handler
 	log      *logger.Logger
+
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	started bool
 }
 
 // NewLoop constructs a Loop. A non-positive interval falls back to
@@ -70,21 +75,64 @@ func NewLoop(interval time.Duration, log *logger.Logger, handlers ...Handler) *L
 	if interval <= 0 {
 		interval = DefaultTickInterval
 	}
+	configured := make([]Handler, 0, len(handlers))
+	for _, handler := range handlers {
+		if handler != nil {
+			configured = append(configured, handler)
+		}
+	}
 	return &Loop{
 		interval: interval,
-		handlers: handlers,
+		handlers: configured,
 		log:      log.WithFields(zap.String("component", "scheduler-cron")),
 	}
 }
 
-// Start runs the loop until ctx is cancelled. Call from a background
-// goroutine. The first tick fires after interval — handlers must not
-// rely on a "tick at t=0" semantic.
+// Start launches the loop. Calling Start more than once without Stop is a
+// no-op. The first tick fires after interval — handlers must not rely on a
+// "tick at t=0" semantic.
 func (l *Loop) Start(ctx context.Context) {
 	if len(l.handlers) == 0 {
 		l.log.Info("cron loop start: no handlers, exiting")
 		return
 	}
+
+	l.mu.Lock()
+	if l.started {
+		l.mu.Unlock()
+		return
+	}
+	l.started = true
+	loopCtx, cancel := context.WithCancel(ctx)
+	l.cancel = cancel
+	l.wg.Add(1)
+	l.mu.Unlock()
+
+	go l.loop(loopCtx)
+}
+
+// Stop cancels the loop and waits for all active handlers to return. It is
+// safe to call repeatedly and concurrently with Start.
+func (l *Loop) Stop() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.started {
+		return nil
+	}
+
+	if l.cancel != nil {
+		l.cancel()
+	}
+	l.wg.Wait()
+
+	l.started = false
+	l.cancel = nil
+	l.log.Info("cron loop stopped")
+	return nil
+}
+
+func (l *Loop) loop(ctx context.Context) {
+	defer l.wg.Done()
 	names := make([]string, 0, len(l.handlers))
 	for _, h := range l.handlers {
 		names = append(names, h.Name())
@@ -102,6 +150,9 @@ func (l *Loop) Start(ctx context.Context) {
 			l.log.Info("cron loop stopping")
 			return
 		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
 			l.fanOut(ctx)
 		}
 	}
@@ -124,7 +175,7 @@ func (l *Loop) fanOut(ctx context.Context) {
 						zap.Any("recover", r))
 				}
 			}()
-			if err := h.Tick(ctx); err != nil {
+			if err := h.Tick(ctx); err != nil && ctx.Err() == nil {
 				l.log.Error("cron handler tick failed",
 					zap.String("handler", h.Name()),
 					zap.Error(err))

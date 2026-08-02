@@ -7,6 +7,12 @@ description: "Use quick chat, utility agents, saved prompts, voice input, editor
 
 Kandev includes short-lived chat, reusable AI helpers, dictation, file and editor integration, language servers, and terminals. Some tools run in a task environment; others run on the Kandev backend host or in the browser. That boundary determines which files, executables, credentials, and network services they can reach.
 
+## Quick path
+
+1. Use **Quick Chat** for disposable questions.
+2. Use a task session for work that needs files, review, or workflow state.
+3. Add utility agents, editors, language servers, or terminals only when their host boundary is acceptable.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
@@ -45,6 +51,9 @@ Closing a real chat tab permanently deletes its conversation, hidden backing tas
 
 If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
+<details>
+<summary>Utility agents and configuration chat</summary>
+
 ## Utility agents
 
 Open **Settings > Utility Agents** (`/settings/utility-agents`). Utility agents are one-shot ACP calls used to generate small pieces of text; they do not create a durable task conversation.
@@ -75,7 +84,12 @@ Configuration Chat uses a repository-less ephemeral task. Its configuration-mode
 
 Closing the floating Settings panel preserves the conversation. To delete it, open it in Quick Chat, close its tab, and confirm deletion. Configuration tasks are excluded from the seven-day Quick Chat sweeper and remain available until explicitly deleted or their workspace is deleted.
 
+</details>
+
 ## Saved prompts
+
+<details>
+<summary>Saved prompt details</summary>
 
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
@@ -95,7 +109,12 @@ Built-ins are marked in the UI but remain editable. Editing `ci-auto-fix` or `ch
 
 A saved prompt is an instruction, not an authorization or policy boundary. Executor permissions, human gates, tests, and provider protections still control what can happen.
 
+</details>
+
 ## Voice Mode
+
+<details>
+<summary>Voice details</summary>
 
 Open **Settings > Voice Mode** (`/settings/voice-mode`). Voice Mode inserts a transcript at the cursor in the active chat composer.
 
@@ -128,7 +147,14 @@ Engine choice is capability selection, not runtime failover. Once recognition or
 
 Microphone capture requires browser permission and normally HTTPS or localhost. Whisper Web also needs `getUserMedia`, `MediaRecorder`, workers, enough browser storage, and a first-use network download. The UI mentions common Chrome, Edge, and Safari versions, but Kandev does not enforce a browser/version allow-list; runtime availability is determined from the required APIs. If recording fails, check site permission, input device, secure context, model download/cache, browser support, and network access. The composer must remain enabled; switching tasks or disabling the input cancels recording.
 
+</details>
+
 ## Files and editor integrations
+
+> **Security:** Embedded VS Code runs code-server with `--auth none` inside the task environment. Use it only with a trusted executor and network boundary.
+
+<details>
+<summary>Editor, language-server, and terminal details</summary>
 
 For an idle, non-archived repository-backed task, **Files → Workspace actions → Add Repositories to workspace** opens a tab-free source picker. **Add repository** offers a workspace repository, a local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. **Add folder** is available on Local/Local PC or Worktree. Every repository chooses one base branch, and Local/Local PC uses the current checkout without switching it. Desktop uses a dialog; phones use a full-height drawer with a touch-sized repository menu. A mixed submission is atomic, and repository additions refresh repository-aware tools while folders remain Files-only. See [Tasks and workflows](tasks-and-workflows.md#add-sources-to-an-existing-task).
 
@@ -202,6 +228,8 @@ Open **Settings > General > Terminal** (`/settings/general/terminal`) to configu
 Shell changes apply whenever a new or restarted terminal is created, including inside an existing task. Only an already-live PTY keeps its current shell. A custom shell must exist in the task environment. Fonts render only when available to the browser. Commands can behave differently from your login shell because the executor may use another user, `PATH`, credentials, working directory, or startup files.
 
 If no terminal can be created, wait for the task environment to become ready and confirm its executor is reachable. If a reopened terminal is dead, create a new one; the original PTY or remote connection may have exited.
+
+</details>
 
 ## Choose the right surface
 

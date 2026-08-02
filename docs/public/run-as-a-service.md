@@ -11,6 +11,13 @@ Install Kandev first using a persistent [CLI installation](cli.md#install). Do n
 
 > **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
+## Quick path
+
+1. Install Kandev persistently with the [CLI](cli.md#install).
+2. Choose a user service for one workstation or `--system` for boot-time service operation.
+3. Install, check `status`, and inspect `logs`.
+4. Keep the listener private or protect it with TLS, authentication, and an access proxy.
+
 ## Choose a service mode
 
 | | User service (default) | System service (`--system`) |

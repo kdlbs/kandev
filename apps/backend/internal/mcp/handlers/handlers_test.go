@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -201,6 +202,53 @@ func TestClassifyCreateTaskErrorMapsWIPLimitToConflict(t *testing.T) {
 	if got := classifyCreateTaskError(err); got != ws.ErrorCodeConflict {
 		t.Fatalf("expected ErrorCodeConflict, got %q", got)
 	}
+}
+
+func TestClassifyCreateTaskErrorMapsOverlongTitleToValidation(t *testing.T) {
+	if got := classifyCreateTaskError(service.ErrTaskTitleTooLong); got != ws.ErrorCodeValidation {
+		t.Fatalf("expected ErrorCodeValidation, got %q", got)
+	}
+}
+
+func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	require.Len(t, workspaces, 1)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	require.Len(t, workflows, 1)
+
+	source, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: workspaces[0].ID,
+		WorkflowID:  workflows[0].ID,
+		Title:       "Source task",
+	})
+	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                "source-title-session",
+		TaskID:            source.ID,
+		AgentProfileID:    "source-profile",
+		ExecutorProfileID: "source-executor-profile",
+		State:             models.TaskSessionStateWaitingForInput,
+		IsPrimary:         true,
+	}))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"source_task_id": source.ID,
+		"workspace_id":   workspaces[0].ID,
+		"workflow_id":    workflows[0].ID,
+		"title":          strings.Repeat("x", service.TaskTitleMaxLength+1),
+		"start_agent":    false,
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	assert.Len(t, tasks, 1, "validation failure must not persist a task")
 }
 
 // TestHandleAddBranchToTask_RejectsMultipleLocators pins the mutual-exclusion

@@ -19,6 +19,7 @@ import (
 	"context"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -74,6 +75,11 @@ type Scheduler struct {
 	signal       <-chan struct{}
 	tickInterval time.Duration
 	log          *logger.Logger
+
+	mu      sync.Mutex
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	started bool
 }
 
 // New constructs a Scheduler. The signal channel comes from the runs
@@ -96,11 +102,47 @@ func New(
 	}
 }
 
-// Start runs the tick + signal loop until the context is cancelled.
-// Call it from a background goroutine. A single goroutine handles
-// both wake-up sources so claim ordering is deterministic and
-// per-agent serialisation is unaffected by the new signal path.
+// Start launches the tick + signal loop. Calling Start more than once
+// without Stop is a no-op. A single owned goroutine handles both wake-up
+// sources so claim ordering is deterministic and per-agent serialisation is
+// unaffected by the signal path.
 func (s *Scheduler) Start(ctx context.Context) {
+	s.mu.Lock()
+	if s.started {
+		s.mu.Unlock()
+		return
+	}
+	s.started = true
+	loopCtx, cancel := context.WithCancel(ctx)
+	s.cancel = cancel
+	s.wg.Add(1)
+	s.mu.Unlock()
+
+	go s.loop(loopCtx)
+}
+
+// Stop cancels the scheduler loop and waits for the active processor tick to
+// return. It is safe to call repeatedly and concurrently with Start.
+func (s *Scheduler) Stop() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.started {
+		return nil
+	}
+
+	if s.cancel != nil {
+		s.cancel()
+	}
+	s.wg.Wait()
+
+	s.started = false
+	s.cancel = nil
+	s.log.Info("runs scheduler stopped")
+	return nil
+}
+
+func (s *Scheduler) loop(ctx context.Context) {
+	defer s.wg.Done()
 	s.log.Info("runs scheduler starting",
 		zap.Duration("tick_interval", s.tickInterval),
 		zap.Bool("signal_enabled", s.signal != nil))
@@ -118,8 +160,14 @@ func (s *Scheduler) Start(ctx context.Context) {
 			s.log.Info("runs scheduler stopping")
 			return
 		case <-ticker.C:
+			if ctx.Err() != nil {
+				return
+			}
 			s.processor.Tick(ctx)
 		case <-s.signal:
+			if ctx.Err() != nil {
+				return
+			}
 			now := time.Now()
 			if now.Sub(lastSignal) < SignalCoalesceWindow {
 				continue

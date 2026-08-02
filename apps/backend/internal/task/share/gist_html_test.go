@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 func TestBuildShareHTML_RendersChatLayout(t *testing.T) {
@@ -38,7 +40,7 @@ func TestBuildShareHTML_RendersChatLayout(t *testing.T) {
 		Redaction: RedactionLog{AppliedRules: []string{RuleAbsPath}},
 	}
 
-	doc := BuildShareHTML(snap)
+	doc := BuildShareHTML(snap, "en")
 
 	assertContains(t, doc, "<!doctype html>")
 	assertContains(t, doc, "<title>Investigate &lt;flaky&gt; test — kandev share</title>")
@@ -64,7 +66,7 @@ func TestBuildShareHTML_GroupsConsecutiveAssistantMessages(t *testing.T) {
 			{Role: roleUser, Blocks: []Block{{Kind: blockKindText, Text: "ok"}}},
 		},
 	}
-	doc := BuildShareHTML(snap)
+	doc := BuildShareHTML(snap, "en")
 	// 3 groups expected: user, assistant (merged 3 messages), user — so 3 sections.
 	if got := strings.Count(doc, `<section class="group `); got != 3 {
 		t.Fatalf("expected 3 groups, got %d in:\n%s", got, doc)
@@ -85,7 +87,7 @@ func TestBuildShareHTML_ToolCallIsCollapsedByDefault(t *testing.T) {
 			}},
 		},
 	}
-	doc := BuildShareHTML(snap)
+	doc := BuildShareHTML(snap, "en")
 	// `<details>` without `open` is closed by default.
 	if strings.Contains(doc, "<details class=\"tool tool-call\" open") {
 		t.Fatal("tool call must not be open by default")
@@ -106,7 +108,7 @@ func TestBuildShareHTML_DiffLineClasses(t *testing.T) {
 			}},
 		},
 	}
-	doc := BuildShareHTML(snap)
+	doc := BuildShareHTML(snap, "en")
 	for _, cls := range []string{"diff-add", "diff-del", "diff-hunk", "diff-file", "diff-ctx"} {
 		if !strings.Contains(doc, `class="`+cls+`"`) {
 			t.Fatalf("missing class %q in diff: %s", cls, doc)
@@ -124,7 +126,7 @@ func TestBuildShareHTML_InlineBackticksAndFencedCode(t *testing.T) {
 			}},
 		},
 	}
-	doc := BuildShareHTML(snap)
+	doc := BuildShareHTML(snap, "en")
 	assertContains(t, doc, `<code>t.Cleanup</code>`)
 	assertContains(t, doc, `<pre><code class="language-go">`)
 	assertContains(t, doc, "func TestX(t *testing.T)")
@@ -143,7 +145,7 @@ func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
 		},
 	}
 
-	doc := BuildShareHTML(snap)
+	doc := BuildShareHTML(snap, "en")
 
 	assertContains(t, doc, "<h2>Summary</h2>")
 	assertContains(t, doc, "<strong>Pushed</strong>")
@@ -159,15 +161,104 @@ func TestBuildShareHTML_RendersMarkdownWithoutUnsafeHTML(t *testing.T) {
 
 func TestBuildShareHTML_EmptyMessagesShowsPlaceholder(t *testing.T) {
 	t.Parallel()
-	doc := BuildShareHTML(&Snapshot{Task: TaskMeta{Title: "Empty"}})
+	doc := BuildShareHTML(&Snapshot{Task: TaskMeta{Title: "Empty"}}, "en")
 	assertContains(t, doc, `class="empty"`)
 	assertContains(t, doc, "No messages.")
 }
 
 func TestBuildShareHTML_NilSafe(t *testing.T) {
 	t.Parallel()
-	if got := BuildShareHTML(nil); got == "" {
+	if got := BuildShareHTML(nil, "en"); got == "" {
 		t.Fatal("nil snapshot should produce a placeholder document")
+	}
+}
+
+// htmlFullKeys lists the catalog keys BuildShareHTML renders for a snapshot
+// with content. Interpolated messages are asserted separately because T
+// cannot resolve their placeholders.
+var htmlFullKeys = []string{
+	"share.brandTag",
+	"share.roleYou",
+	keyRoleAssistant,
+	keyRoleSystem,
+	keyToolOutput,
+	keyToolOutputTruncated,
+	"share.redacted",
+	"share.ctaTryKandev",
+}
+
+// htmlEmptyKeys lists the copy that only appears on the degenerate path.
+var htmlEmptyKeys = []string{
+	keyUntitledTask,
+	keyNoMessages,
+	"share.brandTag",
+	"share.ctaTryKandev",
+}
+
+func TestBuildShareHTML_LocalizesCopy(t *testing.T) {
+	t.Parallel()
+	for _, tc := range localizationCases(htmlFullKeys, htmlEmptyKeys) {
+		tc := tc
+		for _, locale := range []string{"en", "pseudo"} {
+			locale := locale
+			t.Run(tc.name+"/"+locale, func(t *testing.T) {
+				t.Parallel()
+				doc := BuildShareHTML(tc.snap, locale)
+				// <html lang> and the messages must agree on the locale.
+				assertContains(t, doc, `<html lang="`+locale+`">`)
+				for _, key := range tc.keys {
+					assertContains(t, doc, i18n.T(locale, key))
+				}
+				title := tc.snap.Task.Title
+				if title == "" {
+					title = i18n.T(locale, keyUntitledTask)
+				}
+				assertContains(t, doc, i18n.Tf(locale, "share.pageTitle",
+					map[string]any{"title": title}))
+				assertContains(t, doc, i18n.Tf(locale, keyMessageCount,
+					map[string]any{"count": len(tc.snap.Messages)}))
+			})
+		}
+		t.Run(tc.name+"/pseudo_differs", func(t *testing.T) {
+			t.Parallel()
+			assertPseudoDiffers(t, BuildShareHTML(tc.snap, "pseudo"), tc.keys)
+		})
+	}
+}
+
+// TestBuildShareHTML_UnsupportedLocaleFallsBack pins that a locale we have no
+// catalog for degrades to English in both <html lang> and the copy, rather
+// than emitting a lang attribute the browser cannot use.
+func TestBuildShareHTML_UnsupportedLocaleFallsBack(t *testing.T) {
+	t.Parallel()
+	doc := BuildShareHTML(localizationSnapshot(), "klingon")
+	assertContains(t, doc, `<html lang="en">`)
+	assertContains(t, doc, i18n.T("en", "share.ctaTryKandev"))
+}
+
+// TestMessageRoleAttrs_TranslatesOnlyTheLabel guards the trap in this
+// function: it returns a CSS class and an avatar next to the label, and the
+// unknown-role branch echoes the raw wire value from the message store. Only
+// the label may ever change with the locale.
+func TestMessageRoleAttrs_TranslatesOnlyTheLabel(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{roleUser, roleAssistant, roleSystem} {
+		enCls, enLabel, enIcon := messageRoleAttrs(role, "en")
+		psCls, psLabel, psIcon := messageRoleAttrs(role, "pseudo")
+		if enCls != psCls {
+			t.Fatalf("role %q: CSS class changed with locale (%q vs %q)", role, enCls, psCls)
+		}
+		if enIcon != psIcon {
+			t.Fatalf("role %q: avatar changed with locale (%q vs %q)", role, enIcon, psIcon)
+		}
+		if enLabel == psLabel {
+			t.Fatalf("role %q: label %q is identical in both locales — it is hardcoded", role, enLabel)
+		}
+	}
+	// An unrecognised role is wire data, not copy: it is echoed verbatim.
+	cls, label, _ := messageRoleAttrs("reviewer", "pseudo")
+	if cls != "other" || label != "reviewer" {
+		t.Fatalf("unknown role should pass through, got cls=%q label=%q", cls, label)
 	}
 }
 

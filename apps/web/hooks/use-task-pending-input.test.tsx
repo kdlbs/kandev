@@ -11,6 +11,7 @@ import {
 import { useSessionPendingInput, useTaskPendingInput } from "./use-task-pending-input";
 
 const PRIMARY_SESSION_ID = "session-primary";
+const SECONDARY_SESSION_ID = "session-secondary";
 
 function message(overrides: Partial<Message>): Message {
   return {
@@ -35,12 +36,19 @@ function session(id: string, state: TaskSession["state"]): TaskSession {
   };
 }
 
+function sessionWithPendingAction(id: string, action: "clarification" | "permission"): TaskSession {
+  return Object.assign(session(id, "WAITING_FOR_INPUT"), { pending_action: action });
+}
+
 function wrapper(messagesBySession: Record<string, Message[]> = {}, sessions: TaskSession[] = []) {
   return function Wrapper({ children }: { children: ReactNode }) {
     return (
       <StateProvider
         initialState={{
           messages: { bySession: messagesBySession, metaBySession: {} },
+          taskSessions: {
+            items: Object.fromEntries(sessions.map((item) => [item.id, item])),
+          },
           taskSessionsByTask: {
             itemsByTaskId: { "task-1": sessions },
             loadingByTaskId: {},
@@ -118,10 +126,10 @@ describe("useTaskPendingInput", () => {
         wrapper: wrapper(
           {
             [PRIMARY_SESSION_ID]: [],
-            "session-secondary": [
+            [SECONDARY_SESSION_ID]: [
               message({
                 id: "secondary-permission",
-                session_id: toSessionId("session-secondary"),
+                session_id: toSessionId(SECONDARY_SESSION_ID),
                 type: "permission_request",
                 metadata: { status: "pending" },
               }),
@@ -129,7 +137,7 @@ describe("useTaskPendingInput", () => {
           },
           [
             session(PRIMARY_SESSION_ID, "RUNNING"),
-            session("session-secondary", "WAITING_FOR_INPUT"),
+            session(SECONDARY_SESSION_ID, "WAITING_FOR_INPUT"),
           ],
         ),
       },
@@ -174,5 +182,21 @@ describe("useSessionPendingInput", () => {
       }),
     });
     expect(result.current).toEqual({ clarification: true, permission: false });
+  });
+
+  it("uses a per-session pending-action snapshot when messages are unloaded", () => {
+    const { result } = renderHook(() => useSessionPendingInput(SECONDARY_SESSION_ID), {
+      wrapper: wrapper({}, [sessionWithPendingAction(SECONDARY_SESSION_ID, "clarification")]),
+    });
+    expect(result.current).toEqual({ clarification: true, permission: false });
+  });
+
+  it("prefers loaded messages over a stale per-session pending-action snapshot", () => {
+    const { result } = renderHook(() => useSessionPendingInput(SECONDARY_SESSION_ID), {
+      wrapper: wrapper({ [SECONDARY_SESSION_ID]: [] }, [
+        sessionWithPendingAction(SECONDARY_SESSION_ID, "permission"),
+      ]),
+    });
+    expect(result.current).toEqual({ clarification: false, permission: false });
   });
 });

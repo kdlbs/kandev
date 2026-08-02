@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // Repository is the persistence interface required by RoutineService.
@@ -499,7 +500,7 @@ func (s *RoutineService) dispatchRoutineRun(
 	vars := shared.ResolveVariables(now, defaults, provided)
 
 	tmpl := parseTaskTemplate(routine.TaskTemplate)
-	title := shared.InterpolateTemplate(tmpl.Title, vars)
+	title := taskservice.TruncateTaskTitle(shared.InterpolateTemplate(tmpl.Title, vars))
 	description := shared.InterpolateTemplate(tmpl.Description, vars)
 	fingerprint := computeFingerprint(title, description, routine.AssigneeAgentProfileID)
 
