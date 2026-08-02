@@ -134,10 +134,17 @@ describe("system storage slice", () => {
       analyzed_at: "2026-07-23T12:00:00Z",
       last_run: null,
     } satisfies StorageOverviewResponse;
+    const policy = { settings: overview.settings, capabilities: overview.capabilities };
+    store.getState().setSystemStoragePolicy(policy);
     store.getState().setSystemStorageOverview(overview);
     store.getState().setSystemStorageRuns([]);
     store.getState().setSystemStorageQuarantine([]);
-    expect(store.getState().system.storage).toEqual({ overview, runs: [], quarantine: [] });
+    expect(store.getState().system.storage).toEqual({
+      policy,
+      overview,
+      runs: [],
+      quarantine: [],
+    });
   });
 });
 

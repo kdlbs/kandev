@@ -325,6 +325,11 @@ export interface StorageOverviewResponse {
   last_run: StorageMaintenanceRun | null;
 }
 
+export interface StoragePolicyResponse {
+  settings: StorageMaintenanceSettings;
+  capabilities: StorageCapabilities;
+}
+
 export interface StorageSettingsResponse {
   settings: StorageMaintenanceSettings;
 }

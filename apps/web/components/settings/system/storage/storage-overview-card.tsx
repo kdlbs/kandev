@@ -3,13 +3,17 @@ import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import type { StorageOverviewResponse, StorageQuarantineSummary } from "@/lib/types/system";
 import { formatRelativeTime } from "@/lib/utils";
 import { StorageActionButton } from "./storage-action-button";
 import { formatGigabytes } from "./storage-units";
+import { storageAnalysisTotal } from "./storage-totals";
 
 interface Props {
   overview: StorageOverviewResponse | null;
+  loading?: boolean;
+  error?: string | null;
   disabledReason?: string;
   onRunGoCache: () => void;
 }
@@ -171,13 +175,24 @@ function ResourceRow({ resource, goCacheCleanupDisabledReason, onRunGoCache }: R
   );
 }
 
-export function StorageOverviewCard({ overview, disabledReason, onRunGoCache }: Props) {
+export function StorageOverviewCard({
+  overview,
+  loading,
+  error,
+  disabledReason,
+  onRunGoCache,
+}: Props) {
+  const { t } = useTranslation();
+  const isLoading = loading ?? overview === null;
   if (!overview) {
     return (
       <Card data-testid="storage-overview-card">
         <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
-          <Spinner className="size-4" data-testid="storage-overview-spinner" />
-          Loading storage data…
+          {isLoading && <Spinner className="size-4" data-testid="storage-overview-spinner" />}
+          <span>
+            {isLoading ? t("settings:storageLoadingData") : t("settings:storageSectionUnavailable")}
+          </span>
+          {error && <span className="break-words text-destructive">{error}</span>}
         </CardContent>
       </Card>
     );
@@ -186,6 +201,7 @@ export function StorageOverviewCard({ overview, disabledReason, onRunGoCache }: 
   const analyzedAt = new Date(overview.analyzed_at).toLocaleString();
   const cleanupDisabledReason = goCacheDisabledReason(overview, disabledReason);
   const resources = storageResources(overview);
+  const total = storageAnalysisTotal(summary);
   return (
     <Card className="min-w-0" data-testid="storage-overview-card">
       <CardHeader>
@@ -205,6 +221,24 @@ export function StorageOverviewCard({ overview, disabledReason, onRunGoCache }: 
         >
           Last analyzed {formatRelativeTime(overview.analyzed_at)}
         </time>
+        <div
+          className="flex flex-wrap items-center gap-2 text-xs"
+          data-testid="storage-analysis-total"
+        >
+          <span className="font-medium">
+            {t("settings:storageTotalCounted", { size: formatGigabytes(total.bytes) })}
+          </span>
+          {total.partial && (
+            <Badge variant="outline" data-testid="storage-analysis-total-partial">
+              {t("settings:storageTotalPartial")}
+            </Badge>
+          )}
+        </div>
+        {error && (
+          <p className="break-words text-xs text-destructive" data-testid="storage-overview-error">
+            {t("settings:storageSectionUnavailable")}: {error}
+          </p>
+        )}
       </CardHeader>
       <CardContent className="min-w-0">
         <Accordion type="multiple" className="min-w-0">

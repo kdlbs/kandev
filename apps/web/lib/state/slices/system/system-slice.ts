@@ -11,7 +11,7 @@ export const defaultSystemState: SystemSliceState = {
     updates: null,
     jobs: {},
     metrics: null,
-    storage: { overview: null, runs: [], quarantine: [] },
+    storage: { policy: null, overview: null, runs: [], quarantine: [] },
   },
 };
 
@@ -66,6 +66,10 @@ export const createSystemSlice: StateCreator<
   setSystemMetricsSnapshot: (snapshot) =>
     set((draft) => {
       draft.system.metrics = snapshot;
+    }),
+  setSystemStoragePolicy: (policy) =>
+    set((draft) => {
+      draft.system.storage.policy = policy;
     }),
   setSystemStorageOverview: (overview) =>
     set((draft) => {

@@ -15,6 +15,7 @@ import type {
   StorageMaintenanceRun,
   StorageMaintenanceSettings,
   StorageOverviewResponse,
+  StoragePolicyResponse,
   StorageQuarantineEntry,
   StorageQuarantinePurgeScope,
   StorageSettingsResponse,
@@ -200,6 +201,13 @@ export function fetchStorageOverview(
   options?: ApiRequestOptions,
 ): Promise<StorageOverviewResponse> {
   return fetchJson<StorageOverviewResponse>(`${SYSTEM_BASE}/storage`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export function fetchStoragePolicy(options?: ApiRequestOptions): Promise<StoragePolicyResponse> {
+  return fetchJson<StoragePolicyResponse>(`${SYSTEM_BASE}/storage/settings`, {
     ...options,
     cache: "no-store",
   });

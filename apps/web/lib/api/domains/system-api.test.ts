@@ -31,6 +31,7 @@ import {
   analyzeStorage,
   deleteStorageQuarantine,
   fetchStorageOverview,
+  fetchStoragePolicy,
   fetchStorageQuarantine,
   fetchStorageRuns,
   purgeStorageQuarantine,
@@ -312,31 +313,31 @@ describe("restart", () => {
   });
 });
 
-describe("storage maintenance", () => {
-  const settings = {
-    enabled: false,
-    check_interval_hours: 24,
-    idle_for_minutes: 10,
-    orphan_grace_hours: 168,
-    quarantine_retention_hours: 168,
-    workspaces: { enabled: true },
-    kandev_containers: { enabled: true },
-    go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
-    docker: {
-      dedicated_daemon_acknowledged: false,
-      build_cache_enabled: false,
-      build_cache_keep_bytes: 10737418240,
-      build_cache_unused_hours: 168,
-      unused_images_enabled: false,
-      unused_images_hours: 168,
-    },
-  };
+const storageSettings = {
+  enabled: false,
+  check_interval_hours: 24,
+  idle_for_minutes: 10,
+  orphan_grace_hours: 168,
+  quarantine_retention_hours: 168,
+  workspaces: { enabled: true },
+  kandev_containers: { enabled: true },
+  go_cache: { enabled: false, max_bytes: 16106127360, adopted_path: "" },
+  docker: {
+    dedicated_daemon_acknowledged: false,
+    build_cache_enabled: false,
+    build_cache_keep_bytes: 10737418240,
+    build_cache_unused_hours: 168,
+    unused_images_enabled: false,
+    unused_images_hours: 168,
+  },
+};
 
+describe("storage maintenance", () => {
   it("loads overview and list resources without caching", async () => {
     fetchSpy
       .mockResolvedValueOnce(
         jsonResponse({
-          settings,
+          settings: storageSettings,
           summary: {},
           capabilities: {},
           analyzed_at: "2026-07-23T12:00:00Z",
@@ -355,19 +356,19 @@ describe("storage maintenance", () => {
   });
 
   it("saves dedicated Docker acknowledgement with its confirmation", async () => {
-    fetchSpy.mockResolvedValueOnce(jsonResponse({ settings }));
-    await saveStorageSettings(settings, "DEDICATED");
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ settings: storageSettings }));
+    await saveStorageSettings(storageSettings, "DEDICATED");
     expect(lastCall().url).toBe(`${BASE}/storage/settings`);
     expect(method()).toBe("PATCH");
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({
-      settings,
+      settings: storageSettings,
       confirmations: { dedicated_docker: "DEDICATED" },
     });
   });
 
   it("uses fixed confirmations for Go-cache adoption and permanent deletion", async () => {
     fetchSpy
-      .mockResolvedValueOnce(jsonResponse({ settings, capabilities: {} }))
+      .mockResolvedValueOnce(jsonResponse({ settings: storageSettings, capabilities: {} }))
       .mockResolvedValueOnce(jsonResponse({ job_id: "delete-job" }));
     await adoptStorageGoCache("/root/.cache/go-build");
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({
@@ -414,5 +415,20 @@ describe("storage maintenance", () => {
     });
     fetchSpy.mockResolvedValueOnce(jsonResponse({ entry: { id: "restored" } }));
     expect((await restoreStorageQuarantine("entry-1")).id).toBe("restored");
+  });
+});
+
+describe("storage policy", () => {
+  it("loads storage policy without requesting the scan-backed overview", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({ settings: storageSettings, capabilities: { docker_available: true } }),
+    );
+
+    const response = await fetchStoragePolicy();
+
+    expect(lastCall().url).toBe(`${BASE}/storage/settings`);
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.settings).toEqual(storageSettings);
+    expect(response.capabilities.docker_available).toBe(true);
   });
 });

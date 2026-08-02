@@ -132,5 +132,9 @@ describe("StorageOverviewCard", () => {
     expect(
       screen.getByTestId("storage-resource-docker-image-layers-trigger").textContent,
     ).toContain("14 GB");
+    expect(screen.getByTestId("storage-analysis-total").textContent).toContain(
+      "Total counted: 47 GB",
+    );
+    expect(screen.getByTestId("storage-analysis-total-partial")).toBeTruthy();
   });
 });

@@ -71,6 +71,47 @@ func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	}
 }
 
+func TestGetStorageSettingsReturnsPolicyWithoutOverviewScan(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := DefaultSettings()
+	capabilities := Capabilities{
+		ManagedGoCachePath:       "/data/cache/go-build",
+		GoCacheAdoptionAvailable: true,
+		DockerAvailable:          true,
+		DockerHost:               "unix:///var/run/docker.sock",
+		HostGlobalDockerCleanup:  true,
+	}
+	overview := &recordingOverviewReader{capabilities: capabilities}
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+		Settings: staticSettingsManager{settings: settings},
+		Overview: overview,
+	}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/settings", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body struct {
+		Settings     StorageMaintenanceSettings `json:"settings"`
+		Capabilities Capabilities               `json:"capabilities"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Settings != settings {
+		t.Fatalf("settings = %#v, want %#v", body.Settings, settings)
+	}
+	if body.Capabilities != capabilities {
+		t.Fatalf("capabilities = %#v, want %#v", body.Capabilities, capabilities)
+	}
+	if overview.getCalls != 0 {
+		t.Fatalf("overview scans = %d, want 0", overview.getCalls)
+	}
+}
+
 func TestDeleteQuarantineBulkValidatesConfirmation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mutations := &recordingMutations{}
@@ -125,10 +166,13 @@ func (f failingSettingsManager) GetSettings(context.Context) (StorageMaintenance
 	return DefaultSettings(), nil
 }
 
-type staticSettingsManager struct{}
+type staticSettingsManager struct{ settings StorageMaintenanceSettings }
 
-func (staticSettingsManager) GetSettings(context.Context) (StorageMaintenanceSettings, error) {
-	return DefaultSettings(), nil
+func (s staticSettingsManager) GetSettings(context.Context) (StorageMaintenanceSettings, error) {
+	if s.settings == (StorageMaintenanceSettings{}) {
+		return DefaultSettings(), nil
+	}
+	return s.settings, nil
 }
 
 func (staticSettingsManager) SaveSettingsWithConfirmations(context.Context, StorageMaintenanceSettings, SaveConfirmations) (StorageMaintenanceSettings, error) {
@@ -145,6 +189,20 @@ func (o staticCachedOverview) Get(context.Context) (OverviewSnapshot, error) { r
 
 func (o staticCachedOverview) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
 	return Capabilities{}
+}
+
+type recordingOverviewReader struct {
+	capabilities Capabilities
+	getCalls     int
+}
+
+func (o *recordingOverviewReader) Get(context.Context) (OverviewSnapshot, error) {
+	o.getCalls++
+	return OverviewSnapshot{}, nil
+}
+
+func (o *recordingOverviewReader) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
+	return o.capabilities
 }
 
 func (f failingSettingsManager) SaveSettingsWithConfirmations(

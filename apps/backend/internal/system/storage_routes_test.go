@@ -31,6 +31,18 @@ func TestRegisterRoutesExposesStorageSummary(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutesExposesStorageSettings(t *testing.T) {
+	router := newStorageRoutesTestRouter(t)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/settings", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/system/storage/settings status = %d, want 200", response.Code)
+	}
+}
+
 func TestStorageSettingsRejectInvalidPatch(t *testing.T) {
 	router := newStorageRoutesTestRouter(t)
 	settings := storage.DefaultSettings()

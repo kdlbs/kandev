@@ -80,6 +80,7 @@ func NewHandler(config HandlerConfig) *Handler {
 
 func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
 	group.GET("/storage", handler.getStorage)
+	group.GET("/storage/settings", handler.getStorageSettings)
 	group.PATCH("/storage/settings", handler.patchSettings)
 	group.POST("/storage/go-cache/adopt", handler.adoptGoCache)
 	group.POST("/storage/analyze", handler.analyze)
@@ -248,6 +249,18 @@ func (h *Handler) getStorage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"settings": settings, "capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
 		"summary": snapshot.Summary, "analyzed_at": snapshot.AnalyzedAt, "last_run": lastRun,
+	})
+}
+
+func (h *Handler) getStorageSettings(c *gin.Context) {
+	settings, err := h.config.Settings.GetSettings(c.Request.Context())
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"settings":     settings,
+		"capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
 	})
 }
 

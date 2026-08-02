@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   purge: vi.fn(),
   fetchJob: vi.fn(),
   fetchOverview: vi.fn(),
+  fetchPolicy: vi.fn(),
   fetchQuarantine: vi.fn(),
   fetchRuns: vi.fn(),
   restore: vi.fn(),
@@ -31,6 +32,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
   purgeStorageQuarantine: mocks.purge,
   fetchSystemJob: mocks.fetchJob,
   fetchStorageOverview: mocks.fetchOverview,
+  fetchStoragePolicy: mocks.fetchPolicy,
   fetchStorageQuarantine: mocks.fetchQuarantine,
   fetchStorageRuns: mocks.fetchRuns,
   restoreStorageQuarantine: mocks.restore,
@@ -112,6 +114,10 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchOverview.mockResolvedValue(overview);
+  mocks.fetchPolicy.mockResolvedValue({
+    settings: overview.settings,
+    capabilities: overview.capabilities,
+  });
   mocks.fetchRuns.mockResolvedValue([]);
   mocks.fetchQuarantine.mockResolvedValue([]);
   mocks.fetchJob.mockResolvedValue(cleanupJob);
@@ -122,6 +128,29 @@ beforeEach(() => {
 });
 
 describe("useStorageMaintenance", () => {
+  it("publishes fast sections before a cold overview scan finishes", async () => {
+    const overviewRequest = deferred<StorageOverviewResponse>();
+    mocks.fetchOverview.mockReturnValueOnce(overviewRequest.promise);
+
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+
+    await waitFor(() => expect(result.current.policy?.settings).toEqual(settings));
+    expect(result.current.loading).toMatchObject({
+      policy: false,
+      runs: false,
+      quarantine: false,
+      overview: true,
+    });
+    expect(result.current.overview).toBeNull();
+
+    await act(async () => {
+      overviewRequest.resolve(overview);
+      await overviewRequest.promise;
+    });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    expect(result.current.loading.overview).toBe(false);
+  });
+
   it("loads overview, run history, and quarantine through the domain controller", async () => {
     const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
     await waitFor(() => expect(result.current.overview).toEqual(overview));
@@ -141,6 +170,20 @@ describe("useStorageMaintenance", () => {
       title: "Storage policy saved",
       variant: "success",
     });
+  });
+
+  it("refreshes policy after save without starting another overview scan", async () => {
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    mocks.fetchOverview.mockClear();
+    mocks.fetchPolicy.mockClear();
+
+    await act(async () => {
+      await result.current.save(settings);
+    });
+
+    expect(mocks.fetchPolicy).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchOverview).not.toHaveBeenCalled();
   });
 
   it("starts eligible and forced quarantine bulk jobs", async () => {
