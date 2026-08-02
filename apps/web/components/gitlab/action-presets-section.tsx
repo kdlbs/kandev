@@ -139,7 +139,7 @@ export function GitLabActionPresetsSection({ workspaceId }: { workspaceId: strin
       });
       throw error;
     }
-  }, [drafts, toast, update]);
+  }, [drafts, t, toast, update]);
   const discard = useCallback(() => {
     drafts.setMR(drafts.baseline.mr);
     drafts.setIssue(drafts.baseline.issue);
