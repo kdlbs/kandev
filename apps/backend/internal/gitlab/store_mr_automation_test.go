@@ -134,6 +134,37 @@ func TestStore_RecordTaskMRLifecyclePrompt(t *testing.T) {
 	}
 }
 
+// TestStore_RecordTaskMRLifecyclePrompt_ClearsSessionIDWhenAbsent proves a
+// prompt recorded without session context (SessionID == "") clears any
+// previously stored session pointer rather than leaving it stale — the
+// checkpoint must reflect the prompt actually being recorded, not a mix of
+// this prompt's other fields and an earlier prompt's session.
+func TestStore_RecordTaskMRLifecyclePrompt_ClearsSessionIDWhenAbsent(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-1", "")
+	if err := store.RecordTaskMRLifecyclePrompt(ctx, TaskMRLifecyclePrompt{
+		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
+		Event: mrLifecycleEventReviewRequested, SessionID: "sess-1",
+		PromptedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed prompt with session: %v", err)
+	}
+	if err := store.RecordTaskMRLifecyclePrompt(ctx, TaskMRLifecyclePrompt{
+		TaskID: "task-1", ProjectPath: "group/a", MRIID: 1,
+		Event: mrLifecycleEventMerged, PromptedAt: time.Now().UTC(), ObservedState: "merged",
+	}); err != nil {
+		t.Fatalf("RecordTaskMRLifecyclePrompt without session: %v", err)
+	}
+	got, err := store.GetTaskMRLifecycleState(ctx, "task-1", "", "group/a", 1)
+	if err != nil || got == nil {
+		t.Fatalf("GetTaskMRLifecycleState: %+v err=%v", got, err)
+	}
+	if got.LastLifecycleSessionID != nil {
+		t.Fatalf("expected session ID cleared for a session-less prompt, got %+v", got)
+	}
+}
+
 func TestStore_RecordAndClearTaskMRAutomationError(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()
