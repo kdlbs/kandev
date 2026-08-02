@@ -79,18 +79,19 @@ function StepAgentProfileSelect({
           ))}
         </SelectContent>
       </Select>
-      <SessionConfigToggle
-        step={step}
-        savedStep={savedStep}
-        onUpdate={onUpdate}
-        readOnly={readOnly}
-      />
       <HelpTip
+        testId={`${step.id}-agent-profile-help`}
         text={
           hasConditionalSessionConfig
             ? t("settings:removeConditionalSessionConfigBeforeProfile")
             : t("settings:overrideAgentProfileHelp")
         }
+      />
+      <SessionConfigToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
       />
     </div>
   );

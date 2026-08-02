@@ -72,6 +72,13 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
     await page.selectStep(card, "Work");
 
+    const agentProfileHelpId = `${workStep.id}-agent-profile-help`;
+    const originalSessionHelpId = `${workStep.id}-override-original-session-help`;
+    const helpOrder = await card
+      .locator(`[data-testid="${agentProfileHelpId}"], [data-testid="${originalSessionHelpId}"]`)
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid")));
+    expect(helpOrder).toEqual([agentProfileHelpId, originalSessionHelpId]);
+
     await card.getByLabel("Override original session options").click();
     const editor = card.getByTestId(`${workStep.id}-session-config-editor`);
     await expect(editor.getByTestId("session-config-rule-0")).toBeVisible();

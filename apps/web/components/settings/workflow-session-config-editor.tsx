@@ -80,7 +80,10 @@ export function SessionConfigToggle({
       <Label htmlFor={`${step.id}-override-original-session`} className="text-sm">
         {t("settings:overrideOriginalSessionOptions")}
       </Label>
-      <HelpTip text={t("settings:overrideOriginalSessionOptionsHelp")} />
+      <HelpTip
+        testId={`${step.id}-override-original-session-help`}
+        text={t("settings:overrideOriginalSessionOptionsHelp")}
+      />
     </div>
   );
 }
