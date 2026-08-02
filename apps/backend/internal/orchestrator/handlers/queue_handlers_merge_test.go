@@ -11,6 +11,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestWsMergeIntoAbove covers the ActionMessageQueueMerge websocket path:
+// happy-path merge, ownership rejection, and reserved-identity handling.
 func TestWsMergeIntoAbove(t *testing.T) {
 	t.Run("merges a user entry into the entry above", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)

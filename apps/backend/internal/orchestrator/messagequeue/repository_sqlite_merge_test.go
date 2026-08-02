@@ -10,6 +10,8 @@ import (
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// insertTestEntry inserts a queued message through the repository under test
+// and fails the test on error, returning the inserted entry.
 func insertTestEntry(t *testing.T, repo Repository, session, task, content, queuedBy string, attachments []MessageAttachment, metadata map[string]interface{}) *QueuedMessage {
 	t.Helper()
 	msg := &QueuedMessage{
@@ -26,6 +28,8 @@ func insertTestEntry(t *testing.T, repo Repository, session, task, content, queu
 	return msg
 }
 
+// entityRefs builds the metadata reference list for the given issue ids,
+// using canonical github/acme-repo references.
 func entityRefs(ids ...string) []interface{} {
 	out := make([]interface{}, 0, len(ids))
 	for _, id := range ids {
@@ -43,10 +47,13 @@ func entityRefs(ids ...string) []interface{} {
 	return out
 }
 
+// manyEntityRefs returns count references starting at id 1.
 func manyEntityRefs(count int) []interface{} {
 	return manyEntityRefsFrom(1, count)
 }
 
+// manyEntityRefsFrom returns count references starting at the given id,
+// used to build unions that straddle the per-message reference cap.
 func manyEntityRefsFrom(start, count int) []interface{} {
 	ids := make([]string, count)
 	for i := range ids {

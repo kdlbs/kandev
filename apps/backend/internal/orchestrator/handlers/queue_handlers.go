@@ -46,6 +46,7 @@ type QueueService interface {
 	GetStatus(ctx context.Context, sessionID string) *messagequeue.QueueStatus
 }
 
+// QueueDrainer drains a single queued entry when the session is promptable.
 type QueueDrainer interface {
 	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
 }
@@ -359,12 +360,18 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
 }
 
+// wsMergeIntoAboveRequest is the payload for ActionMessageQueueMerge: the
+// session whose queue is modified and the id of the entry to fold into the
+// entry directly above it. user_id is forwarded for ownership checks and is
+// optional (the server defaults to the reserved "user" identity).
 type wsMergeIntoAboveRequest struct {
 	SessionID string `json:"session_id"`
 	EntryID   string `json:"entry_id"`
 	UserID    string `json:"user_id,omitempty"`
 }
 
+// wsMergeIntoAbove handles ActionMessageQueueMerge, folding the referenced
+// queued entry into the entry above it and broadcasting the updated queue.
 func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req wsMergeIntoAboveRequest
 	if err := msg.ParsePayload(&req); err != nil {

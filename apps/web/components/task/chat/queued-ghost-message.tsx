@@ -23,6 +23,7 @@ import {
 } from "@tabler/icons-react";
 import ReactMarkdown from "react-markdown";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { Textarea } from "@kandev/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -327,6 +328,7 @@ function RowActions({
   onStartEdit,
   onRemove,
 }: RowActionsProps) {
+  const { t } = useTranslation();
   return (
     <div
       className={cn(
@@ -343,7 +345,7 @@ function RowActions({
           size="sm"
           className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
           onClick={onToggleExpand}
-          title={expanded ? "Collapse message" : "Expand message"}
+          title={expanded ? t("chat:collapseMessage") : t("chat:expandMessage")}
           data-testid="queue-entry-expand"
           aria-expanded={expanded}
         >
@@ -360,7 +362,7 @@ function RowActions({
           size="sm"
           className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
           onClick={onMerge}
-          title="Merge with above"
+          title={t("chat:mergeWithAbove")}
           data-testid="queue-entry-merge"
         >
           <IconArrowMerge className="h-3.5 w-3.5" />
@@ -373,7 +375,7 @@ function RowActions({
             size="sm"
             className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
             onClick={onStartEdit}
-            title="Edit queued message"
+            title={t("chat:editQueuedMessage")}
           >
             <IconEdit className="h-3.5 w-3.5" />
           </Button>
@@ -382,7 +384,7 @@ function RowActions({
             size="sm"
             className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
             onClick={onRemove}
-            title="Remove queued message"
+            title={t("chat:removeQueuedMessage")}
           >
             <IconX className="h-4 w-4" />
           </Button>

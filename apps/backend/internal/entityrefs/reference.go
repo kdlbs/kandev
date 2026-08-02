@@ -14,6 +14,8 @@ import (
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// ErrInvalidReference is returned when an entity reference fails validation
+// (malformed ref, unknown provider/kind, or over the per-message cap).
 var ErrInvalidReference = errors.New("invalid entity reference")
 
 var identityNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._:-]{0,127}$`)
@@ -24,8 +26,8 @@ const (
 	// combined reference lists (e.g. message queue merges) use it to reject
 	// unions that would exceed the cap instead of silently dropping refs.
 	MaxReferencesPerMessage = 100
-	kandevProviderID         = "kandev"
-	kandevTaskKind           = "task"
+	kandevProviderID        = "kandev"
+	kandevTaskKind          = "task"
 )
 
 // CanonicalRef constructs the opaque stable identity owned by the registry.
