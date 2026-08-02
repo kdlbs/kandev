@@ -24,7 +24,8 @@
 #
 # Set its `prod` value to `true`. Ship the next release. Once the
 # feature has been on by default for a release or two and is
-# permanent, rip the flag out of the codebase entirely.
+# permanent, remove its live wiring and move its key/environment pair
+# to runtimeflags' append-only retired-identity set.
 #
 # ── See also ───────────────────────────────────────────────────────
 #

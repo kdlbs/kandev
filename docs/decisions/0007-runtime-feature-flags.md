@@ -75,8 +75,8 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
 - `apps/backend/internal/profiles/profiles.yaml` — the file (symlinked from `./profiles.yaml` at the repo root).
 - `apps/backend/internal/profiles/profiles.go` — `DetectEnvironment`, `ApplyProfile`, `FeatureFlagDefaults`.
 - `apps/backend/internal/common/config/config.go` — calls `profiles.ApplyProfile()` at the top of `LoadWithPath` (before Viper's `AutomaticEnv`) and then seeds Viper's `features.*` keyspace from `profiles.FeatureFlagDefaults()` so the typed `FeaturesConfig` populates correctly even in tests.
-- `apps/backend/internal/runtimeflags/registry.go` — owns each flag's public metadata, key, environment variable, typed config reader, and typed config applier in one internal registration. `OptionsFromConfig`, `ValuesFromConfig`, and persisted-state application iterate these registrations.
-- `FeaturesConfig` holds a typed `bool` per feature. Reflective tests require every field to have one runtime registration and one profile entry.
+- `apps/backend/internal/runtimeflags/registry.go` — owns each flag's public metadata, key, environment variable, typed config reader, and typed config applier in one internal registration. It also owns the append-only identities of retired flags. `OptionsFromConfig`, `ValuesFromConfig`, and persisted-state application iterate active registrations.
+- `FeaturesConfig` holds a typed `bool` per feature. Reflective tests require exact config/registry/profile key equality, complete metadata, isolated typed bindings, and no active collision with a retired identity. A frontend Vitest contract compares the backend JSON tags with `defaultFeatureFlags`.
 - `apps/backend/internal/backendapp/main.go` and other backend entry paths gate construction, route registration, handlers, background jobs, and agent/MCP behavior at their narrow composition boundaries. When off, the relevant service stays nil or the operation is rejected before side effects; HTTP routes are simply never registered, so a guessed URL returns 404 (not 401).
 
 ### Frontend wiring (feature flags only)
@@ -98,7 +98,7 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
 - The "what's on in dev / e2e?" question is grep-friendly at the repo root.
 - Per-spec / per-host overrides still work because `ApplyProfile` is idempotent and leaves already-set vars alone.
 - Gated code stays compiled into the production binary and JS bundle. Acceptable trade-off vs build tags: the Office surface adds ≤ ~5% to the binary, and the operational simplicity (one artifact, runtime flips) is worth more than tree-shaking would be at our scale.
-- Adding a new flag has one profile entry, one typed `FeaturesConfig` field, one registry registration, and the necessary backend/frontend gates. Completeness tests fail when a layer is omitted.
+- Adding a new flag has one profile entry, one typed `FeaturesConfig` field, one registry registration, and the necessary backend/frontend gates. Completeness tests fail when a layer is omitted, added only on one side, or malformed.
 - The 404-on-disabled-feature failure mode is deliberate: a flagged-off feature should look like it doesn't exist, not like a permission denial.
 
 ## Alternatives considered
@@ -124,7 +124,8 @@ A self-hoster setting `KANDEV_FEATURES_OFFICE=true` in their k8s manifest beats 
    `profiles.FeatureFlagDefaults()` seeds it automatically.)
 3. Add one registration in `apps/backend/internal/runtimeflags/registry.go`
    with the key, env var, metadata, typed reader, and typed applier. Do not add
-   a parallel per-flag map or switch. The registry completeness test must pass.
+   a parallel per-flag map or switch, and do not reuse an identity in
+   `retiredRuntimeFlagIdentities`. The registry completeness test must pass.
 4. Gate every backend entry path at its narrow composition boundary. The
    disabled path must preserve the legacy behavior and must fail closed before
    deriving data, writing state, dispatching work, or exposing a capability.
@@ -144,12 +145,13 @@ or an explicit environment variable, restart, and observe it. Once the
 feature is ready for everyone, change its `prod:` value in `profiles.yaml` to
 `"true"` for the next release while retaining the registry metadata as a
 kill-switch during the rollout. After the feature has been on by default for a
-release or two and is permanent, remove the flag end-to-end.
+release or two and is permanent, remove the live flag end-to-end.
 
 Removal includes the `profiles.yaml` entry, the `FeaturesConfig` field, the
-registry registration, backend gates, frontend declaration and checks, tests,
-and docs. Never reuse a removed key for different behavior; unknown persisted
-overrides remain inert and are ignored by the registry.
+active registry registration, backend gates, frontend declaration and checks,
+tests, and docs. Move the removed key and environment variable to the
+append-only `retiredRuntimeFlagIdentities` set. Unknown persisted overrides
+remain inert, and neither retired identity may be reused.
 
 ## How to add a non-feature-flag knob
 

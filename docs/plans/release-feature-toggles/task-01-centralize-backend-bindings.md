@@ -46,6 +46,12 @@ spec: "../../specs/feature-toggles/spec.md"
   Debug implied-environment behavior remains in its named applier.
 - Added reflective registry/profile/config round-trip coverage and generic
   `FeaturesConfig` JSON/tag coverage.
+- Review remediation made config, registry, and profile key comparison exact in
+  both directions; validates registration metadata and binding isolation; and
+  reserves graduated key/environment identities in an append-only tombstone
+  set. The graduated plugins identity is the first tombstone.
+- Review verification: focused tests passed (37 tests across runtimeflags and
+  profiles), the full backend suite passed, and backend lint reported 0 issues.
 - Verification: focused `go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`
   passed (87 tests across 3 packages), `make -C apps/backend test` passed, and
   `make -C apps/backend lint` passed with 0 issues.

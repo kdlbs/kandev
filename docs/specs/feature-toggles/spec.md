@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-06-14
-updated: 2026-08-01
+updated: 2026-08-02
 owner: tbd
 ---
 
@@ -57,16 +57,17 @@ duplicating flag identity or config-binding code across many files.
   behavior in its own spec.
 - Runtime flag definitions bind their registry key, environment variable,
   config read, and config apply behavior in one backend definition. Frontend
-  feature names and default-false values have one declaration.
+  feature names and default-false values have one declaration. Graduated flag
+  keys and environment variables move to an append-only retired-identity set.
 - A release toggle follows this lifecycle:
   1. merge with every shipped profile default off;
   2. enable selected installations with an override or explicit environment;
   3. ship one default-on release while retaining the kill switch;
-  4. remove the flag and the legacy behavior after the default-on release is
-     proven.
-- Removed flag keys are never reused. Unknown persisted override rows are
-  ignored so upgrades and downgrades do not destructively rewrite operator
-  state.
+  4. remove the live flag and legacy behavior after the default-on release is
+     proven, while retaining its retired key and environment identity.
+- Removed flag keys and environment variables are never reused. Unknown
+  persisted override rows are ignored so upgrades and downgrades do not
+  destructively rewrite operator state.
 
 ## Data model
 
@@ -137,7 +138,7 @@ Restart capability and restart-request contracts remain defined by
 default off
   -> selected-install override on
   -> default on with kill switch retained
-  -> flag removed and new behavior permanent
+  -> live flag removed, identity retired, new behavior permanent
 ```
 
 At any retained-flag stage, an explicit environment value has precedence over
@@ -207,8 +208,8 @@ a saved override. A saved value that differs from the current process value is
   production default changes to on, **THEN** operators can still override it
   off for that release.
 - **GIVEN** one default-on release has succeeded, **WHEN** the toggle graduates,
-  **THEN** the legacy behavior and all flag declarations/gates are removed while
-  the new behavior remains enabled.
+  **THEN** the legacy behavior and live flag declarations/gates are removed,
+  the identity is retired, and the new behavior remains enabled.
 - **GIVEN** a removed key still has a persisted override, **WHEN** Kandev boots,
   **THEN** the row is ignored and no unrelated feature adopts its value.
 - **GIVEN** a phone viewport, **WHEN** an administrator opens Feature Toggles and
@@ -224,8 +225,10 @@ a saved override. A saved value that differs from the current process value is
 - Adding or removing a frontend-visible toggle changes one backend definition,
   one typed config field, one profile entry, and at most one frontend feature
   declaration before its actual gates and tests.
-- CI detects incomplete registry/config/profile bindings.
-- A graduated toggle leaves no live legacy branch or reusable stale key.
+- CI detects incomplete or malformed registry/config/profile/frontend
+  contracts in either direction.
+- A graduated toggle leaves no live legacy branch or reusable stale key or
+  environment variable.
 
 ## Out of scope
 

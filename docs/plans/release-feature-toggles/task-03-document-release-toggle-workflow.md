@@ -42,7 +42,8 @@ spec: "../../specs/feature-toggles/spec.md"
 
 - Updated ADR-0007, public configuration/extending docs, and root agent
   guidance with install-wide ownership, fail-closed entry paths, staged
-  rollout, kill-switch retention, removal, and key non-reuse.
+  rollout, kill-switch retention, removal, and retired key/environment
+  non-reuse.
 - Added the release-toggle contract ADR and indexes, and removed the orphaned
   unread-divider feature-toggle E2E helper.
 - Verification: `node --test scripts/validate-public-docs.test.mjs` passed
@@ -50,3 +51,5 @@ spec: "../../specs/feature-toggles/spec.md"
   `git diff --check` passed.
 - Security/trust impact: none; docs clarify existing boundaries.
 - External side effects: none.
+- Review verification: public-doc tests passed (58 tests), validation covered
+  41 published pages, and `git diff --check` passed.

@@ -33,14 +33,16 @@ single backend binding for registry key, environment variable, config read, and
 config apply behavior; the public `RuntimeFlagDefinition` remains metadata-only.
 Generic resolution iterates registrations instead of adding each flag to
 separate maps and switches. The frontend derives its feature-name type and
-all-false defaults from one declaration. CI checks registry, `FeaturesConfig`,
-profile, and frontend-default completeness.
+all-false defaults from one declaration. CI requires exact registry,
+`FeaturesConfig`, profile, and frontend-default key equality and validates
+registration metadata and typed binding isolation.
 
 Rollout is staged: merge default-off, enable selected installations, ship one
 default-on release with the kill switch retained, then remove the flag and
-legacy behavior. Removed keys are never reused. Unknown persisted overrides are
-ignored rather than deleted so downgrade compatibility does not mutate operator
-state.
+legacy behavior. Graduation moves the key and environment variable to the
+append-only retired-identity set in `internal/runtimeflags/registry.go`;
+retired identities are never reused. Unknown persisted overrides are ignored
+rather than deleted so downgrade compatibility does not mutate operator state.
 
 ## Consequences
 
@@ -54,8 +56,8 @@ state.
 - Retaining the kill switch for one default-on release delays complete code
   removal, but preserves rollback during the highest-exposure stage.
 - Unknown override rows can accumulate, but remain inert and preserve downgrade
-  behavior. Permanent key non-reuse prevents stale values from acquiring new
-  meaning.
+  behavior. The source-controlled retired-identity set prevents stale database
+  or environment values from acquiring new meaning.
 
 ## Alternatives Considered
 

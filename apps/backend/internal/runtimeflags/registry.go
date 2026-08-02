@@ -11,6 +11,19 @@ type runtimeFlagRegistration struct {
 	apply      func(*config.Config, bool)
 }
 
+type runtimeFlagIdentity struct {
+	key    string
+	envVar string
+}
+
+// retiredRuntimeFlagIdentities is append-only. When a flag graduates, remove
+// its active registration and move its identity here. Persisted overrides for
+// unknown keys are intentionally retained, so neither the key nor environment
+// variable may ever be reused for a different flag.
+var retiredRuntimeFlagIdentities = []runtimeFlagIdentity{
+	{key: "features.plugins", envVar: "KANDEV_FEATURES_PLUGINS"},
+}
+
 var registrations = []runtimeFlagRegistration{
 	{
 		definition: RuntimeFlagDefinition{

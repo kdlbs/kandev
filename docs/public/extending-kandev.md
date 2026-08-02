@@ -122,11 +122,13 @@ Wire a release toggle through every enforcement layer in one change:
 
 For rollout, merge with the flag off, enable it on one install through an
 admin override or explicit environment and restart, then promote the `prod`
-default after observation. Remove the flag only after it is permanent, and
-never reuse its key for different behavior. A flag is incomplete if any layer
-can expose or execute the feature while it is disabled. Do not turn an internal
-package or environment variable into a public setting without first defining
-its compatibility contract and support status.
+default after observation. Remove the live flag only after it is permanent,
+and move its key and environment variable to the append-only retired identities
+in `internal/runtimeflags/registry.go`. Never reuse either identity for
+different behavior. A flag is incomplete if any layer can expose or execute
+the feature while it is disabled. Do not turn an internal package or
+environment variable into a public setting without first defining its
+compatibility contract and support status.
 
 Workbench changes must preserve task/session/repository selection, dock-layout restoration, reconnect behavior, and the separate mobile layout. Test unavailable dependencies, invalid credentials, save/test failures, keyboard access, and narrow viewports.
 

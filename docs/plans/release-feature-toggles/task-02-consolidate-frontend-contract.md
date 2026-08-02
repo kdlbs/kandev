@@ -44,6 +44,10 @@ spec: "../../specs/feature-toggles/spec.md"
 - Updated the Zustand slice and server action to consume that declaration;
   malformed, missing, and unreachable values remain fail-closed.
 - Updated slice/action tests to derive complete fixtures from the declaration.
+- Review remediation added a repository contract test that extracts backend
+  `FeaturesConfig` JSON tags and compares them exactly with frontend defaults.
+- Review verification: the contract test and full web Vitest suite passed;
+  web typecheck and lint passed.
 - Verification: `pnpm install --frozen-lockfile` passed; focused Vitest passed
   (2 files, 8 tests); `pnpm run typecheck` passed; `pnpm run lint` passed.
 - Rendered/mobile impact: none; state/type normalization only.

@@ -47,6 +47,9 @@ release-toggle lifecycle that follow-on feature PRs, beginning with #2104, use.
   - one `features.<json-tag>` runtime registration;
   - its `KANDEV_FEATURES_<MAPSTRUCTURE_TAG>` profile entry;
   - a getter/setter round trip that changes only that field.
+- Require exact equality in both directions, validate every registration's
+  metadata and binding isolation, and reject active key/environment collisions
+  with the append-only retired-identity set.
 - Replace the hardcoded serialized object equality in
   `apps/backend/internal/common/config/config_test.go` with a generic assertion
   that every `FeaturesConfig` field is boolean and has non-empty, non-Go-name
@@ -74,6 +77,8 @@ change is required.
 - Update `features-slice.test.ts` and `app/actions/features.test.ts` so tests
   prove all declared defaults are false and missing/non-boolean backend values
   fail closed without repeating the complete feature list in test fixtures.
+- Add a repository contract test that extracts the backend `FeaturesConfig`
+  JSON tags and requires exact equality with `defaultFeatureFlags` keys.
 
 This changes state/type normalization only. It does not change layout,
 navigation, touch behavior, or the existing Feature Toggles cards. The closest
@@ -100,10 +105,13 @@ mobile composition or Playwright scenario is required for this task.
   - **File:** `apps/backend/internal/common/config/config_test.go`
   - **How:** reflective tag validation plus JSON marshal/unmarshal coverage.
 - **What:** frontend feature names have one all-false declaration and bad or
-  absent backend values fail closed.
+  absent backend values fail closed, while backend and frontend key sets remain
+  exactly equal.
   - **Files:** `apps/web/lib/state/slices/features/features-slice.test.ts`,
-    `apps/web/app/actions/features.test.ts`
-  - **How:** focused Vitest tests derive fixtures from the declaration.
+    `apps/web/app/actions/features.test.ts`, and
+    `apps/web/lib/state/slices/features/features-contract.test.ts`
+  - **How:** focused Vitest tests derive fixtures from the declaration and read
+    the backend `FeaturesConfig` contract directly.
 
 ## E2E Tests
 
@@ -189,6 +197,17 @@ and be released independently.
 - Frontend typecheck and lint: passed.
 - Public docs validation: passed (58 tests; 41 published pages).
 - `git diff --check`: passed.
+
+### Review remediation (2026-08-02)
+
+- Red phase: focused runtimeflags tests failed because the retired-identity set
+  did not exist.
+- Backend-focused tests passed (37 tests across runtimeflags and profiles), the
+  full backend suite passed, and backend lint reported 0 issues.
+- The new backend/frontend contract test passed; the full web Vitest suite,
+  web typecheck, and web lint passed.
+- Public docs validation passed (58 tests; 41 published pages), and
+  `git diff --check` passed.
 
 ---
 
