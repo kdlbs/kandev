@@ -236,6 +236,23 @@ func (a *workspacePollAggregator) effectiveModeLocked(workspacePath string) Work
 	return effective
 }
 
+// applyEffectiveModeLocked records the workspace mode and reports whether a
+// push is needed. Caller must hold a.mu. force is used by the ready-time flush
+// to retry a mode that may have been sent before agentctl accepted requests.
+func (a *workspacePollAggregator) applyEffectiveModeLocked(workspacePath string, effective WorkspacePollMode, force bool) bool {
+	prev, hadPrev := a.lastPushed[workspacePath]
+	shouldPush := force || !hadPrev || prev != effective
+	if !force && !hadPrev && effective == WorkspacePollModePaused {
+		return false
+	}
+	if effective == WorkspacePollModePaused {
+		delete(a.lastPushed, workspacePath)
+	} else {
+		a.lastPushed[workspacePath] = effective
+	}
+	return shouldPush && effective != WorkspacePollModePaused
+}
+
 // recordAndCompute updates the per-session mode for the given workspace and
 // returns the new workspace-effective mode, plus whether it changed since the
 // last push. We compute this under a single lock so concurrent transitions in
@@ -254,23 +271,7 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 	// where k = sessions in workspace, not O(N) total sessions).
 	effective := a.effectiveModeLocked(workspacePath)
 
-	prev, hadPrev := a.lastPushed[workspacePath]
-	if hadPrev && prev == effective {
-		return workspacePath, effective, false
-	}
-	// Skip pushing paused when there's no prior entry — agentctl defaults to
-	// slow, so sending paused to a workspace we've never pushed to is a no-op
-	// RPC (and slightly misleading: agentctl would drop from slow to paused
-	// even though the gateway never told it to go slow in the first place).
-	if !hadPrev && effective == WorkspacePollModePaused {
-		return workspacePath, effective, false
-	}
-	if effective == WorkspacePollModePaused {
-		delete(a.lastPushed, workspacePath)
-	} else {
-		a.lastPushed[workspacePath] = effective
-	}
-	return workspacePath, effective, true
+	return workspacePath, effective, a.applyEffectiveModeLocked(workspacePath, effective, false)
 }
 
 // recordRuntimeAndCompute updates runtime interest and returns the resulting
@@ -282,19 +283,7 @@ func (a *workspacePollAggregator) recordRuntimeAndCompute(sessionID string, acti
 	a.setRuntimeInterestLocked(sessionID, active, workspacePath)
 	effective := a.effectiveModeLocked(workspacePath)
 
-	prev, hadPrev := a.lastPushed[workspacePath]
-	if hadPrev && prev == effective {
-		return workspacePath, effective, false
-	}
-	if !hadPrev && effective == WorkspacePollModePaused {
-		return workspacePath, effective, false
-	}
-	if effective == WorkspacePollModePaused {
-		delete(a.lastPushed, workspacePath)
-	} else {
-		a.lastPushed[workspacePath] = effective
-	}
-	return workspacePath, effective, true
+	return workspacePath, effective, a.applyEffectiveModeLocked(workspacePath, effective, false)
 }
 
 // pushAsync queues the latest mode and ensures exactly one pusher goroutine per workspace drains it (last-write-wins).
@@ -399,14 +388,10 @@ func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 		a.setSessionModeLocked(sessionID, sessionMode, wp)
 	}
 	effective := a.effectiveModeLocked(wp)
-	if effective == WorkspacePollModePaused {
-		delete(a.lastPushed, wp)
-	} else {
-		a.lastPushed[wp] = effective
-	}
+	shouldPush := a.applyEffectiveModeLocked(wp, effective, true)
 	a.mu.Unlock()
 
-	if effective != WorkspacePollModePaused {
+	if shouldPush {
 		a.pushAsync(execution, execution.WorkspacePath, effective)
 	}
 }

@@ -21,11 +21,14 @@ export function formatDollars(subcents: number | null | undefined): string {
 }
 
 let uuidFallbackCounter = 0;
+// Keep a per-module component so two tabs generating IDs in the same
+// millisecond do not share the timestamp/counter prefix.
+const uuidFallbackContext = (Math.random() * 0x1_0000_0000) >>> 0;
 
 /**
  * Generate a UUID. Falls back to crypto.getRandomValues when randomUUID is
- * unavailable (e.g., HTTP on non-localhost), then to a deterministic UUID for
- * test or legacy environments without any Web Crypto API.
+ * unavailable (e.g., HTTP on non-localhost), then to a UUID-shaped fallback
+ * with per-context entropy for legacy environments without any Web Crypto API.
  */
 export function generateUUID(): string {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -40,9 +43,10 @@ export function generateUUID(): string {
     return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
   }
 
+  const context = uuidFallbackContext.toString(16).padStart(8, "0");
   const timestamp = Date.now().toString(16).padStart(12, "0").slice(-12);
   const counter = (uuidFallbackCounter++ >>> 0).toString(16).padStart(8, "0");
-  const chars = `${timestamp}${counter}`.padEnd(32, "0").slice(0, 32).split("");
+  const chars = `${context}${timestamp}${counter}`.padEnd(32, "0").slice(0, 32).split("");
   chars[12] = "4";
   chars[16] = "8";
   const hex = chars.join("");

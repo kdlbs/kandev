@@ -128,6 +128,7 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 		return session, nil
 	}
 	if s.eventBus != nil {
+		eventCtx := context.WithoutCancel(ctx)
 		eventData := map[string]interface{}{
 			"task_id":      session.TaskID,
 			"session_id":   sessionID,
@@ -135,7 +136,7 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 			"stamp":        lastErr.Stamp(),
 			"dismissed_at": now.Format(time.RFC3339Nano),
 		}
-		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+		if err := s.eventBus.Publish(eventCtx, events.TaskSessionErrorChanged, bus.NewEvent(
 			events.TaskSessionErrorChanged,
 			"task-service",
 			eventData,
@@ -146,7 +147,7 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 				zap.Error(err))
 		}
 	}
-	return s.sessions.GetTaskSession(ctx, sessionID)
+	return s.sessions.GetTaskSession(context.WithoutCancel(ctx), sessionID)
 }
 
 // MarkSessionRead advances sessionID's Slack-style read cursor to messageID.

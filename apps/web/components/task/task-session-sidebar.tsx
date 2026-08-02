@@ -40,6 +40,8 @@ function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionsById = useAppStore((state) => state.taskSessions.items);
+  const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
+  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
   const archivedState = useArchivedTaskState();
 
@@ -69,6 +71,8 @@ function useSidebarData(workspaceId: string | null) {
       titleById,
       workflowNameById,
       stepTitleById,
+      acknowledgedAgentErrors,
+      dismissedAgentErrors,
     };
     const items: TaskSwitcherItem[] = allTasks.map((task) => buildSidebarItem(task, mapCtx));
     if (
@@ -79,7 +83,16 @@ function useSidebarData(workspaceId: string | null) {
       items.unshift(buildArchivedSidebarItem(archivedState));
     }
     return items;
-  }, [repositoriesByWorkspace, allTasks, allSteps, workflows, workspaceId, archivedState]);
+  }, [
+    repositoriesByWorkspace,
+    allTasks,
+    allSteps,
+    workflows,
+    workspaceId,
+    archivedState,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+  ]);
 
   return {
     activeTaskId,

@@ -281,8 +281,11 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		existing, err := h.service.GetMessage(ctx, req.ClientMessageID)
 		switch {
 		case err == nil && existing != nil:
-			if existing.TaskSessionID != req.TaskSessionID ||
-				(existing.TaskID != "" && existing.TaskID != req.TaskID) ||
+			// The turn-start hook may switch the task's primary session before
+			// the message is persisted. A retried request still belongs to the
+			// same authorized task even when its original session_id is no
+			// longer the persisted message's session.
+			if (existing.TaskID != "" && existing.TaskID != req.TaskID) ||
 				existing.AuthorType != models.MessageAuthorUser {
 				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
 			}

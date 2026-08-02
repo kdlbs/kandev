@@ -1,6 +1,7 @@
 import type { KanbanState } from "@/lib/state/slices";
 import type { TaskSessionState, TaskState } from "@/lib/types/http";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
+import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { workflowStepTitle } from "./task-session-sidebar-aggregate";
 
 type SidebarItemContext = {
@@ -8,6 +9,8 @@ type SidebarItemContext = {
   titleById: Map<string, string>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
+  acknowledgedAgentErrors?: Record<string, string>;
+  dismissedAgentErrors?: Record<string, string>;
 };
 
 function summaryDiffStats(
@@ -26,12 +29,13 @@ function capitalize(value: string): string {
 
 function summaryPRInfo(
   summary: TaskStatusSummary | null | undefined,
-): { number: number; state: string } | undefined {
+): { number: number; state: string; aggregateState?: string } | undefined {
   const pullRequest = summary?.pull_request;
   if (!pullRequest?.number) return undefined;
   return {
     number: pullRequest.number,
     state: capitalize(pullRequest.state ?? pullRequest.aggregate_state ?? "open"),
+    aggregateState: pullRequest.aggregate_state,
   };
 }
 
@@ -50,7 +54,7 @@ function repositoryPathFromSummary(
 }
 
 function pendingFlags(summary: TaskStatusSummary | null | undefined, fallback?: string | null) {
-  const action = summary?.pending_action ?? fallback;
+  const action = summary != null ? summary.pending_action : fallback;
   return {
     clarification: action === "clarification",
     permission: action === "permission",
@@ -67,14 +71,14 @@ function sidebarSessionStatus(
   task: KanbanState["tasks"][number],
 ) {
   const primarySession = summary?.primary_session;
+  const hasSummary = summary != null;
   return {
-    sessionState: (primarySession?.state ?? task.primarySessionState) as
+    sessionState: (hasSummary ? primarySession?.state : task.primarySessionState) as
       | TaskSessionState
       | undefined,
-    foregroundActivity: summary?.foreground_activity ?? task.foregroundActivity,
-    primarySessionId: primarySession?.id ?? task.primarySessionId ?? null,
-    updatedAt: summary?.updated_at ?? task.updatedAt ?? task.createdAt,
-    agentErrorMessage: summary?.active_error?.preview ?? null,
+    foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
+    primarySessionId: hasSummary ? (primarySession?.id ?? null) : (task.primarySessionId ?? null),
+    updatedAt: hasSummary ? summary?.updated_at : (task.updatedAt ?? task.createdAt),
   };
 }
 
@@ -87,6 +91,11 @@ function sidebarStatus(
   const sessionStatus = sidebarSessionStatus(summary, task);
   return {
     ...sessionStatus,
+    agentErrorMessage: statusSummaryActiveErrorPreview(
+      summary,
+      context.acknowledgedAgentErrors,
+      context.dismissedAgentErrors,
+    ),
     repositoryPath:
       repositoryPathFromSummary(summary) ??
       (task.repositoryId ? context.repositorySlugById.get(task.repositoryId) : undefined),

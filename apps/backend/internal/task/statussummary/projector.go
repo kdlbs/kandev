@@ -3,7 +3,6 @@ package statussummary
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +27,17 @@ type SummaryStore interface {
 // include workspace_id in their payloads).
 type WorkspaceResolver func(context.Context, string) (string, error)
 
+// GitObservation is the bounded source state for one repository. It is kept
+// internal to the projector and never serialized into the task summary.
+type GitObservation struct {
+	Repository string
+	Summary    GitSummary
+}
+
+// GitObservationLoader rehydrates the keyed repository observations that are
+// needed when a projector is recreated after a process restart.
+type GitObservationLoader func(context.Context, string) ([]GitObservation, error)
+
 // SummaryUpdated is the complete replacement payload sent to workspace
 // subscribers. It intentionally contains no transcript, file list, or source
 // event payload.
@@ -42,11 +52,12 @@ type SummaryUpdated struct {
 func (e SummaryUpdated) GetWorkspaceID() string { return e.WorkspaceID }
 
 type ProjectorConfig struct {
-	Store            SummaryStore
-	EventBus         bus.EventBus
-	ResolveWorkspace WorkspaceResolver
-	Logger           *logger.Logger
-	Now              func() time.Time
+	Store               SummaryStore
+	EventBus            bus.EventBus
+	ResolveWorkspace    WorkspaceResolver
+	LoadGitObservations GitObservationLoader
+	Logger              *logger.Logger
+	Now                 func() time.Time
 }
 
 // Projector converts authoritative, bounded occurrences into one complete
@@ -54,11 +65,12 @@ type ProjectorConfig struct {
 // independent tasks do not block one another during a burst. Raw stream events
 // are never subscribed to here.
 type Projector struct {
-	store            SummaryStore
-	eventBus         bus.EventBus
-	resolveWorkspace WorkspaceResolver
-	logger           *logger.Logger
-	now              func() time.Time
+	store               SummaryStore
+	eventBus            bus.EventBus
+	resolveWorkspace    WorkspaceResolver
+	loadGitObservations GitObservationLoader
+	logger              *logger.Logger
+	now                 func() time.Time
 
 	mu         sync.Mutex
 	state      map[string]*projectionState
@@ -123,13 +135,14 @@ func NewProjector(cfg ProjectorConfig) *Projector {
 		now = func() time.Time { return time.Now().UTC() }
 	}
 	return &Projector{
-		store:            cfg.Store,
-		eventBus:         cfg.EventBus,
-		resolveWorkspace: cfg.ResolveWorkspace,
-		logger:           log.WithFields(zap.String("component", "task-status-summary-projector")),
-		now:              now,
-		state:            make(map[string]*projectionState),
-		taskLocks:        make(map[string]*taskProjectionLock),
+		store:               cfg.Store,
+		eventBus:            cfg.EventBus,
+		resolveWorkspace:    cfg.ResolveWorkspace,
+		loadGitObservations: cfg.LoadGitObservations,
+		logger:              log.WithFields(zap.String("component", "task-status-summary-projector")),
+		now:                 now,
+		state:               make(map[string]*projectionState),
+		taskLocks:           make(map[string]*taskProjectionLock),
 	}
 }
 
@@ -208,9 +221,7 @@ func (p *Projector) handleEvent(ctx context.Context, event *bus.Event) error {
 	unlockTask := p.lockTask(taskID)
 	defer unlockTask()
 
-	p.mu.Lock()
-	state, err := p.ensureStateLocked(ctx, taskID)
-	p.mu.Unlock()
+	state, err := p.ensureState(ctx, taskID)
 	if err != nil {
 		return err
 	}
@@ -395,19 +406,36 @@ func updateSessionPendingLocked(state *projectionState, sessionID, action string
 	return true
 }
 
-func (p *Projector) ensureStateLocked(ctx context.Context, taskID string) (*projectionState, error) {
-	if state := p.state[taskID]; state != nil {
-		return state, nil
-	}
-	state := &projectionState{
+func newProjectionState() *projectionState {
+	return &projectionState{
 		sessions: make(map[string]sessionObservation),
 		pending:  make(map[string]string),
 		errors:   make(map[string]*ActiveErrorSummary),
 		git:      make(map[string]GitSummary),
 		prs:      make(map[string]pullRequestObservation),
 	}
+}
+
+// ensureState performs persistence and source rehydration outside the global
+// projector mutex. The per-task lock held by handleEvent still serializes all
+// updates for this task, while unrelated tasks remain responsive during I/O.
+func (p *Projector) ensureState(ctx context.Context, taskID string) (*projectionState, error) {
+	p.mu.Lock()
+	if state := p.state[taskID]; state != nil {
+		p.mu.Unlock()
+		return state, nil
+	}
+	p.mu.Unlock()
+
+	state := newProjectionState()
 	if err := p.restorePersistedState(ctx, taskID, state); err != nil {
 		return nil, err
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if existing := p.state[taskID]; existing != nil {
+		return existing, nil
 	}
 	p.state[taskID] = state
 	return state, nil
@@ -442,11 +470,32 @@ func (p *Projector) restorePersistedState(ctx context.Context, taskID string, st
 	if summary.Git != nil {
 		copy := *summary.Git
 		state.gitBaseline = &copy
+		if err := p.restoreGitObservations(ctx, taskID, state); err != nil {
+			return err
+		}
 	}
 	if summary.PullRequest != nil {
 		copy := *summary.PullRequest
 		state.prBaseline = &copy
 	}
+	return nil
+}
+
+func (p *Projector) restoreGitObservations(ctx context.Context, taskID string, state *projectionState) error {
+	if p.loadGitObservations == nil {
+		return nil
+	}
+	observations, err := p.loadGitObservations(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load Git observations for task status summary %q: %w", taskID, err)
+	}
+	for _, observation := range observations {
+		if strings.TrimSpace(observation.Repository) == "" {
+			continue
+		}
+		state.git[observation.Repository] = observation.Summary
+	}
+	state.gitObserved = true
 	return nil
 }
 
@@ -620,11 +669,8 @@ func (p *Projector) applyGitEventLocked(state *projectionState, data map[string]
 }
 
 func (p *Projector) applyPREventLocked(state *projectionState, data map[string]interface{}) bool {
-	key := firstString(data, "repository_id", "pr_url")
+	key := pullRequestObservationKey(data)
 	if key == "" {
-		key = strconv.Itoa(intValueOrZero(data["pr_number"]))
-	}
-	if key == "" || key == "0" {
 		return false
 	}
 	if !state.prObserved {
@@ -652,6 +698,25 @@ func (p *Projector) applyPREventLocked(state *projectionState, data map[string]i
 	}
 	state.prs[key] = observation
 	return true
+}
+
+func pullRequestObservationKey(data map[string]interface{}) string {
+	repository := firstString(data, "repository_id", "repository")
+	number := intValueOrZero(data["pr_number"])
+	url := firstString(data, "pr_url", "url")
+	if repository != "" && number > 0 {
+		return fmt.Sprintf("%s#%d", repository, number)
+	}
+	if url != "" {
+		return url
+	}
+	if repository != "" {
+		return repository
+	}
+	if number > 0 {
+		return fmt.Sprintf("#%d", number)
+	}
+	return ""
 }
 
 func (p *Projector) persistAndPublishLocked(ctx context.Context, taskID string, state *projectionState) error {

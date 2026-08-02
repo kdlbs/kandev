@@ -142,13 +142,10 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 	if copy.OccurredAt.IsZero() {
 		copy.OccurredAt = now.UTC()
 	}
-	if copy.OccurredAt.IsZero() {
-		copy.OccurredAt = time.Now().UTC()
-	}
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}
-	copy.Stamp = truncateString(copy.Stamp, maxPullRequestStateBytes)
+	copy.Stamp = truncateString(copy.Stamp, maxActiveErrorStampBytes)
 	return &copy
 }

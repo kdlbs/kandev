@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -60,14 +61,14 @@ func (s *projectorTestStore) summary(taskID string) *TaskStatusSummary {
 	return cloneSummary(&row.Summary)
 }
 
-func newProjectorTest(t *testing.T) (*Projector, *projectorTestStore, *bus.MemoryEventBus, *int, context.CancelFunc) {
+func newProjectorTest(t *testing.T) (*Projector, *projectorTestStore, *bus.MemoryEventBus, *atomic.Int64, context.CancelFunc) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	store := newProjectorTestStore()
 	eventBus := bus.NewMemoryEventBus(logger.Default())
-	updates := 0
+	updates := new(atomic.Int64)
 	if _, err := eventBus.Subscribe(events.TaskStatusSummaryUpdated, func(_ context.Context, event *bus.Event) error {
-		updates++
+		updates.Add(1)
 		if _, ok := event.Data.(SummaryUpdated); !ok {
 			t.Errorf("summary event data type = %T, want SummaryUpdated", event.Data)
 		}
@@ -93,7 +94,7 @@ func newProjectorTest(t *testing.T) (*Projector, *projectorTestStore, *bus.Memor
 		projector.Close()
 		eventBus.Close()
 	})
-	return projector, store, eventBus, &updates, cancel
+	return projector, store, eventBus, updates, cancel
 }
 
 func publishProjectorEvent(t *testing.T, eventBus *bus.MemoryEventBus, eventType, subject string, data map[string]interface{}) {
@@ -140,8 +141,8 @@ func TestProjectorDoesNotSubscribeToRawStreamsOrStreamingMessageAppends(t *testi
 	if got := store.summary(taskID); got != nil {
 		t.Fatalf("unrelated streaming events created summary: %+v", got)
 	}
-	if *updates != 0 {
-		t.Fatalf("summary updates after unrelated streaming events = %d, want 0", *updates)
+	if updates.Load() != 0 {
+		t.Fatalf("summary updates after unrelated streaming events = %d, want 0", updates.Load())
 	}
 
 	publishSessionState(t, eventBus, taskID, "session-1", nil)
@@ -155,8 +156,8 @@ func TestProjectorDoesNotSubscribeToRawStreamsOrStreamingMessageAppends(t *testi
 	if got.ForegroundActivity != "generating" || got.ActiveSubagentCount != 2 {
 		t.Fatalf("activity summary = %+v", got)
 	}
-	if *updates != 1 {
-		t.Fatalf("summary updates after authoritative state = %d, want 1", *updates)
+	if updates.Load() != 1 {
+		t.Fatalf("summary updates after authoritative state = %d, want 1", updates.Load())
 	}
 
 	// Replayed lifecycle state and assistant append updates are both no-ops at
@@ -169,8 +170,8 @@ func TestProjectorDoesNotSubscribeToRawStreamsOrStreamingMessageAppends(t *testi
 		"type":        "text",
 		"content":     "more partial output",
 	})
-	if *updates != 1 {
-		t.Fatalf("summary updates after replay/append = %d, want 1", *updates)
+	if updates.Load() != 1 {
+		t.Fatalf("summary updates after replay/append = %d, want 1", updates.Load())
 	}
 	_ = ctx
 }
@@ -273,8 +274,8 @@ func TestProjectorDerivesBoundedStatusAcrossSources(t *testing.T) {
 	if got.PendingAction != "" || got.ActiveError != nil {
 		t.Fatalf("cleared status = %+v", got)
 	}
-	if *updates < 7 {
-		t.Fatalf("summary updates = %d, want one for each semantic source change", *updates)
+	if updates.Load() < 7 {
+		t.Fatalf("summary updates = %d, want one for each semantic source change", updates.Load())
 	}
 }
 
@@ -378,5 +379,76 @@ func TestProjectorRetainsStoredDomainsUntilTheirFirstObservation(t *testing.T) {
 	}
 	if got.Git == nil || got.Git.ChangedFiles != 3 || got.PullRequest == nil || got.PullRequest.Number != 12 {
 		t.Fatalf("stored source domains after replay = git=%+v pr=%+v", got.Git, got.PullRequest)
+	}
+}
+
+func TestProjectorKeepsPRsWithTheSameRepositoryDistinct(t *testing.T) {
+	_, store, eventBus, _, _ := newProjectorTest(t)
+	const taskID = "task-pr-identity"
+
+	for _, number := range []int{41, 42} {
+		publishProjectorEvent(t, eventBus, events.GitHubTaskPRUpdated, events.GitHubTaskPRUpdated, map[string]interface{}{
+			"task_id":       taskID,
+			"workspace_id":  "workspace-1",
+			"repository_id": "repo-a",
+			"state":         "open",
+			"pr_number":     number,
+			"pr_url":        fmt.Sprintf("https://example.test/pr/%d", number),
+		})
+	}
+
+	got := store.summary(taskID)
+	if got == nil || got.PullRequest == nil {
+		t.Fatalf("PR summary = %+v", got)
+	}
+	if got.PullRequest.Count != 2 {
+		t.Fatalf("PR count = %d, want 2 for two PR numbers in one repository", got.PullRequest.Count)
+	}
+}
+
+func TestProjectorRehydratesSiblingGitObservationsAfterRestart(t *testing.T) {
+	store := newProjectorTestStore()
+	store.rows["task-git-restart"] = &StoredTaskStatusSummary{
+		TaskID:      "task-git-restart",
+		WorkspaceID: "workspace-1",
+		Summary: TaskStatusSummary{
+			Revision: 1,
+			Git:      &GitSummary{Additions: 7, ChangedFiles: 3},
+		},
+	}
+	projector := NewProjector(ProjectorConfig{
+		Store: store,
+		ResolveWorkspace: func(context.Context, string) (string, error) {
+			return "workspace-1", nil
+		},
+		LoadGitObservations: func(context.Context, string) ([]GitObservation, error) {
+			return []GitObservation{
+				{Repository: "repo-a", Summary: GitSummary{Additions: 5, ChangedFiles: 2}},
+				{Repository: "repo-b", Summary: GitSummary{Additions: 2, ChangedFiles: 1}},
+			}, nil
+		},
+		Now: func() time.Time { return time.Date(2026, 8, 1, 18, 0, 0, 0, time.UTC) },
+	})
+
+	if err := projector.HandleEvent(context.Background(), bus.NewEvent(events.GitEvent, "test", map[string]interface{}{
+		"task_id":      "task-git-restart",
+		"workspace_id": "workspace-1",
+		"session_id":   "session-1",
+		"type":         "status_update",
+		"status": map[string]interface{}{
+			"repository_name":  "repo-a",
+			"branch_additions": 6,
+			"changed_files":    2,
+		},
+	})); err != nil {
+		t.Fatalf("replay Git event: %v", err)
+	}
+
+	got := store.summary("task-git-restart")
+	if got == nil || got.Git == nil {
+		t.Fatalf("Git summary = %+v", got)
+	}
+	if got.Git.Additions != 8 || got.Git.ChangedFiles != 3 {
+		t.Fatalf("Git summary after sibling rehydration = %+v, want additions=8 changed_files=3", got.Git)
 	}
 }

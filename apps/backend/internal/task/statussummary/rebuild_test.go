@@ -108,3 +108,21 @@ func TestBuildFromAuthoritativeLeavesUnavailableOptionalSourcesEmpty(t *testing.
 		t.Fatalf("pull request summary = %+v, want nil when source was not observed", got.PullRequest)
 	}
 }
+
+func TestPullRequestChecksWithAnIncompleteUnknownRollupArePending(t *testing.T) {
+	got := BuildFromAuthoritative(RebuildInput{
+		PRObserved: true,
+		PullRequests: []PullRequestInput{{
+			Key:           "repo-a#42",
+			State:         prStateOpen,
+			Number:        42,
+			ChecksTotal:   3,
+			ChecksPassing: 1,
+			ChecksState:   "",
+		}},
+	})
+
+	if got.PullRequest == nil || got.PullRequest.AggregateState != prStatePending {
+		t.Fatalf("pull request summary = %+v, want pending while checks are incomplete", got.PullRequest)
+	}
+}

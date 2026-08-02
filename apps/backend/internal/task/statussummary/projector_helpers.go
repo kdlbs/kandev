@@ -74,7 +74,7 @@ func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) 
 	}
 	return &ActiveErrorSummary{
 		SessionID:  truncateString(sessionID, maxSessionIDBytes),
-		Stamp:      truncateString(stamp, maxPullRequestStateBytes),
+		Stamp:      truncateString(stamp, maxActiveErrorStampBytes),
 		OccurredAt: occurredAt.UTC(),
 		Preview:    preview,
 	}, true

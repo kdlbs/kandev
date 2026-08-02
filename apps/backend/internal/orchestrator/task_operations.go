@@ -270,7 +270,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
 	// prepareSessionForStart also propagates any inherited workspace
 	// environment (inherit_parent / shared_group) onto the new session.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -282,7 +282,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// transitions through updateTaskSessionState which broadcasts; the prepare
 	// path writes the row directly, so without this the per-task session list
 	// stays empty until a manual reload.
-	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	}
 
 	if launchWorkspace {
 		// Launch workspace infrastructure (agentctl) in the background so the WS response
@@ -832,7 +834,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
 	}
@@ -840,7 +842,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// potentially slow environment setup (for example, a Docker health check).
 	// The frontend adopts this CREATED session and can render
 	// executor.prepare.progress events while the launch request is still pending.
-	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	}
 
 	// When the workflow step overrode the caller's profile, tag the session
 	// for provenance: the profile came from workflow routing rather than
@@ -1091,13 +1095,13 @@ func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
 func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
-	sessionID, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+) (string, bool, error) {
+	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	s.propagateInheritedEnvironment(ctx, task, sessionID)
-	return sessionID, nil
+	return sessionID, created, nil
 }
 
 // resolveIsPassthroughForLaunch reloads the session snapshot to decide
@@ -1124,18 +1128,19 @@ func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID s
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
+) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		session, ensureErr := s.executor.EnsureSessionForAgent(
+		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)
 		if ensureErr != nil {
-			return "", ensureErr
+			return "", false, ensureErr
 		}
-		return session.ID, nil
+		return session.ID, created, nil
 	}
-	return s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	return sessionID, err == nil, err
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.

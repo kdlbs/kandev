@@ -143,7 +143,7 @@ func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
 	if isOffice {
 		t.Fatal("kanban task with a runner was classified as office-owned")
 	}
-	sessionID, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -196,9 +196,12 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	if !isOffice {
 		t.Fatal("office-owned assigned task was not classified as office")
 	}
-	sessionID, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
+	}
+	if created {
+		t.Fatal("office launch reuse must not report a newly created session")
 	}
 	if sessionID != "existing-office-session" {
 		t.Fatalf("office launch session = %q, want existing-office-session", sessionID)

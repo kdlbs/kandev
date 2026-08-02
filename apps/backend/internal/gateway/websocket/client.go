@@ -686,7 +686,9 @@ func (c *Client) sendControlBytes(data []byte) bool {
 		case c.send <- data:
 			return true
 		default:
-			c.logger.Warn("Client control send buffer full; closing connection")
+			if c.logger != nil {
+				c.logger.Warn("Client control send buffer full; closing connection")
+			}
 			c.closeSendLocked()
 			return false
 		}
@@ -695,7 +697,9 @@ func (c *Client) sendControlBytes(data []byte) bool {
 	case c.controlSend <- data:
 		return true
 	default:
-		c.logger.Warn("Client control send buffer full; closing connection")
+		if c.logger != nil {
+			c.logger.Warn("Client control send buffer full; closing connection")
+		}
 		c.closeSendLocked()
 		return false
 	}
@@ -722,7 +726,9 @@ func (c *Client) closeSendLocked() {
 		return
 	}
 	c.closed = true
-	close(c.send)
+	if c.send != nil {
+		close(c.send)
+	}
 	if c.controlSend != nil {
 		close(c.controlSend)
 	}

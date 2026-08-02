@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"fmt"
 	"reflect"
 	"strings"
 	"time"
@@ -21,13 +20,6 @@ type TaskStatusSummaryPRReader interface {
 		context.Context,
 		[]string,
 	) (map[string][]statussummary.PullRequestInput, error)
-}
-
-type gitSnapshotBatchReader interface {
-	GetLatestGitSnapshotsBySessionIDs(
-		context.Context,
-		[]string,
-	) (map[string]*models.GitSnapshot, error)
 }
 
 // SetTaskStatusSummaryPRReader wires the optional provider-backed PR reader.
@@ -81,7 +73,8 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 		next.Revision = 1
 		next.UpdatedAt = now
 		if err := next.Validate(); err != nil {
-			return summaries, fmt.Errorf("validate repaired task status summary %q: %w", task.ID, err)
+			s.logSummaryRepairFailure(task.ID, "validate", err)
+			continue
 		}
 		accepted, err := s.statusSummaries.CompareAndUpdateTaskStatusSummary(ctx, &statussummary.StoredTaskStatusSummary{
 			TaskID:      task.ID,
@@ -89,7 +82,8 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 			Summary:     next,
 		})
 		if err != nil {
-			return summaries, fmt.Errorf("persist repaired task status summary %q: %w", task.ID, err)
+			s.logSummaryRepairFailure(task.ID, "persist", err)
+			continue
 		}
 		if accepted {
 			summaries[task.ID] = &next
@@ -99,13 +93,21 @@ func (s *Service) HydrateMissingTaskStatusSummaries(
 		// Return that authoritative row instead of exposing a stale repair.
 		rows, err := s.statusSummaries.LoadTaskStatusSummaries(ctx, []string{task.ID})
 		if err != nil {
-			return summaries, fmt.Errorf("reload repaired task status summary %q: %w", task.ID, err)
+			s.logSummaryRepairFailure(task.ID, "reload", err)
+			continue
 		}
 		if stored := rows[task.ID]; stored != nil {
 			summaries[task.ID] = stored
 		}
 	}
 	return summaries, nil
+}
+
+func (s *Service) logSummaryRepairFailure(taskID, stage string, err error) {
+	if s.logger != nil {
+		s.logger.Warn("failed to repair task status summary; continuing task list hydration",
+			zap.String("task_id", taskID), zap.String("stage", stage), zap.Error(err))
+	}
 }
 
 func missingSummaryTasks(tasks []*models.Task, summaries map[string]*statussummary.TaskStatusSummary) []*models.Task {
@@ -170,11 +172,10 @@ func (s *Service) loadSummaryGit(
 	ctx context.Context,
 	sessionIDs []string,
 ) (map[string]*models.GitSnapshot, bool) {
-	reader, ok := s.gitSnapshots.(gitSnapshotBatchReader)
-	if !ok || len(sessionIDs) == 0 {
+	if s.gitSnapshots == nil || len(sessionIDs) == 0 {
 		return nil, false
 	}
-	snapshots, err := reader.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	snapshots, err := s.gitSnapshots.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
 	if err != nil {
 		if s.logger != nil {
 			s.logger.Warn("failed to load Git state for status summary repair", zap.Error(err))

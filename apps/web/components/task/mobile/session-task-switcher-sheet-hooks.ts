@@ -21,6 +21,7 @@ import {
 import type { KanbanState } from "@/lib/state/slices";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { repositorySlug } from "@/lib/repository-slug";
+import { statusSummaryActiveErrorPreview } from "@/lib/task-status-summary";
 import { resolvePreferredSessionId } from "../task-select-helpers";
 import { mapSnapshotToKanban, sortByUpdatedAtDesc } from "./session-task-switcher-sheet-helpers";
 
@@ -28,6 +29,8 @@ type SheetItemCtx = {
   repositoryPathsById: Map<string, string | undefined>;
   workflowNameById: Map<string, string>;
   stepTitleById: Map<string, string>;
+  acknowledgedAgentErrors?: Record<string, string>;
+  dismissedAgentErrors?: Record<string, string>;
 };
 
 function sheetDiffStats(summary: KanbanState["tasks"][number]["statusSummary"]) {
@@ -49,7 +52,7 @@ function sheetPendingFlags(
   summary: KanbanState["tasks"][number]["statusSummary"],
   fallback?: string | null,
 ) {
-  const action = summary?.pending_action ?? fallback;
+  const action = summary != null ? summary.pending_action : fallback;
   return {
     clarification: action === "clarification",
     permission: action === "permission",
@@ -58,18 +61,26 @@ function sheetPendingFlags(
 
 function sheetStatus(task: KanbanState["tasks"][number], ctx: SheetItemCtx) {
   const summary = task.statusSummary;
-  const pending = sheetPendingFlags(summary, task.taskPendingAction);
+  const hasSummary = summary != null;
+  const pending = sheetPendingFlags(hasSummary ? summary : undefined, task.taskPendingAction);
   return {
-    sessionState:
-      summary?.primary_session?.state ?? (task.primarySessionState as TaskSessionState | undefined),
-    foregroundActivity: summary?.foreground_activity ?? task.foregroundActivity,
+    sessionState: hasSummary
+      ? summary?.primary_session?.state
+      : (task.primarySessionState as TaskSessionState | undefined),
+    foregroundActivity: hasSummary ? summary?.foreground_activity : task.foregroundActivity,
     repositoryPath: sheetRepositoryPath(task, ctx),
     diffStats: sheetDiffStats(summary),
-    updatedAt: summary?.updated_at ?? task.updatedAt,
-    primarySessionId: summary?.primary_session?.id ?? task.primarySessionId ?? null,
+    updatedAt: hasSummary ? summary?.updated_at : task.updatedAt,
+    primarySessionId: hasSummary
+      ? (summary?.primary_session?.id ?? null)
+      : (task.primarySessionId ?? null),
     hasPendingClarification: pending.clarification,
     hasPendingPermission: pending.permission,
-    agentErrorMessage: summary?.active_error?.preview ?? null,
+    agentErrorMessage: statusSummaryActiveErrorPreview(
+      summary,
+      ctx.acknowledgedAgentErrors,
+      ctx.dismissedAgentErrors,
+    ),
   };
 }
 
@@ -114,6 +125,8 @@ export function useSheetData(workspaceId: string | null) {
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
+  const acknowledgedAgentErrors = useAppStore((state) => state.acknowledgedAgentErrors);
+  const dismissedAgentErrors = useAppStore((state) => state.dismissedAgentErrors);
 
   const selectedTaskId = activeTaskId;
 
@@ -125,9 +138,19 @@ export function useSheetData(workspaceId: string | null) {
       ),
       workflowNameById: new Map(workflows.map((w) => [w.id, w.name])),
       stepTitleById: new Map(allSteps.map((s) => [s.id, s.title])),
+      acknowledgedAgentErrors,
+      dismissedAgentErrors,
     };
     return allTasks.map((task) => toSheetItem(task, ctx));
-  }, [repositoriesByWorkspace, allTasks, allSteps, workflows, workspaceId]);
+  }, [
+    repositoriesByWorkspace,
+    allTasks,
+    allSteps,
+    workflows,
+    workspaceId,
+    acknowledgedAgentErrors,
+    dismissedAgentErrors,
+  ]);
 
   const dialogSteps = useMemo(
     () =>

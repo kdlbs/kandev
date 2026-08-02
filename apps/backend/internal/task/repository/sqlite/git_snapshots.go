@@ -198,11 +198,19 @@ func (r *Repository) GetLatestGitSnapshotsBySessionIDs(
 		query := `
 			SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
 			       ahead, behind, files, triggered_by, metadata, created_at
-			FROM task_session_git_snapshots
-			WHERE session_id IN (` + placeholders + `)
-			ORDER BY session_id,
-			         CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
-			         created_at DESC
+			FROM (
+				SELECT id, session_id, snapshot_type, branch, remote_branch, head_commit, base_commit,
+				       ahead, behind, files, triggered_by, metadata, created_at,
+				       ROW_NUMBER() OVER (
+					       PARTITION BY session_id
+					       ORDER BY CASE WHEN triggered_by = 'agent_completed' THEN 0 ELSE 1 END,
+					                created_at DESC
+				       ) AS row_number
+				FROM task_session_git_snapshots
+				WHERE session_id IN (` + placeholders + `)
+			) ranked
+			WHERE row_number = 1
+			ORDER BY session_id
 		`
 		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
 		if err != nil {

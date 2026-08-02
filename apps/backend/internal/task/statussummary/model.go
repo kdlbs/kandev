@@ -17,6 +17,7 @@ const (
 	MaxActiveErrorPreviewBytes = 512
 	maxSessionIDBytes          = 256
 	maxPendingActionBytes      = 128
+	maxActiveErrorStampBytes   = 64
 	maxPullRequestStateBytes   = 64
 	maxPullRequestURLBytes     = 2048
 )

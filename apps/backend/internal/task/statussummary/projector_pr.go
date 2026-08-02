@@ -95,24 +95,28 @@ func pullRequestAggregateState(pr pullRequestObservation) string {
 	if lifecycle := pullRequestLifecycleState(state, mergeable); lifecycle != "" {
 		return lifecycle
 	}
-	switch {
-	case mergeable == prStateBlocked || mergeable == prStateDirty:
+	if mergeable == prStateBlocked || mergeable == prStateDirty {
 		return prStateBlocked
-	case pullRequestHasFailure(pr, review, checks):
-		return prStateFailure
-	case checks == prStatePending:
-		return prStatePending
-	case pullRequestAwaitsReview(pr, review):
-		return prStateAwaiting
-	case review == prStateApproved && (checks == "" || checks == prStateSuccess):
-		return prStateReady
-	case checks == prStateSuccess:
-		return prStatePassing
-	case state == prStateOpen:
-		return prStateReady
-	default:
-		return prStateNeutral
 	}
+	if pullRequestHasFailure(pr, review, checks) {
+		return prStateFailure
+	}
+	if pullRequestHasPendingChecks(pr, checks) {
+		return prStatePending
+	}
+	if pullRequestAwaitsReview(pr, review) {
+		return prStateAwaiting
+	}
+	if review == prStateApproved && (checks == "" || checks == prStateSuccess) {
+		return prStateReady
+	}
+	if checks == prStateSuccess {
+		return prStatePassing
+	}
+	if state == prStateOpen {
+		return prStateReady
+	}
+	return prStateNeutral
 }
 
 func pullRequestLifecycleState(state, mergeable string) string {
@@ -129,8 +133,12 @@ func pullRequestLifecycleState(state, mergeable string) string {
 }
 
 func pullRequestHasFailure(pr pullRequestObservation, review, checks string) bool {
-	return review == prStateChanges || checks == prStateFailure || pr.unresolvedReviewCount > 0 ||
-		(pr.checksTotal > 0 && pr.checksPassing < pr.checksTotal)
+	return review == prStateChanges || checks == prStateFailure || pr.unresolvedReviewCount > 0
+}
+
+func pullRequestHasPendingChecks(pr pullRequestObservation, checks string) bool {
+	return checks == prStatePending ||
+		(pr.checksTotal > 0 && pr.checksPassing < pr.checksTotal && checks != prStateSuccess)
 }
 
 func pullRequestAwaitsReview(pr pullRequestObservation, review string) bool {
