@@ -4,6 +4,16 @@ from support import ArchitectureFixture, RUNTIME_IMPORT, RUNTIME_RULE
 
 
 class RuntimeImportTest(ArchitectureFixture):
+    def assert_new_import_is_reported(self, path: str, source: str, line: int) -> None:
+        self.write(path, source)
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assert_diagnostic_location(result, path, line)
+        self.assertIn(RUNTIME_RULE, result.stdout)
+
     def test_current_grandfathered_violation_passes(self) -> None:
         path = "apps/backend/internal/example/service.go"
         self.write(path, f'package example\n\nimport "{RUNTIME_IMPORT}"\n')
@@ -22,7 +32,7 @@ class RuntimeImportTest(ArchitectureFixture):
         result = self.run_cli("--all")
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn(f"{path}:3", result.stdout)
+        self.assert_diagnostic_location(result, path, 3)
         self.assertIn(RUNTIME_RULE, result.stdout)
         self.assertIn("internal/agent/runtime", result.stdout)
         self.assertIn("approved low-level adapter", result.stdout)

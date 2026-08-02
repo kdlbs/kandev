@@ -92,6 +92,13 @@ class ArchitectureFixture(unittest.TestCase):
             check=False,
         )
 
+    def assert_diagnostic_location(self, result: subprocess.CompletedProcess[str], path: str, line: int) -> None:
+        self.assertIn(path, result.stdout)
+        self.assertTrue(
+            f"{path}:{line}" in result.stdout or f"line={line}" in result.stdout,
+            result.stdout,
+        )
+
     @staticmethod
     def runtime_entry(path: str) -> dict[str, str]:
         return {"path": path, "import": RUNTIME_IMPORT}

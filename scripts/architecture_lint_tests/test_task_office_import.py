@@ -12,7 +12,7 @@ class TaskOfficeImportTest(ArchitectureFixture):
         result = self.run_cli("--all")
 
         self.assertEqual(result.returncode, 1)
-        self.assertIn(f"{path}:3", result.stdout)
+        self.assert_diagnostic_location(result, path, 3)
         self.assertIn(TASK_OFFICE_RULE, result.stdout)
         self.assertIn("shared task model owns task concepts", result.stdout)
         self.assertIn("Office consumes or adapts", result.stdout)
