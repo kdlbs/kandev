@@ -165,6 +165,31 @@ func TestBuildGistREADME_LocalizesBothCTAs(t *testing.T) {
 	}
 }
 
+// TestMessageHeading_TranslatesOnlyTheLabel mirrors the HTML builder's
+// TestMessageRoleAttrs_TranslatesOnlyTheLabel: the avatar is decoration, the
+// label is copy, and an unrecognised role is wire data echoed through.
+func TestMessageHeading_TranslatesOnlyTheLabel(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{roleUser, roleAssistant, roleSystem} {
+		en, pseudo := messageHeading(role, "en"), messageHeading(role, "pseudo")
+		if en == pseudo {
+			t.Fatalf("role %q: heading %q is identical in both locales — it is hardcoded", role, en)
+		}
+		// The avatar is the first rune and must not change with the locale.
+		if []rune(en)[0] != []rune(pseudo)[0] {
+			t.Fatalf("role %q: avatar changed with locale (%q vs %q)", role, en, pseudo)
+		}
+	}
+	// An unrecognised role is wire data: passed through, and escaped because the
+	// heading is rendered as HTML by GitHub.
+	if got := messageHeading("reviewer", "pseudo"); got != "reviewer" {
+		t.Fatalf("unknown role should pass through verbatim, got %q", got)
+	}
+	if got := messageHeading("<img src=x>", "en"); got != "&lt;img src=x&gt;" {
+		t.Fatalf("unknown role must be HTML-escaped, got %q", got)
+	}
+}
+
 // localizationCase pairs a fixture with the catalog keys its render must
 // contain. Two are needed per builder because some copy only appears on the
 // degenerate path — an untitled task with no messages and no metadata.

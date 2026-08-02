@@ -16,6 +16,7 @@ import (
 type mockBackend struct {
 	uploads          int
 	uploadWorkspaces []string
+	uploadLocales    []string
 	deletes          []string
 	deleteWorkspaces []string
 	accessWorkspaces []string
@@ -33,12 +34,15 @@ func (m *mockBackend) CheckAccess(_ context.Context, workspaceID string) error {
 	return m.accessErr
 }
 
-func (m *mockBackend) Upload(_ context.Context, workspaceID string, _ *Snapshot, _ string) (string, string, error) {
+func (m *mockBackend) Upload(
+	_ context.Context, workspaceID string, _ *Snapshot, locale string,
+) (string, string, error) {
 	if m.uploadErr != nil {
 		return "", "", m.uploadErr
 	}
 	m.uploads++
 	m.uploadWorkspaces = append(m.uploadWorkspaces, workspaceID)
+	m.uploadLocales = append(m.uploadLocales, locale)
 	id := m.nextID
 	if id == "" {
 		id = "gist-1"
@@ -285,5 +289,27 @@ func TestService_PreviewSnapshot_ReturnsRedactedWithoutUpload(t *testing.T) {
 	}
 	if mock.uploads != 0 {
 		t.Fatalf("preview must not call backend Upload")
+	}
+}
+
+// TestService_CreateShare_ForwardsLocaleToBackend pins the middle hop of the
+// locale chain. The published artifact is static, so this argument is the only
+// thing that decides its language — a hop that dropped it would silently
+// publish English and no render test would notice.
+func TestService_CreateShare_ForwardsLocaleToBackend(t *testing.T) {
+	t.Parallel()
+	for _, locale := range []string{"en", "pseudo"} {
+		locale := locale
+		t.Run(locale, func(t *testing.T) {
+			t.Parallel()
+			mock := &mockBackend{}
+			svc := New(newTestRepo(t), completedSession(), mock, nil, "v")
+			if _, err := svc.CreateShare(context.Background(), "s-1", locale); err != nil {
+				t.Fatalf("CreateShare: %v", err)
+			}
+			if len(mock.uploadLocales) != 1 || mock.uploadLocales[0] != locale {
+				t.Fatalf("backend received locales %v, want [%s]", mock.uploadLocales, locale)
+			}
+		})
 	}
 }

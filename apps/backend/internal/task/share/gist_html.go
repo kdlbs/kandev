@@ -79,8 +79,15 @@ func BuildShareHTML(snap *Snapshot, locale string) string {
 	return b.String()
 }
 
+// resolvedTitle is the escaped page title, falling back to the localized
+// "Untitled task". Shared by the <head> and the hero so the fallback and the
+// escaping can never drift between them.
+func resolvedTitle(snap *Snapshot, locale string) string {
+	return html.EscapeString(nonEmpty(snap.Task.Title, i18n.T(locale, keyUntitledTask)))
+}
+
 func writeHTMLHead(b *strings.Builder, snap *Snapshot, locale string) {
-	title := html.EscapeString(nonEmpty(snap.Task.Title, i18n.T(locale, keyUntitledTask)))
+	title := resolvedTitle(snap, locale)
 	fmt.Fprintf(b, "<head>\n<meta charset=\"utf-8\">\n")
 	fmt.Fprintf(b, "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n")
 	// The title is escaped before it goes into the message so the catalog
@@ -93,7 +100,7 @@ func writeHTMLHead(b *strings.Builder, snap *Snapshot, locale string) {
 }
 
 func writeHTMLHero(b *strings.Builder, snap *Snapshot, locale string) {
-	title := html.EscapeString(nonEmpty(snap.Task.Title, i18n.T(locale, keyUntitledTask)))
+	title := resolvedTitle(snap, locale)
 	b.WriteString("<header class=\"hero\">\n")
 	b.WriteString("<div class=\"brand\"><a href=\"" + kandevRepoURL + "\" target=\"_blank\" rel=\"noopener\">kandev</a>")
 	fmt.Fprintf(b, "<span class=\"brand-sep\">·</span><span class=\"brand-tag\">%s</span></div>\n",

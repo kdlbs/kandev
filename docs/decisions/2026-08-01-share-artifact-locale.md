@@ -25,7 +25,7 @@ Shared-task artifacts render in the **share creator's locale**, resolved with
 `i18n.FromRequest` in the create handler and threaded explicitly down the call
 chain:
 
-```
+```text
 httpCreate → Service.CreateShare(ctx, sessionID, locale)
            → Backend.Upload(ctx, workspaceID, snap, locale)
            → BuildShareHTML(snap, locale) / BuildGistREADME(snap, url, locale) / gistDescription(snap, locale)

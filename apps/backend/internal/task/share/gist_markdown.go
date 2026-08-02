@@ -130,7 +130,10 @@ func writeMessage(b *strings.Builder, msg Message, locale string) {
 }
 
 // messageHeading pairs an avatar emoji with the translated role label. The
-// emoji is not copy, and the default branch echoes the raw wire role.
+// emoji is not copy, and the default branch echoes the raw wire role — escaped,
+// because it is written into a heading GitHub renders as HTML. roleForAuthor is
+// total over the three constants today, so that branch is unreachable from a
+// built snapshot; the escape is there so it stays safe if that ever changes.
 func messageHeading(role, locale string) string {
 	switch role {
 	case roleUser:
@@ -140,7 +143,7 @@ func messageHeading(role, locale string) string {
 	case roleSystem:
 		return "⚙️ " + i18n.T(locale, keyRoleSystem)
 	}
-	return role
+	return escapeHTML(role)
 }
 
 // writeBlock writes a single block. Returns true if it produced any output —
@@ -206,8 +209,12 @@ func writeToolResult(b *strings.Builder, block Block, locale string) bool {
 	}
 	// HTML <pre> avoids the triple-backtick collision when the tool output
 	// itself contains a code fence.
+	// The label lands inside a <summary> tag, so it is escaped like every other
+	// value in an HTML context here — today's catalog has nothing to escape, but
+	// a translator adding "&" or an <em> would otherwise inject raw markup.
 	fmt.Fprintf(b, "<details>\n<summary>📤 %s</summary>\n\n<pre><code>%s</code></pre>\n\n</details>\n\n",
-		i18n.T(locale, toolOutputKey(block.Truncated)), escapeHTML(strings.TrimRight(block.Output, "\n")))
+		escapeHTML(i18n.T(locale, toolOutputKey(block.Truncated))),
+		escapeHTML(strings.TrimRight(block.Output, "\n")))
 	return true
 }
 

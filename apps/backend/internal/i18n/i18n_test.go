@@ -63,6 +63,16 @@ func TestTf(t *testing.T) {
 		// JSON-decoded numbers arrive as float64; they must still select a form.
 		{"float count selects a form", "en", "share.messageCount",
 			map[string]any{"count": float64(1)}, "1 message"},
+		// Only an exact 1 is singular. Truncating to an int would pick the
+		// singular here and render "1.5 message".
+		{"fractional count is plural", "en", "share.messageCount",
+			map[string]any{"count": 1.5}, "1.5 messages"},
+		// Widths other than int reach Tf from proto fields and store aggregates;
+		// falling through to the base key would render the plural for every value.
+		{"int32 count selects the singular", "en", "share.messageCount",
+			map[string]any{"count": int32(1)}, "1 message"},
+		{"uint64 count selects the plural", "en", "share.messageCount",
+			map[string]any{"count": uint64(4)}, "4 messages"},
 		// A key with no _one/_other entries must not resolve to a missing
 		// suffixed key and echo it back — it falls back to the base message.
 		{"key without plural forms falls back", "en", "share.untitledTask",

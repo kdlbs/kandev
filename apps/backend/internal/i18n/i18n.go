@@ -198,6 +198,8 @@ func pluralKey(locale, key string, vars map[string]any) string {
 	if !ok {
 		return key
 	}
+	// Only an exact 1 is singular. Comparing the original value rather than a
+	// truncated integer is what stops 1.5 from rendering as "1.5 message".
 	suffixed := key + "_other"
 	if count == 1 {
 		suffixed = key + "_one"
@@ -210,20 +212,37 @@ func pluralKey(locale, key string, vars map[string]any) string {
 	return key
 }
 
-// countVar reads the plural selector out of vars. Non-numeric values are ignored
-// rather than erroring: a bad "count" degrades to the unsuffixed key.
-func countVar(vars map[string]any) (int, bool) {
-	value, ok := vars["count"]
-	if !ok {
-		return 0, false
-	}
-	switch n := value.(type) {
+// countVar reads the plural selector out of vars as a float64, which is wide
+// enough for every Go numeric type a caller might hold (a proto int32, a store
+// aggregate uint64, a JSON-decoded float64) and preserves the fractional part
+// that decides singular-vs-plural. Non-numeric values are ignored rather than
+// erroring: a bad "count" degrades to the unsuffixed key.
+func countVar(vars map[string]any) (float64, bool) {
+	switch n := vars["count"].(type) {
 	case int:
-		return n, true
+		return float64(n), true
+	case int8:
+		return float64(n), true
+	case int16:
+		return float64(n), true
+	case int32:
+		return float64(n), true
 	case int64:
-		return int(n), true
+		return float64(n), true
+	case uint:
+		return float64(n), true
+	case uint8:
+		return float64(n), true
+	case uint16:
+		return float64(n), true
+	case uint32:
+		return float64(n), true
+	case uint64:
+		return float64(n), true
+	case float32:
+		return float64(n), true
 	case float64:
-		return int(n), true
+		return n, true
 	}
 	return 0, false
 }
