@@ -107,9 +107,13 @@ describe("AzureDevOpsConnectionSection", () => {
       `${OLD_ORGANIZATION_URL}/_usersSettings/tokens`,
     );
     expect(patHelp.textContent).toContain("Custom defined");
-    expect(patHelp.textContent).toContain("Work Items");
-    expect(patHelp.textContent).toContain("Code");
-    expect(patHelp.textContent).toContain("Read");
+    // The scope step is a `<Trans>` whose `<n>` indices address the JSX children
+    // positionally, so a reflow of those children silently reassembles the
+    // sentence into fragments. Assert the whole reconstructed clause, not just
+    // that the two scope names appear somewhere.
+    expect(patHelp.textContent).toContain("Under Work Items, check Read & write.");
+    expect(patHelp.textContent).toContain("Under Code, check Read.");
+    expect(patHelp.textContent).toContain("Leave all other scopes unchecked.");
   });
 
   it("does not create a token link from a non-Azure organization URL", async () => {

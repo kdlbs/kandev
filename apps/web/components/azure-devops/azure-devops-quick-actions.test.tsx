@@ -68,7 +68,15 @@ describe("AzureDevOpsQuickActionsSection", () => {
     });
     expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit prompt" }));
-    expect(screen.getByText(/available placeholders/)).toBeTruthy();
+    // The hint is a `<Trans>` whose `<n>` indices address the JSX children
+    // positionally, so a reflow of those children silently reassembles the
+    // sentence into fragments. Assert the whole reconstructed hint, including
+    // the three prompt tokens, which are passed as values so neither i18next
+    // interpolation nor the pseudo-locale rewrites them.
+    const hint = screen.getByText(/available placeholders/);
+    expect(hint.textContent).toBe(
+      "Type {{ to see available placeholders. {{url}} and {{title}} are substituted when the action runs.",
+    );
   });
 
   it("keeps edits local until the shared Save changes action is pressed", async () => {

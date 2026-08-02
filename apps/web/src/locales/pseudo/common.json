@@ -32,5 +32,13 @@
   "workspace": "Ŵōŕķśƥàćē",
   "workspaces": "Ŵōŕķśƥàćēś",
   "title": "Ţĩţĺē",
-  "subtaskTitle": "Śũƀţàśķ ţĩţĺē"
+  "subtaskTitle": "Śũƀţàśķ ţĩţĺē",
+  "presetIconEye": "Ēŷē",
+  "presetIconMessage": "Ḿēśśàĝē",
+  "presetIconTool": "Ţōōĺ",
+  "presetIconCode": "Ćōďē",
+  "presetIconSearch": "Śēàŕćĥ",
+  "presetIconBug": "Ɓũĝ",
+  "presetIconSparkle": "Śƥàŕķĺē",
+  "presetIconCheck": "Ćĥēćķ"
 }

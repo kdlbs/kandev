@@ -10,15 +10,20 @@ import {
   type Icon,
 } from "@tabler/icons-react";
 
-export const ACTION_PRESET_ICON_CHOICES: Array<{ key: string; icon: Icon; label: string }> = [
-  { key: "eye", icon: IconEye, label: "Eye" },
-  { key: "message", icon: IconMessageDots, label: "Message" },
-  { key: "tool", icon: IconTool, label: "Tool" },
-  { key: "code", icon: IconCode, label: "Code" },
-  { key: "search", icon: IconSearch, label: "Search" },
-  { key: "bug", icon: IconBug, label: "Bug" },
-  { key: "sparkle", icon: IconSparkles, label: "Sparkle" },
-  { key: "check", icon: IconChecks, label: "Check" },
+// `key` is the persisted icon enum stored on an action preset; only the label is
+// copy, so it travels as a catalog key resolved at render (a module-scope `t()`
+// would freeze at the boot locale — see docs/i18n.md). The keys live in
+// `common` because this catalog is integration-agnostic; the GitHub and Jira
+// copies of this shape predate it and keep their own namespaced keys.
+export const ACTION_PRESET_ICON_CHOICES: Array<{ key: string; icon: Icon; labelKey: string }> = [
+  { key: "eye", icon: IconEye, labelKey: "common:presetIconEye" },
+  { key: "message", icon: IconMessageDots, labelKey: "common:presetIconMessage" },
+  { key: "tool", icon: IconTool, labelKey: "common:presetIconTool" },
+  { key: "code", icon: IconCode, labelKey: "common:presetIconCode" },
+  { key: "search", icon: IconSearch, labelKey: "common:presetIconSearch" },
+  { key: "bug", icon: IconBug, labelKey: "common:presetIconBug" },
+  { key: "sparkle", icon: IconSparkles, labelKey: "common:presetIconSparkle" },
+  { key: "check", icon: IconChecks, labelKey: "common:presetIconCheck" },
 ];
 
 const ICONS = new Map(ACTION_PRESET_ICON_CHOICES.map((choice) => [choice.key, choice.icon]));

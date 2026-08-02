@@ -412,4 +412,33 @@ export const i18nGuardFiles = [
   "components/sentry/sentry-issue-watch-throttle-field.tsx",
   "components/sentry/sentry-issue-watchers-section.tsx",
   "components/sentry/sentry-settings.tsx",
+  // Settings → Integrations → Azure DevOps: the page and the settings subtree of
+  // `components/azure-devops` — the connection card with its PAT help tooltip,
+  // the work-item / pull-request watch settings, the quick-action presets and
+  // the default-query editor. The board, work-item and pull-request task
+  // surfaces (`azure-devops-board*`, `azure-devops-results`, `-filters`,
+  // `-scope-bar`, `-task-*`, `-work-item-detail`, `-feedback-dialog`,
+  // `-save-view-dialog`, `-task-launcher`) live in the same directory and are
+  // NOT migrated, which is why this is a file list rather than
+  // `components/azure-devops/**`.
+  //
+  // `azure-devops-workspace-defaults.ts` holds no JSX, so `mode: "jsx-only"`
+  // never inspects it; the entry records that it has been reviewed, and only the
+  // pseudo-locale can prove it stays that way. Everything in it is deliberately
+  // left in English: the WIQL filters are Azure DevOps' query language, and the
+  // preset `label` / `hint` / `promptTemplate` records are PERSISTED to
+  // workspace settings and must keep matching the server-side defaults in
+  // `apps/backend/internal/azuredevops/workspace_settings.go`, which has no
+  // locale.
+  "app/settings/integrations/azure-devops/**/*.{ts,tsx}",
+  "components/azure-devops/azure-devops-default-queries.tsx",
+  "components/azure-devops/azure-devops-quick-actions.tsx",
+  "components/azure-devops/azure-devops-settings.tsx",
+  "components/azure-devops/azure-devops-watch-settings.tsx",
+  "components/azure-devops/azure-devops-workspace-defaults.ts",
+  // Shared preset-icon catalog rendered by the Azure DevOps quick actions. Also
+  // `.ts`-only, so the entry records the review rather than enforcing it; the
+  // icon `key`s are the persisted enum and only the labels are copy, which now
+  // travel as `labelKey` and resolve at render.
+  "components/integrations/action-preset-icons.ts",
 ];
