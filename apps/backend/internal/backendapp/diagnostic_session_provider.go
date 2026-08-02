@@ -109,7 +109,7 @@ func (p *diagnosticSessionProvider) collectWorkspace(
 			if session == nil || (!selected[session.ID] && !sessionInWindow(session, since)) {
 				continue
 			}
-			rows[session.ID] = p.diagnosticSessionRow(ctx, session)
+			rows[session.ID] = p.diagnosticSessionRow(ctx, session, task.Title)
 		}
 	}
 	return nil
@@ -129,7 +129,7 @@ func (p *diagnosticSessionProvider) collectExplicit(
 		}
 		session, err := p.reader.GetTaskSession(ctx, sessionID)
 		if err == nil && session != nil {
-			rows[session.ID] = p.diagnosticSessionRow(ctx, session)
+			rows[session.ID] = p.diagnosticSessionRow(ctx, session, "")
 		}
 	}
 }
@@ -152,10 +152,10 @@ func finalizeDiagnosticSessions(
 }
 
 func (p *diagnosticSessionProvider) diagnosticSessionRow(
-	ctx context.Context, session *models.TaskSession,
+	ctx context.Context, session *models.TaskSession, taskTitle string,
 ) logbundle.DiagnosticSession {
 	row := logbundle.DiagnosticSession{
-		TaskID: session.TaskID, SessionID: session.ID, Status: string(session.State),
+		TaskID: session.TaskID, TaskTitle: taskTitle, SessionID: session.ID, Status: string(session.State),
 		StartedAt: session.StartedAt, LastActivityAt: session.UpdatedAt,
 		ACPSessionID: snapshotString(session.Metadata, "acp_session_id"),
 		Agent:        snapshotString(session.AgentProfileSnapshot, "agent_name", "agent_id", "agent"),

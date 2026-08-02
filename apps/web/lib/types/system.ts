@@ -74,6 +74,8 @@ export type DiagnosticSessionAvailability = "host_retained" | "reachable" | "una
 
 export interface DiagnosticSession {
   task_id: string;
+  /** Returned only by the authorized ACP picker; never included in archive metadata. */
+  task_title?: string;
   session_id: string;
   agent?: string;
   provider?: string;

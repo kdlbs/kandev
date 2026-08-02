@@ -20,10 +20,12 @@ const (
 )
 
 // DiagnosticSession is the intentionally small, message-free projection used
-// by the runtime index and ACP session picker. Providers must not populate it
-// from a generic task/session serialization path.
+// by the runtime index and ACP session picker. TaskTitle is picker-only and
+// must remain excluded from archive JSON. Providers must not populate it from
+// a generic task/session serialization path.
 type DiagnosticSession struct {
 	TaskID          string    `json:"task_id"`
+	TaskTitle       string    `json:"-"`
 	SessionID       string    `json:"session_id"`
 	ACPSessionID    string    `json:"-"`
 	Agent           string    `json:"agent,omitempty"`

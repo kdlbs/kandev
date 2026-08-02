@@ -193,16 +193,15 @@ history or returning an unbounded log export.
   executor, integration, startup/shutdown, warning/error, identifier, path,
   performance, and diagnostic-loss events. Backend inclusion copies emitted
   file lines; it does not query product tables or construct transcripts.
-- The always-visible **Download standard bundle** action requests backend and
-  frontend sources. **Customize bundle** opens source selection for frontend,
-  backend, and the sanitized runtime index. Both actions show collecting,
-  preparing, ready/partial, busy-with-retry, and failure states without
+- The page exposes one always-visible **Customize bundle** action. It opens
+  source selection with backend and frontend selected by default; the optional
+  runtime index and ACP evidence start unselected. Collection, preparing,
+  ready/partial, busy-with-retry, and failure states remain on the page without
   navigating away.
-- When the backend reports that raw ACP capture is enabled, the page also shows
-  **Download with ACP…**. It opens the same customizer with backend, frontend,
-  runtime index, and ACP preselected, but requires the user to choose one or
-  more eligible sessions before collection starts. ACP is never silently
-  included by a one-click action. The action remains visible when no eligible
+- When the backend reports that raw ACP capture is enabled, ACP is an optional
+  source in that same customizer. Selecting it requires the user to choose one
+  or more eligible sessions before collection starts. ACP is never silently
+  included by a one-click action. The source remains available when no eligible
   session exists; the picker then shows an explanatory empty state and keeps
   submission disabled.
 - The ACP selection surface explicitly warns that raw and normalized protocol
@@ -210,6 +209,12 @@ history or returning an unbounded log export.
   workspace file content, MCP payloads, environment-derived values, and
   secrets. The standard no-transcript disclosure never appears to cover an
   ACP-inclusive bundle.
+- ACP candidate rows show their authorized Kandev task title as a link that
+  opens that task in a new tab. The title is available only to identify a
+  picker row; it is not written to the runtime index, manifest, or archive.
+  The picker provides explicit select-all and clear-selection controls. Select
+  all includes the first eligible sessions within the backend's maximum rather
+  than exceeding the collection limit.
 - `manifest.json` is always included and is not a selectable source. The
   optional runtime index contains only task/session IDs, agent/provider/model,
   status, timestamps, executor type, and ACP availability. It excludes task
@@ -410,6 +415,7 @@ newest first, and is available only while ACP debug capture is enabled:
   "sessions": [
     {
       "task_id": "task-uuid",
+      "task_title": "Investigate browser disconnect",
       "session_id": "session-uuid",
       "agent": "claude-acp",
       "provider": "anthropic",
@@ -428,8 +434,10 @@ newest first, and is available only while ACP debug capture is enabled:
   still be discovered during collection; otherwise the control disables them
   with an explanation.
 - Non-admin responses contain only caller-owned sessions. Admin responses may
-  contain all eligible sessions. Titles, descriptions, messages, prompts, tool
-  payloads, file content, user identity, and log paths are never returned.
+  contain all eligible sessions. The task title is returned only for the
+  authorized ACP-picker row and is not copied into an archive. Descriptions,
+  messages, prompts, tool payloads, file content, user identity, and log paths
+  are never returned.
 
 Reachable executor-side `agentctl` instances expose an internal
 `GET /api/v1/debug/acp/:session/export?max_bytes=N` route only while
@@ -651,15 +659,18 @@ with the same task/session rules and excludes message bodies and user identity.
 - **GIVEN** a signed-in user opens System Logs, **WHEN** the page renders,
   **THEN** it names the frontend/backend event classes, states that the standard
   bundle does not read stored session or agent messages, warns about incidental
-  emitted log content, and exposes standard/custom actions without a tail or
-  file table.
+  emitted log content, and exposes one Customize bundle action without a tail
+  or file table.
 - **GIVEN** ACP debug capture is disabled, **WHEN** a user opens System Logs,
   **THEN** no ACP download action or ACP custom source is offered and a crafted
   ACP bundle request is rejected.
-- **GIVEN** ACP debug capture is enabled, **WHEN** a user chooses **Download
-  with ACP…**, **THEN** the session picker opens with the high-sensitivity
-  disclosure and collection cannot start until at least one authorized session
-  is selected.
+- **GIVEN** ACP debug capture is enabled, **WHEN** a user selects ACP debug
+  messages in **Customize bundle**, **THEN** the session picker opens with the
+  high-sensitivity disclosure and collection cannot start until at least one
+  authorized session is selected.
+- **GIVEN** the ACP picker lists an authorized session, **WHEN** a user reviews
+  it, **THEN** its task title links to the task in a new tab and select-all
+  includes no more than the allowed number of eligible sessions.
 - **GIVEN** a non-admin can observe another user's session ID, **WHEN** they
   list ACP candidates or submit that ID directly, **THEN** the session is not
   disclosed or included and the response does not reveal its existence.

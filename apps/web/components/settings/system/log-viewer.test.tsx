@@ -8,6 +8,8 @@ const fetchMock = vi.fn();
 const capabilitiesMock = vi.fn();
 const sessionsMock = vi.fn();
 const downloadURLMock = vi.fn((..._args: unknown[]) => "/download/bundle-1");
+const CHECKED_STATE = "checked";
+const DATA_STATE_ATTRIBUTE = "data-state";
 
 vi.mock("@/lib/api/domains/system-api", () => ({
   createDiagnosticBundle: (...args: unknown[]) => createMock(...args),
@@ -38,7 +40,7 @@ afterEach(() => {
 });
 
 describe("LogViewer", () => {
-  it("shows one disclosure-first combined workflow and downloads partial bundles", async () => {
+  it("uses one customizer with the standard backend and frontend defaults", async () => {
     createMock.mockResolvedValue({
       id: "bundle-1",
       status: "collecting",
@@ -57,26 +59,36 @@ describe("LogViewer", () => {
 
     expect(screen.getByText("Review before sharing")).toBeTruthy();
     expect(screen.queryByText("Recent log output")).toBeNull();
-    fireEvent.click(screen.getByTestId("download-diagnostic-bundle"));
-    await waitFor(() => expect(createMock).toHaveBeenCalledWith(["backend", "frontend"], []));
+    expect(screen.queryByTestId("download-diagnostic-bundle")).toBeNull();
+    expect(screen.queryByTestId("download-diagnostic-bundle-with-acp")).toBeNull();
+    fireEvent.click(screen.getByTestId("customize-diagnostic-bundle"));
     expect(
-      screen.getByRole("button", { name: /Collecting frontend logs/ }).hasAttribute("disabled"),
-    ).toBe(true);
+      screen.getByRole("checkbox", { name: "Backend logs" }).getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe(CHECKED_STATE);
+    expect(
+      screen.getByRole("checkbox", { name: "Frontend logs" }).getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe(CHECKED_STATE);
+    expect(
+      screen.getByRole("checkbox", { name: "Runtime index" }).getAttribute(DATA_STATE_ATTRIBUTE),
+    ).not.toBe(CHECKED_STATE);
+    fireEvent.click(screen.getByTestId("create-custom-diagnostic-bundle"));
+    await waitFor(() => expect(createMock).toHaveBeenCalledWith(["backend", "frontend"], []));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("bundle-1"), { timeout: 1_500 });
     expect(await screen.findByText(/partial ZIP is downloading/)).toBeTruthy();
     expect(downloadURLMock).toHaveBeenCalledWith("bundle-1");
   });
 
-  it("shows the ACP customizer from backend capabilities and requires a session", async () => {
+  it("offers ACP in the one customizer with task links and bounded bulk selection", async () => {
     capabilitiesMock.mockResolvedValue({
       sources: ["backend", "frontend", "runtime", "acp"],
       acp_debug_enabled: true,
-      acp_max_sessions: 10,
+      acp_max_sessions: 1,
     });
     sessionsMock.mockResolvedValue([
       {
         task_id: "task-1",
+        task_title: "Repair failing diagnostics",
         session_id: "session-1",
         agent: "claude-acp",
         model: "sonnet",
@@ -84,17 +96,38 @@ describe("LogViewer", () => {
         executor_type: "local_docker",
         acp_availability: "reachable",
       },
+      {
+        task_id: "task-2",
+        task_title: "Inspect timeout",
+        session_id: "session-2",
+        agent: "codex-acp",
+        acp_availability: "host_retained",
+      },
     ]);
     render(<LogViewer />);
-    await waitFor(() =>
-      expect(screen.getByTestId("download-diagnostic-bundle-with-acp")).toBeTruthy(),
-    );
-    fireEvent.click(screen.getByTestId("download-diagnostic-bundle-with-acp"));
+    await waitFor(() => expect(screen.getByTestId("customize-diagnostic-bundle")).toBeTruthy());
+    expect(screen.queryByTestId("download-diagnostic-bundle")).toBeNull();
+    expect(screen.queryByTestId("download-diagnostic-bundle-with-acp")).toBeNull();
+    fireEvent.click(screen.getByTestId("customize-diagnostic-bundle"));
+    fireEvent.click(screen.getByRole("checkbox", { name: "ACP debug messages" }));
     expect((await screen.findAllByText("ACP debug messages")).length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText(/can contain prompts/)).toBeTruthy();
     const create = screen.getByTestId("create-custom-diagnostic-bundle");
     expect(create.hasAttribute("disabled")).toBe(true);
-    fireEvent.click(await screen.findByRole("checkbox", { name: "session-1" }));
+    const taskLink = await screen.findByTestId("acp-session-task-link-session-1");
+    expect(taskLink.textContent).toContain("Repair failing diagnostics");
+    expect(taskLink.getAttribute("href")).toBe("/t/task-1");
+    expect(taskLink.getAttribute("target")).toBe("_blank");
+    fireEvent.click(screen.getByTestId("select-all-acp-sessions"));
     await waitFor(() => expect(create.hasAttribute("disabled")).toBe(false));
+    expect(screen.getByText("1 session selected")).toBeTruthy();
+    expect(
+      screen.getByRole("checkbox", { name: "session-1" }).getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe(CHECKED_STATE);
+    expect(
+      screen.getByRole("checkbox", { name: "session-2" }).getAttribute(DATA_STATE_ATTRIBUTE),
+    ).toBe("unchecked");
+    fireEvent.click(screen.getByTestId("clear-acp-session-selection"));
+    await waitFor(() => expect(create.hasAttribute("disabled")).toBe(true));
   });
 });

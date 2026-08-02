@@ -20,19 +20,18 @@ import {
   DrawerTitle,
 } from "@kandev/ui/drawer";
 import { Spinner } from "@kandev/ui/spinner";
+import { IconExternalLink } from "@tabler/icons-react";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { linkToTask } from "@/lib/links";
 import type {
   DiagnosticBundleCapabilities,
   DiagnosticBundleSource,
   DiagnosticSession,
 } from "@/lib/types/system";
 
-type CustomizerMode = "standard" | "acp";
-
 type BundleCustomizerProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  mode: CustomizerMode;
   capabilities: DiagnosticBundleCapabilities | null;
   sessions: DiagnosticSession[];
   sessionsLoading: boolean;
@@ -41,6 +40,7 @@ type BundleCustomizerProps = {
   submitting: boolean;
   onSourcesChange: (sources: DiagnosticBundleSource[]) => void;
   onSessionChange: (sessionID: string, checked: boolean) => void;
+  onSessionSelectionChange: (sessionIDs: string[]) => void;
   onSubmit: () => void;
 };
 
@@ -72,9 +72,11 @@ export function BundleCustomizer(props: BundleCustomizerProps) {
       props.capabilities?.sources ?? ["backend", "frontend", "runtime"],
     );
     return SOURCE_ORDER.filter(
-      (source) => available.has(source) && (props.mode === "acp" || source !== "acp"),
+      (source) =>
+        available.has(source) &&
+        (source !== "acp" || props.capabilities?.acp_debug_enabled === true),
     );
-  }, [props.capabilities?.sources, props.mode]);
+  }, [props.capabilities?.acp_debug_enabled, props.capabilities?.sources]);
   const acpSelected = props.selectedSources.includes("acp");
   const selectableSessions = props.sessions.filter(
     (session) => session.acp_availability !== "unavailable",
@@ -98,6 +100,7 @@ export function BundleCustomizer(props: BundleCustomizerProps) {
       maxSessions={props.capabilities?.acp_max_sessions ?? 10}
       onSourcesChange={props.onSourcesChange}
       onSessionChange={props.onSessionChange}
+      onSessionSelectionChange={props.onSessionSelectionChange}
     />
   );
   const footer = (
@@ -139,7 +142,7 @@ export function BundleCustomizer(props: BundleCustomizerProps) {
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
       <DialogContent
         data-testid="diagnostic-bundle-dialog"
-        className="flex h-[min(720px,88dvh)] max-w-2xl min-w-0 flex-col overflow-hidden p-0"
+        className="flex max-h-[88dvh] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] min-w-0 flex-col overflow-hidden p-0 sm:max-w-5xl"
       >
         <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-12 text-left">
           <DialogTitle>{t("settings:diagnosticCustomizerTitle")}</DialogTitle>
@@ -166,6 +169,7 @@ type CustomizerContentProps = {
   maxSessions: number;
   onSourcesChange: (sources: DiagnosticBundleSource[]) => void;
   onSessionChange: (sessionID: string, checked: boolean) => void;
+  onSessionSelectionChange: (sessionIDs: string[]) => void;
 };
 
 function CustomizerContent({
@@ -179,6 +183,7 @@ function CustomizerContent({
   maxSessions,
   onSourcesChange,
   onSessionChange,
+  onSessionSelectionChange,
 }: CustomizerContentProps) {
   const { t } = useTranslation();
 
@@ -204,6 +209,7 @@ function CustomizerContent({
           selectedSessionIDs={selectedSessionIDs}
           maxSessions={maxSessions}
           onSessionChange={onSessionChange}
+          onSessionSelectionChange={onSessionSelectionChange}
         />
       )}
     </div>
@@ -311,6 +317,7 @@ type SessionSectionProps = {
   selectedSessionIDs: string[];
   maxSessions: number;
   onSessionChange: (sessionID: string, checked: boolean) => void;
+  onSessionSelectionChange: (sessionIDs: string[]) => void;
 };
 
 function SessionSection({
@@ -320,6 +327,7 @@ function SessionSection({
   selectedSessionIDs,
   maxSessions,
   onSessionChange,
+  onSessionSelectionChange,
 }: SessionSectionProps) {
   const { t } = useTranslation();
   return (
@@ -329,7 +337,7 @@ function SessionSection({
           {t("settings:diagnosticSelectSessions")}
         </h3>
         <p className="text-xs text-muted-foreground">
-          {t("settings:diagnosticSessionsDescription")}
+          {t("settings:diagnosticSessionsDescription", { count: maxSessions })}
         </p>
       </div>
       <SessionResults
@@ -339,6 +347,7 @@ function SessionSection({
         selectedSessionIDs={selectedSessionIDs}
         maxSessions={maxSessions}
         onSessionChange={onSessionChange}
+        onSessionSelectionChange={onSessionSelectionChange}
       />
     </section>
   );
@@ -351,6 +360,7 @@ function SessionResults({
   selectedSessionIDs,
   maxSessions,
   onSessionChange,
+  onSessionSelectionChange,
 }: SessionSectionProps) {
   const { t } = useTranslation();
   if (sessionsLoading) {
@@ -368,8 +378,19 @@ function SessionResults({
       </p>
     );
   }
+  const selectAll = () => {
+    onSessionSelectionChange(
+      selectableSessions.slice(0, maxSessions).map((session) => session.session_id),
+    );
+  };
   return (
     <div className="space-y-2">
+      <SessionSelectionActions
+        hasSelectableSessions={selectableSessions.length > 0}
+        hasSelectedSessions={selectedSessionIDs.length > 0}
+        onSelectAll={selectAll}
+        onClear={() => onSessionSelectionChange([])}
+      />
       {sessions.map((session) => (
         <SessionRow
           key={session.session_id}
@@ -383,6 +404,44 @@ function SessionResults({
       <p className="text-xs text-muted-foreground">
         {t("settings:diagnosticSelectedSessions", { count: selectedSessionIDs.length })}
       </p>
+    </div>
+  );
+}
+
+function SessionSelectionActions({
+  hasSelectableSessions,
+  hasSelectedSessions,
+  onSelectAll,
+  onClear,
+}: {
+  hasSelectableSessions: boolean;
+  hasSelectedSessions: boolean;
+  onSelectAll: () => void;
+  onClear: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-2 sm:flex-row">
+      <Button
+        type="button"
+        variant="outline"
+        className="min-h-11 cursor-pointer sm:w-auto"
+        disabled={!hasSelectableSessions}
+        onClick={onSelectAll}
+        data-testid="select-all-acp-sessions"
+      >
+        {t("settings:diagnosticSelectAllACPSessions")}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        className="min-h-11 cursor-pointer sm:w-auto"
+        disabled={!hasSelectedSessions}
+        onClick={onClear}
+        data-testid="clear-acp-session-selection"
+      >
+        {t("settings:diagnosticClearACPSelection")}
+      </Button>
     </div>
   );
 }
@@ -402,26 +461,42 @@ function SessionRow({
 }) {
   const { t } = useTranslation();
   const title = session.agent || session.provider || session.session_id;
+  const taskTitle = session.task_title || session.task_id;
   const details =
     [session.model, session.status, session.executor_type].filter(Boolean).join(" · ") ||
     session.session_id;
+  const checkboxID = `diagnostic-acp-session-${session.session_id}`;
   return (
-    <label className="flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-border/70 p-3 transition-colors hover:bg-muted/50">
+    <div className="flex min-h-11 items-start gap-3 rounded-lg border border-border/70 p-3 transition-colors hover:bg-muted/50">
       <Checkbox
+        id={checkboxID}
         checked={checked}
         disabled={!selectable || (!checked && maxReached)}
         onCheckedChange={(value) => onSessionChange(session.session_id, value === true)}
         className="mt-0.5"
         aria-label={session.session_id}
       />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{title}</span>
-        <span className="block truncate text-xs text-muted-foreground">{details}</span>
-      </span>
-      <span className="shrink-0 text-xs text-muted-foreground">
+      <div className="min-w-0 flex-1">
+        <a
+          href={linkToTask(session.task_id)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex w-fit max-w-full items-center gap-1 truncate text-sm font-medium text-foreground underline-offset-4 hover:underline focus-visible:rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={t("settings:diagnosticOpenTask", { title: taskTitle })}
+          data-testid={`acp-session-task-link-${session.session_id}`}
+        >
+          <span className="truncate">{taskTitle}</span>
+          <IconExternalLink className="size-3 shrink-0" />
+        </a>
+        <label htmlFor={checkboxID} className="mt-1 block min-h-11 cursor-pointer">
+          <span className="block truncate text-sm font-medium">{title}</span>
+          <span className="block truncate text-xs text-muted-foreground">{details}</span>
+        </label>
+      </div>
+      <span className="mt-0.5 shrink-0 text-xs text-muted-foreground">
         {availabilityLabel(session.acp_availability, t)}
       </span>
-    </label>
+    </div>
   );
 }
 

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Card, CardContent, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconDownload, IconFileZip } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
@@ -24,10 +24,8 @@ import type {
 import { BundleCustomizer } from "./bundle-customizer";
 
 type ViewState = "idle" | "collecting" | "preparing" | "partial" | "busy" | "error";
-type CustomizerMode = "standard" | "acp";
 
-const STANDARD_SOURCES: DiagnosticBundleSource[] = ["backend", "frontend"];
-const CUSTOM_SOURCES: DiagnosticBundleSource[] = ["backend", "frontend", "runtime"];
+const DEFAULT_SOURCES: DiagnosticBundleSource[] = ["backend", "frontend"];
 
 // eslint-disable-next-line max-lines-per-function -- coordinates bundle polling and shared customizer state.
 export function LogViewer() {
@@ -39,8 +37,7 @@ export function LogViewer() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [customizerOpen, setCustomizerOpen] = useState(false);
-  const [customizerMode, setCustomizerMode] = useState<CustomizerMode>("standard");
-  const [selectedSources, setSelectedSources] = useState<DiagnosticBundleSource[]>(CUSTOM_SOURCES);
+  const [selectedSources, setSelectedSources] = useState<DiagnosticBundleSource[]>(DEFAULT_SOURCES);
   const [selectedSessionIDs, setSelectedSessionIDs] = useState<string[]>([]);
   const [customizerSubmitting, setCustomizerSubmitting] = useState(false);
   const mounted = useRef(true);
@@ -56,7 +53,7 @@ export function LogViewer() {
   }, []);
 
   useEffect(() => {
-    if (!customizerOpen || customizerMode !== "acp" || sessionsLoaded) return;
+    if (!customizerOpen || !selectedSources.includes("acp") || sessionsLoaded) return;
     setSessionsLoading(true);
     void fetchDiagnosticACPSessions()
       .then((next) => {
@@ -70,7 +67,7 @@ export function LogViewer() {
         setSessionsLoaded(true);
       })
       .finally(() => mounted.current && setSessionsLoading(false));
-  }, [customizerMode, customizerOpen, sessionsLoaded]);
+  }, [customizerOpen, selectedSources, sessionsLoaded]);
 
   const download = async (sources: DiagnosticBundleSource[], sessionIDs: string[] = []) => {
     setMessage("");
@@ -100,11 +97,9 @@ export function LogViewer() {
     }
   };
 
-  const openCustomizer = (mode: CustomizerMode) => {
-    const available = new Set(capabilities?.sources ?? CUSTOM_SOURCES);
-    const defaults = mode === "acp" ? [...CUSTOM_SOURCES, "acp" as const] : CUSTOM_SOURCES;
-    setCustomizerMode(mode);
-    setSelectedSources(defaults.filter((source) => available.has(source)));
+  const openCustomizer = () => {
+    const available = new Set(capabilities?.sources ?? DEFAULT_SOURCES);
+    setSelectedSources(DEFAULT_SOURCES.filter((source) => available.has(source)));
     setSelectedSessionIDs([]);
     setCustomizerSubmitting(false);
     setCustomizerOpen(true);
@@ -119,9 +114,6 @@ export function LogViewer() {
   };
 
   const pending = state === "collecting" || state === "preparing";
-  const acpAvailable =
-    capabilities?.acp_debug_enabled === true && capabilities.sources.includes("acp");
-
   return (
     <div className="min-w-0 space-y-4">
       <DiagnosticDisclosure />
@@ -129,16 +121,12 @@ export function LogViewer() {
         pending={pending}
         state={state}
         message={message}
-        acpAvailable={acpAvailable}
-        onDownloadStandard={() => void download(STANDARD_SOURCES)}
-        onCustomize={() => openCustomizer("standard")}
-        onDownloadWithACP={() => openCustomizer("acp")}
+        onCustomize={openCustomizer}
       />
 
       <BundleCustomizer
         open={customizerOpen}
         onOpenChange={setCustomizerOpen}
-        mode={customizerMode}
         capabilities={capabilities}
         sessions={sessions}
         sessionsLoading={sessionsLoading}
@@ -152,6 +140,7 @@ export function LogViewer() {
         onSessionChange={(sessionID, checked) =>
           setSelectedSessionIDs((current) => updateSessionSelection(current, sessionID, checked))
         }
+        onSessionSelectionChange={setSelectedSessionIDs}
         onSubmit={submitCustomizer}
       />
     </div>
@@ -161,13 +150,15 @@ export function LogViewer() {
 function DiagnosticDisclosure() {
   const { t } = useTranslation();
   return (
-    <Alert>
+    <Alert className="border-border/70 bg-muted/30">
       <IconAlertTriangle className="size-4" />
       <AlertTitle>{t("settings:diagnosticReviewBeforeSharing")}</AlertTitle>
-      <AlertDescription className="space-y-2">
+      <AlertDescription className="space-y-3 text-sm">
         <p>{t("settings:diagnosticReviewDescription")}</p>
-        <p>{t("settings:diagnosticNoMessages")}</p>
-        <p>{t("settings:diagnosticIncidentalText")}</p>
+        <div className="grid gap-2 border-t border-border/70 pt-3 text-xs leading-relaxed sm:grid-cols-2">
+          <p>{t("settings:diagnosticNoMessages")}</p>
+          <p>{t("settings:diagnosticIncidentalText")}</p>
+        </div>
       </AlertDescription>
     </Alert>
   );
@@ -177,44 +168,30 @@ type DiagnosticBundleCardProps = {
   pending: boolean;
   state: ViewState;
   message: string;
-  acpAvailable: boolean;
-  onDownloadStandard: () => void;
   onCustomize: () => void;
-  onDownloadWithACP: () => void;
 };
 
-function DiagnosticBundleCard({
-  pending,
-  state,
-  message,
-  acpAvailable,
-  onDownloadStandard,
-  onCustomize,
-  onDownloadWithACP,
-}: DiagnosticBundleCardProps) {
+function DiagnosticBundleCard({ pending, state, message, onCustomize }: DiagnosticBundleCardProps) {
   const { t } = useTranslation();
   return (
-    <Card data-testid="system-diagnostic-bundle-card">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2 text-base">
-          <IconFileZip className="size-4" />
-          {t("settings:diagnosticBundleTitle")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <p className="text-sm text-muted-foreground">{t("settings:diagnosticBundleDescription")}</p>
-        <div className="grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
+    <Card data-testid="system-diagnostic-bundle-card" className="overflow-hidden">
+      <CardContent className="space-y-5 p-5 sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div className="min-w-0 space-y-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <IconFileZip className="size-4" />
+              {t("settings:diagnosticBundleTitle")}
+            </CardTitle>
+            <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+              {t("settings:diagnosticBundleDescription")}
+            </p>
+          </div>
+          <DiagnosticBundleActions pending={pending} state={state} onCustomize={onCustomize} />
+        </div>
+        <div className="grid gap-x-8 gap-y-3 border-t border-border/70 pt-4 text-xs leading-relaxed text-muted-foreground sm:grid-cols-2">
           <p>{t("settings:diagnosticBackendEvents")}</p>
           <p>{t("settings:diagnosticFrontendEvents")}</p>
         </div>
-        <DiagnosticBundleActions
-          pending={pending}
-          state={state}
-          acpAvailable={acpAvailable}
-          onDownloadStandard={onDownloadStandard}
-          onCustomize={onCustomize}
-          onDownloadWithACP={onDownloadWithACP}
-        />
         {message && <DiagnosticBundleMessage state={state} message={message} />}
       </CardContent>
     </Card>
@@ -224,43 +201,20 @@ function DiagnosticBundleCard({
 function DiagnosticBundleActions({
   pending,
   state,
-  acpAvailable,
-  onDownloadStandard,
   onCustomize,
-  onDownloadWithACP,
 }: Omit<DiagnosticBundleCardProps, "message">) {
   const { t } = useTranslation();
   return (
-    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+    <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
       <Button
-        className="min-h-11 w-full cursor-pointer sm:w-auto"
-        disabled={pending}
-        onClick={onDownloadStandard}
-        data-testid="download-diagnostic-bundle"
-      >
-        {pending ? <Spinner className="mr-2 size-4" /> : <IconDownload className="mr-2 size-4" />}
-        {pending ? buttonLabel(state, t) : t("settings:diagnosticDownloadStandard")}
-      </Button>
-      <Button
-        variant="outline"
-        className="min-h-11 w-full cursor-pointer sm:w-auto"
+        className="min-h-11 w-full cursor-pointer lg:w-auto"
         disabled={pending}
         onClick={onCustomize}
         data-testid="customize-diagnostic-bundle"
       >
-        {t("settings:diagnosticCustomize")}
+        {pending ? <Spinner className="mr-2 size-4" /> : <IconDownload className="mr-2 size-4" />}
+        {pending ? buttonLabel(state, t) : t("settings:diagnosticCustomize")}
       </Button>
-      {acpAvailable && (
-        <Button
-          variant="outline"
-          className="min-h-11 w-full cursor-pointer sm:w-auto"
-          disabled={pending}
-          onClick={onDownloadWithACP}
-          data-testid="download-diagnostic-bundle-with-acp"
-        >
-          {t("settings:diagnosticDownloadWithACP")}
-        </Button>
-      )}
     </div>
   );
 }
@@ -300,7 +254,7 @@ async function prepareDiagnosticBundle(
 function buttonLabel(state: ViewState, t: (key: string) => string): string {
   if (state === "collecting") return t("settings:diagnosticCollectingFrontendLogs");
   if (state === "preparing") return t("settings:diagnosticPreparingZip");
-  return t("settings:diagnosticDownloadStandard");
+  return t("settings:diagnosticCustomize");
 }
 
 function bundleMessage(

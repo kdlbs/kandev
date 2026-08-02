@@ -14,7 +14,7 @@ func TestDiagnosticSessionProviderBuildsMessageFreeAllowList(t *testing.T) {
 	reader := &diagnosticSessionReaderStub{
 		workspaces: []*models.Workspace{{ID: "ws-1", OwnerID: "user-1"}},
 		tasks: map[string][]*models.Task{
-			"ws-1": {{ID: "task-1", WorkspaceID: "ws-1"}},
+			"ws-1": {{ID: "task-1", Title: "Repair diagnostic export", WorkspaceID: "ws-1"}},
 		},
 		sessions: map[string][]*models.TaskSession{
 			"task-1": {{
@@ -30,7 +30,8 @@ func TestDiagnosticSessionProviderBuildsMessageFreeAllowList(t *testing.T) {
 	}
 	provider := newDiagnosticSessionProvider(reader)
 	rows, err := provider.ListDiagnosticSessions(
-		context.Background(), authn.Identity{UserID: "user-1", Role: authn.RoleMember},
+		context.Background(),
+		authn.Identity{UserID: "user-1", Role: authn.RoleMember},
 		started.Add(-time.Hour), nil,
 	)
 	if err != nil {
@@ -40,7 +41,8 @@ func TestDiagnosticSessionProviderBuildsMessageFreeAllowList(t *testing.T) {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
 	row := rows[0]
-	if row.TaskID != "task-1" || row.SessionID != "session-1" || row.Agent != "claude-acp" ||
+	if row.TaskID != "task-1" || row.TaskTitle != "Repair diagnostic export" ||
+		row.SessionID != "session-1" || row.Agent != "claude-acp" ||
 		row.Provider != "anthropic" || row.Model != "sonnet" || row.ExecutorType != "local_docker" {
 		t.Fatalf("allow-list row = %#v", row)
 	}

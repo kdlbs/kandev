@@ -35,8 +35,10 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
    - Per-row actions: **Download**, **Restore** (gated like Factory Reset), **Delete** (confirm-only).
    - **Create snapshot** button at the top of the list; uses the existing `VACUUM INTO` path.
 5. **Logs** — `/settings/system/logs`
-   - One **Download diagnostic bundle** action with
-     collecting/preparing/partial/busy/error feedback.
+   - One **Customize bundle** action that opens source selection with backend
+     and frontend evidence selected by default; the runtime index and
+     debug-only ACP evidence remain explicit opt-ins. Bundle collection keeps
+     collecting/preparing/partial/busy/error feedback on the page.
    - Visible disclosure that the ZIP contains up to three days of install-wide
      backend logs and up to four connected browser profiles subject to fixed
      byte limits, including URLs, console arguments, stacks, and runtime

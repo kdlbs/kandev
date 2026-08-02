@@ -36,6 +36,11 @@ type createResponse struct {
 	Reused bool `json:"reused"`
 }
 
+type acpSessionResponse struct {
+	DiagnosticSession
+	TaskTitle string `json:"task_title,omitempty"`
+}
+
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/logs/bundles", handleCreate(service))
 	group.GET("/logs/capabilities", handleCapabilities(service))
@@ -87,8 +92,19 @@ func handleACPSessions(service *Service) gin.HandlerFunc {
 			writeServiceError(c, err)
 			return
 		}
-		c.JSON(http.StatusOK, gin.H{"sessions": rows})
+		c.JSON(http.StatusOK, gin.H{"sessions": acpSessionResponses(rows)})
 	}
+}
+
+func acpSessionResponses(rows []DiagnosticSession) []acpSessionResponse {
+	responses := make([]acpSessionResponse, 0, len(rows))
+	for _, row := range rows {
+		responses = append(responses, acpSessionResponse{
+			DiagnosticSession: row,
+			TaskTitle:         row.TaskTitle,
+		})
+	}
+	return responses
 }
 
 func handleGet(service *Service) gin.HandlerFunc {

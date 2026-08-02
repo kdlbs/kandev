@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -49,7 +50,10 @@ func TestBundleRoutesEnforceIdentityOwnership(t *testing.T) {
 func TestBundleCapabilityAndACPSessionRoutesUseBackendDebugState(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	provider := &diagnosticSessionProviderStub{sessions: []DiagnosticSession{
-		{TaskID: "task-1", SessionID: "session-1", Agent: "claude-acp", Status: "running"},
+		{
+			TaskID: "task-1", TaskTitle: "Repair diagnostic export", SessionID: "session-1",
+			Agent: "claude-acp", Status: "running",
+		},
 	}}
 	service := newTestService(t, Config{
 		HomeDir:         t.TempDir(),
@@ -77,6 +81,19 @@ func TestBundleCapabilityAndACPSessionRoutesUseBackendDebugState(t *testing.T) {
 		"/api/v1/system/logs/acp-sessions", "", "")
 	if sessions.Code != http.StatusOK || !strings.Contains(sessions.Body.String(), "session-1") {
 		t.Fatalf("sessions status = %d body=%s", sessions.Code, sessions.Body.String())
+	}
+	if !strings.Contains(sessions.Body.String(), `"task_title":"Repair diagnostic export"`) {
+		t.Fatalf("ACP picker response omits task title: %s", sessions.Body.String())
+	}
+}
+
+func TestDiagnosticSessionTaskTitleStaysOutOfArchiveJSON(t *testing.T) {
+	field, ok := reflect.TypeOf(DiagnosticSession{}).FieldByName("TaskTitle")
+	if !ok {
+		t.Fatal("DiagnosticSession must retain the picker-only TaskTitle field")
+	}
+	if actual := field.Tag.Get("json"); actual != "-" {
+		t.Fatalf("TaskTitle JSON tag = %q, want -", actual)
 	}
 }
 

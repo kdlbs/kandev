@@ -248,7 +248,15 @@ describe("logs", () => {
         }),
       )
       .mockResolvedValueOnce(
-        jsonResponse({ sessions: [{ task_id: "task-1", session_id: "session-1" }] }),
+        jsonResponse({
+          sessions: [
+            {
+              task_id: "task-1",
+              task_title: "Repair diagnostic export",
+              session_id: "session-1",
+            },
+          ],
+        }),
       );
     await createDiagnosticBundle(["acp"], ["session-1"]);
     expect(JSON.parse(String(lastCall().init?.body))).toEqual({
@@ -261,6 +269,7 @@ describe("logs", () => {
     const sessions = await fetchDiagnosticACPSessions();
     expect(lastCall().url).toBe(`${BASE}/logs/acp-sessions`);
     expect(sessions[0]?.session_id).toBe("session-1");
+    expect(sessions[0]?.task_title).toBe("Repair diagnostic export");
   });
 });
 

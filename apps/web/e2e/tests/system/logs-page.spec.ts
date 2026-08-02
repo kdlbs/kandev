@@ -3,7 +3,10 @@ import { inflateRawSync } from "node:zlib";
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("System Logs page", () => {
-  test("downloads one frontend and backend diagnostic ZIP", async ({ testPage, prCapture }) => {
+  test("customizes and downloads the default frontend and backend diagnostic ZIP", async ({
+    testPage,
+    prCapture,
+  }) => {
     test.setTimeout(45_000);
     await testPage.goto("/settings/system/logs");
 
@@ -18,11 +21,11 @@ test.describe("System Logs page", () => {
       fullPage: true,
     });
 
+    await expect(testPage.getByTestId("download-diagnostic-bundle")).toHaveCount(0);
+    await testPage.getByTestId("customize-diagnostic-bundle").click();
+    const dialog = testPage.getByTestId("diagnostic-bundle-dialog");
     const downloadPromise = testPage.waitForEvent("download");
-    await testPage.getByTestId("download-diagnostic-bundle").click();
-    await expect(testPage.getByTestId("download-diagnostic-bundle")).toContainText(
-      /Collecting|Preparing/,
-    );
+    await dialog.getByTestId("create-custom-diagnostic-bundle").click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("kandev-diagnostic-logs.zip");
     const archivePath = await download.path();
@@ -37,15 +40,23 @@ test.describe("System Logs page", () => {
     expect(manifest.requested_sources).toEqual(["backend", "frontend"]);
   });
 
-  test("opens the source customizer without enabling ACP from the browser", async ({
+  test("opens one wider source customizer without enabling ACP from the browser", async ({
     testPage,
+    prCapture,
   }) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
     await testPage.goto("/settings/system/logs");
     await testPage.getByTestId("customize-diagnostic-bundle").click();
     const dialog = testPage.getByTestId("diagnostic-bundle-dialog");
     await expect(dialog).toBeVisible();
     await expect(dialog.getByText("Runtime index")).toBeVisible();
+    await expect(testPage.getByTestId("download-diagnostic-bundle")).toHaveCount(0);
     await expect(testPage.getByTestId("download-diagnostic-bundle-with-acp")).toHaveCount(0);
+    const box = await dialog.boundingBox();
+    expect(box?.width ?? 0).toBeGreaterThan(800);
+    await prCapture.screenshot("desktop-diagnostic-bundle-customizer", {
+      caption: "The wider diagnostic bundle customizer keeps source choices easy to scan.",
+    });
   });
 });
 

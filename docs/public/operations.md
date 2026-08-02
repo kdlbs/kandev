@@ -252,7 +252,14 @@ It does not erase the entire Kandev home: backups, `master.key`, logs, service m
 
 ## Logs and diagnostics
 
-Open **Settings > System > Logs** to create and download a diagnostic ZIP. **Download standard bundle** includes bounded backend and frontend diagnostic evidence; **Customize bundle** can add the allow-listed runtime index. In debug mode, **Download with ACP…** opens an explicit session picker for raw and normalized agent-protocol evidence. The archive has source directories and `manifest.json`; inspect the manifest for requested sources, warnings, captured ranges, truncation, and loss before treating it as complete.
+Open **Settings > System > Logs** and select **Customize bundle** to create and
+download a diagnostic ZIP. Backend and frontend diagnostic evidence are
+selected by default; you can add the allow-listed runtime index, and in debug
+mode raw and normalized agent-protocol (ACP) evidence. Adding ACP opens an
+explicit session picker, with each session's Kandev task title linked for
+identification. The archive has source directories and `manifest.json`; inspect
+the manifest for requested sources, warnings, captured ranges, truncation, and
+loss before treating it as complete.
 
 Standard bundles do not read stored chat transcripts, session messages, or agent messages. Backend evidence covers startup, lifecycle, API, executor, and error events; frontend evidence covers bounded browser console errors/warnings and diagnostic toast reports. Incidental text already emitted into a backend/frontend log entry is not automatically redacted, so review the ZIP before sharing. The runtime index contains only allow-listed session status and executor metadata.
 

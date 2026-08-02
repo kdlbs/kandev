@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/platform/diagnostic-logging.md
 created: 2026-07-30
-status: done
+status: implemented
 ---
 
 # Implementation Plan: Diagnostic logging
@@ -302,24 +302,26 @@ The implementation follows
 
 - Replace the single action copy in
   `apps/web/components/settings/system/log-viewer.tsx` with a shared bundle
-  request controller and three entry points: **Download standard bundle**,
-  **Customize bundle**, and debug-only **Download with ACP…**.
+  request controller and one **Customize bundle** entry point.
 - Fetch backend capabilities instead of inferring ACP availability from
-  `window.__KANDEV_DEBUG`. Standard submits backend+frontend directly.
-  Customize selects backend, frontend, and runtime. Download with ACP opens the
-  customizer with all four sources preselected and requires one to ten eligible
-  sessions before submit. In debug mode it remains visible with an explanatory
-  empty state when the caller has no eligible session.
+  `window.__KANDEV_DEBUG`. The customizer defaults to backend+frontend,
+  offers runtime as an opt-in, and exposes ACP as an opt-in only when the
+  backend allows it. Selecting ACP loads candidates on demand and requires one
+  to ten eligible sessions before submit. In debug mode it remains available
+  with an explanatory empty state when the caller has no eligible session.
 - Add exact translated copy describing frontend and backend event classes,
   stating that standard bundles do not read stored chat/session/agent messages,
   and warning that incidental text already emitted to logs may remain.
 - When ACP is selected, replace the standard reassurance with the explicit raw
   protocol warning covering prompts, responses, tools, files, MCP data,
-  environment-derived values, and secrets. Show per-session availability and
-  explain why unavailable sessions cannot be collected.
+  environment-derived values, and secrets. Show each session's authorized task
+  title as a new-tab task link, per-session availability, and explicit
+  select-all/clear controls that honor the server's maximum; explain why
+  unavailable sessions cannot be collected. Keep task titles out of the
+  runtime index and all archive metadata.
 - Keep all selection, validation, polling, partial/error status, and download
   logic shared. Do not add source preferences to persistent settings or a
-  database; each customizer opening starts from its entry-point defaults.
+  database; each customizer opening starts from the same defaults.
 
 ### Mobile design contract
 
@@ -514,9 +516,9 @@ The implementation follows
 ## Verification Results
 
 Tasks 01–11 record the implemented standard bundle results in their individual
-task files. Tasks 12–16 now record the implemented custom source/runtime-index,
-on-demand ACP, customizer UI, E2E, and privacy-guidance work. No database
-migration or browser schema migration is required by this extension.
+task files. Tasks 12–17 now record the implemented custom source/runtime-index,
+on-demand ACP, consolidated customizer UI, E2E, and privacy-guidance work. No
+database migration or browser schema migration is required by this extension.
 
 ---
 
@@ -598,6 +600,10 @@ Task 15 follows the completed backend/frontend behavior. Task 16 is
 parallel-safe with Task 15 because it owns public docs and debug guidance while
 Task 15 owns Playwright fixtures/specs; parallel execution still requires
 explicit user authorization.
+
+Wave 13:
+
+- [x] [Task 17: Bundle customizer refinement](task-17-bundle-customizer-refinement.md)
 
 ## Risks
 

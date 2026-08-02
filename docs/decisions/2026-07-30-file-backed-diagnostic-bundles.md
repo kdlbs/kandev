@@ -146,8 +146,10 @@ The System Logs page becomes a focused action rather than a live diagnostic
 viewer. Mobile and desktop share the workflow, with a touch-sized primary
 action and no wide table. Desktop customization uses a dialog; phone uses an
 inset, safe-area-aware bottom drawer with one internal scroll owner. Debug mode
-shows a standard action plus a **Download with ACP…** action that opens required
-session selection; both modes retain **Customize bundle**.
+shows one **Customize bundle** action. It starts with backend and frontend
+evidence selected, while the runtime index and ACP evidence remain explicit
+opt-ins. Selecting ACP opens the required session selection in that same
+customizer.
 
 Raw ACP is intentionally more sensitive than the standard bundle. The UI and
 API cannot truthfully promise that an ACP-inclusive archive excludes agent or
