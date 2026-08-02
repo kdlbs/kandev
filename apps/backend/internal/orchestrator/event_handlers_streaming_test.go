@@ -1068,6 +1068,75 @@ func TestToolCallFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 		"stale completed-execution tool calls must be dropped before message side effects")
 }
 
+type blockingToolCallMessageCreator struct {
+	mockMessageCreator
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingToolCallMessageCreator) CreateToolCallMessage(
+	context.Context,
+	string, string, string, string, string, string, string, *streams.NormalizedPayload,
+) error {
+	close(m.entered)
+	<-m.release
+	m.toolCallWrites++
+	return nil
+}
+
+func TestAgentStreamEventWaitsForCancellationGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	creator := &blockingToolCallMessageCreator{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = creator
+
+	lock, releaseGuard := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:      "t1",
+			SessionID:   "s1",
+			ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:       agentEventToolCall,
+				ToolCallID: "tool-1",
+				ToolStatus: "running",
+			},
+		})
+		close(eventDone)
+	}()
+
+	select {
+	case <-creator.entered:
+		t.Fatal("stream side effect bypassed the cancellation guard")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	lock.Unlock()
+	releaseGuard()
+
+	select {
+	case <-creator.entered:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not proceed after cancellation guard release")
+	}
+	close(creator.release)
+	select {
+	case <-eventDone:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not finish")
+	}
+	require.Equal(t, 1, creator.toolCallWrites)
+}
+
 func TestToolCallStreamFromCompletedExecutionDoesNotSaveAgentText(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

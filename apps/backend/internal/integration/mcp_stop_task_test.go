@@ -221,6 +221,23 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 	require.Equal(t, v1.TaskStateInProgress, taskBefore.State)
 	require.True(t, manager.IsAgentRunningForSession(context.Background(), launch.SessionID))
 	promptsBefore := manager.promptCalls.Load()
+	// Agent stream delivery is asynchronous with respect to the RUNNING state
+	// notification. Wait for the simulated tool-call message before taking the
+	// baseline so a legitimate in-flight stream event is not mistaken for output
+	// created after the coordinator stop.
+	require.Eventually(t, func() bool {
+		messages, listErr := ts.TaskRepo.ListMessages(context.Background(), launch.SessionID)
+		if listErr != nil {
+			return false
+		}
+		for _, message := range messages {
+			if message.Type == models.MessageTypeToolCall &&
+				message.Metadata["tool_call_id"] == "long-running-work" {
+				return true
+			}
+		}
+		return false
+	}, 2*time.Second, 10*time.Millisecond)
 	messagesBefore, err := ts.TaskRepo.ListMessages(context.Background(), launch.SessionID)
 	require.NoError(t, err)
 

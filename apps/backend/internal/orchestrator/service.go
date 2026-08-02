@@ -545,10 +545,12 @@ type Service struct {
 	// / handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it),
 	// or QueueAndInterruptForPeerMessage (blocking Lock — must wait rather
 	// than work around a busy lock with an unguarded insert; see its doc
-	// comment). All of these must go through the same per-session guard —
-	// a second, independent lock for any of them would defeat the mutual
-	// exclusion the others rely on to avoid racing each other's
-	// take-and-dispatch decision for the same session.
+	// comment), or an agent stream handler persisting output (blocking Lock so
+	// cancellation cannot commit while a stream side effect is in flight).
+	// All of these must go through the same per-session guard — a second,
+	// independent lock for any of them would defeat the mutual exclusion the
+	// others rely on to avoid racing each other's take-and-dispatch decision
+	// for the same session.
 	//
 	// Entries are reference-counted (acquireCancelInFlightGuard /
 	// releaseCancelInFlightGuard) and pruned once nobody holds a reference,
