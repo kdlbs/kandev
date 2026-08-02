@@ -59,8 +59,7 @@ scripts/pr-resolve list <PR>
 Transport/collection failure leaves checks unknown. Parseable pending/failing
 rows remain usable when `gh pr checks` exits 8; never hide diagnostics in a pipe.
 
-When `filtered_review_thread_count < unresolved_review_thread_count` or
-`hidden_unresolved_threads` exists, fetch each thread body with
+When `hidden_unresolved_threads` is non-empty, fetch each thread body with
 `scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment command only
 for a comment without thread context. A listed thread that is already resolved
 is stale summary state: re-poll and do not reply again.

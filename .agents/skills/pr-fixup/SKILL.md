@@ -56,8 +56,7 @@ exact-head review body still contains actionable findings. Classify each body
 as actionable, already addressed, optional, or invalid and record a concrete
 skip reason for anything not acted on before declaring reviews clear.
 Treat `trusted_producer=true` as qualifying provenance only for the dedicated OpenCode App, never merely because a reviewer name matches.
-If `filtered_review_thread_count < unresolved_review_thread_count` or
-`hidden_unresolved_threads` is non-empty, immediately run
+If `hidden_unresolved_threads` is non-empty, immediately run
 `scripts/pr-resolve list <PR>` and triage its output. A zero current-head
 unresolved count does not make hidden threads clean.
 
@@ -218,8 +217,7 @@ non-empty body in `review_evidence.exact_current_head_reviews[]`, even when
 `unresolved_review_thread_count=0` and `scripts/pr-resolve list` is empty.
 Classify current-head summary findings before declaring the PR clean; thread and
 issue-comment counts alone are insufficient.
-Treat `filtered_review_thread_count < unresolved_review_thread_count` or a
-non-empty `hidden_unresolved_threads` value in that fresh snapshot as a
+Treat a non-empty `hidden_unresolved_threads` value in that fresh snapshot as a
 mandatory hidden-thread gate: run `scripts/pr-resolve list <PR>` again after
 the refresh and immediately before reporting.
 Require `checks_head_sha` to match that head, report pending checks separately
@@ -231,7 +229,8 @@ evidence as stale. When the user authorized thread
 writes, a duplicate or stale bot thread still needs an explicit reply and
 resolution once current source proves the finding is already fixed, including a
 thread surfaced only in `hidden_unresolved_threads`; only current-head
-actionable threads drive code changes. Declare the PR clean only when
+actionable threads drive code changes. Declare the PR clean only when the
+exact-current-head review classification reports no unaddressed findings,
 `checks_snapshot_complete=true`, `failed_checks=[]`, `pending_checks=[]`,
 `approval_required_runs=[]`, `actionable_issue_comment_count=0`,
 `hidden_unresolved_threads=[]`, there is no merge conflict, and
