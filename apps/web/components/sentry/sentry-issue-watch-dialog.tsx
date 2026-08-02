@@ -27,6 +27,7 @@ import {
 import { listSentryInstances, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { sentryIssueWatchPlaceholders } from "./sentry-issue-watch-placeholders";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
 import { SelectField, FilterFields, type FormSetter } from "./sentry-issue-watch-filter-fields";
@@ -81,9 +82,12 @@ function useFormData(workspaceId: string) {
   return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
 }
 
-function PlaceholdersHelp() {
+// `placeholders` comes from PromptField rather than being rebuilt here: this
+// renders inside PromptField, which already needs the same array for
+// ScriptEditor, so recomputing it would run the whole table twice per locale
+// change for no benefit.
+function PlaceholdersHelp({ placeholders }: { placeholders: ScriptPlaceholder[] }) {
   const { t } = useTranslation();
-  const placeholders = useMemo(() => sentryIssueWatchPlaceholders(t), [t]);
   return (
     <TooltipProvider>
       <Tooltip>
@@ -111,13 +115,14 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
   // Memoized because ScriptEditor keys its completion-provider registration on
   // `placeholders` identity. This used to be a module-scope const, so it was
   // stable for free; now that it is built from `t`, a fresh array on every
-  // render would re-register the provider on every keystroke.
+  // render would re-register the provider on every keystroke. The tooltip below
+  // shares this array rather than building its own.
   const placeholders = useMemo(() => sentryIssueWatchPlaceholders(t), [t]);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
         <Label>{t("sentry:taskPrompt")}</Label>
-        <PlaceholdersHelp />
+        <PlaceholdersHelp placeholders={placeholders} />
       </div>
       <p className="text-xs text-muted-foreground">
         {/* The `{{` token is passed as a value so it never reaches the catalog,
