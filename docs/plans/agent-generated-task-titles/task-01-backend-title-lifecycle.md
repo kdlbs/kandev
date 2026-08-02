@@ -10,6 +10,9 @@ spec: "../../specs/tasks/agent-generated-titles.md"
 
 # Task 01: Backend preference and provisional-title lifecycle
 
+> Continuation note: Task 06 changes the missing/new preference default to `true` while preserving
+> explicit opt-outs. This completed task records the original opt-in rollout.
+
 ## Acceptance
 
 - The backend-owned `agent_generated_task_titles` preference defaults to false, round-trips through

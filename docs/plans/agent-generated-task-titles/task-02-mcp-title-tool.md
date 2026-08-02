@@ -10,6 +10,9 @@ spec: "../../specs/tasks/agent-generated-titles.md"
 
 # Task 02: Task MCP tool and first-turn instruction
 
+> Continuation note: Task 05 refines pending-only gating into durable ownership by exactly one
+> first-launched task-mode session. This completed task records the original pending-title rollout.
+
 ## Acceptance
 
 - `set_task_title_kandev(title)` is discoverable only in the title-pending task-mode variant and is

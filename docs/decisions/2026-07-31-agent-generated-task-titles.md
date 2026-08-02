@@ -4,6 +4,11 @@
 **Date:** 2026-07-31
 **Area:** backend, frontend, protocol
 
+**Refined by:**
+[ADR-2026-08-02-single-owner-agent-task-titles](2026-08-02-single-owner-agent-task-titles.md)
+for durable first-session ownership and the default-on preference rollout. Where session eligibility or
+preference defaults differ, the later decision governs.
+
 ## Context
 
 Users can currently create Kanban tasks and subtasks only after choosing a title. Kandev needs an
