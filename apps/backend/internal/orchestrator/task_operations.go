@@ -473,15 +473,24 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
+	configMode := false
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		configMode = true
+	}
+	titleOwner := false
+	if !configMode {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
 		planMode, task.IsEphemeral, session.IsPassthrough,
 	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
-	configMode := false
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		configMode = true
+	if configMode {
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
@@ -495,7 +504,7 @@ func (s *Service) StartCreatedSession(
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.wrapCreatedSessionPrompt(
 			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
-			isOfficeTask, configMode, references, promptReferenceContext,
+			isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
 		)
 	}
 
@@ -537,14 +546,14 @@ func (s *Service) wrapCreatedSessionPrompt(
 	prompt, taskID, sessionID string,
 	session *models.TaskSession,
 	dbTask *models.Task,
-	isOfficeTask, configMode bool,
+	isOfficeTask, configMode, titleOwner bool,
 	references []v1.EntityReference,
 	promptReferenceContext string,
 ) string {
 	referenceContext := EntityReferenceContext(references)
 	switch {
 	case session.IsPassthrough:
-		if !configMode && models.IsAgentTitlePending(dbTask.Metadata) {
+		if !configMode && titleOwner {
 			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
 		}
 		return prompt
@@ -556,7 +565,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
-			IncludeTaskTitleTool:           !configMode && models.IsAgentTitlePending(dbTask.Metadata),
+			IncludeTaskTitleTool:           !configMode && titleOwner,
 		}, referenceContext, promptReferenceContext)
 	}
 }
@@ -905,6 +914,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
+	titleOwner := false
+	if !configMode && !isOfficeTask {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, task.ID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
+	}
 
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
 	// tool list). Done at the orchestrator layer so recordInitialMessage persists
@@ -931,7 +947,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			isPassthrough:        skipKandevMCPWrap,
 			configMode:           configMode,
 			referenceContext:     promptReferenceContext,
-			includeTaskTitleTool: !configMode && models.IsAgentTitlePending(task.Metadata),
+			includeTaskTitleTool: !configMode && titleOwner,
 			spawnOrigin:          opts.SpawnOrigin,
 		})
 	}
@@ -1959,6 +1975,9 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task for prepared session: %w", err)
+	}
+	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
+		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
 	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,

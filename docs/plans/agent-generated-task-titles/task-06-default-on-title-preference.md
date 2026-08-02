@@ -1,7 +1,7 @@
 ---
 id: "06-default-on-title-preference"
 title: "Default-on title preference"
-status: pending
+status: done
 wave: 6
 depends_on: ["05-single-owner-title-handoff"]
 plan: "plan.md"
@@ -62,7 +62,12 @@ multi-session behavior by default in an intermediate commit.
 - Many E2E tests intentionally fill title inputs. Keep their common fixture explicitly opted out rather
   than rewriting unrelated scenarios around prompt-first creation.
 
-## Output contract
+## Result
 
-Report backend/frontend default behavior, explicit-false coverage, fixture impact, exact test results,
-blockers or risks, and update this task plus `plan.md` status in the same conversation.
+Missing backend settings, initial frontend state, boot/SSR hydration, and partial WebSocket updates
+now default to enabled while preserving an explicit `false`. The shared browser fixture explicitly
+opts out so existing manual-title scenarios remain deterministic.
+
+The affected Vitest files passed (50 tests), backend user-store tests passed, and the web lint check
+passed. The broad web typecheck command is mis-scoped in this worktree and reports pre-existing
+repository alias/type errors; it did not identify a regression in the changed settings files.

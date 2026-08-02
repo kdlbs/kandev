@@ -113,6 +113,9 @@ const (
 	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
 	// provisional title still needs the first eligible agent session to replace it.
 	MetaKeyAgentTitlePending = "agent_title_pending"
+	// MetaKeyAgentTitleOwnerSessionID records the one session that atomically
+	// claimed the first-turn title handoff for a pending task.
+	MetaKeyAgentTitleOwnerSessionID = "agent_title_owner_session_id"
 )
 
 // IsAgentTitlePending reports whether task metadata contains the durable
@@ -122,6 +125,18 @@ const (
 func IsAgentTitlePending(metadata map[string]interface{}) bool {
 	pending, ok := metadata[MetaKeyAgentTitlePending].(bool)
 	return ok && pending
+}
+
+// AgentTitleOwnerSessionID returns the session that owns the pending title
+// handoff, if one has been claimed.
+func AgentTitleOwnerSessionID(metadata map[string]interface{}) string {
+	owner, _ := metadata[MetaKeyAgentTitleOwnerSessionID].(string)
+	return owner
+}
+
+// IsAgentTitleOwner reports whether sessionID owns the pending title handoff.
+func IsAgentTitleOwner(metadata map[string]interface{}, sessionID string) bool {
+	return sessionID != "" && IsAgentTitlePending(metadata) && AgentTitleOwnerSessionID(metadata) == sessionID
 }
 
 // TaskSession.Metadata key that records how the session came into existence.

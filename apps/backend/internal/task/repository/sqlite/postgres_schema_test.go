@@ -89,7 +89,7 @@ func TestPostgresTaskTitleCASAndStaleUpdate(t *testing.T) {
 	`), "task-pg-title-false", "Provisional", `{"agent_title_pending":false,"keep":"value"}`, now, now); err != nil {
 		t.Fatalf("seed false-marker task: %v", err)
 	}
-	accepted, err := repo.SetTaskTitleIfPending(ctx, "task-pg-title-false", "Agent title")
+	accepted, err := repo.SetTaskTitleIfPending(ctx, "task-pg-title-false", "session-owner", "Agent title")
 	if err != nil {
 		t.Fatalf("false-marker title CAS: %v", err)
 	}
@@ -110,11 +110,15 @@ func TestPostgresTaskTitleCASAndStaleUpdate(t *testing.T) {
 	`), "task-pg-title-race", "Provisional", `{"agent_title_pending":true}`, now, now); err != nil {
 		t.Fatalf("seed stale-update task: %v", err)
 	}
+	claimed, _, err := repo.ClaimTaskTitleSession(ctx, "task-pg-title-race", "session-owner")
+	if err != nil || !claimed {
+		t.Fatalf("claim postgres title session: claimed=%v err=%v", claimed, err)
+	}
 	stale, err := repo.GetTask(ctx, "task-pg-title-race")
 	if err != nil {
 		t.Fatalf("load stale postgres task: %v", err)
 	}
-	accepted, err = repo.SetTaskTitleIfPending(ctx, "task-pg-title-race", "Agent chosen title")
+	accepted, err = repo.SetTaskTitleIfPending(ctx, "task-pg-title-race", "session-owner", "Agent chosen title")
 	if err != nil || !accepted {
 		t.Fatalf("winning title CAS: accepted=%v err=%v", accepted, err)
 	}
@@ -132,6 +136,9 @@ func TestPostgresTaskTitleCASAndStaleUpdate(t *testing.T) {
 	}
 	if _, pending := current.Metadata[models.MetaKeyAgentTitlePending]; pending {
 		t.Fatalf("pending marker restored by stale update: %#v", current.Metadata)
+	}
+	if _, owner := current.Metadata[models.MetaKeyAgentTitleOwnerSessionID]; owner {
+		t.Fatalf("owner marker restored by stale update: %#v", current.Metadata)
 	}
 }
 

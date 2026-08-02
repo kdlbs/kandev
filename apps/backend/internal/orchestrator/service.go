@@ -219,6 +219,10 @@ type sessionExecutorStore interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	// Task
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+	// ClaimTaskTitleSession atomically assigns the first eligible session to a
+	// pending task title. The second return value reports a new claim rather
+	// than an idempotent same-owner observation.
+	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
@@ -245,6 +249,34 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+}
+
+// ClaimTaskTitleSession claims the first-turn generated-title handoff for a
+// task. The repository owns the compare-and-set; the orchestrator publishes a
+// task update only when this call creates a new owner.
+func (s *Service) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if taskID == "" || sessionID == "" {
+		return false, nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !models.IsAgentTitlePending(task.Metadata) {
+		return false, nil
+	}
+	owned, newlyClaimed, err := s.repo.ClaimTaskTitleSession(ctx, taskID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if newlyClaimed {
+		claimedTask, reloadErr := s.repo.GetTask(ctx, taskID)
+		if reloadErr != nil {
+			return false, reloadErr
+		}
+		s.publishTaskUpdated(ctx, claimedTask)
+	}
+	return owned, nil
 }
 
 // Service is the main orchestrator service

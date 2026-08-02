@@ -521,35 +521,100 @@ func (r *Repository) RemoveTaskMetadataKey(ctx context.Context, taskID, key stri
 	return rows > 0, err
 }
 
+// ClaimTaskTitleSession atomically assigns the first eligible session as the
+// owner of a pending title handoff. Repeated calls by that same session are
+// idempotent; a different session observes the existing owner and returns
+// false.
+func (r *Repository) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, bool, error) {
+	if sessionID == "" {
+		return false, false, nil
+	}
+
+	var query string
+	var args []interface{}
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query = `
+			UPDATE tasks
+			SET metadata = jsonb_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END,
+				ARRAY['agent_title_owner_session_id']::text[], ?::jsonb, true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_pending') = 'true'::jsonb
+			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_owner_session_id') IS NULL
+		`
+		payload, err := json.Marshal(sessionID)
+		if err != nil {
+			return false, false, err
+		}
+		args = []interface{}{string(payload), time.Now().UTC(), taskID}
+	} else {
+		query = `
+			UPDATE tasks
+			SET metadata = json_set(
+				CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END,
+				'$.agent_title_owner_session_id', json(?)
+			), updated_at = ?
+			WHERE id = ?
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_pending') = 'true'
+			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_owner_session_id') IS NULL
+		`
+		payload, err := json.Marshal(sessionID)
+		if err != nil {
+			return false, false, err
+		}
+		args = []interface{}{string(payload), time.Now().UTC(), taskID}
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return false, false, err
+	}
+	if rows, rowsErr := result.RowsAffected(); rowsErr == nil && rows > 0 {
+		return true, true, nil
+	}
+
+	task, err := r.GetTask(ctx, taskID)
+	if err != nil {
+		return false, false, err
+	}
+	return models.IsAgentTitleOwner(task.Metadata, sessionID), false, nil
+}
+
 // SetTaskTitleIfPending replaces a provisional title and removes its pending
-// marker in one conditional write. The compare-and-set prevents two agent
-// sessions (or a late agent call racing a human rename) from both winning.
-func (r *Repository) SetTaskTitleIfPending(ctx context.Context, taskID, title string) (bool, error) {
+// and owner markers in one conditional write. The compare-and-set prevents two
+// agent sessions (or a late agent call racing a human rename) from both winning.
+func (r *Repository) SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error) {
+	if sessionID == "" {
+		return false, nil
+	}
 	var query string
 	if dialect.IsPostgres(r.db.DriverName()) {
 		query = `
 			UPDATE tasks
 			SET title = ?,
-				metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY[?]::text[])::text,
+				metadata = (CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END #- ARRAY['agent_title_pending']::text[] #- ARRAY['agent_title_owner_session_id']::text[])::text,
 				updated_at = ?
 			WHERE id = ?
 			  AND jsonb_extract_path(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, ?) = 'true'::jsonb
+			  AND jsonb_extract_path_text(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END, 'agent_title_owner_session_id') = ?
 		`
 	} else {
 		query = `
 			UPDATE tasks
 			SET title = ?,
-				metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?),
+				metadata = json_remove(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_pending', '$.agent_title_owner_session_id'),
 				updated_at = ?
 			WHERE id = ?
 			  AND json_type(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, ?) = 'true'
+			  AND json_extract(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, '$.agent_title_owner_session_id') = ?
 			`
 	}
 	path := jsonPath(models.MetaKeyAgentTitlePending)
 	if dialect.IsPostgres(r.db.DriverName()) {
 		path = models.MetaKeyAgentTitlePending
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), title, path, time.Now().UTC(), taskID, path)
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), title, time.Now().UTC(), taskID, path, sessionID)
 	if err != nil {
 		return false, err
 	}
@@ -589,9 +654,9 @@ func agentTitlePendingPredicate(driver string) string {
 
 func pendingTaskMetadataMergeExpression(driver string) string {
 	if dialect.IsPostgres(driver) {
-		return "(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END || (?::jsonb - 'agent_title_pending'))::text"
+		return "(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END || (?::jsonb - 'agent_title_pending' - 'agent_title_owner_session_id'))::text"
 	}
-	return "json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json_remove(?, '$.agent_title_pending'))"
+	return "json_patch(CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END, json_remove(?, '$.agent_title_pending', '$.agent_title_owner_session_id'))"
 }
 
 // DetachTask clears only the hierarchy fields involved in detachment. Keeping

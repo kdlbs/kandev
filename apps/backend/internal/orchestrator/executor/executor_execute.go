@@ -36,7 +36,7 @@ func isConfigModeSession(session *models.TaskSession) bool {
 // resolveTaskSessionMCPMode derives restricted MCP access from canonical task
 // ownership and session purpose. Config mode wins because those sessions need
 // config tools even if their backing task is Office-owned.
-func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession) (string, error) {
+func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
 	if isConfigModeSession(session) {
 		return McpModeConfig, nil
 	}
@@ -47,7 +47,7 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
 	}
-	if task != nil && models.IsAgentTitlePending(task.Metadata) {
+	if allowTitleTool && task != nil && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		return McpModeTaskTitlePending, nil
 	}
 	return "", nil
@@ -643,6 +643,23 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 	if err != nil {
 		return nil, err
 	}
+	dbTask, err := e.repo.GetTask(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load task before title claim: %w", err)
+	}
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session before title claim: %w", err)
+	}
+	if (dbTask == nil || !dbTask.IsFromOffice) && !isConfigModeSession(session) {
+		if claimer, ok := e.repo.(interface {
+			ClaimTaskTitleSession(context.Context, string, string) (bool, bool, error)
+		}); ok {
+			if _, _, err := claimer.ClaimTaskTitleSession(ctx, task.ID, sessionID); err != nil {
+				return nil, fmt.Errorf("claim first-turn task title: %w", err)
+			}
+		}
+	}
 
 	// Launch the agent for the prepared session.
 	execution, err := e.LaunchPreparedSession(ctx, task, sessionID, LaunchOptions{
@@ -832,7 +849,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 	if opts.McpMode == "" {
-		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
 			return nil, err
 		}

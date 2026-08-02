@@ -91,13 +91,14 @@ Creating a repository is available only in an unlocked, single-repository **New 
 ### Let the agent name new tasks
 
 Open **Settings → General → Task Actions → Agent-generated task titles** and choose **Save changes**.
-The setting is disabled by default. When enabled, new task and subtask dialogs use the prompt as the
-source of the title: the prompt must contain text, and Kandev immediately displays its first six
-normalized words as a provisional title. The first eligible task-mode session receives the
-`set_task_title_kandev` MCP tool and is instructed to call it before doing any other work. Ask for a
-short title phrase targeting about six words in sentence case rather than a sentence or progress update.
-If the agent never renames the task, the provisional title remains usable and can still be edited by a
-person.
+The setting is enabled by default; an explicitly saved **off** value remains off. When enabled, new task
+and subtask dialogs use the prompt as the source of the title: the prompt must contain text, and Kandev
+immediately displays its first six normalized words as a provisional title. The first eligible task-mode
+session to launch atomically claims the handoff, receives the `set_task_title_kandev` MCP tool, and is
+instructed to call it before doing any other work. Ask for a short title phrase targeting about six words
+in sentence case rather than a sentence or progress update. Later sessions do not receive the instruction
+or tool, even if the owner fails before renaming the task. If the agent never renames the task, the
+provisional title remains usable and can still be edited by a person.
 
 The setting affects only new task/subtask creation. Existing task edits keep the title field, and
 sessions for tasks created while the setting was disabled receive neither this instruction nor the

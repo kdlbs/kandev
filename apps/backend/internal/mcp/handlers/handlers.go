@@ -1322,12 +1322,13 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 }
 
 // handleSetTaskTitle resolves the one-shot provisional title created for a
-// prompt-first task. The MCP server supplies the bound task ID; a missing
-// pending marker makes the call an idempotent no-op so a human rename wins.
+// prompt-first task. The MCP server supplies the bound task and session IDs;
+// only the atomically claimed owner may resolve it.
 func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Title  string `json:"title"`
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Title     string `json:"title"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -1335,11 +1336,14 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
 	if strings.TrimSpace(req.Title) == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	task, accepted, err := h.taskSvc.SetPendingAgentTitle(ctx, req.TaskID, req.Title)
+	task, accepted, reason, err := h.taskSvc.SetPendingAgentTitle(ctx, req.TaskID, req.SessionID, req.Title)
 	if err != nil {
 		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
@@ -1356,7 +1360,7 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 		"title":    task.Title,
 	}
 	if !accepted {
-		result["reason"] = "title_not_pending"
+		result["reason"] = reason
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }

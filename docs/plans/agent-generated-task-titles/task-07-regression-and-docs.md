@@ -1,7 +1,7 @@
 ---
 id: "07-regression-and-docs"
 title: "Regression coverage and public docs"
-status: pending
+status: done
 wave: 7
 depends_on: ["05-single-owner-title-handoff", "06-default-on-title-preference"]
 plan: "plan.md"
@@ -69,7 +69,13 @@ Sequential. E2E and public docs validate the assembled ownership/default contrac
 - Avoid restoring a missing preference as explicit false in dedicated tests when the scenario intends to
   prove the new default; restore only values the test deliberately changed.
 
-## Output contract
+## Result
 
-Report scenarios and docs covered, exact verification commands/results, blockers or risks, and update
-this task plus `plan.md` status in the same conversation.
+Backend coverage now exercises single-owner claims, owner-bound title mutation, launch-mode gating,
+message/workflow/direct/prepared paths, and stale metadata handling. Public task and MCP documentation
+describe the default-on preference, explicit opt-out, six-word sentence-case target, and exactly-one
+eligible session boundary. The shared E2E fixture opts out for unrelated manual-title scenarios.
+
+`node --test scripts/validate-public-docs.test.mjs` and `node scripts/validate-public-docs.mjs` both
+passed. The full backend race suite, backend lint, targeted web tests, and web lint passed; the prior PR
+head's desktop/mobile E2E checks were green, while new browser runs were not available locally.

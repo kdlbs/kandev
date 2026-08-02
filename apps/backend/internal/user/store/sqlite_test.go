@@ -156,8 +156,8 @@ func TestScanUserSettingsAgentGeneratedTaskTitlesDefault(t *testing.T) {
 		raw  string
 		want bool
 	}{
-		{name: "empty settings disable title generation", raw: `{}`, want: false},
-		{name: "missing setting disables title generation", raw: `{"chat_submit_key":"enter"}`, want: false},
+		{name: "empty settings enable title generation", raw: `{}`, want: true},
+		{name: "missing setting enables title generation", raw: `{"chat_submit_key":"enter"}`, want: true},
 		{name: "explicit false disables title generation", raw: `{"agent_generated_task_titles":false}`, want: false},
 		{name: "explicit true enables title generation", raw: `{"agent_generated_task_titles":true}`, want: true},
 	}

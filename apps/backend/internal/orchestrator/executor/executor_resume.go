@@ -905,7 +905,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 
 	e.reuseExistingEnvironment(ctx, req, existingEnv)
 
-	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+	req.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}

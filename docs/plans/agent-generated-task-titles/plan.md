@@ -2,7 +2,7 @@
 spec: docs/specs/tasks/agent-generated-titles.md
 created: 2026-07-31
 updated: 2026-08-02
-status: approved
+status: done
 ---
 
 # Implementation Plan: Agent-Generated Task Titles
@@ -247,31 +247,40 @@ Wave 4:
 - [x] [Task 04: End-to-end coverage and public docs](task-04-e2e-and-docs.md) — done
 
 Wave 5:
-- [ ] [Task 05: Single-owner title handoff](task-05-single-owner-title-handoff.md) — pending
+- [x] [Task 05: Single-owner title handoff](task-05-single-owner-title-handoff.md) — done
 
 Wave 6:
-- [ ] [Task 06: Default-on title preference](task-06-default-on-title-preference.md) — pending
+- [x] [Task 06: Default-on title preference](task-06-default-on-title-preference.md) — done
 
 Wave 7:
-- [ ] [Task 07: Regression coverage and public docs](task-07-regression-and-docs.md) — pending
+- [x] [Task 07: Regression coverage and public docs](task-07-regression-and-docs.md) — done
 
 ## Previous shipped verification
 
 - Backend focused tests: 3,665 passing across 15 affected packages; MCP server tests: 149 passing.
+
+## Completion
+
+- [x] [Task 05: Single-owner title handoff](task-05-single-owner-title-handoff.md) — done
+- [x] [Task 06: Default-on title preference](task-06-default-on-title-preference.md) — done
+- [x] [Task 07: Regression coverage and public docs](task-07-regression-and-docs.md) — done
+
+The continuation was verified with focused backend tests, full backend FTS5 race tests,
+golangci-lint, targeted frontend tests and lint, and public-document validators. PostgreSQL parity
+remains environment-gated and was not run locally because no test DSN was available; the existing PR
+E2E checks passed at the prior head and the shared fixture now opts those scenarios out explicitly.
 - Backend lint: `make -C apps/backend lint` — 0 issues.
 - Frontend focused Vitest suite: 98 passing across 9 files.
 - Frontend lint and TypeScript typecheck — passing.
 - Desktop and mobile Playwright scenarios — 1 passing each.
 - Public documentation tests and validator — 58 tests passing; 41 published pages validated.
 
-## Extension verification required
+## Extension verification
 
-- Focused SQLite and environment-gated PostgreSQL repository tests prove atomic one-owner claims and
-  owner-bound title compare-and-set behavior.
-- Orchestrator, task-handler, executor, sysprompt, and MCP tests prove every initial-turn path keeps
-  prompt instructions and tool catalogs aligned for owner versus non-owner sessions.
-- User-store and frontend mapping tests prove missing/default `true` and explicit `false` preservation.
-- Desktop and mobile Playwright scenarios cover default-on and explicit-opt-out creation behavior; the
-  shared fixture keeps unrelated manual-title tests deterministic.
-- Backend changed-file lint, frontend lint/typecheck/i18n ratchet, public-doc validation, and the task
-  title E2E specs pass before the PR is pushed for fixup.
+- [x] SQLite repository, service, orchestrator, executor, task-handler, and MCP tests prove atomic
+  one-owner claims and owner-bound title compare-and-set behavior.
+- [x] User-store and frontend mapping tests prove missing/default `true` and explicit `false`
+  preservation.
+- [x] Backend race suite, backend lint, frontend lint, targeted frontend tests, and public-doc
+  validation passed.
+- [ ] PostgreSQL parity and the new desktop/mobile browser runs remain CI/environment-gated.

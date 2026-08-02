@@ -1,7 +1,7 @@
 ---
 id: "05-single-owner-title-handoff"
 title: "Single-owner title handoff"
-status: pending
+status: done
 wave: 5
 depends_on: ["02-mcp-title-tool"]
 plan: "plan.md"
@@ -79,7 +79,13 @@ paths can consume it.
 - Rows-affected behavior and JSON extraction/set/remove expressions must stay equivalent across SQLite
   and PostgreSQL.
 
-## Output contract
+## Result
 
-Report claim/mutation semantics, launch paths covered, exact test results including PostgreSQL
-availability, blockers or risks, and update this task plus `plan.md` status in the same conversation.
+Implemented the atomic SQLite/PostgreSQL owner claim, owner-bound MCP mutation, stale-snapshot
+protection, and shared claim wiring across direct, prepared, message-start, workflow, structured,
+passthrough, resume, and executor paths. Config, Office, External, and workspace-only preparation do
+not claim ownership; an owner retry is idempotent and a failed owner is not reassigned.
+
+Verification passed with focused package tests, `go test -race` on the affected packages, and the full
+`go test -tags fts5 -race ./...` backend suite. `golangci-lint run ./...` also passed. PostgreSQL parity
+is environment-gated and was not run locally because no test DSN was available.
