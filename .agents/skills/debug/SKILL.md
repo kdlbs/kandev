@@ -1,7 +1,7 @@
 ---
 name: debug
 description: Diagnose Kandev bugs, running-instance issues, UI/browser failures, and runtime behavior. Use when the user reports unexpected behavior, asks to investigate, asks to add logs/instrumentation, or when a fix needs root-cause evidence before implementing. Triage first, gather evidence safely, then hand off to /fix for code changes.
-allowed-tools: Bash(curl:*) Bash(jq:*) Bash(mktemp:*) Bash(unzip:*) Bash(npx:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
+allowed-tools: Bash(curl:*) Bash(jq:*) Bash(mktemp:*) Bash(unzip:*) Bash(scripts/kandev-instances:*) Bash(scripts/kandev-logs:*) Bash(scripts/dev-isolated:*) Bash(scripts/kandev-kill:*) Bash(go:*) Bash(rg:*) Bash(grep:*)
 ---
 
 # Debug
@@ -48,7 +48,9 @@ Start with the cheapest faithful reproduction:
 1. Backend logic: write a throwaway focused Go repro test against the real service path. If it reproduces, convert it via `/fix`.
 2. Live instance in a task session: call `get_diagnostic_bundle_kandev` with `backend`, `frontend`, or `all`; inspect `manifest.json` before assuming a source is complete.
 3. Host-side instance: use `scripts/kandev-logs <port> --source backend|frontend|all`; do not relaunch. Set `KANDEV_API_TOKEN` only when authentication is enabled.
-4. UI/browser: launch `scripts/dev-isolated --web`, drive `npx playwright-cli`, and correlate console/network state with a fresh all-source bundle.
+4. UI/browser: launch `scripts/dev-isolated --web`, drive
+   `pnpm --dir apps exec playwright-cli`, and correlate console/network state
+   with a fresh all-source bundle.
 5. Unknown: trace from the symptom backward through code and add temporary instrumentation only where it will split the search space.
 
 ### File-first log triage
@@ -100,7 +102,7 @@ Load only the reference needed for the selected path:
 
 - `references/backend-repro.md` - targeted Go repro tests and backend-first debugging.
 - `references/instance.md` - instance discovery, isolated launch, logs/export, and teardown.
-- `references/browser.md` - `npx playwright-cli` browser debugging against isolated instances.
+- `references/browser.md` - pinned `playwright-cli` browser debugging against isolated instances.
 - `references/instrumentation.md` - temporary vs persistent frontend/backend logging rules.
 
 ## When To Use Instrumentation

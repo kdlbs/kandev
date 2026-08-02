@@ -111,9 +111,12 @@ in `references/ci-troubleshooting.md`. Reproduce the exact failed command where 
 CI-specific Go lint often needs `golangci-lint run ./... --new-from-rev=<base>
 --timeout=5m`.
 
-If CI reports files or commits outside the PR diff, or a stale base SHA, fetch
-the PR base and compare `git merge-base HEAD origin/<base>` with
-`git diff origin/<base>...HEAD`. Inspect the parent workflow/run to determine
+If CI reports files or commits outside the PR diff, or a stale base SHA, resolve
+the authoritative base repository, ref name, and current base SHA from PR
+metadata. Fetch that ref from an explicit base remote, verify its tip matches
+the reported SHA, and compare `git merge-base HEAD <base-remote>/<base-ref>`
+with `git diff <base-remote>/<base-ref>...HEAD`; do not assume `origin/<base>`
+when `origin` points to a fork. Inspect the parent workflow/run to determine
 whether a newer base commit caused the failure before changing product or docs
 code. If the fix is already upstream, update or rebase the branch only when
 authorized, rerun affected checks, and invalidate all prior exact-head evidence.
@@ -221,13 +224,17 @@ mandatory hidden-thread gate: run `scripts/pr-resolve list <PR>` again after
 the refresh and immediately before reporting.
 Require `checks_head_sha` to match that head, report pending checks separately
 from failures, and rerun `scripts/pr-resolve list <PR>` before declaring the
-PR clean. Treat prior review evidence as stale. When the user authorized thread
+PR clean. The final predicate must also require
+`hidden_unresolved_threads=[]`; do not require filtered and unresolved counts to
+be equal because the filtered count includes resolved threads. Treat prior review
+evidence as stale. When the user authorized thread
 writes, a duplicate or stale bot thread still needs an explicit reply and
 resolution once current source proves the finding is already fixed, including a
 thread surfaced only in `hidden_unresolved_threads`; only current-head
 actionable threads drive code changes. Declare the PR clean only when
 `checks_snapshot_complete=true`, `failed_checks=[]`, `pending_checks=[]`,
-`approval_required_runs=[]`, `actionable_issue_comment_count=0`, there is no merge conflict, and
+`approval_required_runs=[]`, `actionable_issue_comment_count=0`,
+`hidden_unresolved_threads=[]`, there is no merge conflict, and
 `scripts/pr-resolve list <PR>` is empty. Within
 the user's monitoring limit, continue checking after resolutions until automated
 review jobs are terminal; otherwise report the exact pending check names.
