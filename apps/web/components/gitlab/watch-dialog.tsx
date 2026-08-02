@@ -153,7 +153,12 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
         <p className="text-xs text-muted-foreground">
           {kind === "review"
             ? t("gitlab:leaveEmptyToMatchMergeRequests")
-            : t("gitlab:optionalGitlabApiQueryParametersSuch")}
+            : // The example is a literal GitLab API query string, so it is
+              // interpolated rather than written into the catalog — a translated
+              // (or pseudo-transliterated) copy of it would not parse.
+              t("gitlab:optionalGitlabApiQueryParametersSuch", {
+                example: "state=opened&milestone=Next",
+              })}
         </p>
         <Input
           id={`${kind}-watch-query`}

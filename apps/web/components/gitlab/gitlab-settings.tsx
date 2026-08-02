@@ -34,6 +34,10 @@ import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 const DEFAULT_HOST = "https://gitlab.com";
+// The bare hostname as it reads mid-sentence. Interpolated rather than written
+// into the catalog so no locale — including pseudo — can transliterate it into a
+// hostname that does not resolve.
+const DEFAULT_HOST_NAME = "gitlab.com";
 
 function StatusBadge({ status }: { status: GitLabStatus | null }) {
   const { t } = useTranslation();
@@ -230,7 +234,7 @@ function useGitLabCredentialDraft({
       });
       throw error;
     }
-  }, [host, method, onSaved, toast, token, workspaceId]);
+  }, [host, method, onSaved, t, toast, token, workspaceId]);
   const patNeedsToken = method === "pat" && !hasToken && !token.trim();
   const validHost = isValidGitLabHost(host);
   useSettingsSaveContributor({
@@ -447,7 +451,7 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
           <Separator />
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">
-              {t("gitlab:gitlabHostUrlOverrideForSelf")}
+              {t("gitlab:gitlabHostUrlOverrideForSelf", { host: DEFAULT_HOST_NAME })}
             </p>
             <HostForm
               host={hostDraft}
