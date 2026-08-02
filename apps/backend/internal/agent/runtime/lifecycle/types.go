@@ -117,6 +117,8 @@ type AgentExecution struct {
 	messageBuffer  strings.Builder
 	thinkingBuffer strings.Builder
 	messageMu      sync.Mutex
+	streamMu       sync.Mutex
+	stream         *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.

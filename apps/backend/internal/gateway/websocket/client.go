@@ -56,6 +56,20 @@ type Client struct {
 	mu                      sync.RWMutex
 	closed                  bool
 	logger                  *logger.Logger
+
+	// Replaceable session.message.updated traffic is scheduled separately from
+	// semantic notifications so one noisy session cannot fill the shared FIFO.
+	replaceableByKey           map[replaceableNotificationKey]outboundNotification
+	replaceableBySession       map[string][]replaceableNotificationKey
+	replaceableSessionOrder    []string
+	replaceableRoundRobin      int
+	deferredSemantic           map[string][]outboundNotification
+	notificationWake           chan struct{}
+	replaceableReplacements    uint64
+	replaceableEvictions       uint64
+	replaceableRejected        uint64
+	replaceablePerSessionLimit int
+	replaceableGlobalLimit     int
 }
 
 // NewClient creates a new WebSocket client
@@ -72,6 +86,10 @@ func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hu
 		sessionFocus:         make(map[string]bool),
 		userSubscriptions:    make(map[string]bool),
 		runSubscriptions:     make(map[string]bool),
+		replaceableByKey:     make(map[replaceableNotificationKey]outboundNotification),
+		replaceableBySession: make(map[string][]replaceableNotificationKey),
+		deferredSemantic:     make(map[string][]outboundNotification),
+		notificationWake:     make(chan struct{}, 1),
 		logger:               log.WithFields(zap.String("client_id", id)),
 	}
 }
@@ -654,19 +672,17 @@ func (c *Client) sendMessage(msg *ws.Message) {
 }
 
 func (c *Client) sendBytes(data []byte) bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return false
-	}
+	return c.enqueueNotification(newOutboundNotification(data, ""))
+}
 
-	select {
-	case c.send <- data:
-		return true
-	default:
-		c.logger.Warn("Client send buffer full")
-		return false
-	}
+// sendNotification queues a pre-marshalled notification with its typed action
+// so the client scheduler can classify it once without reparsing the envelope.
+func (c *Client) sendNotification(data []byte, action string) bool {
+	return c.sendNotificationFrame(newOutboundNotification(data, action))
+}
+
+func (c *Client) sendNotificationFrame(frame outboundNotification) bool {
+	return c.enqueueNotification(frame)
 }
 
 // sendControlBytes queues a response/error separately from notifications.
@@ -732,6 +748,16 @@ func (c *Client) closeSendLocked() {
 	if c.controlSend != nil {
 		close(c.controlSend)
 	}
+	if c.notificationWake != nil {
+		// The wake channel is deliberately left open: enqueueNotification checks
+		// closed while holding c.mu, so closing it here would create a
+		// send-on-closed race with a concurrent producer.
+		select {
+		case c.notificationWake <- struct{}{}:
+		default:
+		}
+	}
+	c.deferredSemantic = nil
 }
 
 // WritePump pumps messages from the hub to the WebSocket connection
@@ -744,45 +770,115 @@ func (c *Client) WritePump() {
 		}
 	}()
 
+	controlCh := c.controlSend
+	semanticCh := c.send
+	semanticSinceReplaceable := 0
+
+	writeMessage := func(message []byte) bool {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+			c.logger.Debug("failed to set write deadline", zap.Error(err))
+		}
+		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			c.logger.Debug("failed to write websocket message", zap.Error(err))
+			return false
+		}
+		return true
+	}
+	writeClose := func() {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+			c.logger.Debug("failed to set write deadline", zap.Error(err))
+		}
+		if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+			c.logger.Debug("failed to write close message", zap.Error(err))
+		}
+	}
+
 	for {
-		// Prefer control frames whenever one is already queued. The second
-		// select still lets stream traffic make progress when no response is
-		// waiting, while preventing notifications from starving ACKs.
-		var message []byte
-		var ok bool
-		select {
-		case message, ok = <-c.controlSend:
-		default:
+		// Correlated responses/errors always run first. A bounded semantic burst
+		// then gives each active session's replaceable queue a turn.
+		if controlCh != nil {
 			select {
-			case message, ok = <-c.controlSend:
-			case message, ok = <-c.send:
-			case <-ticker.C:
-				if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
-					c.logger.Debug("failed to set write deadline", zap.Error(err))
+			case message, ok := <-controlCh:
+				if !ok {
+					controlCh = nil
+					continue
 				}
-				if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				if !writeMessage(message) {
+					return
+				}
+				continue
+			default:
+			}
+		}
+
+		if semanticSinceReplaceable >= semanticPriorityBurst {
+			if frame, ok := c.popNextReplaceable(); ok {
+				semanticSinceReplaceable = 0
+				if !writeMessage(frame.data) {
 					return
 				}
 				continue
 			}
 		}
 
-		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
-			c.logger.Debug("failed to set write deadline", zap.Error(err))
-		}
-		if !ok {
-			// Hub closed the channel.
-			if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
-				c.logger.Debug("failed to write close message", zap.Error(err))
+		if semanticCh != nil {
+			select {
+			case message, ok := <-semanticCh:
+				if !ok {
+					semanticCh = nil
+					continue
+				}
+				semanticSinceReplaceable++
+				if !writeMessage(message) {
+					return
+				}
+				continue
+			default:
 			}
+		}
+
+		if frame, ok := c.popNextReplaceable(); ok {
+			semanticSinceReplaceable = 0
+			if !writeMessage(frame.data) {
+				return
+			}
+			continue
+		}
+
+		if controlCh == nil && semanticCh == nil && !c.hasReplaceable() {
+			writeClose()
 			return
 		}
 
-		// Send each message in its own WebSocket frame
-		// (previously batched with newlines, but clients expect one JSON object per frame)
-		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-			c.logger.Debug("failed to write websocket message", zap.Error(err))
-			return
+		c.mu.RLock()
+		wakeCh := c.notificationWake
+		c.mu.RUnlock()
+		select {
+		case message, ok := <-controlCh:
+			if !ok {
+				controlCh = nil
+				continue
+			}
+			if !writeMessage(message) {
+				return
+			}
+		case message, ok := <-semanticCh:
+			if !ok {
+				semanticCh = nil
+				continue
+			}
+			semanticSinceReplaceable++
+			if !writeMessage(message) {
+				return
+			}
+		case <-wakeCh:
+		case <-ticker.C:
+			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+				c.logger.Debug("failed to set write deadline", zap.Error(err))
+			}
+			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				return
+			}
 		}
 	}
 }

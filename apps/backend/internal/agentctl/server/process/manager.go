@@ -1489,8 +1489,8 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			}
 			select {
 			case m.updatesCh <- update:
-			default:
-				m.logger.Warn("updates channel full, dropping notification")
+			case <-stopCh:
+				return
 			}
 		case <-stopCh:
 			return

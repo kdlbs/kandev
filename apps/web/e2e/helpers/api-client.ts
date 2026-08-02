@@ -1712,6 +1712,7 @@ export class ApiClient {
       id: string;
       content: string;
       author_type: string;
+      type?: string;
       raw_content?: string;
       metadata?: Record<string, unknown>;
     }>;

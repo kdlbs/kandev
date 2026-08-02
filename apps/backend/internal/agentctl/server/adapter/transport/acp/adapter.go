@@ -501,12 +501,30 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 }
 
 // sendUpdate safely sends an event to the updates channel.
-// It checks the closed flag under read-lock to prevent panics on closed channels.
+//
+// Stream events are lossless at this boundary: when the per-agent consumer is
+// slower than the ACP producer, the ACP update worker applies backpressure to
+// that agent instead of silently dropping transcript content. The lifetime
+// context makes the wait cancelable during shutdown. Do not hold a.mu while
+// waiting; Close needs the write lock to cancel the context and unblock us.
 func (a *Adapter) sendUpdate(event AgentEvent) {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if !a.sendUpdateLocked(event) && !a.closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	if a.closed {
+		a.mu.RUnlock()
+		return
+	}
+	updatesCh := a.updatesCh
+	lifetimeCtx := a.lifetimeCtx
+	if lifetimeCtx == nil {
+		lifetimeCtx = context.Background()
+	}
+	a.mu.RUnlock()
+
+	select {
+	case updatesCh <- event:
+	case <-lifetimeCtx.Done():
+		// Shutdown cancels the wait. The event is intentionally discarded after
+		// the adapter has become terminal; no later transcript can be applied.
 	}
 }
 
