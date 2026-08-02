@@ -863,16 +863,9 @@ func (s *Server) handleGitLogMultiRepo(
 	// 60s singleflight budget and the caller would see a timeout rather than a
 	// slow answer. Writing by index keeps the merge order deterministic.
 	ctx := c.Request.Context()
-	outcomes := make([]perRepoLogOutcome, len(subpaths))
-	var wg sync.WaitGroup
-	for i, sub := range subpaths {
-		wg.Add(1)
-		go func(i int, sub string) {
-			defer wg.Done()
-			outcomes[i] = s.collectLogForRepo(ctx, req, limit, sub)
-		}(i, sub)
-	}
-	wg.Wait()
+	outcomes := fanOutRepos(subpaths, func(sub string) perRepoLogOutcome {
+		return s.collectLogForRepo(ctx, req, limit, sub)
+	})
 
 	c.JSON(http.StatusOK, mergeGitLogResults(outcomes, limit))
 }
@@ -1029,16 +1022,9 @@ func (s *Server) handleGitCumulativeDiffMultiRepo(
 	// over repositories, which on Windows is enough to blow the gateway's 60s
 	// budget on a task with many repos.
 	ctx := c.Request.Context()
-	outcomes := make([]perRepoDiffOutcome, len(subpaths))
-	var wg sync.WaitGroup
-	for i, sub := range subpaths {
-		wg.Add(1)
-		go func(i int, sub string) {
-			defer wg.Done()
-			outcomes[i] = s.collectCumulativeDiffForRepo(ctx, sub)
-		}(i, sub)
-	}
-	wg.Wait()
+	outcomes := fanOutRepos(subpaths, func(sub string) perRepoDiffOutcome {
+		return s.collectCumulativeDiffForRepo(ctx, sub)
+	})
 
 	// Merging stays sequential: it writes into one shared map, and doing it in
 	// subpath order keeps the merged output independent of goroutine timing.
@@ -1103,6 +1089,31 @@ func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) p
 	// so we pass empty target_branch to skip the second merge-base attempt.
 	result, status, err := s.runGitCumulativeDiffForRepo(ctx, base, "", sub)
 	return perRepoDiffOutcome{subpath: sub, result: result, status: status, err: err}
+}
+
+// fanOutRepos runs collect once per repository, concurrently, and returns the
+// results in subpath order regardless of which finished first. Every repository
+// is an independent git invocation against its own worktree, so serial
+// execution made request latency the sum over repositories rather than the
+// slowest one — on Windows, where a git spawn costs ~150ms before doing any
+// work, a task with a dozen repositories could exceed the gateway's 60s budget
+// and the caller would see a timeout instead of a slow answer.
+//
+// Concurrency is deliberately unbounded here: the process-wide git throttle in
+// common/subproc already caps how many subprocesses run at once, so a second
+// limit would only add a queue in front of that one.
+func fanOutRepos[T any](subpaths []string, collect func(sub string) T) []T {
+	results := make([]T, len(subpaths))
+	var wg sync.WaitGroup
+	for i, sub := range subpaths {
+		wg.Add(1)
+		go func(i int, sub string) {
+			defer wg.Done()
+			results[i] = collect(sub)
+		}(i, sub)
+	}
+	wg.Wait()
+	return results
 }
 
 // resolvePerRepoBase returns the comparison anchor owned by the repository's
