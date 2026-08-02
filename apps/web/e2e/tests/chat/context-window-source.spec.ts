@@ -16,7 +16,7 @@ test("context source help stays open when hovered", async ({
   const contextTrigger = testPage.getByRole("button", { name: "Context window: 21% used" });
   await contextTrigger.hover();
   const contextTooltip = testPage
-    .locator('[data-slot="tooltip-content"][data-state]')
+    .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
     .filter({ has: testPage.getByTestId("context-window-usage") });
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   await expect(contextUsage).toBeVisible();

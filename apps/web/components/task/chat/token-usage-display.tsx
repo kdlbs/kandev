@@ -155,6 +155,9 @@ function ContextWindowSource({ source }: { source: "acp" | "api" | undefined }) 
 function ContextCompactionCount({ count }: { count: number }) {
   const { t } = useTranslation();
   const helpId = useId();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const [touchMode, setTouchMode] = useState(false);
+  const pointerDownRef = useRef(false);
 
   return (
     <div
@@ -168,14 +171,37 @@ function ContextCompactionCount({ count }: { count: number }) {
           type="button"
           aria-label={t("common:aboutContextCompactionCount")}
           aria-describedby={helpId}
+          aria-expanded={helpOpen}
           className="inline-flex size-6 cursor-help items-center justify-center text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:size-4"
+          onPointerDown={(event) => {
+            pointerDownRef.current = true;
+            if (event.pointerType !== "touch") setTouchMode(false);
+          }}
+          onTouchStart={() => {
+            setTouchMode(true);
+          }}
+          onFocus={() => {
+            if (!pointerDownRef.current) setHelpOpen(true);
+          }}
+          onBlur={() => {
+            pointerDownRef.current = false;
+            setHelpOpen(false);
+          }}
+          onClick={() => {
+            pointerDownRef.current = false;
+            setHelpOpen((open) => !open);
+          }}
         >
           <IconInfoCircle className="h-3 w-3" />
         </button>
         <span
           id={helpId}
           role="tooltip"
-          className="pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+          className={cn(
+            "pointer-events-none absolute right-0 bottom-[calc(100%+0.375rem)] z-10 w-60 rounded-md border border-border bg-popover px-3 py-1.5 text-xs text-popover-foreground opacity-0 shadow-sm transition-opacity",
+            !touchMode && "group-hover:opacity-100",
+            helpOpen && "opacity-100",
+          )}
         >
           {t("common:contextCompactionCountHelp")}
         </span>

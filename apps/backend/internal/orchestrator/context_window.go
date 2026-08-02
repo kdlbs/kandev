@@ -10,9 +10,8 @@ import (
 const contextWindowMetadataKey = models.SessionMetaKeyContextWindow
 
 // contextWindowWriteGuard serializes context-window metadata writes for one
-// session and advances its generation at each successful agent reset boundary.
-// A context update that was observed before a reset cannot write after the
-// reset's clear, even though its persistence is performed asynchronously.
+// session and advances its generation at each agent reset boundary. A context
+// update that was observed before a reset cannot write after the reset's clear.
 type contextWindowWriteGuard struct {
 	mu         sync.Mutex
 	generation uint64
@@ -39,6 +38,14 @@ func (s *Service) clearContextWindowForReset(ctx context.Context, sessionID stri
 	defer guard.mu.Unlock()
 	guard.generation++
 	return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+}
+
+// ResetContextWindow clears the persisted context-window reading while
+// invalidating any update captured before the reset. It is exposed as a narrow
+// callback for services that can reset a session without going through the
+// orchestrator's reset state machine.
+func (s *Service) ResetContextWindow(ctx context.Context, sessionID string) error {
+	return s.clearContextWindowForReset(ctx, sessionID)
 }
 
 // persistContextWindowUpdate stores an update only when it belongs to the

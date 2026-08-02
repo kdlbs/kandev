@@ -90,6 +90,7 @@ Extend the existing context-window persistence boundary so one database update s
 - Task 01: SQLite, backend-app replay, task-service, orchestrator, and full `go test ./...` checks passed; PostgreSQL behavior test is present but skipped without `KANDEV_TEST_POSTGRES_DSN`.
 - Task 02: focused frontend suite passed (4 files, 68 tests); typecheck, i18n check, and i18n ratchet passed.
 - Task 03: managed Chromium desktop and mobile-chrome E2E scenarios passed (1 test each).
+- Review fixup: the context-update handler now persists synchronously to preserve arrival order; model-change clears use the guarded reset boundary; the compaction help has explicit touch toggle state; and parser/E2E selectors now require the adjacent count contract. Full `go test -race ./...` was not rerun locally; the PR's race-enabled backend job had already exposed an unrelated `internal/integration` failure before this fixup.
 
 ## Implementation Waves And Parallel Candidates
 

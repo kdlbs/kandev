@@ -641,6 +641,7 @@ func NewService(
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
 	}
+	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
 	// (e.g. WebSocket notifications to the frontend). Must be set after service

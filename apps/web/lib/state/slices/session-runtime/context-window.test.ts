@@ -28,15 +28,18 @@ describe("parseContextWindowEntry", () => {
     );
   });
 
-  it("parses a persisted inferred compaction count", () => {
+  it("parses a caller-supplied persisted inferred compaction count", () => {
     expect(
-      parseContextWindowEntry({
-        size: 128_000,
-        used: 64_000,
-        remaining: 64_000,
-        efficiency: 50,
-        compaction_count: 3,
-      }),
+      parseContextWindowEntry(
+        {
+          size: 128_000,
+          used: 64_000,
+          remaining: 64_000,
+          efficiency: 50,
+        },
+        undefined,
+        3,
+      ),
     ).toEqual(expect.objectContaining({ compactionCount: 3 }));
   });
 

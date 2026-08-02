@@ -23,9 +23,7 @@ export function parseContextWindowEntry(
     used: (contextWindow.used as number) ?? 0,
     remaining: (contextWindow.remaining as number) ?? 0,
     efficiency: (contextWindow.efficiency as number) ?? 0,
-    compactionCount: normalizeCompactionCount(
-      compactionCount ?? contextWindow.compaction_count ?? contextWindow.context_compaction_count,
-    ),
+    compactionCount: normalizeCompactionCount(compactionCount),
     source,
     timestamp: timestamp ?? (contextWindow.timestamp as string | undefined),
   };

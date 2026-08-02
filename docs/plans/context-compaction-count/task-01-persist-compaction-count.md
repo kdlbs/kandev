@@ -74,4 +74,5 @@ Report the result, actual files changed, exact tests and counts, blockers, risks
 - GREEN: `cd apps/backend && go test -run 'Test(UpdateSessionContextWindowSQLiteCountsStrictUsageDrops|PostgresUpdateSessionContextWindowCountsStrictUsageDrops)' ./internal/task/repository/sqlite` — SQLite behavior passed; PostgreSQL case was environment-gated and skipped because no test DSN was configured.
 - Final targeted package check: `cd apps/backend && go test ./internal/task/repository/sqlite ./internal/orchestrator ./internal/backendapp ./internal/task/service` — passed.
 - Full backend check: `cd apps/backend && go test ./...` — passed.
+- Review fixup: context-window event persistence is synchronous to preserve arrival order, and model-change clears route through the guarded reset callback. Full `go test -race ./...` was not rerun locally; the PR race job had already exposed an unrelated `internal/integration` failure on the previous head.
 - `git diff --check` — passed. No external services or durable data outside the test databases were changed.

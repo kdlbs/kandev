@@ -145,6 +145,18 @@ describe("TokenUsageDisplay context source", () => {
     expect(container.textContent).toContain(
       "Kandev infers this count from observed context usage drops",
     );
+
+    const helpButton = getByLabelText("About inferred compaction count");
+    const helpId = helpButton.getAttribute("aria-describedby");
+    if (!helpId) throw new Error("Expected compaction help to be described");
+    const help = document.getElementById(helpId);
+    if (!help) throw new Error("Expected compaction help element");
+    expect(help.className).toContain("opacity-0");
+
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-100");
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-0");
   });
 
   it("labels model API fallback data", () => {

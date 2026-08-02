@@ -59,7 +59,8 @@ export async function seedContextWindowTask(
 }
 
 export async function expectCompactionCount(contextTooltip: Locator): Promise<void> {
-  const row = contextTooltip.getByTestId("context-window-compactions-row").first();
+  const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
+  const row = contextUsage.getByTestId("context-window-compactions-row");
   await expect(row.getByText("Compactions", { exact: true })).toBeVisible();
   await expect(row.getByText("2", { exact: true })).toBeVisible();
 }

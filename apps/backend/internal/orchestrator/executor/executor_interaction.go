@@ -741,7 +741,13 @@ func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID st
 			zap.Error(err))
 		return
 	}
-	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyContextWindow, nil); err != nil {
+	resetContextWindow := e.onContextWindowReset
+	if resetContextWindow == nil {
+		resetContextWindow = func(ctx context.Context, sessionID string) error {
+			return e.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+		}
+	}
+	if err := resetContextWindow(writeCtx, sessionID); err != nil {
 		e.logger.Warn("failed to clear context window after model switch",
 			zap.String("session_id", sessionID),
 			zap.String("model", modelID),
