@@ -398,6 +398,12 @@ func TestDeliverer_RingBufferOverflowLogsAggregatedDrops(t *testing.T) {
 	if got := entries[0].ContextMap()["dropped_count"]; got != int64(1) {
 		t.Fatalf("first dropped_count = %v, want 1", got)
 	}
+	if got := entries[0].ContextMap()["latest_dropped_delivery_id"]; got == nil || got == "" {
+		t.Fatalf("first latest_dropped_delivery_id = %v, want a non-empty id", got)
+	}
+	if _, ok := entries[0].ContextMap()["dropped_delivery_id"]; ok {
+		t.Fatal("first overflow warning still uses the ambiguous dropped_delivery_id field")
+	}
 
 	clockMu.Lock()
 	clock = clock.Add(time.Minute)
@@ -413,6 +419,12 @@ func TestDeliverer_RingBufferOverflowLogsAggregatedDrops(t *testing.T) {
 	}
 	if got := entries[1].ContextMap()["dropped_count"]; got != int64(2) {
 		t.Fatalf("aggregated dropped_count = %v, want 2", got)
+	}
+	if got := entries[1].ContextMap()["latest_dropped_delivery_id"]; got == nil || got == "" {
+		t.Fatalf("aggregated latest_dropped_delivery_id = %v, want a non-empty id", got)
+	}
+	if _, ok := entries[1].ContextMap()["dropped_delivery_id"]; ok {
+		t.Fatal("aggregated overflow warning still uses the ambiguous dropped_delivery_id field")
 	}
 }
 

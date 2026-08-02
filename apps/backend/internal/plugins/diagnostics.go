@@ -18,6 +18,7 @@ var (
 	pluginLabeledSecretPattern = regexp.MustCompile(`(?i)\b(password|passwd|passphrase|secret|token|api[_ -]?(?:key|token|secret)|access[_ -]?token|refresh[_ -]?token|pat)\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`)
 	pluginPATPattern           = regexp.MustCompile(`\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|glpat-[A-Za-z0-9_-]+)\b`)
 	pluginHomePathPattern      = regexp.MustCompile(`(/Users/[^/\s]+|/home/[^/\s]+|/root)(/|$)`)
+	pluginWindowsHomePattern   = regexp.MustCompile(`(?i)([A-Za-z]:[/\\]Users[/\\][^/\\\s]+)([/\\]|$)`)
 )
 
 // normalizePluginError turns a runtime failure into a compact, single-line
@@ -29,27 +30,23 @@ func normalizePluginError(err error) string {
 		return ""
 	}
 	message := strings.Join(strings.Fields(err.Error()), " ")
+	message = strings.ToValidUTF8(message, "�")
 	message = redactPluginError(message)
 	if len([]byte(message)) <= maxPluginErrorBytes {
 		return message
 	}
 
+	return truncatePluginError(message)
+}
+
+func truncatePluginError(message string) string {
 	const marker = "…"
-	budget := maxPluginErrorBytes - len([]byte(marker))
-	runes := []rune(message)
-	for len([]byte(string(runes))) > budget {
-		runes = runes[:len(runes)-1]
+	content := []byte(message)
+	cut := maxPluginErrorBytes - len([]byte(marker))
+	for cut > 0 && cut < len(content) && !utf8.RuneStart(content[cut]) {
+		cut--
 	}
-	// The loop above is rune-safe, but keep the invariant explicit if the
-	// limit is ever changed below the marker's byte width.
-	result := string(runes) + marker
-	if len([]byte(result)) > maxPluginErrorBytes {
-		result = string([]byte(result)[:maxPluginErrorBytes])
-		for !utf8.ValidString(result) {
-			result = result[:len(result)-1]
-		}
-	}
-	return result
+	return string(content[:cut]) + marker
 }
 
 func redactPluginError(message string) string {
@@ -58,6 +55,7 @@ func redactPluginError(message string) string {
 		message = homePattern.ReplaceAllString(message, "~$1")
 	}
 	message = pluginHomePathPattern.ReplaceAllString(message, "~$2")
+	message = pluginWindowsHomePattern.ReplaceAllString(message, "~$2")
 	message = pluginBearerTokenPattern.ReplaceAllString(message, "Bearer [REDACTED]")
 	message = pluginLabeledSecretPattern.ReplaceAllString(message, "${1}${2}[REDACTED]")
 	message = pluginPATPattern.ReplaceAllString(message, "[REDACTED]")

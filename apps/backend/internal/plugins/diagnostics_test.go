@@ -75,6 +75,12 @@ func TestNormalizePluginErrorRedactsCredentialsAndHomePath(t *testing.T) {
 			secret: []string{home + "/"},
 			want:   "~/.kandev/plugins/acme/server",
 		},
+		{
+			name:   "windows home path",
+			input:  `plugin failed at C:\Users\alice\.kandev\plugins\acme\server: handshake failed`,
+			secret: []string{`C:\Users\alice\`},
+			want:   `~\.kandev\plugins\acme\server`,
+		},
 	}
 
 	for _, tc := range cases {

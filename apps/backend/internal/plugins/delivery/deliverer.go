@@ -529,7 +529,7 @@ func (w *pluginWorker) logOverflow(dropped string) {
 	}
 	w.deps.log.Warn("plugin event ring buffer overflow, dropped oldest buffered event",
 		zap.String("plugin_id", w.id),
-		zap.String("dropped_delivery_id", dropped),
+		zap.String("latest_dropped_delivery_id", dropped),
 		zap.Int("dropped_count", count))
 }
 
