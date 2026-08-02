@@ -183,9 +183,7 @@ export function PriorityMultiSelect({
             aria-pressed={active}
             className="cursor-pointer"
           >
-            <Badge variant={active ? "default" : "outline"}>
-              {resolveOptionLabel(t, opt)}
-            </Badge>
+            <Badge variant={active ? "default" : "outline"}>{resolveOptionLabel(t, opt)}</Badge>
           </button>
         );
       })}

@@ -127,9 +127,11 @@ function TeamSelector({ form, baseline, loading, update, teams, loadingTeams }: 
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="__none__">{t("linear:noDefault")}</SelectItem>
-          {teams.map((t) => (
-            <SelectItem key={t.id} value={t.key}>
-              {t.name} ({t.key})
+          {/* Renamed from `t` so it cannot shadow the translation function
+              above; team names and keys are Linear API data, not copy. */}
+          {teams.map((team) => (
+            <SelectItem key={team.id} value={team.key}>
+              {team.name} ({team.key})
             </SelectItem>
           ))}
         </SelectContent>
@@ -141,9 +143,16 @@ function TeamSelector({ form, baseline, loading, update, teams, loadingTeams }: 
 // The identity and the org name are Linear API data, so they are interpolated
 // rather than written into the catalog — a locale (pseudo included) must not
 // rewrite the account the user is checking they connected as.
+//
+// Every field on the result is optional, so each interpolated value needs a
+// fallback: i18next leaves an unmatched placeholder in place, so a partial
+// response would render the literal "{{name}}" to the user rather than the
+// old template's "undefined".
 function testResultMessage(t: TFunction, result: TestLinearConnectionResult): string {
-  if (!result.ok) return t("linear:testFailed", { error: result.error });
-  const name = result.displayName || result.email || result.userId;
+  if (!result.ok) {
+    return t("linear:testFailed", { error: result.error || t("linear:unknownError") });
+  }
+  const name = result.displayName || result.email || result.userId || t("linear:unknownAccount");
   return result.orgName
     ? t("linear:connectedAsWithOrg", { name, org: result.orgName })
     : t("linear:connectedAs", { name });
@@ -343,7 +352,10 @@ function useLinearSettings(workspaceId: string) {
       setBaselineConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
-      toast({ description: t("linear:failedToLoadConfig", { error: String(err) }), variant: "error" });
+      toast({
+        description: t("linear:failedToLoadConfig", { error: String(err) }),
+        variant: "error",
+      });
     } finally {
       setLoading(false);
     }
