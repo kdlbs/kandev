@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 
@@ -24,6 +25,19 @@ var errLifecyclePromptOverridesUnsupported = errors.New("lifecycle prompt overri
 // (which treats an empty body as a no-op GET), an empty MR automation PATCH
 // is rejected outright.
 var errAtLeastOneMRAutomationOptionRequired = errors.New("at least one MR automation option is required")
+
+// errUnknownMRAutomationField rejects a misspelled or unsupported key rather
+// than silently ignoring it — without this, a caller-side typo like
+// "promt_on_merged" would drop that field with no error while any other
+// valid field in the same body still applied.
+var errUnknownMRAutomationField = errors.New("unknown MR automation field")
+
+// errNullMRAutomationSwitch rejects an explicit `null` for a boolean switch.
+// Unmarshaling `null` into a *bool sets it back to nil, which is
+// indistinguishable from the field never being sent at all — silently
+// treating a caller's explicit null as "no change" rather than surfacing it
+// as a bad request.
+var errNullMRAutomationSwitch = errors.New("MR automation switch must be a boolean, not null")
 
 // RegisterMRAutomationHTTPRoutes registers the GET/PATCH MR automation
 // endpoints on an existing /api/v1/gitlab router group.
@@ -86,43 +100,65 @@ func parseTaskMRAutomationPatch(ctx *gin.Context) (TaskMRAutomationPatch, error)
 	if ctx.Request.Body == nil || ctx.Request.ContentLength == 0 {
 		return TaskMRAutomationPatch{}, nil
 	}
-	decoder := json.NewDecoder(ctx.Request.Body)
-	var raw map[string]json.RawMessage
-	if err := decoder.Decode(&raw); err != nil {
+	raw, err := decodeSingleJSONObject(ctx.Request.Body)
+	if err != nil {
 		if errors.Is(err, io.EOF) {
 			return TaskMRAutomationPatch{}, nil
 		}
 		return TaskMRAutomationPatch{}, err
 	}
-	// Decode stops after the first JSON value, so a body like `{...}{...}`
-	// would otherwise silently apply only the first object and ignore the
-	// rest. Requiring EOF here rejects any trailing content as malformed.
+	var patch TaskMRAutomationPatch
+	for key, value := range raw {
+		if err := applyMRAutomationPatchField(&patch, key, value); err != nil {
+			return TaskMRAutomationPatch{}, err
+		}
+	}
+	return patch, nil
+}
+
+// decodeSingleJSONObject decodes exactly one JSON object from body and
+// requires EOF immediately after it. Decode alone stops after the first
+// JSON value, so a body like `{...}{...}` would otherwise silently apply
+// only the first object and ignore the rest — requiring EOF here rejects
+// any trailing content as malformed instead.
+func decodeSingleJSONObject(body io.Reader) (map[string]json.RawMessage, error) {
+	decoder := json.NewDecoder(body)
+	var raw map[string]json.RawMessage
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, err
+	}
 	if err := decoder.Decode(new(json.RawMessage)); !errors.Is(err, io.EOF) {
 		if err == nil {
 			err = errors.New("unexpected trailing content after JSON body")
 		}
-		return TaskMRAutomationPatch{}, err
+		return nil, err
 	}
-	var patch TaskMRAutomationPatch
-	for key, value := range raw {
-		switch key {
-		case "prompt_on_review_requested":
-			if err := json.Unmarshal(value, &patch.PromptOnReviewRequested); err != nil {
-				return TaskMRAutomationPatch{}, err
-			}
-		case "prompt_on_merged":
-			if err := json.Unmarshal(value, &patch.PromptOnMerged); err != nil {
-				return TaskMRAutomationPatch{}, err
-			}
-		case "prompt_on_closed":
-			if err := json.Unmarshal(value, &patch.PromptOnClosed); err != nil {
-				return TaskMRAutomationPatch{}, err
-			}
-		case "review_prompt_override", "merged_prompt_override", "closed_prompt_override":
-			return TaskMRAutomationPatch{}, errLifecyclePromptOverridesUnsupported
-		}
+	return raw, nil
+}
+
+func applyMRAutomationPatchField(patch *TaskMRAutomationPatch, key string, value json.RawMessage) error {
+	switch key {
+	case "prompt_on_review_requested":
+		return decodeMRAutomationSwitch(value, &patch.PromptOnReviewRequested)
+	case "prompt_on_merged":
+		return decodeMRAutomationSwitch(value, &patch.PromptOnMerged)
+	case "prompt_on_closed":
+		return decodeMRAutomationSwitch(value, &patch.PromptOnClosed)
+	case "review_prompt_override", "merged_prompt_override", "closed_prompt_override":
+		return errLifecyclePromptOverridesUnsupported
+	default:
+		return fmt.Errorf("%w: %q", errUnknownMRAutomationField, key)
 	}
-	return patch, nil
+}
+
+// decodeMRAutomationSwitch unmarshals a boolean patch field, rejecting an
+// explicit JSON null rather than silently unmarshaling it into a nil *bool
+// (indistinguishable from the field being absent).
+func decodeMRAutomationSwitch(value json.RawMessage, dst **bool) error {
+	if string(value) == "null" {
+		return errNullMRAutomationSwitch
+	}
+	return json.Unmarshal(value, dst)
 }
 
 func (c *Controller) publishTaskMRAutomationUpdated(ctx context.Context, resp *TaskMRAutomationResponse) {

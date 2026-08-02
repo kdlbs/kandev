@@ -101,6 +101,58 @@ func TestControllerPatchTaskMRAutomation_RejectsTrailingContent(t *testing.T) {
 	}
 }
 
+func TestControllerPatchTaskMRAutomation_RejectsUnknownField(t *testing.T) {
+	router, _ := newMRAutomationControllerFixture(t)
+	body := `{"promt_on_merged":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+}
+
+func TestControllerPatchTaskMRAutomation_RejectsUnknownFieldAlongsideValidOne(t *testing.T) {
+	router, svc := newMRAutomationControllerFixture(t)
+	// A typo'd field must not be silently dropped while a valid field in the
+	// same body still applies — reject the whole request instead.
+	body := `{"promt_on_merged":true,"prompt_on_closed":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	got, err := svc.GetTaskMRAutomationResponse(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("get options: %v", err)
+	}
+	if got.PromptOnClosed {
+		t.Fatalf("expected no field applied from a rejected patch, got %+v", got)
+	}
+}
+
+func TestControllerPatchTaskMRAutomation_RejectsNullSwitch(t *testing.T) {
+	router, svc := newMRAutomationControllerFixture(t)
+	body := `{"prompt_on_merged":null,"prompt_on_closed":true}`
+	req := httptest.NewRequest(http.MethodPatch, "/api/v1/gitlab/tasks/task-1/mr-automation", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	resp := httptest.NewRecorder()
+	router.ServeHTTP(resp, req)
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", resp.Code, resp.Body.String())
+	}
+	got, err := svc.GetTaskMRAutomationResponse(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("get options: %v", err)
+	}
+	if got.PromptOnClosed {
+		t.Fatalf("expected no field applied from a rejected patch, got %+v", got)
+	}
+}
+
 func TestControllerGetTaskMRAutomation_UnknownTaskNotFound(t *testing.T) {
 	router, _ := newMRAutomationControllerFixture(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/gitlab/tasks/does-not-exist/mr-automation", nil)
