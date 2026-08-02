@@ -1,5 +1,5 @@
 ---
-status: approved
+status: building
 created: 2026-07-30
 owner: tbd
 ---
@@ -155,12 +155,20 @@ history or returning an unbounded log export.
   different request from an identity with an active job returns `429`; global
   saturation returns `503`; both include `Retry-After: 5`.
 - A job accepts at most four browser profiles, 20 MiB per profile and 80 MiB
-  total frontend data. Backend payload is capped at 160 MiB, selected newest
-  first from the current file and then newer archives; when a selected file
-  exceeds the remaining budget, only its newest bytes are included and the
-  manifest records the source byte range. Total uncompressed archive payload
-  is capped at 256 MiB and a job may use at most 384 MiB of temporary disk.
+  total frontend data. Without ACP, backend payload remains capped at 160 MiB
+  and frontend payload at 80 MiB. When ACP is selected, the per-source budgets
+  are 96 MiB backend, 48 MiB frontend, 96 MiB ACP, and 2 MiB runtime index.
+  Omitted sources do not transfer their budget to another source. Backend and
+  ACP files are selected newest-first; when a selected file exceeds its
+  remaining source budget, only its newest bytes are included and the manifest
+  records the source byte range. Total uncompressed archive payload remains
+  capped at 256 MiB and a job may use at most 384 MiB of temporary disk.
   Creation fails safely when that temporary-space budget is unavailable.
+- ACP collection is request-driven, permits at most ten selected sessions,
+  fetches from at most two reachable executor-side `agentctl` instances at a
+  time, and has a 30-second total collection deadline. It never continuously
+  copies protocol frames to the backend. ACP collection, like frontend capture,
+  runs outside product-critical paths and may produce a partial bundle.
 - Log payloads use ZIP `Store` rather than CPU-heavy compression. Copy and ZIP
   writing use 1 MiB chunks and yield between chunks. Collection/build jobs have
   a five-minute hard lifetime; ready/partial archives expire 15 minutes after
@@ -173,13 +181,45 @@ history or returning an unbounded log export.
 
 - `/settings/system/logs` no longer renders a log tail, file table, individual
   file downloads, copy action, or refresh action.
-- The page explains that a diagnostic ZIP contains up to three days of backend
-  logs subject to fixed byte limits, locally retained browser console events
-  from up to four connected browser profiles, URLs, console arguments, stacks,
-  and runtime metadata. It tells users to review the archive before sharing it.
-- Its primary action, **Download diagnostic bundle**, requests both backend and
-  frontend sources. The action shows collecting, preparing, ready/partial,
-  busy-with-retry, and failure states without navigating away.
+- The page states that a standard bundle does not read stored chat history,
+  session transcripts, agent responses, prompts, tool messages, database rows,
+  or workspace files. This is a source boundary, not a redaction guarantee:
+  incidental content already emitted into a selected log may still appear.
+- The frontend disclosure names `console.debug`, `console.info`,
+  `console.warn`, `console.error`, uncaught JavaScript errors, unhandled promise
+  rejections, bounded browser/runtime context, and user-visible error toasts
+  that are reported into backend logs.
+- The backend disclosure names structured application/runtime, HTTP/service,
+  executor, integration, startup/shutdown, warning/error, identifier, path,
+  performance, and diagnostic-loss events. Backend inclusion copies emitted
+  file lines; it does not query product tables or construct transcripts.
+- The always-visible **Download standard bundle** action requests backend and
+  frontend sources. **Customize bundle** opens source selection for frontend,
+  backend, and the sanitized runtime index. Both actions show collecting,
+  preparing, ready/partial, busy-with-retry, and failure states without
+  navigating away.
+- When the backend reports that raw ACP capture is enabled, the page also shows
+  **Download with ACP…**. It opens the same customizer with backend, frontend,
+  runtime index, and ACP preselected, but requires the user to choose one or
+  more eligible sessions before collection starts. ACP is never silently
+  included by a one-click action. The action remains visible when no eligible
+  session exists; the picker then shows an explanatory empty state and keeps
+  submission disabled.
+- The ACP selection surface explicitly warns that raw and normalized protocol
+  frames can contain full prompts, agent responses, tool arguments/results,
+  workspace file content, MCP payloads, environment-derived values, and
+  secrets. The standard no-transcript disclosure never appears to cover an
+  ACP-inclusive bundle.
+- `manifest.json` is always included and is not a selectable source. The
+  optional runtime index contains only task/session IDs, agent/provider/model,
+  status, timestamps, executor type, and ACP availability. It excludes task
+  titles, descriptions, prompts, responses, tool payloads, file content, and
+  stored message bodies.
+- Desktop renders source/session customization in a modal dialog. Phone uses
+  an inset bottom drawer patterned after the shipped mobile picker/menu
+  surfaces, with one internally scrolling body, a fixed disclosure/header,
+  safe-area-aware actions, no horizontal overflow, and at least 44px touch
+  targets. Both viewports share selection, validation, job, and download logic.
 - The combined ZIP uses this layout:
 
 ```text
@@ -188,6 +228,9 @@ backend/backend-logs.log
 backend/backend-logs-YYYY-MM-DD.log
 frontend/browser-01.jsonl
 frontend/browser-02.jsonl
+runtime/sessions.json
+acp/session-01/raw-acp.jsonl
+acp/session-01/normalized-acp.jsonl
 ```
 
 - `backend/` contains the recognized active and dated files still inside the
@@ -195,23 +238,38 @@ frontend/browser-02.jsonl
 - `frontend/` contains one JSON Lines file per distinct responding browser
   profile. Multiple tabs from one browser profile are deduplicated. Client
   values never determine archive paths or filenames.
+- `runtime/sessions.json` is present only when the runtime source is requested.
+  It contains at most 500 authorized sessions updated within the backend
+  three-day diagnostic window, newest first. When ACP sessions are selected,
+  their rows are included even if they fall outside that window.
+- `acp/` is present only for explicitly selected sessions while ACP debug
+  capture is enabled. It contains raw and normalized retained JSONL frames
+  collected on demand from host-resident files or reachable executor-side
+  `agentctl` instances. Archive directories are server-numbered; client-supplied
+  session IDs never become ZIP paths. `manifest.json` maps each directory to
+  its authorized task/session and records unavailable or truncated files.
 - `manifest.json` identifies requested and included sources, capture time,
   Kandev version/commit, OS/architecture, uptime and bounded runtime metrics,
   backend filenames, frontend browser/connection counts, storage mode, omitted
-  or truncated data, capture timeouts, and archive expiry.
+  or truncated data, selected ACP session availability and byte ranges, runtime
+  index counts, capture timeouts, and archive expiry.
 - Bundle archives and working files are owner-only and live in a Kandev-owned
   temporary directory. User/API bundle jobs expire 15 minutes after creation.
-- If frontend capture is unavailable or incomplete, an `all` bundle still
-  becomes downloadable with backend files. Its state is `partial`, and the
-  manifest plus UI state explains the missing frontend capture.
-- Any backend byte-range truncation, frontend profile omission, queue loss, or
-  archive-cap truncation also makes the bundle `partial`; the manifest records
-  exact source byte ranges and aggregate loss counters.
+- If frontend or ACP capture is unavailable or incomplete, a multi-source
+  bundle still becomes downloadable with backend files. Its state is `partial`,
+  and the manifest plus UI state explains each unavailable source/session.
+- Any backend/ACP byte-range truncation, frontend profile omission, runtime
+  index truncation, queue loss, or archive-cap truncation also makes the bundle
+  `partial`; the manifest records exact source byte ranges and aggregate loss
+  counters.
 
 ### Agent diagnostics
 
 - Agents use the same bundle API and request only `backend`, `frontend`, or
   `all`. A backend-only request never waits for a browser.
+- The task-mode MCP tool does not expose raw ACP or runtime-index selection.
+  ACP capture is an explicit human download flow because its stronger content
+  and permission contract must be reviewed before collection.
 - Task-session agents normally use the task-mode
   `get_diagnostic_bundle_kandev` MCP tool. It accepts only a source selection;
   it derives the task, session, and authenticated owner from the MCP dispatch
@@ -300,21 +358,92 @@ they cannot replace the fixed `frontend error toast` message.
 
 ```json
 {
-  "sources": ["backend", "frontend"]
+  "sources": ["backend", "frontend", "runtime", "acp"],
+  "session_ids": ["session-uuid-1", "session-uuid-2"]
 }
 ```
 
-- `sources` is a non-empty unique subset of `backend` and `frontend`.
+- `sources` is a non-empty unique subset of `backend`, `frontend`, `runtime`,
+  and `acp`. `session_ids` is rejected unless `acp` is selected. Selecting
+  `acp` requires one to ten unique session IDs.
+- The backend resolves each ACP session to an authorized task and current or
+  retained debug source. A non-admin may select only sessions on tasks they
+  own; an admin may select any eligible session. Unknown, foreign, or duplicate
+  IDs fail the request without revealing whether a foreign session exists.
+- `acp` is rejected unless backend-authoritative ACP debug capture is enabled.
+  A frontend runtime debug flag alone cannot enable or authorize ACP export.
 - A valid request returns `202 Accepted` with `id`, `status`, `reused`,
   `build_deadline`, and nullable `expires_at`. `expires_at` is populated when
   the job becomes ready/partial. An equivalent non-expired job for the same
-  identity and source set returns that job with `reused: true`.
+  identity, source set, and normalized ACP session set returns that job with
+  `reused: true`.
 - Backend-only jobs can become ready immediately. Jobs containing `frontend`
-  enter `collecting` for at most 15 seconds.
+  collect browser evidence for at most 15 seconds. Jobs containing `acp`
+  collect selected executor evidence for at most 30 seconds; frontend and ACP
+  collection may overlap under the global job bounds.
 - An invalid or empty source set returns `400 Bad Request`.
 - A different request while that identity owns an active job returns
   `429 Too Many Requests`; process-wide job saturation returns
   `503 Service Unavailable`. Both include `Retry-After: 5`.
+
+`GET /api/v1/system/logs/capabilities` returns backend-authoritative bundle
+capabilities for the current identity:
+
+```json
+{
+  "sources": ["backend", "frontend", "runtime"],
+  "acp_debug_enabled": false,
+  "acp_max_sessions": 10
+}
+```
+
+- `acp` appears in `sources` whenever ACP debug capture is enabled. Candidate
+  count may be zero; the UI still shows the debug action and its empty state.
+- This endpoint reveals capability only. It does not return paths, frames,
+  another user's session IDs, or the value of environment variables.
+
+`GET /api/v1/system/logs/acp-sessions` returns at most 500 eligible sessions,
+newest first, and is available only while ACP debug capture is enabled:
+
+```json
+{
+  "sessions": [
+    {
+      "task_id": "task-uuid",
+      "session_id": "session-uuid",
+      "agent": "claude-acp",
+      "provider": "anthropic",
+      "model": "sonnet",
+      "status": "running",
+      "executor_type": "local_docker",
+      "last_activity_at": "2026-08-02T12:00:00Z",
+      "acp_availability": "reachable"
+    }
+  ]
+}
+```
+
+- `acp_availability` is `host_retained`, `reachable`, or `unavailable`.
+  Unavailable sessions remain selectable only when a retained host file might
+  still be discovered during collection; otherwise the control disables them
+  with an explanation.
+- Non-admin responses contain only caller-owned sessions. Admin responses may
+  contain all eligible sessions. Titles, descriptions, messages, prompts, tool
+  payloads, file content, user identity, and log paths are never returned.
+
+Reachable executor-side `agentctl` instances expose an internal
+`GET /api/v1/debug/acp/:session/export?max_bytes=N` route only while
+`KANDEV_DEBUG_AGENT_MESSAGES=true`:
+
+- The response is a bounded ZIP containing only recognized retained raw and
+  normalized ACP JSONL files for that exact session. `N` is clamped to the
+  backend's remaining ACP budget.
+- The route never accepts a filesystem path or task/user identity and never
+  returns unrelated session files. Unknown sessions return `404`; disabled
+  debug capture returns `404`; unreadable or expired evidence returns `410`.
+- The lifecycle/runtime client is the only bundle consumer. Browser clients
+  never call executor-side `agentctl` directly, and the backend revalidates ZIP
+  entry names, byte bounds, and selected-session ownership before inclusion.
 
 When frontend collection starts, the backend sends authenticated WebSocket
 notification `system.logs.capture_requested` to every connected frontend for
@@ -362,7 +491,8 @@ to `POST /api/v1/system/logs/bundles/:id/frontend`:
 
 `GET /api/v1/system/logs/bundles/:id` returns the caller-owned job state:
 `collecting`, `building`, `ready`, `partial`, `failed`, or `expired`, plus
-source/capture counts, warnings, expiry, and a download URL when available.
+source/capture counts, selected ACP session counts and aggregate availability,
+warnings, expiry, and a download URL when available.
 
 `GET /api/v1/system/logs/bundles/:id/download` returns
 `application/zip` for `ready` and `partial` jobs. It returns `409 Conflict`
@@ -387,6 +517,13 @@ Logs access rule. A user can inspect, upload to, or download only bundle jobs
 created under the same identity. With authentication disabled, the synthetic
 single-user identity keeps local behavior unchanged.
 
+Raw ACP selection adds a stricter task-ownership boundary. A non-admin may list
+and include ACP evidence only for sessions whose task owner matches the
+authenticated identity. An admin may list and include any eligible session.
+Authentication-disabled local installs use the synthetic admin identity. The
+backend authorizes every selected session before contacting host or executor
+storage; possessing or guessing a session ID does not grant access.
+
 Frontend capture notifications and uploads never cross identities. Bundle
 ownership is derived from the authenticated request, not a client-supplied user
 or browser ID.
@@ -401,6 +538,12 @@ permission bits are supported. Diagnostic archives may contain install-wide
 backend activity, full URLs, console arguments, stacks, paths, browser
 metadata, and user-visible backend error text. The page must present that
 disclosure before the download action.
+
+ACP-inclusive archives carry a distinct high-sensitivity disclosure and may
+contain prompts, responses, tool arguments/results, file content, MCP payloads,
+environment-derived values, and secrets. Standard bundles never read raw ACP
+files or persisted message/transcript tables. The runtime index is authorized
+with the same task/session rules and excludes message bodies and user identity.
 
 ## Failure modes
 
@@ -418,6 +561,16 @@ disclosure before the download action.
 - If some frontend connections time out, disconnect, reject the request, or
   exceed bounds, successful distinct-browser captures remain and the manifest
   lists aggregate omissions without exposing another user's identity.
+- If ACP debug capture is disabled, an ACP request fails validation before a
+  job is created. If a selected host file or executor becomes unavailable after
+  authorization, other selected sources continue and the bundle becomes
+  `partial` with a per-session availability warning in the manifest.
+- If executor ACP export times out, exceeds its clamp, returns invalid ZIP
+  paths, or cannot be revalidated, that session is omitted. The backend does
+  not retry continuously, does not copy other sessions, and does not fail a
+  valid backend/frontend/runtime source.
+- If the runtime index query fails, other selected sources continue and the
+  bundle becomes `partial`; it never falls back to a broader unscoped query.
 - If ZIP construction fails, the job becomes `failed`, temporary partial files
   are removed, and the UI surfaces a normal error toast.
 - If a backend or browser diagnostic queue is saturated, lower-priority entries
@@ -444,6 +597,14 @@ disclosure before the download action.
   that rolling window are deleted at startup and after successful rollover.
 - Browser console history remains in the browser profile for three UTC days,
   subject to its entry/byte caps. It is not server-persistent before capture.
+- Raw ACP files retain their existing debug-only executor/host retention: at
+  most 48 hours by default, bounded by per-file rotation and total file count.
+  Bundle creation reads selected files on demand and does not create permanent
+  backend ACP storage. Executor teardown may make evidence unavailable before
+  the retention age.
+- The runtime index is generated per bundle from authorized current database
+  state, capped to the diagnostic window/row limit, and is not persisted as a
+  separate product record.
 - A frontend bundle can contain only histories returned by browser profiles
   connected during its 15-second collection window.
 - Bundle jobs and ZIPs survive frontend navigation. Collecting/building jobs
@@ -488,8 +649,29 @@ disclosure before the download action.
   the second user requests a bundle, **THEN** its frontend files contain only
   entries captured under the second user's identity partition.
 - **GIVEN** a signed-in user opens System Logs, **WHEN** the page renders,
-  **THEN** it clearly describes backend and frontend contents and exposes one
-  touch-accessible combined-download action without a tail or file table.
+  **THEN** it names the frontend/backend event classes, states that the standard
+  bundle does not read stored session or agent messages, warns about incidental
+  emitted log content, and exposes standard/custom actions without a tail or
+  file table.
+- **GIVEN** ACP debug capture is disabled, **WHEN** a user opens System Logs,
+  **THEN** no ACP download action or ACP custom source is offered and a crafted
+  ACP bundle request is rejected.
+- **GIVEN** ACP debug capture is enabled, **WHEN** a user chooses **Download
+  with ACP…**, **THEN** the session picker opens with the high-sensitivity
+  disclosure and collection cannot start until at least one authorized session
+  is selected.
+- **GIVEN** a non-admin can observe another user's session ID, **WHEN** they
+  list ACP candidates or submit that ID directly, **THEN** the session is not
+  disclosed or included and the response does not reveal its existence.
+- **GIVEN** an admin selects two reachable sessions and one stopped unavailable
+  executor session, **WHEN** the debug bundle finishes, **THEN** raw and
+  normalized files for the reachable sessions are included, the unavailable
+  session is omitted, and the bundle is downloadable as `partial` with an
+  explicit manifest warning.
+- **GIVEN** the runtime index is selected without ACP, **WHEN** a bundle is
+  built, **THEN** it contains only authorized bounded session/runtime metadata
+  and no task titles, prompts, responses, tool payloads, files, or message
+  bodies.
 - **GIVEN** two tabs from one browser profile answer a bundle request, **WHEN**
   their chunks interleave, **THEN** the first capture stream owns that browser
   ID and the ZIP contains one internally consistent frontend JSONL snapshot.
@@ -510,10 +692,20 @@ disclosure before the download action.
   **THEN** the same disclosure, progress, partial-state warning, and archive
   download remain available without horizontal scrolling or desktop-only
   controls.
+- **GIVEN** a phone user customizes a bundle, **WHEN** they select sources and
+  ACP sessions, **THEN** an inset bottom drawer keeps disclosure and actions
+  reachable with one internal scroll owner, safe-area clearance, ≥44px targets,
+  and the same validation/result as desktop.
 
 ## Out of scope
 
 - Continuous browser-log upload, hosted telemetry, or crash-reporting service.
+- Continuous central upload or permanent backend retention of raw ACP frames.
+- Including raw ACP in the standard bundle, Improve Kandev bundle, or
+  task-mode `get_diagnostic_bundle_kandev` response.
+- Exporting database contents, task titles/descriptions, chat transcripts,
+  stored agent messages, workspace files, secrets/configuration, or environment
+  dumps as standalone bundle sources.
 - Preserving backend or frontend diagnostic history beyond three UTC days.
 - A server-side free-text/regex log search or unbounded JSON log export.
 - Viewing, copying, refreshing, or individually downloading log files from the

@@ -59,6 +59,34 @@ partial and records the omission. Any signed-in user retains the existing
 install-wide Logs-page access boundary, while bundle job ownership and frontend
 capture remain identity-scoped.
 
+The standard bundle never reads persisted chat/session message tables or raw
+agent protocol captures. Its UI names the frontend and backend event classes
+and explains that this source boundary cannot remove incidental content already
+emitted into a selected log. `manifest.json` remains mandatory. A separate
+optional `runtime/` source provides a bounded authorized task/session index
+(IDs, agent/provider/model, status, timestamps, and executor type) without
+titles, prompts, responses, tool payloads, file content, identities, or stored
+message bodies.
+
+Raw ACP is a distinct debug-only, explicit-consent source. It is available only
+when backend-authoritative ACP message capture is enabled, always requires the
+user to select one or more sessions, and carries a stronger disclosure that raw
+and normalized frames can contain prompts, responses, tool inputs/results,
+workspace file content, MCP payloads, environment-derived values, and secrets.
+Non-admin users may select only sessions on tasks they own; admins may select
+any eligible session. Auth-disabled local installations use their synthetic
+admin identity.
+
+Kandev does not continuously centralize ACP frames. For selected sessions the
+bundle worker reads retained host files or fetches a bounded export on demand
+from reachable executor-side `agentctl` instances, revalidates every entry and
+archive path, and records unavailable/stopped sessions as partial. The request
+selects at most ten sessions, uses at most two concurrent executor fetches, and
+has a 30-second ACP collection deadline. Standard jobs keep their existing
+160 MiB backend/80 MiB frontend budgets. ACP-inclusive jobs reserve 96 MiB
+backend, 48 MiB frontend, 96 MiB ACP, and 2 MiB runtime while retaining the
+256 MiB uncompressed archive and 384 MiB temporary-disk bounds.
+
 Agents use the same source-selectable bundle API. They request `backend`,
 `frontend`, or `all`, extract into a fresh temporary directory, and grep the
 artifact locally—normally by exact task ID first. Kandev does not add a
@@ -69,6 +97,11 @@ creates an authenticated browser-owned bundle first, then leases a verified
 copy into its task context. Public bundle jobs expire 15 minutes after becoming
 downloadable; Improve Kandev keeps its copied artifact for the existing
 24-hour cleanup window.
+
+Raw ACP and the runtime index are intentionally not added to the task-mode MCP
+or Improve Kandev source aliases. ACP selection remains a human-reviewed
+download flow because its content and permission boundary differ materially
+from the standard support bundle.
 
 The observable contract lives in
 [`docs/specs/platform/diagnostic-logging.md`](../specs/platform/diagnostic-logging.md).
@@ -111,13 +144,43 @@ are mandatory.
 
 The System Logs page becomes a focused action rather than a live diagnostic
 viewer. Mobile and desktop share the workflow, with a touch-sized primary
-action and no wide table.
+action and no wide table. Desktop customization uses a dialog; phone uses an
+inset, safe-area-aware bottom drawer with one internal scroll owner. Debug mode
+shows a standard action plus a **Download with ACP…** action that opens required
+session selection; both modes retain **Customize bundle**.
+
+Raw ACP is intentionally more sensitive than the standard bundle. The UI and
+API cannot truthfully promise that an ACP-inclusive archive excludes agent or
+session messages. Maintainers gain exact wire evidence, but users must make a
+session-scoped choice and review a stronger warning before collection.
+
+On-demand executor reads can omit evidence from stopped, removed, unreachable,
+or non-debug executors. This avoids continuous network/disk overhead and limits
+backend custody of raw frames, at the cost of some historical completeness.
 
 ## Alternatives Considered
 
 - **Continuously stream every frontend log to the backend.** Rejected because it
   uploads sensitive browser history without an explicit diagnostic request and
   adds persistent network/storage overhead.
+- **Continuously centralize all debug ACP frames.** Rejected because raw frames
+  can contain secrets and full work content, would add hot-path network/storage
+  overhead, and would retain sensitive executor data without an explicit user
+  request.
+- **Put ACP in every debug-mode bundle automatically.** Rejected because the
+  standard no-transcript disclosure would become misleading and a single click
+  could export unrelated sessions. ACP requires explicit session selection.
+- **Offer only normalized ACP events.** Rejected because maintainers sometimes
+  need raw wire evidence to diagnose adapter normalization, while normalized
+  events can still contain sensitive message/tool content. The UI therefore
+  includes both behind the same strong warning.
+- **Read only host-resident ACP files.** Rejected because common Docker and
+  remote executors retain debug files inside their agentctl environment.
+  Bounded on-demand export covers reachable selected sessions without making
+  raw-frame streaming continuous.
+- **Export task/session database records as a debug source.** Rejected in favor
+  of a small allow-listed runtime index that excludes titles, message bodies,
+  tool payloads, file content, identities, and arbitrary configuration.
 - **Upload only the current 500-entry memory buffer.** Rejected because it
   cannot match the selected three-day diagnostic window across reloads.
 - **Have the initiating frontend attach logs directly to the ZIP request.**

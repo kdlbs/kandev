@@ -15,7 +15,9 @@ reporting and the backend diagnostic-bundle job/protocol. Then replace the
 browser memory-only console capture with bounded local three-day retention and
 the System Logs download workflow. Finally remove legacy ring-buffer/viewer
 paths, migrate Improve Kandev, update docs, and teach agents to download,
-extract, and grep source-selectable bundles.
+extract, and grep source-selectable bundles. The follow-up extension preserves
+that standard flow while adding an optional sanitized runtime index and an
+explicit, session-selected ACP source fetched on demand only in debug mode.
 
 The implementation follows
 [ADR-2026-07-30-file-backed-diagnostic-bundles](../../decisions/2026-07-30-file-backed-diagnostic-bundles.md).
@@ -248,6 +250,94 @@ The implementation follows
 
 ---
 
+## Custom bundles, runtime index, and ACP debug evidence
+
+### Backend source and permission contracts
+
+- Extend `apps/backend/internal/system/logbundle` source normalization and job
+  identity to support `runtime` and `acp` plus a normalized ACP session-ID set.
+  Preserve `backend`/`frontend` behavior and make coalescing key off both source
+  and selected-session sets.
+- Add authenticated capabilities and ACP-candidate endpoints under
+  `/api/v1/system/logs`. Cap candidate rows at 500, return only allow-listed
+  session/runtime fields, and derive candidate visibility through existing task
+  authorization: owners see their sessions, admins may see all.
+- Add a runtime-index provider that emits `runtime/sessions.json` from at most
+  500 authorized sessions in the three-day diagnostic window plus explicitly
+  selected ACP sessions. Use a dedicated DTO so task titles, descriptions,
+  identities, messages, prompts, tool data, files, arbitrary metadata, and
+  configuration cannot enter by accident.
+- Gate ACP capability, candidate listing, and job creation on the backend's
+  effective `KANDEV_DEBUG_AGENT_MESSAGES` state. A client-side debug flag is
+  presentation only and never authorizes collection.
+- Keep `manifest.json` mandatory. Add requested/included runtime and ACP source
+  fields, selected/available/omitted session counts, executor availability,
+  byte ranges, deadlines, and warnings without recording user identities or
+  filesystem paths.
+
+### On-demand ACP export
+
+- Add an agentctl internal export route beside the existing debug ACP tail. It
+  is registered only while ACP debug logging is enabled, accepts an exact
+  session and clamped byte budget, and produces a bounded ZIP of recognized
+  raw/normalized retained JSONL files for only that session.
+- Add a runtime/lifecycle client seam that locates the selected execution and
+  streams the export from reachable local, Docker, Sprites, or remote agentctl
+  instances. Host-resident standalone logs use the same recognized-filename
+  reader. Do not centralize frames before a request.
+- Authorize all selected sessions before I/O. Fetch at most two executors
+  concurrently, collect at most ten sessions for 30 seconds total, stream in
+  fixed chunks, and cancel/close every partial response on deadline or job
+  cancellation.
+- Revalidate returned ZIP structure, regular-file status, per-entry/session
+  ownership, JSONL filenames, and bytes before copying into server-numbered
+  `acp/session-NN/` paths. Treat stopped/unreachable/expired/invalid sessions as
+  partial rather than falling back to another session or broader directory.
+- Preserve the existing 256 MiB archive and 384 MiB temporary-disk caps.
+  Standard bundles retain 160 MiB backend and 80 MiB frontend budgets;
+  ACP-inclusive jobs use 96 MiB backend, 48 MiB frontend, 96 MiB ACP, and
+  2 MiB runtime budgets with no redistribution from omitted sources.
+
+### Logs page customization
+
+- Replace the single action copy in
+  `apps/web/components/settings/system/log-viewer.tsx` with a shared bundle
+  request controller and three entry points: **Download standard bundle**,
+  **Customize bundle**, and debug-only **Download with ACP…**.
+- Fetch backend capabilities instead of inferring ACP availability from
+  `window.__KANDEV_DEBUG`. Standard submits backend+frontend directly.
+  Customize selects backend, frontend, and runtime. Download with ACP opens the
+  customizer with all four sources preselected and requires one to ten eligible
+  sessions before submit. In debug mode it remains visible with an explanatory
+  empty state when the caller has no eligible session.
+- Add exact translated copy describing frontend and backend event classes,
+  stating that standard bundles do not read stored chat/session/agent messages,
+  and warning that incidental text already emitted to logs may remain.
+- When ACP is selected, replace the standard reassurance with the explicit raw
+  protocol warning covering prompts, responses, tools, files, MCP data,
+  environment-derived values, and secrets. Show per-session availability and
+  explain why unavailable sessions cannot be collected.
+- Keep all selection, validation, polling, partial/error status, and download
+  logic shared. Do not add source preferences to persistent settings or a
+  database; each customizer opening starts from its entry-point defaults.
+
+### Mobile design contract
+
+- Desktop uses the existing design-system `Dialog`; phone uses the shipped
+  inset `Drawer` pattern from `mobile-menu-sheet`/`mobile-picker-sheet`. The
+  Settings > Logs route and diagnostic card remain the entry point.
+- The disclosure/header and bottom actions stay fixed; the source/session list
+  is the only `min-h-0 overflow-y-auto` scroll owner. Clear the bottom safe area
+  and keep document horizontal overflow at zero.
+- Stack card actions on phones, keep each primary/secondary trigger and drawer
+  row at least 44px high, preserve visible labels, and avoid hover-only details.
+- Add desktop and `mobile-chrome` E2E flows proving standard download,
+  customization, ACP session validation, high-sensitivity disclosure, partial
+  unavailable-session behavior, safe-area/overflow geometry, and equivalent
+  final bundle contents.
+
+---
+
 ## Agent diagnostic materialization
 
 - Register task-mode `get_diagnostic_bundle_kandev` with a required
@@ -320,6 +410,17 @@ The implementation follows
   frontend identity isolation, interleaved capture streams, exact coalescing/
   `429`/`503` capacity, per-source/job/temp byte caps, newest-range truncation,
   disk-space refusal, five-minute cancellation, and start/stop leak safety.
+- **Runtime index and capabilities:** Go handler/service tests cover debug
+  capability gating, owner/admin session visibility, foreign-ID non-disclosure,
+  source/session validation, coalescing keys, allow-listed runtime DTO fields,
+  500-row/three-day bounds, and failure-to-partial behavior.
+- **ACP exporter and collector:** Agentctl tests cover debug-disabled `404`,
+  exact-session file matching, raw+normalized rotation selection, clamped
+  newest-byte ranges, malicious paths, and bounded streaming. Runtime/logbundle
+  tests cover host and executor sources, owner/admin authorization before I/O,
+  ten-session/two-fetch/30-second limits, cancellation, partial unavailable
+  sessions, per-source budgets, archive renaming, manifest mapping, and no
+  continuous-copy goroutine.
 - **Browser store:** Vitest with an IndexedDB test implementation covers
   three-day/entry/byte pruning, 64 KiB entry limits, cyclic/unserializable
   values, reference-free object descriptors, argument/field caps, shared
@@ -331,6 +432,11 @@ The implementation follows
   upload failures.
 - **System Logs UI:** component tests cover disclosure, job states, partial
   warning, download, and accessible action.
+- **Custom Logs UI:** Vitest covers standard source defaults, capability-driven
+  ACP visibility, custom source validation, required/owned session selection,
+  runtime-index selection, standard versus ACP disclosure, translated copy,
+  shared polling/download state, unavailable sessions, and desktop dialog versus
+  phone drawer presentation.
 - **Legacy removal:** source scans reject the old tail/list/debug-export APIs
   and backend ring-buffer imports.
 - **Improve Kandev:** backend/frontend tests cover reuse of the all-sources ZIP
@@ -350,6 +456,15 @@ The implementation follows
   `mobile-chrome` project: use `.tap()`, verify the ≥44px action, partial-state
   feedback when capture is unavailable, downloadable backend evidence, and no
   document horizontal overflow.
+- Extend the desktop spec with debug-disabled standard/custom behavior and a
+  debug-enabled seeded session catalogue. Verify that **Download with ACP…**
+  cannot submit without a session, the strong warning is visible, selected raw
+  and normalized evidence plus the sanitized runtime index appear in the ZIP,
+  and unavailable sessions yield an explicit partial result.
+- Extend the mobile spec to open Customize and ACP selection through the inset
+  drawer, complete the same source/session workflow, assert ≥44px controls,
+  internal scrolling, viewport containment, safe-area clearance, focus return,
+  and zero document horizontal overflow.
 - Use `pnpm e2e:run` so production backend/web artifacts are rebuilt before the
   focused specs run.
 
@@ -367,6 +482,14 @@ The implementation follows
 - Document that the System Logs page downloads backend plus frontend evidence,
   that frontend history stays local until requested, and that partial bundles
   must be checked via `manifest.json`.
+- Update CLI/operations/configuration/remote-cloud docs to distinguish the
+  standard message-table-free source boundary from raw ACP's explicit
+  high-sensitivity content, owner/admin selection rules, host versus executor
+  availability, runtime index fields, fixed ACP limits, and partial behavior.
+- Update `.agents/skills/debug` guidance to request standard sources first and
+  use ACP only after a human-selected debug bundle is available. Continue exact
+  task-ID/session-ID grep and never describe standard no-transcript language as
+  applying to an ACP-inclusive archive.
 
 ---
 
@@ -385,6 +508,15 @@ The implementation follows
   the removed stderr-tail convention. Under auth it reads only the
   `KANDEV_API_TOKEN` environment variable. Never extract over an existing
   directory.
+
+---
+
+## Verification Results
+
+Tasks 01–11 record the implemented standard bundle results in their individual
+task files. The custom/runtime/ACP extension in Tasks 12–16 is pending; no
+production code, test fixture, database migration, or browser schema migration
+has been added for that extension yet.
 
 ---
 
@@ -441,6 +573,32 @@ Task 11 is a sequential PR-remediation task covering the current-main lint
 integration, bounded automatic toast ingestion, the fixed daily file bound,
 URL privacy hardening, and allocation-free IndexedDB pruning.
 
+Wave 9:
+
+- [ ] [Task 12: Custom bundle contracts and runtime index](task-12-custom-bundle-contracts.md)
+
+Wave 10:
+
+- [ ] [Task 13: On-demand ACP collection](task-13-on-demand-acp-collection.md)
+
+Task 13 depends on Task 12's source/session and manifest contracts. Both tasks
+are sequential because they share logbundle job/archive state and permission
+boundaries.
+
+Wave 11:
+
+- [ ] [Task 14: Bundle customizer UI](task-14-bundle-customizer-ui.md)
+
+Wave 12:
+
+- [ ] [Task 15: Custom bundle E2E](task-15-custom-bundle-e2e.md)
+- [ ] [Task 16: Diagnostic privacy documentation](task-16-diagnostic-privacy-docs.md)
+
+Task 15 follows the completed backend/frontend behavior. Task 16 is
+parallel-safe with Task 15 because it owns public docs and debug guidance while
+Task 15 owns Playwright fixtures/specs; parallel execution still requires
+explicit user authorization.
+
 ## Risks
 
 - Frontend console data is highly sensitive. It remains browser-local until an
@@ -452,6 +610,19 @@ URL privacy hardening, and allocation-free IndexedDB pruning.
   expiry, disconnect, duplicate tabs, and late chunks need deterministic tests.
 - ZIP creation must not follow symlinks, accept client paths, zip-slip on
   extraction guidance, or grow beyond frontend/backend bounds.
+- Raw ACP can contain prompts, responses, tools, files, MCP payloads, and
+  secrets. Capability gating, explicit session selection, owner/admin
+  authorization before I/O, high-sensitivity copy, and server-owned archive
+  paths are release blockers.
+- Executor-side ACP evidence may disappear with stopped or removed containers.
+  On-demand collection must report this as partial without centralizing frames
+  continuously or blocking session/agent work.
+- The runtime index must be built from a field allow-list, not generic model or
+  metadata serialization, so future message-bearing fields cannot enter by
+  accident.
+- Desktop Dialog and phone Drawer must share state/validation while retaining
+  one phone scroll owner, safe-area clearance, ≥44px targets, and no horizontal
+  overflow.
 - Any authenticated user retains install-wide backend log access by explicit
   product choice.
 - Removing the ring buffer affects Logs, debug export, Improve Kandev, logger
