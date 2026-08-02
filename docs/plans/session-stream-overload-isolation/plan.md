@@ -44,7 +44,7 @@ correlated-response queue.
 Add an execution-owned coalescer in
 `apps/backend/internal/agent/runtime/lifecycle`. It accepts already-normalized
 assistant/reasoning chunks after legacy newline buffering and protocol ID to
-Kandev ID mapping. The first chunk for a record publishes immediately with
+Kandev ID mapping. The first non-empty chunk for a record publishes immediately with
 `IsAppend=false`. Adjacent later chunks append to one pending segment and flush
 at the 100 ms cadence with `IsAppend=true`.
 
@@ -78,7 +78,7 @@ behind the newest message state. Drain active session queues round-robin and
 interleave them with the semantic FIFO after bounded control priority.
 
 Production capacities are named constants, but tests construct small queues.
-On per-session pressure, evict or reject only obsolete replaceable entries for
+On per-session pressure, evict or reject only queued replaceable entries for
 that session. Never evict control or semantic notifications to admit a stream
 replacement. Record content-free counters/log fields for action, client,
 session, replacement, eviction, and queue depth.

@@ -62,8 +62,9 @@ Production capacities: 256 semantic FIFO frames, 32 distinct replaceable
 message updates per session, and 256 replaceable updates per client. Control
 responses/errors retain their independent 256-frame queue. Replacement keeps
 its original per-session position; per-session pressure evicts only that
-session's oldest replaceable entry, while a full global queue rejects a new
-session rather than evicting another session. Queue logs include action,
+session's oldest replaceable entry, while a full global queue rejects an
+incoming replacement whenever its session has no pending entry rather than
+evicting another session. Queue logs include action,
 client, session, message, reason, and depth only; content is never logged.
 
 Files changed:

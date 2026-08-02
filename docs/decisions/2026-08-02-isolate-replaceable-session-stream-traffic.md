@@ -37,7 +37,7 @@ Kandev will treat agent text and reasoning chunks as a high-frequency ingress
 format rather than a persistence or render contract.
 
 The lifecycle manager will coalesce adjacent chunks for the same execution,
-stream kind, and Kandev message record. The first chunk creates the record
+stream kind, and Kandev message record. The first non-empty chunk creates the record
 immediately; later chunks flush no more than once per 100 ms window during
 continuous streaming. Semantic boundaries and teardown flush pending content
 before they proceed. Coalescing is lossless: final persisted assistant and
@@ -57,9 +57,11 @@ complete current public message state. Each client gets bounded per-session
 replaceable capacity. A newer update replaces the queued payload in place, and
 session queues are drained fairly. Semantic notifications and correlated
 control traffic have independent bounded capacity, so a noisy session cannot
-occupy their slots. Overload may discard only obsolete intermediate
-replacements from the offending session; authoritative persistence is not
-discarded.
+occupy their slots. Overload may evict the oldest queued replaceable entry from
+the offending session, including an entry that has not yet been superseded.
+Because the database remains authoritative, reconnect, snapshot, and
+turn-settle reconciliation repair any intermediate replacement that was not
+delivered; authoritative persistence is never discarded.
 
 The frontend will coalesce replacement updates once more at the animation-frame
 boundary and will key intentional multi-session subscriptions by stable session

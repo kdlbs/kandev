@@ -64,10 +64,12 @@ type Client struct {
 	replaceableSessionOrder    []string
 	replaceableRoundRobin      int
 	deferredSemantic           map[string][]outboundNotification
+	readySemantic              []outboundNotification
 	notificationWake           chan struct{}
 	replaceableReplacements    uint64
 	replaceableEvictions       uint64
 	replaceableRejected        uint64
+	droppedSemantic            uint64
 	replaceablePerSessionLimit int
 	replaceableGlobalLimit     int
 }
@@ -758,6 +760,7 @@ func (c *Client) closeSendLocked() {
 		}
 	}
 	c.deferredSemantic = nil
+	c.readySemantic = nil
 }
 
 // WritePump pumps messages from the hub to the WebSocket connection
@@ -792,10 +795,30 @@ func (c *Client) WritePump() {
 			c.logger.Debug("failed to write close message", zap.Error(err))
 		}
 	}
+	writePing := func() bool {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+			c.logger.Debug("failed to set write deadline", zap.Error(err))
+		}
+		if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			c.logger.Debug("failed to write websocket ping", zap.Error(err))
+			return false
+		}
+		return true
+	}
 
 	for {
 		// Correlated responses/errors always run first. A bounded semantic burst
 		// then gives each active session's replaceable queue a turn.
+		select {
+		case <-ticker.C:
+			if !writePing() {
+				return
+			}
+		default:
+		}
+		if c.flushReadySemantic() {
+			continue
+		}
 		if controlCh != nil {
 			select {
 			case message, ok := <-controlCh:
@@ -873,10 +896,7 @@ func (c *Client) WritePump() {
 			}
 		case <-wakeCh:
 		case <-ticker.C:
-			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
-				c.logger.Debug("failed to set write deadline", zap.Error(err))
-			}
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if !writePing() {
 				return
 			}
 		}

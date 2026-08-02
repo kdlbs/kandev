@@ -12,7 +12,7 @@ spec: "../../specs/platform/bounded-task-status-delivery.md"
 
 ## Acceptance
 
-- The first assistant/reasoning chunk for a message publishes immediately;
+- The first non-empty assistant/reasoning chunk for a message publishes immediately;
   adjacent append chunks publish no more than once per 100 ms window.
 - A 30,000-chunk protocol reasoning stream persists byte-for-byte content with
   a bounded publication/write count.

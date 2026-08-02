@@ -32,11 +32,16 @@ function makeUpdated(sessionId: string, messageId: string, content: string): Upd
   };
 }
 
-function makeStore() {
+function makeStore(currentMessages: Record<string, unknown[]> = {}) {
   const updateMessage = vi.fn();
   const addMessage = vi.fn();
   const removeMessage = vi.fn();
-  const state = { updateMessage, addMessage, removeMessage };
+  const state = {
+    updateMessage,
+    addMessage,
+    removeMessage,
+    messages: { bySession: currentMessages },
+  };
   return {
     store: { getState: () => state } as unknown as StoreApi<AppState>,
     updateMessage,
@@ -166,5 +171,28 @@ describe("session message frame scheduler", () => {
     expect(updateMessage).toHaveBeenCalledTimes(1);
     expect(updateMessage).toHaveBeenLastCalledWith(expect.objectContaining({ content: "settled" }));
     scheduler.dispose();
+  });
+});
+
+describe("session message snapshot ordering", () => {
+  it("does not apply a batched update older than a refetched snapshot", () => {
+    const { store, updateMessage } = makeStore({
+      "session-1": [
+        {
+          id: "message-1",
+          updated_at: "2026-08-02T00:00:02.000Z",
+        },
+      ],
+    });
+    const frame = makeFrameScheduler();
+    const registration = createMessagesHandlerRegistration(store, frame);
+
+    registration.handlers["session.message.updated"]!(
+      makeUpdated("session-1", "message-1", "stale"),
+    );
+    frame.runFrame();
+
+    expect(updateMessage).not.toHaveBeenCalled();
+    registration.dispose();
   });
 });

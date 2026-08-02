@@ -64,6 +64,7 @@ test.describe("Session stream overload isolation", () => {
 
     const exact = await waitForExactReasoningBurst(apiClient, noisyTask.session_id);
     const noisyFrames = noisyReceivedFrames(noisyCapture.frames, noisyTask.session_id);
+    const quietSessionNoisyFrames = noisyReceivedFrames(quietCapture.frames, noisyTask.session_id);
     expect(
       noisyFrames.length,
       "noisy session must produce observable update frames",
@@ -71,6 +72,10 @@ test.describe("Session stream overload isolation", () => {
     expect(noisyFrames.length, "gateway delivery must be below source chunk count").toBeLessThan(
       REASONING_BURST_COUNT,
     );
+    expect(
+      quietSessionNoisyFrames,
+      "quiet page must not receive noisy-session updates",
+    ).toHaveLength(0);
 
     const evidence = {
       sourceChunks: exact.sourceChunks,

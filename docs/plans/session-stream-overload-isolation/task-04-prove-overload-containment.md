@@ -97,10 +97,12 @@ Sequential final integration/QA task.
 
 ## Output contract
 
-Report source chunk count, lifecycle publications, DB/message updates, gateway
-replacements/evictions and max pending depth, browser frames/store updates,
-quiet-session latency/result, exact final byte count/hash, desktop/mobile
-results, broad verification commands, and files changed.
+Report the diagnostics exposed by the current proof harness: source chunk
+count, exact persisted byte count, gateway frame/byte summaries, quiet-session
+response, desktop/mobile results, verification commands, and files changed.
+Lifecycle publication, DB/message update, replacement/eviction, maximum-depth,
+browser-store update, latency, and content-hash counters are not exposed by
+this E2E harness and are out of scope for this task.
 
 ## Verification results
 

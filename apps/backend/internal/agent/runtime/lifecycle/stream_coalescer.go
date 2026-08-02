@@ -15,7 +15,7 @@ type coalescedStreamChunk struct {
 }
 
 // streamCoalescer combines adjacent append chunks for one execution. The
-// first chunk of a record is emitted immediately; later chunks wait for the
+// first non-empty chunk of a record is emitted immediately; later chunks wait for the
 // bounded window or an explicit lifecycle boundary. A single pending segment
 // is intentional: combining across another message ID would change wire
 // ordering.
@@ -122,6 +122,10 @@ func (c *streamCoalescer) close() {
 }
 
 func (c *streamCoalescer) detachLocked(ready []coalescedStreamChunk) []coalescedStreamChunk {
+	// A timer callback that already fired can be waiting on emitMu while add
+	// installs a later pending segment and timer. When that callback acquires
+	// emitMu it may detach the later segment immediately, collapsing its window;
+	// content and ordering remain correct because all detaches are serialized.
 	if c.timer != nil {
 		c.timer.Stop()
 		c.timer = nil

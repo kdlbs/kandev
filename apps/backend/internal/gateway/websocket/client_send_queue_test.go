@@ -281,6 +281,100 @@ func TestClient_ReplaceableQueueBoundsNoisySessionOnly(t *testing.T) {
 	}
 }
 
+func TestClient_ReplaceableEvictionKeepsSessionOrderUnique(t *testing.T) {
+	c := newTestClient("replaceable-eviction-order")
+	c.replaceablePerSessionLimit = 2
+	c.replaceableGlobalLimit = 2
+
+	queueUpdate := func(sessionID, messageID string) {
+		t.Helper()
+		message, err := ws.NewNotification(ws.ActionSessionMessageUpdated, map[string]any{
+			"session_id": sessionID, "message_id": messageID,
+		})
+		if err != nil {
+			t.Fatalf("build update: %v", err)
+		}
+		data, _ := json.Marshal(message)
+		if !c.sendNotification(data, message.Action) {
+			t.Fatalf("queue update %s/%s", sessionID, messageID)
+		}
+	}
+
+	queueUpdate("session-a", "message-a1")
+	queueUpdate("session-b", "message-b1")
+	queueUpdate("session-a", "message-a2") // evicts a1 while a remains registered
+
+	c.mu.RLock()
+	order := append([]string(nil), c.replaceableSessionOrder...)
+	c.mu.RUnlock()
+	if !reflect.DeepEqual(order, []string{"session-a", "session-b"}) {
+		t.Fatalf("replaceable session order = %v, want one entry per session", order)
+	}
+}
+
+func TestClient_DeferredSemanticBarrierSurvivesFullQueue(t *testing.T) {
+	c := newTestClient("deferred-semantic")
+	c.send = make(chan []byte, 1)
+
+	message, err := ws.NewNotification(ws.ActionSessionMessageUpdated, map[string]any{
+		"session_id": "session-1", "message_id": "message-1",
+	})
+	if err != nil {
+		t.Fatalf("build update: %v", err)
+	}
+	data, _ := json.Marshal(message)
+	if !c.sendNotification(data, message.Action) {
+		t.Fatal("replaceable update was not queued")
+	}
+	c.send <- []byte("occupied")
+
+	deleted, err := ws.NewNotification(ws.ActionSessionMessageDeleted, map[string]any{
+		"session_id": "session-1", "message_id": "message-1",
+	})
+	if err != nil {
+		t.Fatalf("build delete: %v", err)
+	}
+	deletedData, _ := json.Marshal(deleted)
+	if !c.sendNotification(deletedData, deleted.Action) {
+		t.Fatal("semantic barrier was not accepted")
+	}
+	if _, ok := c.popNextReplaceable(); !ok {
+		t.Fatal("replaceable update was not drained")
+	}
+
+	c.mu.RLock()
+	pending := c.deferredSemanticCountLocked()
+	c.mu.RUnlock()
+	if pending != 1 {
+		t.Fatalf("deferred semantic barriers = %d, want 1 after a full queue", pending)
+	}
+	<-c.send
+	if !c.flushReadySemantic() {
+		t.Fatal("deferred semantic barrier was not released after capacity opened")
+	}
+	barrier := <-c.send
+	var got ws.Message
+	if err := json.Unmarshal(barrier, &got); err != nil {
+		t.Fatalf("decode released barrier: %v", err)
+	}
+	if got.Action != ws.ActionSessionMessageDeleted {
+		t.Fatalf("released barrier action = %q, want %q", got.Action, ws.ActionSessionMessageDeleted)
+	}
+}
+
+func TestClient_SemanticDropsAreCounted(t *testing.T) {
+	c := newTestClient("semantic-drop-count")
+	c.send = make(chan []byte, 1)
+	c.send <- []byte("occupied")
+
+	if c.sendNotification([]byte(`{"type":"notification","action":"session.state_updated"}`), "session.state_updated") {
+		t.Fatal("semantic frame should be rejected when the queue is full")
+	}
+	if got := c.notificationQueueStats().DroppedSemantic; got != 1 {
+		t.Fatalf("dropped semantic count = %d, want 1", got)
+	}
+}
+
 func TestClient_ReplaceableQueueCloseAndZeroValueAreSafe(t *testing.T) {
 	var zero Client
 	frame := []byte(`{"type":"notification","action":"session.message.updated","payload":{"session_id":"session-1","message_id":"message-1"}}`)

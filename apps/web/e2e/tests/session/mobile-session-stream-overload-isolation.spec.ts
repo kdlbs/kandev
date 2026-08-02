@@ -70,8 +70,13 @@ test.describe("mobile: session stream overload isolation", () => {
 
     await waitForExactReasoningBurst(apiClient, noisySessionId);
     const noisyFrames = noisyReceivedFrames(noisyCapture.frames, noisySessionId);
+    const quietSessionNoisyFrames = noisyReceivedFrames(capture.frames, noisySessionId);
     expect(noisyFrames.length).toBeGreaterThan(0);
     expect(noisyFrames.length).toBeLessThan(REASONING_BURST_COUNT);
+    expect(
+      quietSessionNoisyFrames,
+      "quiet mobile view must not receive noisy-session updates",
+    ).toHaveLength(0);
     await assertNoHorizontalOverflow(testPage, "mobile session stream overload surface");
 
     const evidence = {

@@ -22,6 +22,9 @@ export async function waitForExactReasoningBurst(
   count = REASONING_BURST_COUNT,
 ): Promise<{ sourceChunks: number; reasoningBytes: number }> {
   const expected = expectedReasoningContent(count);
+  const firstChunk = `reasoning-burst-${String(1).padStart(6, "0")}|`;
+  const findBurst = (messages: Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"]) =>
+    messages.find((message) => String(message.metadata?.thinking ?? "").startsWith(firstChunk));
   let latestMessages: Awaited<ReturnType<ApiClient["listSessionMessages"]>>["messages"] = [];
   await expect
     .poll(
@@ -30,7 +33,7 @@ export async function waitForExactReasoningBurst(
         const marker = latestMessages.some(
           (message) => message.content === `reasoning-burst-produced:${count}`,
         );
-        const reasoning = latestMessages.find((message) => message.metadata?.thinking);
+        const reasoning = findBurst(latestMessages);
         return marker && reasoning?.metadata?.thinking === expected;
       },
       {
@@ -40,7 +43,7 @@ export async function waitForExactReasoningBurst(
     )
     .toBe(true);
 
-  const reasoning = latestMessages.find((message) => message.metadata?.thinking);
+  const reasoning = findBurst(latestMessages);
   return {
     sourceChunks: count,
     reasoningBytes: Buffer.byteLength(String(reasoning?.metadata?.thinking ?? ""), "utf8"),

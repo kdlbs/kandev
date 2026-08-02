@@ -65,4 +65,28 @@ describe("Office session live-sync membership", () => {
     expect(unsubscriptions.get("session-b")).toHaveBeenCalledTimes(1);
     expect(unsubscriptions.get("session-c")).toHaveBeenCalledTimes(1);
   });
+
+  it("clears all subscriptions when the connection disconnects", () => {
+    const unsubscribe = vi.fn();
+    mockWebSocketClient.subscribeSession.mockReturnValue(unsubscribe);
+    const initialProps: { connectionStatus: "connected" | "reconnecting" } = {
+      connectionStatus: "connected",
+    };
+
+    const { rerender, unmount } = renderHook(
+      ({ connectionStatus }: { connectionStatus: "connected" | "reconnecting" }) =>
+        useSessionLiveSyncSubscriptions({
+          connectionStatus,
+          taskId: "task-1",
+          sessionIds: ["session-a", "session-b"],
+        }),
+      { initialProps },
+    );
+
+    expect(mockWebSocketClient.subscribeSession).toHaveBeenCalledTimes(2);
+    rerender({ connectionStatus: "reconnecting" });
+    expect(unsubscribe).toHaveBeenCalledTimes(2);
+    unmount();
+    expect(unsubscribe).toHaveBeenCalledTimes(2);
+  });
 });

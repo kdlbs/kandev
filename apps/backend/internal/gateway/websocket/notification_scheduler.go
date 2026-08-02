@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"slices"
 
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -12,7 +13,7 @@ const (
 	// message updates a single session can hold for one client.
 	replaceablePerSessionCapacity = 32
 	// replaceableGlobalCapacity bounds all pending replaceable updates for one
-	// client. A noisy session can only evict its own obsolete replacements.
+	// client. A noisy session can only evict its own oldest queued replacements.
 	replaceableGlobalCapacity = 256
 	// semanticPriorityBurst prevents a busy semantic queue from starving the
 	// replaceable queues while still giving responses/control frames priority.
@@ -115,10 +116,27 @@ func (c *Client) enqueueNotification(frame outboundNotification) bool {
 }
 
 func (c *Client) enqueueSemanticLocked(data []byte) bool {
+	c.drainReadySemanticLocked()
+	if len(c.readySemantic) > 0 {
+		if len(c.readySemantic) >= cap(c.send) {
+			c.droppedSemantic++
+			if c.logger != nil {
+				c.logger.Warn("Client semantic queue full; dropping notification")
+			}
+			return false
+		}
+		c.readySemantic = append(c.readySemantic, outboundNotification{data: data})
+		return true
+	}
+	if c.send == nil {
+		c.droppedSemantic++
+		return false
+	}
 	select {
 	case c.send <- data:
 		return true
 	default:
+		c.droppedSemantic++
 		if c.logger != nil {
 			c.logger.Warn("Client send buffer full")
 		}
@@ -128,6 +146,7 @@ func (c *Client) enqueueSemanticLocked(data []byte) bool {
 
 func (c *Client) deferSemanticLocked(frame outboundNotification) bool {
 	if c.deferredSemanticCountLocked() >= cap(c.send) {
+		c.droppedSemantic++
 		if c.logger != nil {
 			c.logger.Warn("Client semantic queue full; dropping notification",
 				queueActionField(frame.action),
@@ -144,7 +163,30 @@ func (c *Client) deferredSemanticCountLocked() int {
 	for _, frames := range c.deferredSemantic {
 		total += len(frames)
 	}
-	return total
+	return total + len(c.readySemantic)
+}
+
+func (c *Client) drainReadySemanticLocked() {
+	if c.closed || c.send == nil {
+		return
+	}
+	for len(c.readySemantic) > 0 {
+		select {
+		case c.send <- c.readySemantic[0].data:
+			c.readySemantic = c.readySemantic[1:]
+		default:
+			return
+		}
+	}
+}
+
+func (c *Client) flushReadySemantic() bool {
+	c.mu.Lock()
+	before := len(c.readySemantic)
+	c.drainReadySemanticLocked()
+	flushed := before != len(c.readySemantic)
+	c.mu.Unlock()
+	return flushed
 }
 
 func (c *Client) enqueueReplaceable(frame outboundNotification, key replaceableNotificationKey) bool {
@@ -169,7 +211,7 @@ func (c *Client) enqueueReplaceable(frame outboundNotification, key replaceableN
 	perSessionLimit, globalLimit := c.replaceableCapacitiesLocked()
 	queue := c.replaceableBySession[frame.sessionID]
 	if len(queue) >= perSessionLimit || len(c.replaceableByKey) >= globalLimit {
-		// Only this session's oldest obsolete replacement may be evicted. If
+		// Only this session's oldest queued replacement may be evicted. If
 		// the global cap is occupied by other sessions, reject this frame.
 		if len(queue) == 0 {
 			c.replaceableRejected++
@@ -183,7 +225,7 @@ func (c *Client) enqueueReplaceable(frame outboundNotification, key replaceableN
 		queue = c.replaceableBySession[frame.sessionID]
 	}
 	c.replaceableByKey[key] = frame
-	if len(queue) == 0 {
+	if !slices.Contains(c.replaceableSessionOrder, frame.sessionID) {
 		c.replaceableSessionOrder = append(c.replaceableSessionOrder, frame.sessionID)
 	}
 	c.replaceableBySession[frame.sessionID] = append(queue, key)
@@ -213,11 +255,10 @@ func (c *Client) removeOldestReplaceableLocked(sessionID string) bool {
 	}
 	key := queue[0]
 	delete(c.replaceableByKey, key)
-	if len(queue) == 1 {
-		delete(c.replaceableBySession, sessionID)
-	} else {
-		c.replaceableBySession[sessionID] = queue[1:]
-	}
+	// Keep the session registered in replaceableSessionOrder. The enqueue
+	// caller may immediately add another key for this session; popNextReplaceable
+	// owns removal from the round-robin order after the queue is truly drained.
+	c.replaceableBySession[sessionID] = queue[1:]
 	return true
 }
 
@@ -288,13 +329,8 @@ func (c *Client) releaseDeferredSemanticLocked(sessionID string) {
 	if c.closed || c.send == nil {
 		return
 	}
-	for _, frame := range frames {
-		if !c.enqueueSemanticLocked(frame.data) && c.logger != nil {
-			c.logger.Warn("Client semantic barrier queue full; dropping notification",
-				queueActionField(frame.action),
-				queueSessionField(frame.sessionID))
-		}
-	}
+	c.readySemantic = append(c.readySemantic, frames...)
+	c.drainReadySemanticLocked()
 }
 
 func (c *Client) logReplaceablePressure(reason string, frame outboundNotification, depth int) {
@@ -332,19 +368,21 @@ func queueDepthField(depth int) zap.Field {
 // notificationQueueStats intentionally exposes only queue metadata. Message
 // content never enters pressure logs or metrics.
 type notificationQueueStats struct {
-	Depth        int
-	Replacements uint64
-	Evictions    uint64
-	Rejected     uint64
+	Depth           int
+	Replacements    uint64
+	Evictions       uint64
+	Rejected        uint64
+	DroppedSemantic uint64
 }
 
 func (c *Client) notificationQueueStats() notificationQueueStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return notificationQueueStats{
-		Depth:        len(c.replaceableByKey),
-		Replacements: c.replaceableReplacements,
-		Evictions:    c.replaceableEvictions,
-		Rejected:     c.replaceableRejected,
+		Depth:           len(c.replaceableByKey),
+		Replacements:    c.replaceableReplacements,
+		Evictions:       c.replaceableEvictions,
+		Rejected:        c.replaceableRejected,
+		DroppedSemantic: c.droppedSemantic,
 	}
 }

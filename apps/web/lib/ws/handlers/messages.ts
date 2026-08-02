@@ -49,6 +49,16 @@ function messageKey(payload: MessagePayload): string {
   return `${payload.session_id}:${payload.message_id}`;
 }
 
+function isOlderThanCurrentSnapshot(store: StoreApi<AppState>, payload: MessagePayload): boolean {
+  const current = store
+    .getState()
+    .messages.bySession[
+      sessionId(payload.session_id)
+    ]?.find((message) => message.id === payload.message_id);
+  if (!current?.updated_at) return false;
+  return !payload.updated_at || current.updated_at > payload.updated_at;
+}
+
 function defaultSchedule(callback: () => void): number {
   if (typeof requestAnimationFrame === "function") {
     return requestAnimationFrame(() => callback());
@@ -87,6 +97,7 @@ export function createMessageUpdateScheduler(
     pending.clear();
     for (const payload of updates) {
       if (!payload.session_id || !payload.message_id) continue;
+      if (isOlderThanCurrentSnapshot(store, payload)) continue;
       store.getState().updateMessage(toMessage(payload));
     }
   };
@@ -140,8 +151,4 @@ export function createMessagesHandlerRegistration(
     },
   };
   return { handlers, scheduler, dispose: scheduler.dispose };
-}
-
-export function registerMessagesHandlers(store: StoreApi<AppState>): WsHandlers {
-  return createMessagesHandlerRegistration(store).handlers;
 }

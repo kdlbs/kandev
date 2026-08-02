@@ -157,9 +157,11 @@ older payload in place. Replaceable stream notifications use bounded
 per-session capacity and fair scheduling, separate from correlated control
 traffic and semantic notifications such as message creation/deletion, task or
 session state changes, pending-input occurrences, and turn completion. When a
-session exceeds its replaceable allowance, only that session's obsolete
-intermediate replacements may be evicted; it cannot consume another session's
-allowance or the semantic-notification lane.
+session exceeds its replaceable allowance, that session's oldest queued
+replaceable entry may be evicted; it cannot consume another session's
+allowance or the semantic-notification lane. Reconnect, snapshot, and
+turn-settle reconciliation repair any intermediate replacement that was not
+delivered because the database remains authoritative.
 
 The frontend applies the same defense at the render boundary. It keeps only the
 newest `session.message.updated` payload for each message during one animation
