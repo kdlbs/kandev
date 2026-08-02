@@ -349,4 +349,31 @@ export const i18nGuardFiles = [
   "components/jira/my-jira/presets.ts",
   "components/jira/my-jira/use-task-presets.ts",
   "components/jira/task-presets-section.tsx",
+  // Settings → Integrations → Linear: the page and the settings subtree of
+  // `components/linear` — the connection card, the Linear-watcher section with
+  // its table, and the watch dialog with its filter/settings field modules. The
+  // issue task surface (`linear-issue-button`, `linear-issue-dialog`,
+  // `linear-issue-common`), the import bar and the quick-task launcher live in
+  // the same directory and are NOT migrated, which is why this is a file list
+  // rather than `components/linear/**`.
+  //
+  // The two `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them; the entries record that they are migrated, and only the pseudo-locale
+  // can prove it stays that way. Each carries copy that is deliberately left in
+  // English because it is PERSISTED or sent to an agent verbatim — the
+  // `DEFAULT_LINEAR_ISSUE_WATCH_PROMPT` in
+  // `linear-issue-watch-placeholders.ts`, which must also keep matching
+  // `apps/backend/config/prompts/linear-issue-watch-default.md`. The placeholder
+  // `example` values in the same file, and the option `value`s in
+  // `linear-issue-watch-form.ts`, are identifiers rather than copy; the option
+  // labels there now travel as `labelKey` and resolve at render.
+  "app/settings/integrations/linear/**/*.{ts,tsx}",
+  "components/linear/linear-issue-watch-dialog.tsx",
+  "components/linear/linear-issue-watch-fields.tsx",
+  "components/linear/linear-issue-watch-filter-fields.tsx",
+  "components/linear/linear-issue-watch-form.ts",
+  "components/linear/linear-issue-watch-placeholders.ts",
+  "components/linear/linear-issue-watch-table.tsx",
+  "components/linear/linear-issue-watchers-section.tsx",
+  "components/linear/linear-settings.tsx",
 ];
