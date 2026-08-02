@@ -288,7 +288,7 @@ func TestGetLog_BoundBaseRangeCapsCommits(t *testing.T) {
 	isolateTestGitEnv(t)
 
 	repoDir, cleanup := setupTestRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 
 	log := newTestLogger(t)
 	ctx := context.Background()
