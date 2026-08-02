@@ -150,14 +150,14 @@ export function LogViewer() {
 function DiagnosticDisclosure() {
   const { t } = useTranslation();
   return (
-    <Alert className="border-border/70 bg-muted/30">
+    <Alert className="border-border/70 bg-muted/30 p-5 sm:p-6">
       <IconAlertTriangle className="size-4" />
       <AlertTitle>{t("settings:diagnosticReviewBeforeSharing")}</AlertTitle>
-      <AlertDescription className="space-y-3 text-sm">
+      <AlertDescription className="space-y-4 text-sm leading-relaxed">
         <p>{t("settings:diagnosticReviewDescription")}</p>
-        <div className="grid gap-2 border-t border-border/70 pt-3 text-xs leading-relaxed sm:grid-cols-2">
+        <div className="space-y-3 border-t border-border/70 pt-4 text-xs leading-relaxed">
           <p>{t("settings:diagnosticNoMessages")}</p>
-          <p>{t("settings:diagnosticIncidentalText")}</p>
+          <p className="border-t border-border/70 pt-3">{t("settings:diagnosticIncidentalText")}</p>
         </div>
       </AlertDescription>
     </Alert>
@@ -174,23 +174,23 @@ type DiagnosticBundleCardProps = {
 function DiagnosticBundleCard({ pending, state, message, onCustomize }: DiagnosticBundleCardProps) {
   const { t } = useTranslation();
   return (
-    <Card data-testid="system-diagnostic-bundle-card" className="overflow-hidden">
+    <Card data-testid="system-diagnostic-bundle-card" className="border-border/70">
       <CardContent className="space-y-5 p-5 sm:p-6">
-        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0 space-y-2">
+        <div className="max-w-3xl space-y-4">
+          <div className="space-y-2">
             <CardTitle className="flex items-center gap-2 text-base">
               <IconFileZip className="size-4" />
               {t("settings:diagnosticBundleTitle")}
             </CardTitle>
-            <p className="max-w-3xl text-sm leading-relaxed text-muted-foreground">
+            <p className="text-sm leading-relaxed text-muted-foreground">
               {t("settings:diagnosticBundleDescription")}
             </p>
           </div>
           <DiagnosticBundleActions pending={pending} state={state} onCustomize={onCustomize} />
         </div>
-        <div className="grid gap-x-8 gap-y-3 border-t border-border/70 pt-4 text-xs leading-relaxed text-muted-foreground sm:grid-cols-2">
+        <div className="space-y-3 border-t border-border/70 pt-4 text-xs leading-relaxed text-muted-foreground">
           <p>{t("settings:diagnosticBackendEvents")}</p>
-          <p>{t("settings:diagnosticFrontendEvents")}</p>
+          <p className="border-t border-border/70 pt-3">{t("settings:diagnosticFrontendEvents")}</p>
         </div>
         {message && <DiagnosticBundleMessage state={state} message={message} />}
       </CardContent>
@@ -205,9 +205,9 @@ function DiagnosticBundleActions({
 }: Omit<DiagnosticBundleCardProps, "message">) {
   const { t } = useTranslation();
   return (
-    <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:flex-wrap">
+    <div className="flex w-full sm:w-auto">
       <Button
-        className="min-h-11 w-full cursor-pointer lg:w-auto"
+        className="min-h-11 w-full cursor-pointer sm:w-auto"
         disabled={pending}
         onClick={onCustomize}
         data-testid="customize-diagnostic-bundle"

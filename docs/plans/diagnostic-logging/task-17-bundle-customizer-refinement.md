@@ -94,8 +94,12 @@ pnpm e2e:run --no-build --project mobile-chrome e2e/tests/system/mobile-logs-bun
 - Widened the desktop customizer without imposing empty fixed-height space; the
   phone flow remains an inset Drawer with one scroll owner and touch-sized
   controls.
+- Refined the Logs-page hierarchy with matched card padding, vertically ordered
+  privacy/source notes, and a desktop action aligned under the bundle
+  description. The phone page retains the same single-column flow and Drawer
+  entry point.
 - Updated the public operations guide and diagnostic-bundle decision to match
   the consolidated flow.
 - Verified with backend package tests (252), focused web tests (28), production
-  web build, desktop E2E (2), mobile E2E (2), web typecheck, lint, and i18n
+  web build, desktop E2E (3), mobile E2E (2), web typecheck, lint, and i18n
   checks.

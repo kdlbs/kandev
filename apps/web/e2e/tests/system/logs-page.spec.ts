@@ -58,6 +58,37 @@ test.describe("System Logs page", () => {
       caption: "The wider diagnostic bundle customizer keeps source choices easy to scan.",
     });
   });
+
+  test("keeps privacy notes stacked and the bundle action on the content axis", async ({
+    testPage,
+  }) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    await testPage.goto("/settings/system/logs");
+
+    const noMessages = testPage.getByText(
+      "Standard bundles do not include chat transcripts, session messages, or agent messages.",
+    );
+    const incidentalText = testPage.getByText(
+      "Incidental text already written into a log entry is not automatically redacted. Review the ZIP before sharing.",
+    );
+    const description = testPage.getByText(
+      "Kandev asks your connected browser tabs for their bounded three-day console history, combines it with retained backend log files, and downloads one ZIP.",
+    );
+    const action = testPage.getByTestId("customize-diagnostic-bundle");
+    const [noMessagesBox, incidentalTextBox, descriptionBox, actionBox] = await Promise.all([
+      noMessages.boundingBox(),
+      incidentalText.boundingBox(),
+      description.boundingBox(),
+      action.boundingBox(),
+    ]);
+
+    expect(noMessagesBox).not.toBeNull();
+    expect(incidentalTextBox).not.toBeNull();
+    expect(descriptionBox).not.toBeNull();
+    expect(actionBox).not.toBeNull();
+    expect(incidentalTextBox!.y).toBeGreaterThan(noMessagesBox!.y + noMessagesBox!.height);
+    expect(Math.abs(actionBox!.x - descriptionBox!.x)).toBeLessThanOrEqual(1);
+  });
 });
 
 function readStoredZip(buffer: Buffer): Map<string, Buffer> {
