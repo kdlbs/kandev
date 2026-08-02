@@ -68,6 +68,7 @@ apps/backend/
 │   ├── integrations/     # Shared shapes for third-party integrations
 │   │   ├── healthpoll/   # Reusable 90s auth-health Poller (used by jira, linear)
 │   │   └── secretadapter/ # Upsert-style adapter over secrets.SecretStore
+│   ├── i18n/             # Localization for backend-rendered browser/share artifacts
 │   ├── jira/             # Jira/Atlassian Cloud integration (config, REST client, poller)
 │   ├── linear/           # Linear integration (config, GraphQL client, poller)
 │   ├── lsp/              # LSP server
@@ -272,12 +273,9 @@ Built-in prompt content refreshes are seed-data migrations, not schema migration
 
 ## Internationalization
 
-`internal/i18n` covers only what Go renders **directly to a browser**: the
-SPA-unavailable error pages and the shared-task artifacts (`share.html`, gist
-README, gist description). Everything else stays English by design — the ~1,100
-`http.Error` / `gin.H{"error": …}` strings are diagnostics the SPA maps onto its
-own translated copy, and log lines, agent/ACP output, and CLI output are not
-display copy.
+`internal/i18n` covers only Go-rendered browser copy: SPA-unavailable pages and
+shared-task artifacts (`share.html`, gist README, gist description). Diagnostics,
+logs, agent/ACP output, and CLI output remain English by design.
 
 - `i18n.T(locale, key)` / `i18n.Tf(locale, key, vars)` for lookup; `Tf`
   interpolates `{{name}}` and applies the catalog's i18next-compatible plural

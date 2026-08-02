@@ -14,7 +14,7 @@ from .repository import read_text
 RULE_ID = "COMPAT-LEDGER"
 _SEMVER_NUMBER = r"(?:0|[1-9][0-9]*)"
 _SEMVER_PRERELEASE_IDENTIFIER = (
-    rf"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
+    r"(?:0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)"
 )
 SEMVER = re.compile(
     rf"^{_SEMVER_NUMBER}\.{_SEMVER_NUMBER}\.{_SEMVER_NUMBER}"
@@ -44,7 +44,10 @@ def parse_date(value: object) -> dt.date | None:
 
 def validate_ledger(root: Path, ledger_path: Path, tracked: set[str], today: dt.date) -> list[Diagnostic]:
     data = load_json_file(ledger_path)
-    label = ledger_path.relative_to(root).as_posix() if ledger_path.is_relative_to(root) else str(ledger_path)
+    try:
+        label = ledger_path.relative_to(root).as_posix()
+    except ValueError:
+        label = str(ledger_path)
     if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("entries"), list):
         return [diagnostic(label, "ledger must contain version 1 and an entries array")]
 

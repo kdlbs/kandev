@@ -1,5 +1,9 @@
 """Compatibility-ledger validation tests."""
 
+import json
+import tempfile
+from pathlib import Path
+
 from support import ArchitectureFixture
 
 
@@ -88,3 +92,18 @@ class CompatibilityLedgerTest(ArchitectureFixture):
 
                 self.assertEqual(result.returncode, 1)
                 self.assertIn("invalid introduced_version", result.stdout)
+
+    def test_ledger_outside_repository_uses_absolute_label(self) -> None:
+        marker = "// compat: external-ledger"
+        self.write("apps/backend/internal/example/compat.go", f"package example\n{marker}\n")
+        self.track_all()
+
+        with tempfile.TemporaryDirectory() as tempdir:
+            ledger_path = Path(tempdir) / "compatibility-ledger.json"
+            ledger_path.write_text(
+                json.dumps({"version": 1, "entries": [self.valid_ledger_entry(marker=marker)]}) + "\n",
+                encoding="utf-8",
+            )
+            result = self.run_cli("--all", "--ledger", str(ledger_path))
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

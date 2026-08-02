@@ -92,11 +92,11 @@ def load_baselines_from_ref(
     for rule in rules:
         try:
             raw = run_git(root, "show", f"{ref}:{rule.baseline_path.as_posix()}")
-        except GitDiscoveryError:
+        except GitDiscoveryError as exc:
             if allow_missing:
                 baselines[rule.id] = None
                 continue
-            raise ConfigurationError(f"baseline {rule.baseline_path} does not exist at {ref}")
+            raise ConfigurationError(f"baseline {rule.baseline_path} does not exist at {ref}") from exc
         try:
             data = json.loads(raw.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as exc:
