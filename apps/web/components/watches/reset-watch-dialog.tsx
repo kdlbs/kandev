@@ -234,5 +234,8 @@ function renderDescription({
       : t("common:resetWatchDeleteAllTasks");
   }
   if (count === 0) return t("common:resetWatchNoTasks");
-  return t("common:resetWatchDeleteTasks", { count: count ?? 0 });
+  // `count` is still null on the first render, before the effect flips
+  // previewLoading — without this guard that renders "delete 0 tasks".
+  if (count === null) return t("common:resetWatchChecking");
+  return t("common:resetWatchDeleteTasks", { count });
 }

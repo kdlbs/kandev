@@ -98,7 +98,7 @@ function useWatchActions(workspaceId?: string | null) {
         toast({ description: t("github:failedToDeleteReviewWatch"), variant: "error" });
       }
     },
-    [remove, toast, watches],
+    [remove, t, toast, watches],
   );
 
   const handleTrigger = useCallback(
@@ -123,7 +123,7 @@ function useWatchActions(workspaceId?: string | null) {
         toast({ description: t("github:failedToCheckForPrs"), variant: "error" });
       }
     },
-    [trigger, toast, watches],
+    [trigger, t, toast, watches],
   );
 
   const handleReset = useCallback(
@@ -142,7 +142,7 @@ function useWatchActions(workspaceId?: string | null) {
         throw new Error("reset failed");
       }
     },
-    [reset, toast],
+    [reset, t, toast],
   );
 
   return {
@@ -183,7 +183,7 @@ function useIssueWatchActions(workspaceId?: string | null) {
         toast({ description: t("github:failedToDeleteIssueWatch"), variant: "error" });
       }
     },
-    [remove, toast, watches],
+    [remove, t, toast, watches],
   );
 
   const handleTrigger = useCallback(
@@ -208,7 +208,7 @@ function useIssueWatchActions(workspaceId?: string | null) {
         toast({ description: t("github:failedToCheckForIssues"), variant: "error" });
       }
     },
-    [trigger, toast, watches],
+    [trigger, t, toast, watches],
   );
 
   const handleReset = useCallback(
@@ -227,7 +227,7 @@ function useIssueWatchActions(workspaceId?: string | null) {
         throw new Error("reset failed");
       }
     },
-    [reset, toast],
+    [reset, t, toast],
   );
 
   return {

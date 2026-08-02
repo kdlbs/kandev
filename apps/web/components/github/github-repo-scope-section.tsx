@@ -30,6 +30,7 @@ import type {
   UpdateGitHubWorkspaceSettingsRequest,
 } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
+import { t as translate } from "@/lib/i18n";
 
 function splitCSV(value: string): string[] {
   return value
@@ -244,8 +245,15 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
         setRepos(next.repos);
       })
       .catch(() => {
+        // The module-level `t` resolves at call time, so this follows the active
+        // locale without putting the hook's `t` in the effect deps — that would
+        // refetch on every locale switch and overwrite the user's unsaved edits
+        // via the setMode/setOrgs/setRepos calls above.
         if (!cancelled)
-          toast({ description: t("github:failedToLoadGithubWorkspaceSettings"), variant: "error" });
+          toast({
+            description: translate("github:failedToLoadGithubWorkspaceSettings"),
+            variant: "error",
+          });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -275,7 +283,7 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
       toast({ description: t("github:failedToSaveGithubWorkspaceSettings"), variant: "error" });
       throw new Error("Failed to save GitHub workspace settings");
     }
-  }, [mode, orgs, parsedRepos, repos, toast, workspaceId]);
+  }, [mode, orgs, parsedRepos, repos, t, toast, workspaceId]);
   const discard = useCallback(() => {
     setMode(baseline.mode);
     setOrgs(baseline.orgs);

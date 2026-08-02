@@ -99,7 +99,12 @@ export function GitHubTaskAccessForm({
         </label>
       </RadioGroup>
       <p className="text-xs leading-5 text-muted-foreground">
-        {t("github:anExecutorProfileGhTokenOr")}
+        {/* Env var names are identifiers the user must type exactly, so they are
+            interpolated rather than left for the pseudo-locale to mangle. */}
+        {t("github:anExecutorProfileGhTokenOr", {
+          ghToken: "GH_TOKEN",
+          githubToken: "GITHUB_TOKEN",
+        })}
       </p>
       {taskAccess.error && (
         <p className="text-sm text-destructive">{t("github:unableToLoadTheCurrentTask")}</p>

@@ -189,6 +189,7 @@ function useConnectionSettingsDraft({
     connectionRequest,
     onComplete,
     onSaved,
+    t,
     taskAccess,
     taskDirty,
     taskMode,

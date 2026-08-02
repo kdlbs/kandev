@@ -44,9 +44,14 @@ export function GitHubAppImportGuide({
           })}
         </p>
         <p className="text-xs leading-5 text-muted-foreground">
-          <Trans i18nKey="github:forWebhooksChooseContentType">
-            For webhooks, choose <strong>application/json</strong> as the content type and keep SSL
-            verification enabled.
+          {/* The content-type value is a literal the user selects on GitHub, so it
+              is interpolated rather than written into the catalog. */}
+          <Trans
+            i18nKey="github:forWebhooksChooseContentType"
+            values={{ contentType: "application/json" }}
+          >
+            For webhooks, choose <strong>{"{{contentType}}"}</strong> as the content type and keep
+            SSL verification enabled.
           </Trans>
         </p>
       </div>

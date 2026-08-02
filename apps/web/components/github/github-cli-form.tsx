@@ -28,8 +28,10 @@ function GitHubCLIAccountNotice({
   }
   return (
     <p className="text-xs text-muted-foreground">
-      <Trans i18nKey="github:signInWithGhAuthLogin">
-        Sign in with <code>gh auth login</code>, then reopen this dialog.
+      {/* The command is a value, not copy: writing it into the catalog lets the
+          pseudo-locale transliterate it into something the user cannot type. */}
+      <Trans i18nKey="github:signInWithGhAuthLogin" values={{ command: "gh auth login" }}>
+        Sign in with <code>{"{{command}}"}</code>, then reopen this dialog.
       </Trans>
     </p>
   );
