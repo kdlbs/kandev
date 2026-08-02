@@ -66,7 +66,7 @@ Changes:
 - Introduce a typed completion cause or equivalent private helper input so ordinary agent completion continues to require the pending signal when configured, while a configured explicit user cancellation can bypass that agent-owned gate.
 - In `Service.CancelAgent`, preserve authorization, deduplication, runtime cancellation, the visible cancellation message, turn completion, parked queue behavior, and session reconciliation. Reconciliation must return an authoritative result: confirm `WAITING_FOR_INPUT`, close every active turn, and verify no turn remains before evaluating `on_turn_complete` exactly once only when the current non-Office, non-ephemeral, non-archived Kanban step enables the policy. Any state or turn persistence failure fails closed and leaves the workflow transition untouched.
 - Retain the clarification barrier, pending/stale-event guards, transition failure behavior, `on_exit`, terminal-state handling, and asynchronous destination `on_enter` processing.
-- Avoid a duplicate or transient `REVIEW` state write when a workflow transition owns the final task state (especially terminal transitions); retain the review-ready fallback only after a confirmed no-transition/nonterminal outcome.
+- Avoid a duplicate or transient `REVIEW` state write when a workflow transition owns the final task state (especially terminal transitions); reconcile `REVIEW` after a confirmed no-transition or successful nonterminal transition, while terminal transitions remain direct.
 - Keep `cancelAgentSilent`, peer interruption, parent stop, archive, provider error, `AgentStopped`, and other runtime teardown paths outside this policy.
 
 ---

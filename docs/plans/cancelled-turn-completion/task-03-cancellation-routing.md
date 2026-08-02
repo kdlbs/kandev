@@ -16,7 +16,7 @@ spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
 - Cancellation reconciliation is authoritative: session state must be confirmed as `WAITING_FOR_INPUT` and no active turn may remain before completion evaluation. A session-state or turn-close failure fails closed and leaves the workflow step unchanged.
 - Configured user cancellation bypasses the agent completion-signal gate but not the pending-clarification, archive, ownership, Office, ephemeral, or stale-event guards.
 - A successful transition preserves ordinary `on_exit`, terminal, destination `on_enter`, and auto-start behavior; failed/no-transition paths remain input-ready and queued messages stay parked.
-- Terminal transitions publish their terminal task state directly without a transient `REVIEW` write; no-transition/nonterminal outcomes retain the review-ready fallback after reconciliation.
+- Terminal transitions publish their terminal task state directly without a transient `REVIEW` write; no-transition and successful nonterminal outcomes reconcile the task to `REVIEW` after settlement.
 
 ## Verification
 

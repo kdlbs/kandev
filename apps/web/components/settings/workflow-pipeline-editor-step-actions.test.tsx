@@ -47,6 +47,9 @@ describe("TurnCompleteSelect cancel completion policy", () => {
     const checkbox = screen.getByTestId("step-1-cancel-completion-checkbox");
 
     expect(checkbox.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByTestId("step-1-cancel-completion-help").textContent).toBe(
+      "settings:runCompletionActionsWhenTurnCancelledHelp",
+    );
     fireEvent.click(checkbox);
     expect(onUpdate).toHaveBeenCalledWith({ cancel_triggers_turn_complete: true });
   });

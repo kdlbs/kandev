@@ -887,6 +887,7 @@ func TestCancelAgent_HandlesReconciledRuntime(t *testing.T) {
 type cancelTurnFailureService struct {
 	*repoTurnService
 	completeErr error
+	activeErr   error
 }
 
 func (s *cancelTurnFailureService) CompleteTurn(ctx context.Context, turnID string) error {
@@ -894,6 +895,13 @@ func (s *cancelTurnFailureService) CompleteTurn(ctx context.Context, turnID stri
 		return s.completeErr
 	}
 	return s.repoTurnService.CompleteTurn(ctx, turnID)
+}
+
+func (s *cancelTurnFailureService) GetActiveTurn(ctx context.Context, sessionID string) (*models.Turn, error) {
+	if s.activeErr != nil {
+		return nil, s.activeErr
+	}
+	return s.repoTurnService.GetActiveTurn(ctx, sessionID)
 }
 
 type cancelContextAgentManager struct {
@@ -949,6 +957,66 @@ func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
 	task, err = repo.GetTask(ctx, taskID)
 	require.NoError(t, err)
 	assert.Equal(t, "step2", task.WorkflowStepID, "a later cancel retries the now-settled completion")
+}
+
+func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-active-turn-inspection-failure"
+	sessionID := "session-cancel-active-turn-inspection-failure"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
+		ID:            "turn-cancel-active-turn-inspection-failure",
+		TaskID:        taskID,
+		TaskSessionID: sessionID,
+		StartedAt:     now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}))
+
+	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
+	turnService := &cancelTurnFailureService{
+		repoTurnService: &repoTurnService{repo: repo},
+		activeErr:       errors.New("active turn lookup failed"),
+	}
+	svc.turnService = turnService
+
+	err := svc.CancelAgent(ctx, sessionID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "active turn lookup failed")
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step1", task.WorkflowStepID, "a failed retry inspection must keep completion pending")
+	activeTurn, err := turnService.repoTurnService.GetActiveTurn(ctx, sessionID)
+	require.NoError(t, err)
+	assert.NotNil(t, activeTurn, "a failed retry inspection must not close the active turn")
+
+	turnService.activeErr = nil
+	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID, "a later retry should evaluate the settled cancellation")
+}
+
+func TestCancelAgent_NonterminalTransitionReconcilesReviewState(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-review-state"
+	sessionID := "session-cancel-review-state"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, taskID, v1.TaskStateInProgress)
+	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
+	svc.taskRepo = taskRepo
+
+	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	assert.Contains(t, taskRepo.stateHistory[taskID], v1.TaskStateReview,
+		"a successful nonterminal cancellation transition must settle the task into REVIEW")
 }
 
 func TestReconcileCancelledTurn_DoesNotCloseTurnWhenSessionStateWriteFails(t *testing.T) {

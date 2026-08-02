@@ -4206,12 +4206,9 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			// re-run the source step's completion actions.
 			activeTurnID, turnErr := s.peekActiveTurnID(ctx, sessionID)
 			if turnErr != nil {
-				s.logger.Warn("failed to inspect active turn before cancel retry",
-					zap.String("session_id", sessionID),
-					zap.Error(turnErr))
-			} else {
-				cancelTurnCompletionEligible = activeTurnID != ""
+				return fmt.Errorf("inspect active turn before cancel retry: %w", turnErr)
 			}
+			cancelTurnCompletionEligible = activeTurnID != ""
 		}
 	}
 
@@ -4290,17 +4287,17 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// durable, while the per-session guard still excludes a late agent.ready
 	// event from observing a successor turn and transitioning a second time.
 	if session != nil && cancelTurnCompletionEligible {
-		transitioned := s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
-		if !transitioned {
-			// Disabled/no-transition outcomes still reconcile the Kanban task to
-			// REVIEW, but only after session and turn settlement has succeeded.
-			s.writeTaskReviewState(ctx, session.TaskID, session.ID)
-		}
+		s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
+		// Disabled/no-transition outcomes and successful nonterminal transitions
+		// both reconcile the source task to REVIEW after session and turn
+		// settlement. The guarded state write is a no-op for terminal tasks or a
+		// destination that has already restarted work.
+		s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
 	} else if session != nil {
 		// Preserve the existing review reconciliation for cancellations that
 		// are not eligible to run workflow completion (already waiting or a
 		// terminal/ineligible session).
-		s.writeTaskReviewState(ctx, session.TaskID, session.ID)
+		s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
 	}
 
 	// Release the cancel/interrupt guard now that this session's cancel is
@@ -4313,6 +4310,17 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sessionID string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err == nil && task != nil && task.WorkflowStepID != "" && s.workflowStepGetter != nil {
+		step, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if stepErr == nil && step != nil && s.workflowStepIsTerminal(ctx, step.ID) {
+			return
+		}
+	}
+	s.writeTaskReviewState(ctx, taskID, sessionID)
 }
 
 // takeAndDispatchEntryLocked takes entryID from sessionID's queue and
