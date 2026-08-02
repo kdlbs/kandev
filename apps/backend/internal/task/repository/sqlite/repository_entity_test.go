@@ -495,9 +495,16 @@ func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
 		t.Fatalf("seed legacy workflow step: %v", err)
 	}
 
-	for _, column := range []string{"auto_advance_requires_signal", "cancel_triggers_turn_complete"} {
-		if _, err := repo.db.Exec(`ALTER TABLE workflow_steps DROP COLUMN ` + column); err != nil {
-			t.Fatalf("drop legacy workflow_steps.%s: %v", column, err)
+	legacyColumns := []struct {
+		name string
+		sql  string
+	}{
+		{name: "auto_advance_requires_signal", sql: `ALTER TABLE workflow_steps DROP COLUMN auto_advance_requires_signal`},
+		{name: "cancel_triggers_turn_complete", sql: `ALTER TABLE workflow_steps DROP COLUMN cancel_triggers_turn_complete`},
+	}
+	for _, column := range legacyColumns {
+		if _, err := repo.db.Exec(column.sql); err != nil {
+			t.Fatalf("drop legacy workflow_steps.%s: %v", column.name, err)
 		}
 	}
 	if err := repo.runMigrations(); err != nil {
