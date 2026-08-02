@@ -115,7 +115,11 @@ func (wt *WorkspaceTracker) getGitStatusClass(ctx context.Context, class subproc
 		return types.GitStatusUpdate{}, err
 	}
 
-	resultCh := wt.gitStatusGroup.DoChan("live", func() (interface{}, error) {
+	// Observations are coalesced only within the same admission class. A
+	// background poll already in flight must not capture a fresh interactive
+	// request and make its Git commands run on the background queue.
+	key := "live:" + string(class)
+	resultCh := wt.gitStatusGroup.DoChan(key, func() (interface{}, error) {
 		sharedCtx, finish, err := wt.beginGitStatusObservation()
 		if err != nil {
 			return types.GitStatusUpdate{}, err

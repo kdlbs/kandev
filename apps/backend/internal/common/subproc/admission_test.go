@@ -195,6 +195,36 @@ func TestClassAdmissionCancellationWinsReleaseBoundary(t *testing.T) {
 	}
 }
 
+func TestClassAdmissionCancellationDoesNotCountAsAcquire(t *testing.T) {
+	pool := NewNamedClassThrottle("class-cancel-metrics-"+t.Name(), 1)
+	hold, err := pool.AcquireClass(context.Background(), GitInteractive)
+	if err != nil {
+		t.Fatalf("hold slot: %v", err)
+	}
+	defer hold()
+
+	beforeAggregate := metricInt(subprocAcquireTotal, pool.name)
+	beforeClass := metricInt(subprocClassAcquireTotal, classMetricKey(pool.name, GitLifecycle))
+	ctx, cancel := context.WithCancel(context.Background())
+	result := make(chan error, 1)
+	go func() {
+		_, acquireErr := pool.AcquireClass(ctx, GitLifecycle)
+		result <- acquireErr
+	}()
+	waitForClassWaiters(t, pool, GitLifecycle, 1)
+	cancel()
+	if acquireErr := <-result; !errors.Is(acquireErr, context.Canceled) {
+		t.Fatalf("canceled acquire = %v, want context.Canceled", acquireErr)
+	}
+
+	if got := metricInt(subprocAcquireTotal, pool.name); got != beforeAggregate {
+		t.Fatalf("aggregate acquire total = %d, want unchanged %d", got, beforeAggregate)
+	}
+	if got := metricInt(subprocClassAcquireTotal, classMetricKey(pool.name, GitLifecycle)); got != beforeClass {
+		t.Fatalf("lifecycle acquire total = %d, want unchanged %d", got, beforeClass)
+	}
+}
+
 func TestClassAdmissionGlobalCapAndWorkConservation(t *testing.T) {
 	pool := NewNamedClassThrottle("class-cap-"+t.Name(), 2)
 	var active, peak int64

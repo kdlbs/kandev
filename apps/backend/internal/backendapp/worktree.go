@@ -201,10 +201,17 @@ const defaultGitRemote = "origin"
 // the worktree's git config. Falls back to defaultGitRemote when no upstream
 // is set (matching the historical hard-coded behaviour).
 func detectBranchRemote(ctx context.Context, dir, branch string) string {
-	cmd := subproc.NewGitCommand(ctx, "config", "--get", "branch."+branch+".remote")
-	cmd.Dir = dir
-	out, err := subproc.RunGitOutputClass(ctx, subproc.GitInteractive, cmd)
-	if err != nil {
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		pushBranchTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, "config", "--get", "branch."+branch+".remote")
+			cmd.Dir = dir
+			return cmd
+		},
+	)
+	if runErr != nil || execCtxErr != nil {
 		return defaultGitRemote
 	}
 	remote := strings.TrimSpace(string(out))

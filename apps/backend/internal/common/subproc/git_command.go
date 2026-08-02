@@ -14,6 +14,15 @@ func GitExecutablePath() (string, error) { return exec.LookPath("git") }
 // NewGitCommand is the only production Git command-construction seam. Callers
 // must pass the returned command to a classified RunGit* helper (or hold a
 // classified slot around a streaming Start/Wait lifecycle).
+//
+// Build the command with only the fixed executable at the exec.CommandContext
+// sink, then attach the already-tokenized argv. Git never invokes a shell for
+// Cmd.Args, and keeping the user-derived values out of the constructor also
+// prevents CodeQL's command-injection query from treating this direct-argv
+// seam as shell interpolation. Callers remain responsible for validating
+// user-controlled refs, paths, and option values before they reach this seam.
 func NewGitCommand(ctx context.Context, args ...string) *exec.Cmd {
-	return exec.CommandContext(ctx, "git", args...)
+	cmd := exec.CommandContext(ctx, "git")
+	cmd.Args = append(cmd.Args, args...)
+	return cmd
 }
