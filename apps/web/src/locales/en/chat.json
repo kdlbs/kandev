@@ -5,5 +5,11 @@
   "failedToMergeQueuedMessages": "Failed to merge queued messages.",
   "mergeReferenceOverflow": "Too many entity references to merge these queued messages.",
   "mergeWithAbove": "Merge with above",
-  "removeQueuedMessage": "Remove queued message"
+  "removeQueuedMessage": "Remove queued message",
+  "technicalDetails": "Technical details",
+  "providerQuotaTitle": "{{provider}} usage limit reached",
+  "providerQuotaModel": "Model: {{model}}",
+  "providerQuotaReset": "Capacity resets {{resetAt}}.",
+  "providerQuotaResetUnknown": "Try again when the provider makes capacity available.",
+  "providerQuotaProviderFallback": "Provider"
 }

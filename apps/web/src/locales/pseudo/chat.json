@@ -5,5 +5,11 @@
   "failedToMergeQueuedMessages": "Ƒàĩĺēď ţō ḿēŕĝē qũēũēď ḿēśśàĝēś.",
   "mergeReferenceOverflow": "Ţōō ḿàńŷ ēńţĩţŷ ŕēƒēŕēńćēś ţō ḿēŕĝē ţĥēśē qũēũēď ḿēśśàĝēś.",
   "mergeWithAbove": "Ḿēŕĝē ŵĩţĥ àƀōvē",
-  "removeQueuedMessage": "Ŕēḿōvē qũēũēď ḿēśśàĝē"
+  "removeQueuedMessage": "Ŕēḿōvē qũēũēď ḿēśśàĝē",
+  "technicalDetails": "Ţēćĥńĩćàĺ ďēţàĩĺś",
+  "providerQuotaTitle": "{{provider}} ũśàĝē ĺĩḿĩţ ŕēàćĥēď",
+  "providerQuotaModel": "Ḿōďēĺ: {{model}}",
+  "providerQuotaReset": "Ćàƥàćĩţŷ ŕēśēţś {{resetAt}}.",
+  "providerQuotaResetUnknown": "Ţŕŷ àĝàĩń ŵĥēń ţĥē ƥŕōvĩďēŕ ḿàķēś ćàƥàćĩţŷ àvàĩĺàƀĺē.",
+  "providerQuotaProviderFallback": "Ƥŕōvĩďēŕ"
 }

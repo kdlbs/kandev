@@ -1,7 +1,7 @@
 ---
 id: "04-render-provider-quota-recovery"
 title: "Render localized quota recovery"
-status: pending
+status: done
 wave: 4
 depends_on: ["03-classify-provider-failure"]
 plan: "plan.md"
@@ -69,4 +69,8 @@ conversation.
 
 ## Results
 
-Pending.
+Added the localized `ProviderQuotaRecovery` inline card with model/reset
+fallbacks, collapsed technical details, existing recovery actions, and shared
+desktop/mobile layout. Unknown failures and running stall notices retain their
+existing renderers. The focused component suite passed all 17 tests; web
+typecheck, i18n key/pseudo checks, and the new-code ratchet passed.

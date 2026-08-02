@@ -1,7 +1,7 @@
 ---
 id: "05-e2e-provider-quota-recovery"
 title: "Prove desktop and mobile quota recovery"
-status: pending
+status: done
 wave: 5
 depends_on:
   - "03-classify-provider-failure"
@@ -26,8 +26,8 @@ spec: "../../specs/agent-stall-recovery/spec.md"
 ## Verification
 
 - `cd apps && pnpm install --frozen-lockfile`
-- `cd apps && pnpm --filter @kandev/web e2e:run tests/session/provider-quota-recovery.spec.ts`
-- `cd apps && pnpm --filter @kandev/web e2e:run tests/session/mobile-provider-quota-recovery.spec.ts -- --project=mobile-chrome`
+- `cd apps/web && pnpm e2e:run --no-build tests/session/provider-quota-recovery.spec.ts`
+- `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-provider-quota-recovery.spec.ts`
 
 Run against freshly built backend and Vite artifacts through the managed E2E
 runner. Inspect the rendered phone viewport in addition to assertions.
@@ -70,4 +70,9 @@ verification results in the same conversation.
 
 ## Results
 
-Pending.
+Added E2E-only seeded desktop and mobile specs. Both managed production-build
+runs passed: Chromium verifies the localized card, collapsed/expanded privacy
+details, and recovery actions; `mobile-chrome` verifies touch disclosure,
+44px actions, viewport containment, and no horizontal overflow. The first run
+found and fixed a fixture requirement for `completed_at`; no provider quota or
+developer log was used.

@@ -1,7 +1,7 @@
 ---
 id: "01-capture-opencode-error-diagnostics"
 title: "Capture OpenCode error diagnostics"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -74,4 +74,9 @@ and update its plan checkbox in the same conversation.
 
 ## Results
 
-Pending.
+RED covered the managed command contract, optional stderr consumer, and parser
+privacy cases before the implementation was added. OpenCode now uses
+`acp --print-logs --log-level ERROR`; the parser keeps only the validated
+foreground session/provider/model/message/timestamp/reset fields and rejects
+title, `small=true`, malformed, unrelated, or incomplete records. The exact
+verification command passed with 24 tests across three packages.

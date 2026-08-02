@@ -1363,6 +1363,45 @@ func TestHandleAgentEvent_ErrorCompleteSignalsPromptDoneCh(t *testing.T) {
 	}
 }
 
+func TestHandleAgentEvent_DuplicateErrorCannotReplaceProviderError(t *testing.T) {
+	mgr, _ := createTestManagerWithTracking()
+	execution := createTestExecution("exec-duplicate-error", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	generation, err := mgr.executionStore.BeginPrompt(execution.ID)
+	if err != nil {
+		t.Fatalf("begin prompt: %v", err)
+	}
+	first := &streams.ProviderError{
+		Source:     streams.ProviderErrorSourceOpenCodeStderr,
+		ProviderID: "opencode-go",
+		ModelID:    "kimi-k3",
+		Message:    "5-hour usage limit reached",
+		OccurredAt: time.Now().UTC(),
+	}
+	second := *first
+	second.Message = "a different provider failure"
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "complete",
+		PromptGeneration: generation,
+		ProviderError:    first,
+		Error:            first.Message,
+		Data:             map[string]interface{}{"is_error": true},
+	})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:             "complete",
+		PromptGeneration: generation,
+		ProviderError:    &second,
+		Error:            second.Message,
+		Data:             map[string]interface{}{"is_error": true},
+	})
+	if execution.ProviderError == nil || execution.ProviderError.Message != first.Message {
+		t.Fatalf("provider error was replaced: %+v", execution.ProviderError)
+	}
+}
+
 // TestHandleAgentEvent_UpdatesLastActivityAt verifies that every agent event
 // updates the lastActivityAt timestamp for stall detection.
 func TestHandleAgentEvent_UpdatesLastActivityAt(t *testing.T) {

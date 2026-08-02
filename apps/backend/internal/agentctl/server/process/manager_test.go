@@ -55,6 +55,56 @@ func TestPublishMCPAttachmentPublishesWithoutBlocking(t *testing.T) {
 	}
 }
 
+func TestSendErrorEventWithProviderErrorCarriesSafeDetails(t *testing.T) {
+	occurred := time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC)
+	m := &Manager{
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		logger:    newTestLogger(t),
+	}
+	m.SendErrorEventWithProviderError("provider failed", 7, &streams.ProviderError{
+		Source:     streams.ProviderErrorSourceOpenCodeStderr,
+		ModelID:    "kimi-k3",
+		Message:    "5-hour usage limit reached",
+		OccurredAt: occurred,
+	})
+
+	event := <-m.updatesCh
+	if event.PromptGeneration != 7 || event.Error != "provider failed" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.ProviderError == nil || event.ProviderError.ModelID != "kimi-k3" {
+		t.Fatalf("provider error = %+v", event.ProviderError)
+	}
+}
+
+func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
+	consumer := &stderrLineCapture{lines: make(chan string, 2)}
+	m := &Manager{
+		stderr:         io.NopCloser(strings.NewReader("\x1b[31mquota\x1b[0m\nplain\n")),
+		stderrConsumer: consumer,
+		logger:         newTestLogger(t),
+	}
+	m.wg.Add(1)
+	m.readStderr()
+
+	got := []string{<-consumer.lines, <-consumer.lines}
+	want := []string{"quota", "plain"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("consumer lines = %#v, want %#v", got, want)
+	}
+	if got := m.GetRecentStderr(); !slices.Equal(got, want) {
+		t.Fatalf("recent stderr = %#v, want %#v", got, want)
+	}
+}
+
+type stderrLineCapture struct {
+	lines chan string
+}
+
+func (c *stderrLineCapture) ConsumeStderrLine(line string) {
+	c.lines <- line
+}
+
 func TestPublishMCPAttachmentAttemptCarriesBackendOwnedIdentity(t *testing.T) {
 	m := &Manager{updatesCh: make(chan adapter.AgentEvent, 1), logger: newTestLogger(t)}
 	m.PublishMCPAttachmentAttempt(streams.MCPAttachmentAttempt{

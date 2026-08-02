@@ -1,7 +1,7 @@
 ---
 id: "02-settle-correlated-opencode-prompt"
 title: "Settle correlated OpenCode prompts"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-capture-opencode-error-diagnostics"]
 plan: "plan.md"
@@ -71,4 +71,9 @@ plan checkbox in the same conversation.
 
 ## Results
 
-Pending.
+The ACP adapter correlates diagnostics to the active ACP session and prompt
+turn, cancels the held RPC through its context cause, and forwards one typed
+provider error through the existing async prompt event. Wrong-session and
+post-settlement diagnostics are ignored; duplicate lifecycle terminal events
+are guarded by prompt generation. The exact verification command passed with
+3 tests across three packages.

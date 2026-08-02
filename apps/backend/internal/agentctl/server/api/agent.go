@@ -557,7 +557,11 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 				return
 			}
 			s.logger.Error("async prompt failed", zap.Error(err))
-			s.procMgr.SendErrorEvent(err.Error(), req.PromptGeneration)
+			s.procMgr.SendErrorEventWithProviderError(
+				err.Error(),
+				req.PromptGeneration,
+				acptransport.ProviderErrorFromError(err),
+			)
 		}
 	}()
 

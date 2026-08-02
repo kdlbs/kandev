@@ -30,6 +30,7 @@ func newPromptTurnState(
 		rpcDone:          make(chan struct{}),
 		abortCh:          make(chan struct{}),
 		handoffCh:        make(chan struct{}),
+		providerErrorCh:  make(chan openCodeStderrDiagnostic, 1),
 		promptGeneration: promptGeneration,
 		allowHandoff:     allowHandoff,
 	}
@@ -221,26 +222,43 @@ func waitForPromptRPCAfterCancel(turn *promptTurnState) error {
 }
 
 // waitForPromptRPCAfterUserCancel blocks until the in-flight session/prompt RPC
-// finishes. If the user cancels while this RPC is running, it waits briefly for
-// the agent to stop; otherwise it abandons the RPC so the prompt gate is released.
-func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState) error {
+// finishes or a correlated OpenCode provider diagnostic settles it. If the user
+// cancels while this RPC is running, it waits briefly for the agent to stop;
+// otherwise it abandons the RPC so the prompt gate is released.
+func (a *Adapter) waitForPromptRPCAfterUserCancel(turn *promptTurnState, sessionID string) error {
 	if turn == nil {
 		return nil
 	}
-	select {
-	case <-turn.rpcDone:
-		return nil
-	case <-turn.abortCh:
+	for {
 		select {
 		case <-turn.rpcDone:
 			return nil
-		case <-time.After(promptCancelJoinTimeout):
-			if turn.endTurn != nil {
-				turn.endTurn(ErrTurnCancelNotAcknowledged)
+		case diagnostic := <-turn.providerErrorCh:
+			if sessionID == "" || diagnostic.SessionID != sessionID {
+				continue
 			}
-			a.logger.Warn("in-flight session/prompt did not end after cancel; releasing prompt gate",
-				zap.Duration("timeout", promptCancelJoinTimeout))
-			return errPromptAbandonedAfterCancel
+			providerErr := &providerPromptError{ProviderError: diagnostic.ProviderError}
+			if turn.endTurn != nil {
+				turn.endTurn(providerErr)
+			}
+			select {
+			case <-turn.rpcDone:
+				return providerErr
+			case <-time.After(promptCancelJoinTimeout):
+				return providerErr
+			}
+		case <-turn.abortCh:
+			select {
+			case <-turn.rpcDone:
+				return nil
+			case <-time.After(promptCancelJoinTimeout):
+				if turn.endTurn != nil {
+					turn.endTurn(ErrTurnCancelNotAcknowledged)
+				}
+				a.logger.Warn("in-flight session/prompt did not end after cancel; releasing prompt gate",
+					zap.Duration("timeout", promptCancelJoinTimeout))
+				return errPromptAbandonedAfterCancel
+			}
 		}
 	}
 }

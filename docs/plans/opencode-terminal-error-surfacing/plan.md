@@ -2,7 +2,7 @@
 spec: docs/specs/agent-stall-recovery/spec.md
 decision: docs/decisions/2026-08-02-agent-terminal-diagnostics-over-stderr.md
 created: 2026-08-02
-status: draft
+status: done
 ---
 
 # Implementation Plan: OpenCode Terminal Error Surfacing
@@ -123,8 +123,9 @@ stall notice.
   the existing recovery actions, and the existing collapsed **Technical
   details** disclosure for sanitized `error_output`.
 - Add all new copy to `apps/web/src/locales/en/chat.json` and
-  `apps/web/src/locales/pseudo/chat.json`; call `useTranslation("chat")` at
-  render time. Do not translate tokens that are compared in control flow.
+  `apps/web/src/locales/pseudo/chat.json`; resolve chat keys through
+  `useTranslation` at render time. Do not translate tokens that are compared
+  in control flow.
 - Keep the generic settled-error behavior unchanged for unknown provider
   failures and keep the existing neutral running-stall notice unchanged.
 
@@ -210,8 +211,11 @@ stall notice.
 
 ## Verification Results
 
-Pending. Each task records its exact commands and results before its status and
-the corresponding checkbox below are changed to `done`.
+- Task 01: `cd apps/backend && go test ./internal/agent/agents ./internal/agentctl/server/process ./internal/agentctl/server/adapter/transport/acp -run 'Test(OpenCode|ManagedNPMRuntime|Manager.*Stderr|ParseOpenCode)' -count=1` — 24 tests passed.
+- Task 02: `cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp ./internal/agentctl/server/api ./internal/agentctl/server/process -run 'Test(OpenCodeDiagnostic|Prompt.*Diagnostic|HandleWSPrompt.*ProviderError|SendErrorEvent)' -count=1` — 3 tests passed.
+- Task 03: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/agent/runtime/routingerr ./internal/orchestrator ./internal/orchestrator/watcher -run 'Test(.*ProviderError|.*OpenCode.*UsageLimit|HandleRecoverableFailure.*Quota|CreateRecoveryStatusMessage.*Quota)' -count=1` — 13 tests passed.
+- Task 04: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/action-message.test.tsx` — 17 tests passed; `cd apps/web && pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Task 05: managed desktop and mobile Playwright runs passed after the E2E seed was corrected to include `completed_at`: one Chromium test and one `mobile-chrome` test passed.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -220,23 +224,23 @@ contract introduced by the previous task, so none is marked parallel-safe.
 
 Wave 1:
 
-- [ ] [Task 01: Capture OpenCode error diagnostics](task-01-capture-opencode-error-diagnostics.md)
+- [x] [Task 01: Capture OpenCode error diagnostics](task-01-capture-opencode-error-diagnostics.md)
 
 Wave 2:
 
-- [ ] [Task 02: Settle prompts from correlated diagnostics](task-02-settle-correlated-opencode-prompt.md)
+- [x] [Task 02: Settle prompts from correlated diagnostics](task-02-settle-correlated-opencode-prompt.md)
 
 Wave 3:
 
-- [ ] [Task 03: Classify and persist provider failures](task-03-classify-provider-failure.md)
+- [x] [Task 03: Classify and persist provider failures](task-03-classify-provider-failure.md)
 
 Wave 4:
 
-- [ ] [Task 04: Render localized quota recovery](task-04-render-provider-quota-recovery.md)
+- [x] [Task 04: Render localized quota recovery](task-04-render-provider-quota-recovery.md)
 
 Wave 5:
 
-- [ ] [Task 05: Prove desktop and mobile recovery](task-05-e2e-provider-quota-recovery.md)
+- [x] [Task 05: Prove desktop and mobile recovery](task-05-e2e-provider-quota-recovery.md)
 
 ## Risks and non-goals
 

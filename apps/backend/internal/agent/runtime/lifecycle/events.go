@@ -92,6 +92,7 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 		AgentExecutionID:   execution.ID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
 		ExecutionProfileID: execution.AgentProfileID,
 		ContainerID:        execution.ContainerID,
@@ -99,6 +100,7 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 		StartedAt:          execution.StartedAt,
 		FinishedAt:         execution.FinishedAt,
 		ErrorMessage:       execution.ErrorMessage,
+		ProviderError:      execution.ProviderError,
 		ExitCode:           execution.ExitCode,
 		PromptGeneration:   execution.promptGeneration,
 	}
@@ -184,6 +186,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		ToolTitle:               event.ToolTitle,
 		ToolStatus:              event.ToolStatus,
 		Error:                   event.Error,
+		ProviderError:           event.ProviderError,
 		SessionStatus:           event.SessionStatus,
 		PromptGeneration:        event.PromptGeneration,
 		Data:                    event.Data,

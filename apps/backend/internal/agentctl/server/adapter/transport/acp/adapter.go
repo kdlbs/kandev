@@ -292,6 +292,7 @@ type promptTurnState struct {
 	rpcDone          chan struct{}
 	abortCh          chan struct{}
 	handoffCh        chan struct{}
+	providerErrorCh  chan openCodeStderrDiagnostic
 	promptGeneration uint64
 	allowHandoff     bool
 	handedOff        bool

@@ -81,6 +81,14 @@ type StderrProvider interface {
 	GetRecentStderr() []string
 }
 
+// StderrLineConsumer receives cleaned stderr lines as they are emitted by the
+// managed agent process. Implementations must return promptly; a consumer is
+// an optional diagnostic signal and must never apply backpressure to the child
+// process's stderr pipe.
+type StderrLineConsumer interface {
+	ConsumeStderrLine(line string)
+}
+
 // StderrProviderSetter is an optional interface implemented by adapters that can use
 // stderr output for error context. The process manager checks for this interface
 // and calls SetStderrProvider if available.

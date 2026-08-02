@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -1352,6 +1353,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
+	applyProviderQuotaMetadata(meta, data)
 
 	// Include cached auth methods so the frontend can show login options.
 	if authErr {
@@ -1376,6 +1378,38 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
 	}
+}
+
+// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
+// diagnostic to the specialized recovery surface. Generic prose and provider
+// diagnostics from other agents retain the existing error card.
+func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
+	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
+		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
+		!data.ProviderError.Valid() {
+		return false
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: data.AgentID,
+		Stderr:     data.ProviderError.Message,
+	})
+	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
+		return false
+	}
+
+	meta["failure_kind"] = "provider_quota_limited"
+	meta["provider_name"] = "OpenCode"
+	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
+		meta["model_id"] = modelID
+	}
+	if resetAt := data.ProviderError.ResetAt; resetAt != nil && !resetAt.IsZero() {
+		meta["reset_at"] = resetAt.UTC().Format(time.RFC3339)
+	}
+	if details := routingerr.Sanitize(data.ProviderError.Message); details != "" {
+		meta["error_output"] = details
+	}
+	return true
 }
 
 // isOfficeSession resolves Office ownership through the session's task.

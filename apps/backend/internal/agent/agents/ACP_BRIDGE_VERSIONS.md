@@ -7,13 +7,15 @@ name:
 | --- | --- | --- |
 | Claude | `@agentclientprotocol/claude-agent-acp` | none |
 | Codex | `@agentclientprotocol/codex-acp` | none |
-| OpenCode | `opencode-ai` | `acp` |
+| OpenCode | `opencode-ai` | `acp --print-logs --log-level ERROR` |
 | Copilot | `@github/copilot` | `--acp` |
 | Gemini | `@google/gemini-cli` | `--acp` |
 
 Normal capability probes, sessions, container commands, and one-shot
 inference use `npx --yes --prefer-offline` with the package name and arguments
-above. This lets npm reuse its execution cache without making the cache a
+above. OpenCode's error-only log flags are part of its managed command so
+agentctl can observe terminal provider diagnostics without reading OpenCode's
+private log files. This lets npm reuse its execution cache without making the cache a
 durable installed-version guarantee. Kandev records the version reported by
 the ACP initialize response instead of inferring it from source.
 

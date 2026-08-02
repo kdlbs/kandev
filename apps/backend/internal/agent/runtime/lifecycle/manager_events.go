@@ -206,6 +206,10 @@ func (m *Manager) claimPromptCompletion(
 		if current != execution || current.promptGeneration != event.PromptGeneration {
 			return
 		}
+		if current.promptCompletionGeneration == event.PromptGeneration {
+			return
+		}
+		current.promptCompletionGeneration = event.PromptGeneration
 		claimed = true
 		claim.execution = current
 		if isError {
@@ -255,6 +259,9 @@ func (m *Manager) finishPromptCompletion(
 ) {
 	handleCompleteEventSignal(execution, event, isError)
 	if event.PromptGeneration == 0 || isError {
+		if isError {
+			setProviderError(execution, event.ProviderError)
+		}
 		m.handleCompleteEventMarkState(execution, event, isError)
 		if claim.locked {
 			execution.promptLifecycleMu.Unlock()
@@ -268,6 +275,18 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+}
+
+func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {
+	if execution == nil || providerError == nil || !providerError.Valid() {
+		return
+	}
+	copy := *providerError
+	if providerError.ResetAt != nil {
+		resetAt := *providerError.ResetAt
+		copy.ResetAt = &resetAt
+	}
+	execution.ProviderError = &copy
 }
 
 // handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.

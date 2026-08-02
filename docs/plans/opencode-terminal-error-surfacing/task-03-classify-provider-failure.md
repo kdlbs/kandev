@@ -1,7 +1,7 @@
 ---
 id: "03-classify-provider-failure"
 title: "Classify and persist provider failures"
-status: pending
+status: done
 wave: 3
 depends_on: ["02-settle-correlated-opencode-prompt"]
 plan: "plan.md"
@@ -73,4 +73,10 @@ conversation.
 
 ## Results
 
-Pending.
+The safe provider record and concrete `opencode-acp` ID now reach
+`agent.failed`. The exact five-hour usage-limit signature is high-confidence
+`quota_limited`; URL/session/workspace identifiers are redacted before
+persistence. Non-Office recovery metadata includes only the specialized
+failure kind, provider/model/reset values, sanitized details, and existing
+actions. The exact verification command passed with 13 tests across four
+packages.

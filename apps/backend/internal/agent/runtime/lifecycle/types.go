@@ -52,15 +52,19 @@ type AgentExecution struct {
 	FinishedAt           *time.Time
 	ExitCode             *int
 	ErrorMessage         string
+	ProviderError        *streams.ProviderError
 	Metadata             map[string]interface{}
 	// runtimeEnv is the effective environment used to create the task's
 	// runtime instance. It is kept in memory only so authorized task-scoped
 	// terminals and passthrough processes can inherit the same credentials and
 	// PATH as the agent subprocess without persisting secrets in metadata.
-	runtimeEnv        map[string]string
-	runtimeEnvMu      sync.RWMutex
-	promptGeneration  uint64
-	promptLifecycleMu sync.Mutex
+	runtimeEnv       map[string]string
+	runtimeEnvMu     sync.RWMutex
+	promptGeneration uint64
+	// promptCompletionGeneration prevents duplicate terminal events for the
+	// same prompt from replacing the first terminal outcome or provider error.
+	promptCompletionGeneration uint64
+	promptLifecycleMu          sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
