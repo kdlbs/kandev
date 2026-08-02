@@ -104,8 +104,16 @@ jobs:
         run: |
           set -euo pipefail
 
+          # On `pull_request` the checkout is the MERGE REF, whose first parent is
+          # the base branch tip. `pull_request.base.sha` is the base tip from when
+          # the PR event fired, so it is an ANCESTOR of that merge ref — which
+          # makes `base...HEAD` collapse to a two-dot diff and list everything
+          # main landed since the PR opened. Over-broad is harmless here (the
+          # extra files are already formatted), but it is the same trap the i18n
+          # ratchet below hit for real, so do not copy the old idiom. The fork
+          # point is what "changed in this PR" actually means.
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            BASE_SHA="$(git merge-base HEAD "origin/${{ github.base_ref }}")"
           else
             BASE_SHA="${{ github.event.before }}"
           fi
@@ -115,7 +123,7 @@ jobs:
           fi
 
           CHANGED_FILES="$(
-            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}"..."${{ github.sha }}" \
+            git diff --name-only --diff-filter=ACMRT "${BASE_SHA}" HEAD \
             | grep -E '^apps/(web|cli|packages)/.*\.(ts|tsx|js|jsx|mjs|cjs|json|md|mdx|yml|yaml|css|scss)$' \
             || true
           )"
@@ -160,8 +168,7 @@ jobs:
       # These two judge the CHANGE instead of the FILE: an added file must be
       # clean outright, a modified file only on the lines it touched, and the
       # guard allowlist may not shrink. Same model as
-      # `golangci-lint --new-from-rev` for Go. Base SHA is resolved the same way
-      # as the Prettier step above.
+      # `golangci-lint --new-from-rev` for Go.
       - name: Run i18n new-code ratchet
         shell: bash
         # The job defaults to `apps`; these scripts live one level deeper.
@@ -169,19 +176,28 @@ jobs:
         run: |
           set -euo pipefail
 
+          # DO NOT pass --base on pull_request. The checkout is the merge ref
+          # `refs/pull/N/merge`, and `pull_request.base.sha` is the base branch tip
+          # from when the PR event fired — an ancestor of that merge ref. Handing
+          # it in made the ratchet judge every commit main landed since the PR
+          # opened as this PR's new code, failing PRs on files they never touched
+          # (#2160). The scripts' own default, `merge-base HEAD origin/main`,
+          # resolves to the merge ref's base-side parent and is correct here;
+          # origin/main is present because the checkout is fetch-depth: 0.
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          else
-            BASE_SHA="${{ github.event.before }}"
+            node scripts/run-i18n-ratchet.mjs
+            exit 0
           fi
 
+          # push: HEAD *is* the new base branch tip, so there is no fork point to
+          # find and the previous tip is the only meaningful base.
+          BASE_SHA="${{ github.event.before }}"
           if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
             echo "No usable base SHA; skipping the new-code ratchet."
             exit 0
           fi
 
-          node scripts/check-new-code-i18n.mjs --base "${BASE_SHA}"
-          node scripts/check-guard-allowlist.mjs --base "${BASE_SHA}"
+          node scripts/run-i18n-ratchet.mjs --base "${BASE_SHA}"
 
       - name: Run tests
         run: pnpm --filter @kandev/web test

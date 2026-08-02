@@ -26,6 +26,11 @@ type ServerFactory func(cfg *config.InstanceConfig, procMgr *process.Manager, lo
 
 const instanceHTTPShutdownGrace = 250 * time.Millisecond
 
+// ErrManagerShuttingDown is returned by CreateInstance once Shutdown has begun.
+// Callers get a clear refusal instead of an instance that the shutdown sequence
+// has already walked past and will never stop.
+var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -45,6 +50,27 @@ type Manager struct {
 	reaperStop     chan struct{}
 	reaperStopOnce sync.Once
 	reaperWG       sync.WaitGroup
+
+	// abandonWG tracks the teardown goroutines CreateInstance spawns when a
+	// caller vanishes mid-creation. They run off the creation mutex so a slow
+	// tracker stop cannot block the queue; Shutdown drains them so a process
+	// exit does not leave half-torn-down trackers behind.
+	//
+	// shuttingDown, guarded by mu, closes the window where Shutdown could
+	// observe the counter at zero and a CreateInstance already past its own
+	// checks could then Add(1) behind it. Setting the flag under the same mutex
+	// CreateInstance holds means every creation either completes before the
+	// flag is set — so its Add is visible to the Wait below — or sees the flag
+	// and refuses.
+	abandonWG    sync.WaitGroup
+	shuttingDown bool
+
+	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
+	// nil in production. It exists so a test can cancel the caller's context at
+	// exactly that point and assert the abandonment branch ran, rather than
+	// racing cancellation against tracker startup and accepting whichever
+	// outcome it happens to get.
+	afterTrackerStart func()
 }
 
 // NewManager creates a new instance manager.
@@ -81,6 +107,32 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Refuse once Shutdown has begun, so no creation can register an
+	// abandonment teardown after Shutdown drained the wait group.
+	if m.shuttingDown {
+		return nil, ErrManagerShuttingDown
+	}
+
+	// The caller may already be gone. Creation is serialised on m.mu, the
+	// control client gives up after 30s, and callers that give up retry — so
+	// under load this lock grows a queue of requests nobody is waiting for any
+	// more. Building an instance for one of those leaks it: no caller holds its
+	// ID, so nothing ever stops it, and it keeps a port, an HTTP server and a
+	// full set of workspace trackers polling git. That extra polling is what
+	// makes the next creation slower, which lengthens the queue, which leaks
+	// more instances.
+	//
+	// Seen in the field as create latency climbing 6ms -> 5.5s -> 34s -> 192s
+	// with 16 live instances and zero deletions, by which point plain
+	// `git ls-files` was hitting its 10s timeout and session resume failed.
+	if err := ctx.Err(); err != nil {
+		m.logger.Warn("create instance abandoned while queued; caller had already given up",
+			zap.String("workspace_path", req.WorkspacePath),
+			zap.Error(err))
+		return nil, fmt.Errorf("create instance abandoned while queued: %w", err)
+	}
+
 	agentEnv, err := config.CollectAgentEnvWithError(req.Env)
 	if err != nil {
 		return nil, fmt.Errorf("prepare agent environment: %w", err)
@@ -143,6 +195,30 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
 	procMgr.StartAllWorkspaceTrackers(context.Background())
+	if m.afterTrackerStart != nil {
+		m.afterTrackerStart()
+	}
+
+	// Starting the trackers is the slow part of creation, so re-check: a caller
+	// that was still waiting when we took the lock can time out during it.
+	if err := ctx.Err(); err != nil {
+		// Teardown runs off this goroutine because it must not happen under
+		// m.mu. stopWorkspaceTrackers stops trackers one at a time, and
+		// WorkspaceTracker.Stop takes no context — it waits on its own
+		// stopTimeout timer — so a workspace with a dozen repositories could
+		// pin the creation mutex for the better part of a minute, lengthening
+		// the very queue this abandonment exists to drain.
+		//
+		// Nothing can observe the instance meanwhile: it was never added to
+		// m.instances, and PortAllocator carries its own mutex. The wait group
+		// lets Shutdown drain these before it returns.
+		m.abandonWG.Add(1)
+		go func() {
+			defer m.abandonWG.Done()
+			m.abandonPartialInstance(id, port, listener, procMgr)
+		}()
+		return nil, fmt.Errorf("create instance abandoned during startup: %w", err)
+	}
 
 	// Create instance up-front so the activity middleware can reference it.
 	inst := &Instance{
@@ -171,6 +247,46 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		ID:   id,
 		Port: port,
 	}, nil
+}
+
+// abandonPartialInstanceTimeout bounds the admission wait inside
+// StopForTeardown for an instance whose caller vanished mid-creation. It does
+// not bound the tracker stops themselves — WorkspaceTracker.Stop honours no
+// context and falls back to its own stopTimeout — which is exactly why this
+// teardown runs off the creation mutex rather than under it.
+const abandonPartialInstanceTimeout = 5 * time.Second
+
+// abandonPartialInstance unwinds the pieces CreateInstance built before it
+// noticed the caller had gone: the tracker goroutines, the bound listener and
+// the allocated port. It must be called WITHOUT m.mu held — the tracker stops
+// are slow and uninterruptible — and it does not route through StopInstance,
+// which would take that lock. The instance was never registered in
+// m.instances, so there is nothing there to remove.
+func (m *Manager) abandonPartialInstance(id string, port int, listener net.Listener, procMgr *process.Manager) {
+	// The request context is already cancelled, so teardown needs its own.
+	ctx, cancel := context.WithTimeout(context.Background(), abandonPartialInstanceTimeout)
+	defer cancel()
+
+	// Give the port back first. Nothing was ever published on this listener, and
+	// stopping the trackers below can take seconds — holding the port for that
+	// long shrinks the pool exactly when creations are already piling up.
+	if listener != nil {
+		_ = listener.Close()
+	}
+	m.portAlloc.Release(port)
+
+	if procMgr != nil {
+		procMgr.CloseAdmission()
+		if err := procMgr.StopForTeardown(ctx); err != nil {
+			m.logger.Warn("error stopping process manager for abandoned instance",
+				zap.String("instance_id", id),
+				zap.Error(err))
+		}
+	}
+
+	m.logger.Warn("abandoned partially created instance",
+		zap.String("instance_id", id),
+		zap.Int("port", port))
 }
 
 // allocatePortAndListener allocates a free port and binds a TCP listener to it.
@@ -429,6 +545,17 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	// Stop the idle reaper first so it doesn't fire StopInstance concurrently
 	// with our explicit per-instance shutdown loop.
 	m.stopReaperOnce()
+
+	// Refuse new creations before draining, so nothing can register another
+	// teardown goroutine behind the Wait below.
+	m.mu.Lock()
+	m.shuttingDown = true
+	m.mu.Unlock()
+
+	// Drain any in-flight abandonment teardowns. They own trackers and a port
+	// that are no longer reachable through m.instances, so nothing below would
+	// wait for them otherwise.
+	m.abandonWG.Wait()
 
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.instances))

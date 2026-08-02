@@ -124,6 +124,19 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 	}
 }
 
+// buildSessionGitDataProvider constructs the narrow provider used by the diff
+// panel's explicit refresh request. It intentionally does not hydrate session
+// state, agent readiness, commands, mode, models, or context-window data.
+func buildSessionGitDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
+	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+		session, err := taskRepo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return nil, nil
+		}
+		return appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, nil, log), nil
+	}
+}
+
 const sessionIDPayloadKey = "session_id"
 const taskIDPayloadKey = "task_id"
 const newStatePayloadKey = "new_state"
@@ -368,16 +381,20 @@ func appendContextWindowMessage(sessionID string, session *models.TaskSession, r
 	if session.Metadata == nil {
 		return result
 	}
-	contextWindow, ok := session.Metadata["context_window"]
+	contextWindow, ok := session.Metadata[models.SessionMetaKeyContextWindow]
 	if !ok {
 		return result
+	}
+	metadata := map[string]interface{}{
+		models.SessionMetaKeyContextWindow: contextWindow,
+	}
+	if count, present := session.Metadata[models.SessionMetaKeyContextCompactionCount]; present {
+		metadata[models.SessionMetaKeyContextCompactionCount] = count
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 		"session_id": sessionID,
 		"task_id":    session.TaskID,
-		"metadata": map[string]interface{}{
-			"context_window": contextWindow,
-		},
+		"metadata":   metadata,
 	})
 	if err == nil {
 		result = append(result, notification)
@@ -557,6 +574,9 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetCascadeTaskDeleter(handoffSvc)
 	}
+	if p.services.AzureDevOps != nil {
+		p.services.AzureDevOps.SetCascadeTaskDeleter(handoffSvc)
+	}
 	// repoLookup validates a watcher's optional repository binding (workspace
 	// ownership + default-branch fill) on create/update. Shared across the three
 	// repo-less watchers; one concrete adapter satisfies each package's
@@ -565,6 +585,12 @@ func registerRoutes(p routeParams) {
 	if p.services.GitLab != nil {
 		p.services.GitLab.SetRepositoryLookup(repoLookup)
 		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
+			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
+		})
+	}
+	if p.services.AzureDevOps != nil {
+		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
+		p.services.AzureDevOps.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
 	}

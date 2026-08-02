@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import { useSerializedMutationQueue } from "./use-serialized-mutation-queue";
 import type { WorkflowMutationGuardController } from "./workflow-mutation-guard";
@@ -74,7 +75,7 @@ const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
 
 function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
   return {
-    id: `temp-step-${crypto.randomUUID()}`,
+    id: `temp-step-${generateUUID()}`,
     workflow_id: workflow.id,
     ...NEW_STEP_DEFAULTS,
     position,

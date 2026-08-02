@@ -52,6 +52,7 @@ describe("TokenUsageDisplay", () => {
       used: 233_900,
       remaining: -33_900,
       efficiency: 117,
+      compactionCount: 0,
     });
 
     const { container } = render(<TokenUsageDisplay sessionId="sess-1" />);
@@ -65,6 +66,7 @@ describe("TokenUsageDisplay", () => {
       used: 56_047,
       remaining: 143_953,
       efficiency: 28,
+      compactionCount: 0,
     });
 
     const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
@@ -72,6 +74,9 @@ describe("TokenUsageDisplay", () => {
     fireEvent.click(getByRole("button", { name: "Context window: 28% used" }));
 
     expect(getByTestId("tooltip-root").getAttribute("data-open")).toBe("true");
+    const compactionRow = getByTestId("context-window-compactions-row");
+    expect(compactionRow.textContent).toContain("Compactions");
+    expect(compactionRow.textContent).toContain("0");
   });
 
   it("closes a tapped tooltip when Escape is pressed", () => {
@@ -80,6 +85,7 @@ describe("TokenUsageDisplay", () => {
       used: 56_047,
       remaining: 143_953,
       efficiency: 28,
+      compactionCount: 0,
     });
 
     const { getByRole, getByTestId } = render(<TokenUsageDisplay sessionId="sess-1" />);
@@ -98,6 +104,7 @@ describe("TokenUsageDisplay context source", () => {
       used: 56_047,
       remaining: 143_953,
       efficiency: 28,
+      compactionCount: 2,
       source: "acp",
     });
 
@@ -118,12 +125,47 @@ describe("TokenUsageDisplay context source", () => {
     expect(getByText(/ACP is the active session's effective window/i)).toBeDefined();
   });
 
+  it("shows the inferred compaction count and its accuracy disclosure", () => {
+    vi.mocked(useSessionContextWindow).mockReturnValue({
+      size: 200_000,
+      used: 56_047,
+      remaining: 143_953,
+      efficiency: 28,
+      compactionCount: 2,
+      source: "acp",
+    });
+
+    const { container, getByLabelText, getByText } = render(
+      <TokenUsageDisplay sessionId="sess-1" />,
+    );
+
+    expect(getByText("Compactions")).toBeDefined();
+    expect(getByText("2", { selector: "span" })).toBeDefined();
+    expect(getByLabelText("About inferred compaction count")).toBeDefined();
+    expect(container.textContent).toContain(
+      "Kandev infers this count from observed context usage drops",
+    );
+
+    const helpButton = getByLabelText("About inferred compaction count");
+    const helpId = helpButton.getAttribute("aria-describedby");
+    if (!helpId) throw new Error("Expected compaction help to be described");
+    const help = document.getElementById(helpId);
+    if (!help) throw new Error("Expected compaction help element");
+    expect(help.className).toContain("opacity-0");
+
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-100");
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-0");
+  });
+
   it("labels model API fallback data", () => {
     vi.mocked(useSessionContextWindow).mockReturnValue({
       size: 128_000,
       used: 64_000,
       remaining: 64_000,
       efficiency: 50,
+      compactionCount: 0,
       source: "api",
     });
 

@@ -117,6 +117,19 @@ func TestFormatKandevContext_OmitsStepCompleteToolByDefault(t *testing.T) {
 	assert.NotContains(t, result, "{step_complete_section}")
 }
 
+func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {
+	withoutTitle := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{})
+	assert.NotContains(t, withoutTitle, "set_task_title_kandev")
+	assert.NotContains(t, withoutTitle, "first action")
+
+	withTitle := FormatKandevContextWithOptions("task-abc", "session-xyz", KandevContextOptions{
+		IncludeTaskTitleTool: true,
+	})
+	assert.Contains(t, withTitle, "set_task_title_kandev")
+	assert.Contains(t, withTitle, "first action")
+	assert.Contains(t, withTitle, "targeting about 3 words")
+}
+
 func TestFormatKandevContext_IncludesStepCompleteToolWhenRequired(t *testing.T) {
 	result := FormatKandevContext("task-abc", "session-xyz", true)
 	assert.Contains(t, result, "step_complete_kandev",

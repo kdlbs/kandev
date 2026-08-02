@@ -19,6 +19,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { listPorts, listTunnels, type ListeningPort } from "@/lib/api/domains/port-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useTunnelActions } from "./use-tunnel-actions";
 import { getBackendConfig } from "@/lib/config";
 import { toast } from "sonner";
@@ -49,10 +50,11 @@ function InfoTip({ text }: { text: string }) {
 
 function UrlActions({ url }: { url: string }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = useCallback(() => {
-    navigator.clipboard?.writeText(url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const handleCopy = useCallback(async () => {
+    if (await copyToClipboard(url)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
   }, [url]);
 
   return (

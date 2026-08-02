@@ -78,6 +78,20 @@ type Repository interface {
 	// unrelated metadata remains unchanged.
 	UpdateContentAndMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 
+	// MergeIntoAbove folds the entry identified by sourceID into the entry
+	// immediately above it (greatest position strictly below the source) within
+	// the same session. Content, attachments, and entity references are merged
+	// and the source row is removed, all in one transaction.
+	//
+	// The merge is allowed only between entries of the same sender kind: a
+	// user-owned source merges into a user-owned target owned by queuedBy; an
+	// agent-owned source merges into an agent-owned target whose
+	// sender_task_id metadata matches the source's. Anything else — head source,
+	// mismatched kinds, agent sender-task mismatch, caller not owning both rows,
+	// or a reserved in-flight lifecycle target — returns ErrNoMergeTarget. A
+	// missing source returns ErrEntryNotFound.
+	MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error)
+
 	// DeleteByID removes a single entry. The session scope (`AND session_id = ?`)
 	// is mandatory so a caller can't delete an entry by guessing its UUID across
 	// sessions — the queue_full MCP payload deliberately discloses sibling-task

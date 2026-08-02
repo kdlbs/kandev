@@ -458,6 +458,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"reviewAutoMarkOnScroll":          settings.ReviewAutoMarkOnScroll,
 		"confirmTaskArchive":              settings.ConfirmTaskArchive,
 		"unreadDivider":                   settings.UnreadDivider,
+		"agentGeneratedTaskTitles":        settings.AgentGeneratedTaskTitles,
 		"mcpTaskAgentProfileDefault":      usermodels.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"showAnchoredPromptBar":           settings.ShowAnchoredPromptBar,
 		"showScrollToLastPrompt":          settings.ShowScrollToLastPrompt,
@@ -480,6 +481,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"terminalFontFamily":              nullString(settings.TerminalFontFamily),
 		"terminalFontSize":                nullInt(settings.TerminalFontSize),
 		"changesPanelLayout":              changesPanelLayout(settings.ChangesPanelLayout),
+		"azureDevOpsBrowsePreferences":    settings.AzureDevOpsBrowsePreferences,
 		"systemMetricsDisplay": map[string]any{
 			"showInTopbar": settings.SystemMetricsDisplay.ShowInTopbar,
 			"simplified":   settings.SystemMetricsDisplay.Simplified,
@@ -569,6 +571,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"primarySessionState":         task.PrimarySessionState,
 		"primarySessionPendingAction": task.PrimarySessionPendingAction,
 		"taskPendingAction":           task.TaskPendingAction,
+		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
 		"parentTaskId":                nullString(task.ParentID),

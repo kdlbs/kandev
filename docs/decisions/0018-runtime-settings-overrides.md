@@ -28,9 +28,11 @@ descriptions, stability metadata, risk descriptions, env-var names, and restart
 requirements. The Feature Toggles UI renders that registry state rather than
 hardcoding env-var behavior in React.
 
-V1 exposes Office mode and Debug mode. Office mode is marked experimental.
+V1 exposed Office mode and Debug mode. The current registry also includes the
+App Status Bar, opt-in Authentication, and Claude background prompt handoff
+experiment. Office mode and the handoff experiment are marked experimental;
 Debug mode is the user-facing toggle for debug behavior, including agent
-message debug logs; agent message logs are not a separate top-level toggle.
+message debug logs. Agent message logs are not a separate top-level toggle.
 
 V1 toggle changes require restart. Restart is launcher/supervisor mediated:
 
@@ -55,8 +57,8 @@ process-tree cleanup.
   states.
 - Restart support needs CLI/service coordination rather than a backend-only
   handler.
-- Future multi-user support must restrict Feature Toggles, especially Debug
-  mode, to admins.
+- Feature Toggle mutations are restricted to admins, especially for Debug mode;
+  members may read effective state so the frontend can render consistently.
 
 ## Alternatives Considered
 

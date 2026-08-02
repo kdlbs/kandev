@@ -1243,6 +1243,7 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	m.setRuntimeInterest(execution.SessionID, true)
 
 	m.persistRuntimeSecrets(ctx, execInstance, execution)
 

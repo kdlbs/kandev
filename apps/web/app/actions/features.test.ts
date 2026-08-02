@@ -5,6 +5,9 @@ vi.mock("@/lib/config", () => ({
 }));
 
 import { getRuntimeDebugModeAction } from "./features";
+import { getFeatureFlagsAction } from "./features";
+import { defaultFeatureFlags } from "@/lib/state/slices/features/types";
+import type { FeatureFlags } from "@/lib/state/slices/features/types";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -26,6 +29,35 @@ function jsonResponse(body: unknown): Response {
     headers: { "Content-Type": "application/json" },
   });
 }
+
+function flagsWith(value: boolean): FeatureFlags {
+  return Object.fromEntries(
+    Object.keys(defaultFeatureFlags).map((name) => [name, value]),
+  ) as FeatureFlags;
+}
+
+describe("getFeatureFlagsAction", () => {
+  it("normalizes declared backend flags and ignores unknown keys", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ ...flagsWith(true), unknown: true }));
+
+    await expect(getFeatureFlagsAction()).resolves.toEqual(flagsWith(true));
+  });
+
+  it("fails closed for missing and non-boolean backend values", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ office: "true", appStatusBar: true }));
+
+    await expect(getFeatureFlagsAction()).resolves.toEqual({
+      ...flagsWith(false),
+      appStatusBar: true,
+    });
+  });
+
+  it("falls back to all-off defaults when the backend is unavailable", async () => {
+    fetchSpy.mockResolvedValueOnce(new Response("nope", { status: 503 }));
+
+    await expect(getFeatureFlagsAction()).resolves.toEqual(flagsWith(false));
+  });
+});
 
 describe("getRuntimeDebugModeAction", () => {
   it("returns true when the effective debug runtime flag is enabled", async () => {

@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import {
+  expectCompactionCount,
   expectSourceRightOfTokenCount,
   seedContextWindowTask,
 } from "./context-window-source-helpers";
@@ -15,11 +16,12 @@ test("context source help stays open when hovered", async ({
   const contextTrigger = testPage.getByRole("button", { name: "Context window: 21% used" });
   await contextTrigger.hover();
   const contextTooltip = testPage
-    .locator('[data-slot="tooltip-content"][data-state]')
+    .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
     .filter({ has: testPage.getByTestId("context-window-usage") });
   const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
   await expect(contextUsage).toBeVisible();
   await expectSourceRightOfTokenCount(contextTooltip);
+  await expectCompactionCount(contextTooltip);
 
   const sourceHelpButton = contextUsage.locator('button[aria-label="About context window source"]');
   const sourceHelpId = await sourceHelpButton.getAttribute("aria-describedby");
@@ -28,7 +30,17 @@ test("context source help stays open when hovered", async ({
 
   await expect(contextUsage).toBeVisible();
   await expect(testPage.locator(`[id="${sourceHelpId}"]`)).toHaveCSS("opacity", "1");
+
+  const compactionHelpButton = contextUsage.locator(
+    'button[aria-label="About inferred compaction count"]',
+  );
+  const compactionHelpId = await compactionHelpButton.getAttribute("aria-describedby");
+  if (!compactionHelpId) throw new Error("Expected compaction help to be described");
+  await compactionHelpButton.hover();
+
+  await expect(contextUsage).toBeVisible();
+  await expect(testPage.locator(`[id="${compactionHelpId}"]`)).toHaveCSS("opacity", "1");
   await prCapture.screenshot("context-source-help", {
-    caption: "Context source shown inline with the token count and its help visible",
+    caption: "Context source and inferred compaction count shown with their help visible",
   });
 });

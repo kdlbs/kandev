@@ -43,6 +43,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
 
 ## tasks/ — task & workflow model
 
@@ -74,6 +75,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
 | [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
+| [agent-generated-titles](tasks/agent-generated-titles.md) | shipped |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 
@@ -137,6 +139,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
+| [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
@@ -154,6 +157,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | archived; superseded by embedded-vscode-executor-availability |
 | [ws-connectivity-warning](ui/ws-connectivity-warning.md) | approved |
+| [context-compaction-count](context-compaction-count/spec.md) | approved |
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI

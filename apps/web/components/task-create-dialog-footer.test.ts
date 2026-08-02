@@ -8,6 +8,7 @@ import {
   REASON_WORKFLOW,
   REASON_AGENT,
   REASON_DESCRIPTION,
+  REASON_PROMPT,
 } from "./task-create-dialog-footer";
 import type { ButtonKind, TaskCreateDialogFooterProps } from "./task-create-dialog-footer";
 
@@ -61,6 +62,21 @@ describe("computeDisabledReason (start-task)", () => {
         KIND_START,
       ),
     ).toBe(REASON_TITLE);
+  });
+
+  it("requires the prompt instead of a title in auto-title mode", () => {
+    expect(
+      computeDisabledReason(
+        makeProps({ autoTitle: true, hasTitle: false, hasDescription: false }),
+        KIND_START,
+      ),
+    ).toBe(REASON_PROMPT);
+    expect(
+      computeDisabledReason(
+        makeProps({ autoTitle: true, hasTitle: false, hasDescription: true }),
+        KIND_START,
+      ),
+    ).toBeNull();
   });
 
   it("flags missing repository selection", () => {

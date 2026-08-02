@@ -42,7 +42,7 @@ func setMcpMode(t *testing.T, s *Server, mode string) *httptest.ResponseRecorder
 func TestHandleSetMcpMode_AcceptsSupportedModes(t *testing.T) {
 	s := newTestServerWithMCP(t)
 
-	for _, mode := range []string{mcpserver.ModeTask, mcpserver.ModeConfig, mcpserver.ModeOffice} {
+	for _, mode := range []string{mcpserver.ModeTask, mcpserver.ModeTaskTitlePending, mcpserver.ModeConfig, mcpserver.ModeOffice} {
 		t.Run(mode, func(t *testing.T) {
 			rec := setMcpMode(t, s, mode)
 			if rec.Code != http.StatusOK {

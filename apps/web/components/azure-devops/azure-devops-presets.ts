@@ -4,9 +4,15 @@ import {
   IconChecks,
   IconGitPullRequest,
   IconInbox,
+  IconSearch,
   IconUser,
 } from "@tabler/icons-react";
+import type { AzureDevOpsQueryPreset } from "@/lib/types/azure-devops";
 import type { AzureDevOpsFiltersState } from "./azure-devops-filters";
+import {
+  DEFAULT_AZURE_PULL_REQUEST_QUERIES,
+  DEFAULT_AZURE_WORK_ITEM_QUERIES,
+} from "./azure-devops-workspace-defaults";
 
 export type AzureDevOpsPresetKind = "work_item" | "pull_request";
 
@@ -18,75 +24,63 @@ export type AzureDevOpsPreset = {
   filters: Partial<AzureDevOpsFiltersState>;
 };
 
-const WIQL_START = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project";
-const WIQL_ORDER = " ORDER BY [System.ChangedDate] DESC";
+const ICONS = {
+  recent: IconCalendarClock,
+  assigned: IconInbox,
+  active: IconActivity,
+  "review-requested": IconInbox,
+  completed: IconChecks,
+  created: IconUser,
+};
 
-function wiql(condition?: string): string {
-  return `${WIQL_START}${condition ? ` AND ${condition}` : ""}${WIQL_ORDER}`;
+function stringFilter(filters: Record<string, unknown>, key: string, fallback = ""): string {
+  return typeof filters[key] === "string" ? filters[key] : fallback;
 }
 
-export const AZURE_WORK_ITEM_PRESETS: AzureDevOpsPreset[] = [
-  {
-    value: "recent",
-    label: "Recently updated",
-    icon: IconCalendarClock,
-    group: "inbox",
-    filters: { wiql: wiql(), top: 50 },
-  },
-  {
-    value: "assigned",
-    label: "Assigned to me",
-    icon: IconInbox,
-    group: "inbox",
-    filters: { wiql: wiql("[System.AssignedTo] = @Me"), top: 50 },
-  },
-  {
-    value: "active",
-    label: "Active",
-    icon: IconActivity,
-    group: "inbox",
-    filters: { wiql: wiql("[System.State] <> 'Closed' AND [System.State] <> 'Done'"), top: 50 },
-  },
-  {
-    value: "created",
-    label: "Created by me",
-    icon: IconUser,
-    group: "created",
-    filters: { wiql: wiql("[System.CreatedBy] = @Me"), top: 50 },
-  },
-];
-
-export const AZURE_PULL_REQUEST_PRESETS: AzureDevOpsPreset[] = [
-  {
-    value: "review-requested",
-    label: "Review requested",
-    icon: IconInbox,
-    group: "inbox",
-    filters: { status: "active", reviewer: "@me", creator: "" },
-  },
-  {
-    value: "active",
-    label: "Open",
-    icon: IconGitPullRequest,
-    group: "inbox",
-    filters: { status: "active", creator: "", reviewer: "" },
-  },
-  {
-    value: "completed",
-    label: "Completed",
-    icon: IconChecks,
-    group: "created",
-    filters: { status: "completed", creator: "", reviewer: "" },
-  },
-  {
-    value: "created",
-    label: "Created by me",
-    icon: IconUser,
-    group: "created",
-    filters: { status: "active", creator: "@me", reviewer: "" },
-  },
-];
-
-export function presetsForKind(kind: AzureDevOpsPresetKind): AzureDevOpsPreset[] {
-  return kind === "work_item" ? AZURE_WORK_ITEM_PRESETS : AZURE_PULL_REQUEST_PRESETS;
+function filtersForQuery(
+  kind: AzureDevOpsPresetKind,
+  filters: Record<string, unknown>,
+): Partial<AzureDevOpsFiltersState> {
+  if (kind === "work_item") {
+    const top = typeof filters.top === "number" && filters.top > 0 ? filters.top : 50;
+    return { wiql: stringFilter(filters, "wiql"), top };
+  }
+  return {
+    status: stringFilter(filters, "status", "active"),
+    creator: stringFilter(filters, "creator"),
+    reviewer: stringFilter(filters, "reviewer"),
+  };
 }
+
+function toBrowsePreset(
+  kind: AzureDevOpsPresetKind,
+  preset: AzureDevOpsQueryPreset,
+): AzureDevOpsPreset {
+  return {
+    value: preset.id,
+    label: preset.label,
+    icon:
+      ICONS[preset.id as keyof typeof ICONS] ??
+      (kind === "pull_request" ? IconGitPullRequest : IconSearch),
+    group: preset.group === "created" ? "created" : "inbox",
+    filters: filtersForQuery(kind, preset.filters),
+  };
+}
+
+export type AzureDevOpsQueryPresets = {
+  workItems: AzureDevOpsQueryPreset[];
+  pullRequests: AzureDevOpsQueryPreset[];
+};
+
+export function presetsForKind(
+  kind: AzureDevOpsPresetKind,
+  configured?: AzureDevOpsQueryPresets,
+): AzureDevOpsPreset[] {
+  const defaults =
+    kind === "work_item" ? DEFAULT_AZURE_WORK_ITEM_QUERIES : DEFAULT_AZURE_PULL_REQUEST_QUERIES;
+  const candidates = kind === "work_item" ? configured?.workItems : configured?.pullRequests;
+  return (candidates?.length ? candidates : defaults).map((preset) => toBrowsePreset(kind, preset));
+}
+
+export const AZURE_WORK_ITEM_PRESETS = presetsForKind("work_item");
+export const AZURE_PULL_REQUEST_PRESETS = presetsForKind("pull_request");

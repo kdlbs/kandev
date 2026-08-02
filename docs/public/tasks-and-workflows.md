@@ -54,7 +54,12 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
   caption="A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review."
 />
 
-1. Enter a concise title of up to 60 characters. Titles prefilled from a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the detailed context belongs in the description.
+1. When the title field is shown, enter a concise title of up to 60 characters. Titles prefilled from
+   a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the
+   detailed context belongs in the description. If **Settings → General → Task Actions → Agent-generated
+   task titles** is enabled, the New Task dialog hides this field, requires a nonempty prompt, and uses
+   the prompt's first six words as a provisional title while the first eligible agent session chooses
+   the final title. The empty-description Plan Mode exception applies only when this setting is disabled.
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
@@ -65,7 +70,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                                                                                                                                                                                                                            |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
-5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. A nonempty description exposes the standard split actions.
+5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. When agent-generated task titles are enabled, every task and subtask action requires a nonempty prompt; the empty-description Plan Mode exception is disabled. A nonempty description exposes the standard split actions.
 6. Choose the applicable action:
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
    - **Start task** requires a nonempty description, creates the task, and starts its agent.
@@ -82,6 +87,20 @@ Creating a repository is available only in an unlocked, single-repository **New 
 
 <details>
 <summary>Advanced task creation: agent-created tasks, long transcripts, multiple sources, and attachments</summary>
+
+### Let the agent name new tasks
+
+Open **Settings → General → Task Actions → Agent-generated task titles** and choose **Save changes**.
+The setting is disabled by default. When enabled, new task and subtask dialogs use the prompt as the
+source of the title: the prompt must contain text, and Kandev immediately displays its first six
+normalized words as a provisional title. The first eligible task-mode session receives the
+`set_task_title_kandev` MCP tool and is instructed to call it before doing any other work. Ask for a
+short noun phrase targeting about three words (no more than six when practical). If the agent never
+renames the task, the provisional title remains usable and can still be edited by a person.
+
+The setting affects only new task/subtask creation. Existing task edits keep the title field, and
+sessions for tasks created while the setting was disabled receive neither this instruction nor the
+tool. Config and Office sessions never receive the title tool.
 
 ### Choose the profile for tasks created by agents
 

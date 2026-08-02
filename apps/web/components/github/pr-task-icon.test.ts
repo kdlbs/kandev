@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   aggregatePRStatusColor,
+  getPRAggregateStatusColor,
   areAllOpenPRsReadyToMerge,
   getPRStatusColor,
   getPRTooltip,
@@ -11,6 +12,14 @@ import {
   prStatusRank,
 } from "./pr-task-icon";
 import type { TaskPR } from "@/lib/types/github";
+
+const SKY_400 = "text-sky-400";
+const RED_500 = "text-red-500";
+const YELLOW_500 = "text-yellow-500";
+const EMERALD_400 = "text-emerald-400";
+const GREEN_500 = "text-green-500";
+const PURPLE_500 = "text-purple-500";
+const MUTED_FOREGROUND = "text-muted-foreground";
 
 function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   return {
@@ -45,10 +54,19 @@ function makePR(overrides: Partial<TaskPR> = {}): TaskPR {
   };
 }
 
-const SKY_400 = "text-sky-400";
-const RED_500 = "text-red-500";
-const YELLOW_500 = "text-yellow-500";
-const MUTED_FOREGROUND = "text-muted-foreground";
+describe("getPRAggregateStatusColor", () => {
+  it.each([
+    ["failure", RED_500],
+    ["pending", YELLOW_500],
+    ["awaiting_review", SKY_400],
+    ["ready", EMERALD_400],
+    ["passing", GREEN_500],
+    ["merged", PURPLE_500],
+    ["open", MUTED_FOREGROUND],
+  ])("maps %s to %s", (state, color) => {
+    expect(getPRAggregateStatusColor(state)).toBe(color);
+  });
+});
 
 describe("isPRReadyToMerge", () => {
   it("is true when open + approved + success + clean", () => {
@@ -241,7 +259,7 @@ describe("getPRStatusColor", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
-    expect(getPRStatusColor(pr)).toBe("text-emerald-400");
+    expect(getPRStatusColor(pr)).toBe(EMERALD_400);
   });
 
   it("returns muted for approved+success but mergeable_state blocked (branch protection)", () => {
@@ -293,7 +311,7 @@ describe("getPRStatusColor", () => {
       checks_state: "success",
       mergeable_state: "",
     });
-    expect(getPRStatusColor(pr)).toBe("text-green-500");
+    expect(getPRStatusColor(pr)).toBe(GREEN_500);
   });
 
   it("returns sky-400 when CI passed but review is pending", () => {
@@ -326,7 +344,7 @@ describe("getPRStatusColor", () => {
       mergeable_state: "clean",
       pending_review_count: 0,
     });
-    expect(getPRStatusColor(pr)).toBe("text-emerald-400");
+    expect(getPRStatusColor(pr)).toBe(EMERALD_400);
   });
 
   it("returns red for changes_requested regardless of mergeable_state", () => {
@@ -345,7 +363,7 @@ describe("getPRStatusColor", () => {
   });
 
   it("returns purple for merged", () => {
-    expect(getPRStatusColor(makePR({ state: "merged" }))).toBe("text-purple-500");
+    expect(getPRStatusColor(makePR({ state: "merged" }))).toBe(PURPLE_500);
   });
 });
 
@@ -359,7 +377,7 @@ describe("getPRStatusColor — aggregate checks", () => {
       checks_passing: 5,
       mergeable_state: "",
     });
-    expect(getPRStatusColor(pr)).toBe("text-green-500");
+    expect(getPRStatusColor(pr)).toBe(GREEN_500);
   });
 
   it("treats aggregate all-green counts as passed when no reviews are required", () => {
@@ -372,7 +390,7 @@ describe("getPRStatusColor — aggregate checks", () => {
       checks_passing: 5,
       mergeable_state: "",
     });
-    expect(getPRStatusColor(pr)).toBe("text-green-500");
+    expect(getPRStatusColor(pr)).toBe(GREEN_500);
   });
 });
 
@@ -402,7 +420,7 @@ describe("getPRStatusColor — mergeability", () => {
 
   it("ignores dirty/behind mergeable_state on terminal (merged) PRs", () => {
     expect(getPRStatusColor(makePR({ state: "merged", mergeable_state: "dirty" }))).toBe(
-      "text-purple-500",
+      PURPLE_500,
     );
   });
 });
@@ -514,7 +532,7 @@ describe("aggregatePRStatusColor", () => {
       checks_state: "success",
       mergeable_state: "clean",
     });
-    expect(aggregatePRStatusColor([ready, ready])).toBe("text-emerald-400");
+    expect(aggregatePRStatusColor([ready, ready])).toBe(EMERALD_400);
   });
 
   it("yellow CI pending beats merged purple", () => {
@@ -546,7 +564,7 @@ describe("aggregatePRStatusColor", () => {
     // so the result depends on which terminal state is present. Merged ranks
     // 0 (purple), closed ranks 5 (red) — both paths need a guard.
     const merged = makePR({ state: "merged" });
-    expect(aggregatePRStatusColor([merged, merged])).toBe("text-purple-500");
+    expect(aggregatePRStatusColor([merged, merged])).toBe(PURPLE_500);
     const closed = makePR({ state: "closed" });
     expect(aggregatePRStatusColor([closed, closed])).toBe(RED_500);
   });

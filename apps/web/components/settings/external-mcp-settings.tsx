@@ -15,6 +15,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { getBackendConfig } from "@/lib/config";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import {
   buildAuggieCliCommand,
   buildAuggieConfig,
@@ -35,16 +36,12 @@ export function ExternalMcpSettings() {
   const [copied, setCopied] = useState<string | null>(null);
 
   function handleCopy(text: string) {
-    if (typeof navigator === "undefined") return;
-    navigator.clipboard
-      .writeText(text)
-      .then(() => {
+    void copyToClipboard(text).then((success) => {
+      if (success) {
         setCopied(text);
         setTimeout(() => setCopied(null), 2000);
-      })
-      .catch(() => {
-        // Best-effort: clipboard may be unavailable in non-secure contexts.
-      });
+      }
+    });
   }
 
   return (

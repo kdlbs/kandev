@@ -46,13 +46,23 @@ export async function reorderWorkflows(
 }
 
 // Task operations
+type CreateTaskTitlePayload =
+  | {
+      title: string;
+      auto_title?: false;
+      description?: string;
+    }
+  | {
+      title?: never;
+      auto_title: true;
+      description: string;
+    };
+
 export async function createTask(
-  payload: {
+  payload: CreateTaskTitlePayload & {
     workspace_id: string;
     workflow_id: string;
     workflow_step_id?: string;
-    title: string;
-    description?: string;
     position?: number;
     repositories?: Array<{
       repository_id: string;

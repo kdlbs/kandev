@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 )
 
 // gitSnapshotPersistInterval is the minimum time between persisted live git
@@ -27,6 +28,12 @@ const gitSnapshotPersistInterval = 30 * time.Second
 // backend with many sessions can't grow it without limit. When the cache is
 // full and a new session arrives, the oldest entry by lastWrite is evicted.
 const gitSnapshotCacheMaxEntries = 4096
+
+// gitlabProviderName is the repositories.provider value used for GitLab,
+// mirrored locally the same way githubPRStateOpen mirrors the github
+// package's vocabulary rather than importing task/service's unexported
+// equivalent.
+const gitlabProviderName = "gitlab"
 
 type gitSnapshotCacheEntry struct {
 	hash      string
@@ -239,13 +246,80 @@ func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitE
 		zap.String("repository_name", data.Status.RepositoryName),
 		zap.String("branch", data.Status.Branch),
 		zap.Bool("first_observation", !loaded))
-	go s.detectPushAndAssociatePR(
+	go s.dispatchPushDetection(
 		context.Background(),
 		data.SessionID,
 		data.TaskID,
 		data.Status.RepositoryName,
 		data.Status.Branch,
 	)
+}
+
+// dispatchPushDetection routes one push-detection run to the right
+// provider's association logic, so the two providers' code paths issue zero
+// calls into each other's client. GitHub's proven detectPushAndAssociatePR is
+// called verbatim for every non-GitLab (including unknown/legacy-empty
+// provider) repository — this wraps it, it does not replace it. Extracted
+// from trackPushAndAssociatePR to keep that function inside the statement
+// budget.
+func (s *Service) dispatchPushDetection(ctx context.Context, sessionID, taskID, repositoryName, branch string) {
+	if s.resolvePushRepositoryProvider(ctx, sessionID, taskID, repositoryName) == gitlabProviderName {
+		s.detectPushAndAssociateMR(ctx, sessionID, taskID, repositoryName, branch)
+		return
+	}
+	s.detectPushAndAssociatePR(ctx, sessionID, taskID, repositoryName, branch)
+}
+
+// resolvePushRepositoryProvider looks up the provider ("github", "gitlab", or
+// "" when unknown/unresolvable) of the repository backing this push, reusing
+// resolvePushRepo's owner/name matching rather than re-deriving it, so
+// dispatchPushDetection can route without duplicating that logic.
+func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, taskID, repositoryName string) string {
+	_, _, repositoryID := s.resolvePushRepo(ctx, sessionID, taskID, repositoryName)
+	if repositoryID == "" {
+		return ""
+	}
+	store, ok := s.repo.(repoStore)
+	if !ok {
+		return ""
+	}
+	repoObj, err := store.GetRepository(ctx, repositoryID)
+	if err != nil || repoObj == nil {
+		return ""
+	}
+	if repoObj.Provider != "" {
+		return repoObj.Provider
+	}
+	// The row may not yet reflect a provider resolvePushRepo's own call just
+	// derived from the local git remote: matchPushRepo/resolveSessionRepo
+	// compute it in-memory and persist it via a detached backfill goroutine,
+	// so this read can race ahead of that write on the very first push from a
+	// repository with no durable provider yet. Recompute live from the same
+	// local checkout instead of trusting a possibly-stale empty column.
+	// ResolveGitRemoteProviderIdentity recognizes both github.com and
+	// gitlab.com remotes (the same helper resolveRepositoryProviderIdentity
+	// uses to backfill Repository rows in production), so this closes the
+	// race for either provider rather than only GitHub.
+	if repoObj.LocalPath != "" {
+		if provider, _, owner, _ := service.ResolveGitRemoteProviderIdentity(repoObj.LocalPath); provider != "" && owner != "" {
+			return provider
+		}
+	}
+	// Self-managed GitLab instances never get a durable "gitlab" Provider tag
+	// at all — resolveRepositoryProviderIdentity only recognizes github.com
+	// and gitlab.com at discovery time, so the well-known-host fallback above
+	// can never resolve them either; this is a permanent gap for self-managed
+	// repositories, not just a narrow backfill race. remote_url is their only
+	// durable identity signal (still populated by the same production
+	// backfill), so compare it against the workspace's own configured GitLab
+	// connection instead of a hostname allowlist.
+	if s.gitlabMRLinkService != nil && repoObj.RemoteURL != "" {
+		if workspaceID := s.taskWorkspaceID(ctx, taskID); workspaceID != "" &&
+			s.gitlabMRLinkService.IsConfiguredGitLabHost(ctx, workspaceID, repoObj.RemoteURL) {
+			return gitlabProviderName
+		}
+	}
+	return ""
 }
 
 // shouldFirePushDetection decides whether to kick off PR association for one
@@ -352,30 +426,29 @@ func (s *Service) handleContextWindowUpdated(ctx context.Context, data watcher.C
 		"source":     source,
 	}
 
-	// Persist to database asynchronously using json_set to atomically set one
-	// key without clobbering other metadata keys (plan_mode, prepare_result).
-	// The generation check prevents a pre-reset update from resurrecting stale
-	// usage after resetAgentContext clears the metadata.
-	go func() {
-		persisted, err := s.persistAndPublishContextWindowUpdate(
-			context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
-		)
-		switch {
-		case err != nil:
-			s.logger.Error("failed to update session with context window",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID),
-				zap.Error(err))
-		case !persisted:
-			s.logger.Debug("discarded stale context window update after reset",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID))
-		default:
-			s.logger.Debug("persisted context window to session",
-				zap.String("task_id", data.TaskID),
-				zap.String("session_id", data.TaskSessionID))
-		}
-	}()
+	// Persist synchronously using json_set to atomically set one key without
+	// clobbering other metadata keys (plan_mode, prepare_result). The watcher
+	// delivers updates in arrival order; keeping persistence in this callback
+	// preserves that order instead of letting independent goroutines reorder
+	// samples and produce an incorrect compaction count.
+	persisted, err := s.persistAndPublishContextWindowUpdate(
+		context.Background(), data.TaskID, data.TaskSessionID, generation, contextWindowData,
+	)
+	switch {
+	case err != nil:
+		s.logger.Error("failed to update session with context window",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID),
+			zap.Error(err))
+	case !persisted:
+		s.logger.Debug("discarded stale context window update after reset",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID))
+	default:
+		s.logger.Debug("persisted context window to session",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.TaskSessionID))
+	}
 }
 
 func (s *Service) persistAndPublishContextWindowUpdate(
@@ -384,7 +457,7 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 	generation uint64,
 	contextWindowData map[string]interface{},
 ) (bool, error) {
-	persisted, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
+	persisted, count, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
 	}
@@ -395,7 +468,8 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"metadata": map[string]interface{}{
-				contextWindowMetadataKey: contextWindowData,
+				contextWindowMetadataKey:                    contextWindowData,
+				models.SessionMetaKeyContextCompactionCount: count,
 			},
 		},
 	))

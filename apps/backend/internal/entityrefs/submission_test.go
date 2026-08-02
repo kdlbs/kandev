@@ -102,7 +102,7 @@ func TestSubmissionServiceRejectsOverLimitBeforeScopeOrProviderWork(t *testing.T
 	resolver := &fakeConversationResolver{workspaceID: "workspace-1"}
 	authorizer := &fakeWorkspaceAuthorizer{}
 	validator := NewSubmissionService(resolver, authorizer)
-	references := make([]apiv1.EntityReference, maxReferencesPerMessage+1)
+	references := make([]apiv1.EntityReference, MaxReferencesPerMessage+1)
 
 	_, err := validator.ValidateForSubmission(
 		context.Background(), "session-1", "task-1", references,

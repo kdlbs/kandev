@@ -63,6 +63,16 @@ type workspacePollAggregator struct {
 	// known to belong to that workspace. Lets recordAndCompute iterate only
 	// sessions in the affected workspace instead of scanning all sessionModes.
 	workspaceSessions map[string]map[string]bool
+	// runtimeSessions tracks executions independently of browser UI state. An
+	// active execution contributes the slow polling baseline so task summaries
+	// continue to receive Git/status updates when no task page is open.
+	runtimeSessions map[string]bool
+	// workspaceRuntimeSessions is the runtime-interest reverse index used when
+	// computing the workspace-level maximum without scanning all executions.
+	workspaceRuntimeSessions map[string]map[string]bool
+	// runtimeWorkspaceBySession lets a replacement execution move a session's
+	// runtime contribution without leaving an entry in its old workspace.
+	runtimeWorkspaceBySession map[string]string
 	// Last-write-wins queue: pendingPush + pushInFlight serialize per-workspace HTTP pushes so order matches enqueue.
 	pendingPush  map[string]workspacePushTarget
 	pushInFlight map[string]bool
@@ -77,12 +87,15 @@ type workspacePushTarget struct {
 // newWorkspacePollAggregator wires an aggregator to the lifecycle manager.
 func newWorkspacePollAggregator(mgr *Manager) *workspacePollAggregator {
 	return &workspacePollAggregator{
-		mgr:               mgr,
-		sessionModes:      make(map[string]WorkspacePollMode),
-		lastPushed:        make(map[string]WorkspacePollMode),
-		workspaceSessions: make(map[string]map[string]bool),
-		pendingPush:       make(map[string]workspacePushTarget),
-		pushInFlight:      make(map[string]bool),
+		mgr:                       mgr,
+		sessionModes:              make(map[string]WorkspacePollMode),
+		lastPushed:                make(map[string]WorkspacePollMode),
+		workspaceSessions:         make(map[string]map[string]bool),
+		runtimeSessions:           make(map[string]bool),
+		workspaceRuntimeSessions:  make(map[string]map[string]bool),
+		runtimeWorkspaceBySession: make(map[string]string),
+		pendingPush:               make(map[string]workspacePushTarget),
+		pushInFlight:              make(map[string]bool),
 	}
 }
 
@@ -125,6 +138,24 @@ func (a *workspacePollAggregator) HandleSessionMode(sessionID string, mode Works
 	a.pushAsync(execution, workspacePath, effective)
 }
 
+// HandleRuntimeInterest records whether an execution is active for polling
+// purposes. Runtime interest is deliberately separate from UI session mode:
+// a browser may unsubscribe or lose focus while the execution still needs Git
+// and status updates for the task-level summary.
+func (a *workspacePollAggregator) HandleRuntimeInterest(sessionID string, active bool) {
+	execution, exists := a.mgr.GetExecutionBySessionID(sessionID)
+	if !exists || execution.WorkspacePath == "" {
+		return
+	}
+
+	workspacePath, effective, changed := a.recordRuntimeAndCompute(sessionID, active, execution.WorkspacePath)
+	if !changed {
+		return
+	}
+
+	a.pushAsync(execution, workspacePath, effective)
+}
+
 // setSessionModeLocked updates sessionModes and the workspaceSessions reverse
 // index for a single session. Caller must hold a.mu.
 func (a *workspacePollAggregator) setSessionModeLocked(sessionID string, mode WorkspacePollMode, workspacePath string) {
@@ -153,6 +184,75 @@ func (a *workspacePollAggregator) removeFromWorkspaceIndex(sessionID, workspaceP
 	}
 }
 
+// removeRuntimeFromWorkspaceIndex drops a runtime contribution from its
+// reverse index, cleaning up the workspace key if empty. Caller must hold
+// a.mu.
+func (a *workspacePollAggregator) removeRuntimeFromWorkspaceIndex(sessionID, workspacePath string) {
+	sessions := a.workspaceRuntimeSessions[workspacePath]
+	if sessions == nil {
+		return
+	}
+	delete(sessions, sessionID)
+	if len(sessions) == 0 {
+		delete(a.workspaceRuntimeSessions, workspacePath)
+	}
+}
+
+// setRuntimeInterestLocked updates runtime interest and its workspace index.
+// Caller must hold a.mu.
+func (a *workspacePollAggregator) setRuntimeInterestLocked(sessionID string, active bool, workspacePath string) {
+	if !active {
+		delete(a.runtimeSessions, sessionID)
+		if previousWorkspace := a.runtimeWorkspaceBySession[sessionID]; previousWorkspace != "" {
+			a.removeRuntimeFromWorkspaceIndex(sessionID, previousWorkspace)
+		}
+		delete(a.runtimeWorkspaceBySession, sessionID)
+		return
+	}
+
+	if previousWorkspace := a.runtimeWorkspaceBySession[sessionID]; previousWorkspace != "" && previousWorkspace != workspacePath {
+		a.removeRuntimeFromWorkspaceIndex(sessionID, previousWorkspace)
+	}
+	a.runtimeSessions[sessionID] = true
+	a.runtimeWorkspaceBySession[sessionID] = workspacePath
+	if a.workspaceRuntimeSessions[workspacePath] == nil {
+		a.workspaceRuntimeSessions[workspacePath] = make(map[string]bool)
+	}
+	a.workspaceRuntimeSessions[workspacePath][sessionID] = true
+}
+
+// effectiveModeLocked computes the maximum of browser UI contributions and
+// runtime-interest contributions for a workspace. Caller must hold a.mu.
+func (a *workspacePollAggregator) effectiveModeLocked(workspacePath string) WorkspacePollMode {
+	effective := WorkspacePollModePaused
+	for sid := range a.workspaceSessions[workspacePath] {
+		if mode, ok := a.sessionModes[sid]; ok && mode.rank() > effective.rank() {
+			effective = mode
+		}
+	}
+	if len(a.workspaceRuntimeSessions[workspacePath]) > 0 && WorkspacePollModeSlow.rank() > effective.rank() {
+		effective = WorkspacePollModeSlow
+	}
+	return effective
+}
+
+// applyEffectiveModeLocked records the workspace mode and reports whether a
+// push is needed. Caller must hold a.mu. force is used by the ready-time flush
+// to retry a mode that may have been sent before agentctl accepted requests.
+func (a *workspacePollAggregator) applyEffectiveModeLocked(workspacePath string, effective WorkspacePollMode, force bool) bool {
+	prev, hadPrev := a.lastPushed[workspacePath]
+	shouldPush := force || !hadPrev || prev != effective
+	if !force && !hadPrev && effective == WorkspacePollModePaused {
+		return false
+	}
+	if effective == WorkspacePollModePaused {
+		delete(a.lastPushed, workspacePath)
+	} else {
+		a.lastPushed[workspacePath] = effective
+	}
+	return shouldPush && effective != WorkspacePollModePaused
+}
+
 // recordAndCompute updates the per-session mode for the given workspace and
 // returns the new workspace-effective mode, plus whether it changed since the
 // last push. We compute this under a single lock so concurrent transitions in
@@ -167,32 +267,23 @@ func (a *workspacePollAggregator) recordAndCompute(sessionID string, mode Worksp
 
 	a.setSessionModeLocked(sessionID, mode, workspacePath)
 
-	// Compute effective mode using only sessions in this workspace (O(k)
+	// Compute effective mode using only contributions in this workspace (O(k)
 	// where k = sessions in workspace, not O(N) total sessions).
-	effective := WorkspacePollModePaused
-	for sid := range a.workspaceSessions[workspacePath] {
-		if m, ok := a.sessionModes[sid]; ok && m.rank() > effective.rank() {
-			effective = m
-		}
-	}
+	effective := a.effectiveModeLocked(workspacePath)
 
-	prev, hadPrev := a.lastPushed[workspacePath]
-	if hadPrev && prev == effective {
-		return workspacePath, effective, false
-	}
-	// Skip pushing paused when there's no prior entry — agentctl defaults to
-	// slow, so sending paused to a workspace we've never pushed to is a no-op
-	// RPC (and slightly misleading: agentctl would drop from slow to paused
-	// even though the gateway never told it to go slow in the first place).
-	if !hadPrev && effective == WorkspacePollModePaused {
-		return workspacePath, effective, false
-	}
-	if effective == WorkspacePollModePaused {
-		delete(a.lastPushed, workspacePath)
-	} else {
-		a.lastPushed[workspacePath] = effective
-	}
-	return workspacePath, effective, true
+	return workspacePath, effective, a.applyEffectiveModeLocked(workspacePath, effective, false)
+}
+
+// recordRuntimeAndCompute updates runtime interest and returns the resulting
+// workspace-effective mode plus whether it changed since the last push.
+func (a *workspacePollAggregator) recordRuntimeAndCompute(sessionID string, active bool, workspacePath string) (string, WorkspacePollMode, bool) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	a.setRuntimeInterestLocked(sessionID, active, workspacePath)
+	effective := a.effectiveModeLocked(workspacePath)
+
+	return workspacePath, effective, a.applyEffectiveModeLocked(workspacePath, effective, false)
 }
 
 // pushAsync queues the latest mode and ensures exactly one pusher goroutine per workspace drains it (last-write-wins).
@@ -249,8 +340,8 @@ func (a *workspacePollAggregator) pushLoop(workspacePath string) {
 //
 // This is called from the lifecycle manager's waitForAgentctlReady success
 // path — once we know agentctl is accepting RPCs, force-resend whatever
-// workspace-effective mode we currently believe is correct. No-op if nothing
-// was cached (no gateway events reached us before flush).
+// workspace-effective mode we currently believe is correct. A workspace with
+// an active execution is flushed even when no gateway UI event was cached.
 func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 	execution, exists := a.mgr.GetExecutionBySessionID(sessionID)
 	if !exists || execution.WorkspacePath == "" {
@@ -270,40 +361,37 @@ func (a *workspacePollAggregator) FlushSessionMode(sessionID string) {
 	qry := a.hubQry
 	a.mu.Unlock()
 
-	var sessionMode WorkspacePollMode
+	var (
+		sessionMode    WorkspacePollMode
+		hasSessionMode bool
+	)
 	if qry != nil {
 		sessionMode = qry.GetSessionMode(sessionID)
+		hasSessionMode = true
 	} else {
 		// Fall back to cached value if no hub wired (e.g., tests).
 		a.mu.Lock()
 		cached, hasCached := a.sessionModes[sessionID]
 		a.mu.Unlock()
-		if !hasCached {
-			return
+		if hasCached {
+			sessionMode = cached
+			hasSessionMode = true
 		}
-		sessionMode = cached
 	}
 
 	a.mu.Lock()
-	// Merge the queried mode with whatever we had cached, then recompute
-	// the workspace-level effective mode across all sessions in this
-	// workspace.
+	// Merge the queried mode with whatever we had cached when the hub has an
+	// authoritative answer. Runtime interest is always included, even when no
+	// UI subscription exists for this session.
 	wp := execution.WorkspacePath
-	a.setSessionModeLocked(sessionID, sessionMode, wp)
-	effective := WorkspacePollModePaused
-	for sid := range a.workspaceSessions[wp] {
-		if m, ok := a.sessionModes[sid]; ok && m.rank() > effective.rank() {
-			effective = m
-		}
+	if hasSessionMode {
+		a.setSessionModeLocked(sessionID, sessionMode, wp)
 	}
-	if effective == WorkspacePollModePaused {
-		delete(a.lastPushed, wp)
-	} else {
-		a.lastPushed[wp] = effective
-	}
+	effective := a.effectiveModeLocked(wp)
+	shouldPush := a.applyEffectiveModeLocked(wp, effective, true)
 	a.mu.Unlock()
 
-	if effective != WorkspacePollModePaused {
+	if shouldPush {
 		a.pushAsync(execution, execution.WorkspacePath, effective)
 	}
 }
@@ -315,5 +403,13 @@ func (m *Manager) SetSessionModeQuerier(q SessionModeQuerier) {
 		m.pollAggregator.mu.Lock()
 		m.pollAggregator.hubQry = q
 		m.pollAggregator.mu.Unlock()
+	}
+}
+
+// setRuntimeInterest keeps workspace polling alive for active executions even
+// when no browser is subscribed to the session stream.
+func (m *Manager) setRuntimeInterest(sessionID string, active bool) {
+	if m.pollAggregator != nil {
+		m.pollAggregator.HandleRuntimeInterest(sessionID, active)
 	}
 }

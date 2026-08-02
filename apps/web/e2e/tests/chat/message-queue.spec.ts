@@ -325,6 +325,45 @@ test.describe("Task session queue", () => {
     expect(metrics.overflowY).toBe("auto");
   });
 
+  test("merges a queued message into the message above it", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const session = await seedTaskAndWaitForIdle(testPage, apiClient, seedData, "Queue merge test");
+
+    // Send a slow command to keep the agent busy while we queue two messages.
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await testPage.waitForTimeout(500);
+
+    const editor = testPage.locator(".tiptap.ProseMirror").first();
+    await typeWhileBusy(testPage, editor, "first message");
+    const submitBtn = testPage.getByTestId("submit-message-button");
+    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
+    await submitBtn.click();
+
+    await typeWhileBusy(testPage, editor, "second message");
+    await expect(submitBtn).toBeVisible({ timeout: 5_000 });
+    await submitBtn.click();
+
+    // Expand the queue panel; the second row offers the merge control.
+    await openQueuePanel(testPage);
+    const mergeButtons = testPage.getByTestId("queue-entry-merge");
+    await expect(mergeButtons).toHaveCount(1, { timeout: 5_000 });
+    await mergeButtons.click();
+
+    // After the merge the queue holds a single entry whose text contains both
+    // messages, and the panel header reflects one queued message.
+    const entries = testPage.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(1, { timeout: 5_000 });
+    await expect(entries.first()).toContainText("first message");
+    await expect(entries.first()).toContainText("second message");
+    await expect(testPage.getByTestId("queued-ghost-list")).toContainText(/1 of 10/);
+  });
+
   test("queue message with plan mode enabled via submit button", async ({
     testPage,
     apiClient,

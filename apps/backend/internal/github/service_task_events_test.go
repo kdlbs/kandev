@@ -152,14 +152,29 @@ func TestHandleTaskEvents_MalformedPayloadIsNoop(t *testing.T) {
 
 func TestHandleWorkspaceDeletedRemovesOnlyOwnedConnectionSecrets(t *testing.T) {
 	svc, secrets := newWorkspaceConnectionService(t, "octocat")
+	ctx := context.Background()
+	if err := svc.store.UpsertWorkspaceSettings(ctx, &WorkspaceSettings{
+		WorkspaceID:            "ws-1",
+		TaskGitCredentialsMode: TaskGitCredentialsModeExecutor,
+	}); err != nil {
+		t.Fatalf("seed workspace settings: %v", err)
+	}
 	secrets.values[WorkspacePATSecretKey("ws-1")] = "pat"
 	secrets.values[UserAccessTokenSecretKey("ws-1", "user-1")] = "access"
 	secrets.values[UserRefreshTokenSecretKey("ws-1", "user-1")] = "refresh"
 	secrets.values[WorkspacePATSecretKey("ws-2")] = "other"
 
 	event := bus.NewEvent(events.WorkspaceDeleted, "task-service", map[string]interface{}{"id": "ws-1"})
-	if err := svc.handleWorkspaceDeleted(context.Background(), event); err != nil {
+	if err := svc.handleWorkspaceDeleted(ctx, event); err != nil {
 		t.Fatalf("handleWorkspaceDeleted: %v", err)
+	}
+	var settingsCount int
+	if err := svc.store.db.GetContext(ctx, &settingsCount,
+		`SELECT COUNT(1) FROM github_workspace_settings WHERE workspace_id = ?`, "ws-1"); err != nil {
+		t.Fatalf("count workspace settings: %v", err)
+	}
+	if settingsCount != 0 {
+		t.Fatalf("workspace settings rows = %d, want 0", settingsCount)
 	}
 	for _, id := range []string{
 		WorkspacePATSecretKey("ws-1"),

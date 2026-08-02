@@ -431,6 +431,10 @@ type RepoSpec struct {
 // config, tasks). Used when plan_mode is enabled on a session.
 const McpModeConfig = "config"
 
+// McpModeTaskTitlePending exposes the task-mode MCP surface plus the one-shot
+// title tool while a prompt-first task still has its provisional title.
+const McpModeTaskTitlePending = "task-title-pending"
+
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
@@ -445,7 +449,7 @@ type LaunchOptions struct {
 	Prompt               string
 	WorkflowStepID       string
 	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeConfig, or McpModeOffice
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
 	// RouteOverride carries a provider-routing override resolved by the
@@ -623,6 +627,10 @@ type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID 
 // frontend receives the primary_session_id.
 type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 
+// ContextWindowResetFunc clears a session's persisted context-window reading
+// and invalidates updates captured before the reset.
+type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -704,6 +712,10 @@ type Executor struct {
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
+
+	// Callback for model changes that invalidate the current context window.
+	// The orchestrator owns the per-session generation guard used by this reset.
+	onContextWindowReset ContextWindowResetFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -882,6 +894,11 @@ func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 // receives primary_session_id.
 func (e *Executor) SetOnPrimarySessionSet(fn PrimarySessionSetFunc) {
 	e.onPrimarySessionSet = fn
+}
+
+// SetOnContextWindowReset wires the guarded context-window reset callback.
+func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
+	e.onContextWindowReset = fn
 }
 
 // SetOnLaunchFailed sets a callback for launch failures that happen before

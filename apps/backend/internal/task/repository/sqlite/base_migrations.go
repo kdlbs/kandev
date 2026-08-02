@@ -199,6 +199,22 @@ func (r *Repository) runMigrations() error {
 	// "New" divider (see models.TaskSession.LastReadMessageID).
 	r.migrate.Apply("task_sessions.last_read_message_id", `ALTER TABLE task_sessions ADD COLUMN last_read_message_id TEXT DEFAULT ''`)
 
+	// Bounded task-level status projection. Keep this on the replay path as well
+	// as the fresh schema path so an existing installation gets the table
+	// without a destructive rebuild.
+	r.migrate.Apply("task_status_summaries.table", `
+		CREATE TABLE IF NOT EXISTS task_status_summaries (
+			task_id TEXT PRIMARY KEY,
+			workspace_id TEXT NOT NULL,
+			revision INTEGER NOT NULL DEFAULT 0,
+			summary TEXT NOT NULL DEFAULT '{}',
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+		)`)
+	r.migrate.Apply("task_status_summaries.workspace", `
+		CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
+			ON task_status_summaries(workspace_id)`)
+
 	return nil
 }
 

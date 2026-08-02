@@ -72,7 +72,7 @@ Open it from either:
 - the current task action beside **New Task** in the sidebar (**New subtask of current task**); or
 - the task workbench **Task** split menu → **Subtask**.
 
-The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are required, and **Create Subtask** starts the agent immediately. The subtask inherits the parent's workflow. Its profile starts from the active parent session's profile and can be changed, but the dialog does not filter profiles for executor compatibility.
+The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are required, and **Create Subtask** starts the agent immediately. When **Agent-generated task titles** is enabled, the title field is hidden and the prompt is required instead; Kandev derives the same six-word provisional title and lets the first session replace it. The subtask inherits the parent's workflow. Its profile starts from the active parent session's profile and can be changed, but the dialog does not filter profiles for executor compatibility.
 
 Choose a workspace mode:
 
@@ -268,7 +268,7 @@ When Office is enabled, it prototypes **Blocked by** and **Blocking** properties
 - **New Agent has no usable profile:** configure credentials under **Settings → Agents** and a compatible executor under **Settings → Executors**.
 - **Summarize session is missing:** configure a utility agent; otherwise use **Blank** or **Copy initial prompt**.
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
-- **Subtask cannot be created:** confirm title, prompt, compatible profile, workflow, and the one-level Kanban depth limit.
+- **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.

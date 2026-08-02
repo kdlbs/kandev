@@ -71,6 +71,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 
 	api.GET("/task-prs", c.httpListTaskPRs)
 	api.POST("/task-prs", c.httpCreateTaskPR)
+	api.DELETE("/task-prs/:associationId", c.httpDeleteTaskPR)
 	api.GET("/task-prs/:taskId", c.httpGetTaskPR)
 	api.GET("/task-issues", c.httpListTaskIssues)
 	api.PUT("/tasks/:taskId/issue", c.httpLinkTaskIssue)
@@ -247,6 +248,26 @@ func (c *Controller) httpCreateTaskPR(ctx *gin.Context) {
 		return
 	}
 	ctx.JSON(http.StatusOK, tp)
+}
+
+func (c *Controller) httpDeleteTaskPR(ctx *gin.Context) {
+	workspaceID := ctx.Query("workspace_id")
+	if workspaceID == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id query parameter required"})
+		return
+	}
+	associationID := ctx.Param("associationId")
+	if _, err := c.service.DetachTaskPR(ctx.Request.Context(), workspaceID, associationID); err != nil {
+		if errors.Is(err, ErrTaskPRNotFound) || writeWatchWorkspaceError(ctx, "task PR", err) {
+			if !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+				ctx.JSON(http.StatusNotFound, gin.H{"error": "task PR not found"})
+			}
+			return
+		}
+		ctx.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	ctx.JSON(http.StatusOK, gin.H{"deleted": true})
 }
 
 func (c *Controller) httpGetTaskPR(ctx *gin.Context) {

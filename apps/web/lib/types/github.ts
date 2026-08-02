@@ -256,6 +256,13 @@ export type TaskPR = {
   updated_at: string;
 };
 
+/** Workspace-scoped websocket payload emitted when a task PR association is detached. */
+export type TaskPRDeletedEvent = {
+  workspace_id: string;
+  task_id: string;
+  association_id: string;
+};
+
 export type TaskCIPRAutomationState = {
   task_id: string;
   repository_id: string;

@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
 import { createInvite } from "@/lib/api/domains/auth-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 type Props = {
   open: boolean;
@@ -103,8 +104,7 @@ function InviteForm({
 function InviteLinkResult({ url, onDone }: { url: string; onDone: () => void }) {
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
-    await navigator.clipboard.writeText(url);
-    setCopied(true);
+    if (await copyToClipboard(url)) setCopied(true);
   };
   return (
     <>

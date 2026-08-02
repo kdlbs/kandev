@@ -308,8 +308,8 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'config', or 'office'"})
+	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)

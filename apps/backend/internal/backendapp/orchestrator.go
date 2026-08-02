@@ -104,6 +104,7 @@ func provideOrchestrator(
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
+	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 

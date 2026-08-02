@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SavedLayout } from "@/lib/types/http";
 import { panel, type LayoutState } from "@/lib/state/layout-manager";
 import {
@@ -28,6 +28,10 @@ const SECOND_LAYOUT_ID = "layout-two";
 const CENTER_COLUMN_ID = "center";
 const LEGACY_LAYOUT_VALUE = "old-format";
 const SESSION_PANEL_ID = "session:session-one";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 function reusableLayout(panelIds: string[] = ["chat", "files", "changes"]): LayoutState {
   return {
@@ -294,6 +298,17 @@ describe("layout profile IDs", () => {
     const second = createLayoutProfileId();
 
     expect(first).toMatch(/^layout-[0-9a-f-]{36}$/);
+    expect(second).not.toBe(first);
+  });
+
+  it("uses the UUID fallback when crypto.randomUUID is unavailable", () => {
+    vi.stubGlobal("crypto", {});
+
+    const first = createLayoutProfileId();
+    const second = createLayoutProfileId();
+
+    expect(first).toMatch(/^layout-[0-9a-f-]{36}$/);
+    expect(second).toMatch(/^layout-[0-9a-f-]{36}$/);
     expect(second).not.toBe(first);
   });
 });

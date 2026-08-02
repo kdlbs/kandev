@@ -17,7 +17,7 @@ func Provide(
 	writer *sqlx.DB,
 	reader *sqlx.DB,
 	secrets SecretStore,
-	_ bus.EventBus,
+	eventBus bus.EventBus,
 	log *logger.Logger,
 ) (*Service, func() error, error) {
 	store, err := NewStore(writer, reader)
@@ -31,6 +31,7 @@ func Provide(
 		factory = func(*Config, string) Client { return mock }
 	}
 	service := NewService(store, secrets, factory, log)
+	service.SetEventBus(eventBus)
 	service.mock = mock
 	return service, func() error { return nil }, nil
 }

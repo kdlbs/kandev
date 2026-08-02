@@ -460,6 +460,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
 		"unread_divider":                      settings.UnreadDivider,
+		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
@@ -481,6 +482,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"github_saved_presets":                settings.GitHubSavedPresets,
 		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
 		"keyboard_shortcuts":                  keyboardShortcuts,
@@ -579,6 +581,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ReviewAutoMarkOnScroll:          true,
 		ConfirmTaskArchive:              true,
 		UnreadDivider:                   false,
+		AgentGeneratedTaskTitles:        false,
 		MCPTaskAgentProfileDefault:      models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:           false,
 		ShowScrollToLastPrompt:          true,
@@ -626,6 +629,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ReviewAutoMarkOnScroll          *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive              *bool                               `json:"confirm_task_archive"`
 		UnreadDivider                   *bool                               `json:"unread_divider"`
+		AgentGeneratedTaskTitles        *bool                               `json:"agent_generated_task_titles"`
 		MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar           *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
@@ -647,6 +651,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		GitHubSavedPresets              json.RawMessage                     `json:"github_saved_presets"`
 		GitHubDefaultQueryPresets       json.RawMessage                     `json:"github_default_query_presets"`
 		GitLabSavedPresets              json.RawMessage                     `json:"gitlab_saved_presets"`
+		AzureDevOpsBrowsePreferences    json.RawMessage                     `json:"azure_devops_browse_preferences"`
 		DefaultUtilityAgentID           string                              `json:"default_utility_agent_id"`
 		DefaultUtilityModel             string                              `json:"default_utility_model"`
 		KeyboardShortcuts               map[string]interface{}              `json:"keyboard_shortcuts"`
@@ -687,6 +692,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
+	}
+	if payload.AgentGeneratedTaskTitles != nil {
+		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {
@@ -734,6 +742,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.GitHubSavedPresets = payload.GitHubSavedPresets
 	settings.GitHubDefaultQueryPresets = payload.GitHubDefaultQueryPresets
 	settings.GitLabSavedPresets = payload.GitLabSavedPresets
+	settings.AzureDevOpsBrowsePreferences = payload.AzureDevOpsBrowsePreferences
 	settings.DefaultUtilityAgentID = payload.DefaultUtilityAgentID
 	settings.DefaultUtilityModel = payload.DefaultUtilityModel
 	settings.KeyboardShortcuts = payload.KeyboardShortcuts

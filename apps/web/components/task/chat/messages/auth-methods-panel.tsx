@@ -5,6 +5,7 @@ import { IconTerminal2, IconCopy, IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { RecoveryAuthMethod } from "@/components/task/chat/types";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 function buildFullCommand(termAuth: RecoveryAuthMethod["terminal_auth"]): string | null {
   if (!termAuth) return null;
@@ -65,12 +66,9 @@ function AuthMethodRow({
 
   const handleCopy = useCallback(async () => {
     if (!fullCommand) return;
-    try {
-      await navigator.clipboard.writeText(fullCommand);
+    if (await copyToClipboard(fullCommand)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch {
-      // clipboard API unavailable
     }
   }, [fullCommand]);
 

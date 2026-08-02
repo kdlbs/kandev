@@ -125,6 +125,18 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.confirmTaskArchive).toBe(false);
   });
 
+  it("syncs the agent-generated title preference", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ agent_generated_task_titles: true }),
+    );
+    expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(true);
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(false);
+  });
+
   it("syncs transcript navigation preferences and uses the documented defaults", () => {
     const store = makeStore();
 

@@ -16,6 +16,7 @@ import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { MessageRenderer } from "@/components/task/chat/message-renderer";
 import type { Message } from "@/lib/types/http";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
+import { generateUUID } from "@/lib/utils";
 
 type AdvancedChatPanelProps = {
   taskId: string;
@@ -130,7 +131,12 @@ function useChatActions(
       if (!client || !sessionId) return;
       await client.request(
         "message.add",
-        { task_id: taskId, session_id: sessionId, content: text },
+        {
+          task_id: taskId,
+          session_id: sessionId,
+          client_message_id: generateUUID(),
+          content: text,
+        },
         10_000,
       );
     },

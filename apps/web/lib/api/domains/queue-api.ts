@@ -27,6 +27,17 @@ export class QueueEntryNotFoundError extends Error {
   }
 }
 
+/** Error thrown when a merge would push the combined entity references past
+ * the per-message cap; the server rejects the merge atomically instead of
+ * dropping references that were already persisted. */
+export class MergeReferenceOverflowError extends Error {
+  readonly code = "merge_reference_overflow";
+  constructor() {
+    super("Merging would exceed the per-message entity reference limit.");
+    this.name = "MergeReferenceOverflowError";
+  }
+}
+
 type WSError = {
   code?: string;
   message?: string;
@@ -56,6 +67,9 @@ export function rethrowQueueError(err: unknown): never {
   }
   if (wsErr?.code === "entry_not_found") {
     throw new QueueEntryNotFoundError();
+  }
+  if (wsErr?.code === "merge_reference_overflow") {
+    throw new MergeReferenceOverflowError();
   }
   if (wsErr?.message) {
     throw new Error(wsErr.message);
@@ -183,6 +197,23 @@ export async function removeQueuedEntry(params: {
   }
   try {
     return await client.request<{ entry_id: string }>("message.queue.remove", params);
+  } catch (err) {
+    rethrowQueueError(err);
+  }
+}
+
+/** Fold a queued entry into the entry directly above it. Throws QueueEntryNotFoundError if drained. */
+export async function mergeQueuedEntry(params: {
+  session_id: string;
+  entry_id: string;
+  user_id?: string;
+}): Promise<{ entry_id: string }> {
+  const client = getWebSocketClient();
+  if (!client) {
+    throw new Error(WS_CLIENT_UNAVAILABLE);
+  }
+  try {
+    return await client.request<{ entry_id: string }>("message.queue.merge", params);
   } catch (err) {
     rethrowQueueError(err);
   }

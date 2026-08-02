@@ -12,6 +12,32 @@ const baseStatus: GitHubStatus = {
 };
 
 describe("registerGitHubHandlers", () => {
+  it("removes the detached PR association without touching sibling PRs", () => {
+    const store = createAppStore();
+    const first = {
+      id: "association-1",
+      task_id: "task-1",
+      owner: "acme",
+      repo: "kandev",
+      pr_number: 1,
+    };
+    const sibling = { ...first, id: "association-2", pr_number: 2 };
+    store.getState().setTaskPRs({ "task-1": [first as never, sibling as never] });
+
+    const handler = registerGitHubHandlers(store)["github.task_pr.deleted"]!;
+    handler({
+      payload: {
+        workspace_id: "workspace-1",
+        task_id: "task-1",
+        association_id: "association-1",
+      },
+    } as Parameters<typeof handler>[0]);
+
+    expect(store.getState().taskPRs.byTaskId["task-1"]?.map((pr) => pr.id)).toEqual([
+      "association-2",
+    ]);
+  });
+
   it("applies unscoped rate-limit events only to legacy shared connections", () => {
     const store = createAppStore();
     store.getState().resetGitHubStatus("legacy-workspace");

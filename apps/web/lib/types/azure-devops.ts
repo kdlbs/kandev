@@ -75,9 +75,86 @@ export type AzureDevOpsWorkItem = {
   project?: string;
   areaPath?: string;
   assignedTo?: string;
+  tags?: string[];
   webUrl?: string;
   apiUrl?: string;
   fields?: Record<string, unknown>;
+};
+
+export type AzureDevOpsPlanningField = {
+  referenceName: string;
+  label: string;
+  value: string;
+};
+
+export type AzureDevOpsWorkItemDetail = AzureDevOpsWorkItem & {
+  planningFields: AzureDevOpsPlanningField[];
+};
+
+export type AzureDevOpsWorkItemComment = {
+  id: number;
+  content: string;
+  author: AzureDevOpsIdentity;
+  publishedAt?: string;
+  updatedAt?: string;
+};
+
+export type AzureDevOpsWorkItemCommentPage = {
+  comments: AzureDevOpsWorkItemComment[];
+  continuationToken?: string;
+};
+
+export type AzureDevOpsWorkItemAssignmentUpdate = {
+  revision: number;
+  assigneeAction: "assign_current_user" | "unassign";
+};
+
+export type AzureDevOpsTeam = {
+  id: string;
+  name: string;
+  projectId: string;
+  projectName?: string;
+};
+
+export type AzureDevOpsBoardReference = { id: string; name: string };
+
+export type AzureDevOpsBoardColumn = {
+  id: string;
+  name: string;
+  columnType?: string;
+  description?: string;
+  isSplit?: boolean;
+  itemLimit?: number;
+  stateMappings?: Record<string, string>;
+};
+
+export type AzureDevOpsBoard = {
+  id: string;
+  name: string;
+  columns: AzureDevOpsBoardColumn[];
+  fields: {
+    columnField: { referenceName: string };
+    doneField: { referenceName: string };
+    rowField: { referenceName: string };
+  };
+  rows?: Array<{ id: string; name: string; color?: string }>;
+};
+
+export type AzureDevOpsBoardWorkItem = AzureDevOpsWorkItem & {
+  columnId: string;
+  columnDone: boolean;
+};
+
+export type AzureDevOpsBoardSnapshot = {
+  board: AzureDevOpsBoard;
+  items: AzureDevOpsBoardWorkItem[];
+};
+
+export type AzureDevOpsBoardWorkItemUpdate = {
+  revision: number;
+  assigneeAction?: "assign_current_user" | "unassign";
+  columnId?: string;
+  columnDone?: boolean;
 };
 
 export type AzureDevOpsWorkItemSearchResult = {
@@ -179,3 +256,129 @@ export type AssociateAzureDevOpsPullRequestRequest = {
   repositoryId: string;
   pullRequestId: number;
 };
+
+export type AzureDevOpsTaskWorkItem = {
+  id: string;
+  taskId: string;
+  workspaceId: string;
+  projectId: string;
+  workItemId: number;
+  workItemUrl: string;
+  title: string;
+  state: string;
+  type: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AssociateAzureDevOpsWorkItemRequest = {
+  projectId: string;
+  workItemId: number;
+};
+
+export type AzureDevOpsQueryPreset = {
+  id: string;
+  label: string;
+  group: string;
+  filters: Record<string, unknown>;
+};
+
+export type AzureDevOpsActionPreset = {
+  id: string;
+  label: string;
+  hint: string;
+  icon: string;
+  promptTemplate: string;
+};
+
+export type AzureDevOpsWorkspaceSettings = {
+  workspaceId: string;
+  workItemQueries: AzureDevOpsQueryPreset[];
+  pullRequestQueries: AzureDevOpsQueryPreset[];
+  workItemActions: AzureDevOpsActionPreset[];
+  pullRequestActions: AzureDevOpsActionPreset[];
+};
+
+export type UpdateAzureDevOpsWorkspaceSettingsRequest = {
+  workItemQueries?: AzureDevOpsQueryPreset[] | null;
+  pullRequestQueries?: AzureDevOpsQueryPreset[] | null;
+  workItemActions?: AzureDevOpsActionPreset[] | null;
+  pullRequestActions?: AzureDevOpsActionPreset[] | null;
+};
+
+export type AzureDevOpsCleanupPolicy = "auto" | "always" | "never";
+
+export type AzureDevOpsWorkItemWatch = {
+  id: string;
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  projectId: string;
+  wiql: string;
+  repositoryId: string;
+  baseBranch: string;
+  agentProfileId: string;
+  executorProfileId: string;
+  prompt: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  cleanupPolicy: AzureDevOpsCleanupPolicy;
+  maxInflightTasks?: number;
+  lastError?: string;
+  lastErrorAt?: string | null;
+  lastPolledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AzureDevOpsPullRequestWatch = {
+  id: string;
+  workspaceId: string;
+  workflowId: string;
+  workflowStepId: string;
+  projectId: string;
+  azureRepositoryId?: string;
+  status: string;
+  creatorId?: string;
+  reviewerId?: string;
+  repositoryId: string;
+  baseBranch: string;
+  agentProfileId: string;
+  executorProfileId: string;
+  prompt: string;
+  enabled: boolean;
+  pollIntervalSeconds: number;
+  cleanupPolicy: AzureDevOpsCleanupPolicy;
+  maxInflightTasks?: number;
+  lastError?: string;
+  lastErrorAt?: string | null;
+  lastPolledAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type AzureDevOpsWorkItemWatchInput = Omit<
+  AzureDevOpsWorkItemWatch,
+  | "id"
+  | "workspaceId"
+  | "enabled"
+  | "lastError"
+  | "lastErrorAt"
+  | "lastPolledAt"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export type AzureDevOpsPullRequestWatchInput = Omit<
+  AzureDevOpsPullRequestWatch,
+  | "id"
+  | "workspaceId"
+  | "enabled"
+  | "lastError"
+  | "lastErrorAt"
+  | "lastPolledAt"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export type AzureDevOpsWatchResetResult = { generation: number; taskCount: number };

@@ -270,7 +270,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
 	// prepareSessionForStart also propagates any inherited workspace
 	// environment (inherit_parent / shared_group) onto the new session.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -282,7 +282,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// transitions through updateTaskSessionState which broadcasts; the prepare
 	// path writes the row directly, so without this the per-task session list
 	// stays empty until a manual reload.
-	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	}
 
 	if launchWorkspace {
 		// Launch workspace infrastructure (agentctl) in the background so the WS response
@@ -490,19 +492,11 @@ func (s *Service) StartCreatedSession(
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
-		referenceContext := EntityReferenceContext(references)
-		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(
-				taskID, sessionID, effectivePrompt,
-				referenceContext, promptReferenceContext,
-			)
-		} else {
-			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-				IncludeCoordinatorTaskControls: !configMode,
-			}, referenceContext, promptReferenceContext)
-		}
+	if effectivePrompt != "" || len(attachments) > 0 {
+		effectivePrompt = s.wrapCreatedSessionPrompt(
+			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
+			isOfficeTask, configMode, references, promptReferenceContext,
+		)
 	}
 
 	executorID := session.ExecutorID
@@ -533,6 +527,38 @@ func (s *Service) StartCreatedSession(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+// wrapCreatedSessionPrompt adds the first-turn context for a prepared session.
+// Passthrough sessions intentionally receive only the short pending-title
+// instruction; structured sessions receive the normal task or Office block.
+func (s *Service) wrapCreatedSessionPrompt(
+	ctx context.Context,
+	prompt, taskID, sessionID string,
+	session *models.TaskSession,
+	dbTask *models.Task,
+	isOfficeTask, configMode bool,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) string {
+	referenceContext := EntityReferenceContext(references)
+	switch {
+	case session.IsPassthrough:
+		if !configMode && models.IsAgentTitlePending(dbTask.Metadata) {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+		}
+		return prompt
+	case isOfficeTask:
+		return sysprompt.InjectOfficeContext(
+			taskID, sessionID, prompt, referenceContext, promptReferenceContext,
+		)
+	default:
+		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			IncludeCoordinatorTaskControls: !configMode,
+			IncludeTaskTitleTool:           !configMode && models.IsAgentTitlePending(dbTask.Metadata),
+		}, referenceContext, promptReferenceContext)
+	}
 }
 
 // handleSessionLaunchFailure covers launch and resume failures that have not
@@ -832,9 +858,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
+	}
+	// Surface the newly created session before LaunchPreparedSession performs
+	// potentially slow environment setup (for example, a Docker health check).
+	// The frontend adopts this CREATED session and can render
+	// executor.prepare.progress events while the launch request is still pending.
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
 	}
 
 	// When the workflow step overrode the caller's profile, tag the session
@@ -856,6 +889,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// strictly less harmful than leaking hidden <kandev-system> content into
 	// a real passthrough session's PTY.
 	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
+	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+	}
 
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
@@ -864,7 +901,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
-	if cm, ok := task.Metadata["config_mode"].(bool); ok && cm {
+	if cm, ok := launchSession.Metadata["config_mode"].(bool); ok && cm {
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
@@ -887,14 +924,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
-			prompt:           effectivePrompt,
-			taskID:           task.ID,
-			sessionID:        sessionID,
-			isOfficeTask:     isOfficeTask,
-			isPassthrough:    skipKandevMCPWrap,
-			configMode:       configMode,
-			referenceContext: promptReferenceContext,
-			spawnOrigin:      opts.SpawnOrigin,
+			prompt:               effectivePrompt,
+			taskID:               task.ID,
+			sessionID:            sessionID,
+			isOfficeTask:         isOfficeTask,
+			isPassthrough:        skipKandevMCPWrap,
+			configMode:           configMode,
+			referenceContext:     promptReferenceContext,
+			includeTaskTitleTool: !configMode && models.IsAgentTitlePending(task.Metadata),
+			spawnOrigin:          opts.SpawnOrigin,
 		})
 	}
 
@@ -937,14 +975,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 // launchPromptContext carries what the first turn of a launch needs in order to
 // compose its system context.
 type launchPromptContext struct {
-	prompt           string
-	taskID           string
-	sessionID        string
-	isOfficeTask     bool
-	isPassthrough    bool
-	configMode       bool
-	referenceContext string
-	spawnOrigin      *SpawnOrigin
+	prompt               string
+	taskID               string
+	sessionID            string
+	isOfficeTask         bool
+	isPassthrough        bool
+	configMode           bool
+	includeTaskTitleTool bool
+	referenceContext     string
+	spawnOrigin          *SpawnOrigin
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -955,7 +994,11 @@ type launchPromptContext struct {
 // applySpawnOriginText for why they skip the MCP block entirely.
 func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptContext) string {
 	if p.isPassthrough {
-		return applySpawnOriginText(p.prompt, p.spawnOrigin)
+		prompt := applySpawnOriginText(p.prompt, p.spawnOrigin)
+		if p.includeTaskTitleTool {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+		}
+		return prompt
 	}
 	// Spawner attribution is built here, not by the MCP handler that filled
 	// SpawnOrigin: the injectors below strip every <kandev-system> block they do
@@ -970,6 +1013,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
+		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 	}, p.referenceContext, spawnContext)
 }
 
@@ -1086,13 +1130,13 @@ func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
 func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
-	sessionID, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+) (string, bool, error) {
+	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	s.propagateInheritedEnvironment(ctx, task, sessionID)
-	return sessionID, nil
+	return sessionID, created, nil
 }
 
 // resolveIsPassthroughForLaunch reloads the session snapshot to decide
@@ -1119,18 +1163,19 @@ func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID s
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
+) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		session, ensureErr := s.executor.EnsureSessionForAgent(
+		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)
 		if ensureErr != nil {
-			return "", ensureErr
+			return "", false, ensureErr
 		}
-		return session.ID, nil
+		return session.ID, created, nil
 	}
-	return s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	return sessionID, err == nil, err
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
@@ -2446,6 +2491,12 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 	result, err := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
 	if err != nil {
 		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, err)
+	}
+	if result.Changed {
+		// Cancellation takes effect before detached runtime teardown. Tombstone
+		// the execution immediately so buffered agent frames cannot recreate
+		// session output after the coordinator has acknowledged the stop.
+		s.markExecutionFailed(sessionID, result.ExecutionID)
 	}
 	teardownClaimed := result.Changed && s.claimExecutionTeardown(
 		sessionID,

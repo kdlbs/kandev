@@ -35,6 +35,7 @@ import { StatusIcon } from "@/app/office/tasks/[id]/status-icon";
 import { StageProgressBar } from "./stage-progress-bar";
 import { SubtaskStepper } from "./subtask-stepper";
 import { hasBlockerChain } from "./workflow-sort";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { NewTaskDialog } from "@/app/office/components/new-task-dialog";
 import { ActiveSessionRefProvider } from "./components/active-session-ref-context";
 import { TopbarWorkingIndicator } from "./components/topbar-working-indicator";
@@ -139,7 +140,7 @@ function TaskHeaderRow({ task, activeHold }: { task: Task; activeHold: TreeHold 
               variant="ghost"
               size="icon"
               className="h-8 w-8 cursor-pointer"
-              onClick={() => navigator.clipboard.writeText(task.identifier)}
+              onClick={() => void copyToClipboard(task.identifier)}
             >
               <IconCopy className="h-4 w-4" />
             </Button>

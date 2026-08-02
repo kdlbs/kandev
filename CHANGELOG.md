@@ -2,6 +2,18 @@
 
 All notable changes to Kandev.
 
+## 0.84.1 - 2026-08-02
+
+### Features
+
+- localize Settings → Integrations → GitHub watches and defaults ([#2158](https://github.com/kdlbs/kandev/pull/2158))
+- localize Settings → Integrations → GitHub connection and auth ([#2155](https://github.com/kdlbs/kandev/pull/2155))
+
+### Bug Fixes
+
+- guard browser APIs in insecure contexts ([#2157](https://github.com/kdlbs/kandev/pull/2157))
+- default new workspaces to host GitHub access ([#2156](https://github.com/kdlbs/kandev/pull/2156))
+
 ## 0.84.0 - 2026-08-02
 
 ### Features

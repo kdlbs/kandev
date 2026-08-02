@@ -7,6 +7,8 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	mcplib "github.com/mark3labs/mcp-go/mcp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -267,6 +269,49 @@ func TestServerModeTask_DisableAskQuestion(t *testing.T) {
 	assert.Contains(t, tools, "create_task_plan_kandev")
 }
 
+func TestServerModeTaskTitlePending_RegistersTitleToolOnlyForPendingTaskMode(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	pending := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTaskTitlePending)
+	titleTool, ok := pending.mcpServer.ListTools()["set_task_title_kandev"]
+	require.True(t, ok, "pending task mode must register set_task_title_kandev")
+	assert.Contains(t, titleTool.Tool.Description, "first action")
+	assert.Contains(t, titleTool.Tool.Description, "3 words")
+
+	ordinary := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	assert.NotContains(t, ordinary.mcpServer.ListTools(), "set_task_title_kandev")
+	for _, mode := range []string{ModeConfig, ModeOffice, ModeExternal} {
+		t.Run(mode, func(t *testing.T) {
+			restricted := New(backend, "test-session", "test-task", 10005, log, "", false, mode)
+			assert.NotContains(t, restricted.mcpServer.ListTools(), "set_task_title_kandev")
+		})
+	}
+}
+
+func TestServerSetTaskTitle_ForwardsBoundTaskAndSession(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"accepted": true,
+		"task_id":  "task-1",
+		"title":    "Short title",
+	}}
+	log := newTestLogger(t)
+	s := New(backend, "session-1", "task-1", 10005, log, "", false, ModeTaskTitlePending)
+
+	result := callTool(t, s, "set_task_title_kandev", map[string]interface{}{"title": "Short title"})
+	require.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPSetTaskTitle, backend.lastAction)
+	assert.Equal(t, map[string]interface{}{
+		"task_id":    "task-1",
+		"session_id": "session-1",
+		"title":      "Short title",
+	}, backend.lastPayload)
+	text, ok := result.Content[0].(mcplib.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, text.Text, `"accepted": true`)
+}
+
 func TestServerModeTask_ToolCount(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -416,6 +461,7 @@ func TestServerModeOffice_DisableAskQuestion(t *testing.T) {
 
 func TestServerModeConstants(t *testing.T) {
 	assert.Equal(t, "task", ModeTask)
+	assert.Equal(t, "task-title-pending", ModeTaskTitlePending)
 	assert.Equal(t, "config", ModeConfig)
 	assert.Equal(t, "external", ModeExternal)
 	assert.Equal(t, "office", ModeOffice)

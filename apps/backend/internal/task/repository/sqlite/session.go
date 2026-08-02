@@ -1025,6 +1025,104 @@ func (r *Repository) SetSessionMetadataKey(ctx context.Context, sessionID, key s
 	return nil
 }
 
+// UpdateSessionContextWindow stores a context-window sample and atomically
+// increments the session's inferred compaction count when the new used-token
+// value is lower than the previous persisted sample.
+func (r *Repository) UpdateSessionContextWindow(
+	ctx context.Context,
+	sessionID string,
+	contextWindow map[string]interface{},
+) (int64, error) {
+	windowJSON, err := json.Marshal(contextWindow)
+	if err != nil {
+		return 0, fmt.Errorf("failed to serialize context window: %w", err)
+	}
+	used, err := contextWindowUsed(contextWindow)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().UTC()
+	var count int64
+	row := r.db.QueryRowxContext(ctx, r.db.Rebind(updateSessionContextWindowQuery(r.db.DriverName())), string(windowJSON), used, now, sessionID)
+	if err := row.Scan(&count); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return 0, fmt.Errorf("agent session not found: %s", sessionID)
+		}
+		return 0, err
+	}
+	return count, nil
+}
+
+func contextWindowUsed(contextWindow map[string]interface{}) (int64, error) {
+	value, ok := contextWindow["used"]
+	if !ok {
+		return 0, errors.New("context window is missing used tokens")
+	}
+	switch typed := value.(type) {
+	case int:
+		return int64(typed), nil
+	case int32:
+		return int64(typed), nil
+	case int64:
+		return typed, nil
+	case float64:
+		return int64(typed), nil
+	case json.Number:
+		used, err := typed.Int64()
+		if err != nil {
+			return 0, fmt.Errorf("invalid context window used tokens: %w", err)
+		}
+		return used, nil
+	default:
+		return 0, fmt.Errorf("invalid context window used tokens: %T", value)
+	}
+}
+
+//nolint:dupword // nested JSON setter calls are intentional in the atomic SQL.
+func updateSessionContextWindowQuery(driver string) string {
+	if dialect.IsPostgres(driver) {
+		base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}'::jsonb ELSE metadata::jsonb END"
+		count := "GREATEST(COALESCE(NULLIF((" + base + ") #>> '{context_compaction_count}', '')::bigint, 0), 0)"
+		previousUsed := "(" + base + ") #>> '{context_window,used}'"
+		return `
+			UPDATE task_sessions
+			SET metadata = jsonb_set(
+				jsonb_set(` + base + `, '{context_window}', ?::jsonb, true),
+				'{context_compaction_count}',
+				to_jsonb(CASE
+					WHEN jsonb_typeof((` + base + `) #> '{context_window,used}') = 'number'
+						AND (` + previousUsed + `)::bigint > ?
+					THEN ` + count + ` + 1
+					ELSE ` + count + `
+				END),
+				true
+			)::text,
+				updated_at = ?
+			WHERE id = ?
+			RETURNING ((metadata::jsonb) #>> '{context_compaction_count}')::bigint
+		`
+	}
+	base := "CASE WHEN metadata IS NULL OR metadata = 'null' OR metadata = '' THEN '{}' ELSE metadata END"
+	count := "MAX(COALESCE(CAST(json_extract(" + base + ", '$.context_compaction_count') AS INTEGER), 0), 0)"
+	previousUsed := "json_extract(" + base + ", '$.context_window.used')"
+	return `
+		UPDATE task_sessions
+		SET metadata = json_set(
+			json_set(` + base + `, '$.context_window', json(?)),
+			'$.context_compaction_count',
+			CASE
+				WHEN json_type(` + base + `, '$.context_window.used') IN ('integer', 'real')
+					AND CAST(` + previousUsed + ` AS INTEGER) > ?
+				THEN ` + count + ` + 1
+				ELSE ` + count + `
+			END
+		),
+			updated_at = ?
+		WHERE id = ?
+		RETURNING CAST(json_extract(metadata, '$.context_compaction_count') AS INTEGER)
+	`
+}
+
 // SetSessionMetadataKeyIfAbsent atomically writes a metadata key only when it
 // does not already exist. The returned bool reports whether this call stored
 // the value.

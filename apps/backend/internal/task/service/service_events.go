@@ -160,6 +160,7 @@ func (s *Service) publishSessionsCancelled(
 			"agent_profile_id":         sess.AgentProfileID,
 			"agent_profile_snapshot":   sess.AgentProfileSnapshot,
 			"is_passthrough":           sess.IsPassthrough,
+			"is_primary":               sess.IsPrimary,
 			sessionEventFieldUpdatedAt: sess.UpdatedAt.Format(time.RFC3339Nano),
 			sessionEventFieldName:      sess.Name,
 		}

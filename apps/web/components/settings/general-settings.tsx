@@ -30,6 +30,7 @@ import { ArchiveConfirmationSettings } from "@/components/settings/archive-confi
 import { LanguageSettings } from "@/components/settings/language-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
 import { UnreadDividerSettings } from "@/components/settings/unread-divider-settings";
+import { AgentGeneratedTaskTitleSettings } from "@/components/settings/agent-generated-task-title-settings";
 import { AnchoredPromptBarSettings } from "@/components/settings/anchored-prompt-bar-settings";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides";
@@ -249,6 +250,7 @@ export function TaskActionsSettings() {
       >
         <div className="space-y-4">
           <MCPTaskAgentProfileDefaultSettings />
+          <AgentGeneratedTaskTitleSettings />
           <ArchiveConfirmationSettings />
           <UnreadDividerSettings />
         </div>

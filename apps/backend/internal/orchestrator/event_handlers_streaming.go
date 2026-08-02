@@ -1113,6 +1113,7 @@ func (s *Service) publishTaskSessionStateChanged(
 		metaKeyAgentProfileID:    agentProfileID,
 		"agent_profile_snapshot": session.AgentProfileSnapshot,
 		"is_passthrough":         session.IsPassthrough,
+		"is_primary":             session.IsPrimary,
 		// Carry activity only while the durable session is RUNNING. Every other
 		// state gets an explicit null so partial client-store merges clear a
 		// previously-live busy signal during settlement or teardown.
@@ -2629,7 +2630,7 @@ func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sess
 		s.runtimeModelBySession.Store(sessionID, cfg.Model)
 	}
 	if cfg.Model != "" && cfg.Model != previousModel {
-		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+		if err := s.clearContextWindowForReset(writeCtx, sessionID); err != nil {
 			s.logger.Warn("failed to clear stale context window after runtime model change",
 				zap.String("session_id", sessionID),
 				zap.String("previous_model", previousModel),

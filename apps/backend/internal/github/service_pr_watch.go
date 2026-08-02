@@ -284,7 +284,7 @@ func (s *Service) ensurePRWatch(
 // callers MUST pass it — empty causes ReplaceTaskPR to wipe the entire task's
 // PR rows (legacy "delete all" branch), which is what older code relied on.
 func (s *Service) AssociatePRWithTask(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
-	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr)
+	return s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, false)
 }
 
 func (s *Service) AssociatePRWithTaskForWorkspace(
@@ -293,11 +293,11 @@ func (s *Service) AssociatePRWithTaskForWorkspace(
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, ErrGitHubWorkspaceRequired
 	}
-	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr)
+	return s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, false)
 }
 
 func (s *Service) associatePRWithTask(
-	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR,
+	ctx context.Context, workspaceID, taskID, repositoryID string, pr *PR, restoreDetached bool,
 ) (*TaskPR, error) {
 	// Multi-branch: scope the "already-current" short-circuit by exact
 	// pr_number too. A task can hold multiple PR rows per (task, repo) on
@@ -306,11 +306,24 @@ func (s *Service) associatePRWithTask(
 	// secondary PR is already there (wrong PR number) and skip the insert
 	// — or worse, fall through to ReplaceTaskPR which used to delete the
 	// sibling row.
-	existing, err := s.store.GetTaskPRByRepoAndNumber(ctx, taskID, repositoryID, pr.Number)
+	existing, err := s.store.GetTaskPRByRepoAndNumberIncludingDetached(ctx, taskID, repositoryID, pr.Number)
 	if err != nil {
 		return nil, err
 	}
 	if existing != nil {
+		if existing.DetachedAt != nil && restoreDetached {
+			restored, restoreErr := s.store.RestoreTaskPR(ctx, taskID, repositoryID, pr)
+			if restoreErr != nil || restored == nil {
+				return restored, restoreErr
+			}
+			if s.eventBus != nil {
+				event := bus.NewEvent(events.GitHubTaskPRUpdated, "github", restored)
+				if err := s.eventBus.Publish(ctx, events.GitHubTaskPRUpdated, event); err != nil {
+					s.logger.Debug("failed to publish restored task PR event", zap.Error(err))
+				}
+			}
+			return restored, nil
+		}
 		return existing, nil
 	}
 	tp := &TaskPR{
@@ -380,7 +393,7 @@ func (s *Service) AssociateExistingPRByURL(ctx context.Context, taskID, reposito
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.AssociatePRWithTask(ctx, taskID, repositoryID, pr)
+	tp, err := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -405,7 +418,7 @@ func (s *Service) AssociateExistingPRByURLForWorkspace(
 	if err != nil {
 		return nil, fmt.Errorf("fetch PR: %w", err)
 	}
-	tp, err := s.AssociatePRWithTaskForWorkspace(ctx, workspaceID, taskID, repositoryID, pr)
+	tp, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true)
 	if err != nil {
 		return nil, fmt.Errorf("associate PR with task: %w", err)
 	}
@@ -445,7 +458,7 @@ func (s *Service) AssociatePRByURL(ctx context.Context, sessionID, taskID, repos
 	}
 
 	// Associate PR with task (persists + publishes WS event)
-	if _, assocErr := s.AssociatePRWithTask(ctx, taskID, repositoryID, pr); assocErr != nil {
+	if _, assocErr := s.associatePRWithTask(ctx, "", taskID, repositoryID, pr, true); assocErr != nil {
 		s.logger.Error("failed to associate PR with task after creation",
 			zap.String("task_id", taskID), zap.Error(assocErr))
 	}
@@ -477,7 +490,7 @@ func (s *Service) AssociatePRByURLForWorkspace(
 	); err != nil {
 		return fmt.Errorf("create PR watch: %w", err)
 	}
-	if _, err := s.AssociatePRWithTaskForWorkspace(ctx, workspaceID, taskID, repositoryID, pr); err != nil {
+	if _, err := s.associatePRWithTask(ctx, workspaceID, taskID, repositoryID, pr, true); err != nil {
 		return fmt.Errorf("associate PR with task: %w", err)
 	}
 	return nil

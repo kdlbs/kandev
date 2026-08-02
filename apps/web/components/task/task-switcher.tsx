@@ -40,7 +40,7 @@ export type TaskSwitcherItem = {
   parentTaskTitle?: string;
   parentTaskId?: string;
   workspaceMode?: "inherit_parent" | "new_workspace" | "shared_group";
-  prInfo?: { number: number; state: string };
+  prInfo?: { number: number; state: string; aggregateState?: string };
   isPRReview?: boolean;
   isIssueWatch?: boolean;
   issueInfo?: { url: string; number: number };

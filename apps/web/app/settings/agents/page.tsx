@@ -30,6 +30,7 @@ import type { AgentUpdateJob, AgentUpdatePreview, InstallJob } from "@/lib/api";
 import { useAgentDiscovery } from "@/hooks/domains/settings/use-agent-discovery";
 import { useAgentRuntimeUpdates } from "@/hooks/domains/settings/use-agent-runtime-updates";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { AgentLogo } from "@/components/agent-logo";
 import { AddTUIAgentDialog } from "@/components/settings/add-tui-agent-dialog";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
@@ -48,21 +49,10 @@ import type {
 function useCopyCommand() {
   const [copiedValue, setCopiedValue] = useState<string | null>(null);
   const copy = useCallback(async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      // fallback
-      const ta = document.createElement("textarea");
-      ta.value = text;
-      ta.style.position = "fixed";
-      ta.style.opacity = "0";
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand("copy");
-      document.body.removeChild(ta);
+    if (await copyToClipboard(text)) {
+      setCopiedValue(text);
+      setTimeout(() => setCopiedValue(null), 2000);
     }
-    setCopiedValue(text);
-    setTimeout(() => setCopiedValue(null), 2000);
   }, []);
   return { copiedValue, copy };
 }

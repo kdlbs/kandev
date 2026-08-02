@@ -1576,6 +1576,11 @@ func (s *Service) autoStartStepPrompt(
 			requeueTaken()
 			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
 		}
+		dbTask, err := s.repo.GetTask(ctx, taskID)
+		if err != nil {
+			requeueTaken()
+			return fmt.Errorf("resolve task title capability for workflow auto-start: %w", err)
+		}
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
@@ -1585,6 +1590,7 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
+				IncludeTaskTitleTool:           !configMode && dbTask != nil && models.IsAgentTitlePending(dbTask.Metadata),
 			}, referenceContext)
 		}
 	}

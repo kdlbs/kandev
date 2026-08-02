@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AzureDevOpsPullRequest, AzureDevOpsWorkItem } from "@/lib/types/azure-devops";
 import { AzureDevOpsPullRequestResults, AzureDevOpsWorkItemResults } from "./azure-devops-results";
@@ -31,5 +31,34 @@ describe("Azure DevOps results", () => {
     );
     expect(screen.getByText("Loading results...")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Feedback" })).toBeNull();
+  });
+
+  it("offers configured work-item quick actions before creating a task", () => {
+    const onQuickAction = vi.fn();
+    render(
+      <AzureDevOpsWorkItemResults
+        items={[{ id: 7, title: "Fix Azure" } as AzureDevOpsWorkItem]}
+        loading={false}
+        error={null}
+        onStartTask={vi.fn()}
+        quickActions={[
+          {
+            id: "implement",
+            label: "Implement",
+            hint: "Build it",
+            icon: "code",
+            promptTemplate: "Implement {{url}}",
+          },
+        ]}
+        onQuickAction={onQuickAction}
+      />,
+    );
+
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Task actions for work item 7" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Implement/ }));
+    expect(onQuickAction).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 7 }),
+      expect.anything(),
+    );
   });
 });

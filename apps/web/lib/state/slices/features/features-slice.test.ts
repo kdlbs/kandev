@@ -2,13 +2,20 @@ import { describe, expect, it } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createFeaturesSlice, defaultFeaturesState } from "./features-slice";
-import type { FeaturesSlice } from "./types";
+import { defaultFeatureFlags } from "./types";
+import type { FeatureFlags, FeaturesSlice } from "./types";
 
 function makeStore() {
   return create<FeaturesSlice>()(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     immer((...a) => ({ ...(createFeaturesSlice as any)(...a) })),
   );
+}
+
+function flagsWith(value: boolean): FeatureFlags {
+  return Object.fromEntries(
+    Object.keys(defaultFeatureFlags).map((name) => [name, value]),
+  ) as FeatureFlags;
 }
 
 describe("features slice", () => {
@@ -20,33 +27,14 @@ describe("features slice", () => {
     for (const [name, value] of Object.entries(defaultFeaturesState.features)) {
       expect(value, `default of features.${name}`).toBe(false);
     }
-    expect(store.getState().features.office).toBe(false);
-    expect(defaultFeaturesState.features).toHaveProperty("appStatusBar", false);
-    expect(defaultFeaturesState.features).toHaveProperty("auth", false);
-    expect(defaultFeaturesState.features).toHaveProperty("claudeBackgroundPromptHandoff", false);
+    expect(store.getState().features).toEqual(flagsWith(false));
   });
 
   it("setFeatures replaces the whole flag map", () => {
     const store = makeStore();
-    store.getState().setFeatures({
-      office: true,
-      appStatusBar: true,
-      auth: true,
-      claudeBackgroundPromptHandoff: true,
-    });
-    expect(store.getState().features.office).toBe(true);
-    expect(store.getState().features.appStatusBar).toBe(true);
-    expect(store.getState().features.auth).toBe(true);
-    expect(store.getState().features.claudeBackgroundPromptHandoff).toBe(true);
-    store.getState().setFeatures({
-      office: false,
-      appStatusBar: false,
-      auth: false,
-      claudeBackgroundPromptHandoff: false,
-    });
-    expect(store.getState().features.office).toBe(false);
-    expect(store.getState().features.appStatusBar).toBe(false);
-    expect(store.getState().features.auth).toBe(false);
-    expect(store.getState().features.claudeBackgroundPromptHandoff).toBe(false);
+    store.getState().setFeatures(flagsWith(true));
+    expect(store.getState().features).toEqual(flagsWith(true));
+    store.getState().setFeatures(flagsWith(false));
+    expect(store.getState().features).toEqual(flagsWith(false));
   });
 });

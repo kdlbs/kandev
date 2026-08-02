@@ -546,6 +546,51 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestUpdateSessionContextWindowSQLiteCountsStrictUsageDrops(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-context-count", "session-context-count", "turn-context-count")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-context-count", "unrelated", "kept"))
+
+	count, err := repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000), "remaining": int64(80000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000), "remaining": int64(80000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(0), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000), "remaining": int64(120000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000), "remaining": int64(120000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count", map[string]interface{}{
+		"size": int64(200000), "used": int64(100000), "remaining": int64(100000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+
+	session, err := repo.GetTaskSession(ctx, "session-context-count")
+	require.NoError(t, err)
+	require.Equal(t, "kept", session.Metadata["unrelated"])
+	require.Equal(t, float64(1), session.Metadata[models.SessionMetaKeyContextCompactionCount])
+	window, ok := session.Metadata[models.SessionMetaKeyContextWindow].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, float64(100000), window["used"])
+}
+
 func TestSetSessionMetadataKeyIfAbsentQueryUsesPostgresJSONB(t *testing.T) {
 	query := setSessionMetadataKeyIfAbsentQuery(dialect.PGX)
 	if strings.Contains(query, "json_set") || strings.Contains(query, "json_type") || strings.Contains(query, "json(?)") {

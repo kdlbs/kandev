@@ -96,7 +96,7 @@ func TestPrepareSessionForStart_PropagatesInheritedEnvironment(t *testing.T) {
 		ParentID: "parent",
 		Metadata: map[string]interface{}{"workspace": map[string]interface{}{"mode": "inherit_parent"}},
 	}
-	sessionID, err := svc.prepareSessionForStart(ctx, childTask, "profile-1", "exec-1", "", "")
+	sessionID, _, err := svc.prepareSessionForStart(ctx, childTask, "profile-1", "exec-1", "", "")
 	if err != nil {
 		t.Fatalf("prepareSessionForStart: %v", err)
 	}

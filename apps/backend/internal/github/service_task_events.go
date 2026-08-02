@@ -95,10 +95,10 @@ type connectionSecretIDLister interface {
 	ListIDs(context.Context) ([]string, error)
 }
 
-// handleWorkspaceDeleted removes encrypted GitHub credentials after the
-// workspace-owned metadata rows have been deleted by the database cascade.
-// Secret IDs are namespaced, so future multi-user connections are covered
-// without reading deleted user-connection rows.
+// handleWorkspaceDeleted removes workspace-owned GitHub metadata and encrypted
+// credentials after the task repository deletes the workspace row. Secret IDs
+// are namespaced, so future multi-user connections are covered without reading
+// deleted user-connection rows.
 func (s *Service) handleWorkspaceDeleted(ctx context.Context, event *bus.Event) error {
 	workspaceID := workspaceIDFromEvent(event)
 	if workspaceID == "" {
@@ -109,6 +109,11 @@ func (s *Service) handleWorkspaceDeleted(ctx context.Context, event *bus.Event) 
 	s.mu.Unlock()
 	if broker != nil {
 		broker.RevokeWorkspace(workspaceID)
+	}
+	if s.store != nil {
+		if err := s.store.DeleteWorkspaceSettings(ctx, workspaceID); err != nil {
+			return fmt.Errorf("delete GitHub workspace settings: %w", err)
+		}
 	}
 	if s.connectionSecrets == nil {
 		return nil

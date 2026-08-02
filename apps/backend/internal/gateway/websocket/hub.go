@@ -14,6 +14,11 @@ import (
 // SessionDataProvider is a function that retrieves initial data for a session subscription (e.g., git status)
 type SessionDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
 
+// SessionGitDataProvider retrieves only the current git-status snapshot needed
+// by a detail surface. It is separate from SessionDataProvider so a refresh
+// does not replay unrelated session state, models, commands, or control data.
+type SessionGitDataProvider func(ctx context.Context, sessionID string) ([]*ws.Message, error)
+
 // Hub manages all WebSocket client connections
 type Hub struct {
 	// All registered clients
@@ -46,6 +51,7 @@ type Hub struct {
 
 	// Optional provider for session data on subscription (e.g., git status)
 	sessionDataProvider       SessionDataProvider
+	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
 
 	// sessionMode tracks per-session focus state and fires listeners when
@@ -469,9 +475,12 @@ func (h *Hub) SubscribeToTask(client *Client, taskID string) {
 		zap.String("task_id", taskID))
 }
 
-// SubscribeToSession subscribes a client to session notifications
-func (h *Hub) SubscribeToSession(client *Client, sessionID string) {
+// SubscribeToSession subscribes a client to session notifications and reports
+// whether this call created new membership. Callers use the transition to
+// decide whether an initial detail snapshot is needed.
+func (h *Hub) SubscribeToSession(client *Client, sessionID string) bool {
 	h.mu.Lock()
+	wasSubscribed := client.sessionSubscriptions[sessionID]
 	if _, ok := h.sessionSubscribers[sessionID]; !ok {
 		h.sessionSubscribers[sessionID] = make(map[*Client]bool)
 	}
@@ -484,6 +493,7 @@ func (h *Hub) SubscribeToSession(client *Client, sessionID string) {
 		zap.String("session_id", sessionID))
 
 	h.recomputeSessionMode(sessionID)
+	return !wasSubscribed
 }
 
 // UnsubscribeFromSession unsubscribes a client from session notifications
@@ -687,10 +697,26 @@ func (h *Hub) SetSessionDataProvider(provider SessionDataProvider) {
 	h.sessionDataProvider = provider
 }
 
+// SetSessionGitDataProvider sets the narrow provider used by explicit git
+// refresh requests. Subscription hydration continues to use the full provider.
+func (h *Hub) SetSessionGitDataProvider(provider SessionGitDataProvider) {
+	h.sessionGitDataProvider = provider
+}
+
 // GetSessionData retrieves session data (e.g., git status) if a provider is set
 func (h *Hub) GetSessionData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 	if h.sessionDataProvider == nil {
 		return nil, nil
 	}
 	return h.sessionDataProvider(ctx, sessionID)
+}
+
+// GetSessionGitData retrieves only git data for an explicit detail refresh.
+// Fall back to the full provider for compatibility with lightweight/test
+// configurations that have not installed the dedicated provider yet.
+func (h *Hub) GetSessionGitData(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+	if h.sessionGitDataProvider != nil {
+		return h.sessionGitDataProvider(ctx, sessionID)
+	}
+	return h.GetSessionData(ctx, sessionID)
 }

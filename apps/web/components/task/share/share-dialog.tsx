@@ -21,6 +21,7 @@ import {
   type SnapshotPreview,
 } from "@/lib/api/domains/share-api";
 import { useShares } from "@/hooks/domains/session/use-shares";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 import { ShareList } from "./share-list";
 import { ShareSnapshotPreview } from "./share-snapshot-preview";
@@ -188,9 +189,10 @@ function PublishedState({
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(share.url);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (await copyToClipboard(share.url)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    }
   };
 
   return (

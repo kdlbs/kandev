@@ -1,47 +1,70 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Repository, Workflow, WorkflowStep } from "@/lib/types/http";
 
 const mocks = vi.hoisted(() => ({
   associate: vi.fn(),
+  associateWorkItem: vi.fn(),
   cache: vi.fn(),
+  cacheWorkItem: vi.fn(),
   close: vi.fn(),
   push: vi.fn(),
   setTaskPullRequest: vi.fn(),
+  setTaskWorkItem: vi.fn(),
   toastError: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { error: mocks.toastError } }));
 vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   associateAzureDevOpsPullRequest: mocks.associate,
+  associateAzureDevOpsWorkItem: mocks.associateWorkItem,
 }));
 vi.mock("@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests", () => ({
   cacheAzureDevOpsTaskPullRequest: mocks.cache,
+}));
+vi.mock("@/hooks/domains/azure-devops/use-azure-devops-task-work-items", () => ({
+  cacheAzureDevOpsTaskWorkItem: mocks.cacheWorkItem,
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (
     selector: (state: {
       setAzureDevOpsTaskPullRequest: typeof mocks.setTaskPullRequest;
+      setAzureDevOpsTaskWorkItem: typeof mocks.setTaskWorkItem;
     }) => unknown,
-  ) => selector({ setAzureDevOpsTaskPullRequest: mocks.setTaskPullRequest }),
+  ) =>
+    selector({
+      setAzureDevOpsTaskPullRequest: mocks.setTaskPullRequest,
+      setAzureDevOpsTaskWorkItem: mocks.setTaskWorkItem,
+    }),
 }));
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
 vi.mock("@/components/task-create-dialog", () => ({
-  TaskCreateDialog: ({ onSuccess }: { onSuccess?: (task: { id: string }) => void }) => (
-    <button type="button" onClick={() => onSuccess?.({ id: "task-1" })}>
-      Create task
-    </button>
+  TaskCreateDialog: ({
+    initialValues,
+    onSuccess,
+  }: {
+    initialValues?: { description?: string };
+    onSuccess?: (task: { id: string }) => void;
+  }) => (
+    <>
+      <p data-testid="task-description">{initialValues?.description}</p>
+      <button type="button" onClick={() => onSuccess?.({ id: "task-1" })}>
+        Create task
+      </button>
+    </>
   ),
 }));
 
 import { AzureDevOpsTaskLauncher } from "./azure-devops-task-launcher";
 
 const timestamp = "2026-07-18T00:00:00Z";
+const workspaceId = "workspace-1";
+const createTaskButtonName = "Create task";
 const workflow: Workflow = {
   id: "workflow-1" as Workflow["id"],
-  workspace_id: "workspace-1" as Workflow["workspace_id"],
+  workspace_id: workspaceId as Workflow["workspace_id"],
   name: "Review",
   created_at: timestamp,
   updated_at: timestamp,
@@ -57,7 +80,7 @@ const step: WorkflowStep = {
 };
 const repository: Repository = {
   id: "repo-1" as Repository["id"],
-  workspace_id: "workspace-1" as Repository["workspace_id"],
+  workspace_id: workspaceId as Repository["workspace_id"],
   name: "app",
   source_type: "git",
   local_path: "/repo",
@@ -94,7 +117,7 @@ const pullRequest = {
 function renderLauncher() {
   return render(
     <AzureDevOpsTaskLauncher
-      workspaceId="workspace-1"
+      workspaceId={workspaceId}
       workflows={[workflow]}
       steps={[step]}
       repositories={[repository]}
@@ -110,27 +133,126 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe("AzureDevOpsTaskLauncher", () => {
-  it("updates the cache and store after associating the created task", async () => {
-    const linked = { id: "link-1" };
-    mocks.associate.mockResolvedValue(linked);
-    renderLauncher();
+it("updates the cache and store after associating the created task", async () => {
+  const linked = { id: "link-1" };
+  mocks.associate.mockResolvedValue(linked);
+  renderLauncher();
 
-    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+  fireEvent.click(screen.getByRole("button", { name: createTaskButtonName }));
 
-    await waitFor(() => expect(mocks.cache).toHaveBeenCalledWith("workspace-1", "task-1", linked));
-    expect(mocks.setTaskPullRequest).toHaveBeenCalledWith("task-1", linked);
-    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
-  });
+  await waitFor(() => expect(mocks.cache).toHaveBeenCalledWith(workspaceId, "task-1", linked));
+  expect(mocks.setTaskPullRequest).toHaveBeenCalledWith("task-1", linked);
+  expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+});
 
-  it("reports a pull request association failure", async () => {
-    mocks.associate.mockRejectedValue(new Error("Azure association failed"));
-    renderLauncher();
+it("reports a pull request association failure", async () => {
+  mocks.associate.mockRejectedValue(new Error("Azure association failed"));
+  renderLauncher();
 
-    fireEvent.click(screen.getByRole("button", { name: "Create task" }));
+  fireEvent.click(screen.getByRole("button", { name: createTaskButtonName }));
 
-    await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Azure association failed"));
-    expect(mocks.close).toHaveBeenCalled();
-    expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
-  });
+  await waitFor(() => expect(mocks.toastError).toHaveBeenCalledWith("Azure association failed"));
+  expect(mocks.close).toHaveBeenCalled();
+  expect(mocks.push).toHaveBeenCalledWith("/tasks/task-1");
+});
+
+it("associates and caches a created task for a work item", async () => {
+  const linked = { id: "work-item-link" };
+  mocks.associateWorkItem.mockResolvedValue(linked);
+  render(
+    <AzureDevOpsTaskLauncher
+      workspaceId={workspaceId}
+      workflows={[workflow]}
+      steps={[step]}
+      repositories={[repository]}
+      payload={{
+        kind: "work-item",
+        item: {
+          id: 73,
+          revision: 1,
+          title: "Investigate Azure item links",
+          type: "Issue",
+          state: "To Do",
+          project: "project-1",
+        },
+      }}
+      onClose={mocks.close}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: createTaskButtonName }));
+
+  await waitFor(() =>
+    expect(mocks.associateWorkItem).toHaveBeenCalledWith(workspaceId, "task-1", {
+      projectId: "project-1",
+      workItemId: 73,
+    }),
+  );
+  expect(mocks.cacheWorkItem).toHaveBeenCalledWith(workspaceId, "task-1", linked);
+  expect(mocks.setTaskWorkItem).toHaveBeenCalledWith("task-1", linked);
+});
+
+it("uses the generated description when an action prompt is blank", () => {
+  render(
+    <AzureDevOpsTaskLauncher
+      workspaceId={workspaceId}
+      workflows={[workflow]}
+      steps={[step]}
+      repositories={[repository]}
+      payload={{
+        kind: "work-item",
+        item: {
+          id: 73,
+          revision: 1,
+          title: "Investigate Azure item links",
+          type: "Issue",
+          state: "To Do",
+          project: "project-1",
+        },
+        action: {
+          id: "new",
+          label: "New action",
+          hint: "",
+          icon: "sparkle",
+          promptTemplate: "   ",
+        },
+      }}
+      onClose={mocks.close}
+    />,
+  );
+
+  expect(screen.getByTestId("task-description").textContent).toContain(
+    "Azure DevOps work item: 73",
+  );
+});
+
+it("reports a missing work-item project after creating the task", async () => {
+  render(
+    <AzureDevOpsTaskLauncher
+      workspaceId={workspaceId}
+      workflows={[workflow]}
+      steps={[step]}
+      repositories={[repository]}
+      payload={{
+        kind: "work-item",
+        item: {
+          id: 73,
+          revision: 1,
+          title: "Investigate Azure item links",
+          type: "Issue",
+          state: "To Do",
+        },
+      }}
+      onClose={mocks.close}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: createTaskButtonName }));
+
+  await waitFor(() =>
+    expect(mocks.toastError).toHaveBeenCalledWith(
+      "Failed to link Azure DevOps work item: project is missing.",
+    ),
+  );
+  expect(mocks.associateWorkItem).not.toHaveBeenCalled();
 });

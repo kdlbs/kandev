@@ -15,6 +15,7 @@ import { useTaskRepositories } from "@/hooks/domains/kanban/use-task-repositorie
 import { formatReviewCommentsAsMarkdown } from "@/components/task/chat/messages/review-comments-attachment";
 import { getCumulativeReviewRepositoryNames, isReviewMultiRepo } from "@/components/review/types";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { generateUUID } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
 import type { DiffComment } from "@/lib/diff/types";
 import type { FileInfo, GitStatusEntry } from "@/lib/state/slices/session-runtime/types";
@@ -134,7 +135,12 @@ export function useReviewDialog(effectiveSessionId: string | null) {
       client
         .request(
           "message.add",
-          { task_id: activeTaskId, session_id: effectiveSessionId, content: markdown },
+          {
+            task_id: activeTaskId,
+            session_id: effectiveSessionId,
+            client_message_id: generateUUID(),
+            content: markdown,
+          },
           10000,
         )
         .catch(() => {
