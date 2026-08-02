@@ -2,7 +2,6 @@ package plugins
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -274,6 +273,12 @@ func (s *Service) scanMissingInstalls() []string {
 		}
 		if _, err := os.Stat(rec.InstallPath); err == nil {
 			continue
+		} else if !os.IsNotExist(err) {
+			s.log.Warn("plugins: sync could not inspect install path",
+				zap.String("plugin_id", rec.ID),
+				zap.String("path", rec.InstallPath),
+				zap.Error(err))
+			continue
 		}
 		if s.runtime != nil && s.runtime.Running(rec.ID) {
 			s.runtime.Stop(rec.ID)
@@ -284,35 +289,22 @@ func (s *Service) scanMissingInstalls() []string {
 	return missing
 }
 
-// markMissing transitions id to StatusError via the normal FSM transition,
-// falling back to a direct (transition-check-bypassing) status write if the
-// transition is not a legal single-hop edge — e.g. the record is already
-// StatusError, which SetStatus rejects as a same-status "transition".
+// markMissing transitions id to StatusError and records the missing path as
+// the current runtime diagnostic. Repeated scans replace the timestamp and
+// diagnostic instead of bypassing the normal persistence path.
 func (s *Service) markMissing(id string) {
-	err := s.SetStatus(id, StatusError)
+	rec, getErr := s.Get(id)
+	if getErr != nil {
+		s.log.Warn("plugins: sync failed to read missing install record",
+			zap.String("plugin_id", id), zap.Error(getErr))
+		return
+	}
+	err := s.setStatusAndDiagnostic(id, StatusError,
+		fmt.Errorf("plugin install path %q is missing", rec.InstallPath), true)
 	if err == nil {
 		s.notifyDeliverer()
 		return
 	}
-	var invalidErr *ErrInvalidTransition
-	if !errors.As(err, &invalidErr) {
-		s.log.Warn("plugins: sync failed to mark missing install as error",
-			zap.String("plugin_id", id), zap.Error(err))
-		return
-	}
-	if err := s.setStatusUnchecked(id, StatusError); err != nil {
-		s.log.Warn("plugins: sync failed to force missing install to error",
-			zap.String("plugin_id", id), zap.Error(err))
-	}
-}
-
-// setStatusUnchecked directly writes status onto id's record in both the
-// registry and the store, bypassing SetStatus's FSM transition check. Only
-// used by markMissing's fallback path above.
-func (s *Service) setStatusUnchecked(id string, status Status) error {
-	updated, ok := s.registry.SetStatus(id, status)
-	if !ok {
-		return store.ErrNotFound
-	}
-	return s.store.Save(updated)
+	s.log.Warn("plugins: sync failed to mark missing install as error",
+		zap.String("plugin_id", id), zap.Error(err))
 }

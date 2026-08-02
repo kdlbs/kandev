@@ -1,56 +1,35 @@
 #!/usr/bin/env bash
-# kandev-logs — fetch logs for a running kandev instance by backend port.
-#
-# Two modes:
-#   --export  (default)  GET /api/v1/system/debug/export[?level=LEVEL], pretty
-#                        printed with jq. This is the structured in-memory log
-#                        buffer + runtime metadata.
-#   --tail               Tail the stderr log file written by dev-isolated
-#                        (/tmp/kandev-iso-<port>-*/backend.log), or a file given
-#                        with --file.
+# kandev-logs — download a bounded diagnostic bundle from a running instance.
 #
 # Usage:
-#   scripts/kandev-logs <backend_port> [--export] [--level LEVEL]
-#   scripts/kandev-logs <backend_port> --tail [--lines N] [--file PATH]
+#   scripts/kandev-logs <backend_port> [--source backend|frontend|all] [--output FILE]
 #
 # Options:
-#   --export          Hit the debug-export endpoint (default).
-#   --level LEVEL      Filter export by level. The export endpoint matches the
-#                      log entry's level string exactly (zap lowercase levels),
-#                      so LEVEL must be one of: debug|info|warn|error|dpanic|
-#                      panic|fatal. Passes ?level=LEVEL and prints only .logs.
-#   --tail             Tail the backend stderr log file instead of the endpoint.
-#   --lines N          Lines to show with --tail (default: 80).
-#   --file PATH        Explicit log file for --tail (overrides auto-resolve).
-#   -h, --help         Show this help.
+#   --source SOURCE  Evidence to request (default: backend).
+#   --output FILE    Destination ZIP (default: kandev-diagnostic-<id>.zip).
+#   -h, --help       Show this help.
+#
+# Authentication:
+#   Auth-disabled instances need only a port. For authenticated instances set
+#   KANDEV_API_TOKEN in the environment. Tokens are never accepted on the
+#   command line or printed.
 #
 # Examples:
-#   scripts/kandev-logs 48429 --export
-#   scripts/kandev-logs 48429 --export --level error
-#   scripts/kandev-logs 48429 --tail --lines 120
-#
+#   scripts/kandev-logs 48429
+#   scripts/kandev-logs 48429 --source frontend
+#   KANDEV_API_TOKEN=... scripts/kandev-logs 48429 --source all --output /tmp/logs.zip
 set -euo pipefail
 
-MODE="export"
-LEVEL=""
-LINES=80
-FILE=""
 PORT=""
+SOURCE="backend"
+OUTPUT=""
 
-# Levels the export endpoint can match (zapcore.Level.String(), lowercase). The
-# endpoint compares the entry's level string exactly, so any other value would
-# silently match nothing — we reject it up front instead.
-ALLOWED_LEVELS=(debug info warn error dpanic panic fatal)
-
-usage() { sed -n '2,31p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
+usage() { sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --export) MODE="export"; shift ;;
-    --tail) MODE="tail"; shift ;;
-    --level) LEVEL="${2:?--level requires a value}"; shift 2 ;;
-    --lines) LINES="${2:?--lines requires a number}"; shift 2 ;;
-    --file) FILE="${2:?--file requires a path}"; shift 2 ;;
+    --source) SOURCE="${2:?--source requires a value}"; shift 2 ;;
+    --output) OUTPUT="${2:?--output requires a path}"; shift 2 ;;
     -h|--help) usage 0 ;;
     --*) echo "kandev-logs: unknown flag '$1'" >&2; usage 2 ;;
     *)
@@ -63,52 +42,57 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$PORT" ]] || { echo "kandev-logs: a backend port is required." >&2; usage 2; }
-[[ "$PORT" =~ ^[0-9]+$ ]] || { echo "kandev-logs: port must be numeric, got '$PORT'" >&2; exit 2; }
-
-# Validate --level against the allowed set BEFORE it reaches the URL. An invalid
-# value would otherwise be interpolated into ?level= and silently return zero
-# matching logs, masking the typo.
-if [[ -n "$LEVEL" ]]; then
-  level_ok=0
-  for lvl in "${ALLOWED_LEVELS[@]}"; do
-    [[ "$LEVEL" == "$lvl" ]] && { level_ok=1; break; }
-  done
-  if [[ "$level_ok" -ne 1 ]]; then
-    echo "kandev-logs: invalid --level '$LEVEL'. Allowed: ${ALLOWED_LEVELS[*]}" >&2
-    exit 2
-  fi
-fi
-
-if [[ "$MODE" == "export" ]]; then
-  url="http://localhost:$PORT/api/v1/system/debug/export"
-  # LEVEL is whitelisted above (alphabetic, no metacharacters), so it is safe to
-  # interpolate directly; the query value needs no further encoding.
-  [[ -n "$LEVEL" ]] && url="$url?level=$LEVEL"
-  if ! body="$(curl -s --fail-with-body "$url" 2>/dev/null)"; then
-    echo "kandev-logs: request to $url failed (is the instance on port $PORT up?)" >&2
-    exit 1
-  fi
-  if command -v jq >/dev/null 2>&1; then
-    if [[ -n "$LEVEL" ]]; then
-      printf '%s' "$body" | jq '.logs'
-    else
-      printf '%s' "$body" | jq .
-    fi
-  else
-    printf '%s\n' "$body"
-  fi
-  exit 0
-fi
-
-# --- tail mode ---
-if [[ -z "$FILE" ]]; then
-  # Resolve the dev-isolated log convention: /tmp/kandev-iso-<port>-*/backend.log
-  # Pick the most recent match.
-  FILE="$(ls -t /tmp/kandev-iso-"$PORT"-*/backend.log 2>/dev/null | head -1 || true)"
-fi
-[[ -n "$FILE" && -f "$FILE" ]] || {
-  echo "kandev-logs: no log file found for port $PORT. Pass --file PATH." >&2
+[[ "$PORT" =~ ^[0-9]+$ ]] || { echo "kandev-logs: port must be numeric." >&2; exit 2; }
+[[ "$SOURCE" == "backend" || "$SOURCE" == "frontend" || "$SOURCE" == "all" ]] || {
+  echo "kandev-logs: --source must be backend, frontend, or all." >&2
+  exit 2
+}
+command -v jq >/dev/null 2>&1 || {
+  echo "kandev-logs: jq is required to inspect bundle job responses." >&2
   exit 1
 }
-echo "kandev-logs: tail -n $LINES $FILE" >&2
-tail -n "$LINES" "$FILE"
+
+case "$SOURCE" in
+  backend) sources='["backend"]' ;;
+  frontend) sources='["frontend"]' ;;
+  all) sources='["backend","frontend"]' ;;
+esac
+
+base_url="http://localhost:$PORT/api/v1/system/logs/bundles"
+curl_args=(--silent --show-error --fail-with-body)
+if [[ -n "${KANDEV_API_TOKEN:-}" ]]; then
+  curl_args+=(--header "Authorization: Bearer ${KANDEV_API_TOKEN}")
+fi
+
+job="$(curl "${curl_args[@]}" --header "Content-Type: application/json" \
+  --request POST --data "{\"sources\":$sources}" "$base_url")"
+bundle_id="$(printf '%s' "$job" | jq -er '.id')"
+status="$(printf '%s' "$job" | jq -er '.status')"
+deadline=$((SECONDS + 300))
+
+while [[ "$status" == "collecting" || "$status" == "building" ]]; do
+  if (( SECONDS >= deadline )); then
+    echo "kandev-logs: bundle $bundle_id did not finish within five minutes." >&2
+    exit 1
+  fi
+  sleep 1
+  job="$(curl "${curl_args[@]}" "$base_url/$bundle_id")"
+  status="$(printf '%s' "$job" | jq -er '.status')"
+done
+
+if [[ "$status" != "ready" && "$status" != "partial" ]]; then
+  echo "kandev-logs: bundle ended in state '$status'." >&2
+  printf '%s\n' "$job" | jq . >&2
+  exit 1
+fi
+
+[[ -n "$OUTPUT" ]] || OUTPUT="kandev-diagnostic-$bundle_id.zip"
+output_dir="$(dirname "$OUTPUT")"
+mkdir -p "$output_dir"
+temp_file="$(mktemp "$output_dir/.kandev-logs.XXXXXX")"
+trap 'rm -f "$temp_file"' EXIT
+curl "${curl_args[@]}" --output "$temp_file" "$base_url/$bundle_id/download"
+chmod 600 "$temp_file"
+mv "$temp_file" "$OUTPUT"
+trap - EXIT
+echo "$OUTPUT"

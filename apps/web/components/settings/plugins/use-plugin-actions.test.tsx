@@ -1,7 +1,7 @@
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { ReactNode } from "react";
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStore } from "@/components/state-provider";
 import type { PluginRecord } from "@/lib/types/plugins";
 import type { InstallResult } from "@/lib/api/domains/plugins-api";
 
@@ -10,6 +10,7 @@ const unloadPlugin = vi.fn();
 const installPluginFromUrl = vi.fn<() => Promise<InstallResult>>();
 const installPluginUpload = vi.fn<() => Promise<InstallResult>>();
 const enablePlugin = vi.fn(async () => ({ enabled: true }));
+const getPlugin = vi.fn<() => Promise<PluginRecord>>();
 
 vi.mock("@/lib/plugins/host", () => ({
   loadPlugins: (...args: unknown[]) => loadPlugins(...(args as [])),
@@ -25,6 +26,7 @@ vi.mock("@/lib/api/domains/plugins-api", async () => {
     installPluginFromUrl: (...args: unknown[]) => installPluginFromUrl(...(args as [])),
     installPluginUpload: (...args: unknown[]) => installPluginUpload(...(args as [])),
     enablePlugin: (...args: unknown[]) => enablePlugin(...(args as [])),
+    getPlugin: (...args: unknown[]) => getPlugin(...(args as [])),
   };
 });
 
@@ -60,6 +62,7 @@ beforeEach(() => {
   installPluginFromUrl.mockReset();
   installPluginUpload.mockReset();
   enablePlugin.mockClear();
+  getPlugin.mockReset();
 });
 
 describe("usePluginActions — install/update", () => {
@@ -101,5 +104,54 @@ describe("usePluginActions — enable", () => {
     const unloadOrder = unloadPlugin.mock.invocationCallOrder[0];
     const loadOrder = loadPlugins.mock.invocationCallOrder[0];
     expect(unloadOrder).toBeLessThan(loadOrder);
+  });
+
+  it("clears a stale failure diagnostic after an errored plugin is enabled", async () => {
+    const plugin = activeRecord({
+      status: "error",
+      last_error: "plugins/runtime: handshake failed",
+      last_error_at: "2026-08-02T12:34:56Z",
+    });
+
+    const { result } = renderHook(
+      () => ({ actions: usePluginActions(), stored: useAppStore((s) => s.plugins.items[0]) }),
+      { wrapper },
+    );
+
+    await act(async () => {
+      await result.current.actions.handleEnable(plugin);
+    });
+
+    await waitFor(() => expect(result.current.stored?.status).toBe("active"));
+    expect(result.current.stored?.last_error).toBeUndefined();
+    expect(result.current.stored?.last_error_at).toBeUndefined();
+  });
+
+  it("refreshes and upserts the replacement diagnostic after a failed enable", async () => {
+    const plugin = activeRecord({
+      status: "error",
+      last_error: "old handshake failure",
+      last_error_at: "2026-08-02T12:34:56Z",
+    });
+    const refreshed = activeRecord({
+      status: "error",
+      last_error: "new executable failure",
+      last_error_at: "2026-08-02T12:35:56Z",
+    });
+    enablePlugin.mockRejectedValueOnce(new Error("enable failed"));
+    getPlugin.mockResolvedValueOnce(refreshed);
+
+    const { result } = renderHook(
+      () => ({ actions: usePluginActions(), stored: useAppStore((s) => s.plugins.items[0]) }),
+      { wrapper },
+    );
+
+    await act(async () => {
+      await result.current.actions.handleEnable(plugin);
+    });
+
+    await waitFor(() => expect(result.current.stored?.last_error).toBe("new executable failure"));
+    expect(result.current.stored?.last_error).not.toBe(plugin.last_error);
+    expect(getPlugin).toHaveBeenCalledWith(plugin.id, { cache: "no-store" });
   });
 });

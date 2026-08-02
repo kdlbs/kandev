@@ -219,7 +219,9 @@ type Handlers struct {
 	reviewRunner  ReviewRunner
 
 	// Optional task-bound GitHub PR automation controls.
-	taskPRAutomation TaskPRAutomationService
+	taskPRAutomation       TaskPRAutomationService
+	diagnosticBundles      DiagnosticBundleProvider
+	diagnosticMaterializer DiagnosticBundleMaterializer
 }
 
 // NewHandlers creates new MCP handlers.
@@ -330,6 +332,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	count := 26
+	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
+		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
+		count++
+	}
 	count += h.registerReviewHandlers(d)
 	count += 2 // task PR automation get/update
 
@@ -1316,12 +1322,13 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 }
 
 // handleSetTaskTitle resolves the one-shot provisional title created for a
-// prompt-first task. The MCP server supplies the bound task ID; a missing
-// pending marker makes the call an idempotent no-op so a human rename wins.
+// prompt-first task. The MCP server supplies the bound task and session IDs;
+// only the atomically claimed owner may resolve it.
 func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		TaskID string `json:"task_id"`
-		Title  string `json:"title"`
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Title     string `json:"title"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -1329,11 +1336,14 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if req.SessionID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
 	if strings.TrimSpace(req.Title) == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
 	}
 
-	task, accepted, err := h.taskSvc.SetPendingAgentTitle(ctx, req.TaskID, req.Title)
+	task, accepted, reason, err := h.taskSvc.SetPendingAgentTitle(ctx, req.TaskID, req.SessionID, req.Title)
 	if err != nil {
 		if errors.Is(err, taskrepo.ErrTaskNotFound) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
@@ -1350,7 +1360,7 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 		"title":    task.Title,
 	}
 	if !accepted {
-		result["reason"] = "title_not_pending"
+		result["reason"] = reason
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }
@@ -3097,9 +3107,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			h.logger.Warn("failed to update task state to IN_PROGRESS",
 				zap.String("task_id", taskID),
 				zap.Error(err))
-			return
-		}
-		if !taskStateChanged {
+		} else if !taskStateChanged {
 			h.logger.Debug("skipping stale clarification resume after session state changed",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
@@ -3107,34 +3115,51 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		}
 	}
 
-	// Publish session state changed event
-	if h.eventBus != nil {
-		eventData := map[string]any{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"new_state":  string(models.TaskSessionStateRunning),
-		}
-		if !updatedAt.IsZero() {
-			eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
-		} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
-			eventData["updated_at"] = persistedUpdatedAt
-		} else {
-			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
-				zap.String("session_id", sessionID))
-			return
-		}
-		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+	// Publish session state changed event after any task event for this task.
+	if h.eventBus == nil {
+		return
+	}
+	eventData := map[string]any{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"new_state":  string(models.TaskSessionStateRunning),
+	}
+	if !updatedAt.IsZero() {
+		eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
+	} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+		eventData["updated_at"] = persistedUpdatedAt
+	} else {
+		h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+			zap.String("session_id", sessionID))
+		return
+	}
+	publish := func(publicationCtx context.Context) {
+		_ = h.eventBus.Publish(publicationCtx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
 			eventData,
 		))
 	}
+	if h.taskSvc != nil && taskID != "" {
+		h.taskSvc.PublishAfterTaskEvents(ctx, taskID, events.TaskSessionStateChanged, publish)
+		return
+	}
+	publish(ctx)
 }
 
 func (h *Handlers) setTaskInProgressForClarification(
 	ctx context.Context,
 	taskID, sessionID string,
 ) (bool, error) {
+	if h.taskSvc != nil {
+		return h.taskSvc.UpdateTaskStateIfSessionState(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateRunning,
+			v1.TaskStateInProgress,
+		)
+	}
 	if updater, ok := h.taskRepo.(sessionOwnedTaskStateUpdater); ok {
 		_, updated, err := updater.UpdateTaskStateIfSessionState(
 			ctx,

@@ -252,7 +252,7 @@ func (e *Executor) createOfficeSession(
 		session.ExecutorID = execConfig.ExecutorID
 	}
 
-	if err := e.repo.CreateTaskSession(ctx, session); err != nil {
+	if err := e.persistOfficeSession(ctx, task.ID, session); err != nil {
 		return nil, fmt.Errorf("persist office session: %w", err)
 	}
 	e.logger.Info("office session created",
@@ -260,4 +260,28 @@ func (e *Executor) createOfficeSession(
 		zap.String("session_id", session.ID),
 		zap.String("agent_profile_id", agentInstanceID))
 	return session, nil
+}
+
+func (e *Executor) persistOfficeSession(ctx context.Context, taskID string, session *models.TaskSession) error {
+	if creator, ok := e.repo.(officeTaskSessionCreator); ok {
+		return creator.CreateOfficeTaskSession(ctx, session)
+	}
+	creationLock := e.officeSessionLock(taskID)
+	creationLock.Lock()
+	defer creationLock.Unlock()
+	return e.persistOfficeSessionFallback(ctx, taskID, session)
+}
+
+func (e *Executor) persistOfficeSessionFallback(ctx context.Context, taskID string, session *models.TaskSession) error {
+	existingSessions, err := e.repo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("list task sessions before creating office session: %w", err)
+	}
+	if len(existingSessions) == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
+	return e.repo.CreateTaskSession(ctx, session)
 }

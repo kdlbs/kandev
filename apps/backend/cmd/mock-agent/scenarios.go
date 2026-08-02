@@ -42,6 +42,7 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"symlink-file-setup":      scenarioSymlinkFileSetup,
 	"markdown-table":          scenarioMarkdownTable,
 	"empty-turn":              scenarioEmptyTurn,
+	"push-current-branch":     scenarioPushCurrentBranch,
 }
 
 // scenarioEmptyTurn emits no content and no tool calls, so the turn ends
@@ -450,6 +451,66 @@ func scenarioDiffUpdateModify(e *emitter) {
 
 	fixedDelay(100)
 	e.text("diff-update-modify complete: diff_update_test.txt now has SECOND_MODIFICATION")
+}
+
+// scenarioPushCurrentBranch pushes the worktree's current branch to origin
+// directly, with no Kandev "Create MR"/"Create PR" action involved. Used by
+// push-detection auto-link e2e tests to reproduce an agent running a raw
+// `git push` on its own — the same shape as a real user/agent pushing and
+// then opening the MR/PR through `glab mr create`, `gh pr create`, or the
+// code host's web UI, rather than through Kandev's own runtime action.
+// Expects a prior turn (e.g. diff-update-setup) to have already committed
+// something to push.
+//
+// Explicitly writes the remote-tracking ref and upstream config after
+// pushing rather than relying on `git push -u` alone: the e2e fixture's mock
+// git remote only implements the receive-pack (push) side of the smart-HTTP
+// protocol, not upload-pack/info-refs (fetch/clone) — confirmed by
+// worktree-manager's own "git fetch failed before worktree creation;
+// continuing with fallback ref" warning during task setup, and reproducible
+// directly (`git fetch` against it fails with "not valid: is this a git
+// repository?"). A real code host's push response updates
+// refs/remotes/origin/<branch> as a side effect of the exchange; here that
+// has to be reproduced by hand with `update-ref`, using the local HEAD this
+// process just successfully pushed as the known-good value — no fetch
+// required, since the pushed content is exactly what's already local.
+func scenarioPushCurrentBranch(e *emitter) {
+	fixedDelay(50)
+
+	wd, err := os.Getwd()
+	if err != nil {
+		e.text("push-current-branch: getwd failed: " + err.Error())
+		return
+	}
+	branchNameOut, err := exec.Command("git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if err != nil {
+		e.text("push-current-branch: resolve branch name failed: " + err.Error())
+		return
+	}
+	branchName := strings.TrimSpace(string(branchNameOut))
+	headSHAOut, err := exec.Command("git", "-C", wd, "rev-parse", "HEAD").Output()
+	if err != nil {
+		e.text("push-current-branch: resolve HEAD sha failed: " + err.Error())
+		return
+	}
+	headSHA := strings.TrimSpace(string(headSHAOut))
+
+	runGitCmd := makeGitRunner(wd)
+	if err := runGitCmd("push", "origin", branchName); err != nil {
+		e.text("push-current-branch: git push failed")
+		return
+	}
+	if err := runGitCmd("update-ref", "refs/remotes/origin/"+branchName, headSHA); err != nil {
+		e.text("push-current-branch: git update-ref failed")
+		return
+	}
+	if err := runGitCmd("branch", "--set-upstream-to=origin/"+branchName, branchName); err != nil {
+		e.text("push-current-branch: git branch --set-upstream-to failed")
+		return
+	}
+
+	fixedDelay(100)
+	e.text("push-current-branch complete: pushed directly, no Create MR/PR action used")
 }
 
 // scenarioDiffUpdateStreaming modifies the file mid-turn, emitting text both

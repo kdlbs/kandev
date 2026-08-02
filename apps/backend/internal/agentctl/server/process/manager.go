@@ -98,8 +98,10 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer []string
-	stderrMu     sync.RWMutex
+	stderrBuffer    []string
+	stderrMu        sync.RWMutex
+	stderrConsumer  adapter.StderrLineConsumer
+	stderrSanitizer adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -1457,6 +1459,16 @@ func (m *Manager) createAdapter() error {
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
+	if consumer, ok := m.adapter.(adapter.StderrLineConsumer); ok {
+		m.stderrConsumer = consumer
+	} else {
+		m.stderrConsumer = nil
+	}
+	if sanitizer, ok := m.adapter.(adapter.StderrLineSanitizer); ok {
+		m.stderrSanitizer = sanitizer
+	} else {
+		m.stderrSanitizer = nil
+	}
 
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
@@ -1494,11 +1506,23 @@ func (m *Manager) GetUpdates() <-chan adapter.AgentEvent {
 // SendErrorEvent sends an error event on the updates channel so the
 // lifecycle manager (and ultimately the UI) learns about the failure.
 func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
+	m.SendErrorEventWithProviderError(errorMessage, promptGeneration, nil)
+}
+
+// SendErrorEventWithProviderError sends an error event with optional safe
+// provider details. The details are already normalized by the adapter and are
+// never populated from the manager's raw stderr ring.
+func (m *Manager) SendErrorEventWithProviderError(
+	errorMessage string,
+	promptGeneration uint64,
+	providerError *streams.ProviderError,
+) {
 	select {
 	case m.updatesCh <- adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
+		ProviderError:    providerError,
 	}:
 	default:
 		m.logger.Warn("updates channel full, could not send error event")
@@ -2064,10 +2088,24 @@ func (m *Manager) readStderr() {
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
-		line := scanner.Text()
+		rawLine := stripANSI(scanner.Text())
+		if m.stderrConsumer != nil {
+			// Protocol-specific consumers inspect the line in memory. Their
+			// normalized output is projected separately before any generic
+			// logging, buffering, or process-exit event can expose it.
+			m.stderrConsumer.ConsumeStderrLine(rawLine)
+		}
+
+		line, keep := rawLine, true
+		if m.stderrSanitizer != nil {
+			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+		}
+		if !keep || line == "" {
+			continue
+		}
 		m.logger.Debug("agent stderr", zap.String("line", line))
 
-		// Buffer the line for error context
+		// Buffer only the safe projection for error context.
 		m.appendStderr(line)
 	}
 

@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { StorageOverviewResponse } from "@/lib/types/system";
 import { StorageOverviewCard } from "./storage-overview-card";
@@ -132,5 +133,48 @@ describe("StorageOverviewCard", () => {
     expect(
       screen.getByTestId("storage-resource-docker-image-layers-trigger").textContent,
     ).toContain("14 GB");
+    expect(screen.getByTestId("storage-analysis-total").textContent).toContain(
+      "Total counted: 47 GB",
+    );
+    expect(screen.getByTestId("storage-analysis-total-partial")).toBeTruthy();
+  });
+});
+
+describe("StorageOverviewCard refresh and policy state", () => {
+  it("uses the current saved policy for Go cache cleanup eligibility", () => {
+    const overview = {
+      ...degradedOverview,
+      settings: {
+        ...degradedOverview.settings,
+        go_cache: { ...degradedOverview.settings.go_cache, max_bytes: 20 * 1024 ** 3 },
+      },
+      summary: {
+        ...degradedOverview.summary,
+        go_cache: {
+          ...degradedOverview.summary.go_cache,
+          size_bytes: 15 * 1024 ** 3,
+        },
+      },
+    } satisfies StorageOverviewResponse;
+    const savedSettings = {
+      ...overview.settings,
+      go_cache: { ...overview.settings.go_cache, max_bytes: 10 * 1024 ** 3 },
+    };
+
+    render(
+      <StorageOverviewCard overview={overview} settings={savedSettings} onRunGoCache={vi.fn()} />,
+      { wrapper: TooltipProvider },
+    );
+
+    fireEvent.click(screen.getByTestId("storage-resource-go-cache-trigger"));
+    expect((screen.getByTestId("storage-go-cache-clean") as HTMLButtonElement).disabled).toBe(
+      false,
+    );
+  });
+
+  it("shows refresh progress while a cached snapshot is loading", () => {
+    render(<StorageOverviewCard overview={degradedOverview} loading onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId("storage-overview-spinner")).toBeTruthy();
   });
 });

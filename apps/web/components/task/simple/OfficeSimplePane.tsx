@@ -56,7 +56,7 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 
 const COMMENTABLE_DONE_SESSION_STATES = new Set<TaskSession["state"]>([
   "CREATED",

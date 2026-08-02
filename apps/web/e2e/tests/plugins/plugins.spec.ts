@@ -88,6 +88,26 @@ async function uninstallViaApi(apiClient: ApiClient) {
   await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
 }
 
+async function installedPluginPath(apiClient: ApiClient): Promise<string> {
+  const response = await apiClient.rawRequest("GET", "/api/plugins");
+  if (!response.ok) throw new Error(`GET /api/plugins failed: ${response.status}`);
+  const body = (await response.json()) as {
+    plugins?: Array<{ id: string; install_path: string }>;
+  };
+  const record = body.plugins?.find((plugin) => plugin.id === PLUGIN_ID);
+  if (!record) throw new Error(`plugin ${PLUGIN_ID} was not returned by GET /api/plugins`);
+  return record.install_path;
+}
+
+function pluginExecutablePath(installPath: string): string {
+  const serverDir = path.join(installPath, "server");
+  const executable = fs
+    .readdirSync(serverDir, { withFileTypes: true })
+    .find((entry) => entry.isFile())?.name;
+  if (!executable) throw new Error(`no plugin executable found under ${serverDir}`);
+  return path.join(serverDir, executable);
+}
+
 /**
  * Stages a filesystem sideload: extracts the same fixture package the
  * upload tests use directly into `<pluginsDir>/<id>/<version>/`, with no
@@ -316,6 +336,89 @@ test.describe("Plugins — gRPC plugin install/load/live-update/uninstall", () =
     // Leave the instance-wide default off so sibling tests start clean.
     await globalToggle.click();
     await expect(globalToggle).toHaveAttribute("aria-checked", "false");
+  });
+
+  test("shows boot failure diagnostics and retries an errored plugin", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    await openInstallDialog(testPage);
+    await uploadPackage(testPage, PACKAGE_PATH);
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 15_000 });
+    await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible();
+
+    const installPath = await installedPluginPath(apiClient);
+    const executablePath = pluginExecutablePath(installPath);
+    const unavailablePath = `${executablePath}.unavailable`;
+    fs.renameSync(executablePath, unavailablePath);
+
+    try {
+      await backend.restart();
+      await expect
+        .poll(
+          async () => {
+            const response = await apiClient.rawRequest("GET", `/api/plugins/${PLUGIN_ID}`);
+            if (!response.ok) return "missing";
+            return ((await response.json()) as { status?: string }).status ?? "missing";
+          },
+          { timeout: 20_000, intervals: [250, 500, 1000] },
+        )
+        .toBe("error");
+
+      await testPage.goto("/settings/plugins");
+      await expect(pluginRow.getByText("Error", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-error-${PLUGIN_ID}`)).toBeVisible();
+      await expect(pluginRow.getByRole("button", { name: "Enable" })).toBeVisible();
+
+      await pluginRow.getByTestId(`plugin-row-link-${PLUGIN_ID}`).click();
+      const detail = testPage.getByTestId(`plugin-detail-${PLUGIN_ID}`);
+      await expect(detail.getByTestId(`plugin-error-${PLUGIN_ID}`)).toBeVisible();
+      await expect(detail.getByRole("button", { name: "Enable" })).toBeVisible();
+
+      const firstDiagnostic = await detail
+        .getByTestId(`plugin-error-${PLUGIN_ID}`)
+        .locator("span")
+        .textContent();
+      if (!firstDiagnostic) throw new Error("initial plugin diagnostic was empty");
+
+      // The first retry still sees the missing executable. The hook must
+      // refetch the backend record even though the action remains failed.
+      await detail.getByRole("button", { name: "Enable" }).click();
+      await expect(detail.getByText("Error", { exact: true })).toBeVisible({ timeout: 15_000 });
+
+      // Change the failure mode without restoring the real binary. Linux
+      // reports an executable-format error, which must replace the original
+      // missing-file diagnostic in the detail view.
+      fs.writeFileSync(executablePath, "not a go-plugin executable\n");
+      if (process.platform !== "win32") fs.chmodSync(executablePath, 0o755);
+      await detail.getByRole("button", { name: "Enable" }).click();
+      await expect(detail.getByText("Error", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect
+        .poll(
+          async () =>
+            (await detail.getByTestId(`plugin-error-${PLUGIN_ID}`).locator("span").textContent()) ??
+            "",
+          { timeout: 15_000, intervals: [250, 500, 1000] },
+        )
+        .not.toBe(firstDiagnostic);
+
+      fs.rmSync(executablePath, { force: true });
+      fs.renameSync(unavailablePath, executablePath);
+      await detail.getByRole("button", { name: "Enable" }).click();
+      await expect(detail.getByText("Active", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(detail.getByTestId(`plugin-error-${PLUGIN_ID}`)).toHaveCount(0);
+    } finally {
+      if (fs.existsSync(unavailablePath) && fs.existsSync(executablePath)) {
+        fs.rmSync(executablePath, { force: true });
+      }
+      if (fs.existsSync(unavailablePath) && !fs.existsSync(executablePath)) {
+        fs.renameSync(unavailablePath, executablePath);
+      }
+    }
   });
 
   test("keybinding declared in the manifest opens a host.openModal demo modal", async ({

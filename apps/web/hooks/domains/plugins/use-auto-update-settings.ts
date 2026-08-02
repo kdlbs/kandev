@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { getPluginSettings, updatePluginSettings } from "@/lib/api/domains/plugins-api";
 
 export type AutoUpdateSettings = {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, memo, type ReactElement } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
   IconArchive,
@@ -24,6 +25,7 @@ import { AuthMethodsPanel, GenericAuthPanel } from "./auth-methods-panel";
 import { HostShellDialog } from "@/components/settings/host-shell-dialog";
 import type { Message, TaskSessionState } from "@/lib/types/http";
 import type { MessageAction, RecoveryAuthMethod } from "@/components/task/chat/types";
+import { formatDateTime } from "@/lib/i18n/formats";
 
 const ICON_MAP: Record<string, React.ElementType> = {
   archive: IconArchive,
@@ -46,6 +48,9 @@ type ActionMeta = {
   error_output?: string;
   failure_kind?: string;
   missing_branch?: string;
+  provider_name?: string;
+  model_id?: string;
+  reset_at?: string;
 };
 
 function isSessionActive(state?: TaskSessionState) {
@@ -100,16 +105,14 @@ function SettledActionMessage({
   if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryRequested))
     return null;
 
-  if (metadata?.failure_kind === "missing_pr_branch") {
-    return (
-      <MissingBranchRecovery
-        metadata={metadata}
-        taskId={taskId}
-        fallbackMessage={message}
-        technicalDetails={sessionError}
-      />
-    );
-  }
+  const specialRecovery = renderSpecialRecovery({
+    metadata,
+    message,
+    sessionError,
+    taskId,
+    onRecoveryRequested: () => setRecoveryRequested(true),
+  });
+  if (specialRecovery) return specialRecovery;
 
   const iconClass = metadata?.variant === "warning" ? "text-amber-500" : "text-red-500";
   const textClass =
@@ -138,6 +141,93 @@ function SettledActionMessage({
         </div>
       </div>
     </div>
+  );
+}
+
+function renderSpecialRecovery({
+  metadata,
+  message,
+  sessionError,
+  taskId,
+  onRecoveryRequested,
+}: {
+  metadata: ActionMeta | undefined;
+  message: string;
+  sessionError?: string;
+  taskId?: string;
+  onRecoveryRequested: () => void;
+}): ReactElement | null {
+  if (metadata?.failure_kind === "missing_pr_branch") {
+    return (
+      <MissingBranchRecovery
+        metadata={metadata}
+        taskId={taskId}
+        fallbackMessage={message}
+        technicalDetails={sessionError}
+      />
+    );
+  }
+  if (metadata?.failure_kind === "provider_quota_limited") {
+    return (
+      <ProviderQuotaRecovery
+        metadata={metadata}
+        taskId={taskId}
+        onRecoveryRequested={onRecoveryRequested}
+      />
+    );
+  }
+  return null;
+}
+
+function ProviderQuotaRecovery({
+  metadata,
+  taskId,
+  onRecoveryRequested,
+}: {
+  metadata: ActionMeta;
+  taskId?: string;
+  onRecoveryRequested: () => void;
+}) {
+  const { t } = useTranslation();
+  const provider = metadata.provider_name?.trim() || t("chat:providerQuotaProviderFallback");
+  const model = metadata.model_id?.trim();
+  const resetDate = metadata.reset_at ? new Date(metadata.reset_at) : undefined;
+  const resetAt = resetDate && !Number.isNaN(resetDate.getTime()) ? formatDateTime(resetDate) : "";
+
+  return (
+    <section
+      data-testid="provider-quota-recovery"
+      role="alert"
+      className="w-full min-w-0 rounded-md border border-amber-500/25 bg-amber-500/[0.06] p-3 sm:p-4"
+    >
+      <div className="flex min-w-0 items-start gap-3">
+        <IconAlertTriangle
+          className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <h3 className="text-sm font-medium text-foreground">
+            {t("chat:providerQuotaTitle", { provider })}
+          </h3>
+          <div className="mt-1 space-y-1 text-xs leading-relaxed text-muted-foreground">
+            {model && <p>{t("chat:providerQuotaModel", { model })}</p>}
+            <p>
+              {resetAt
+                ? t("chat:providerQuotaReset", { resetAt })
+                : t("chat:providerQuotaResetUnknown")}
+            </p>
+          </div>
+          <ActionMessageDetails metadata={metadata} />
+          {metadata.actions && metadata.actions.length > 0 && (
+            <ActionButtons
+              actions={metadata.actions}
+              taskId={taskId}
+              onRecoveryRequested={onRecoveryRequested}
+            />
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -223,11 +313,12 @@ function MissingBranchRecovery({
 }
 
 function TechnicalDetails({ children }: { children: string }) {
+  const { t } = useTranslation();
   return (
     <details className="mt-2 min-w-0 text-xs text-muted-foreground">
       <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 sm:min-h-8">
         <IconChevronDown className="h-3.5 w-3.5" />
-        Technical details
+        {t("chat:technicalDetails")}
       </summary>
       <pre className="max-h-[300px] max-w-full overflow-y-auto whitespace-pre-wrap break-words rounded bg-muted/50 p-2 font-mono text-[11px]">
         {children}

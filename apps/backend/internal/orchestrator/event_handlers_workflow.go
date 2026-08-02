@@ -1125,6 +1125,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
 	}
 
+	// Conditional session configuration is applied after a context reset so the
+	// new ACP session receives the workflow-selected settings before any
+	// auto-start prompt is dispatched. It never switches or creates a tab.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+
 	hasAutoStart := false
 	for _, action := range step.Events.OnEnter {
 		switch action.Type {
@@ -1624,17 +1629,26 @@ func (s *Service) autoStartStepPrompt(
 	// Passthrough sessions skip the wrap: the prompt is typed straight into
 	// the agent CLI's TTY and the user sees it verbatim.
 	recordedPrompt := agentPrompt
+	titleOwner := false
+	isOfficeTask := false
+	if session.State == models.TaskSessionStateCreated {
+		var officeErr error
+		isOfficeTask, officeErr = s.lookupOfficeTask(ctx, taskID)
+		if officeErr != nil {
+			requeueTaken()
+			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", officeErr)
+		}
+		configMode, _ := session.Metadata["config_mode"].(bool)
+		if !configMode && !isOfficeTask {
+			var claimErr error
+			titleOwner, claimErr = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
+			if claimErr != nil {
+				requeueTaken()
+				return fmt.Errorf("claim task title for workflow auto-start: %w", claimErr)
+			}
+		}
+	}
 	if session.State == models.TaskSessionStateCreated && !session.IsPassthrough && (agentPrompt != "" || len(attachments) > 0) {
-		isOfficeTask, err := s.lookupOfficeTask(ctx, taskID)
-		if err != nil {
-			requeueTaken()
-			return fmt.Errorf("resolve MCP mode for workflow auto-start: %w", err)
-		}
-		dbTask, err := s.repo.GetTask(ctx, taskID)
-		if err != nil {
-			requeueTaken()
-			return fmt.Errorf("resolve task title capability for workflow auto-start: %w", err)
-		}
 		configMode, _ := session.Metadata["config_mode"].(bool)
 		requiresSignal := step != nil && step.AutoAdvanceRequiresSignal
 		referenceContext := EntityReferenceContext(references)
@@ -1644,7 +1658,7 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, agentPrompt, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
-				IncludeTaskTitleTool:           !configMode && dbTask != nil && models.IsAgentTitlePending(dbTask.Metadata),
+				IncludeTaskTitleTool:           !configMode && titleOwner,
 			}, referenceContext)
 		}
 	}

@@ -36,6 +36,18 @@ describe("startup page user settings", () => {
   });
 });
 
+describe("agent-generated task title defaults", () => {
+  it("defaults missing preference to enabled", () => {
+    expect(buildCoreFields({}).agentGeneratedTaskTitles).toBe(true);
+  });
+
+  it("preserves an explicit disabled preference", () => {
+    expect(buildCoreFields({ agent_generated_task_titles: false }).agentGeneratedTaskTitles).toBe(
+      false,
+    );
+  });
+});
+
 describe("buildCoreFields", () => {
   it("normalizes the simplified metrics preference and defaults old rows to detailed", () => {
     expect(parseSystemMetricsDisplay({ show_in_topbar: true, simplified: true } as never)).toEqual({
@@ -325,7 +337,7 @@ describe("mapUserSettingsResponse unread divider", () => {
 });
 
 describe("mapUserSettingsResponse agent-generated task titles", () => {
-  it("defaults the preference off and preserves explicit enablement", () => {
+  it("defaults the preference on and preserves explicit enablement", () => {
     const fallback = mapUserSettingsResponse(null) as { agentGeneratedTaskTitles?: boolean };
     const enabled = mapUserSettingsResponse({
       settings: {
@@ -337,7 +349,7 @@ describe("mapUserSettingsResponse agent-generated task titles", () => {
       } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
     }) as { agentGeneratedTaskTitles?: boolean };
 
-    expect(fallback.agentGeneratedTaskTitles).toBe(false);
+    expect(fallback.agentGeneratedTaskTitles).toBe(true);
     expect(enabled.agentGeneratedTaskTitles).toBe(true);
   });
 });

@@ -91,6 +91,65 @@ func TestParseCommitDiff_PathsWithSpaces(t *testing.T) {
 	}
 }
 
+func TestShowCommit_MergeCommitUsesFirstParentDiff(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+
+	log := newTestLogger(t)
+	ctx := context.Background()
+
+	runGit(t, repoDir, "checkout", "-b", "feature/merge-diff")
+	writeFile(t, repoDir, "feature-only.txt", "feature branch\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "feature work")
+
+	runGit(t, repoDir, "checkout", "main")
+	writeFile(t, repoDir, "incoming.txt", "merged branch\n")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "main work")
+
+	runGit(t, repoDir, "checkout", "feature/merge-diff")
+	runGit(t, repoDir, "merge", "--no-ff", "-m", "Merge main into feature/merge-diff", "main")
+	mergeSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+
+	gitOp := NewGitOperator(repoDir, log, nil)
+	result, err := gitOp.ShowCommit(ctx, mergeSHA)
+	if err != nil {
+		t.Fatalf("ShowCommit error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("ShowCommit failed: %+v", result)
+	}
+
+	if _, ok := result.Files["incoming.txt"]; !ok {
+		t.Fatalf("merge diff missing incoming first-parent change; files=%v", fileKeys(result.Files))
+	}
+	entry, ok := result.Files["incoming.txt"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("incoming.txt entry type = %T, want map[string]interface{}", result.Files["incoming.txt"])
+	}
+	if status := entry["status"]; status != "added" {
+		t.Errorf("incoming.txt status = %v, want added", status)
+	}
+	if _, ok := result.Files["feature-only.txt"]; ok {
+		t.Fatalf("merge diff incorrectly included a file already present in the first parent")
+	}
+	if result.FilesChanged != 1 {
+		t.Errorf("FilesChanged = %d, want 1", result.FilesChanged)
+	}
+	if result.Insertions != 1 || result.Deletions != 0 {
+		t.Errorf("stats = +%d/-%d, want +1/-0", result.Insertions, result.Deletions)
+	}
+
+	diff, skipReason := fileEntryDiff(t, result.Files, "incoming.txt")
+	if skipReason != "" {
+		t.Errorf("incoming diff skip reason = %q, want empty", skipReason)
+	}
+	if !strings.Contains(diff, "+merged branch") {
+		t.Errorf("incoming diff = %q, want merged file content", diff)
+	}
+}
+
 func TestGitOperatorCreatePR_UsesAzureCLIForAzureRepos(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell wrapper test is Unix-only")

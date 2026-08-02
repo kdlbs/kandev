@@ -134,7 +134,7 @@ describe("user settings websocket handler", () => {
     expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(true);
 
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
-    expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(false);
+    expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(true);
   });
 
   it("syncs transcript navigation preferences and uses the documented defaults", () => {

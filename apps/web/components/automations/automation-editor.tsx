@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { Separator } from "@kandev/ui/separator";
 import { useAppStore } from "@/components/state-provider";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";

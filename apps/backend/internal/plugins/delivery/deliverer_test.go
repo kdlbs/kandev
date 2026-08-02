@@ -12,6 +12,9 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/plugins/store"
 	"github.com/kandev/kandev/pkg/pluginsdk"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 // fakeTransport is a controllable Transport for tests: DeliverEvent calls
@@ -349,6 +352,124 @@ func TestDeliverer_RingBufferOverflowDropsOldest(t *testing.T) {
 		t.Errorf("replay order = [%s %s], want [task.updated task.deleted] (task.created should have been dropped as oldest on overflow)", first, second)
 	}
 	requireTimeout(t, arrivedCh, 150*time.Millisecond, "a 3rd replayed event")
+}
+
+func TestDeliverer_RingBufferOverflowLogsAggregatedDrops(t *testing.T) {
+	clock := time.Date(2026, time.August, 2, 12, 0, 0, 0, time.UTC)
+	var clockMu sync.Mutex
+	now := func() time.Time {
+		clockMu.Lock()
+		defer clockMu.Unlock()
+		return clock
+	}
+	core, observed := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap(): %v", err)
+	}
+
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	lister := &fakeLister{}
+	lister.set(PluginRecord{ID: "plug1", EventSubjects: []string{"task.*"}, Status: store.StatusError})
+	processedCh := make(chan struct{}, 10)
+	d := New(eventBus, &fakeTransport{}, lister, log,
+		WithRetryDelays(nil),
+		WithRingBuffer(1, 5*time.Minute),
+		WithNow(now),
+		WithOverflowLogInterval(time.Minute),
+		withOnProcessed(func(string, Delivery) { processedCh <- struct{}{} }))
+	t.Cleanup(d.Stop)
+	d.Refresh()
+
+	ctx := context.Background()
+	for _, subject := range []string{"task.created", "task.updated", "task.deleted"} {
+		if err := eventBus.Publish(ctx, subject, bus.NewEvent(subject, "test", map[string]interface{}{})); err != nil {
+			t.Fatalf("Publish(%s): %v", subject, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		requireNoTimeout(t, processedCh, 2*time.Second, fmt.Sprintf("event %d buffered", i+1))
+	}
+
+	entries := observed.All()
+	if len(entries) != 1 {
+		t.Fatalf("overflow warnings after two drops = %d, want 1", len(entries))
+	}
+	if got := entries[0].ContextMap()["dropped_count"]; got != int64(1) {
+		t.Fatalf("first dropped_count = %v, want 1", got)
+	}
+	if got := entries[0].ContextMap()["latest_dropped_delivery_id"]; got == nil || got == "" {
+		t.Fatalf("first latest_dropped_delivery_id = %v, want a non-empty id", got)
+	}
+	if _, ok := entries[0].ContextMap()["dropped_delivery_id"]; ok {
+		t.Fatal("first overflow warning still uses the ambiguous dropped_delivery_id field")
+	}
+
+	clockMu.Lock()
+	clock = clock.Add(time.Minute)
+	clockMu.Unlock()
+	if err := eventBus.Publish(ctx, "task.archived", bus.NewEvent("task.archived", "test", map[string]interface{}{})); err != nil {
+		t.Fatalf("Publish(task.archived): %v", err)
+	}
+	requireNoTimeout(t, processedCh, 2*time.Second, "post-interval event buffered")
+
+	entries = observed.All()
+	if len(entries) != 2 {
+		t.Fatalf("overflow warnings after interval = %d, want 2", len(entries))
+	}
+	if got := entries[1].ContextMap()["dropped_count"]; got != int64(2) {
+		t.Fatalf("aggregated dropped_count = %v, want 2", got)
+	}
+	if got := entries[1].ContextMap()["latest_dropped_delivery_id"]; got == nil || got == "" {
+		t.Fatalf("aggregated latest_dropped_delivery_id = %v, want a non-empty id", got)
+	}
+	if _, ok := entries[1].ContextMap()["dropped_delivery_id"]; ok {
+		t.Fatal("aggregated overflow warning still uses the ambiguous dropped_delivery_id field")
+	}
+}
+
+func TestDeliverer_RingBufferOverflowLimiterIsPerPlugin(t *testing.T) {
+	core, observed := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("NewFromZap(): %v", err)
+	}
+
+	eventBus := bus.NewMemoryEventBus(logger.Default())
+	lister := &fakeLister{}
+	lister.set(
+		PluginRecord{ID: "plug1", EventSubjects: []string{"task.*"}, Status: store.StatusError},
+		PluginRecord{ID: "plug2", EventSubjects: []string{"task.*"}, Status: store.StatusError},
+	)
+	processedCh := make(chan struct{}, 10)
+	d := New(eventBus, &fakeTransport{}, lister, log,
+		WithRetryDelays(nil),
+		WithRingBuffer(1, 5*time.Minute),
+		WithOverflowLogInterval(time.Minute),
+		withOnProcessed(func(string, Delivery) { processedCh <- struct{}{} }))
+	t.Cleanup(d.Stop)
+	d.Refresh()
+
+	for _, subject := range []string{"task.created", "task.updated"} {
+		if err := eventBus.Publish(context.Background(), subject, bus.NewEvent(subject, "test", map[string]interface{}{})); err != nil {
+			t.Fatalf("Publish(%s): %v", subject, err)
+		}
+	}
+	for i := 0; i < 4; i++ {
+		requireNoTimeout(t, processedCh, 2*time.Second, fmt.Sprintf("plugin event %d buffered", i+1))
+	}
+
+	entries := observed.All()
+	if len(entries) != 2 {
+		t.Fatalf("overflow warnings for two plugins = %d, want 2", len(entries))
+	}
+	seen := map[string]bool{}
+	for _, entry := range entries {
+		seen[entry.ContextMap()["plugin_id"].(string)] = true
+	}
+	if !seen["plug1"] || !seen["plug2"] {
+		t.Fatalf("overflow warning plugin ids = %v, want both plugins", seen)
+	}
 }
 
 func TestDeliverer_RefreshStopsDeliveryWhenPluginRemoved(t *testing.T) {

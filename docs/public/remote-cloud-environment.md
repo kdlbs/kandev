@@ -152,7 +152,7 @@ The Azure tooling is optional and only needed for Azure Repos operations. See [G
 
 ## Development state and persistence
 
-Normal `make dev` isolates state under `<checkout>/.kandev-dev/`, including its SQLite database, logs, task workspaces, and other Kandev home data. It does not use `~/.kandev` by default. The selected development profile uses embedded SQLite and the in-memory event bus, so PostgreSQL and NATS are not prerequisites.
+Normal `make dev` isolates state under `<checkout>/.kandev-dev/`, including its SQLite database, task workspaces, and `.kandev-dev/logs/backend-logs.log`. Startup prints the resolved log path. It does not use `~/.kandev` by default. The selected development profile uses embedded SQLite and the in-memory event bus, so PostgreSQL and NATS are not prerequisites.
 
 When the checkout itself is a Kandev task workspace, the launcher deliberately clears a parent-provided `KANDEV_DATABASE_PATH` and uses the local `.kandev-dev` state. In a normal shell, an explicit `KANDEV_DATABASE_PATH` is honored. If that path is outside a `.kandev-dev` directory, the launcher treats it as production data, copies an existing database to `~/.kandev/data/backups/dev-prod-db-<timestamp>.db`, retains the newest five such snapshots, and aborts startup if the copy fails.
 
@@ -168,7 +168,7 @@ make clean-db
 
 That target removes the entire `.kandev-dev` tree, not only the SQLite file. Any tasks, repositories, sessions, and debug logs below it are lost. Ephemeral-VM deletion likewise loses uncommitted changes and provider-local secrets unless the provider volume persists; push or export wanted work before destroying the workspace.
 
-Development mode writes raw ACP frames under `.kandev-dev/logs/acp`. They can include full prompts, file content, and tool payloads. The built-in writer rotates and prunes them, but you should still exclude them from support bundles and delete the development home when no longer needed.
+Development mode writes raw ACP frames under `.kandev-dev/logs/acp`. They can include full prompts, file content, and tool payloads. The built-in writer rotates and prunes them, but standard support bundles exclude ACP; include ACP only through the explicit debug bundle session picker after reviewing the selected sessions. Delete the development home when no longer needed.
 
 ## Build and test commands
 

@@ -252,18 +252,31 @@ It does not erase the entire Kandev home: backups, `master.key`, logs, service m
 
 ## Logs and diagnostics
 
-Open **Settings > System > Logs** for recent structured backend events. Kandev maintains an in-memory ring of exactly 2,000 events that passed the configured log level; the page requests the newest 1,000. This buffer disappears on restart.
+Open **Settings > System > Logs** and select **Customize bundle** to create and
+download a diagnostic ZIP. Backend and frontend diagnostic evidence are
+selected by default; you can add the allow-listed runtime index, and in debug
+mode raw and normalized agent-protocol (ACP) evidence. Adding ACP opens an
+explicit session picker, with each session's Kandev task title linked for
+identification. The archive has source directories and `manifest.json`; inspect
+the manifest for requested sources, warnings, captured ranges, truncation, and
+loss before treating it as complete.
 
-Default interactive launcher output is warning level. `kandev --verbose` selects info level and shows backend output; `kandev --debug` selects debug level and also enables ACP message dumps. An explicit `KANDEV_LOG_LEVEL` overrides the flag-selected level. Those dumps can contain full prompts, file contents, and tool calls. Use debug mode only on a trusted machine, collect the minimum needed, then disable and remove the files.
+Standard bundles do not read stored chat transcripts, session messages, or agent messages. Backend evidence covers startup, lifecycle, API, executor, and error events; frontend evidence covers bounded browser console errors/warnings and diagnostic toast reports. Incidental text already emitted into a backend/frontend log entry is not automatically redacted, so review the ZIP before sharing. The runtime index contains only allow-listed session status and executor metadata.
 
-Logging configuration defaults are `outputPath: stdout`, 100 MB rotation size, five rotated files, 30-day rotated-file age, and gzip compression. Rotation applies only when `logging.outputPath` is a file, and active files are created owner-readable. The Logs page can list/download the exact active filename and timestamped rotations when that filename has an extension; for an extensionless output path it does not enumerate rotated siblings. With stdout logging, use the in-memory tail plus the process manager:
+ACP evidence is a separate, debug-only opt-in. It is limited to one to ten sessions the caller is authorized to view and may contain prompts, responses, tool calls, file contents, MCP data, environment-derived values, and secrets. Collection is on demand from retained host files or reachable executors; unavailable, expired, invalid, or truncated sessions make the archive partial instead of broadening the request or continuously copying ACP frames.
+
+Every launch writes info and above to `<home>/logs/backend-logs.log`; normal and debug stdout show warn and above. `kandev --verbose` also shows info on stdout. `kandev --debug` records debug events in the file and enables ACP message dumps. The backend appends on same-day restarts, caps each daily file at 256 MiB, rolls at UTC midnight, and retains the current day plus the two previous UTC days.
+
+The browser keeps a bounded three-day console history locally and sends it only when an authenticated bundle request asks for frontend evidence. Console calls are not continuously uploaded. Error toasts are reported immediately, but automatic reports remove URL query strings and fragments and use count and byte rate limits. A bundle can be partial if no browser responds, IndexedDB is unavailable, queues shed entries, or byte/profile limits truncate data. Ready bundles expire after 15 minutes; one active job per user and bounded global capacity can return `429` or `503`. Standard bundles cap backend/frontend/runtime sources at 160/80/2 MiB; ACP-inclusive bundles use 96/48/2 MiB plus 96 MiB ACP, with no budget transfer between sources.
+
+Process-manager logs remain useful for live output:
 
 - Linux service: `kandev service logs -f` reads the systemd journal.
 - macOS service: the same command tails `<home>/logs/service.out` and `service.err`.
 - Docker: `docker logs -f kandev`.
 - Kubernetes: `kubectl logs -f deployment/kandev`.
 
-When reporting an incident, record timestamp/timezone, Kandev version and commit from **System > About**, task ID, session ID, executor type, repository/branch, and relevant provider request IDs. **System > Licenses** is a generated inventory of shipped npm and Go dependencies, not a runtime health check.
+When reporting an incident, record timestamp/timezone, Kandev version and commit from **System > About**, task ID, session ID, executor type, repository/branch, and relevant provider request IDs. Bundles can contain install-wide backend events, full browser URLs, console arguments, and stacks; review them as sensitive data before sharing. Agents can request backend, frontend, or all sources and should search a known task ID exactly before broadening. **System > Licenses** is a generated inventory of shipped npm and Go dependencies, not a runtime health check.
 
 ## Disk use and environment cleanup
 
@@ -337,7 +350,7 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 | Backups page reports a 15-second create timeout | Reload the backup list and inspect the `backup-create` job/log | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk |
 | Backup/maintenance fails on PostgreSQL | Active driver on Database page | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only |
 | Restored data looks stale | Whether the backend was restarted immediately | Quit/restart; do not keep using the old open database connections |
-| Logs page has no downloadable files | `logging.outputPath` and service/container logs | `stdout` is the default; use in-memory tail or configure a file sink |
+| Diagnostic bundle is partial | `manifest.json` warnings, source status, and loss counters | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary |
 | Update check returns HTTP 429 | Time since last **Check now** | Wait at least 30 seconds; background checks retry every six hours |
 | **Apply update** is absent | Install mode/method and `<home>/service/install.json` | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
 | Metrics show unavailable | OS support, disk path, executor connectivity | Select supported metrics and verify permissions/network; the collector reports errors per sample |

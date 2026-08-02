@@ -25,11 +25,7 @@ test.describe("Improve Kandev on mobile", () => {
           issue_workflow_id: seedData.workflowId,
           branch: "main",
           bundle_dir: "/tmp/kandev-improve-mobile-e2e",
-          bundle_files: {
-            metadata: "/tmp/kandev-improve-mobile-e2e/metadata.json",
-            backend_log: "/tmp/kandev-improve-mobile-e2e/backend.log",
-            frontend_log: "/tmp/kandev-improve-mobile-e2e/frontend.log",
-          },
+          bundle_file: "/tmp/kandev-improve-mobile-e2e/diagnostic-bundle.zip",
           github_login: "octocat",
           has_write_access: false,
           fork_status: "unknown",

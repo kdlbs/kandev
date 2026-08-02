@@ -22,7 +22,13 @@ import {
 import { resolveHealthTimeoutMs, waitForHealth } from "./health";
 import { getBinaryName } from "./platform";
 import { createProcessSupervisor } from "./process";
-import { buildBackendEnv, logStartupInfo, pickBackendPorts } from "./shared";
+import {
+  buildBackendEnv,
+  createOutputRingBuffer,
+  logStartupInfo,
+  pickBackendPorts,
+  resolveBackendLogLevels,
+} from "./shared";
 import { launchRestartableBackend } from "./supervisor/backend";
 import { openBrowser } from "./web";
 
@@ -31,9 +37,9 @@ export type StartOptions = {
   repoRoot: string;
   /** Optional preferred backend port (finds available port if not specified) */
   backendPort?: number;
-  /** Show info logs from backend + web */
+  /** Show backend info logs on stdout */
   verbose?: boolean;
-  /** Show debug logs + agent message dumps */
+  /** Retain backend debug logs in its file + agent message dumps */
   debug?: boolean;
   /** Skip browser open. Set by service units and preview environments. */
   headless?: boolean;
@@ -65,18 +71,19 @@ export async function runStart({
     throw new Error("Backend binary not found. Run `make build` first.");
   }
 
-  // Production mode: use warn log level for clean output unless verbose/debug
-  const showOutput = verbose || debug;
+  // File logs retain info by default. Verbose only changes the stdout sink;
+  // debug lowers the file threshold while stdout remains warn+.
   fs.mkdirSync(resolveDataDir(), { recursive: true });
   // The data dir holds the SQLite DB; keep it owner-only even if it pre-existed
   // with a looser umask-derived mode.
   fs.chmodSync(resolveDataDir(), 0o700);
   const dbPath = resolveDatabasePath();
-  const logLevel =
-    process.env.KANDEV_LOG_LEVEL?.trim() || (debug ? "debug" : verbose ? "info" : "warn");
+  const levels = resolveBackendLogLevels({ verbose, debug });
+  const logLevel = levels.file;
   const backendEnv = buildBackendEnv({
     ports,
     logLevel,
+    consoleLogLevel: levels.console,
     webProxy: false,
     extra: {
       KANDEV_DATABASE_PATH: dbPath,
@@ -94,8 +101,7 @@ export async function runStart({
   const supervisor = createProcessSupervisor();
   supervisor.attachSignalHandlers();
 
-  // Start backend: ignore stdin, show stdout only in verbose/debug mode, always show stderr
-  // Stderr is always inherited to ensure error messages are visible immediately (no pipe buffering)
+  const output = createOutputRingBuffer(process.stdout);
   const backend = await launchRestartableBackend({
     command: backendBin,
     args: [],
@@ -104,13 +110,20 @@ export async function runStart({
     homeDir: resolveKandevHomeDir(),
     ports,
     mode: "start",
-    stdio: showOutput ? ["ignore", "inherit", "inherit"] : ["ignore", "ignore", "inherit"],
+    stdio: ["ignore", "pipe", "inherit"],
     supervisor,
+    onProcess: (proc) => output.attach(proc.stdout),
   });
 
   const healthTimeoutMs = resolveHealthTimeoutMs(HEALTH_TIMEOUT_MS_RELEASE);
   console.log("[kandev] starting backend...");
-  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs);
+  await waitForHealth(ports.backendUrl, backend.proc, healthTimeoutMs, () => {
+    const buffered = output.read();
+    if (buffered.trim().length === 0) return;
+    console.error("[kandev] --- backend stdout (last captured output) ---");
+    console.error(buffered.trimEnd());
+    console.error("[kandev] --- end backend stdout ---");
+  });
   console.log(`[kandev] backend ready at ${ports.backendUrl}`);
 
   console.log("[kandev] open: " + ports.backendUrl);

@@ -169,7 +169,8 @@ const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
 const taskTitleSection = "- set_task_title_kandev: Set the user-facing title for the CURRENT task. " +
 	"Call this as your first action in the session, before planning, inspecting files, or doing any other work. " +
 	"Call it even when the provisional title looks usable. " +
-	"Use a concise title targeting about 3 words (no more than 6 words when practical), as a short noun phrase rather than a sentence or progress update. " +
+	"Use a concise title targeting about 6 words, as a short title phrase rather than a sentence or progress update. " +
+	"Use sentence case: capitalize only the first word and proper nouns (for example, \"Improve task title casing\", not \"Improve Task Title Casing\"). " +
 	"Required param: title.\n"
 
 // PendingTaskTitlePassthroughInstruction is the compact equivalent of the
@@ -178,7 +179,8 @@ const taskTitleSection = "- set_task_title_kandev: Set the user-facing title for
 // printed into the user's terminal.
 func PendingTaskTitlePassthroughInstruction() string {
 	return "Before doing any other work, call set_task_title_kandev for the current task. " +
-		"Use a concise title targeting about 3 words (no more than 6 words when practical), " +
+		"Use a concise title targeting about 6 words, as a short title phrase rather than a sentence or progress update, " +
+		"in sentence case (for example, \"Improve task title casing\", not \"Improve Task Title Casing\"), " +
 		"even if the provisional title looks usable."
 }
 

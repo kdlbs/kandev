@@ -171,6 +171,10 @@ type AgentEvent struct {
 	// Error contains error message when Type is "error".
 	Error string `json:"error,omitempty"`
 
+	// ProviderError contains a validated, sanitized provider diagnostic for a
+	// terminal error. Raw stderr never crosses this boundary.
+	ProviderError *ProviderError `json:"provider_error,omitempty"`
+
 	// MCPAttachment contains one safe observation from the MCP attachment
 	// lifecycle when Type is EventTypeMCPAttachment.
 	MCPAttachment *MCPAttachmentEvidence `json:"mcp_attachment,omitempty"`
@@ -286,6 +290,11 @@ type AgentEvent struct {
 	// ConfigBaselineCandidate carries an authoritative response snapshot for
 	// lifecycle settlement without replacing the event's newer live options.
 	ConfigBaselineCandidate []ConfigOption `json:"config_baseline_candidate,omitempty"`
+
+	// OriginalConfigCandidate is the profile-settled model-adjacent state used
+	// once to capture a task session's immutable original configuration. It is
+	// emitted before runtime/workflow overrides are applied.
+	OriginalConfigCandidate []ConfigOption `json:"original_config_candidate,omitempty"`
 
 	// --- Session info fields ---
 

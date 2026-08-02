@@ -213,17 +213,30 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 	}
 }
 
-// trackPushAndAssociatePR detects git pushes by tracking the "ahead" count.
-// Two cases trigger detection:
+// pushTrackerUnsynced is the pushTracker sentinel for "no upstream
+// configured yet" (RemoteBranch == ""). Deliberately distinct from 0 (a real
+// RemoteAhead of zero, meaning "has an upstream, nothing left to push") —
+// collapsing both into 0 would make "never pushed" and "just pushed"
+// indistinguishable to the transition check below, since a task's very
+// first status observation (no upstream, no commits yet) would itself read
+// as "already synced" and silently consume the one-time first-observation
+// fast path before any real push ever happens.
+const pushTrackerUnsynced = -1
+
+// trackPushAndAssociatePR detects git pushes by tracking the "remote ahead"
+// count — commits not yet present on the branch's own upstream (see
+// lifecycle.GitStatusData.RemoteAhead). Two cases trigger detection:
 //
-//  1. Transition: ahead went from >0 to 0 with a remote branch set — the
-//     normal in-session push, observed across two status events.
+//  1. Transition: the branch was unsynced (no upstream yet, or remote-ahead
+//     >0 with a remote branch set) on the previous observation, and this one
+//     shows remote-ahead=0 with a remote branch — the normal in-session
+//     push, observed across two status events.
 //  2. First-observation sync: the very first status event for this
-//     (session, repo) already shows ahead=0 with a remote branch. This means
-//     a push happened before agentctl's poller saw the ahead>0 phase (the
-//     poll cadence missed it, or the session resumed after a restart). For a
-//     fresh task branch, RemoteBranch is only populated after `git push -u`,
-//     so seeing it pre-synced is itself a push signal.
+//     (session, repo) already shows remote-ahead=0 with a remote branch.
+//     This means a push happened before agentctl's poller saw the unsynced
+//     phase (the poll cadence missed it, or the session resumed after a
+//     restart). For a fresh task branch, RemoteBranch is only populated
+//     after `git push -u`, so seeing it pre-synced is itself a push signal.
 //
 // Without (2), multi-repo tasks routinely lose PR associations for any repo
 // whose first poll happens to land after the push completes — the
@@ -231,13 +244,23 @@ func (s *Service) persistGitStatusSnapshot(ctx context.Context, data watcher.Git
 //
 // Multi-repo: keyed per (session, repository_name) so each repo's
 // transitions are tracked independently. Without this, agentctl's per-repo
-// status events race-overwrote each other's ahead counts and only one
+// status events race-overwrote each other's remote-ahead counts and only one
 // repo's push got detected.
+//
+// Deliberately keys off RemoteAhead, not the base-branch-relative Ahead:
+// Ahead reflects "commits ahead of origin/main" for the Push/Pull UI badge
+// and stays > 0 for the entire life of a normal feature branch — it never
+// drops to 0 just because the branch itself was pushed, so it could never
+// signal "a push just happened" for real feature-branch work.
 func (s *Service) trackPushAndAssociatePR(ctx context.Context, data watcher.GitEventData) {
 	key := pushTrackerKey(data.SessionID, data.Status.RepositoryName)
-	prevAheadVal, loaded := s.pushTracker.Swap(key, data.Status.Ahead)
-	prevAhead, _ := prevAheadVal.(int)
-	if !shouldFirePushDetection(loaded, prevAhead, data.Status) {
+	trackedValue := data.Status.RemoteAhead
+	if data.Status.RemoteBranch == "" {
+		trackedValue = pushTrackerUnsynced
+	}
+	prevValueVal, loaded := s.pushTracker.Swap(key, trackedValue)
+	prevValue, _ := prevValueVal.(int)
+	if !shouldFirePushDetection(loaded, prevValue, data.Status) {
 		return
 	}
 	s.logger.Info("git push detected, starting PR association",
@@ -325,25 +348,40 @@ func (s *Service) resolvePushRepositoryProvider(ctx context.Context, sessionID, 
 // shouldFirePushDetection decides whether to kick off PR association for one
 // status event. It fires in two cases (see trackPushAndAssociatePR doc):
 //
-//   - Transition: the previous observation had ahead>0 and this one has ahead=0
-//     with a remote branch set.
-//   - First observation: no previous entry, this one has ahead=0 with a
-//     remote branch set — meaning a push happened before agentctl's poller
-//     observed the ahead>0 phase.
+//   - Transition: the previous observation was unsynced — either no upstream
+//     yet (pushTrackerUnsynced) or a remote branch with remote-ahead>0 — and
+//     this one has remote-ahead=0 with a remote branch set.
+//   - First observation: no previous entry, this one has remote-ahead=0 with
+//     a remote branch set — meaning a push happened before agentctl's poller
+//     observed the unsynced phase.
+//
+// Reads RemoteAhead (commits not yet on this branch's own upstream), not the
+// base-branch-relative Ahead — see lifecycle.GitStatusData.RemoteAhead and
+// trackPushAndAssociatePR's doc comment for why Ahead can never signal this.
+//
+// prevValue must come from pushTracker's stored value, not a raw prior
+// RemoteAhead: comparing against pushTrackerUnsynced (not 0) for "was this
+// unsynced before" is what lets a task's first-ever observation (no
+// upstream, no commits) correctly NOT count as "already synced" — otherwise
+// it would consume the first-observation fast path before any real push
+// happens, and the genuine no-upstream-to-synced transition on the next
+// observation would never fire (prevValue would already read 0 == "was
+// already synced", identical to "had nothing to push", not ">0" or
+// "unsynced").
 //
 // Pulled out as a pure function so the decision logic can be tested without
 // spawning the goroutine that calls the GitHub API.
-func shouldFirePushDetection(loaded bool, prevAhead int, status *lifecycle.GitStatusData) bool {
+func shouldFirePushDetection(loaded bool, prevValue int, status *lifecycle.GitStatusData) bool {
 	if status == nil {
 		return false
 	}
-	if status.RemoteBranch == "" || status.Ahead != 0 {
+	if status.RemoteBranch == "" || status.RemoteAhead != 0 {
 		return false
 	}
 	if !loaded {
 		return true
 	}
-	return prevAhead > 0
+	return prevValue != 0
 }
 
 // pushTrackerKey builds the per-(session, repo) key used by pushTracker.

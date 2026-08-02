@@ -85,6 +85,13 @@ type executorStore interface {
 	GetTaskPlan(ctx context.Context, taskID string) (*models.TaskPlan, error)
 }
 
+// officeTaskSessionCreator lets repositories make Office-session origin
+// selection part of the insert transaction. Test and legacy stores can omit
+// it; the executor keeps a per-task fallback lock for those implementations.
+type officeTaskSessionCreator interface {
+	CreateOfficeTaskSession(context.Context, *models.TaskSession) error
+}
+
 type primarySessionTaskStateStore interface {
 	UpdateTaskStateIfPrimarySessionState(
 		context.Context,
@@ -730,6 +737,10 @@ type Executor struct {
 	// succeeds and the second reuses its env.
 	taskEnvLocks sync.Map // map[string]*sync.Mutex
 
+	// Per-task locks serialize Office session creation so concurrent agents
+	// cannot both observe an empty task and claim the immutable origin marker.
+	officeSessionLocks sync.Map // map[string]*sync.Mutex
+
 	// Optional cloner for provider-backed repos without a local path.
 	repoCloner  RepoCloner
 	repoUpdater RepoUpdater
@@ -739,6 +750,11 @@ type Executor struct {
 // demand. Mirrors the sessionLocks pattern.
 func (e *Executor) taskEnvLock(taskID string) *sync.Mutex {
 	mu, _ := e.taskEnvLocks.LoadOrStore(taskID, &sync.Mutex{})
+	return mu.(*sync.Mutex)
+}
+
+func (e *Executor) officeSessionLock(taskID string) *sync.Mutex {
+	mu, _ := e.officeSessionLocks.LoadOrStore(taskID, &sync.Mutex{})
 	return mu.(*sync.Mutex)
 }
 

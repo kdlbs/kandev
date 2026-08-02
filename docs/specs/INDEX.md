@@ -40,10 +40,12 @@ Product-wide capabilities that are not tied to a single feature area.
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [i18n](platform/i18n.md) | building |
 | [plugins](plugins/spec.md) | draft |
+| [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
 | [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
+| [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 
 ## tasks/ — task & workflow model
 
@@ -75,10 +77,11 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
 | [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
-| [agent-generated-titles](tasks/agent-generated-titles.md) | shipped |
+| [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | shipped |
+| [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 
 ## agents/ — agent governance
 
@@ -178,7 +181,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | Spec | Status |
 |---|---|
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
-| [agent-stall-recovery](agent-stall-recovery/spec.md) | draft |
+| [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |

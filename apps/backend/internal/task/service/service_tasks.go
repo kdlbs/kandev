@@ -39,6 +39,11 @@ const (
 
 const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
 
+const (
+	titleNotPendingReason = "title_not_pending"
+	titleNotOwnerReason   = "title_not_owner"
+)
+
 // ErrSubtaskDepthExceeded is returned when a caller tries to create a
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
@@ -64,7 +69,7 @@ var ErrAutoTitlePromptRequired = errors.New("description is required when auto_t
 var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
 
 type pendingTaskTitleSetter interface {
-	SetTaskTitleIfPending(ctx context.Context, taskID, title string) (bool, error)
+	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
 }
 
 type taskStopTarget struct {
@@ -1214,6 +1219,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		task.Title = *req.Title
 		if task.Metadata != nil {
 			delete(task.Metadata, models.MetaKeyAgentTitlePending)
+			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
 		}
 	}
 	parentCleared := false
@@ -1281,54 +1287,62 @@ func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallba
 }
 
 // SetPendingAgentTitle replaces a prompt-first provisional title exactly once.
-// A missing pending marker is an idempotent no-op so a human rename or an
-// earlier agent call always wins a late request.
-func (s *Service) SetPendingAgentTitle(ctx context.Context, id, title string) (*models.Task, bool, error) {
+// Only the atomically claimed owner session may resolve it. A missing pending
+// marker is an idempotent no-op so a human rename or an earlier agent call
+// always wins a late request.
+func (s *Service) SetPendingAgentTitle(ctx context.Context, id, sessionID, title string) (*models.Task, bool, string, error) {
 	if err := s.authorizeTaskID(ctx, id); err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	task, err := s.tasks.GetTask(ctx, id)
 	if err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	if !models.IsAgentTitlePending(task.Metadata) {
-		return task, false, nil
+		return task, false, titleNotPendingReason, nil
+	}
+	if !models.IsAgentTitleOwner(task.Metadata, sessionID) {
+		return task, false, titleNotOwnerReason, nil
 	}
 	title = strings.TrimSpace(title)
 	if title == "" {
-		return nil, false, errors.New("title is required")
+		return nil, false, "", errors.New("title is required")
 	}
 	if err := validateTaskTitle(title); err != nil {
-		return nil, false, err
+		return nil, false, "", err
 	}
 	if setter, ok := s.tasks.(pendingTaskTitleSetter); ok {
-		accepted, err := setter.SetTaskTitleIfPending(ctx, id, title)
+		accepted, err := setter.SetTaskTitleIfPending(ctx, id, sessionID, title)
 		if err != nil {
 			s.logger.Error("failed to set pending agent title", zap.String("task_id", id), zap.Error(err))
-			return nil, false, err
+			return nil, false, "", err
 		}
 		if !accepted {
 			current, getErr := s.tasks.GetTask(ctx, id)
 			if getErr != nil {
-				return nil, false, getErr
+				return nil, false, "", getErr
 			}
-			return current, false, nil
+			if !models.IsAgentTitlePending(current.Metadata) {
+				return current, false, titleNotPendingReason, nil
+			}
+			return current, false, titleNotOwnerReason, nil
 		}
 		// Reload the winning row so the response/event includes any ordinary
 		// task update that raced the conditional title write.
 		task = s.reloadTaskAfterMutation(ctx, id, task, "set pending agent title")
 		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
-		return task, true, nil
+		return task, true, "", nil
 	}
 	task.Title = title
 	delete(task.Metadata, models.MetaKeyAgentTitlePending)
+	delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
 	task.UpdatedAt = time.Now().UTC()
 	if err := s.tasks.UpdateTask(ctx, task); err != nil {
 		s.logger.Error("failed to set pending agent title", zap.String("task_id", id), zap.Error(err))
-		return nil, false, err
+		return nil, false, "", err
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
-	return task, true, nil
+	return task, true, "", nil
 }
 
 // parentChainWalkLimit bounds the ancestor walk in resolveParentID so a

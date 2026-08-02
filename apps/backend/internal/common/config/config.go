@@ -404,20 +404,8 @@ type FeaturesConfig struct {
 
 // LoggingConfig holds logging configuration.
 type LoggingConfig struct {
-	Level      string `mapstructure:"level"`
-	Format     string `mapstructure:"format"`
-	OutputPath string `mapstructure:"outputPath"`
-
-	// Rotation options - apply only when OutputPath is a file path
-	// (ignored for stdout/stderr). Backed by lumberjack.
-	//
-	// Note: lumberjack creates the active log file with mode 0600 (owner read/write
-	// only); the previous os.OpenFile path used 0644. External log shippers or
-	// sidecars running as a different user will need to run as the same user.
-	MaxSizeMB  int  `mapstructure:"maxSizeMb"`  // rotate when file exceeds this size; 0 = lumberjack default (100MB)
-	MaxBackups int  `mapstructure:"maxBackups"` // max number of rotated files to retain; 0 = unlimited
-	MaxAgeDays int  `mapstructure:"maxAgeDays"` // max age in days of rotated files; 0 = unlimited
-	Compress   bool `mapstructure:"compress"`   // gzip rotated files
+	Level  string `mapstructure:"level"`
+	Format string `mapstructure:"format"`
 }
 
 // RepositoryDiscoveryConfig holds configuration for local repository scanning.
@@ -577,11 +565,6 @@ func setDefaults(v *viper.Viper) {
 	// Logging defaults
 	v.SetDefault("logging.level", "info")
 	v.SetDefault("logging.format", detectDefaultLogFormat())
-	v.SetDefault("logging.outputPath", "stdout")
-	v.SetDefault("logging.maxSizeMb", 100)
-	v.SetDefault("logging.maxBackups", 5)
-	v.SetDefault("logging.maxAgeDays", 30)
-	v.SetDefault("logging.compress", true)
 
 	// Repository discovery defaults
 	v.SetDefault("repositoryDiscovery.roots", []string{})

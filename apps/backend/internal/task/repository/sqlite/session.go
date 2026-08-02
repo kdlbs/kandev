@@ -213,6 +213,49 @@ const taskSessionFromClause = `FROM task_sessions ts
 
 // CreateTaskSession creates a new agent session
 func (r *Repository) CreateTaskSession(ctx context.Context, session *models.TaskSession) error {
+	return r.createTaskSession(ctx, r.db, session)
+}
+
+// CreateOfficeTaskSession creates an Office session and atomically marks it as
+// the task's initial session when no earlier session exists. The task row lock
+// serializes callers across PostgreSQL connections; SQLite's single writer
+// connection serializes the transaction.
+func (r *Repository) CreateOfficeTaskSession(ctx context.Context, session *models.TaskSession) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if dialect.IsPostgres(r.db.DriverName()) {
+		var lockedTaskID string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(
+			`SELECT id FROM tasks WHERE id = ? FOR UPDATE`,
+		), session.TaskID).Scan(&lockedTaskID); err != nil {
+			return fmt.Errorf("lock task for office session: %w", err)
+		}
+	}
+
+	var sessionCount int
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(
+		`SELECT COUNT(*) FROM task_sessions WHERE task_id = ?`,
+	), session.TaskID).Scan(&sessionCount); err != nil {
+		return fmt.Errorf("check task sessions before office session: %w", err)
+	}
+	if sessionCount == 0 {
+		if session.Metadata == nil {
+			session.Metadata = make(map[string]interface{})
+		}
+		session.Metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
+
+	if err := r.createTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExecutor, session *models.TaskSession) error {
 	if session.ID == "" {
 		session.ID = uuid.New().String()
 	}
@@ -259,7 +302,7 @@ func (r *Repository) CreateTaskSession(ctx context.Context, session *models.Task
 	if session.AgentProfileID != "" {
 		agentProfileID = session.AgentProfileID
 	}
-	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
+	_, err = exec.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_sessions (
 			id, task_id, agent_profile_id, execution_profile_id, executor_id, executor_profile_id, environment_id,
 			repository_id, base_branch, base_commit_sha, workspace_path,

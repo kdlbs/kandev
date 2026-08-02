@@ -89,7 +89,10 @@ func (a *OpenCodeACP) BuildCommand(opts CommandOptions) Command {
 }
 
 func (a *OpenCodeACP) ManagedNPMRuntime() ManagedNPMRuntimeSpec {
-	return ManagedNPMRuntimeSpec{Package: opencodeACPPackage, ACPArgs: []string{"acp"}}
+	return ManagedNPMRuntimeSpec{
+		Package: opencodeACPPackage,
+		ACPArgs: []string{"acp", "--print-logs", "--log-level", "ERROR"},
+	}
 }
 
 func (a *OpenCodeACP) Runtime() *RuntimeConfig {

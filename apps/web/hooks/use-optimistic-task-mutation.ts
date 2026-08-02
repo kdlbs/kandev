@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { Task } from "@/app/office/tasks/[id]/types";
 import type { OfficeTask } from "@/lib/state/slices/office/types";

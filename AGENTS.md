@@ -183,7 +183,9 @@ Jira and Linear are the model (per-workspace credentials, 90s auth-health poller
 
 ### Kandev plugins
 
-Production Kandev plugins live in dedicated repositories, not in this monorepo. Official plugins use public `kdlbs/kandev-plugin-<slug>` repositories and start from [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template). Use `/create-kandev-plugin` for plugin creation, modification, bug fixes, packaging, release, and marketplace work. When a Kandev Worktree task needs the plugin repository, attach it with `add_branch_to_task_kandev` instead of cloning inside this worktree. Keep host API, SDK, loader, registry, and the in-tree test fixture in this repository.
+Production Kandev plugins live in dedicated repositories, not in this monorepo. Start at the [canonical plugin authoring guide](docs/public/plugins-authoring.md), then use `/create-kandev-plugin` for plugin creation, modification, bug fixes, packaging, release, and marketplace work. Official plugins use public `kdlbs/kandev-plugin-<slug>` repositories and start from [`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template). The recommended workflow is: choose recipe → edit manifest → implement → validate → package → smoke test. When the user explicitly requests a persistent Kandev task, attach the plugin repository through that task's workflow; otherwise do not use Kandev task/session APIs as repository-work mechanisms.
+
+Contract authority is intentionally split by implementation boundary: frontend authors use [`docs/plans/plugins/PLUGIN-API.md`](docs/plans/plugins/PLUGIN-API.md) plus [`apps/web/lib/plugins/types.ts`](apps/web/lib/plugins/types.ts), with concrete Host UI exports in `apps/web/lib/plugins/host-api.ts`; backend authors use `apps/backend/pkg/pluginsdk`, the wire contract in `apps/backend/proto/kandev/plugin/v1/plugin.proto`, and manifest/package rules in `apps/backend/internal/plugins/manifest` and `apps/backend/internal/plugins/pkgtar`. The in-tree fixture under `apps/backend/cmd/plugin-fixture` is test support, not a production plugin starter.
 
 ### Runtime profiles (prod / dev / e2e)
 

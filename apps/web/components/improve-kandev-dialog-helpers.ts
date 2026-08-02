@@ -1,22 +1,16 @@
 "use client";
 
-import { snapshotLogs } from "@/lib/logger/buffer";
 import {
-  uploadFrontendLog,
+  leaseDiagnosticBundle,
   type ImproveKandevBootstrapResponse,
 } from "@/lib/api/domains/improve-kandev-api";
+import { createDiagnosticBundle, fetchDiagnosticBundle } from "@/lib/api/domains/system-api";
+import type { DiagnosticBundleJob } from "@/lib/types/system";
 
 /**
- * Append the bundle file paths to the user-supplied description as a
- * machine-readable footer the agent prompt instructs to read.
- *
- * Behavior:
- * - When `bootstrap` is null, returns the description unchanged.
- * - When `captureLogs` is false, returns the description unchanged.
- * - When `captureLogs` is true, attempts to upload the current in-memory
- *   frontend log snapshot to the bundle directory and only includes the
- *   `frontend_log` entry when the upload succeeded — referencing a file
- *   that was never written would mislead the agent.
+ * Creates the same owner-scoped frontend+backend ZIP used by System Logs,
+ * leases it into the Improve Kandev task context, and appends that single path
+ * to the task description. Diagnostics stay best-effort.
  */
 export async function buildImproveKandevDescription(
   description: string,
@@ -26,24 +20,32 @@ export async function buildImproveKandevDescription(
   if (!bootstrap) return description;
   if (!captureLogs) return description;
 
-  let frontendLogUploaded = false;
   try {
-    await uploadFrontendLog(bootstrap.bundle_dir, snapshotLogs());
-    frontendLogUploaded = true;
+    const created = await createDiagnosticBundle(["backend", "frontend"]);
+    const completed = await waitForDiagnosticBundle(created);
+    const lease = await leaseDiagnosticBundle(bootstrap.bundle_dir, completed.id);
+    return [
+      description,
+      "",
+      "---",
+      "Diagnostic bundle for the agent (frontend + backend logs):",
+      `- ${lease.path}`,
+    ].join("\n");
   } catch {
-    // Frontend log upload is best-effort — keep submitting the task without it.
+    return description;
   }
+}
 
-  const lines = [
-    description,
-    "",
-    "---",
-    "Context bundle for the agent:",
-    `- ${bootstrap.bundle_files.metadata}`,
-    `- ${bootstrap.bundle_files.backend_log}`,
-  ];
-  if (frontendLogUploaded) {
-    lines.push(`- ${bootstrap.bundle_files.frontend_log}`);
+async function waitForDiagnosticBundle(initial: DiagnosticBundleJob): Promise<DiagnosticBundleJob> {
+  let job = initial;
+  const deadline = Date.now() + 5 * 60_000;
+  while (job.status === "collecting" || job.status === "building") {
+    if (Date.now() >= deadline) throw new Error("diagnostic bundle timed out");
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    job = await fetchDiagnosticBundle(job.id);
   }
-  return lines.join("\n");
+  if (job.status !== "ready" && job.status !== "partial") {
+    throw new Error("diagnostic bundle failed");
+  }
+  return job;
 }

@@ -26,6 +26,7 @@ import {
 } from "./session-dialog-shared";
 import { ContextZone } from "./chat/context-items/context-zone";
 import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTranslation } from "react-i18next";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
   if (!show || !branch) return null;
@@ -419,6 +420,7 @@ export function SubtaskFormBody({
   onClose,
   onSubmit,
 }: SubtaskFormBodyProps) {
+  const { t } = useTranslation();
   const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
@@ -429,13 +431,13 @@ export function SubtaskFormBody({
             htmlFor="subtask-title-input"
             className="text-xs font-medium text-muted-foreground"
           >
-            Title
+            {t("common:title")}
           </label>
           <Input
             id="subtask-title-input"
             value={title}
             onChange={(e) => setTitle(clampTaskTitleInput(e.target.value))}
-            placeholder="Subtask title"
+            placeholder={t("common:subtaskTitle")}
             className="min-w-0 max-w-full text-sm"
             data-testid="subtask-title-input"
             disabled={isCreating}

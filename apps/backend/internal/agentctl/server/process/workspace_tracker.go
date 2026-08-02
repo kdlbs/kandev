@@ -68,10 +68,11 @@ type WorkspaceTracker struct {
 	mu            sync.RWMutex
 
 	// Cached git state for detecting manual operations
-	cachedHeadSHA    string
-	cachedBranchName string // Current branch name for detecting branch switches
-	cachedIndexHash  string // Hash of git status porcelain output to detect staging changes
-	gitStateMu       sync.RWMutex
+	cachedHeadSHA     string
+	cachedBranchName  string // Current branch name for detecting branch switches
+	cachedIndexHash   string // Hash of git status porcelain output to detect staging changes
+	cachedUpstreamSHA string // SHA of @{upstream}, "" when no upstream — detects push/fetch
+	gitStateMu        sync.RWMutex
 
 	// Unified workspace stream subscribers
 	workspaceStreamSubscribers map[types.WorkspaceStreamSubscriber]struct{}

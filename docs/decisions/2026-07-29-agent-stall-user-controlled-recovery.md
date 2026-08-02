@@ -30,6 +30,10 @@ Stall detection is advisory and recovery remains operator controlled:
   process. `RUNNING` sessions retain the conservative prompt-admission behavior
   defined by
   [ADR-2026-07-28-coarse-running-busy-signal](2026-07-28-coarse-running-busy-signal.md).
+- This advisory rule applies to inactivity without terminal evidence. A
+  sanitized, session-correlated provider diagnostic follows
+  [ADR-2026-08-02-agent-terminal-diagnostics-over-stderr](2026-08-02-agent-terminal-diagnostics-over-stderr.md)
+  and may fail the prompt immediately.
 - The watchdog checks once per 60 seconds and logs only the first detected stall
   for a prompt generation; it does not repeat a notice every check.
 

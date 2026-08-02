@@ -8,7 +8,6 @@ import type {
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
-  LogFileInfo,
   UpdatesResponse,
   SystemJob,
   StorageOverviewResponse,
@@ -66,13 +65,6 @@ const SNAPSHOT: SnapshotInfo = {
   size_bytes: 1024,
   mtime: "2026-05-17T00:00:00Z",
   kind: "manual",
-};
-
-const LOG_FILE: LogFileInfo = {
-  name: "kandev.log",
-  size: 2048,
-  mtime: TS,
-  current: true,
 };
 
 const UPDATES: UpdatesResponse = {
@@ -134,10 +126,17 @@ describe("system storage slice", () => {
       analyzed_at: "2026-07-23T12:00:00Z",
       last_run: null,
     } satisfies StorageOverviewResponse;
+    const policy = { settings: overview.settings, capabilities: overview.capabilities };
+    store.getState().setSystemStoragePolicy(policy);
     store.getState().setSystemStorageOverview(overview);
     store.getState().setSystemStorageRuns([]);
     store.getState().setSystemStorageQuarantine([]);
-    expect(store.getState().system.storage).toEqual({ overview, runs: [], quarantine: [] });
+    expect(store.getState().system.storage).toEqual({
+      policy,
+      overview,
+      runs: [],
+      quarantine: [],
+    });
   });
 });
 
@@ -150,7 +149,6 @@ describe("system slice", () => {
     expect(s.system.diskUsage).toBeNull();
     expect(s.system.database).toBeNull();
     expect(s.system.backups).toEqual({ items: [], loaded: false });
-    expect(s.system.logs).toEqual({ files: [], tail: [], tailLoaded: false });
     expect(s.system.updates).toBeNull();
     expect(s.system.jobs).toEqual({});
   });
@@ -185,23 +183,6 @@ describe("system slice", () => {
     // Empty list also flips loaded to true.
     store.getState().setSystemBackups([]);
     expect(store.getState().system.backups).toEqual({ items: [], loaded: true });
-  });
-
-  it("setSystemLogs replaces only the files (tail stays untouched)", () => {
-    const store = makeStore();
-    store.getState().setSystemLogTail(["line 1", "line 2"]);
-    store.getState().setSystemLogs([LOG_FILE]);
-    expect(store.getState().system.logs.files).toEqual([LOG_FILE]);
-    expect(store.getState().system.logs.tail).toEqual(["line 1", "line 2"]);
-    expect(store.getState().system.logs.tailLoaded).toBe(true);
-  });
-
-  it("setSystemLogTail flips tailLoaded to true", () => {
-    const store = makeStore();
-    expect(store.getState().system.logs.tailLoaded).toBe(false);
-    store.getState().setSystemLogTail(["hello"]);
-    expect(store.getState().system.logs.tail).toEqual(["hello"]);
-    expect(store.getState().system.logs.tailLoaded).toBe(true);
   });
 
   it("setSystemUpdates stores the response", () => {

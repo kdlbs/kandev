@@ -10,7 +10,7 @@ owner: tbd
 
 Today, settings-style operational concerns (health, disk usage, current version, OSS attribution, log access, database maintenance) have no home in kandev's UI. The existing settings sidebar is product-configuration only (executors, agents, integrations); the only system-shaped entry — Changelog — sits awkwardly inside it. When something goes wrong, users have no path inside the app to see "where is my database, how big is it, what version am I on, is there an update, where are the logs." This forces them into the filesystem and into GitHub, and it makes recoverable problems (bloated SQLite, corrupt state) look unrecoverable.
 
-Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and lumberjack log files).
+Radarr and Sonarr solve this with a dedicated **System** area: a group of read-only diagnostic pages plus a small number of gated maintenance actions. This spec brings the same shape to kandev, scoped to the kandev-specific surface (database diagnostics, SQLite backups/maintenance, worktrees, GitHub releases, and daily backend log files).
 
 ## What (v1)
 
@@ -35,9 +35,21 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
    - Per-row actions: **Download**, **Restore** (gated like Factory Reset), **Delete** (confirm-only).
    - **Create snapshot** button at the top of the list; uses the existing `VACUUM INTO` path.
 5. **Logs** — `/settings/system/logs`
-   - Static log viewer: last 1000 lines of the current lumberjack log file, with a **Refresh** button. No live tail in v1.
-   - List of rotated log files with name/size/mtime and a per-row **Download** button.
-   - **Download current** button at the top.
+   - One **Customize bundle** action that opens source selection with backend
+     and frontend evidence selected by default; the runtime index and
+     debug-only ACP evidence remain explicit opt-ins. Bundle collection keeps
+     collecting/preparing/partial/busy/error feedback on the page.
+   - Visible disclosure that the ZIP contains up to three days of install-wide
+     backend logs and up to four connected browser profiles subject to fixed
+     byte limits, including URLs, console arguments, stacks, and runtime
+     metadata.
+   - The page does not render a tail, file table, copy/refresh controls, or individual-file downloads.
+   - If a source is unavailable, truncated by the fixed diagnostic budgets, or
+     reports queue loss, the page still downloads a partial ZIP and names the
+     omission without blocking normal application work.
+   - The active files, browser capture, ZIP lifecycle, sink thresholds, and
+     frontend-error ingestion contracts are defined by
+     [Diagnostic logging](../platform/diagnostic-logging.md).
 6. **Updates** — `/settings/system/updates`
    - Shows running version, latest available version, and a "new version available" badge if newer.
    - **Check now** button — forces a re-poll (rate-limited 30s per process).
@@ -81,9 +93,12 @@ POST   /api/v1/system/backups                     - create snapshot; 202 + jobId
 GET    /api/v1/system/backups/:name/download      - stream snapshot file
 POST   /api/v1/system/backups/:name/restore       - restore; body { confirm: "RESTORE" }
 DELETE /api/v1/system/backups/:name               - delete snapshot
-GET    /api/v1/system/logs                        - { files: [{ name, size, mtime }] }
-GET    /api/v1/system/logs/tail?n=1000            - last N lines of current log
-GET    /api/v1/system/logs/:name/download         - stream log file
+POST   /api/v1/system/logs/bundles                - create source-selectable diagnostic ZIP job
+GET    /api/v1/system/logs/bundles/:id            - bundle collection/build status
+POST   /api/v1/system/logs/bundles/:id/frontend   - bounded frontend capture chunk
+GET    /api/v1/system/logs/bundles/:id/download   - stream ready/partial ZIP
+POST   /api/v1/system/logs/frontend-errors        - bounded/rate-limited error-toast report
+POST   /api/v1/system/improve-kandev/bundle/lease - owner-verified 24h task-context copy
 GET    /api/v1/system/updates                     - { current, latest, latestCheckedAt, releaseUrl, install, applySupported }
 POST   /api/v1/system/updates/check               - force GitHub re-poll; rate-limited 30s
 POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE" }
@@ -148,7 +163,7 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the user clicks **Factory Reset**, types `RESET`, and confirms, **WHEN** the backend executes, **THEN** a fresh snapshot is created first, all tables are dropped and migrations re-run, the backend restarts, and the frontend redirects to the empty onboarding state once it reconnects.
 - **GIVEN** the backend cannot reach GitHub, **WHEN** the poller fires, **THEN** the failure is logged but the previous `latest_version` and `latest_version_checked_at` remain in `kandev_meta`; the Updates page surfaces the stale value with a "Last checked <time>" subtitle.
 - **GIVEN** the user clicks **Check now** twice within 30 seconds, **WHEN** the second click fires, **THEN** the endpoint returns `429 Too Many Requests` and the UI shows "Already checked, try again in <N>s".
-- **GIVEN** lumberjack has rotated the current log into `kandev.log.1`, **WHEN** the user opens `/settings/system/logs`, **THEN** the viewer shows the tail of the current `kandev.log` and the rotated files appear in the list with download buttons.
+- **GIVEN** retained backend logs and a connected browser with local console history, **WHEN** the user downloads diagnostics from `/settings/system/logs`, **THEN** one ZIP contains separate backend/frontend directories and a manifest describing both captures.
 - **GIVEN** the user opens `/settings/system/licenses` while offline, **WHEN** the page renders, **THEN** every dependency's license text is available locally (no network calls).
 
 ## Data model
@@ -186,7 +201,9 @@ All System endpoints require the same "logged-in install user" check as the exis
 - **Non-SQLite maintenance call** — `vacuum`, `optimize`, and `reset` jobs fail with `not supported for <driver> driver` before running SQLite-only SQL; factory reset also rejects before stopping active executions.
 - **Factory reset failure mid-run** — the pre-reset snapshot remains in `<data-dir>/backups/`; the user can restore it from the Backups page on next boot. Recovery is documented inline in the failure UI.
 - **Restore failure** — original DB file is left untouched; restore writes to a temp file and atomic-renames only on success.
-- **Log file missing / unreadable** — viewer renders an empty state with the file path so the user can investigate manually.
+- **Log file missing / unreadable** — bundle creation continues with available
+  sources, marks the result partial, and records the missing/unreadable backend
+  source in `manifest.json`.
 
 ## Persistence guarantees
 
@@ -203,7 +220,8 @@ All System endpoints require the same "logged-in install user" check as the exis
 - Live log tail (WS streaming of new lines as they're written).
 - Channel-aware upgrade hints (npm vs homebrew vs binary install path).
 - Admin/role gating of destructive actions; everyone who can sign in can VACUUM/Reset.
-- Importing or analyzing older log files beyond filename listing + download.
+- Importing or analyzing logs outside the diagnostic bundle's retained
+  three-day and byte/profile limits.
 - Inline editing of `kandev_meta` or other system tables.
 - A separate top-level "System" nav entry alongside "Settings" (chose nested-in-Settings instead).
 - Tasks/Cron page (Radarr-equivalent) — kandev's office routines surface already covers this.

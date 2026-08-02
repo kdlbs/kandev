@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import Link from "@/components/routing/app-link";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
+import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 
 type PluginRowProps = {
@@ -42,7 +43,8 @@ export function PluginRow({
   onUpdate,
   onSetAutoUpdate,
 }: PluginRowProps) {
-  const canEnable = plugin.status === "disabled" || plugin.status === "registered";
+  const canEnable =
+    plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
 
   return (
@@ -95,6 +97,7 @@ export function PluginRow({
       {plugin.description && (
         <div className="text-xs text-muted-foreground">{plugin.description}</div>
       )}
+      <PluginErrorDiagnostic plugin={plugin} />
       {plugin.categories.length > 0 && (
         <div className="flex flex-wrap gap-1">
           {plugin.categories.map((category) => (
@@ -205,7 +208,7 @@ function PluginRowActions({
           variant="outline"
           size="sm"
           data-testid={`plugin-update-${plugin.id}`}
-          className="cursor-pointer gap-1"
+          className="cursor-pointer gap-1 min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => onUpdate(update)}
         >
@@ -217,7 +220,7 @@ function PluginRowActions({
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => onEnable(plugin)}
         >
@@ -228,7 +231,7 @@ function PluginRowActions({
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => onDisable(plugin)}
         >
@@ -238,7 +241,7 @@ function PluginRowActions({
       <Button
         variant="ghost"
         size="sm"
-        className="cursor-pointer text-destructive hover:text-destructive"
+        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
         disabled={busy}
         onClick={() => onUninstall(plugin)}
       >

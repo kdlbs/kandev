@@ -472,15 +472,24 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
+	configMode := false
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		configMode = true
+	}
+	titleOwner := false
+	if !configMode {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
 		planMode, task.IsEphemeral, session.IsPassthrough,
 	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
-	configMode := false
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		configMode = true
+	if configMode {
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
@@ -494,7 +503,7 @@ func (s *Service) StartCreatedSession(
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.wrapCreatedSessionPrompt(
 			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
-			isOfficeTask, configMode, references, promptReferenceContext,
+			isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
 		)
 	}
 
@@ -536,14 +545,14 @@ func (s *Service) wrapCreatedSessionPrompt(
 	prompt, taskID, sessionID string,
 	session *models.TaskSession,
 	dbTask *models.Task,
-	isOfficeTask, configMode bool,
+	isOfficeTask, configMode, titleOwner bool,
 	references []v1.EntityReference,
 	promptReferenceContext string,
 ) string {
 	referenceContext := EntityReferenceContext(references)
 	switch {
 	case session.IsPassthrough:
-		if !configMode && models.IsAgentTitlePending(dbTask.Metadata) {
+		if !configMode && titleOwner {
 			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
 		}
 		return prompt
@@ -555,7 +564,7 @@ func (s *Service) wrapCreatedSessionPrompt(
 		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
 			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
 			IncludeCoordinatorTaskControls: !configMode,
-			IncludeTaskTitleTool:           !configMode && models.IsAgentTitlePending(dbTask.Metadata),
+			IncludeTaskTitleTool:           !configMode && titleOwner,
 		}, referenceContext, promptReferenceContext)
 	}
 }
@@ -788,6 +797,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
+	workflowSessionConfigStepID := workflowStepID
+	// Manual starts often omit workflow_step_id because the task is already
+	// bound to its current step. Resolve that canonical step before profile
+	// selection and launch-layer session configuration so a start-step rule is
+	// applied before the first prompt as well.
+	if workflowSessionConfigStepID == "" {
+		if dbTask, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+			s.logger.Warn("failed to fetch task for workflow step fallback",
+				zap.String("task_id", taskID), zap.Error(taskErr))
+		} else if dbTask != nil {
+			workflowSessionConfigStepID = dbTask.WorkflowStepID
+		}
+	}
 
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
 	// every run. Their lifecycle status (todo / in_review / done /
@@ -861,6 +883,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, err
 	}
+	// Seed a matching conditional session configuration before lifecycle
+	// startup. The ACP manager applies this durable runtime layer after the
+	// selected profile and before the first prompt, preserving the original
+	// session tab.
+	s.applyWorkflowSessionConfigBeforeLaunchForStep(ctx, taskID, sessionID, workflowSessionConfigStepID)
 	// Surface the newly created session before LaunchPreparedSession performs
 	// potentially slow environment setup (for example, a Docker health check).
 	// The frontend adopts this CREATED session and can render
@@ -904,6 +931,13 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
+	titleOwner := false
+	if !configMode && !isOfficeTask {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, task.ID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
+	}
 
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
 	// tool list). Done at the orchestrator layer so recordInitialMessage persists
@@ -930,7 +964,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			isPassthrough:        skipKandevMCPWrap,
 			configMode:           configMode,
 			referenceContext:     promptReferenceContext,
-			includeTaskTitleTool: !configMode && models.IsAgentTitlePending(task.Metadata),
+			includeTaskTitleTool: !configMode && titleOwner,
 			spawnOrigin:          opts.SpawnOrigin,
 		})
 	}
@@ -969,6 +1003,33 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
+}
+
+func (s *Service) applyWorkflowSessionConfigBeforeLaunchForStep(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+) {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return
+	}
+	workflowStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		s.logger.Warn("failed to load workflow step for session configuration",
+			zap.String("task_id", taskID), zap.String("step_id", workflowStepID), zap.Error(err))
+		return
+	}
+	if workflowStep == nil {
+		return
+	}
+	preparedSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session for session configuration",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	s.applyWorkflowSessionConfigBeforeLaunch(ctx, taskID, preparedSession, workflowStep)
 }
 
 // launchPromptContext carries what the first turn of a launch needs in order to
@@ -1692,6 +1753,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return err
 	}
 
+	// Apply conditional session settings after a manual resume and before the
+	// step prompt. The helper reloads the session so a resume-created runtime
+	// state cannot be overwritten by the stale request snapshot.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
 	if err != nil {
@@ -1958,6 +2024,9 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task for prepared session: %w", err)
+	}
+	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
+		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
 	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,
@@ -2442,6 +2511,9 @@ func coordinatorStopSessionID(session *models.TaskSession) string {
 }
 
 func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, sessionID string) (bool, error) {
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
+
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 
@@ -3915,20 +3987,50 @@ func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, fun
 	return &guard.mu, release
 }
 
-// isCancelInFlight reports whether sessionID's cancelInFlight guard is
-// currently held by someone else, without itself claiming it — a
-// TryLock-then-immediately-Unlock peek rather than a real acquisition. The
-// guard entry this creates to perform the peek is released (and pruned if
-// nothing else references it) before this returns, so a passive readiness
-// probe never leaves permanent state behind.
+// beginCancelInFlight records that a cancellation operation for sessionID is
+// active (or waiting to claim the shared per-session guard). This is separate
+// from cancelInFlight itself: stream handlers also hold that mutex while
+// persisting output, but must not make boot-ready handling mistake their work
+// for a cancellation. The returned release function is idempotent so callers
+// can safely use it with both explicit and deferred cleanup.
+func (s *Service) beginCancelInFlight(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+
+	s.cancelOperationsMu.Lock()
+	if s.cancelOperations == nil {
+		s.cancelOperations = make(map[string]int)
+	}
+	s.cancelOperations[sessionID]++
+	s.cancelOperationsMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.cancelOperationsMu.Lock()
+			count := s.cancelOperations[sessionID]
+			if count <= 1 {
+				delete(s.cancelOperations, sessionID)
+			} else {
+				s.cancelOperations[sessionID] = count - 1
+			}
+			s.cancelOperationsMu.Unlock()
+		})
+	}
+}
+
+// isCancelInFlight reports whether an actual cancellation operation for
+// sessionID is active or waiting on the shared guard. It deliberately does
+// not inspect the guard mutex itself because stream/lifecycle handlers also
+// use that mutex for non-cancelling side effects.
 func (s *Service) isCancelInFlight(sessionID string) bool {
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	if lock.TryLock() {
-		lock.Unlock()
+	if sessionID == "" {
 		return false
 	}
-	return true
+	s.cancelOperationsMu.Lock()
+	defer s.cancelOperationsMu.Unlock()
+	return s.cancelOperations[sessionID] > 0
 }
 
 // reconcileCancelledTurn durably settles the cancelled session and its turn.
@@ -4059,6 +4161,8 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
 
 	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
 	// disable, so impatient users click it multiple times while the agent is

@@ -1123,6 +1123,9 @@ func registerSecondaryRoutes(
 
 	if p.repoCloner != nil {
 		ikHandler := improvekandev.NewHandler(p.taskSvc, p.repoCloner, p.version, p.log)
+		if p.systemSvc != nil {
+			ikHandler.SetLogBundles(p.systemSvc.LogBundles)
+		}
 		improvekandev.RegisterRoutes(p.router, ikHandler)
 		improvekandev.CleanupStaleBundles(func(path string, err error) {
 			p.log.Warn("Improve Kandev: failed to clean stale bundle", zap.String("path", path), zap.Error(err))
@@ -1429,6 +1432,9 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
+	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
+		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
+	}
 
 	// Enrich list_tasks responses with associated GitHub PRs (link, title,
 	// number, state) when the github service is available.
@@ -1495,7 +1501,6 @@ func registerMCPAndDebugRoutes(
 	p.log.Debug("Registered Debug handlers (HTTP)")
 
 	if p.devMode {
-		debughandlers.RegisterExportRoute(p.router, p.version, Commit, p.log)
 		debughandlers.RegisterPprofRoutes(p.router, p.log)
 		debughandlers.RegisterMemoryRoute(p.router, p.log)
 	}

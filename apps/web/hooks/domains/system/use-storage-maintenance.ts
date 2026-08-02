@@ -17,6 +17,7 @@ import {
   analyzeStorage,
   deleteStorageQuarantine,
   fetchStorageOverview,
+  fetchStoragePolicy,
   fetchStorageQuarantine,
   fetchStorageRuns,
   purgeStorageQuarantine,
@@ -28,13 +29,13 @@ import type {
   StorageBusyResource,
   StorageBusyResponse,
   StorageMaintenanceSettings,
+  StoragePolicyResponse,
   StorageQuarantinePurgeScope,
   SystemJob,
 } from "@/lib/types/system";
 import { useSystemJob } from "./use-system-jobs";
 
 export type StoragePendingAction =
-  | "load"
   | "save"
   | "analyze"
   | "run"
@@ -89,7 +90,10 @@ export function settingsWithDockerAcknowledgement(
   };
 }
 
-type Reload = () => Promise<void>;
+export type StorageSection = "policy" | "overview" | "runs" | "quarantine";
+export type StorageSectionLoading = Record<StorageSection, boolean>;
+export type StorageSectionErrors = Record<StorageSection, string | null>;
+type Reload = (sections?: StorageSection[]) => Promise<void>;
 type SetStorageError = Dispatch<SetStateAction<string | null>>;
 const TERMINAL_REFRESH_RETRY_MS = 1000;
 const TERMINAL_REFRESH_MAX_RETRY_MS = 8000;
@@ -97,23 +101,20 @@ const MAX_TERMINAL_REFRESH_ATTEMPTS = 6;
 
 function useStorageActionRunner() {
   const { toast } = useToast();
-  const [loading, setLoading] = useState(true);
   const [pendingActions, setPendingActions] = useState<
-    Array<{ id: number; action: Exclude<StoragePendingAction, "load" | null> }>
+    Array<{ id: number; action: Exclude<StoragePendingAction, null> }>
   >([]);
   const nextPendingActionId = useRef(0);
   const [error, setError] = useState<string | null>(null);
-  const finishLoading = useCallback(() => setLoading(false), []);
   const pendingAction = useMemo<StoragePendingAction>(() => {
-    if (loading) return "load";
     const policyAction = pendingActions.findLast(
       ({ action }) => action === "save" || action === "adopt",
     );
     return policyAction?.action ?? pendingActions[0]?.action ?? null;
-  }, [loading, pendingActions]);
+  }, [pendingActions]);
   const perform = useCallback(
     async (
-      action: Exclude<StoragePendingAction, "load" | null>,
+      action: Exclude<StoragePendingAction, null>,
       work: () => Promise<void>,
       rethrow = false,
     ) => {
@@ -133,7 +134,7 @@ function useStorageActionRunner() {
     },
     [toast],
   );
-  return { pendingAction, error, setError, finishLoading, perform };
+  return { pendingAction, error, setError, perform };
 }
 
 function useStoragePolicyActions(
@@ -141,6 +142,7 @@ function useStoragePolicyActions(
   reload: Reload,
   toast: ReturnType<typeof useToast>["toast"],
   clearBusy: () => void,
+  setPolicy: (policy: StoragePolicyResponse) => void,
 ) {
   const save = useCallback(
     async (settings: StorageMaintenanceSettings, confirmation?: "DEDICATED") => {
@@ -149,7 +151,7 @@ function useStoragePolicyActions(
         "save",
         async () => {
           await saveStorageSettings(settings, confirmation);
-          await reload();
+          await reload(["policy"]);
           toast({ title: "Storage policy saved", variant: "success" });
         },
         true,
@@ -162,12 +164,12 @@ function useStoragePolicyActions(
     async (path: string) => {
       clearBusy();
       return perform("adopt", async () => {
-        await adoptStorageGoCache(path);
-        await reload();
+        const response = await adoptStorageGoCache(path);
+        setPolicy(response);
         toast({ title: "Go build cache adopted", variant: "success" });
       });
     },
-    [clearBusy, perform, reload, toast],
+    [clearBusy, perform, setPolicy, toast],
   );
 
   return { save, adopt };
@@ -217,9 +219,9 @@ function useStorageBulkDeleteAction(
   );
 }
 
-function useStorageActions(reload: Reload) {
+function useStorageActions(reload: Reload, setPolicy: (policy: StoragePolicyResponse) => void) {
   const { toast } = useToast();
-  const { pendingAction, error, setError, finishLoading, perform } = useStorageActionRunner();
+  const { pendingAction, error, setError, perform } = useStorageActionRunner();
   const [analysisJobId, setAnalysisJobId] = useState<string | null>(null);
   const [cleanupJobId, setCleanupJobId] = useState<string | null>(null);
   const [deleteJobId, setDeleteJobId] = useState<string | null>(null);
@@ -228,7 +230,7 @@ function useStorageActions(reload: Reload) {
   const cleanupJob = useSystemJob(cleanupJobId);
   const deleteJob = useSystemJob(deleteJobId);
   const clearBusy = useCallback(() => setBusy(null), []);
-  const { save, adopt } = useStoragePolicyActions(perform, reload, toast, clearBusy);
+  const { save, adopt } = useStoragePolicyActions(perform, reload, toast, clearBusy, setPolicy);
 
   const analyze = useCallback(async () => {
     clearBusy();
@@ -286,7 +288,7 @@ function useStorageActions(reload: Reload) {
       clearBusy();
       return perform("restore", async () => {
         await restoreStorageQuarantine(id);
-        await reload();
+        await reload(["quarantine"]);
         toast({ title: "Quarantined resource restored", variant: "success" });
       });
     },
@@ -298,7 +300,6 @@ function useStorageActions(reload: Reload) {
   return {
     pendingAction,
     error,
-    finishLoading,
     setError,
     save,
     analyze,
@@ -365,35 +366,94 @@ function useReloadCompletedJobs(
 
 export function useStorageMaintenance() {
   const storage = useAppStore((state) => state.system.storage);
+  const setPolicy = useAppStore((state) => state.setSystemStoragePolicy);
   const setOverview = useAppStore((state) => state.setSystemStorageOverview);
   const setRuns = useAppStore((state) => state.setSystemStorageRuns);
   const setQuarantine = useAppStore((state) => state.setSystemStorageQuarantine);
-  const reloadGeneration = useRef(0);
-  const reload = useCallback(async () => {
-    const generation = ++reloadGeneration.current;
-    const [overview, runs, quarantine] = await Promise.all([
-      fetchStorageOverview(),
-      fetchStorageRuns(20),
-      fetchStorageQuarantine(),
-    ]);
-    if (generation !== reloadGeneration.current) return;
-    setOverview(overview);
-    setRuns(runs);
-    setQuarantine(quarantine);
-  }, [setOverview, setQuarantine, setRuns]);
-  const { finishLoading, setError, ...actions } = useStorageActions(reload);
+  const [loading, setLoading] = useState<StorageSectionLoading>({
+    policy: true,
+    overview: true,
+    runs: true,
+    quarantine: true,
+  });
+  const [sectionErrors, setSectionErrors] = useState<StorageSectionErrors>({
+    policy: null,
+    overview: null,
+    runs: null,
+    quarantine: null,
+  });
+  const sectionGenerations = useRef<Record<StorageSection, number>>({
+    policy: 0,
+    overview: 0,
+    runs: 0,
+    quarantine: 0,
+  });
+  const loadSection = useCallback(
+    async <T>(section: StorageSection, request: () => Promise<T>, commit: (value: T) => void) => {
+      const generation = ++sectionGenerations.current[section];
+      setLoading((current) => ({ ...current, [section]: true }));
+      setSectionErrors((current) => ({ ...current, [section]: null }));
+      try {
+        const value = await request();
+        if (generation === sectionGenerations.current[section]) commit(value);
+      } catch (requestError) {
+        if (generation === sectionGenerations.current[section]) {
+          setSectionErrors((current) => ({
+            ...current,
+            [section]: messageFromError(requestError),
+          }));
+          throw requestError;
+        }
+      } finally {
+        if (generation === sectionGenerations.current[section]) {
+          setLoading((current) => ({ ...current, [section]: false }));
+        }
+      }
+    },
+    [],
+  );
+  const reload = useCallback(
+    async (sections: StorageSection[] = ["policy", "overview", "runs", "quarantine"]) => {
+      const jobs = sections.map((section) => {
+        switch (section) {
+          case "policy":
+            return loadSection("policy", fetchStoragePolicy, setPolicy);
+          case "overview":
+            return loadSection("overview", fetchStorageOverview, setOverview);
+          case "runs":
+            return loadSection("runs", () => fetchStorageRuns(20), setRuns);
+          case "quarantine":
+            return loadSection("quarantine", fetchStorageQuarantine, setQuarantine);
+        }
+      });
+      const results = await Promise.allSettled(jobs);
+      const failure = results.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      if (failure) throw failure.reason;
+    },
+    [loadSection, setOverview, setPolicy, setQuarantine, setRuns],
+  );
+  const commitAdoptedPolicy = useCallback(
+    (policy: StoragePolicyResponse) => {
+      sectionGenerations.current.policy += 1;
+      setPolicy(policy);
+      setSectionErrors((current) => ({ ...current, policy: null }));
+      setLoading((current) => ({ ...current, policy: false }));
+    },
+    [setPolicy],
+  );
+  const actions = useStorageActions(reload, commitAdoptedPolicy);
 
   useEffect(() => {
-    void reload()
-      .catch((requestError) => setError(messageFromError(requestError)))
-      .finally(finishLoading);
-  }, [finishLoading, reload, setError]);
+    void reload().catch(() => undefined);
+  }, [reload]);
   useReloadCompletedJobs(
     reload,
-    setError,
+    actions.setError,
     actions.analysisJob,
     actions.cleanupJob,
     actions.deleteJob,
   );
-  return { ...storage, ...actions, reload };
+  return { ...storage, ...actions, loading, sectionErrors, reload };
 }

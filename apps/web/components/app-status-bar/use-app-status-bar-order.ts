@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { createQueuedUserSettingsSync } from "@/lib/user-settings-sync";
 import type { AppStatusBarOrderState } from "@/lib/state/slices/settings/types";

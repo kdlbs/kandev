@@ -27,15 +27,16 @@ func TestHandleSetTaskTitle_UpdatesPendingTitleOnce(t *testing.T) {
 		Title:       "Build the useful feature now",
 		Description: "Build the useful feature now",
 		State:       v1.TaskStateInProgress,
-		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true},
+		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-title"},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}))
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 
 	resp, err := h.handleSetTaskTitle(ctx, makeWSMessage(t, ws.ActionMCPSetTaskTitle, map[string]interface{}{
-		"task_id": "task-title",
-		"title":   "Useful Feature",
+		"task_id":    "task-title",
+		"session_id": "session-title",
+		"title":      "Useful Feature",
 	}))
 	require.NoError(t, err)
 	assertTaskTitleResponse(t, resp, map[string]interface{}{
@@ -50,8 +51,9 @@ func TestHandleSetTaskTitle_UpdatesPendingTitleOnce(t *testing.T) {
 	assert.False(t, models.IsAgentTitlePending(updated.Metadata))
 
 	resp, err = h.handleSetTaskTitle(ctx, makeWSMessage(t, ws.ActionMCPSetTaskTitle, map[string]interface{}{
-		"task_id": "task-title",
-		"title":   "Late Agent Title",
+		"task_id":    "task-title",
+		"session_id": "session-title",
+		"title":      "Late Agent Title",
 	}))
 	require.NoError(t, err)
 	assertTaskTitleResponse(t, resp, map[string]interface{}{
@@ -82,6 +84,37 @@ func TestHandleSetTaskTitle_ValidatesInput(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
+func TestHandleSetTaskTitleRejectsNonOwner(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-title-owner", Name: "Titles", CreatedAt: now, UpdatedAt: now}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:          "task-title-owner",
+		WorkspaceID: "ws-title-owner",
+		Title:       "Temporary title",
+		Description: "Prompt",
+		State:       v1.TaskStateInProgress,
+		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-owner"},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}))
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	resp, err := h.handleSetTaskTitle(ctx, makeWSMessage(t, ws.ActionMCPSetTaskTitle, map[string]interface{}{
+		"task_id":    "task-title-owner",
+		"session_id": "session-other",
+		"title":      "Other title",
+	}))
+	require.NoError(t, err)
+	assertTaskTitleResponse(t, resp, map[string]interface{}{
+		"accepted": false,
+		"task_id":  "task-title-owner",
+		"title":    "Temporary title",
+		"reason":   "title_not_owner",
+	})
+}
+
 func TestHandleSetTaskTitle_RejectsOverlongTitle(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
@@ -95,15 +128,16 @@ func TestHandleSetTaskTitle_RejectsOverlongTitle(t *testing.T) {
 		Title:       "Temporary title",
 		Description: "Prompt",
 		State:       v1.TaskStateInProgress,
-		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true},
+		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-title-long"},
 		CreatedAt:   now,
 		UpdatedAt:   now,
 	}))
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
 
 	resp, err := h.handleSetTaskTitle(ctx, makeWSMessage(t, ws.ActionMCPSetTaskTitle, map[string]interface{}{
-		"task_id": "task-title-long",
-		"title":   strings.Repeat("x", 501),
+		"task_id":    "task-title-long",
+		"session_id": "session-title-long",
+		"title":      strings.Repeat("x", 501),
 	}))
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)

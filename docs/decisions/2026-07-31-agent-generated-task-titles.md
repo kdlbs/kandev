@@ -4,6 +4,11 @@
 **Date:** 2026-07-31
 **Area:** backend, frontend, protocol
 
+**Refined by:**
+[ADR-2026-08-02-single-owner-agent-task-titles](2026-08-02-single-owner-agent-task-titles.md)
+for durable first-session ownership and the default-on preference rollout. Where session eligibility or
+preference defaults differ, the later decision governs.
+
 ## Context
 
 Users can currently create Kanban tasks and subtasks only after choosing a title. Kandev needs an
@@ -23,8 +28,8 @@ preference at session launch time.
 The executor resolves a title-pending task-mode MCP variant only when the task has
 `agent_title_pending=true`; regular task mode does not register `set_task_title_kandev`. The tool is
 bound to the MCP server's current task and accepts only the replacement `title`; callers cannot select
-another task. Its tool and argument descriptions teach the agent to target three words and use no more
-than six when practical. This is generation guidance rather than a new persistence constraint.
+another task. Its tool and argument descriptions teach the agent to target about six words in sentence
+case. This is generation guidance rather than a new persistence constraint.
 First-turn prompt composition includes both the tool inventory entry and the instruction to call it
 before other work only while the marker is true, even if the provisional title appears usable. A
 successful call replaces the title, removes the marker, and publishes the normal `task.updated` event.

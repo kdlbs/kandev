@@ -271,12 +271,16 @@
       "sources": [
         "apps/backend/internal/system/settings/store.go",
         "apps/backend/internal/system/storage/handler.go",
+        "apps/backend/internal/system/logbundle/service.go",
+        "apps/backend/internal/mcp/handlers/diagnostic_bundle.go",
         "apps/web/components/settings/system/feature-toggles-settings.tsx",
         "apps/web/components/settings/system/storage/storage-maintenance-settings.tsx"
       ],
       "tests": [
         "apps/backend/internal/system/settings/store_test.go",
         "apps/backend/internal/system/storage/handler_test.go",
+        "apps/backend/internal/system/logbundle/service_test.go",
+        "apps/backend/internal/mcp/handlers/diagnostic_bundle_test.go",
         "apps/web/components/settings/system/feature-toggles-settings.test.tsx",
         "apps/web/components/settings/system/storage/storage-maintenance-settings.test.tsx"
       ],
@@ -290,7 +294,8 @@
         "/settings/system/status",
         "/settings/system/storage",
         "/settings/system/updates"
-      ]
+      ],
+      "mcpTools": ["get_diagnostic_bundle_kandev"]
     },
     {
       "id": "deployment-and-platforms",

@@ -581,7 +581,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ReviewAutoMarkOnScroll:          true,
 		ConfirmTaskArchive:              true,
 		UnreadDivider:                   false,
-		AgentGeneratedTaskTitles:        false,
+		AgentGeneratedTaskTitles:        true,
 		MCPTaskAgentProfileDefault:      models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:           false,
 		ShowScrollToLastPrompt:          true,

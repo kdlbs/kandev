@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Spinner } from "@kandev/ui/spinner";
 import { IconRestore, IconTrash } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
 import { JobProgressIndicator } from "../job-progress-indicator";
 import { PermanentDeleteDialog, QuarantinePurgeDialog } from "./storage-confirmation-dialogs";
 import { StorageActionButton } from "./storage-action-button";
 import { StorageSettingHelp } from "./storage-setting-help";
 import { formatGigabytes } from "./storage-units";
+import { quarantineTotalBytes } from "./storage-totals";
 import {
   formatQuarantineDeadline,
   isQuarantineEligible,
@@ -21,6 +24,8 @@ const MAX_TIMER_DELAY_MS = 2_147_483_647;
 
 type Props = {
   entries: StorageQuarantineEntry[];
+  loading?: boolean;
+  error?: string | null;
   deleteJobId?: string;
   deleteJobActive?: boolean;
   disabledReason?: string;
@@ -107,7 +112,9 @@ function QuarantineHeader({
   bulkDisabledReason,
   schedulingEnabled,
   checkIntervalHours,
+  showTotal,
   onPurge,
+  totalBytes,
 }: {
   entries: StorageQuarantineEntry[];
   counts: ReturnType<typeof quarantineCounts>;
@@ -115,8 +122,11 @@ function QuarantineHeader({
   bulkDisabledReason?: string;
   schedulingEnabled: boolean;
   checkIntervalHours: number;
+  showTotal: boolean;
   onPurge: (scope: StorageQuarantinePurgeScope) => void;
+  totalBytes: number;
 }) {
+  const { t } = useTranslation();
   return (
     <CardHeader>
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -165,6 +175,11 @@ function QuarantineHeader({
         item if you still need it, or delete it permanently when you are certain. {counts.eligible}{" "}
         eligible now · {counts.protected} protected
       </CardDescription>
+      {showTotal && (
+        <p className="text-xs font-medium" data-testid="storage-quarantine-total">
+          {t("settings:storageQuarantineTotal", { size: formatGigabytes(totalBytes) })}
+        </p>
+      )}
       <p className="text-xs text-muted-foreground" data-testid="storage-quarantine-schedule-copy">
         {schedulingEnabled
           ? `Eligible entries are removed by the first successful maintenance run after their deadline (every ${checkIntervalHours} hours when the idle gate allows it).`
@@ -174,8 +189,58 @@ function QuarantineHeader({
   );
 }
 
+function QuarantineContent({
+  entries,
+  loading,
+  error,
+  now,
+  disabledReason,
+  onRestore,
+  onDelete,
+}: {
+  entries: StorageQuarantineEntry[];
+  loading: boolean;
+  error?: string | null;
+  now: Date;
+  disabledReason?: string;
+  onRestore: (id: string) => Promise<void>;
+  onDelete: (entry: StorageQuarantineEntry) => void;
+}) {
+  const { t } = useTranslation();
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Spinner className="size-4" data-testid="storage-quarantine-spinner" />
+        {t("settings:storageQuarantineLoading")}
+      </div>
+    );
+  }
+  if (error) {
+    return (
+      <p className="break-words text-sm text-destructive" data-testid="storage-quarantine-error">
+        {t("settings:storageSectionUnavailable")}: {error}
+      </p>
+    );
+  }
+  if (entries.length === 0) {
+    return <p className="text-sm text-muted-foreground">{t("settings:storageQuarantineEmpty")}</p>;
+  }
+  return entries.map((entry) => (
+    <QuarantineEntryRow
+      key={entry.id}
+      entry={entry}
+      now={now}
+      disabledReason={disabledReason}
+      onRestore={onRestore}
+      onDelete={onDelete}
+    />
+  ));
+}
+
 export function StorageQuarantineCard({
   entries,
+  loading = false,
+  error,
   deleteJobId,
   deleteJobActive,
   disabledReason,
@@ -201,6 +266,7 @@ export function StorageQuarantineCard({
     return () => clearTimeout(timer);
   }, [entries, now]);
   const counts = quarantineCounts(entries, now);
+  const totalBytes = quarantineTotalBytes(entries);
   const bulkDisabledReason =
     disabledReason ?? (deleteJobActive ? "A quarantine cleanup is still running." : undefined);
   return (
@@ -212,22 +278,20 @@ export function StorageQuarantineCard({
         bulkDisabledReason={bulkDisabledReason}
         schedulingEnabled={schedulingEnabled}
         checkIntervalHours={checkIntervalHours}
+        showTotal={!loading && !error}
         onPurge={setPurgeScope}
+        totalBytes={totalBytes}
       />
       <CardContent className="space-y-3">
-        {entries.length === 0 && (
-          <p className="text-sm text-muted-foreground">No restorable quarantined resources.</p>
-        )}
-        {entries.map((entry) => (
-          <QuarantineEntryRow
-            key={entry.id}
-            entry={entry}
-            now={now}
-            disabledReason={bulkDisabledReason}
-            onRestore={onRestore}
-            onDelete={setDeleteEntry}
-          />
-        ))}
+        <QuarantineContent
+          entries={entries}
+          loading={loading}
+          error={error}
+          now={now}
+          disabledReason={bulkDisabledReason}
+          onRestore={onRestore}
+          onDelete={setDeleteEntry}
+        />
       </CardContent>
       <PermanentDeleteDialog
         entry={deleteEntry}

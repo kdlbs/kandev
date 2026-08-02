@@ -11,6 +11,7 @@ import (
 func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	env := []string{
 		"KANDEV_SERVER_PORT=1234",
+		"KANDEV_CONSOLE_LOG_LEVEL=warn",
 		"UNRELATED=value",
 	}
 	manifest := buildManifest("/opt/kandev/bin/kandev", []string{"__backend"}, "/opt/kandev/bin", env, "/tmp/home", 1234, "run")
@@ -26,6 +27,9 @@ func TestBuildManifestUsesSameBinaryBackendMode(t *testing.T) {
 	}
 	if manifest.Env["KANDEV_SERVER_PORT"] != "1234" {
 		t.Fatalf("KANDEV_SERVER_PORT = %q", manifest.Env["KANDEV_SERVER_PORT"])
+	}
+	if manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"] != "warn" {
+		t.Fatalf("KANDEV_CONSOLE_LOG_LEVEL = %q", manifest.Env["KANDEV_CONSOLE_LOG_LEVEL"])
 	}
 }
 

@@ -131,26 +131,26 @@ func TestSetPendingAgentTitleIsOneShotAndHumanRenameWins(t *testing.T) {
 		WorkflowID:  "wf-agent-title",
 		Title:       "Temporary prompt title",
 		Description: "Do the work",
-		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true},
+		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-owner"},
 	})
 	if err != nil {
 		t.Fatalf("create pending task: %v", err)
 	}
 	eventBus.ClearEvents()
 
-	updated, accepted, err := svc.SetPendingAgentTitle(ctx, task.ID, "Ship login fix")
+	updated, accepted, reason, err := svc.SetPendingAgentTitle(ctx, task.ID, "session-owner", "Ship login fix")
 	if err != nil || !accepted {
-		t.Fatalf("set pending title = (%v, %v), want accepted", updated, err)
+		t.Fatalf("set pending title = (%v, %v, %q), want accepted", updated, accepted, reason)
 	}
-	if updated.Title != "Ship login fix" || models.IsAgentTitlePending(updated.Metadata) {
+	if updated.Title != "Ship login fix" || models.IsAgentTitlePending(updated.Metadata) || models.AgentTitleOwnerSessionID(updated.Metadata) != "" {
 		t.Fatalf("updated task = %#v, want resolved title and marker removed", updated)
 	}
 	if len(eventBus.GetPublishedEvents()) != 1 || eventBus.GetPublishedEvents()[0].Type != "task.updated" {
 		t.Fatalf("events = %#v, want one task.updated event", eventBus.GetPublishedEvents())
 	}
-	_, accepted, err = svc.SetPendingAgentTitle(ctx, task.ID, "Late overwrite")
-	if err != nil || accepted {
-		t.Fatalf("second set = (accepted=%v, err=%v), want idempotent rejection", accepted, err)
+	_, accepted, reason, err = svc.SetPendingAgentTitle(ctx, task.ID, "session-owner", "Late overwrite")
+	if err != nil || accepted || reason != "title_not_pending" {
+		t.Fatalf("second set = (accepted=%v, reason=%q, err=%v), want idempotent rejection", accepted, reason, err)
 	}
 
 	pendingTask, err := svc.CreateTask(ctx, &CreateTaskRequest{
@@ -158,7 +158,7 @@ func TestSetPendingAgentTitleIsOneShotAndHumanRenameWins(t *testing.T) {
 		WorkflowID:  "wf-agent-title",
 		Title:       "Temporary again",
 		Description: "Do more work",
-		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true},
+		Metadata:    map[string]interface{}{models.MetaKeyAgentTitlePending: true, models.MetaKeyAgentTitleOwnerSessionID: "session-owner"},
 	})
 	if err != nil {
 		t.Fatalf("create second pending task: %v", err)
@@ -167,9 +167,9 @@ func TestSetPendingAgentTitleIsOneShotAndHumanRenameWins(t *testing.T) {
 	if _, err := svc.UpdateTask(ctx, pendingTask.ID, &UpdateTaskRequest{Title: &humanTitle}); err != nil {
 		t.Fatalf("human rename: %v", err)
 	}
-	updated, accepted, err = svc.SetPendingAgentTitle(ctx, pendingTask.ID, "Agent overwrite")
-	if err != nil || accepted || updated.Title != humanTitle {
-		t.Fatalf("late agent rename = (%v, %v, %v), want human title preserved", updated.Title, accepted, err)
+	updated, accepted, reason, err = svc.SetPendingAgentTitle(ctx, pendingTask.ID, "session-owner", "Agent overwrite")
+	if err != nil || accepted || reason != "title_not_pending" || updated.Title != humanTitle {
+		t.Fatalf("late agent rename = (%v, %v, %q, %v), want human title preserved", updated.Title, accepted, reason, err)
 	}
 }
 

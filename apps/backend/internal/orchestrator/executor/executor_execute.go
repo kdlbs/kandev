@@ -36,7 +36,7 @@ func isConfigModeSession(session *models.TaskSession) bool {
 // resolveTaskSessionMCPMode derives restricted MCP access from canonical task
 // ownership and session purpose. Config mode wins because those sessions need
 // config tools even if their backing task is Office-owned.
-func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession) (string, error) {
+func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
 	if isConfigModeSession(session) {
 		return McpModeConfig, nil
 	}
@@ -47,7 +47,7 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
 	}
-	if task != nil && models.IsAgentTitlePending(task.Metadata) {
+	if allowTitleTool && task != nil && models.IsAgentTitleOwner(task.Metadata, session.ID) {
 		return McpModeTaskTitlePending, nil
 	}
 	return "", nil
@@ -643,6 +643,23 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 	if err != nil {
 		return nil, err
 	}
+	dbTask, err := e.repo.GetTask(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load task before title claim: %w", err)
+	}
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session before title claim: %w", err)
+	}
+	if (dbTask == nil || !dbTask.IsFromOffice) && !isConfigModeSession(session) {
+		if claimer, ok := e.repo.(interface {
+			ClaimTaskTitleSession(context.Context, string, string) (bool, bool, error)
+		}); ok {
+			if _, _, err := claimer.ClaimTaskTitleSession(ctx, task.ID, sessionID); err != nil {
+				return nil, fmt.Errorf("claim first-turn task title: %w", err)
+			}
+		}
+	}
 
 	// Launch the agent for the prepared session.
 	execution, err := e.LaunchPreparedSession(ctx, task, sessionID, LaunchOptions{
@@ -692,10 +709,17 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	// Resolve agent profile to get model and other settings for snapshot
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
-	// Determine if this new session should become primary.
-	// Only the first session for a task is primary by default; subsequent sessions
-	// leave the existing primary unchanged so the user's explicit choice is preserved.
-	existingSessions, _ := e.repo.ListTaskSessions(ctx, task.ID)
+	// Determine whether this is the task's first session and whether it should
+	// become primary. The immutable origin marker follows creation order, not
+	// primary-session ownership, because a later user-selected primary must not
+	// change which conversation workflow rules treat as the original.
+	existingSessions, err := e.repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		e.logger.Error("failed to list task sessions before creating initial session",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return "", fmt.Errorf("list task sessions: %w", err)
+	}
+	isTaskInitialSession := len(existingSessions) == 0
 	hasPrimary := false
 	for _, s := range existingSessions {
 		if s.IsPrimary {
@@ -703,7 +727,13 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			break
 		}
 	}
-	isFirstSession := !hasPrimary
+	isPrimarySession := !hasPrimary
+	if isTaskInitialSession {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
 
 	// Create agent session in database. WorkspacePath is propagated from task
 	// metadata for repo-less tasks where the user picked a starting folder.
@@ -721,7 +751,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            isFirstSession,
+		IsPrimary:            isPrimarySession,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
 	}
@@ -751,7 +781,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	// Set primary flag only for the first session (no existing primary).
 	// Subsequent sessions do not override the established primary.
-	if isFirstSession {
+	if isPrimarySession {
 		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 			e.logger.Warn("failed to update primary session flag",
 				zap.String("task_id", task.ID),
@@ -832,7 +862,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 	if opts.McpMode == "" {
-		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
 			return nil, err
 		}

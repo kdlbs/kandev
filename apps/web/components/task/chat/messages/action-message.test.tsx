@@ -317,3 +317,62 @@ describe("ActionMessage — missing PR branch", () => {
     expect(details?.open).toBe(true);
   });
 });
+
+describe("ActionMessage — provider quota recovery", () => {
+  it("renders localized model/reset guidance with collapsed sanitized details", () => {
+    renderAction(
+      retryMessage({
+        content: "provider quota reached",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "provider_quota_limited",
+          provider_name: "OpenCode",
+          model_id: "kimi-k3",
+          reset_at: "2026-08-02T19:34:44Z",
+          error_output: "5-hour usage limit reached",
+          actions: [
+            {
+              type: "ws_request",
+              label: "Resume session",
+              test_id: RESUME_TEST_ID,
+            },
+          ],
+        },
+      } as Partial<Message>),
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
+    expect(screen.getByText(/OpenCode usage limit reached/i)).toBeTruthy();
+    expect(screen.getByText(/kimi-k3/i)).toBeTruthy();
+    const details = screen.getByText(TECHNICAL_DETAILS).closest("details");
+    expect(details?.open).toBe(false);
+    expect(screen.getByTestId(RESUME_TEST_ID).className).toContain("min-h-11");
+
+    fireEvent.click(screen.getByText(TECHNICAL_DETAILS));
+    expect(details?.open).toBe(true);
+    expect(screen.getByText("5-hour usage limit reached")).toBeTruthy();
+    expect(screen.queryByText(/opencode\.ai\/workspace/i)).toBeNull();
+  });
+
+  it("uses a safe generic reset message when reset time is absent", () => {
+    renderAction(
+      retryMessage({
+        content: "provider quota reached",
+        metadata: {
+          variant: "error",
+          recovery_actions: true,
+          failure_kind: "provider_quota_limited",
+          provider_name: "OpenCode",
+          model_id: "kimi-k3",
+          actions: [],
+        },
+      } as Partial<Message>),
+      "WAITING_FOR_INPUT",
+    );
+
+    expect(screen.getByTestId("provider-quota-recovery")).toBeTruthy();
+    expect(screen.getByText(/when the provider makes capacity available/i)).toBeTruthy();
+  });
+});

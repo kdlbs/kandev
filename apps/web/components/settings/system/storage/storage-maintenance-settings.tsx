@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconCheck, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import {
   useStorageMaintenance,
   type StorageBusyState,
@@ -187,19 +189,33 @@ function serializeSettings(settings: Settings | null): string {
 }
 
 function policyPendingAction(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
-  return action === "load" || action === "save" || action === "adopt";
+  return action === "save" || action === "adopt";
 }
 
-function policyBlockedReason(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
-  if (action === "adopt") return "Wait for Go cache adoption to finish.";
-  if (action === "load") return "Wait for storage settings to finish loading.";
+function policyBlockedReason(
+  t: (key: string) => string,
+  action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
+  loading: boolean,
+) {
+  if (action === "adopt") return t("settings:storageAdoptionPending");
+  if (loading) return t("settings:storagePolicyLoadingBlock");
+  return undefined;
+}
+
+function storageActionDisabledReason(
+  t: (key: string) => string,
+  action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
+) {
+  if (action) return t("settings:storageActionPending");
   return undefined;
 }
 
 function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenance>) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Settings | null>(null);
   const previousServerSettings = useRef<Settings | null>(null);
-  const savedSettings = controller.overview?.settings ?? null;
+  const savedSettings = controller.policy?.settings ?? controller.overview?.settings ?? null;
+  const policyLoading = controller.loading?.policy ?? !savedSettings;
 
   useEffect(() => {
     if (!savedSettings) return;
@@ -216,7 +232,7 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
     previousServerSettings.current = savedSettings;
   }, [savedSettings]);
 
-  const invalidReason = policyBlockedReason(controller.pendingAction);
+  const invalidReason = policyBlockedReason(t, controller.pendingAction, policyLoading);
   useSettingsSaveContributor({
     id: "system:storage-policy",
     revision: serializeSettings(draft),
@@ -242,13 +258,125 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
   return { draft, setDraft, savedSettings };
 }
 
-export function StorageMaintenanceSettings() {
-  const controller = useStorageMaintenance();
-  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
+function StoragePolicyState({ loading, error }: { loading: boolean; error?: string | null }) {
+  const { t } = useTranslation();
+  if (!loading && !error) return null;
+  return (
+    <Card data-testid="storage-policy-state">
+      <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        {loading && <Spinner className="size-4" data-testid="storage-policy-spinner" />}
+        <span>{loading ? t("settings:loading") : t("settings:storageSectionUnavailable")}</span>
+        {error && <span className="break-words text-destructive">{error}</span>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StoragePrimarySections({
+  controller,
+  disabledReason,
+  draft,
+  setDraft,
+  savedSettings,
+}: {
+  controller: ReturnType<typeof useStorageMaintenance>;
+  disabledReason?: string;
+  draft: Settings | null;
+  setDraft: (settings: Settings | null) => void;
+  savedSettings: Settings | null;
+}) {
   const controlsPending = policyPendingAction(controller.pendingAction);
-  const actionDisabledReason = controller.pendingAction
-    ? "Wait for the current storage action to finish."
-    : undefined;
+  const policyLoading = controller.loading?.policy ?? !savedSettings;
+  const capabilities = controller.policy?.capabilities ?? controller.overview?.capabilities;
+  return (
+    <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
+      <StorageOverviewCard
+        overview={controller.overview}
+        settings={savedSettings ?? undefined}
+        loading={controller.loading?.overview}
+        error={controller.sectionErrors?.overview}
+        disabledReason={disabledReason}
+        onRunGoCache={() => void controller.runNow(["go_cache"])}
+      />
+      <StoragePolicyState loading={policyLoading} error={controller.sectionErrors?.policy} />
+      {draft && savedSettings && capabilities && (
+        <StoragePolicyCard
+          settings={draft}
+          savedSettings={savedSettings}
+          capabilities={capabilities}
+          pending={controlsPending}
+          onChange={setDraft}
+          onAdopt={controller.adopt}
+        />
+      )}
+    </div>
+  );
+}
+
+function StorageQuarantineSection({
+  controller,
+  disabledReason,
+  savedSettings,
+}: {
+  controller: ReturnType<typeof useStorageMaintenance>;
+  disabledReason?: string;
+  savedSettings: Settings | null;
+}) {
+  const deleteJobActive =
+    controller.deleteJob?.state === "queued" || controller.deleteJob?.state === "running";
+  return (
+    <StorageQuarantineCard
+      entries={controller.quarantine}
+      loading={controller.loading?.quarantine}
+      error={controller.sectionErrors?.quarantine}
+      deleteJobId={controller.deleteJob?.id}
+      deleteJobActive={deleteJobActive}
+      disabledReason={disabledReason}
+      schedulingEnabled={savedSettings?.enabled ?? false}
+      checkIntervalHours={savedSettings?.check_interval_hours ?? 24}
+      onRestore={controller.restore}
+      onDelete={controller.permanentlyDelete}
+      onClearEligible={controller.clearEligible}
+      onForceClearAll={controller.forceClearAll}
+    />
+  );
+}
+
+function StoragePageSections({
+  controller,
+  disabledReason,
+}: {
+  controller: ReturnType<typeof useStorageMaintenance>;
+  disabledReason?: string;
+}) {
+  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
+  return (
+    <>
+      <StoragePrimarySections
+        controller={controller}
+        disabledReason={disabledReason}
+        draft={draft}
+        setDraft={setDraft}
+        savedSettings={savedSettings}
+      />
+      <StorageRunHistory
+        runs={controller.runs}
+        loading={controller.loading?.runs}
+        error={controller.sectionErrors?.runs}
+      />
+      <StorageQuarantineSection
+        controller={controller}
+        disabledReason={disabledReason}
+        savedSettings={savedSettings}
+      />
+    </>
+  );
+}
+
+export function StorageMaintenanceSettings() {
+  const { t } = useTranslation();
+  const controller = useStorageMaintenance();
+  const actionDisabledReason = storageActionDisabledReason(t, controller.pendingAction);
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">
@@ -256,38 +384,7 @@ export function StorageMaintenanceSettings() {
 
       <StorageActionFeedback controller={controller} />
 
-      <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
-        <StorageOverviewCard
-          overview={controller.overview}
-          disabledReason={actionDisabledReason}
-          onRunGoCache={() => void controller.runNow(["go_cache"])}
-        />
-        {draft && savedSettings && controller.overview && (
-          <StoragePolicyCard
-            settings={draft}
-            savedSettings={savedSettings}
-            capabilities={controller.overview.capabilities}
-            pending={controlsPending}
-            onChange={setDraft}
-            onAdopt={controller.adopt}
-          />
-        )}
-      </div>
-      <StorageRunHistory runs={controller.runs} />
-      <StorageQuarantineCard
-        entries={controller.quarantine}
-        deleteJobId={controller.deleteJob?.id}
-        deleteJobActive={
-          controller.deleteJob?.state === "queued" || controller.deleteJob?.state === "running"
-        }
-        disabledReason={actionDisabledReason}
-        schedulingEnabled={controller.overview?.settings.enabled ?? false}
-        checkIntervalHours={controller.overview?.settings.check_interval_hours ?? 24}
-        onRestore={controller.restore}
-        onDelete={controller.permanentlyDelete}
-        onClearEligible={controller.clearEligible}
-        onForceClearAll={controller.forceClearAll}
-      />
+      <StoragePageSections controller={controller} disabledReason={actionDisabledReason} />
     </div>
   );
 }

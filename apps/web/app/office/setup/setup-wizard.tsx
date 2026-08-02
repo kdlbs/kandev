@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { useRouter } from "@/lib/routing/client-router";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import {
   completeOnboarding,
   importFromFS,

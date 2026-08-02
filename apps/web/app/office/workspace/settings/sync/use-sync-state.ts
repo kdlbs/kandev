@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import * as officeApi from "@/lib/api/domains/office-api";
 import type { SyncDiff } from "@/lib/api/domains/office-api";
 

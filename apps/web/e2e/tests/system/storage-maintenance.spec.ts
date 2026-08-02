@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { seedManagedGoCache } from "../../helpers/storage-maintenance";
 
@@ -94,6 +95,68 @@ test.describe("System storage maintenance", () => {
         await testPage.getByRole("button", { name: "Save changes" }).click();
         await expect(testPage.getByText("Storage policy saved")).toBeVisible();
       }
+    }
+  });
+
+  test("shows fast storage sections while the overview scan is pending", async ({
+    testPage,
+    prCapture,
+  }) => {
+    let overviewRequestStarted = false;
+    let releaseOverview: () => void = () => {};
+    let markOverviewObserved: () => void = () => {};
+    let markOverviewSettled: () => void = () => {};
+    const overviewGate = new Promise<void>((resolve) => {
+      releaseOverview = resolve;
+    });
+    const overviewObserved = new Promise<void>((resolve) => {
+      markOverviewObserved = resolve;
+    });
+    const overviewSettled = new Promise<void>((resolve) => {
+      markOverviewSettled = resolve;
+    });
+    const overviewPattern = "**/api/v1/system/storage";
+    const holdOverview = async (route: Route) => {
+      const request = route.request();
+      const pathname = new URL(request.url()).pathname;
+      if (request.method() !== "GET" || pathname !== "/api/v1/system/storage") {
+        await route.continue();
+        return;
+      }
+      overviewRequestStarted = true;
+      markOverviewObserved();
+      await overviewGate;
+      try {
+        await route.continue();
+      } finally {
+        markOverviewSettled();
+      }
+    };
+
+    await testPage.route(overviewPattern, holdOverview);
+    try {
+      await testPage.goto("/settings/system/storage");
+      await overviewObserved;
+
+      await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
+      await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
+      await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
+      await expect(testPage.getByTestId("storage-overview-spinner")).toBeVisible();
+      await expect(testPage.getByTestId("storage-analysis-total")).toHaveCount(0);
+      await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+      await prCapture.screenshot("progressive-loading", {
+        caption: "Desktop storage shows policy, history, and quarantine while analysis scans",
+        fullPage: true,
+      });
+
+      releaseOverview();
+      await expect(testPage.getByTestId("storage-analysis-total")).toBeVisible();
+      await expect(testPage.getByTestId("storage-quarantine-total")).toBeVisible();
+      await expect(testPage.getByTestId("storage-overview-spinner")).toHaveCount(0);
+    } finally {
+      releaseOverview();
+      if (overviewRequestStarted) await overviewSettled;
+      await testPage.unroute(overviewPattern, holdOverview);
     }
   });
 

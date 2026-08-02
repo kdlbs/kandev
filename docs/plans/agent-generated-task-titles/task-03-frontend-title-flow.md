@@ -10,6 +10,9 @@ spec: "../../specs/tasks/agent-generated-titles.md"
 
 # Task 03: Settings and task/subtask dialogs
 
+> Continuation note: Task 06 makes this shipped prompt-first flow the default while retaining the
+> manual-title flow for explicit opt-outs.
+
 ## Acceptance
 
 - Task Actions exposes a self-documenting, manually saved setting that defaults false and stays synced

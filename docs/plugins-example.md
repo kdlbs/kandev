@@ -1,13 +1,14 @@
-# Example plugin
+# Plugin examples
 
-`kandev-plugin-hello` is a standalone, importable reference implementation of
-the kandev native-UI plugin contract (manifest + Go SDK backend, spawned by
-kandev as a gRPC subprocess via `pkg/pluginsdk` + hand-written, no-build ES
-module UI bundle) — it registers a "Hello" nav item and route, a
-task-sidebar slot widget, a live WebSocket-driven counter, and a backend
-tool/event/webhook, and is meant to be copied as the starting point for a
-new plugin. It lives in its own git repository, sibling to this one, at
-`../kandev-plugin-hello/` (see that repo's `README.md` for how to build,
-package, and install it against a running kandev instance); see
-`docs/plans/plugins/GRPC-CONTRACT.md` for the backend/transport contract and
-`docs/plans/plugins/PLUGIN-API.md` for the frontend contract it implements.
+The canonical authoring guide is [Authoring a Plugin](public/plugins-authoring.md).
+It documents the current frontend hooks, backend Host surfaces, six recipes,
+package layout, and the reproducible build/package/install/test workflow.
+
+For a maintained scaffold, start from
+[`kdlbs/kandev-plugin-template`](https://github.com/kdlbs/kandev-plugin-template).
+For an in-tree package smoke test, use the fixture and commands in
+`apps/backend/cmd/plugin-fixture` and `make -C apps/backend e2e-plugin-package`.
+
+The fixture is test support, not a production plugin repository. Do not rely on
+old external example links that are not present in the maintained source
+catalog; use the template and fixture paths above.

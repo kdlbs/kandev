@@ -10,6 +10,9 @@ spec: "../../specs/tasks/agent-generated-titles.md"
 
 # Task 04: End-to-end coverage and public docs
 
+> Continuation note: Task 07 updates coverage and documentation for the default-on, single-owner
+> contract. This completed task records the original opt-in behavior.
+
 ## Acceptance
 
 - Desktop E2E proves saved preference persistence, absent title inputs, empty-prompt gating, and the
@@ -19,8 +22,8 @@ spec: "../../specs/tasks/agent-generated-titles.md"
   horizontal overflow with the prompt as the first editable field; the shared task dialog uses the
   same preference/payload contract covered by focused frontend tests.
 - Public task, subtask, and MCP documentation describes the setting, fallback/pending lifecycle, mode
-  boundary, pending-only tool availability/token behavior, three-word target, and six-word practical
-  cap; public-doc validators pass.
+  boundary, pending-only tool availability/token behavior, six-word sentence-case target, and
+  short-title guidance; public-doc validators pass.
 
 ## Verification
 

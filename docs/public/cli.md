@@ -97,7 +97,7 @@ kandev service <action> [service options]
 | `--port <1-65535>` | Request an exact backend port. `--backend-port` is an alias; `--port=<port>` forms also work. |
 | `--headless`, `--no-browser` | Do not open a browser. |
 | `--verbose`, `-v` | Show backend info output. |
-| `--debug` | Show debug output and enable diagnostic endpoints and ACP frame logs. See the security warning below. |
+| `--debug` | Record debug output in the backend file and enable diagnostic endpoints and ACP frame logs; stdout remains concise. See the security warning below. |
 | `--version`, `-V` | Print the native runtime version. |
 | `--help`, `-h`, `help` | Print help. |
 
@@ -193,7 +193,7 @@ Flags take precedence over the equivalent port variables. `KANDEV_BACKEND_PORT` 
 
 The launcher also sets the selected server and `agentctl` ports for the backend. Treat its supervisor socket and manifest under `<home>/supervisor/` as private implementation state, not a control API.
 
-`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true`. ACP logs can contain full prompts, file content, and tool calls, while diagnostic endpoints expose process details. Use debug mode only on a trusted machine and remove retained debug logs afterward. [Configuration](./configuration.md) lists their location and retention controls.
+`--debug` sets `KANDEV_DEBUG_AGENT_MESSAGES=true` and `KANDEV_DEBUG_PPROF_ENABLED=true`. Debug events go to `<home>/logs/backend-logs.log`; warn and above still appear on stdout. ACP logs can contain full prompts, file content, and tool calls, while diagnostic endpoints expose process details. Use debug mode only on a trusted machine and remove retained debug logs afterward. [Configuration](./configuration.md) lists locations and retention.
 
 ## Data and cleanup
 

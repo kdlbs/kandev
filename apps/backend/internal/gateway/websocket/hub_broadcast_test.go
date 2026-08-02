@@ -3,6 +3,7 @@ package websocket
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -167,5 +168,32 @@ func TestBroadcastToUserReportsFalseWhenSubscriberIsClosed(t *testing.T) {
 	}
 	if h.BroadcastToUser("user-1", msg) {
 		t.Fatal("broadcast to a closed subscriber must report no queued recipient")
+	}
+}
+
+func TestSendToIdentityTargetsConnectedClientsWithoutSubscription(t *testing.T) {
+	h := newTestHub(t)
+	first := newTestClient("first")
+	first.identity = authn.Identity{UserID: "user-1"}
+	second := newTestClient("second")
+	second.identity = authn.Identity{UserID: "user-1"}
+	other := newTestClient("other")
+	other.identity = authn.Identity{UserID: "user-2"}
+	registerTestClient(h, first)
+	registerTestClient(h, second)
+	registerTestClient(h, other)
+
+	msg, err := ws.NewNotification("system.logs.capture_requested", map[string]any{"bundle_id": "bundle-1"})
+	if err != nil {
+		t.Fatalf("notification: %v", err)
+	}
+	if got := h.SendToIdentity("user-1", msg); got != 2 {
+		t.Fatalf("queued recipients = %d, want 2", got)
+	}
+	if !clientReceived(first) || !clientReceived(second) {
+		t.Fatal("both matching identity clients must receive the notification")
+	}
+	if clientReceived(other) {
+		t.Fatal("a different identity must not receive the notification")
 	}
 }

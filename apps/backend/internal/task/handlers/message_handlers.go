@@ -39,6 +39,10 @@ type OrchestratorService interface {
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 
+type taskTitleSessionClaimer interface {
+	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
 	service            *service.Service
@@ -70,6 +74,18 @@ func NewMessageHandlers(
 		handlers.referenceValidator = validators[0]
 	}
 	return handlers
+}
+
+func (h *MessageHandlers) claimTaskTitleSession(ctx context.Context, task *models.Task, taskID, sessionID string) (bool, error) {
+	if task == nil || task.IsFromOffice {
+		return false, nil
+	}
+	titleOwner := models.IsAgentTitleOwner(task.Metadata, sessionID)
+	claimer, ok := h.orchestrator.(taskTitleSessionClaimer)
+	if !ok {
+		return titleOwner, nil
+	}
+	return claimer.ClaimTaskTitleSession(ctx, taskID, sessionID)
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
@@ -306,6 +322,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if wsErr != nil {
 		return wsErr, nil
 	}
+	wasCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 	if len(req.EntityReferences) > 0 {
 		if sessionResp.Session.IsPassthrough || h.referenceValidator == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid entity references", nil)
@@ -357,6 +374,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return wsErr, nil
 	}
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
+	startCreatedSession := isCreatedSession || wasCreatedSession
 
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
@@ -382,13 +400,18 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
+	if startCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
 		task, err := h.service.GetTask(ctx, req.TaskID)
 		if err != nil {
 			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 		}
 		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
+		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, req.TaskID, req.TaskSessionID)
+		if claimErr != nil {
+			h.logger.Error("failed to claim first-turn task title", zap.String("task_id", req.TaskID), zap.String("session_id", req.TaskSessionID), zap.Error(claimErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
+		}
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
 		if task.IsFromOffice {
@@ -397,7 +420,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
-				IncludeTaskTitleTool:           !configMode && models.IsAgentTitlePending(task.Metadata),
+				IncludeTaskTitleTool:           !configMode && titleOwner,
 			}, referenceContext)
 		}
 	}
@@ -433,7 +456,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
 	if h.orchestrator != nil {
-		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, isCreatedSession)
+		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession)
 	}
 
 	return response, nil

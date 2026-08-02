@@ -15,7 +15,7 @@ func TestManagedNPMRuntimeContracts(t *testing.T) {
 	}{
 		{"claude", NewClaudeACP(), "@agentclientprotocol/claude-agent-acp", nil},
 		{"codex", NewCodexACP(), "@agentclientprotocol/codex-acp", nil},
-		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp"}},
+		{"opencode", NewOpenCodeACP(), "opencode-ai", []string{"acp", "--print-logs", "--log-level", "ERROR"}},
 		{"copilot", NewCopilotACP(), "@github/copilot", []string{"--acp"}},
 		{"gemini", NewGemini(), "@google/gemini-cli", []string{"--acp"}},
 	}

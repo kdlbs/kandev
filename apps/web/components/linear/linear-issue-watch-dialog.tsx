@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { Label } from "@kandev/ui/label";
-import { Input } from "@kandev/ui/input";
 import {
   Dialog,
   DialogContent,
@@ -13,7 +12,6 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@kandev/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CliModeIcon } from "@/components/cli-mode-icon";
@@ -25,36 +23,26 @@ import {
   ScriptEditor,
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
-import {
-  LabelMultiSelect,
-  PriorityMultiSelect,
-  SettingsFields,
-  StateMultiSelect,
-  useTeamsAndStates,
-} from "./linear-issue-watch-fields";
-import { LINEAR_ISSUE_WATCH_PLACEHOLDERS } from "./linear-issue-watch-placeholders";
+import { SettingsFields } from "./linear-issue-watch-fields";
+import { FilterFields, SelectField } from "./linear-issue-watch-filter-fields";
+import { linearIssueWatchPlaceholders } from "./linear-issue-watch-placeholders";
 import { STEP_DEFAULT, STEP_DEFAULT_LABEL, resolveProfileId } from "@/lib/watcher-profile-default";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
 import {
-  ASSIGNED_ANY,
-  CREATOR_ANY,
   type FormState,
-  type LinearPriority,
   buildWatchPayload,
-  creatorPlaceholder,
   formStateFromWatch,
   isWatchFormReady,
   makeEmptyForm,
-  userOptionLabel,
 } from "./linear-issue-watch-form";
 import type {
   CreateLinearIssueWatchInput,
   LinearIssueWatch,
-  LinearTeam,
-  LinearUser,
   UpdateLinearIssueWatchInput,
 } from "@/lib/types/linear";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type Props = {
   open: boolean;
@@ -82,254 +70,9 @@ function useFormData(workspaceId: string) {
   return { workflows, agentProfiles, allExecutorProfiles };
 }
 
-type SelectFieldItem = { id: string; label: string; icon?: React.ReactNode };
-
-function SelectField(props: {
-  label: string;
-  description?: string;
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  items: SelectFieldItem[];
-  disabled?: boolean;
-}) {
-  return (
-    <div className="space-y-1.5">
-      <Label>{props.label}</Label>
-      {props.description && <p className="text-xs text-muted-foreground">{props.description}</p>}
-      <Select
-        value={props.value || undefined}
-        onValueChange={props.onChange}
-        disabled={props.disabled}
-      >
-        <SelectTrigger className="cursor-pointer">
-          <SelectValue placeholder={props.placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          {props.items.map((item) => (
-            <SelectItem key={item.id} value={item.id}>
-              {item.icon ? (
-                <span className="flex items-center gap-1.5">
-                  <span>{item.label}</span>
-                  {item.icon}
-                </span>
-              ) : (
-                item.label
-              )}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-function FilterFields({
-  form,
-  setForm,
-}: {
-  form: FormState;
-  setForm: React.Dispatch<React.SetStateAction<FormState>>;
-}) {
-  const { teams, states, labels, users, loadingStates, loadingLabels, loadingUsers } =
-    useTeamsAndStates(form.workspaceId, form.teamKey);
-  const toggleState = useCallback(
-    (id: string) =>
-      setForm((p) => ({
-        ...p,
-        stateIds: p.stateIds.includes(id)
-          ? p.stateIds.filter((s) => s !== id)
-          : [...p.stateIds, id],
-      })),
-    [setForm],
-  );
-  const toggleLabel = useCallback(
-    (id: string) =>
-      setForm((p) => ({
-        ...p,
-        labelIds: p.labelIds.includes(id)
-          ? p.labelIds.filter((l) => l !== id)
-          : [...p.labelIds, id],
-      })),
-    [setForm],
-  );
-  const togglePriority = useCallback(
-    (priority: LinearPriority) =>
-      setForm((p) => ({
-        ...p,
-        priorities: p.priorities.includes(priority)
-          ? p.priorities.filter((x) => x !== priority)
-          : [...p.priorities, priority],
-      })),
-    [setForm],
-  );
-
-  return (
-    <>
-      <TeamRow form={form} setForm={setForm} teams={teams} />
-      <AssigneeAndCreatorRow
-        form={form}
-        setForm={setForm}
-        users={users}
-        loadingUsers={loadingUsers}
-      />
-      <div className="space-y-1.5">
-        <Label>Priority</Label>
-        <p className="text-xs text-muted-foreground">
-          Click to toggle. Matches issues at ANY of the selected priorities.
-        </p>
-        <PriorityMultiSelect selected={form.priorities} onToggle={togglePriority} />
-      </div>
-      <div className="space-y-1.5">
-        <Label>States</Label>
-        <p className="text-xs text-muted-foreground">
-          {form.teamKey
-            ? "Click states to toggle. Empty matches every state on the team."
-            : "Pick a team to choose specific workflow states."}
-        </p>
-        <StateMultiSelect
-          states={states}
-          loading={loadingStates}
-          selected={form.stateIds}
-          onToggle={toggleState}
-          disabled={!form.teamKey}
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Labels</Label>
-        <p className="text-xs text-muted-foreground">
-          {form.teamKey
-            ? "Click to toggle. Matches ANY of the selected labels."
-            : "Pick a team to choose specific labels."}
-        </p>
-        <LabelMultiSelect
-          labels={labels}
-          loading={loadingLabels}
-          selected={form.labelIds}
-          onToggle={toggleLabel}
-          disabled={!form.teamKey}
-        />
-      </div>
-      <EstimateRow form={form} setForm={setForm} />
-      <QueryField form={form} setForm={setForm} />
-    </>
-  );
-}
-
-type FormSetter = React.Dispatch<React.SetStateAction<FormState>>;
-
-function TeamRow({
-  form,
-  setForm,
-  teams,
-}: {
-  form: FormState;
-  setForm: FormSetter;
-  teams: LinearTeam[];
-}) {
-  return (
-    <SelectField
-      label="Team"
-      description="Restrict matches to one team."
-      value={form.teamKey}
-      onChange={(v) =>
-        setForm((p) => ({ ...p, teamKey: v, stateIds: [], labelIds: [], creatorId: "" }))
-      }
-      placeholder="(any team)"
-      items={teams.map((t) => ({ id: t.key, label: `${t.name} (${t.key})` }))}
-    />
-  );
-}
-
-function AssigneeAndCreatorRow({
-  form,
-  setForm,
-  users,
-  loadingUsers,
-}: {
-  form: FormState;
-  setForm: FormSetter;
-  users: LinearUser[];
-  loadingUsers: boolean;
-}) {
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      <SelectField
-        label="Assignee"
-        description="Filter by who an issue is assigned to."
-        value={form.assigned || ASSIGNED_ANY}
-        onChange={(v) => setForm((p) => ({ ...p, assigned: v === ASSIGNED_ANY ? "" : v }))}
-        placeholder="(any)"
-        items={[
-          { id: ASSIGNED_ANY, label: "(any)" },
-          { id: "me", label: "Me" },
-          { id: "unassigned", label: "Unassigned" },
-        ]}
-      />
-      <SelectField
-        label="Creator"
-        description="Match issues created by one user."
-        value={form.creatorId || CREATOR_ANY}
-        onChange={(v) => setForm((p) => ({ ...p, creatorId: v === CREATOR_ANY ? "" : v }))}
-        placeholder={creatorPlaceholder(form.teamKey, loadingUsers)}
-        items={[
-          { id: CREATOR_ANY, label: "(any)" },
-          ...users.map((u) => ({ id: u.id, label: userOptionLabel(u) })),
-        ]}
-        disabled={!form.teamKey || loadingUsers}
-      />
-    </div>
-  );
-}
-
-function EstimateRow({ form, setForm }: { form: FormState; setForm: FormSetter }) {
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      <div className="space-y-1.5">
-        <Label>Estimate min</Label>
-        <p className="text-xs text-muted-foreground">Lower bound in points (optional).</p>
-        <Input
-          type="number"
-          value={form.estimateMin}
-          onChange={(e) => setForm((p) => ({ ...p, estimateMin: e.target.value }))}
-          min={0}
-          step="0.5"
-          placeholder="e.g. 1"
-        />
-      </div>
-      <div className="space-y-1.5">
-        <Label>Estimate max</Label>
-        <p className="text-xs text-muted-foreground">Upper bound in points (optional).</p>
-        <Input
-          type="number"
-          value={form.estimateMax}
-          onChange={(e) => setForm((p) => ({ ...p, estimateMax: e.target.value }))}
-          min={0}
-          step="0.5"
-          placeholder="e.g. 5"
-        />
-      </div>
-    </div>
-  );
-}
-
-function QueryField({ form, setForm }: { form: FormState; setForm: FormSetter }) {
-  return (
-    <div className="space-y-1.5">
-      <Label>Query</Label>
-      <p className="text-xs text-muted-foreground">
-        Free-text match across title and description (optional).
-      </p>
-      <Input
-        value={form.query}
-        onChange={(e) => setForm((p) => ({ ...p, query: e.target.value }))}
-        placeholder="auth bug"
-      />
-    </div>
-  );
-}
-
 function PlaceholdersHelp() {
+  const { t } = useTranslation();
+  const placeholders = useMemo(() => linearIssueWatchPlaceholders(t), [t]);
   return (
     <TooltipProvider>
       <Tooltip>
@@ -337,9 +80,9 @@ function PlaceholdersHelp() {
           <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0" />
         </TooltipTrigger>
         <TooltipContent className="max-w-xs" align="start">
-          <p className="text-xs font-medium mb-1">Available placeholders:</p>
+          <p className="text-xs font-medium mb-1">{t("linear:availablePlaceholders")}</p>
           <ul className="text-xs space-y-0.5">
-            {LINEAR_ISSUE_WATCH_PLACEHOLDERS.map((p) => (
+            {placeholders.map((p) => (
               <li key={p.key}>
                 <code className="text-[10px] bg-white/15 px-1 rounded">{`{{${p.key}}}`}</code>{" "}
                 <span className="opacity-70">{p.description}</span>
@@ -353,14 +96,22 @@ function PlaceholdersHelp() {
 }
 
 function PromptField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
+  // Memoized because `ScriptEditor` keys its Monaco completion-provider
+  // registration on `placeholders` identity. This used to be a module-scope
+  // const, so it was stable for free; now that it is built from `t`, a fresh
+  // array on every render would re-register the provider on every keystroke.
+  const placeholders = useMemo(() => linearIssueWatchPlaceholders(t), [t]);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
-        <Label>Task Prompt</Label>
+        <Label>{t("linear:taskPrompt")}</Label>
         <PlaceholdersHelp />
       </div>
       <p className="text-xs text-muted-foreground">
-        The prompt sent to the agent for each new issue. Type {"{{"} to insert placeholders.
+        {/* The `{{` token is passed as a value so it never reaches the catalog,
+            where i18next would interpolate it away. */}
+        {t("linear:promptFieldHelp", { token: "{{" })}
       </p>
       <div className="rounded-md border border-border overflow-hidden">
         <ScriptEditor
@@ -369,7 +120,7 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
           language="markdown"
           height={computeEditorHeight(value)}
           lineNumbers="off"
-          placeholders={LINEAR_ISSUE_WATCH_PLACEHOLDERS}
+          placeholders={placeholders}
         />
       </div>
     </div>
@@ -385,14 +136,15 @@ function WorkspacePicker({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   return (
     <SelectField
-      label="Workspace"
-      description="Tasks created by this watcher land in the selected workspace."
+      label={t("common:workspace")}
+      description={t("linear:workspaceHelp")}
       value={value}
       onChange={onChange}
-      placeholder="Select workspace"
+      placeholder={t("linear:selectWorkspace")}
       items={workspaces.map((w) => ({ id: w.id, label: w.name }))}
       disabled={disabled}
     />
@@ -406,22 +158,23 @@ function AutomationFields({
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
+  const { t } = useTranslation();
   const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
   const { steps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          label="Workflow"
-          description="Tasks are created in this workflow."
+          label={t("linear:workflow")}
+          description={t("linear:workflowHelp")}
           value={form.workflowId}
           onChange={(v) => setForm((p) => ({ ...p, workflowId: v, workflowStepId: "" }))}
-          placeholder="Select workflow"
+          placeholder={t("linear:selectWorkflow")}
           items={workflows.map((w) => ({ id: w.id, label: w.name }))}
         />
         <SelectField
-          label="Workflow Step"
-          description="Initial step for new tasks."
+          label={t("linear:workflowStep")}
+          description={t("linear:workflowStepHelp")}
           value={form.workflowStepId}
           onChange={(v) => setForm((p) => ({ ...p, workflowStepId: v }))}
           placeholder={stepPlaceholder(form.workflowId, stepsLoading, steps.length)}
@@ -440,8 +193,8 @@ function AutomationFields({
       />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          label="Agent Profile"
-          description="Optional — falls back to step default."
+          label={t("linear:agentProfile")}
+          description={t("linear:fallsBackToStepDefault")}
           value={form.agentProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((p) => ({ ...p, agentProfileId: resolveProfileId(v) }))}
           placeholder={STEP_DEFAULT_LABEL}
@@ -455,8 +208,8 @@ function AutomationFields({
           ]}
         />
         <SelectField
-          label="Executor Profile"
-          description="Optional — falls back to step default."
+          label={t("linear:executorProfile")}
+          description={t("linear:fallsBackToStepDefault")}
           value={form.executorProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((p) => ({ ...p, executorProfileId: resolveProfileId(v) }))}
           placeholder={STEP_DEFAULT_LABEL}
@@ -470,9 +223,9 @@ function AutomationFields({
   );
 }
 
-function savingLabel(saving: boolean, isEdit: boolean): string {
-  if (saving) return "Saving…";
-  return isEdit ? "Update" : "Create";
+function savingLabel(t: TFunction, saving: boolean, isEdit: boolean): string {
+  if (saving) return t("linear:saving");
+  return isEdit ? t("linear:update") : t("linear:create");
 }
 
 export function LinearIssueWatchDialog({
@@ -483,6 +236,7 @@ export function LinearIssueWatchDialog({
   onCreate,
   onUpdate,
 }: Props) {
+  const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => makeEmptyForm(workspaceId ?? ""));
@@ -520,12 +274,10 @@ export function LinearIssueWatchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full max-w-full sm:w-[800px] sm:max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{watch ? "Edit Linear Watcher" : "Create Linear Watcher"}</DialogTitle>
-          <DialogDescription>
-            Poll Linear with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. Optionally bind a repository so each task runs against that
-            codebase, or leave it unset to run with no repository.
-          </DialogDescription>
+          <DialogTitle>
+            {watch ? t("linear:editLinearWatcher") : t("linear:createLinearWatcher")}
+          </DialogTitle>
+          <DialogDescription>{t("linear:watchDialogDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
           <WorkspacePicker
@@ -551,10 +303,10 @@ export function LinearIssueWatchDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
-            {savingLabel(saving, !!watch)}
+            {savingLabel(t, saving, !!watch)}
           </Button>
         </DialogFooter>
       </DialogContent>

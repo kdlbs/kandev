@@ -85,6 +85,10 @@ export interface PluginRecord {
   installed_at: string;
   /** Crash-restart attempts since install (health-check backoff counter). */
   restart_count: number;
+  /** Host-managed, bounded single-line diagnostic for the last failure. */
+  last_error?: string | null;
+  /** UTC timestamp of the last host-managed failure diagnostic. */
+  last_error_at?: string | null;
   last_health_check?: string | null;
   /**
    * Per-plugin auto-update override. Tri-state: `null`/`undefined` means
