@@ -785,6 +785,18 @@ func (m *Manager) applyWorkspacePollModeLocked(trackers ...*WorkspaceTracker) {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
+	// Reject before storing, not just before applying. Every tracker already
+	// ignores an invalid mode, so an invalid push is harmless to the trackers
+	// that exist — but recording it would overwrite the last valid one, and
+	// trackers created afterwards inherit what is stored. A single malformed
+	// push would leave every later tracker on its construction default, and
+	// applyWorkspacePollModeLocked could not tell that apart from a workspace
+	// the gateway has genuinely never spoken for.
+	if !mode.IsValid() {
+		m.logger.Warn("ignoring invalid workspace poll mode", zap.String("mode", string(mode)))
+		return
+	}
+
 	// Storing the mode and fanning it out happen under one write lock, the same
 	// one the rescan paths hold while they publish new trackers. That ordering
 	// is what makes the two safe against each other: a tracker is either already

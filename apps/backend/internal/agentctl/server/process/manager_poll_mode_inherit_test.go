@@ -118,3 +118,53 @@ func TestManagerRescanKeepsGraceWhenNeverFocused(t *testing.T) {
 	}
 	t.Fatal("rescan did not create a tracker for the new repository")
 }
+
+// TestManagerRescanIgnoresInvalidPollModePush covers the gap between rejecting a
+// mode and recording it. Every tracker already refuses an invalid mode, so a
+// malformed push is harmless to the trackers that exist — but if the Manager
+// stored it anyway, trackers created afterwards would inherit the garbage and
+// sit on their construction default, indistinguishable from a workspace the
+// gateway never spoke for. The last valid push has to survive.
+func TestManagerRescanIgnoresInvalidPollModePush(t *testing.T) {
+	isolateTestGitEnv(t)
+	taskRoot := t.TempDir()
+	placeRepo(t, taskRoot, "frontend")
+
+	mgr := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, newTestLogger(t))
+	stopManagerTrackers(t, mgr)
+
+	// The gateway focuses the workspace, then sends something malformed.
+	mgr.SetWorkspacePollMode(context.Background(), PollModeSlow)
+	mgr.SetWorkspacePollMode(context.Background(), PollMode("turbo"))
+
+	mgr.repoTrackersMu.RLock()
+	stored, ok := mgr.workspacePollMode, mgr.workspacePollModeSet
+	mgr.repoTrackersMu.RUnlock()
+	if !ok {
+		t.Fatal("the invalid push cleared the record of the valid one")
+	}
+	if stored != PollModeSlow {
+		t.Errorf("stored mode = %v, want %v — the invalid push overwrote it", stored, PollModeSlow)
+	}
+
+	// A repository added afterwards must inherit the last valid mode.
+	placeRepo(t, taskRoot, "worker")
+	if err := mgr.RescanRepositories(context.Background(), taskRoot); err != nil {
+		t.Fatalf("RescanRepositories: %v", err)
+	}
+
+	_, trackers := mgr.snapshotTrackers()
+	var worker *WorkspaceTracker
+	for _, tr := range trackers {
+		if tr.RepositoryName() == "worker" {
+			worker = tr
+			break
+		}
+	}
+	if worker == nil {
+		t.Fatalf("rescan did not create a tracker for the new repository; got %d trackers", len(trackers))
+	}
+	if got := worker.GetPollMode(); got != PollModeSlow {
+		t.Errorf("new tracker poll mode = %v, want %v — it did not inherit the last valid push", got, PollModeSlow)
+	}
+}
