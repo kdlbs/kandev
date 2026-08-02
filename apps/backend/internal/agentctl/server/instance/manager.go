@@ -45,6 +45,12 @@ type Manager struct {
 	reaperStop     chan struct{}
 	reaperStopOnce sync.Once
 	reaperWG       sync.WaitGroup
+
+	// abandonWG tracks the teardown goroutines CreateInstance spawns when a
+	// caller vanishes mid-creation. They run off the creation mutex so a slow
+	// tracker stop cannot block the queue; Shutdown drains them so a process
+	// exit does not leave half-torn-down trackers behind.
+	abandonWG sync.WaitGroup
 }
 
 // NewManager creates a new instance manager.
@@ -166,10 +172,22 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Starting the trackers is the slow part of creation, so re-check: a caller
 	// that was still waiting when we took the lock can time out during it.
-	// Everything built so far has to be undone by hand — StopInstance takes the
-	// same mutex we are holding, and the instance is not registered yet anyway.
 	if err := ctx.Err(); err != nil {
-		m.abandonPartialInstance(id, port, listener, procMgr)
+		// Teardown runs off this goroutine because it must not happen under
+		// m.mu. stopWorkspaceTrackers stops trackers one at a time, and
+		// WorkspaceTracker.Stop takes no context — it waits on its own
+		// stopTimeout timer — so a workspace with a dozen repositories could
+		// pin the creation mutex for the better part of a minute, lengthening
+		// the very queue this abandonment exists to drain.
+		//
+		// Nothing can observe the instance meanwhile: it was never added to
+		// m.instances, and PortAllocator carries its own mutex. The wait group
+		// lets Shutdown drain these before it returns.
+		m.abandonWG.Add(1)
+		go func() {
+			defer m.abandonWG.Done()
+			m.abandonPartialInstance(id, port, listener, procMgr)
+		}()
 		return nil, fmt.Errorf("create instance abandoned during startup: %w", err)
 	}
 
@@ -202,17 +220,19 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 	}, nil
 }
 
-// abandonPartialInstanceTimeout bounds the teardown of an instance whose caller
-// vanished mid-creation. It is deliberately short: m.mu is held throughout, so
-// every other creation waits on it, and the queue that produced the abandoned
-// request in the first place is exactly what must not grow further.
+// abandonPartialInstanceTimeout bounds the admission wait inside
+// StopForTeardown for an instance whose caller vanished mid-creation. It does
+// not bound the tracker stops themselves — WorkspaceTracker.Stop honours no
+// context and falls back to its own stopTimeout — which is exactly why this
+// teardown runs off the creation mutex rather than under it.
 const abandonPartialInstanceTimeout = 5 * time.Second
 
 // abandonPartialInstance unwinds the pieces CreateInstance built before it
 // noticed the caller had gone: the tracker goroutines, the bound listener and
-// the allocated port. It must be called with m.mu held and must not route
-// through StopInstance, which takes that same lock — and the instance was never
-// registered in m.instances, so there is nothing there to remove.
+// the allocated port. It must be called WITHOUT m.mu held — the tracker stops
+// are slow and uninterruptible — and it does not route through StopInstance,
+// which would take that lock. The instance was never registered in
+// m.instances, so there is nothing there to remove.
 func (m *Manager) abandonPartialInstance(id string, port int, listener net.Listener, procMgr *process.Manager) {
 	// The request context is already cancelled, so teardown needs its own.
 	ctx, cancel := context.WithTimeout(context.Background(), abandonPartialInstanceTimeout)
@@ -492,6 +512,11 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	// Stop the idle reaper first so it doesn't fire StopInstance concurrently
 	// with our explicit per-instance shutdown loop.
 	m.stopReaperOnce()
+
+	// Drain any in-flight abandonment teardowns. They own trackers and a port
+	// that are no longer reachable through m.instances, so nothing below would
+	// wait for them otherwise.
+	m.abandonWG.Wait()
 
 	m.mu.Lock()
 	ids := make([]string, 0, len(m.instances))

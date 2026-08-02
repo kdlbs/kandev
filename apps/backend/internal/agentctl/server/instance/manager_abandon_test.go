@@ -83,3 +83,55 @@ func TestAbandonPartialInstanceReleasesPort(t *testing.T) {
 	_ = nextListener.Close()
 	mgr.portAlloc.Release(next)
 }
+
+// TestCreateInstanceAbandonsWhenCallerLeavesMidCreation covers a caller that is
+// still waiting when CreateInstance takes the lock and gives up while it works.
+//
+// It asserts the invariant rather than which of the two context checks caught
+// it: whichever fires, no instance may be registered and no port may be lost.
+// Pinning the branch would mean racing the cancellation against tracker
+// startup, and a test that has to win a race to be meaningful is a test that
+// quietly stops being meaningful.
+func TestCreateInstanceAbandonsWhenCallerLeavesMidCreation(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	go func() {
+		<-started
+		cancel()
+	}()
+	close(started)
+
+	resp, err := mgr.CreateInstance(ctx, &CreateRequest{WorkspacePath: t.TempDir()})
+	if err == nil {
+		// The caller can win the race and get a live instance; that is a valid
+		// outcome, and the instance is owned so it is not a leak.
+		if resp == nil {
+			t.Fatal("nil error and nil response")
+		}
+		return
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if resp != nil {
+		t.Errorf("returned response %+v alongside the error", resp)
+	}
+
+	// Teardown is asynchronous by design — it must not run under the creation
+	// mutex — so wait for it before asserting nothing was left behind.
+	mgr.abandonWG.Wait()
+
+	mgr.mu.RLock()
+	live := len(mgr.instances)
+	mgr.mu.RUnlock()
+	if live != 0 {
+		t.Errorf("registered %d instances for a caller that had gone, want 0", live)
+	}
+}
