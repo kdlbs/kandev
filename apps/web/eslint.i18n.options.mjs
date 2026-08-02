@@ -297,4 +297,28 @@ export const i18nGuardFiles = [
   "components/github/my-github/search-bar.tsx",
   "components/github/my-github/use-default-query-presets.ts",
   "components/github/repo-filter-selector.tsx",
+  // Settings → Integrations → GitLab: the page and the settings subtree of
+  // `components/gitlab` — the connection card, the quick-action presets, the
+  // review/issue watch sections, and the shared watch dialog, watch table and
+  // delete-confirmation they render through. The merge-request task surface
+  // (`mr-*`), `my-gitlab/**` and the task/quick-launcher components live in the
+  // same directory and are NOT migrated, which is why this is a file list rather
+  // than `components/gitlab/**`.
+  //
+  // `watch-form.ts` holds no JSX, so `mode: "jsx-only"` never inspects it; the
+  // entry records that it is migrated (its two default prompt templates are
+  // deliberately untranslated, being persisted and sent to the agent verbatim),
+  // and only the pseudo-locale can prove it stays that way.
+  "app/settings/integrations/gitlab/**/*.{ts,tsx}",
+  "components/gitlab/action-presets-section.tsx",
+  "components/gitlab/delete-watch-dialog.tsx",
+  "components/gitlab/gitlab-settings.tsx",
+  "components/gitlab/issue-watch-dialog.tsx",
+  "components/gitlab/issue-watch-table.tsx",
+  "components/gitlab/review-watch-dialog.tsx",
+  "components/gitlab/review-watch-table.tsx",
+  "components/gitlab/watch-dialog.tsx",
+  "components/gitlab/watch-form.ts",
+  "components/gitlab/watch-settings.tsx",
+  "components/gitlab/watch-table.tsx",
 ];

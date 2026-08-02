@@ -17,6 +17,7 @@ import { IssueWatchTable } from "./issue-watch-table";
 import { ReviewWatchDialog } from "./review-watch-dialog";
 import { ReviewWatchTable } from "./review-watch-table";
 import { DeleteWatchDialog } from "./delete-watch-dialog";
+import { useTranslation } from "react-i18next";
 
 type ReviewWatches = ReturnType<typeof useGitLabReviewWatches>;
 type IssueWatches = ReturnType<typeof useGitLabIssueWatches>;
@@ -36,6 +37,7 @@ function ActionError({ message }: { message: string }) {
 }
 
 function NewWatchButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <Button
       size="sm"
@@ -43,7 +45,7 @@ function NewWatchButton({ onClick }: { onClick: () => void }) {
       className="min-h-11 w-full cursor-pointer sm:min-h-8 sm:w-auto"
     >
       <IconPlus className="mr-1 h-4 w-4" />
-      New watch
+      {t("gitlab:newWatch")}
     </Button>
   );
 }
@@ -53,6 +55,7 @@ function useReviewActions(
   workspaceId: string,
   setError: (message: string) => void,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const run = useCallback(
     async (watch: ReviewWatch) => {
@@ -61,28 +64,28 @@ function useReviewActions(
         const result = await watches.trigger(watch.id, watch.workspace_id);
         toast({
           description: result.count
-            ? `Found ${result.count} matching merge request(s)`
-            : "No new merge requests matched",
+            ? t("gitlab:foundMatchingMergeRequests", { count: result.count })
+            : t("gitlab:noNewMergeRequestsMatched"),
           variant: "success",
         });
       } catch (error) {
-        setError(errorMessage(error, "Review watch check failed"));
+        setError(errorMessage(error, t("gitlab:reviewWatchCheckFailed")));
       }
     },
-    [setError, toast, watches],
+    [setError, t, toast, watches],
   );
   const remove = useCallback(
     async (watch: ReviewWatch) => {
       setError("");
       try {
         await watches.remove(watch.id, watch.workspace_id);
-        toast({ description: "Review watch deleted", variant: "success" });
+        toast({ description: t("gitlab:reviewWatchDeleted"), variant: "success" });
       } catch (error) {
-        setError(errorMessage(error, "Review watch deletion failed"));
+        setError(errorMessage(error, t("gitlab:reviewWatchDeletionFailed")));
         throw error;
       }
     },
-    [setError, toast, watches],
+    [setError, t, toast, watches],
   );
   const reset = useWatchResetController<ReviewWatch>({
     preview: (watch) => watches.previewReset(watch.id, watch.workspace_id),
@@ -91,11 +94,11 @@ function useReviewActions(
       try {
         const result = await watches.reset(watch.id, watch.workspace_id);
         toast({
-          description: `Review watch reset; ${result.tasksDeleted} task(s) deleted`,
+          description: t("gitlab:reviewWatchReset", { count: result.tasksDeleted }),
           variant: "success",
         });
       } catch (error) {
-        setError(errorMessage(error, "Review watch reset failed"));
+        setError(errorMessage(error, t("gitlab:reviewWatchResetFailed")));
         throw error;
       }
     },
@@ -105,26 +108,26 @@ function useReviewActions(
       setError("");
       try {
         await watches.create(request);
-        toast({ description: "Review watch created", variant: "success" });
+        toast({ description: t("gitlab:reviewWatchCreated"), variant: "success" });
       } catch (error) {
-        setError(errorMessage(error, "Review watch creation failed"));
+        setError(errorMessage(error, t("gitlab:reviewWatchCreationFailed")));
         throw error;
       }
     },
-    [setError, toast, watches],
+    [setError, t, toast, watches],
   );
   const update = useCallback(
     async (id: string, request: Parameters<ReviewWatches["update"]>[1]) => {
       setError("");
       try {
         await watches.update(id, request, workspaceId);
-        toast({ description: "Review watch updated", variant: "success" });
+        toast({ description: t("gitlab:reviewWatchUpdated"), variant: "success" });
       } catch (error) {
-        setError(errorMessage(error, "Review watch update failed"));
+        setError(errorMessage(error, t("gitlab:reviewWatchUpdateFailed")));
         throw error;
       }
     },
-    [setError, toast, watches, workspaceId],
+    [setError, t, toast, watches, workspaceId],
   );
   return { run, remove, reset, create, update };
 }
@@ -138,6 +141,7 @@ function ReviewDialogs(props: {
   setDeleting: (watch: ReviewWatch | null) => void;
   actions: ReturnType<typeof useReviewActions>;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <ReviewWatchDialog
@@ -153,7 +157,7 @@ function ReviewDialogs(props: {
           open
           requirePreviewSuccess
           onOpenChange={props.actions.reset.onOpenChange}
-          integrationLabel="GitLab review watch"
+          integrationLabel={t("gitlab:gitlabReviewWatch")}
           previewLoader={props.actions.reset.previewLoader}
           onConfirm={props.actions.reset.confirmReset}
         />
@@ -164,7 +168,7 @@ function ReviewDialogs(props: {
           onOpenChange={(open) => {
             if (!open) props.setDeleting(null);
           }}
-          watchLabel="GitLab review watch"
+          watchLabel={t("gitlab:gitlabReviewWatch")}
           onConfirm={() => props.actions.remove(props.deleting!)}
         />
       )}
@@ -173,6 +177,7 @@ function ReviewDialogs(props: {
 }
 
 function ReviewWatchSettings({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const watches = useGitLabReviewWatches(workspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<ReviewWatch | null>(null);
@@ -189,8 +194,8 @@ function ReviewWatchSettings({ workspaceId }: { workspaceId: string }) {
   return (
     <SettingsSection
       icon={<IconGitMerge className="h-5 w-5" />}
-      title="Merge request review watches"
-      description="Poll GitLab for merge requests awaiting review and create one task per new match."
+      title={t("gitlab:mergeRequestReviewWatches")}
+      description={t("gitlab:pollGitlabForMergeRequestsAwaiting")}
       action={
         <NewWatchButton
           onClick={() => {
@@ -250,6 +255,7 @@ function useIssueActions(
   workspaceId: string,
   setError: (message: string) => void,
 ) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const run = useCallback(
     async (watch: IssueWatch) => {
@@ -258,28 +264,28 @@ function useIssueActions(
         const result = await watches.trigger(watch.id, watch.workspace_id);
         toast({
           description: result.count
-            ? `Found ${result.count} matching issue(s)`
-            : "No new issues matched",
+            ? t("gitlab:foundMatchingIssues", { count: result.count })
+            : t("gitlab:noNewIssuesMatched"),
           variant: "success",
         });
       } catch (error) {
-        setError(errorMessage(error, "Issue watch check failed"));
+        setError(errorMessage(error, t("gitlab:issueWatchCheckFailed")));
       }
     },
-    [setError, toast, watches],
+    [setError, t, toast, watches],
   );
   const remove = useCallback(
     async (watch: IssueWatch) => {
       setError("");
       try {
         await watches.remove(watch.id, watch.workspace_id);
-        toast({ description: "Issue watch deleted", variant: "success" });
+        toast({ description: t("gitlab:issueWatchDeleted"), variant: "success" });
       } catch (error) {
-        setError(errorMessage(error, "Issue watch deletion failed"));
+        setError(errorMessage(error, t("gitlab:issueWatchDeletionFailed")));
         throw error;
       }
     },
-    [setError, toast, watches],
+    [setError, t, toast, watches],
   );
   const reset = useWatchResetController<IssueWatch>({
     preview: (watch) => watches.previewReset(watch.id, watch.workspace_id),
@@ -288,11 +294,11 @@ function useIssueActions(
       try {
         const result = await watches.reset(watch.id, watch.workspace_id);
         toast({
-          description: `Issue watch reset; ${result.tasksDeleted} task(s) deleted`,
+          description: t("gitlab:issueWatchReset", { count: result.tasksDeleted }),
           variant: "success",
         });
       } catch (error) {
-        setError(errorMessage(error, "Issue watch reset failed"));
+        setError(errorMessage(error, t("gitlab:issueWatchResetFailed")));
         throw error;
       }
     },
@@ -302,26 +308,26 @@ function useIssueActions(
       setError("");
       try {
         await watches.create(request);
-        toast({ description: "Issue watch created", variant: "success" });
+        toast({ description: t("gitlab:issueWatchCreated"), variant: "success" });
       } catch (error) {
-        setError(errorMessage(error, "Issue watch creation failed"));
+        setError(errorMessage(error, t("gitlab:issueWatchCreationFailed")));
         throw error;
       }
     },
-    [setError, toast, watches],
+    [setError, t, toast, watches],
   );
   const update = useCallback(
     async (id: string, request: Parameters<IssueWatches["update"]>[1]) => {
       setError("");
       try {
         await watches.update(id, request, workspaceId);
-        toast({ description: "Issue watch updated", variant: "success" });
+        toast({ description: t("gitlab:issueWatchUpdated"), variant: "success" });
       } catch (error) {
-        setError(errorMessage(error, "Issue watch update failed"));
+        setError(errorMessage(error, t("gitlab:issueWatchUpdateFailed")));
         throw error;
       }
     },
-    [setError, toast, watches, workspaceId],
+    [setError, t, toast, watches, workspaceId],
   );
   return { run, remove, reset, create, update };
 }
@@ -335,6 +341,7 @@ function IssueDialogs(props: {
   setDeleting: (watch: IssueWatch | null) => void;
   actions: ReturnType<typeof useIssueActions>;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <IssueWatchDialog
@@ -350,7 +357,7 @@ function IssueDialogs(props: {
           open
           requirePreviewSuccess
           onOpenChange={props.actions.reset.onOpenChange}
-          integrationLabel="GitLab issue watch"
+          integrationLabel={t("gitlab:gitlabIssueWatch")}
           previewLoader={props.actions.reset.previewLoader}
           onConfirm={props.actions.reset.confirmReset}
         />
@@ -361,7 +368,7 @@ function IssueDialogs(props: {
           onOpenChange={(open) => {
             if (!open) props.setDeleting(null);
           }}
-          watchLabel="GitLab issue watch"
+          watchLabel={t("gitlab:gitlabIssueWatch")}
           onConfirm={() => props.actions.remove(props.deleting!)}
         />
       )}
@@ -370,6 +377,7 @@ function IssueDialogs(props: {
 }
 
 function IssueWatchSettings({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const watches = useGitLabIssueWatches(workspaceId);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<IssueWatch | null>(null);
@@ -386,8 +394,8 @@ function IssueWatchSettings({ workspaceId }: { workspaceId: string }) {
   return (
     <SettingsSection
       icon={<IconTicket className="h-5 w-5" />}
-      title="Issue watches"
-      description="Poll GitLab issues and create one task per new match."
+      title={t("gitlab:issueWatches")}
+      description={t("gitlab:pollGitlabIssuesAndCreateOne")}
       action={
         <NewWatchButton
           onClick={() => {

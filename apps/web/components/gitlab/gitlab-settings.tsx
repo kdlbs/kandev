@@ -30,15 +30,18 @@ import { clearGitLabToken, fetchGitLabStatus, setGitLabConfig } from "@/lib/api/
 import type { GitLabConfig, GitLabStatus } from "@/lib/types/gitlab";
 import { GitLabWatchSettings } from "./watch-settings";
 import { GitLabActionPresetsSection } from "./action-presets-section";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 const DEFAULT_HOST = "https://gitlab.com";
 
 function StatusBadge({ status }: { status: GitLabStatus | null }) {
+  const { t } = useTranslation();
   if (!status) return null;
   if (status.authenticated) {
     return (
       <Badge variant="secondary" className="gap-1">
-        <IconCheck className="h-3 w-3" /> Connected
+        <IconCheck className="h-3 w-3" /> {t("gitlab:connected")}
       </Badge>
     );
   }
@@ -51,7 +54,7 @@ function StatusBadge({ status }: { status: GitLabStatus | null }) {
         variant="outline"
         className="gap-1 border-amber-500/60 text-amber-700 dark:text-amber-300"
       >
-        <IconAlertTriangle className="h-3 w-3" /> Unreachable
+        <IconAlertTriangle className="h-3 w-3" /> {t("gitlab:unreachable")}
       </Badge>
     );
   }
@@ -61,13 +64,13 @@ function StatusBadge({ status }: { status: GitLabStatus | null }) {
         variant="outline"
         className="gap-1 border-amber-500/60 text-amber-700 dark:text-amber-300"
       >
-        <IconAlertTriangle className="h-3 w-3" /> Reconnect required
+        <IconAlertTriangle className="h-3 w-3" /> {t("gitlab:reconnectRequired")}
       </Badge>
     );
   }
   return (
     <Badge variant="outline" className="gap-1">
-      <IconX className="h-3 w-3" /> Not connected
+      <IconX className="h-3 w-3" /> {t("gitlab:notConnected")}
     </Badge>
   );
 }
@@ -77,28 +80,43 @@ function StatusBadge({ status }: { status: GitLabStatus | null }) {
 // of "your token is broken" during an outage. Hidden when the probe succeeded
 // or when no token is configured (nothing to probe).
 function ConnectionErrorAlert({ status }: { status: GitLabStatus | null }) {
+  const { t } = useTranslation();
   if (!status?.connection_error) return null;
   return (
     <Alert variant="destructive">
       <IconAlertTriangle className="h-4 w-4" />
       <AlertDescription className="text-sm">
-        Couldn&apos;t reach <code className="font-mono text-xs">{status.host}</code>:{" "}
-        {status.connection_error}
+        {/* One message rather than a stem plus the host: where the host and the
+            upstream error sit in the sentence is the translator's call. Both are
+            server data, so they travel through `values`. */}
+        <Trans
+          i18nKey="gitlab:couldNotReachHost"
+          values={{ host: status.host, error: status.connection_error }}
+        >
+          Couldn&apos;t reach <code className="font-mono text-xs">{status.host}</code>:{" "}
+          {status.connection_error}
+        </Trans>
         <span className="block text-xs opacity-80 mt-1">
-          Your token may still be valid — this looks like a network or upstream issue.
+          {t("gitlab:yourTokenMayStillBeValid")}
         </span>
       </AlertDescription>
     </Alert>
   );
 }
 
+// The record keys are the wire `auth_method` values the backend sends and must
+// never be translated; only the values are copy. Built inside the component so
+// `t()` runs at render — a module-scope table would freeze at the boot locale.
+// The `?? method` fallback deliberately echoes the raw wire value for a method
+// this build does not know about.
 function AuthMethodBadge({ method }: { method: GitLabStatus["auth_method"] }) {
+  const { t } = useTranslation();
   const labels: Record<GitLabStatus["auth_method"], string> = {
-    glab_cli: "glab CLI",
-    pat: "Personal access token",
-    environment: "Environment token",
-    none: "Not configured",
-    mock: "Mock (test)",
+    glab_cli: t("gitlab:glabCli"),
+    pat: t("gitlab:personalAccessToken"),
+    environment: t("gitlab:environmentToken"),
+    none: t("gitlab:notConfigured"),
+    mock: t("gitlab:mockTest"),
   };
   return <Badge variant="outline">{labels[method] ?? method}</Badge>;
 }
@@ -152,9 +170,11 @@ function isValidGitLabHost(host: string): boolean {
   }
 }
 
-function credentialInvalidReason(validHost: boolean, patNeedsToken: boolean) {
-  if (!validHost) return "Enter a valid HTTP or HTTPS GitLab host URL.";
-  if (patNeedsToken) return "Enter a personal access token to switch to PAT.";
+// `t` is threaded in: this is a plain function, and the guard only inspects JSX,
+// so a literal returned from here would never be reported.
+function credentialInvalidReason(t: TFunction, validHost: boolean, patNeedsToken: boolean) {
+  if (!validHost) return t("gitlab:enterAValidHttpOrHttpsGitlabHost");
+  if (patNeedsToken) return t("gitlab:enterAPersonalAccessTokenToSwitch");
   return undefined;
 }
 
@@ -169,6 +189,7 @@ function useGitLabCredentialDraft({
   onDirtyChange,
   onHostChange,
 }: GitLabCredentialsFormProps) {
+  const { t } = useTranslation();
   const [method, setMethod] = useState(initial);
   const [baseline, setBaseline] = useState(initial);
   const [syncedInitial, setSyncedInitial] = useState(initial);
@@ -199,12 +220,12 @@ function useGitLabCredentialDraft({
       setBaseline(method);
       setHostBaseline(host.trim());
       setToken((current) => (current.trim() === submittedToken ? "" : current));
-      toast({ description: "GitLab authentication method updated", variant: "success" });
+      toast({ description: t("gitlab:gitlabAuthenticationMethodUpdated"), variant: "success" });
       onSaved();
     } catch (error) {
       toast({
         description:
-          error instanceof Error ? error.message : "Failed to update authentication method",
+          error instanceof Error ? error.message : t("gitlab:failedToUpdateAuthenticationMethod"),
         variant: "error",
       });
       throw error;
@@ -217,7 +238,7 @@ function useGitLabCredentialDraft({
     revision: JSON.stringify({ host: host.trim(), method, token }),
     isDirty,
     canSave: validHost && !patNeedsToken,
-    invalidReason: credentialInvalidReason(validHost, patNeedsToken),
+    invalidReason: credentialInvalidReason(t, validHost, patNeedsToken),
     save,
     discard: () => {
       setMethod(baseline);
@@ -235,17 +256,15 @@ function useGitLabCredentialDraft({
 }
 
 export function GitLabCredentialsForm(props: GitLabCredentialsFormProps) {
+  const { t } = useTranslation();
   const draft = useGitLabCredentialDraft(props);
   const [showToken, setShowToken] = useState(false);
   return (
     <div className="space-y-2">
-      <p className="text-xs text-muted-foreground">
-        Choose a workspace PAT, the local glab CLI login, or an environment-provided token. CLI and
-        environment credentials must already be available to the kandev backend.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("gitlab:chooseAWorkspacePatTheLocal")}</p>
       <Select value={draft.method} onValueChange={draft.selectMethod}>
         <SelectTrigger
-          aria-label="Authentication method"
+          aria-label={t("gitlab:authenticationMethod")}
           className="w-full cursor-pointer sm:w-64"
           data-settings-dirty={draft.isDirty}
         >
@@ -253,13 +272,13 @@ export function GitLabCredentialsForm(props: GitLabCredentialsFormProps) {
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="pat" className="cursor-pointer">
-            Personal access token
+            {t("gitlab:personalAccessToken")}
           </SelectItem>
           <SelectItem value="glab_cli" className="cursor-pointer">
-            glab CLI
+            {t("gitlab:glabCli")}
           </SelectItem>
           <SelectItem value="environment" className="cursor-pointer">
-            Environment token
+            {t("gitlab:environmentToken")}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -281,7 +300,7 @@ export function GitLabCredentialsForm(props: GitLabCredentialsFormProps) {
               type="button"
               onClick={() => setShowToken((value) => !value)}
               className="absolute right-2 top-1/2 -translate-y-1/2 cursor-pointer text-muted-foreground hover:text-foreground"
-              aria-label={showToken ? "Hide token" : "Show token"}
+              aria-label={showToken ? t("gitlab:hideToken") : t("gitlab:showToken")}
             >
               {showToken ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
             </button>
@@ -299,6 +318,7 @@ function ClearTokenButton({
   workspaceId: string;
   onCleared: () => void;
 }) {
+  const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const { toast } = useToast();
   return (
@@ -310,11 +330,11 @@ function ClearTokenButton({
         setBusy(true);
         try {
           await clearGitLabToken({ workspaceId });
-          toast({ description: "GitLab token cleared" });
+          toast({ description: t("gitlab:gitlabTokenCleared") });
           onCleared();
         } catch (err) {
           toast({
-            description: err instanceof Error ? err.message : "Failed to clear token",
+            description: err instanceof Error ? err.message : t("gitlab:failedToClearToken"),
             variant: "error",
           });
         } finally {
@@ -324,7 +344,7 @@ function ClearTokenButton({
       className="gap-1 cursor-pointer"
     >
       {busy ? <Spinner className="h-3 w-3" /> : <IconTrash className="h-3 w-3" />}
-      Clear token
+      {t("gitlab:clearToken")}
     </Button>
   );
 }
@@ -380,7 +400,9 @@ function ConnectionStatusRow({ status }: { status: GitLabStatus | null }) {
       </div>
       {status?.username ? (
         <span className="text-xs text-muted-foreground">
-          Logged in as <span className="font-medium">{status.username}</span>
+          <Trans i18nKey="gitlab:loggedInAs" values={{ username: status.username }}>
+            Logged in as <span className="font-medium">{status.username}</span>
+          </Trans>
         </span>
       ) : null}
     </div>
@@ -388,6 +410,7 @@ function ConnectionStatusRow({ status }: { status: GitLabStatus | null }) {
 }
 
 function GitLabConnectionCard(props: ConnectionCardProps) {
+  const { t } = useTranslation();
   const {
     workspaceId,
     status,
@@ -403,7 +426,7 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
   return (
     <SettingsSection
       title="GitLab"
-      description="Connect a GitLab account so kandev can open merge requests, read review discussions, and reply to / resolve them on your behalf."
+      description={t("gitlab:connectAGitlabAccountSoKandev")}
       icon={<IconBrandGitlab className="h-4 w-4" />}
       action={
         <Button
@@ -413,7 +436,7 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
           disabled={loading}
           className="gap-1 cursor-pointer"
         >
-          <IconRefresh className="h-3 w-3" /> Refresh
+          <IconRefresh className="h-3 w-3" /> {t("gitlab:refresh")}
         </Button>
       }
     >
@@ -424,8 +447,7 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
           <Separator />
           <div className="space-y-2">
             <p className="text-xs text-muted-foreground">
-              GitLab host URL. Override for self-managed instances; leave at the default for
-              gitlab.com.
+              {t("gitlab:gitlabHostUrlOverrideForSelf")}
             </p>
             <HostForm
               host={hostDraft}
