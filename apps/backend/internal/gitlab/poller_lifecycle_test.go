@@ -74,6 +74,17 @@ func TestPoller_RunMRLifecycleSync_SyncsSubscribedRowsAndPublishes(t *testing.T)
 	if received[0].TaskID != "task-1" || received[0].ProjectPath != "group/subscribed" {
 		t.Fatalf("unexpected published MR: %+v", received[0])
 	}
+	// The doc comment's "left untouched" claim only holds if nothing evaluated
+	// the unsubscribed row either — verify no checkpoint exists for it, not
+	// just that it didn't publish (a regression could mutate the row silently
+	// without emitting its event).
+	unsubscribedState, err := store.GetTaskMRLifecycleState(ctx, "task-2", "", "group/unsubscribed", 2)
+	if err != nil {
+		t.Fatalf("get unsubscribed lifecycle state: %v", err)
+	}
+	if unsubscribedState != nil {
+		t.Fatalf("expected no checkpoint for the unsubscribed row, got %+v", unsubscribedState)
+	}
 }
 
 // TestPoller_RunMRLifecycleSync_ErrorOnOneRowDoesNotAbortOthers is AC25: a
