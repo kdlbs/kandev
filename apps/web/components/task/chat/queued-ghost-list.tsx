@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -100,6 +101,7 @@ function useQueuePanelHandlers({
   // first click's success refetch removes the row and the second would surface
   // a spurious "not found" error.
   const pendingMerges = useRef(new Set<string>());
+  const { t } = useTranslation();
   const handleSave = useCallback(
     async (entryId: string, content: string, entityReferences: EntityReference[]) => {
       await editEntry(entryId, content, undefined, entityReferences);
@@ -129,11 +131,11 @@ function useQueuePanelHandlers({
         // benign, self-recovering case.
         if (err instanceof QueueEntryNotFoundError) return;
         if (err instanceof MergeReferenceOverflowError) {
-          toast.error("Too many entity references to merge these queued messages.");
+          toast.error(t("chat:mergeReferenceOverflow"));
           return;
         }
         console.error("Failed to merge queued entry:", err);
-        toast.error("Failed to merge queued messages.");
+        toast.error(t("chat:failedToMergeQueuedMessages"));
       } finally {
         pendingMerges.current.delete(entryId);
       }

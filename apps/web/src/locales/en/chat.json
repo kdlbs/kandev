@@ -2,6 +2,8 @@
   "collapseMessage": "Collapse message",
   "editQueuedMessage": "Edit queued message",
   "expandMessage": "Expand message",
+  "failedToMergeQueuedMessages": "Failed to merge queued messages.",
+  "mergeReferenceOverflow": "Too many entity references to merge these queued messages.",
   "mergeWithAbove": "Merge with above",
   "removeQueuedMessage": "Remove queued message"
 }

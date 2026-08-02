@@ -387,12 +387,18 @@ func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID
 		return nil, ErrNoMergeTarget
 	}
 
-	target.Content = joinMergeContent(target.Content, source.Content)
-	target.Attachments = append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
+	// Compute every merged value before mutating the target: mergeEntryMetadata
+	// can reject an over-cap reference union, and the target must stay untouched
+	// on that path so the failed merge is atomic (mirrors the sqlite
+	// repository's build-then-apply ordering).
+	content := joinMergeContent(target.Content, source.Content)
+	attachments := append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
 	metadata, err := mergeEntryMetadata(target.Metadata, source.Metadata)
 	if err != nil {
 		return nil, err
 	}
+	target.Content = content
+	target.Attachments = attachments
 	target.Metadata = metadata
 	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
 	if len(r.entries[sessionID]) == 0 {

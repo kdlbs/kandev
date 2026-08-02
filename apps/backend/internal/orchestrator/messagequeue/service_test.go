@@ -3,6 +3,7 @@ package messagequeue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -798,6 +799,58 @@ func TestMemoryRepository_MergeIntoAbove_MixedKindsRejected(t *testing.T) {
 
 	_, err = repo.MergeIntoAbove(ctx, "s1", "missing", "alice")
 	assert.ErrorIs(t, err, ErrEntryNotFound)
+}
+
+// TestMemoryRepository_MergeIntoAbove_ReferenceOverflow asserts an over-cap
+// reference union is rejected atomically in the in-memory repository: the
+// target's content, attachments, and references must stay untouched so a
+// failed merge does not leave a partially-folded queue behind.
+func TestMemoryRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
+	ctx := context.Background()
+	repo := NewMemoryRepository()
+
+	refs := make([]apiv1.EntityReference, 0, entityrefs.MaxReferencesPerMessage)
+	for i := 0; i < entityrefs.MaxReferencesPerMessage; i++ {
+		refs = append(refs, apiv1.EntityReference{
+			Version:  apiv1.EntityReferenceVersion,
+			Ref:      entityrefs.CanonicalRef("github", "issue", "acme/repo", fmt.Sprintf("%d", i)),
+			Provider: "github",
+			Kind:     "issue",
+			ID:       fmt.Sprintf("%d", i),
+			Title:    "Issue " + fmt.Sprintf("%d", i),
+			URL:      "https://github.com/acme/repo/issues/" + fmt.Sprintf("%d", i),
+			Scope:    "acme/repo",
+		})
+	}
+	target := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "first", QueuedBy: "alice",
+		Attachments: []MessageAttachment{{Type: "image", Data: "a", MimeType: "image/png"}},
+		Metadata:    map[string]interface{}{MetadataEntityReferences: refs},
+	}
+	require.NoError(t, repo.Insert(ctx, target, 0))
+	source := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "second", QueuedBy: "alice",
+		Attachments: []MessageAttachment{{Type: "file", Data: "b", MimeType: "text/plain"}},
+		Metadata: map[string]interface{}{MetadataEntityReferences: []apiv1.EntityReference{
+			{Version: apiv1.EntityReferenceVersion, Ref: entityrefs.CanonicalRef("github", "issue", "acme/repo", "x"), Provider: "github", Kind: "issue", ID: "x", Title: "Issue x", URL: "https://github.com/acme/repo/issues/x", Scope: "acme/repo"},
+		}},
+	}
+	require.NoError(t, repo.Insert(ctx, source, 0))
+
+	_, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "alice")
+	assert.ErrorIs(t, err, ErrMergeReferenceOverflow)
+
+	entries, err := repo.ListBySession(ctx, "s1")
+	require.NoError(t, err)
+	require.Len(t, entries, 2)
+	byID := make(map[string]*QueuedMessage, len(entries))
+	for i := range entries {
+		byID[entries[i].ID] = &entries[i]
+	}
+	assert.Equal(t, "first", byID[target.ID].Content, "target content changed after rejected overflow merge")
+	assert.Len(t, byID[target.ID].Attachments, 1, "target attachments changed after rejected overflow merge")
+	assert.Len(t, entityrefs.NormalizePersisted(byID[target.ID].Metadata[MetadataEntityReferences]), entityrefs.MaxReferencesPerMessage, "target refs changed after rejected overflow merge")
+	assert.Equal(t, "second", byID[source.ID].Content, "source content changed after rejected overflow merge")
 }
 
 // TestService_MergeIntoAbove exercises the service delegation path over the
