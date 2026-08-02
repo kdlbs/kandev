@@ -87,6 +87,7 @@ describe("session.models_updated handler", () => {
             used: 114000,
             remaining: 144400,
             efficiency: 44,
+            compactionCount: 0,
           },
         },
       } as AppState["contextWindow"],
@@ -121,6 +122,7 @@ describe("session.models_updated handler", () => {
             used: 114000,
             remaining: 144400,
             efficiency: 44,
+            compactionCount: 0,
           },
         },
       } as AppState["contextWindow"],
@@ -144,6 +146,7 @@ describe("session.models_updated handler", () => {
       used: 114000,
       remaining: 144400,
       efficiency: 44,
+      compactionCount: 0,
     });
     expect(store.getState().setSessionModels).toHaveBeenCalledWith(
       "session-1",

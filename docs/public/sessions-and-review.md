@@ -119,7 +119,10 @@ Structured shell-command activity keeps the command, working directory, status, 
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
-tokens; it focuses on the active session's context window. For account-wide
+tokens; it focuses on the active session's context window. The hover also shows
+a session compaction count inferred from observed drops in used tokens. ACP does
+not report compaction events, so missing samples or provider resets can make the
+count approximate. For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global

@@ -7,7 +7,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const contextWindowMetadataKey = "context_window"
+const contextWindowMetadataKey = models.SessionMetaKeyContextWindow
 
 // contextWindowWriteGuard serializes context-window metadata writes for one
 // session and advances its generation at each successful agent reset boundary.
@@ -38,7 +38,7 @@ func (s *Service) clearContextWindowForReset(ctx context.Context, sessionID stri
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
 	guard.generation++
-	return s.repo.SetSessionMetadataKey(ctx, sessionID, contextWindowMetadataKey, nil)
+	return s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
 }
 
 // persistContextWindowUpdate stores an update only when it belongs to the
@@ -48,17 +48,18 @@ func (s *Service) persistContextWindowUpdate(
 	sessionID string,
 	generation uint64,
 	contextWindowData map[string]interface{},
-) (bool, error) {
+) (bool, int64, error) {
 	guard := s.contextWindowGuard(sessionID)
 	guard.mu.Lock()
 	defer guard.mu.Unlock()
 	if guard.generation != generation {
-		return false, nil
+		return false, 0, nil
 	}
-	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, contextWindowMetadataKey, contextWindowData); err != nil {
-		return false, err
+	count, err := s.repo.UpdateSessionContextWindow(ctx, sessionID, contextWindowData)
+	if err != nil {
+		return false, 0, err
 	}
-	return true, nil
+	return true, count, nil
 }
 
 func clearInMemoryContextWindow(session *models.TaskSession) {

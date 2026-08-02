@@ -368,16 +368,20 @@ func appendContextWindowMessage(sessionID string, session *models.TaskSession, r
 	if session.Metadata == nil {
 		return result
 	}
-	contextWindow, ok := session.Metadata["context_window"]
+	contextWindow, ok := session.Metadata[models.SessionMetaKeyContextWindow]
 	if !ok {
 		return result
+	}
+	metadata := map[string]interface{}{
+		models.SessionMetaKeyContextWindow: contextWindow,
+	}
+	if count, present := session.Metadata[models.SessionMetaKeyContextCompactionCount]; present {
+		metadata[models.SessionMetaKeyContextCompactionCount] = count
 	}
 	notification, err := ws.NewNotification(ws.ActionSessionStateChanged, map[string]interface{}{
 		"session_id": sessionID,
 		"task_id":    session.TaskID,
-		"metadata": map[string]interface{}{
-			"context_window": contextWindow,
-		},
+		"metadata":   metadata,
 	})
 	if err == nil {
 		result = append(result, notification)

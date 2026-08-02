@@ -741,7 +741,7 @@ func (e *Executor) persistRuntimeModelMetadata(ctx context.Context, sessionID st
 			zap.Error(err))
 		return
 	}
-	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+	if err := e.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyContextWindow, nil); err != nil {
 		e.logger.Warn("failed to clear context window after model switch",
 			zap.String("session_id", sessionID),
 			zap.String("model", modelID),

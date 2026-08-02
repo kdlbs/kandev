@@ -2629,7 +2629,7 @@ func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sess
 		s.runtimeModelBySession.Store(sessionID, cfg.Model)
 	}
 	if cfg.Model != "" && cfg.Model != previousModel {
-		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, "context_window", nil); err != nil {
+		if err := s.repo.SetSessionMetadataKey(writeCtx, sessionID, models.SessionMetaKeyContextWindow, nil); err != nil {
 			s.logger.Warn("failed to clear stale context window after runtime model change",
 				zap.String("session_id", sessionID),
 				zap.String("previous_model", previousModel),

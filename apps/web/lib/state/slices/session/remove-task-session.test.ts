@@ -33,7 +33,13 @@ describe("removeTaskSession cleanup cascade", () => {
     const s = store.getState();
     s.registerSessionEnvironment(SESSION_ID, "env-1");
     s.appendShellOutput(SESSION_ID, "shell output");
-    s.setContextWindow(SESSION_ID, { size: 1, used: 1, remaining: 0, efficiency: 1 });
+    s.setContextWindow(SESSION_ID, {
+      size: 1,
+      used: 1,
+      remaining: 0,
+      efficiency: 1,
+      compactionCount: 0,
+    });
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     s.addMessage({ id: "m1", session_id: SESSION_ID, role: "user", content: "hi" } as any);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

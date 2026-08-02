@@ -291,6 +291,46 @@ func TestPostgresSetSessionMetadataKeyIfAbsentIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestPostgresUpdateSessionContextWindowCountsStrictUsageDrops(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`), "task-context-count-pg", "ws-context-count-pg", "Context count", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-context-count-pg", TaskID: "task-context-count-pg", State: models.TaskSessionStateWaitingForInput,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	count, err := repo.UpdateSessionContextWindow(ctx, "session-context-count-pg", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000),
+	})
+	if err != nil || count != 0 {
+		t.Fatalf("first context update = (%d, %v), want (0, nil)", count, err)
+	}
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count-pg", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("decreased context update = (%d, %v), want (1, nil)", count, err)
+	}
+	count, err = repo.UpdateSessionContextWindow(ctx, "session-context-count-pg", map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	if err != nil || count != 1 {
+		t.Fatalf("duplicate context update = (%d, %v), want (1, nil)", count, err)
+	}
+}
+
 func TestPostgresSkipsLegacyTaskEnvironmentBackfill(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo, err := NewWithDB(db, db, nil)

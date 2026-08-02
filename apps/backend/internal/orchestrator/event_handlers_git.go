@@ -384,7 +384,7 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 	generation uint64,
 	contextWindowData map[string]interface{},
 ) (bool, error) {
-	persisted, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
+	persisted, count, err := s.persistContextWindowUpdate(ctx, sessionID, generation, contextWindowData)
 	if !persisted || err != nil || s.eventBus == nil {
 		return persisted, err
 	}
@@ -395,7 +395,8 @@ func (s *Service) persistAndPublishContextWindowUpdate(
 			"task_id":    taskID,
 			"session_id": sessionID,
 			"metadata": map[string]interface{}{
-				contextWindowMetadataKey: contextWindowData,
+				contextWindowMetadataKey:                    contextWindowData,
+				models.SessionMetaKeyContextCompactionCount: count,
 			},
 		},
 	))
