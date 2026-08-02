@@ -32,6 +32,24 @@ type replaceableNotificationKey struct {
 	messageID string
 }
 
+type queuedReplaceableKey struct {
+	replaceableNotificationKey
+	sequence uint64
+}
+
+type notificationQueueItemKind uint8
+
+const (
+	replaceableQueueItem notificationQueueItemKind = iota
+	semanticQueueItem
+)
+
+type sessionNotificationQueueItem struct {
+	kind  notificationQueueItemKind
+	key   queuedReplaceableKey
+	frame outboundNotification
+}
+
 func (n outboundNotification) replaceableKey() (replaceableNotificationKey, bool) {
 	if n.action != ws.ActionSessionMessageUpdated || n.sessionID == "" || n.messageID == "" {
 		return replaceableNotificationKey{}, false
@@ -71,13 +89,13 @@ func newOutboundNotification(data []byte, action string) outboundNotification {
 
 func (c *Client) ensureNotificationSchedulerLocked() {
 	if c.replaceableByKey == nil {
-		c.replaceableByKey = make(map[replaceableNotificationKey]outboundNotification)
+		c.replaceableByKey = make(map[queuedReplaceableKey]outboundNotification)
 	}
 	if c.replaceableBySession == nil {
-		c.replaceableBySession = make(map[string][]replaceableNotificationKey)
+		c.replaceableBySession = make(map[string][]sessionNotificationQueueItem)
 	}
-	if c.deferredSemantic == nil {
-		c.deferredSemantic = make(map[string][]outboundNotification)
+	if c.replaceableCurrentByKey == nil {
+		c.replaceableCurrentByKey = make(map[replaceableNotificationKey]queuedReplaceableKey)
 	}
 	if c.notificationWake == nil {
 		c.notificationWake = make(chan struct{}, 1)
@@ -104,30 +122,25 @@ func (c *Client) enqueueNotification(frame outboundNotification) bool {
 	}
 
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.closed || c.send == nil {
+		c.mu.Unlock()
 		return false
 	}
 	c.ensureNotificationSchedulerLocked()
 	if frame.sessionID != "" && len(c.replaceableBySession[frame.sessionID]) > 0 {
-		return c.deferSemanticLocked(frame)
+		accepted := c.enqueueSemanticBarrierLocked(frame)
+		c.mu.Unlock()
+		if accepted {
+			c.signalNotificationWake()
+		}
+		return accepted
 	}
-	return c.enqueueSemanticLocked(frame.data)
+	accepted := c.enqueueSemanticLocked(frame.data)
+	c.mu.Unlock()
+	return accepted
 }
 
 func (c *Client) enqueueSemanticLocked(data []byte) bool {
-	c.drainReadySemanticLocked()
-	if len(c.readySemantic) > 0 {
-		if len(c.readySemantic) >= cap(c.send) {
-			c.droppedSemantic++
-			if c.logger != nil {
-				c.logger.Warn("Client semantic queue full; dropping notification")
-			}
-			return false
-		}
-		c.readySemantic = append(c.readySemantic, outboundNotification{data: data})
-		return true
-	}
 	if c.send == nil {
 		c.droppedSemantic++
 		return false
@@ -144,8 +157,8 @@ func (c *Client) enqueueSemanticLocked(data []byte) bool {
 	}
 }
 
-func (c *Client) deferSemanticLocked(frame outboundNotification) bool {
-	if c.deferredSemanticCountLocked() >= cap(c.send) {
+func (c *Client) enqueueSemanticBarrierLocked(frame outboundNotification) bool {
+	if c.scheduledSemantic >= cap(c.send) {
 		c.droppedSemantic++
 		if c.logger != nil {
 			c.logger.Warn("Client semantic queue full; dropping notification",
@@ -154,39 +167,24 @@ func (c *Client) deferSemanticLocked(frame outboundNotification) bool {
 		}
 		return false
 	}
-	c.deferredSemantic[frame.sessionID] = append(c.deferredSemantic[frame.sessionID], frame)
+	c.replaceableBySession[frame.sessionID] = append(
+		c.replaceableBySession[frame.sessionID],
+		sessionNotificationQueueItem{kind: semanticQueueItem, frame: frame},
+	)
+	c.scheduledSemantic++
+	c.clearCurrentReplaceableKeysLocked(frame.sessionID)
+	if !slices.Contains(c.replaceableSessionOrder, frame.sessionID) {
+		c.replaceableSessionOrder = append(c.replaceableSessionOrder, frame.sessionID)
+	}
 	return true
 }
 
-func (c *Client) deferredSemanticCountLocked() int {
-	total := 0
-	for _, frames := range c.deferredSemantic {
-		total += len(frames)
-	}
-	return total + len(c.readySemantic)
-}
-
-func (c *Client) drainReadySemanticLocked() {
-	if c.closed || c.send == nil {
-		return
-	}
-	for len(c.readySemantic) > 0 {
-		select {
-		case c.send <- c.readySemantic[0].data:
-			c.readySemantic = c.readySemantic[1:]
-		default:
-			return
+func (c *Client) clearCurrentReplaceableKeysLocked(sessionID string) {
+	for key := range c.replaceableCurrentByKey {
+		if key.sessionID == sessionID {
+			delete(c.replaceableCurrentByKey, key)
 		}
 	}
-}
-
-func (c *Client) flushReadySemantic() bool {
-	c.mu.Lock()
-	before := len(c.readySemantic)
-	c.drainReadySemanticLocked()
-	flushed := before != len(c.readySemantic)
-	c.mu.Unlock()
-	return flushed
 }
 
 func (c *Client) enqueueReplaceable(frame outboundNotification, key replaceableNotificationKey) bool {
@@ -196,10 +194,10 @@ func (c *Client) enqueueReplaceable(frame outboundNotification, key replaceableN
 		return false
 	}
 	c.ensureNotificationSchedulerLocked()
-	if _, exists := c.replaceableByKey[key]; exists {
-		// Keep the key in its original queue position: a full-state update is
-		// replaceable, but it must not overtake a later semantic barrier.
-		c.replaceableByKey[key] = frame
+	if queuedKey, exists := c.replaceableCurrentByKey[key]; exists {
+		// Keep the key in its current segment position: a full-state update is
+		// replaceable, but it must not cross a semantic barrier.
+		c.replaceableByKey[queuedKey] = frame
 		c.replaceableReplacements++
 		depth := len(c.replaceableByKey)
 		c.mu.Unlock()
@@ -210,25 +208,35 @@ func (c *Client) enqueueReplaceable(frame outboundNotification, key replaceableN
 
 	perSessionLimit, globalLimit := c.replaceableCapacitiesLocked()
 	queue := c.replaceableBySession[frame.sessionID]
-	if len(queue) >= perSessionLimit || len(c.replaceableByKey) >= globalLimit {
+	if c.replaceableSessionDepthLocked(queue) >= perSessionLimit || len(c.replaceableByKey) >= globalLimit {
 		// Only this session's oldest queued replacement may be evicted. If
 		// the global cap is occupied by other sessions, reject this frame.
-		if len(queue) == 0 {
+		if c.replaceableSessionDepthLocked(queue) == 0 {
 			c.replaceableRejected++
 			depth := len(c.replaceableByKey)
 			c.mu.Unlock()
 			c.logReplaceablePressure("rejected", frame, depth)
 			return false
 		}
-		c.removeOldestReplaceableLocked(frame.sessionID)
-		c.replaceableEvictions++
+		if c.removeOldestReplaceableLocked(frame.sessionID) {
+			c.replaceableEvictions++
+		}
 		queue = c.replaceableBySession[frame.sessionID]
 	}
-	c.replaceableByKey[key] = frame
+	c.nextReplaceableSequence++
+	queuedKey := queuedReplaceableKey{
+		replaceableNotificationKey: key,
+		sequence:                   c.nextReplaceableSequence,
+	}
+	c.replaceableByKey[queuedKey] = frame
 	if !slices.Contains(c.replaceableSessionOrder, frame.sessionID) {
 		c.replaceableSessionOrder = append(c.replaceableSessionOrder, frame.sessionID)
 	}
-	c.replaceableBySession[frame.sessionID] = append(queue, key)
+	c.replaceableBySession[frame.sessionID] = append(queue, sessionNotificationQueueItem{
+		kind: replaceableQueueItem,
+		key:  queuedKey,
+	})
+	c.replaceableCurrentByKey[key] = queuedKey
 	depth := len(c.replaceableByKey)
 	c.mu.Unlock()
 	c.logReplaceablePressure("queued", frame, depth)
@@ -248,29 +256,45 @@ func (c *Client) replaceableCapacitiesLocked() (int, int) {
 	return perSessionLimit, globalLimit
 }
 
+func (c *Client) replaceableSessionDepthLocked(queue []sessionNotificationQueueItem) int {
+	depth := 0
+	for _, item := range queue {
+		if item.kind == replaceableQueueItem {
+			depth++
+		}
+	}
+	return depth
+}
+
 func (c *Client) removeOldestReplaceableLocked(sessionID string) bool {
 	queue := c.replaceableBySession[sessionID]
-	if len(queue) == 0 {
-		return false
+	for index, item := range queue {
+		if item.kind != replaceableQueueItem {
+			continue
+		}
+		delete(c.replaceableByKey, item.key)
+		if current, ok := c.replaceableCurrentByKey[item.key.replaceableNotificationKey]; ok && current == item.key {
+			delete(c.replaceableCurrentByKey, item.key.replaceableNotificationKey)
+		}
+		queue = append(queue[:index], queue[index+1:]...)
+		// Keep the session registered in replaceableSessionOrder. The enqueue
+		// caller may immediately add another key for this session; popNextReplaceable
+		// owns removal from the round-robin order after the queue is truly drained.
+		c.replaceableBySession[sessionID] = queue
+		return true
 	}
-	key := queue[0]
-	delete(c.replaceableByKey, key)
-	// Keep the session registered in replaceableSessionOrder. The enqueue
-	// caller may immediately add another key for this session; popNextReplaceable
-	// owns removal from the round-robin order after the queue is truly drained.
-	c.replaceableBySession[sessionID] = queue[1:]
-	return true
+	return false
 }
 
 func (c *Client) hasReplaceable() bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return len(c.replaceableByKey) > 0
+	return len(c.replaceableByKey) > 0 || c.scheduledSemantic > 0
 }
 
-// popNextReplaceable returns one full-state frame using round-robin session
-// scheduling. It also releases semantic barriers after the final replacement
-// for that session has been removed.
+// popNextReplaceable returns one scheduled frame using round-robin session
+// scheduling. Semantic barriers live in the same per-session sequence as
+// replaceable updates, so a later update cannot overtake the barrier.
 func (c *Client) popNextReplaceable() (outboundNotification, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -286,15 +310,26 @@ func (c *Client) popNextReplaceable() (outboundNotification, bool) {
 			continue
 		}
 
-		key := queue[0]
-		frame, ok := c.replaceableByKey[key]
-		delete(c.replaceableByKey, key)
+		item := queue[0]
+		c.replaceableBySession[sessionID] = queue[1:]
+		if item.kind == semanticQueueItem {
+			c.scheduledSemantic--
+			if len(queue) == 1 {
+				c.removeReplaceableSessionLocked(index, sessionID)
+			} else {
+				c.replaceableRoundRobin = (index + 1) % len(c.replaceableSessionOrder)
+			}
+			return item.frame, true
+		}
+
+		frame, ok := c.replaceableByKey[item.key]
+		delete(c.replaceableByKey, item.key)
+		if current, currentOK := c.replaceableCurrentByKey[item.key.replaceableNotificationKey]; currentOK && current == item.key {
+			delete(c.replaceableCurrentByKey, item.key.replaceableNotificationKey)
+		}
 		if len(queue) == 1 {
-			delete(c.replaceableBySession, sessionID)
 			c.removeReplaceableSessionLocked(index, sessionID)
-			c.releaseDeferredSemanticLocked(sessionID)
 		} else {
-			c.replaceableBySession[sessionID] = queue[1:]
 			c.replaceableRoundRobin = (index + 1) % len(c.replaceableSessionOrder)
 		}
 		if !ok {
@@ -307,6 +342,7 @@ func (c *Client) popNextReplaceable() (outboundNotification, bool) {
 
 func (c *Client) removeReplaceableSessionLocked(index int, sessionID string) {
 	delete(c.replaceableBySession, sessionID)
+	c.clearCurrentReplaceableKeysLocked(sessionID)
 	c.replaceableSessionOrder = append(c.replaceableSessionOrder[:index], c.replaceableSessionOrder[index+1:]...)
 	if len(c.replaceableSessionOrder) == 0 {
 		c.replaceableRoundRobin = 0
@@ -317,20 +353,6 @@ func (c *Client) removeReplaceableSessionLocked(index int, sessionID string) {
 	} else {
 		c.replaceableRoundRobin = index
 	}
-}
-
-func (c *Client) releaseDeferredSemanticLocked(sessionID string) {
-	frames := c.deferredSemantic[sessionID]
-	if len(frames) == 0 {
-		delete(c.deferredSemantic, sessionID)
-		return
-	}
-	delete(c.deferredSemantic, sessionID)
-	if c.closed || c.send == nil {
-		return
-	}
-	c.readySemantic = append(c.readySemantic, frames...)
-	c.drainReadySemanticLocked()
 }
 
 func (c *Client) logReplaceablePressure(reason string, frame outboundNotification, depth int) {

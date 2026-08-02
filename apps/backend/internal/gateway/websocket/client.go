@@ -59,12 +59,16 @@ type Client struct {
 
 	// Replaceable session.message.updated traffic is scheduled separately from
 	// semantic notifications so one noisy session cannot fill the shared FIFO.
-	replaceableByKey           map[replaceableNotificationKey]outboundNotification
-	replaceableBySession       map[string][]replaceableNotificationKey
+	// Each session queue contains replaceable segments separated by semantic
+	// barriers. This prevents an update published after a barrier from overtaking
+	// that barrier while still allowing coalescing within the current segment.
+	replaceableByKey           map[queuedReplaceableKey]outboundNotification
+	replaceableBySession       map[string][]sessionNotificationQueueItem
+	replaceableCurrentByKey    map[replaceableNotificationKey]queuedReplaceableKey
 	replaceableSessionOrder    []string
 	replaceableRoundRobin      int
-	deferredSemantic           map[string][]outboundNotification
-	readySemantic              []outboundNotification
+	nextReplaceableSequence    uint64
+	scheduledSemantic          int
 	notificationWake           chan struct{}
 	replaceableReplacements    uint64
 	replaceableEvictions       uint64
@@ -77,22 +81,22 @@ type Client struct {
 // NewClient creates a new WebSocket client
 func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
-		ID:                   id,
-		identity:             identity,
-		conn:                 conn,
-		hub:                  hub,
-		send:                 make(chan []byte, 256),
-		controlSend:          make(chan []byte, controlSendBufferSize),
-		subscriptions:        make(map[string]bool),
-		sessionSubscriptions: make(map[string]bool),
-		sessionFocus:         make(map[string]bool),
-		userSubscriptions:    make(map[string]bool),
-		runSubscriptions:     make(map[string]bool),
-		replaceableByKey:     make(map[replaceableNotificationKey]outboundNotification),
-		replaceableBySession: make(map[string][]replaceableNotificationKey),
-		deferredSemantic:     make(map[string][]outboundNotification),
-		notificationWake:     make(chan struct{}, 1),
-		logger:               log.WithFields(zap.String("client_id", id)),
+		ID:                      id,
+		identity:                identity,
+		conn:                    conn,
+		hub:                     hub,
+		send:                    make(chan []byte, 256),
+		controlSend:             make(chan []byte, controlSendBufferSize),
+		subscriptions:           make(map[string]bool),
+		sessionSubscriptions:    make(map[string]bool),
+		sessionFocus:            make(map[string]bool),
+		userSubscriptions:       make(map[string]bool),
+		runSubscriptions:        make(map[string]bool),
+		replaceableByKey:        make(map[queuedReplaceableKey]outboundNotification),
+		replaceableBySession:    make(map[string][]sessionNotificationQueueItem),
+		replaceableCurrentByKey: make(map[replaceableNotificationKey]queuedReplaceableKey),
+		notificationWake:        make(chan struct{}, 1),
+		logger:                  log.WithFields(zap.String("client_id", id)),
 	}
 }
 
@@ -759,8 +763,6 @@ func (c *Client) closeSendLocked() {
 		default:
 		}
 	}
-	c.deferredSemantic = nil
-	c.readySemantic = nil
 }
 
 // WritePump pumps messages from the hub to the WebSocket connection
@@ -815,9 +817,6 @@ func (c *Client) WritePump() {
 				return
 			}
 		default:
-		}
-		if c.flushReadySemantic() {
-			continue
 		}
 		if controlCh != nil {
 			select {

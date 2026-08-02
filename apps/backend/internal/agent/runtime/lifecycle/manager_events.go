@@ -35,7 +35,6 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 		m.publishProtocolMessage(execution, event.ProtocolMessageID, event.Text)
 		return
 	}
-	m.flushStreamCoalescer(execution)
 	execution.messageMu.Lock()
 	execution.messageBuffer.WriteString(event.Text)
 	bufferLenAfterWrite := execution.messageBuffer.Len()
@@ -72,7 +71,6 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 		m.publishProtocolThinking(execution, event.ProtocolMessageID, event.ReasoningText)
 		return
 	}
-	m.flushStreamCoalescer(execution)
 	execution.messageMu.Lock()
 	execution.thinkingBuffer.WriteString(event.ReasoningText)
 

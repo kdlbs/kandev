@@ -202,6 +202,9 @@ func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution) {
 		return
 	}
 	if messageID != "" {
+		// The final direct append must follow any coalesced legacy chunk that
+		// was already emitted for this record.
+		m.flushStreamCoalescer(execution)
 		m.publishStreamingMessageFinal(execution, messageID, trimmed)
 		return
 	}
@@ -226,6 +229,9 @@ func (m *Manager) flushPendingLegacyThinking(execution *AgentExecution) {
 		return
 	}
 	if messageID != "" {
+		// The final direct append must follow any coalesced legacy chunk that
+		// was already emitted for this record.
+		m.flushStreamCoalescer(execution)
 		m.publishStreamingThinkingFinal(execution, messageID, trimmed)
 		return
 	}

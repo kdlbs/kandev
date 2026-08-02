@@ -38,15 +38,12 @@ func TestClientWritePumpPrioritizesControlAndFairReplaceable(t *testing.T) {
 		t.Fatalf("logger: %v", err)
 	}
 	c := &Client{
-		ID:                   "write-pump-priority",
-		conn:                 serverConn,
-		send:                 make(chan []byte, 16),
-		controlSend:          make(chan []byte, 16),
-		replaceableByKey:     make(map[replaceableNotificationKey]outboundNotification),
-		replaceableBySession: make(map[string][]replaceableNotificationKey),
-		deferredSemantic:     make(map[string][]outboundNotification),
-		notificationWake:     make(chan struct{}, 1),
-		logger:               log,
+		ID:               "write-pump-priority",
+		conn:             serverConn,
+		send:             make(chan []byte, 16),
+		controlSend:      make(chan []byte, 16),
+		notificationWake: make(chan struct{}, 1),
+		logger:           log,
 	}
 	c.controlSend <- []byte("control")
 	for i := 0; i < 9; i++ {

@@ -160,9 +160,12 @@ func TestClient_ReplaceableQueuePreservesPositionAndSemanticBarrier(t *testing.T
 		t.Fatalf("expected latest payload in original position, got %q", payload.Content)
 	}
 
-	barrier := <-c.send
+	barrierFrame, ok := c.popNextReplaceable()
+	if !ok {
+		t.Fatal("expected semantic barrier after replacement")
+	}
 	var barrierMessage ws.Message
-	if err := json.Unmarshal(barrier, &barrierMessage); err != nil {
+	if err := json.Unmarshal(barrierFrame.data, &barrierMessage); err != nil {
 		t.Fatalf("decode semantic barrier: %v", err)
 	}
 	if barrierMessage.Action != ws.ActionSessionMessageDeleted {
@@ -312,21 +315,23 @@ func TestClient_ReplaceableEvictionKeepsSessionOrderUnique(t *testing.T) {
 	}
 }
 
-func TestClient_DeferredSemanticBarrierSurvivesFullQueue(t *testing.T) {
-	c := newTestClient("deferred-semantic")
-	c.send = make(chan []byte, 1)
+func TestClient_SemanticBarrierPartitionsReplacementUpdates(t *testing.T) {
+	c := newTestClient("semantic-barrier-partition")
 
-	message, err := ws.NewNotification(ws.ActionSessionMessageUpdated, map[string]any{
-		"session_id": "session-1", "message_id": "message-1",
-	})
-	if err != nil {
-		t.Fatalf("build update: %v", err)
+	queueUpdate := func(content string) {
+		t.Helper()
+		message, err := ws.NewNotification(ws.ActionSessionMessageUpdated, map[string]any{
+			"session_id": "session-1", "message_id": "message-1", "content": content,
+		})
+		if err != nil {
+			t.Fatalf("build update: %v", err)
+		}
+		data, _ := json.Marshal(message)
+		if !c.sendNotification(data, message.Action) {
+			t.Fatalf("queue update %q", content)
+		}
 	}
-	data, _ := json.Marshal(message)
-	if !c.sendNotification(data, message.Action) {
-		t.Fatal("replaceable update was not queued")
-	}
-	c.send <- []byte("occupied")
+	queueUpdate("before")
 
 	deleted, err := ws.NewNotification(ws.ActionSessionMessageDeleted, map[string]any{
 		"session_id": "session-1", "message_id": "message-1",
@@ -338,27 +343,37 @@ func TestClient_DeferredSemanticBarrierSurvivesFullQueue(t *testing.T) {
 	if !c.sendNotification(deletedData, deleted.Action) {
 		t.Fatal("semantic barrier was not accepted")
 	}
-	if _, ok := c.popNextReplaceable(); !ok {
-		t.Fatal("replaceable update was not drained")
+	queueUpdate("after")
+
+	readAction := func() (string, string) {
+		t.Helper()
+		frame, ok := c.popNextReplaceable()
+		if !ok {
+			t.Fatal("expected scheduled frame")
+		}
+		var message ws.Message
+		if err := json.Unmarshal(frame.data, &message); err != nil {
+			t.Fatalf("decode scheduled frame: %v", err)
+		}
+		var payload struct {
+			Content string `json:"content"`
+		}
+		if len(message.Payload) > 0 {
+			if err := json.Unmarshal(message.Payload, &payload); err != nil {
+				t.Fatalf("decode scheduled payload: %v", err)
+			}
+		}
+		return message.Action, payload.Content
 	}
 
-	c.mu.RLock()
-	pending := c.deferredSemanticCountLocked()
-	c.mu.RUnlock()
-	if pending != 1 {
-		t.Fatalf("deferred semantic barriers = %d, want 1 after a full queue", pending)
+	if action, content := readAction(); action != ws.ActionSessionMessageUpdated || content != "before" {
+		t.Fatalf("first scheduled frame = (%q, %q), want before update", action, content)
 	}
-	<-c.send
-	if !c.flushReadySemantic() {
-		t.Fatal("deferred semantic barrier was not released after capacity opened")
+	if action, _ := readAction(); action != ws.ActionSessionMessageDeleted {
+		t.Fatalf("second scheduled frame = %q, want delete barrier", action)
 	}
-	barrier := <-c.send
-	var got ws.Message
-	if err := json.Unmarshal(barrier, &got); err != nil {
-		t.Fatalf("decode released barrier: %v", err)
-	}
-	if got.Action != ws.ActionSessionMessageDeleted {
-		t.Fatalf("released barrier action = %q, want %q", got.Action, ws.ActionSessionMessageDeleted)
+	if action, content := readAction(); action != ws.ActionSessionMessageUpdated || content != "after" {
+		t.Fatalf("third scheduled frame = (%q, %q), want after update", action, content)
 	}
 }
 

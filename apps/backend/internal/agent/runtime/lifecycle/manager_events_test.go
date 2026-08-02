@@ -416,6 +416,38 @@ func TestHandleAgentEvent_ProtocolThinkingBurstIsCoalescedBeforeCompletion(t *te
 	}
 }
 
+func TestHandleAgentEvent_LegacyNewlineBurstIsCoalescedBeforeCompletion(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	const chunkCount = 20
+	var want strings.Builder
+	for index := 0; index < chunkCount; index++ {
+		text := "legacy chunk\n"
+		want.WriteString(text)
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type: "message_chunk",
+			Text: text,
+		})
+	}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if got := len(messageEvents); got > 2 {
+		t.Fatalf("message publication count = %d, want at most 2 for %d ID-less chunks", got, chunkCount)
+	}
+	var streamed strings.Builder
+	for _, event := range messageEvents {
+		streamed.WriteString(event.Data.Text)
+	}
+	if got := streamed.String(); got != want.String() {
+		t.Fatalf("coalesced legacy content = %q, want exact burst content", got)
+	}
+}
+
 func TestHandleAgentEvent_ProtocolAssistantHistoryPersistedOnceInWireOrder(t *testing.T) {
 	mgr, _ := createTestManagerWithTracking()
 	history, err := NewSessionHistoryManager(t.TempDir(), "", newTestLogger())
