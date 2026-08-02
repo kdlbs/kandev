@@ -70,6 +70,8 @@ Open the workspace GitHub settings. **Workspace automation** offers three connec
 
 A workspace has one active automation connection at a time. Replacing it changes the identity used by repository discovery, watches, background work, and task GitHub access in that workspace only. Disconnecting a CLI connection does not sign the host out of `gh`; disconnecting an App connection removes only the workspace binding and does not uninstall the App from GitHub.
 
+New workspaces created by an operator or an internal trusted flow start with **Inherit executor Git credentials** for task Git access. When the backend host has an authenticated active `gh` account, the new workspace also snapshots that exact host/login as its named GitHub CLI automation connection; Kandev stores the selection, never the CLI token. If `gh` is unavailable or unauthenticated, creation still succeeds with executor inheritance and no automation connection. Authenticated non-admin members receive the executor default but never the operator's host identity.
+
 Workspaces migrated from an older Kandev release may temporarily use a compatibility connection
 named `legacy_shared`. It continues using the deployment's existing authenticated `gh` account,
 `GITHUB_TOKEN`/`GH_TOKEN`, or legacy stored PAT for both GitHub API calls and workspace-isolated
@@ -114,14 +116,15 @@ select **Save changes** once. GitHub App creation, import, and installation rema
 GitHub workflows. The help control beside **Task Git access** explains the effective credential
 path on desktop hover or focus and in a touch-accessible drawer on mobile.
 
-- **Managed workspace credentials** (the default) uses the selected workspace PAT, named GitHub
+- **Managed workspace credentials** (an opt-in policy) uses the selected workspace PAT, named GitHub
   CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
   configures `agentctl` as Git's credential helper so an attached repository can redeem its
   matching lease on demand; the returned credential is not written to the repository or Git
   configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
   PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
   precedence for that task.
-- **Inherit executor Git credentials** does not install Kandev's broker helper or `gh` shim. Local
+- **Inherit executor Git credentials** is the default for newly created workspaces and does not
+  install Kandev's broker helper or `gh` shim. Local
   and Worktree tasks use credentials already visible to the host Git process (including SSH).
   Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
   For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
@@ -252,7 +255,7 @@ it.
 
 ### Upgrade and recovery
 
-Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. New workspaces start disconnected. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
+Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. Existing workspaces and their saved task-access policies are not rewritten by the new-workspace defaults. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
 
 Legacy shared resolution checks an authenticated host `gh` CLI first, then backend `GITHUB_TOKEN`, backend `GH_TOKEN`, and finally the old stored `GITHUB_TOKEN`/`github_token` secret. Those ambient sources are migration compatibility only; configure an explicit workspace connection to make identity and access deterministic.
 

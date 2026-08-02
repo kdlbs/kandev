@@ -141,6 +141,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 		taskSvc.SetPRTaskResolver(githubSvc)
 		githubSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		taskSvc.SetWorkspaceDefaultsInitializer(githubSvc)
+		if err := githubSvc.InitializeFreshWorkspaceDefaults(context.Background()); err != nil {
+			log.Warn("GitHub fresh workspace defaults initialization failed", zap.Error(err))
+		}
 	}
 
 	// Initialize Automation service
