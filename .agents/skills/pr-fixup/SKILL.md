@@ -56,7 +56,7 @@ exact-head review body still contains actionable findings. Classify each body
 as actionable, already addressed, optional, or invalid and record a concrete
 skip reason for anything not acted on before declaring reviews clear.
 Treat `trusted_producer=true` as qualifying provenance only for the dedicated OpenCode App, never merely because a reviewer name matches.
-If `filtered_review_thread_count > unresolved_review_thread_count` or
+If `filtered_review_thread_count < unresolved_review_thread_count` or
 `hidden_unresolved_threads` is non-empty, immediately run
 `scripts/pr-resolve list <PR>` and triage its output. A zero current-head
 unresolved count does not make hidden threads clean.
@@ -215,7 +215,7 @@ non-empty body in `review_evidence.exact_current_head_reviews[]`, even when
 `unresolved_review_thread_count=0` and `scripts/pr-resolve list` is empty.
 Classify current-head summary findings before declaring the PR clean; thread and
 issue-comment counts alone are insufficient.
-Treat `filtered_review_thread_count > unresolved_review_thread_count` or a
+Treat `filtered_review_thread_count < unresolved_review_thread_count` or a
 non-empty `hidden_unresolved_threads` value in that fresh snapshot as a
 mandatory hidden-thread gate: run `scripts/pr-resolve list <PR>` again after
 the refresh and immediately before reporting.
@@ -232,9 +232,11 @@ actionable threads drive code changes. Declare the PR clean only when
 the user's monitoring limit, continue checking after resolutions until automated
 review jobs are terminal; otherwise report the exact pending check names.
 
-If the task has an external Kandev plan, update it after fixup with the
-remediation commit, final exact-head check counts, resolved-thread state, and
-mergeability. For tracked `docs/plans/**` artifacts, record the remediation
+If the user explicitly requested a persistent Kandev plan update and the task
+has an external Kandev plan, update it after fixup with the remediation commit,
+final exact-head check counts, resolved-thread state, and mergeability. Without
+that authorization, report the plan update as pending and do not invoke Kandev
+task or session APIs. For tracked `docs/plans/**` artifacts, record the remediation
 scope and local verification before the final remediation commit; do not make a
 post-fixup plan edit that changes the PR head and invalidates its own exact-head
 snapshot. Report the final exact-head SHA, CI/review counts, and mergeability in

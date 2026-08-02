@@ -37,6 +37,10 @@ Task arrives
 `-- Release/versioning? --------------------> /release
 ```
 
+When runtime-flag work also matches new behavior or validation, compose
+`/runtime-feature-flags` with `/spec-driven-development` and `/tdd` as needed.
+Use the smallest covering set and state the order.
+
 ## Operating Rules
 
 1. Work in the user-started primary conversation; do not create a worker session.

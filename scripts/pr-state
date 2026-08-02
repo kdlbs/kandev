@@ -946,6 +946,55 @@ if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
     add_error "closing_head" "gh api graphql closing head commit failed"
   fi
 fi
+
+# Re-read the base alongside the closing head. The base can advance while
+# reviews and checks are collected, so the initial divergence fields are not a
+# safe final snapshot.
+if [[ -n "$repo_owner" && -n "$repo_name" && -n "$resolved_pr_number" ]]; then
+  if closing_base_context_json="$(fetch_base_ref_json "$repo_owner" "$repo_name" "$resolved_pr_number")"; then
+    closing_base_ref_name="$(jq -r '.base_ref_name // ""' <<<"$closing_base_context_json")"
+    closing_base_head_oid="$(jq -r '.base_head_oid // ""' <<<"$closing_base_context_json")"
+    closing_merge_base_oid=''
+    comparison_head_oid="$closing_head_oid"
+    [[ -n "$comparison_head_oid" ]] || comparison_head_oid="$checks_head_sha"
+    if [[ -n "$closing_base_head_oid" && -n "$comparison_head_oid" ]]; then
+      if closing_merge_base_json="$(fetch_merge_base_json "$repo_owner" "$repo_name" "$closing_base_head_oid" "$comparison_head_oid")"; then
+        closing_merge_base_oid="$(jq -r '.merge_base_oid // ""' <<<"$closing_merge_base_json")"
+      else
+        add_error "closing_merge_base" "gh api compare base and head failed after evidence collection"
+      fi
+    fi
+    base_ref_name="$closing_base_ref_name"
+    base_head_oid="$closing_base_head_oid"
+    merge_base_oid="$closing_merge_base_oid"
+    base_advanced_since_head=null
+    if [[ -n "$base_head_oid" && -n "$merge_base_oid" ]]; then
+      if [[ "$base_head_oid" == "$merge_base_oid" ]]; then
+        base_advanced_since_head=false
+      else
+        base_advanced_since_head=true
+      fi
+    fi
+  else
+    add_error "closing_base" "gh api graphql base ref lookup failed after evidence collection"
+    base_ref_name=''
+    base_head_oid=''
+    merge_base_oid=''
+    base_advanced_since_head=null
+  fi
+  pr_json="$(jq -c \
+    --arg base_ref_name "$base_ref_name" \
+    --arg base_head_oid "$base_head_oid" \
+    --arg merge_base_oid "$merge_base_oid" \
+    --argjson base_advanced_since_head "$base_advanced_since_head" \
+    '. + {
+      base_ref_name: (if $base_ref_name == "" then null else $base_ref_name end),
+      base_head_oid: (if $base_head_oid == "" then null else $base_head_oid end),
+      merge_base_oid: (if $merge_base_oid == "" then null else $merge_base_oid end),
+      base_advanced_since_head: $base_advanced_since_head
+    }' <<<"$pr_json")"
+fi
+
 if [[ -n "$opening_head_oid" && -n "$closing_head_oid" && "$opening_head_oid" != "$closing_head_oid" ]]; then
   add_error "review_evidence" "head changed during evidence collection"
 fi

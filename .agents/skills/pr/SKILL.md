@@ -31,11 +31,10 @@ checks, and push. Ready PR monitoring and remediation continue through
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
 - Default (no flag) — create as ready-for-review and continue with `/pr-fixup` in the same conversation.
 
-**Publishing-state precedence:** `/pr` owns the repository default: an omitted
-flag means ready-for-review. If the `github:yeet` plugin is explicitly selected,
-follow its draft default unless the user explicitly requests a ready-for-review
-PR; do not silently change the state based only on whichever routing skill was
-loaded. Always report the resulting draft or ready state.
+**Publishing-state precedence:** explicit user state (`--draft` or an explicit
+ready-for-review request) wins. If the `github:yeet` plugin is explicitly
+selected, follow its draft default only when the user did not request either
+state; otherwise `/pr` defaults to ready-for-review. Always report the result.
 
 ## Steps
 

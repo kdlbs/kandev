@@ -59,7 +59,7 @@ scripts/pr-resolve list <PR>
 Transport/collection failure leaves checks unknown. Parseable pending/failing
 rows remain usable when `gh pr checks` exits 8; never hide diagnostics in a pipe.
 
-When `filtered_review_thread_count > unresolved_review_thread_count` or
+When `filtered_review_thread_count < unresolved_review_thread_count` or
 `hidden_unresolved_threads` exists, fetch each thread body with
 `scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment command only
 for a comment without thread context. A listed thread that is already resolved
@@ -71,9 +71,11 @@ stop early on a required failure. For an explicit fixed-duration request, use
 strict-deadline mode: accumulate failures and comments until the absolute
 deadline, stopping early only if the PR is merged/closed or access is revoked.
 Queued/in-progress jobs are pending, not speculative-fix triggers. On an
-explicit wait-through-CI request without a fixed deadline, repeat bounded
-checks until failures, pending checks, and unresolved-thread count are all
-empty/zero.
+explicit wait-through-CI request without a fixed deadline, use the same
+20-minute absolute cap: repeat bounded checks until failures, pending checks,
+and unresolved-thread count are all empty/zero, or stop at the deadline and
+report remaining pending checks or unresolved threads. Preserve early stopping
+for failures and merged/closed or access-revoked conditions.
 
 For E2E-only pending work, summarize a saved snapshot before printing shards:
 

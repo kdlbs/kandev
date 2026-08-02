@@ -80,10 +80,14 @@ if [[ "$1" == "repo" && "$2" == "view" ]]; then
 fi
 
 if [[ "$1" == "api" && "$2" == repos/kdlbs/kandev/compare/* ]]; then
+  merge_base="${GH_MERGE_BASE:-base-branch-sha}"
+  if [[ "${GH_BASE_SEQUENCE:-stable}" == "race" && "$2" == *"late-base-head-sha..."* ]]; then
+    merge_base="late-merge-base-sha"
+  fi
   cat <<JSON
 {
   "base_commit": { "sha": "${GH_BASE_HEAD:-base-head-sha}" },
-  "merge_base_commit": { "sha": "${GH_MERGE_BASE:-base-branch-sha}" }
+  "merge_base_commit": { "sha": "$merge_base" }
 }
 JSON
   exit 0
@@ -537,12 +541,20 @@ fi
 
 if [[ "$1" == "api" && "$2" == "graphql" ]]; then
   if [[ "$*" == *"baseRefOid"* && "$*" != *"headRefOid"* ]]; then
+    base_head="${GH_BASE_HEAD:-base-head-sha}"
+    if [[ "${GH_BASE_SEQUENCE:-stable}" == "race" ]]; then
+      if [[ -f "${GH_BASE_COUNTER_FILE:?}" ]]; then
+        base_head="late-base-head-sha"
+      else
+        : >"$GH_BASE_COUNTER_FILE"
+      fi
+    fi
     printf '%s\n' '{
       "data": {
         "repository": {
           "pullRequest": {
             "baseRefName": "main",
-            "baseRefOid": "'"${GH_BASE_HEAD:-base-head-sha}"'"
+            "baseRefOid": "'"$base_head"'"
           }
         }
       }
@@ -1168,11 +1180,12 @@ test_graphql_failure_records_error_but_keeps_other_data() {
   assert_jq "reviews still present on graphql failure" '.reviews | length == 2' "$json"
   assert_jq "review threads empty on graphql failure" '.review_threads == []' "$json"
   assert_jq "unresolved count unknown on graphql failure" '.unresolved_review_thread_count == null' "$json"
-  assert_jq "graphql failure records base, opening, and closing head errors" '.errors | length == 4' "$json"
+  assert_jq "graphql failure records base, opening, and closing errors" '.errors | length == 5' "$json"
   assert_jq "graphql failure records base lookup error" '.errors[] | select(.source == "base") | .message == "gh api graphql base ref lookup failed"' "$json"
   assert_jq "graphql failure records since error" '.errors[] | select(.source == "since") | .message == "gh api graphql head commit failed; including historical comments"' "$json"
   assert_jq "graphql failure records review_threads error" '.errors[] | select(.source == "review_threads") | .message == "gh api graphql reviewThreads failed"' "$json"
   assert_jq "graphql failure records closing head error" '.errors[] | select(.source == "closing_head") | .message == "gh api graphql closing head commit failed"' "$json"
+  assert_jq "graphql failure records closing base error" '.errors[] | select(.source == "closing_base") | .message == "gh api graphql base ref lookup failed after evidence collection"' "$json"
   assert_jq "since fallback includes all historical comments" '.issue_comments | length == 8' "$json"
   pass "graphql failure records error but keeps other data"
 }
@@ -1273,6 +1286,19 @@ test_summary_reports_base_not_advanced_when_head_matches_merge_base() {
 
   assert_jq "summary reports base not advanced" '.pr.base_advanced_since_head == false' "$json"
   pass "summary reports base not advanced when head matches merge base"
+}
+
+test_summary_revalidates_base_at_closing_head() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_BASE_SEQUENCE=race GH_BASE_COUNTER_FILE="$tmp/base-calls" GH_MERGE_BASE=base-head-sha PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary uses closing base ref" '.pr.base_head_oid == "late-base-head-sha" and .pr.merge_base_oid == "late-merge-base-sha" and .pr.base_advanced_since_head == true' "$json"
+  pass "summary revalidates base at closing head"
 }
 
 test_summary_reports_approval_run_fetch_failure() {
@@ -1490,6 +1516,7 @@ test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
 test_summary_reports_current_head_fork_approval_runs
 test_summary_reports_base_not_advanced_when_head_matches_merge_base
+test_summary_revalidates_base_at_closing_head
 test_summary_reports_approval_run_fetch_failure
 test_summary_all_flag_includes_historical_unresolved_threads
 test_job_log_mode_emits_bounded_failure_context

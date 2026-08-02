@@ -28,7 +28,8 @@ minutes" or "then fix up", use strict-deadline mode: calculate and include the
 absolute deadline in the polling prompt, accumulate findings, and do not return
 early for findings, pending checks, or a clean snapshot. Stop early only if the
 PR is merged/closed or access is revoked. At the deadline, return the latest
-pending checks and review findings.
+named pending checks and named actionable review findings, not only aggregate
+CI and review states.
 
 Before the first GitHub request, obtain any runtime network approval required by
 the platform. A denied, cancelled, or interrupted approval is terminal: do not
@@ -39,6 +40,7 @@ Return only:
 ```text
 PR <number> at <head SHA>
 CI: <failed | pending | passed>
-Reviews: <actionable findings | pending | clear>
+Reviews: <actionable findings | pending | clear>; findings: <named findings or none>
+Pending checks: <named checks or none>
 Next action: <one concise recommendation for the primary conversation>
 ```
