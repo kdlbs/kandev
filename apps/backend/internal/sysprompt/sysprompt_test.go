@@ -130,6 +130,9 @@ func TestFormatKandevContext_TitleToolFollowsCapability(t *testing.T) {
 	assert.Contains(t, withTitle, "targeting about 6 words")
 	assert.Contains(t, withTitle, "sentence case")
 	assert.Contains(t, withTitle, "Improve task title casing")
+	assert.Contains(t, withTitle, "short title phrase")
+	assert.Contains(t, withTitle, "progress update")
+	assert.NotContains(t, withTitle, "short noun phrase")
 }
 
 func TestPendingTaskTitlePassthroughInstruction_UsesSentenceCase(t *testing.T) {
@@ -137,6 +140,8 @@ func TestPendingTaskTitlePassthroughInstruction_UsesSentenceCase(t *testing.T) {
 
 	assert.Contains(t, instruction, "sentence case")
 	assert.Contains(t, instruction, "Improve task title casing")
+	assert.Contains(t, instruction, "short title phrase")
+	assert.Contains(t, instruction, "progress update")
 }
 
 func TestFormatKandevContext_IncludesStepCompleteToolWhenRequired(t *testing.T) {

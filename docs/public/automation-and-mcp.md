@@ -173,7 +173,8 @@ Task mode currently registers these tool groups:
 When **Settings → General → Task Actions → Agent-generated task titles** is enabled, a task-mode
 session for a newly created task or subtask also exposes `set_task_title_kandev`. The first session is
 prompted to call it before any other work, even though the task already has a provisional title from
-the prompt. Use a short noun phrase targeting about three words (no more than six when practical).
+the prompt. Use a short title phrase targeting about six words in sentence case rather than a sentence
+or progress update.
 The tool is omitted for ordinary tasks, tasks created while the setting was disabled, config sessions,
 Office sessions, and later sessions after the pending title has been resolved. A human rename wins if
 it happens first; a late agent call returns `title_not_pending` without changing the title.

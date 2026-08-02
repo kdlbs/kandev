@@ -34,8 +34,8 @@ Decision: [ADR-2026-07-31-agent-generated-task-titles](../../decisions/2026-07-3
   agent's title call fails.
 - The first session launched while the title is pending instructs the agent to call
   `set_task_title_kandev` before any other work or tool call, even though the task already has a
-  provisional title. The replacement summarizes the user's request with a target of three words and
-  no more than six words when practical.
+  provisional title. The replacement summarizes the user's request with a target of about six words in
+  sentence case and uses a short title phrase rather than a sentence or progress update.
 - A successful agent title call updates every live task surface through the normal `task.updated`
   event and ends the pending state. Later sessions are not instructed to rename the task again.
 - A user or other ordinary task-title update made while the agent title is pending wins: it ends the
@@ -90,11 +90,11 @@ The tool targets the current task bound to the MCP server. A successful response
 returns `{"accepted": false, "reason": "title_not_pending", "task_id": "..."}` without mutation.
 Blank titles and titles over the existing 500-character limit are validation errors.
 
-The tool description tells the agent to set a short title for the current task before beginning work,
-to target three words (and use no more than six when practical), and to make the call even when the
-existing provisional title appears usable. The `title` argument repeats that guidance. The word counts
-are generation guidance, not server-side rejection thresholds; the existing 500-character limit
-remains the hard validation boundary.
+The tool description tells the agent to set a short title phrase for the current task before beginning
+work, to target about six words in sentence case rather than a sentence or progress update, and to make
+the call even when the existing provisional title appears usable. The `title` argument repeats that
+guidance. The word count is generation guidance, not a server-side rejection threshold; the existing
+500-character limit remains the hard validation boundary.
 
 `set_task_title_kandev` is registered only for a task-mode MCP server launched while the current task
 has `agent_title_pending: true`. Ordinary task-mode sessions, including tasks created while the setting
@@ -150,8 +150,9 @@ eligible first-turn instruction.
   **THEN** creation is blocked with prompt-required guidance and no task is created.
 - **GIVEN** a title-pending task starts a structured task-mode session, **WHEN** Kandev composes its
   first-turn context, **THEN** the agent is told to call `set_task_title_kandev` before any other work,
-  even though a provisional title exists, with a title targeting three words and no more than six when
-  practical, and the session's MCP catalog exposes that tool.
+  even though a provisional title exists, with a short title phrase targeting about six words in
+  sentence case rather than a sentence or progress update, and the session's MCP catalog exposes that
+  tool.
 - **GIVEN** a title-pending task starts a passthrough session, **WHEN** Kandev sends its initial launch
   prompt, **THEN** the equivalent short instruction precedes the user prompt in the native TUI.
 - **GIVEN** the agent follows the tool guidance and calls `set_task_title_kandev` with a valid few-word

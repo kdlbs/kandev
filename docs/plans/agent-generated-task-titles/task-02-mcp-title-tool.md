@@ -15,8 +15,9 @@ spec: "../../specs/tasks/agent-generated-titles.md"
 - `set_task_title_kandev(title)` is discoverable only in the title-pending task-mode variant and is
   absent from ordinary task, Config, Office, and External modes. It targets only the server-bound
   current task and returns the specified success/idempotent responses. Its tool and argument
-  descriptions target three words, request no more than six when practical, and make clear that the
-  agent replaces the provisional title before beginning work.
+  descriptions target about six words in sentence case, use a short title phrase rather than a sentence
+  or progress update, and make clear that the agent replaces the provisional title before beginning
+  work.
 - Every structured first-turn path includes the before-other-work instruction only for pending tasks;
   the instruction repeats the same word-count guidance and says to call despite the provisional title.
   Later sessions and non-pending tasks omit both the instruction and tool schema, and

@@ -95,8 +95,9 @@ The setting is disabled by default. When enabled, new task and subtask dialogs u
 source of the title: the prompt must contain text, and Kandev immediately displays its first six
 normalized words as a provisional title. The first eligible task-mode session receives the
 `set_task_title_kandev` MCP tool and is instructed to call it before doing any other work. Ask for a
-short noun phrase targeting about three words (no more than six when practical). If the agent never
-renames the task, the provisional title remains usable and can still be edited by a person.
+short title phrase targeting about six words in sentence case rather than a sentence or progress update.
+If the agent never renames the task, the provisional title remains usable and can still be edited by a
+person.
 
 The setting affects only new task/subtask creation. Existing task edits keep the title field, and
 sessions for tasks created while the setting was disabled receive neither this instruction nor the

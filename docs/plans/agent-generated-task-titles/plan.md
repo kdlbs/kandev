@@ -63,8 +63,9 @@ prompt composition reads it, and either an agent or human title update clears it
   regular task tools plus `set_task_title_kandev`; regular `ModeTask` and restricted modes omit the new
   tool entirely. Its public schema has one required `title`; the server injects `s.taskID` into the
   internal payload and never accepts a caller-selected task ID. Write both the tool description and
-  `title` argument description to target three words, use no more than six when practical, and clarify
-  that the existing title is provisional and must still be replaced.
+  `title` argument description to target about six words in sentence case and use a short title phrase
+  rather than a sentence or progress update, and clarify that the existing title is provisional and must
+  still be replaced.
 - Extend `resolveTaskSessionMCPMode` in
   `apps/backend/internal/orchestrator/executor/executor_execute.go` to select the title-pending task mode
   from `agent_title_pending`. Config and Office modes win. Thread the new supported mode through the
@@ -82,8 +83,9 @@ prompt composition reads it, and either an agent or human title update clears it
   `set_task_title_kandev` inventory entry and first-call instruction only for title-pending task mode.
 - Extend `sysprompt.KandevContextOptions` in `apps/backend/internal/sysprompt/sysprompt.go` with the
   pending-title capability. The instruction says to call the tool before any other work or tool call,
-  even though a provisional title already exists, and requests a title targeting three words and no
-  more than six when practical. It remains absent when the marker is not true.
+  even though a provisional title already exists, and requests a short title phrase targeting about six
+  words in sentence case rather than a sentence or progress update. It remains absent when the marker is
+  not true.
 - Pass the marker through every first-turn composition path in
   `apps/backend/internal/orchestrator/task_operations.go`,
   `event_handlers_workflow.go`, and
@@ -156,8 +158,8 @@ prompt composition reads it, and either an agent or human title update clears it
 - **What:** ordinary task sessions receive no title prompt/tool schema, while pending-task catalog and
   conditional first-turn instruction stay aligned across direct launch, workflow auto-start,
   message-start, and passthrough. **Files:** MCP server/sysprompt/executor/orchestrator/task handler
-  tests. **How:** regular-versus-pending catalog assertions include the three-word target and six-word
-  practical cap, and captured launch-prompt tests verify the same gating, guidance, and call ordering.
+  tests. **How:** regular-versus-pending catalog assertions include the six-word sentence-case target,
+  and captured launch-prompt tests verify the same gating, guidance, and call ordering.
 - **What:** enabled/disabled UI states produce the correct title visibility, validation, and HTTP
   payload for tasks and subtasks. **Files:** focused `*.test.ts(x)` files beside settings and dialogs.
   **How:** Vitest component/hook tests with mocked API calls.
@@ -183,8 +185,8 @@ prompt composition reads it, and either an agent or human title update clears it
   and manual-rename fallback.
 - Update `docs/public/coordination.md` so subtask title requirements describe both setting states.
 - Update `docs/public/automation-and-mcp.md`, `docs/public/agent-communication.md`, and
-  `docs/public/coverage.json` with the task-bound `set_task_title_kandev` contract, three-word target,
-  six-word practical cap, and mode boundary.
+  `docs/public/coverage.json` with the task-bound `set_task_title_kandev` contract, six-word
+  sentence-case target, and mode boundary.
 - Validate public docs with `node --test scripts/validate-public-docs.test.mjs` and
   `node scripts/validate-public-docs.mjs`.
 

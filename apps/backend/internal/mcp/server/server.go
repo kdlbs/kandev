@@ -1028,7 +1028,7 @@ or doing any other work. The task currently has a provisional title derived from
 the prompt; call this tool even when that provisional title looks usable.
 
 Use a concise title targeting about 6 words.
-Write a short noun phrase, not a sentence or a progress update. Your title should
+Write a short title phrase, not a sentence or a progress update. Your title should
 summarize the requested outcome and will replace the provisional title. Use sentence case:
 capitalize only the first word and proper nouns (for example, "Improve task title casing", not
 "Improve Task Title Casing").`),

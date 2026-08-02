@@ -282,6 +282,14 @@ func TestServerModeTaskTitlePending_RegistersTitleToolOnlyForPendingTaskMode(t *
 	assert.Contains(t, titleTool.Tool.Description, "6 words")
 	assert.Contains(t, titleTool.Tool.Description, "sentence case")
 	assert.Contains(t, titleTool.Tool.Description, "Improve task title casing")
+	assert.Contains(t, titleTool.Tool.Description, "short title phrase")
+	assert.NotContains(t, titleTool.Tool.Description, "short noun phrase")
+
+	titleProperties := toolInputProperties(t, pending, "set_task_title_kandev")
+	titleProperty, ok := titleProperties["title"].(map[string]interface{})
+	require.True(t, ok, "title argument should have a schema property")
+	assert.Contains(t, titleProperty["description"], "targeting about 6 words")
+	assert.Contains(t, titleProperty["description"], "sentence-case")
 
 	ordinary := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	assert.NotContains(t, ordinary.mcpServer.ListTools(), "set_task_title_kandev")
