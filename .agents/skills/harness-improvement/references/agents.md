@@ -11,8 +11,10 @@ not prohibited by this policy.
 
 1. Use a strong model for discovery, specs, plans, task files, and high-risk
    design.
-2. Pause at the completed-plan checkpoint and ask the user to switch the main
-   conversation to a lower-cost implementation/test model.
+2. At the completed-plan checkpoint, return control with a concise handoff. Do
+   not call `ask_user_question_kandev` or ask the user to approve the package or
+   switch models. The user reviews the artifacts, changes the model if desired,
+   and sends a later explicit implementation request.
 3. Execute task files sequentially by default. Plans may label parallel-safe
    waves, but launch native subagents only after the user explicitly asks.
 4. Ask the user to switch back to a strong model only for an architectural,
