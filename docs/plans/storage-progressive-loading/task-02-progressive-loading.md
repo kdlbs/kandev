@@ -27,11 +27,14 @@ rtk pnpm install --frozen-lockfile
 rtk pnpm --filter @kandev/web test -- lib/api/domains/system-api.test.ts lib/state/slices/system/system-slice.test.ts hooks/domains/system/use-storage-maintenance.test.tsx components/settings/system/storage/storage-maintenance-settings.test.tsx components/settings/system/storage/storage-overview-card.test.tsx components/settings/system/storage/storage-run-history.test.tsx components/settings/system/storage/storage-quarantine-card.test.tsx
 ```
 
-From `apps/web`:
+From `apps/`:
 
 ```bash
-rtk pnpm run typecheck
+rtk pnpm --filter @kandev/web run typecheck
 ```
+
+The focused suite and typecheck run from the `apps/` workspace so pnpm resolves the monorepo
+workspace consistently.
 
 ## Files likely touched
 
@@ -84,8 +87,10 @@ blockers/risks, and update this task plus `plan.md` status in the same conversat
   loading/error state and generation guards so stale responses cannot overwrite newer data.
 - Policy save/adoption and quarantine restore now refresh only their affected sections; terminal job
   refreshes still reload all sections for a consistent post-run snapshot.
+- Stale section failures no longer escape newer successful reloads, and Go-cache adoption invalidates
+  in-flight policy reads before committing its response.
 - Rendered independent loading/error cards for policy, history, and quarantine while overview scanning
   remains in progress.
 - RED: API/store focused tests initially failed because the new policy client and setter were absent.
 - GREEN: `rtk pnpm --filter @kandev/web test -- --run lib/api/domains/system-api.test.ts lib/state/slices/system/system-slice.test.ts hooks/domains/system/use-storage-maintenance.test.tsx components/settings/system/storage/storage-maintenance-settings.test.tsx components/settings/system/storage/storage-overview-card.test.tsx components/settings/system/storage/storage-run-history.test.tsx components/settings/system/storage/storage-quarantine-card.test.tsx` — 7 files, 85 tests passed.
-- GREEN: `rtk pnpm run typecheck` from `apps/web` passed.
+- GREEN: `rtk pnpm --filter @kandev/web run typecheck` from `apps` passed.

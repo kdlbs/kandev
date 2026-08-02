@@ -54,11 +54,13 @@ type QuarantineSummary struct {
 type OverviewProvider interface {
 	Summary(context.Context) (Summary, error)
 	Capabilities(context.Context, StorageMaintenanceSettings) Capabilities
+	SettingsCapabilities(StorageMaintenanceSettings) Capabilities
 }
 
 type OverviewReader interface {
 	Get(context.Context) (OverviewSnapshot, error)
 	Capabilities(context.Context, StorageMaintenanceSettings) Capabilities
+	SettingsCapabilities(StorageMaintenanceSettings) Capabilities
 }
 
 type HandlerConfig struct {
@@ -68,6 +70,7 @@ type HandlerConfig struct {
 	Overview          OverviewReader
 	Mutations         Mutations
 	OnSettingsChanged func(StorageMaintenanceSettings)
+	LogError          func(string, error)
 }
 
 type Handler struct {
@@ -76,6 +79,12 @@ type Handler struct {
 
 func NewHandler(config HandlerConfig) *Handler {
 	return &Handler{config: config}
+}
+
+func (h *Handler) logError(message string, err error) {
+	if h.config.LogError != nil {
+		h.config.LogError(message, err)
+	}
 }
 
 func RegisterRoutes(group *gin.RouterGroup, handler *Handler) {
@@ -229,7 +238,8 @@ func writeMutationError(c *gin.Context, err error) {
 func (h *Handler) getStorage(c *gin.Context) {
 	settings, err := h.config.Settings.GetSettings(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		h.logError("failed to load storage settings", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load storage settings"})
 		return
 	}
 	snapshot, err := h.config.Overview.Get(c.Request.Context())
@@ -255,12 +265,13 @@ func (h *Handler) getStorage(c *gin.Context) {
 func (h *Handler) getStorageSettings(c *gin.Context) {
 	settings, err := h.config.Settings.GetSettings(c.Request.Context())
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		h.logError("failed to load storage settings", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load storage settings"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"settings":     settings,
-		"capabilities": h.config.Overview.Capabilities(c.Request.Context(), settings),
+		"capabilities": h.config.Overview.SettingsCapabilities(settings),
 	})
 }
 

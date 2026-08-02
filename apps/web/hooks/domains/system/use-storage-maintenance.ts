@@ -402,8 +402,8 @@ export function useStorageMaintenance() {
             ...current,
             [section]: messageFromError(requestError),
           }));
+          throw requestError;
         }
-        throw requestError;
       } finally {
         if (generation === sectionGenerations.current[section]) {
           setLoading((current) => ({ ...current, [section]: false }));
@@ -434,7 +434,16 @@ export function useStorageMaintenance() {
     },
     [loadSection, setOverview, setPolicy, setQuarantine, setRuns],
   );
-  const actions = useStorageActions(reload, setPolicy);
+  const commitAdoptedPolicy = useCallback(
+    (policy: StoragePolicyResponse) => {
+      sectionGenerations.current.policy += 1;
+      setPolicy(policy);
+      setSectionErrors((current) => ({ ...current, policy: null }));
+      setLoading((current) => ({ ...current, policy: false }));
+    },
+    [setPolicy],
+  );
+  const actions = useStorageActions(reload, commitAdoptedPolicy);
 
   useEffect(() => {
     void reload().catch(() => undefined);

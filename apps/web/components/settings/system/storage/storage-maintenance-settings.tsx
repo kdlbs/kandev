@@ -193,22 +193,25 @@ function policyPendingAction(action: ReturnType<typeof useStorageMaintenance>["p
 }
 
 function policyBlockedReason(
+  t: (key: string) => string,
   action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
   loading: boolean,
 ) {
-  if (action === "adopt") return "Wait for Go cache adoption to finish.";
-  if (loading) return "Wait for storage settings to finish loading.";
+  if (action === "adopt") return t("settings:storageAdoptionPending");
+  if (loading) return t("settings:storagePolicyLoadingBlock");
   return undefined;
 }
 
 function storageActionDisabledReason(
+  t: (key: string) => string,
   action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
 ) {
-  if (action) return "Wait for the current storage action to finish.";
+  if (action) return t("settings:storageActionPending");
   return undefined;
 }
 
 function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenance>) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Settings | null>(null);
   const previousServerSettings = useRef<Settings | null>(null);
   const savedSettings = controller.policy?.settings ?? controller.overview?.settings ?? null;
@@ -229,7 +232,7 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
     previousServerSettings.current = savedSettings;
   }, [savedSettings]);
 
-  const invalidReason = policyBlockedReason(controller.pendingAction, policyLoading);
+  const invalidReason = policyBlockedReason(t, controller.pendingAction, policyLoading);
   useSettingsSaveContributor({
     id: "system:storage-policy",
     revision: serializeSettings(draft),
@@ -371,8 +374,9 @@ function StoragePageSections({
 }
 
 export function StorageMaintenanceSettings() {
+  const { t } = useTranslation();
   const controller = useStorageMaintenance();
-  const actionDisabledReason = storageActionDisabledReason(controller.pendingAction);
+  const actionDisabledReason = storageActionDisabledReason(t, controller.pendingAction);
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">

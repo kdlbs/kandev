@@ -242,3 +242,7 @@ func (emptyStorageOverview) Get(context.Context) (storage.OverviewSnapshot, erro
 func (emptyStorageOverview) Capabilities(context.Context, storage.StorageMaintenanceSettings) storage.Capabilities {
 	return storage.Capabilities{}
 }
+
+func (emptyStorageOverview) SettingsCapabilities(storage.StorageMaintenanceSettings) storage.Capabilities {
+	return storage.Capabilities{}
+}

@@ -455,6 +455,10 @@ func (o *recordingRefreshOverview) Capabilities(context.Context, StorageMaintena
 	return Capabilities{}
 }
 
+func (o *recordingRefreshOverview) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+	return Capabilities{}
+}
+
 func (o *recordingRefreshOverview) Invalidate() {
 	o.invalidateCalls++
 }

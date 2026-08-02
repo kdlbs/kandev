@@ -827,6 +827,7 @@ func startGatewayAndServe(
 	})
 	storageComposition, err := provideStorageComposition(
 		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+		func(message string, err error) { log.Error(message, zap.Error(err)) },
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))

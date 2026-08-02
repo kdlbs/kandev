@@ -78,3 +78,6 @@ evidence, blockers/risks, and update this task plus `plan.md` status in the same
   in 15.9s.
 - GREEN: `rtk pnpm e2e:run --project mobile-chrome tests/system/mobile-storage-maintenance.spec.ts`
   — 4 tests discovered, 4 passed in 10.3s.
+- Retained PR capture artifacts: `storage-maintenance--progressive-loading.png` and
+  `mobile-storage-maintenance--progressive-loading.png`; the managed runners completed teardown
+  after each capture.

@@ -20,7 +20,7 @@ measurement is unavailable. Preserve the existing `GET /storage` response for co
 - In `apps/backend/internal/system/storage/handler.go`, register
   `GET /api/v1/system/storage/settings` beside the existing `PATCH` route.
 - Implement `getSettings` by calling `SettingsManager.GetSettings` and
-  `OverviewReader.Capabilities`; return `{ settings, capabilities }` without calling
+  `OverviewReader.SettingsCapabilities`; return `{ settings, capabilities }` without calling
   `OverviewReader.Get`, `RunLister.ListRuns`, or any analysis provider.
 - Keep `GET /api/v1/system/storage` unchanged so existing clients still receive
   `{ settings, capabilities, summary, analyzed_at, last_run }`.

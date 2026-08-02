@@ -59,6 +59,9 @@ this task plus `plan.md` status in the same conversation.
 - RED: `rtk go test -run TestGetStorageSettingsReturnsPolicyWithoutOverviewScan ./internal/system/storage`
   failed as expected with HTTP 404 before the route existed.
 - GREEN/final: `rtk go test ./internal/system/storage ./internal/system` — 107 tests passed.
-- Added `GET /api/v1/system/storage/settings`; it returns settings and capabilities without calling
-  the scan-backed overview reader. Existing `GET /storage` behavior remains unchanged.
+- Added `GET /api/v1/system/storage/settings`; it returns settings and settings-derived capabilities
+  without calling the scan-backed overview reader or probing Docker. Existing `GET /storage` behavior
+  remains unchanged.
+- Settings-load failures now use a client-safe response while preserving the original error in the
+  server-side logging callback.
 - No external side effects or cleanup required.
