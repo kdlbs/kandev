@@ -41,7 +41,7 @@ If `git ls-files -u` prints entries, or conflict markers are present in tracked 
    the user explicitly authorizes bypassing hooks. If the merge commit fails or
    exits ambiguously, inspect and report the hook result; do not bypass it just
    to finish the conflict resolution.
-3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files.
+3. If conflicts appear, inspect each conflicted file, preserve the intended behavior from both sides, remove all conflict markers, and stage only the resolved files. When the index has conflict stages, inspect the competing versions with `git show :2:<path>` and `git show :3:<path>` (or compare the merge-base, current branch, and base branch versions when stages are unavailable). Compare analogous provider implementations and their tests before choosing behavior, then run the focused test for the conflicted feature.
 4. Confirm the conflict is gone before continuing:
    ```bash
    git ls-files -u

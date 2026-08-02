@@ -150,10 +150,7 @@ replace state verification, installation association, or HMAC verification.
 
 **agentctl client** (`internal/agent/runtime/agentctl/`) is the HTTP/WS client used by the lifecycle manager to talk to a running agentctl instance. It is a runtime-tier package and should not be imported outside `internal/agent/runtime/`.
 
-**Agent discovery vs. ACP probing:** discovery answers only whether an agent
-executable is available. Authentication, protocol compatibility, and supported
-models or modes belong to the ACP probe path; do not reintroduce those checks
-as installation gates.
+**Agent discovery vs. ACP probing:** discovery answers only whether an agent executable is available; authentication, protocol compatibility, and supported models or modes belong to the ACP probe path, not installation gates.
 
 **agentctl** is an HTTP server that:
 - Runs inside Docker containers or as standalone process
@@ -161,10 +158,7 @@ as installation gates.
 - Exposes workspace operations (shell, git, files)
 - Supports multiple concurrent instances on different ports
 
-Standalone agentctl is launched in its own process group so terminal Ctrl+C is
-handled by the backend lifecycle manager first. Do not make standalone agentctl
-share the backend's foreground process group; that bypasses supervised shutdown
-and can leak ACP subprocesses.
+Standalone agentctl is launched in its own process group so terminal Ctrl+C is handled by the backend lifecycle manager first; do not share the backend's foreground group, which bypasses supervised shutdown and can leak ACP subprocesses.
 
 **Executor Types** (database model):
 - `local_pc` - Standalone process on host
@@ -182,6 +176,7 @@ and can leak ACP subprocesses.
 - **Two session paths bypass the task service and must guard themselves.** (1) Handlers that resolve an execution by a bare in-memory lookup (`GetExecutionBySessionID`, `*BySessionID`) skip the `GetOrEnsure*` chokepoint where the lifecycle check runs — call `service.AuthorizeSessionAccess` (see `ProcessHandlers.denySessionAccess`) or `lifecycleMgr.CheckSessionAccess` first. (2) The orchestrator reads sessions through its own repo handle, so it inherits nothing from the task service; session-keyed entry points there call `authorizeSession` / `authorizeTask`, wired by `SetSessionAccessChecker` / `SetTaskAccessChecker`. An entry point that accepts **both** a task and a session ID must use `authorizeTaskSessionPair`, never `authorizeSession` alone: the caller can satisfy a session-only check with one of their own sessions while pointing `taskID` at someone else's task, which the method then uses for its task-scoped work. Put the guard **first** in the method, before any repo/executor/agent-manager use — `TestSessionKeyedEntryPointsGuardBeforeDependencies` runs each entry point with nil dependencies and fails on a panic if a guard is placed too late.
 - **Dispatched WS actions have a gateway backstop.** `Client.authorizeAction` (`internal/gateway/websocket/dispatch_scope.go`) checks any payload carrying `task_id` or `session_id` against the client's identity *before* dispatch, so a newly added action is scoped by default rather than only when its author remembers. Handler-level scoping is still required (defense in depth, and it covers non-WS callers) — do not delete a service-layer check because the backstop exists. The backstop reads `task_id`, `session_id` and `task_environment_id` — keep using those names for task-scoped actions, because an action that invents a new name for the same kind of resource silently opts out. (`user_shell.stop` was exactly that: it keys off `task_environment_id` with `task_id` optional, so a `task_id`-only backstop missed it.) Also avoid permissive types (`any`, `json.RawMessage`) for those fields: a payload that fails to unmarshal into the ref struct is treated as naming nothing.
 - **WS**: clients carry their identity; dispatched actions and subscriptions are scoped; workspace-carrying events route via `Hub.BroadcastToWorkspace`. A new `hub.Broadcast` (global) call site needs a `//ws:global` justification comment.
+- **Task overview vs. session detail:** Cross-task overview state belongs in the persisted, rebuildable `TaskStatusSummary` projection and is delivered through workspace-scoped `task.status_summary.updated`. Summaries are fixed-size, complete replacements with monotonic revisions and publish only on semantic change. Transcript bodies, file names or patches, shell output, model/MCP payloads, and other unbounded session data remain session-scoped and route only to subscribed or focused detail clients. See the [bounded task-status spec](../../docs/specs/platform/bounded-task-status-delivery.md) and [accepted ADR](../../docs/decisions/2026-08-01-separate-task-summary-session-stream-traffic.md) for exact fields.
 - **Self-authenticating webhooks** (automation, office channels, plugin webhooks) and `/health`, `/api/v1/features`, `/api/v1/app-state` stay public — the allowlist lives in `auth/httpmw/middleware.go` with a pinning test.
 
 ## Execution Flow
@@ -219,7 +214,9 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 - **Event-bus wildcard parity:** New NATS wildcard subscriptions must verify equivalent `MemoryEventBus` semantics in `go test ./internal/events/bus`.
 - **Repository provider identity:** Provider-backed repositories are keyed by workspace, provider, normalized `provider_host` origin, full owner/namespace, and name. Persist `provider_host` when importing or resolving a remote; do not infer self-managed GitLab rows from owner/name alone. Legacy rows with an empty host have unknown identity and must fail closed for provider write/link operations.
 - **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).
+- **Generated-title ownership:** Claim generated-title ownership only after task, config, and Office eligibility is known. Config tasks, Office/External modes, and workspace-only preparation (`StartAgent: false`) must never claim it; only an eligible agent-start task may claim the generated title.
 - **Task lifecycle events:** Any code path that mutates a task row must publish via the event bus (`task.created` / `task.updated` / `task.deleted`) — either by going through `Service.CreateTask` / `UpdateTask` / `DeleteTask` / `ArchiveTask`, or by calling `publishTaskEvent` (or one of the `Publish*` helpers in `service_events.go`) directly. Walking `repository.TaskRepository` straight bypasses event publishing and breaks WS-driven UI like the All-Workflows kanban view. `HandoffService`'s cascade methods learned this the hard way — they now require a `TaskEventPublisher` wired via `SetTaskEventPublisher`. New cascade / bulk / cleanup paths must follow the same pattern.
+- **Workspace deletion side tables:** Any workspace-scoped integration side table without a database foreign key/cascade must be deleted explicitly from its `WorkspaceDeleted` handler. Cover the create → delete lifecycle in a test, and include the same cleanup in E2E reset fixtures; do not assume deleting the workspace row removes orphaned integration metadata.
 - **Testing:** Prefer `testing/synctest` (Go 1.24+) over `time.Sleep` for time-dependent tests. Use `synctest.Test` to wrap tests with tickers or timeouts — it advances fake time instantly when all goroutines are idle. When `synctest` is not feasible (e.g., tests spawning external processes like `git`), use channel-based synchronization (`<-started`, non-blocking `select`) instead of sleep-based waits. Reserve `time.Sleep` only for integration tests that need real subprocess execution time.
   - **Test cleanup:** Register `t.Cleanup` immediately after creating resources that need teardown (adapters, `io.Pipe` writers, background goroutines) — before any `t.Fatal`/`t.Fatalf` path. Late cleanup registration leaks pipes and goroutines on early failure.
   - **Joining production goroutines in tests:** When code spawns untracked goroutines (e.g. `fireWakeup`), don't rely on arbitrary sleeps. Join via an observable side effect — e.g. block on `EventTypeComplete` from `a.updatesCh` after unblocking the fake agent. Use short timeouts (~100ms) for in-process negative assertions; reserve multi-second waits for subprocess/integration tests only.
@@ -230,6 +227,7 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
     `GIT_CONFIG_KEY_n`, and `GIT_CONFIG_VALUE_n`, clear every inherited indexed
     key first and restore it with `t.Cleanup`. Changing only the count can leave
     higher parent indexes behind and create a malformed Git config block.
+  - **Derived environment contracts:** Drive derived values through the production producer/wiring seam instead of manually seeding keys; pair consumer/process coverage with a producer-boundary assertion so missing publication fails.
   - **Full test output:** For local full-suite pass/fail validation, prefer plain `go test -race ./...`. `go test -json ./...` can emit very large JSONL streams; if a wrapper or tracing tool truncates the stream mid-record, downstream JSON parsing may fail even when Go tests passed. Use JSON output mainly for CI artifacts or test-report tooling that explicitly requires it.
   - **Private executable helpers:** When library code starts `os.Executable()` in
     a private helper mode, do not rely only on a command package's dispatch or
@@ -276,6 +274,7 @@ Built-in prompt content refreshes are seed-data migrations, not schema migration
 `internal/i18n` renders only browser-facing copy: SPA-unavailable pages and shared-task artifacts. Diagnostics, logs, agent/ACP output, and CLI output remain English.
 Use `i18n.T`/`i18n.Tf` with explicit locale threading (including interpolation/plurals); resolve artifact locale at creation. Catalogs are embedded in `internal/i18n/locales/`; regenerate `pseudo` with `pnpm run i18n:pseudo`.
 Prefer stable error codes for new output so the frontend translates it. See `docs/i18n.md` and ADR `2026-08-01-share-artifact-locale.md`.
+**Table-rebuild migrations:** When a legacy or constraint migration recreates a table, mirror every new column in the replacement `CREATE TABLE` and `INSERT ... SELECT` copy list; add a replay regression test proving values, including timestamps, survive.
 
 ## Code-quality limits
 

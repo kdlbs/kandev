@@ -31,6 +31,12 @@ checks, and push. Ready PR monitoring and remediation continue through
 - `--draft` — create the PR as draft and skip the fixup step. Use when the work is not ready for review.
 - Default (no flag) — create as ready-for-review and continue with `/pr-fixup` in the same conversation.
 
+**Publishing-state precedence:** `/pr` owns the repository default: an omitted
+flag means ready-for-review. If the `github:yeet` plugin is explicitly selected,
+follow its draft default unless the user explicitly requests a ready-for-review
+PR; do not silently change the state based only on whichever routing skill was
+loaded. Always report the resulting draft or ready state.
+
 ## Steps
 
 Track these steps with an internal todo/checklist and mark them complete as you go.
@@ -95,6 +101,13 @@ required screenshot embedding in step 7 is complete.
      treating capture as blocked. Name mobile specs `mobile-*.spec.ts`, write
      assets to ignored `apps/web/.pr-assets`, inspect/compress them, then remove
      the temporary spec and confirm `git status` is clean.
+   - For disposable capture specs, prefer the existing `prCapture` fixture from
+     `apps/web/e2e/fixtures/test-base.ts`; it writes the expected filenames and
+     manifest for PR assets.
+   - `apps/web/e2e/scripts/run-e2e.sh` clears `.pr-assets` at the start of each
+     managed-runner invocation. Capture desktop and mobile assets in one
+     invocation when possible; if separate runs are necessary, preserve/merge
+     the prior assets and revalidate the complete manifest afterward.
    - Reuse only fresh entries from `apps/web/.pr-assets/manifest.json`. After
      every capture, require a non-empty manifest with the intended fresh asset
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or

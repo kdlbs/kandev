@@ -38,9 +38,9 @@ Update these layers in the same change:
    `apps/backend/internal/runtimeflags/registry.go`: key, env var, kind, label,
    description, stability, risk metadata, restart/mutability metadata, typed
    `read`, and typed `apply` functions.
-4. **Backend gates:** gate construction and every enabled-only entry path at
-   the narrow composition boundary. Do not only hide the frontend; direct
-   callers must receive the legacy behavior or a safe rejection.
+4. **Backend gates:** gate construction and every enabled-only entry path at the
+   narrow composition boundary. Do not only hide the frontend; direct callers
+   must receive the legacy behavior or a safe rejection.
 5. **Frontend contract:** add the all-off key to
    `apps/web/lib/state/slices/features/types.ts`. Use `useFeature()` for client
    surfaces and `notFound()` from the relevant server layout/page when a route

@@ -81,6 +81,19 @@ values, and secrets. Always inspect `manifest.json` and its warnings before
 assuming a source is complete, and grep task/session IDs inside the extracted
 ZIP before broadening to route text or timestamps.
 
+**Cancellation intent is separate from event serialization:** A generic
+per-session event-serialization mutex only orders work; it is not evidence
+that cancellation was requested. Model cancellation intent with separate state
+or a refcount, and mark it only around real cancellation operations. During
+concurrency debugging, inspect that state independently before attributing a
+queued or dropped event to cancellation.
+
+**Provider diagnostics:** Raw agent stderr may contain URLs, IDs, subscription
+details, or other sensitive runtime data. Inspect it only in memory, sanitize it
+before writing to generic logs, ring buffers, process-exit errors, persistence,
+or the UI, and ensure bounded diagnostic consumers cannot block subprocess
+stderr draining.
+
 ## Reference Files
 
 Load only the reference needed for the selected path:

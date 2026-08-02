@@ -35,8 +35,26 @@ npx playwright-cli network
 npx playwright-cli goto http://localhost:<your_web_port>/some/path
 ```
 
-Correlate browser console and network activity with a fresh standard bundle or
-the smallest custom source set that answers the question:
+For browser/API failures that may be caused by origin capabilities, capture
+these values in the isolated browser session before attributing the symptom to
+WebSocket or network behavior:
+
+```bash
+npx playwright-cli eval 'JSON.stringify({
+  origin: location.origin,
+  secure_context: window.isSecureContext,
+  random_uuid: typeof crypto === "undefined" ? "undefined" : typeof crypto.randomUUID,
+  subtle: typeof crypto === "undefined" ? "undefined" : typeof crypto.subtle,
+  clipboard_write: typeof navigator === "undefined" || !navigator.clipboard
+    ? "undefined"
+    : typeof navigator.clipboard.writeText,
+})'
+```
+
+Verify the failing code's capability probe and fallback in that same session;
+do not infer support from a different origin or from a test-only stub.
+
+Correlate browser console, frontend log buffer, network activity, and backend logs from:
 
 ```bash
 scripts/kandev-logs <your_backend_port> --source all

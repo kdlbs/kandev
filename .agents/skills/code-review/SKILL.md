@@ -36,14 +36,21 @@ the current PR.
 Record the base and head SHA for each review round. A new contributor push starts
 a new round: reassess prior findings and the verdict against the new head, and
 verify checks or workflow results for that head rather than relying on a PR
-number or author summary.
+number or author summary. From `scripts/pr-state --summary`, also record
+`pr.base_ref_name`, `pr.base_head_oid`, `pr.merge_base_oid`, and
+`pr.base_advanced_since_head` when available.
 
-When the base branch advanced after the reviewed head's CI run, validate the
-actual merge result before declaring the PR ready. Record the latest base and
-immutable head SHAs, create a temporary worktree from that base, merge the head
-with `git merge --no-commit --no-ff <head-sha>`, and run focused verification in
-the merged tree before removing the worktree. GitHub's `mergeable: MERGEABLE`
-status proves conflict compatibility, not that the merged result was tested.
+When `pr.base_advanced_since_head` is `true`, validate the actual merge result
+before declaring the PR ready. Record the latest base and immutable head SHAs,
+create a temporary worktree from that base, merge the head with `git merge
+--no-commit --no-ff <head-sha>`, and run focused verification in the merged tree
+before removing the worktree. GitHub's `mergeable: MERGEABLE` status proves
+conflict compatibility, not that the merged result was tested. If an older
+`pr-state` helper does not expose the base fields, resolve the current base
+head only as a fallback with `gh api
+repos/{owner}/{repo}/git/ref/heads/{base}` and derive/record the merge base
+before making the same decision; do not try the unsupported
+`gh pr view --json baseRefOid` field.
 
 For an existing GitHub PR, inspect both `scripts/pr-state --summary <PR>` and
 `scripts/pr-resolve list <PR>` before treating review feedback as clean. Read

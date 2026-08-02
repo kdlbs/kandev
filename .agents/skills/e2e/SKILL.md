@@ -92,6 +92,8 @@ pnpm e2e:run --project containers tests/docker/<name>.spec.ts
 Use `mobile-chrome` only for `mobile-*.spec.ts` files. Confirm Playwright
 discovers the intended test count before treating a focused command as evidence.
 
+`e2e:run` accepts one `--project`; repeating it selects only the last value, so run desktop and mobile separately when both are required and confirm discovery for each.
+
 The runner solves the sharp edges hand-rolling would hit: in docker it builds the CGO backend on the **host** and runs it in the runtime image (forward-compatible when the host glibc ≤ the image's — the usual case; it smoke-tests this and only falls back to the build image if the host is newer), builds the Vite web assets on the host, runs them through the Go-served SPA, and keeps Playwright output container-local. See `apps/web/e2e/README.md` → "the managed runner".
 
 `--no-build` reuses every production E2E artifact, not only Vite assets and the
@@ -168,7 +170,7 @@ defect with retries disabled, or evidence a concrete external blocker.
 make build-web   # ~30s, required after every frontend change
 ```
 
-Without this, tests run against stale code and failures are misleading. `make build-backend` is also required after Go changes. `make test-e2e` and `pnpm e2e:run` handle both automatically.
+Without this, tests can exercise stale code: after backend changes run `make -C apps/backend build` before reproducing Playwright failures, and compare the binary timestamp/hash if a fixed test still fails. `make test-e2e` and `pnpm e2e:run` handle both builds.
 
 ## Writing a test
 
@@ -480,12 +482,7 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 ## Selector guidelines
 
 - **Prefer `data-testid` selectors** over text-based locators. Text content can change when UI is updated (e.g., hiding a badge), breaking tests that match by text. Use `getByTestId()` or `locator("[data-testid='...']")` for stable targeting.
-- **Scope Radix tooltip locators to the visible portal.** Radix can render an
-  accessibility copy as well as the visible tooltip, so global test-id, text,
-  or role locators may match multiple elements in strict mode. Start from a
-  open portal `[data-slot="tooltip-content"][data-state="open"]`, then locate its visible
-  descendant. Do not assume the trigger's `aria-describedby` target is the
-  visual portal. Use bounding-box assertions when relative placement matters.
+- **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
 - **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
 

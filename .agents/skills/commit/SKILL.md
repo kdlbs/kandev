@@ -94,6 +94,15 @@ explicitly requests task tracking.
      ```
      Retry the normal commit after the install; never bypass the hook.
 
+   - After merging or rebasing the base branch, if `apps/package.json` or
+     `apps/pnpm-lock.yaml` changed and a hook reports
+     `ERR_MODULE_NOT_FOUND` even though `apps/node_modules/.bin/commitlint`
+     exists, refresh the workspace dependencies from `apps/`:
+     ```bash
+     cd apps && pnpm install --frozen-lockfile
+     ```
+     Retry the normal commit without bypassing hooks.
+
    Why this matters: a missing hook lets lint regressions slip past local commits and only surface in CI (e.g. funlen / cognitive complexity on backend Go code). The hook catches them in <1s at commit time. See `Makefile`'s `doctor` target for the idempotent install command.
 
 3. **Capture the parent SHA and preserve hook evidence:**
@@ -111,6 +120,9 @@ qualifies as a successful hook receipt.
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   `rtk git commit` may emit only a condensed `ok <sha>` and hide hook output.
+   When a hook receipt is required, use the `rtk proxy git commit` capture
+   pattern below and report the hook IDs and results.
    Capture the normal hook stream in a temporary log while committing and use
    that log to record each hook ID and result. Do not infer hook results from a
    condensed launcher summary. For example:
