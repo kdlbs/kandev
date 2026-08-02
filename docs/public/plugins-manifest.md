@@ -46,7 +46,7 @@ min_kandev_version: "0.78.0"                 # optional
 capabilities:
   events: ["task.created", "task.state_changed", "agent.completed"]
   api_read: ["tasks", "agent_profiles"]      # gates the Host data-reader RPCs
-  api_write: ["tasks"]                       # reserved, no Host RPC enforces this yet
+  api_write: ["tasks"]                       # gates Tasks().Create/Update
   state: true
   secrets: true
   agent_invoke: true                         # gates Host.InvokeUtilityAgent
@@ -103,7 +103,7 @@ ui:                                           # optional native frontend plugin
 | `min_kandev_version` | no | string | Optional advisory; not currently enforced by the installer. |
 | `capabilities.events` | no | string[] | Bus subjects (or wildcard patterns) this plugin subscribes to. See "Event subscription vocabulary" below. |
 | `capabilities.api_read` | no | string[] | Gates the Host data API's read-only accessors. Each entry is a resource name: `tasks`, `sessions`, `messages`, `workspaces`, `workflows`, `agent_profiles`, `repositories`. Calling the matching `Host` accessor (e.g. `Tasks()`) without its resource declared returns gRPC `PermissionDenied`. See "Host data API resource vocabulary" below. |
-| `capabilities.api_write` | no | string[] | **Reserved for future Host RPCs.** Declared but not enforced by anything today — no Host RPC currently writes kandev's own data. |
+| `capabilities.api_write` | no | string[] | Gates Host data writes. Current resources are `tasks` (`Tasks().Create/Update`) and `messages` (`Messages().Send`); reads and writes are gated independently. |
 | `capabilities.state` | no | bool | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.secrets` | no | bool | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`. |
 | `capabilities.agent_invoke` | no | bool | Gates `Host.InvokeUtilityAgent` — a one-shot completion run by the utility agent selected for this plugin. Declare a `utility_agent` config property with `type: string` and `format: utility-agent`; Settings > Plugins renders the picker. Calling without this capability returns gRPC `PermissionDenied`; calling without a valid enabled selection returns gRPC `FailedPrecondition`. See ADR 0048. |
@@ -115,19 +115,20 @@ ui:                                           # optional native frontend plugin
 | `config_schema` | no | object | JSON-Schema-like object driving the settings form at **Settings > Plugins > `<plugin>`** (`GET /api/plugins/{id}/config` and `PATCH /api/plugins/{id}`). See "Config schema validation and secret fields" below. |
 | `ui.bundle` | no | string | Root-relative path (must start with `/`, e.g. `/ui/bundle.js`) to the plugin's native UI ES module, served at `GET /api/plugins/{id}/bundle`. |
 | `ui.styles` | no | string[] | Root-relative CSS paths (each must start with `/`), served at `GET /api/plugins/{id}/ui/*` and injected as `<link>` tags on load. |
-| `ui.pages` | no | object[] | Optional declarative page metadata. Secondary to `ui.bundle` — a native bundle registers its own routes/nav at runtime, so most plugins omit `ui.pages`. |
+| `ui.pages` | no | object[] | Optional declarative metadata accepted by the manifest model. The current frontend does not render these entries; a native bundle registers its supported routes/nav/slots at runtime, so most plugins omit `ui.pages`. |
 | `ui.pages[].key` | yes* | string | Stable identifier for the page (*required when a page entry is present). |
 | `ui.pages[].title` | yes* | string | Display title. |
 | `ui.pages[].path` | yes* | string | Route path for the page. |
-| `ui.pages[].surface` | yes* | string | Where the page mounts. Enum, one of: `settings` · `task-panel` · `main-nav`. Any other value is a validation error. |
+| `ui.pages[].surface` | yes* | string | Metadata enum (`settings` · `task-panel` · `main-nav`) validated by the manifest parser. It is not a current frontend mount; use the registry hooks in the authoring guide. |
 | `ui.keybindings` | no | object[] | Declares plugin keybindings bound at runtime via `registerKeybinding`. Requires `ui.bundle`. |
 | `ui.keybindings[].id` | yes* | string | Stable, plugin-local slug (*required when a keybinding entry is present). Must match `^[a-z0-9][a-z0-9-]*$` and be unique within this plugin's own `ui.keybindings` list — not globally; the effective shortcut is namespaced `plugin:{pluginId}:{id}`. |
 | `ui.keybindings[].default` | yes* | string | Default combo string. `+`-separated tokens: zero or more modifiers from `mod`, `ctrl`, `cmd`, `meta`, `alt`, `option`, `shift` (`mod` = ⌘ on macOS, Ctrl elsewhere) plus exactly one non-modifier key. `shift` may not combine with a digit or symbol key — the browser reports the shifted glyph for those keys, so the combo could never match. |
 | `ui.keybindings[].description` | yes* | string | Non-empty, human-readable label shown in **Settings > Keyboard Shortcuts**. |
 
-`ui.pages` is declarative manifest metadata only. A native bundle's runtime
-nav items, icons, and per-route title-bar chrome (`registerNavItem`,
-`registerRoute`'s `options.topbar`) are a separate JS SDK surface with no
+`ui.pages` is declarative manifest metadata only and is not currently rendered
+by the frontend. A native bundle's runtime nav items, icons, routes, named
+slots, and per-route title-bar chrome (`registerNavItem`, `registerRoute`, and
+`registerComponent`) are the supported JS SDK surface with no corresponding
 `manifest.yaml` field — see [Authoring a plugin](plugins-authoring.md).
 
 ## Managed vs. legacy manifests
@@ -157,8 +158,10 @@ resource grants the matching `Host` accessor (`Tasks()`, `Sessions()`,
 `Messages()`, `Workspaces()`, `Workflows()`, `AgentProfiles()`,
 `Repositories()` — see [Authoring a plugin](plugins-authoring.md)); calling an
 accessor for an undeclared resource returns gRPC `PermissionDenied`.
-`capabilities.api_write` reserves the same resource names for a future write
-path — no write RPC exists yet, so declaring it currently has no effect.
+`capabilities.api_write` gates the current Host data writes: `tasks` gates
+`Tasks().Create`/`Update`, and `messages` gates `Messages().Send`. A plugin may
+declare a read resource without its write capability, or vice versa. Calling a
+write without the matching declaration returns gRPC `PermissionDenied`.
 
 `messages` reads historical **conversation content** (`Messages().List`):
 one user/agent message per row (`id`, `session_id`, `task_id`, `turn_id`,

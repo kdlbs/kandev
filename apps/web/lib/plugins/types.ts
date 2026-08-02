@@ -71,7 +71,7 @@ export interface PluginRouteOptions {
 
 /**
  * Named slot the host renders via `<PluginSlot name .../>`. Initial slots:
- * "task-sidebar", "settings-nav", "main-nav-footer", "chat-input-actions"
+ * "task-sidebar", "settings-nav", "chat-input-actions"
  * (icon buttons in the chat composer toolbar, beside the model picker / mic /
  * send — receives `{ taskId, taskTitle, activeSessionId, sessionIds }` as
  * `slotProps`), "chat-top-bar" (status in the session top bar, beside the

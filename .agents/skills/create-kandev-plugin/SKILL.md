@@ -9,6 +9,12 @@ Build Kandev runtime plugins from the official template and current public
 contracts. Keep plugin source outside the Kandev monorepo and prove the packaged
 artifact against a disposable development instance before publishing it.
 
+Start with the [canonical plugin authoring guide](../../../docs/public/plugins-authoring.md).
+Use this skill for the repository workflow after choosing a recipe there:
+choose recipe → edit manifest → implement → validate → package → smoke test.
+The guide owns the complete hook/Host matrix; this skill keeps the repository
+and verification procedure concise.
+
 ## Establish The Boundary
 
 1. Invoke this skill only when the user intends to create, change, fix, test,
@@ -95,7 +101,7 @@ Choose the narrowest surface that satisfies the behavior:
 | Store small structured data | Host state | Values are JSON objects keyed by scope and key; there is no transaction or compare-and-swap API. |
 | Store files or use a plugin-managed database | `KANDEV_PLUGIN_DATA_DIR` | The plugin owns schema, locking, migrations, and recovery. |
 | Read Kandev entities | Typed Host readers plus `api_read` | Use opaque pagination cursors and stable SDK DTOs; never query Kandev's database or internal HTTP API. |
-| Mutate Kandev entities | Native host UI commands where available | `api_write` is reserved and SDK write methods are not implemented. A missing mutation requires a separate Host API change. |
+| Mutate Kandev entities | Typed Host writers | `api_write:tasks` gates `Tasks().Create/Update`; `api_write:messages` gates `Messages().Send`. A missing mutation requires a separate Host API change. |
 | Notify another plugin | `Host.EmitEvent` | Events are published as `plugin.<id>.<name>`; keep names and payloads versionable. |
 | Add native interface | UI registry and `host.ui` | Use host-owned React and components so themes, contexts, portals, and mobile behavior remain compatible. |
 
@@ -104,7 +110,7 @@ Choose the narrowest surface that satisfies the behavior:
 Read these sources before designing the plugin:
 
 1. `docs/public/plugins-authoring.md` for the supported backend, Host API,
-   native UI, packaging, install, and iteration workflow.
+   native UI, recipes, packaging, install, and iteration workflow.
 2. `docs/public/plugins-manifest.md` for the authoritative manifest fields,
    capability gates, and event vocabulary.
 3. `docs/public/plugins-marketplace.md` when publishing or updating a catalog
@@ -112,16 +118,61 @@ Read these sources before designing the plugin:
 4. The current `kdlbs/kandev-plugin-template` repository, including its
    `README.md`, `Makefile`, tests, and release workflow.
 
-Prefer the public authoring docs and current template over old examples or
-implementation plans. Read `docs/plans/plugins/GRPC-CONTRACT.md` and
-`docs/plans/plugins/PLUGIN-API.md` only when changing the host contract or when
-the public docs do not answer a low-level compatibility question.
+Prefer the public authoring docs and current template over old examples. The
+frontend contract pair is `docs/plans/plugins/PLUGIN-API.md` plus
+`apps/web/lib/plugins/types.ts`; concrete UI exports are in
+`apps/web/lib/plugins/host-api.ts`. The backend contract is
+`apps/backend/pkg/pluginsdk` plus `apps/backend/proto/kandev/plugin/v1/plugin.proto`.
+Read `docs/plans/plugins/GRPC-CONTRACT.md` when changing the wire contract or
+when the public docs do not answer a low-level compatibility question.
+
+The current frontend branch does not expose `registerTaskPanel`,
+`registerTaskMenuAction`, `host.storage`, `RichTextEditor`,
+`RichTextReadOnly`, or a Kanban-card injection hook. Use the supported slots,
+routes, Host state, and shared store documented in the guide; do not invent
+future signatures.
 
 When debugging a contract discrepancy, verify it at the implementation
 boundary: manifest and package rules live under
 `apps/backend/internal/plugins/manifest` and `pkgtar`; runtime, Host, webhook,
 and delivery behavior live under `apps/backend/internal/plugins`; native UI
 loading and registration live under `apps/web/lib/plugins`.
+
+## When Adding Or Changing A Hook
+
+Treat a new hook, Host method, capability, manifest field, or mounted UI slot as
+a contract change. Do not implement the runtime surface and leave author docs
+for later. In the same change:
+
+1. Update the implementation boundary and its focused tests.
+2. Update the authoritative contract source:
+   - frontend: `docs/plans/plugins/PLUGIN-API.md` plus
+     `apps/web/lib/plugins/types.ts`; update `host-api.ts`, `registry.ts`, or
+     the mounted component when the concrete surface changes;
+   - backend: `apps/backend/pkg/pluginsdk`,
+     `apps/backend/proto/kandev/plugin/v1/plugin.proto`, and the manifest model
+     or validator when applicable; update `docs/plans/plugins/GRPC-CONTRACT.md`
+     for wire-level changes.
+3. Update `docs/public/plugins-authoring.md` in the same change: add the hook to
+   the frontend or backend matrix, document inputs/props, capability and
+   lifecycle/cleanup behavior, and add a copy-pasteable recipe or maintained
+   fixture link. Remove it from the unavailable-API list when it becomes real.
+4. Update `docs/public/plugins-manifest.md` for capability/manifest changes and
+   update `docs/public/plugins.md`, `docs/plugins-example.md`, or the relevant
+   ADR when their claims or links change. Keep the public guide as a summary;
+   never create a second schema or type definition in prose.
+5. Recheck the root/backend/web `AGENTS.md` authority pointers and this skill if
+   the source-of-truth locations or author workflow changed.
+6. Run the focused implementation tests plus
+   `node --test scripts/validate-public-docs.test.mjs`,
+   `node scripts/validate-public-docs.mjs`, and a stale-reference search. Report
+   the exact commands and results.
+
+If a proposed hook is not implemented on the current branch, document it as
+unavailable with the nearest supported recipe; do not publish a speculative
+signature. If the hook is implemented but the matrix, recipe, fixture, or
+authoritative contract is missing, the plugin change is not documentation
+complete.
 
 ## Create A New Repository
 
@@ -188,8 +239,8 @@ request. Do not silently substitute a directory in the Kandev monorepo.
 Run the plugin repository's own formatting, tests, and lint commands first,
 then verify the artifact rather than only the source tree:
 
-1. Build a host-only package with the template's `make package-host` target for
-   the local loop.
+1. Run the plugin repository's tests, vet/lint, and build. Build a host-only
+   package with the template's `make package-host` target for the local loop.
 2. Confirm the archive contains `manifest.yaml`, the current host executable,
    optional UI assets, and the generated internal `checksums.txt`. Never author
    the internal checksum file by hand.
@@ -209,6 +260,12 @@ then verify the artifact rather than only the source tree:
    reinstalling; Kandev rejects reinstalling the same id and version.
 7. Before release, run the repository's full cross-platform package workflow
    and confirm its release asset name is `<id>-<version>.tar.gz`.
+
+There is no standalone exhaustive package checker in this branch. `plugin-pack`
+stages files and generates checksums; install-time `pkgtar.Install` validates the
+manifest, archive safety, checksums, managed runtime, and host executable. These
+checks do not execute plugin code or prove browser/module behavior, so the
+disposable-instance smoke test remains required.
 
 Do not test with a developer's primary instance, database, or credentials.
 Report commands run, artifact name, host platform tested, and any platform or

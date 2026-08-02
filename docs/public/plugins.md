@@ -192,8 +192,8 @@ A plugin can also render its own UI inline on this page — at the top, above th
 settings form — via the `plugin-settings` slot, for example a live
 integration-health card ("CLI installed ✅ v0.45.2", "API token ✅
 authenticated"). This is owner-scoped, so a plugin's card only ever appears on
-its own settings page. See [Named
-slots](plugins-authoring.md#named-slots) in the authoring guide.
+its own settings page. See [supported named
+slots](plugins-authoring.md#supported-named-slots) in the authoring guide.
 
 <details>
 <summary>Package signing, storage, and security details</summary>
@@ -235,8 +235,8 @@ identically to an unsigned one; signing is not required in v1.
   it declared in its manifest: `state` gates the state RPCs, `secrets` gates
   the plugin-owned secret RPCs, and each read-only data accessor (tasks,
   sessions, workspaces, workflows, agent profiles, repositories) is gated
-  individually via `api_read:<resource>` (write access, `api_write:<resource>`,
-  is reserved but not yet implemented). An undeclared capability returns gRPC
+  individually via `api_read:<resource>` and `api_write:<resource>` for the
+  implemented task/message Host writes. An undeclared capability returns gRPC
   `PermissionDenied` with a message naming the missing capability, checked by
   a server interceptor before the handler runs. `GetConfig` and `EmitEvent`
   are the only ungated RPCs — a plugin can always read its own config

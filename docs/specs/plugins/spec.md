@@ -126,8 +126,8 @@ config_schema:
   required: ["bot_token_secret", "default_channel"]
 
 ui:                                            # Native frontend plugin (see "Frontend plugin runtime")
-  bundle: "ui/bundle.js"                       # ES module extracted alongside the package
-  styles: ["ui/plugin.css"]                    # optional stylesheets
+  bundle: "/ui/bundle.js"                      # root-relative ES module path
+  styles: ["/ui/plugin.css"]                   # optional root-relative stylesheets
 
 # Runtime fields managed by kandev (not authored):
 status: "active"
@@ -506,8 +506,8 @@ components, and WebSocket handlers that run inside the kandev frontend (the
 Mattermost-webapp model), not iframes. The full contract lives in
 `docs/plans/plugins/PLUGIN-API.md`; summary:
 
-- **Manifest:** a plugin declares `ui.bundle` (a path inside the extracted package,
-  e.g. `ui/bundle.js`) and optional `ui.styles`.
+- **Manifest:** a plugin declares `ui.bundle` (a root-relative path inside the
+  extracted package, e.g. `/ui/bundle.js`) and optional root-relative `ui.styles`.
 - **Bundle delivery:** kandev serves the bundle at `GET /api/plugins/{id}/bundle`
   (and any assets under `GET /api/plugins/{id}/ui/*`) directly from the extracted
   package directory on local disk, forcing `Content-Type: text/javascript` and

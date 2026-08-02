@@ -140,7 +140,7 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "main-nav-footer", "chat-input-actions", "chat-top-bar",
+  // "settings-nav", "chat-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right", and
   // "plugin-settings".
   // "chat-input-actions" renders icon buttons in the chat composer toolbar
