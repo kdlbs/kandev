@@ -5,6 +5,7 @@ import { IconCheck, IconCopy, IconTrash, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import type { Annotation } from "@/lib/preview-inspect-bridge";
 import { formatAnnotations } from "@/lib/preview-inspect-bridge";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 interface AnnotationsPanelProps {
   annotations: Annotation[];
@@ -30,12 +31,11 @@ export function AnnotationsPanel({ annotations, onRemove, onClear }: Annotations
   if (annotations.length === 0) return null;
 
   async function handleCopy() {
-    try {
-      await navigator.clipboard.writeText(formatAnnotations(annotations));
+    if (await copyToClipboard(formatAnnotations(annotations))) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-    } catch (err) {
-      console.error(`AnnotationsPanel: clipboard write failed: ${String(err)}`);
+    } else {
+      console.error("AnnotationsPanel: clipboard write failed");
     }
   }
 

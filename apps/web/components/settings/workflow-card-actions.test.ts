@@ -1,5 +1,5 @@
 import { act, renderHook } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createWorkflowAction,
   createWorkflowStepAction,
@@ -36,6 +36,10 @@ vi.mock("@/app/actions/workspaces", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
 });
 
 const workflow = {
@@ -142,6 +146,32 @@ describe("useWorkflowStepActions", () => {
       name: "New Step",
     });
     expect(createWorkflowStepAction).not.toHaveBeenCalled();
+  });
+
+  it("adds a client-only step when crypto.randomUUID is unavailable", async () => {
+    vi.stubGlobal("crypto", {});
+    const setWorkflowSteps = vi.fn();
+    const { result } = renderHook(() =>
+      useWorkflowStepActions({
+        workflow,
+        workflowSteps: [step("step-1", "Todo", 0, true)],
+        setWorkflowSteps,
+        refreshWorkflowSteps: vi.fn(),
+        setStepToDelete: vi.fn(),
+        setStepTaskCount: vi.fn(),
+        setTargetStepForMigration: vi.fn(),
+        setStepDeleteOpen: vi.fn(),
+        toast: vi.fn(),
+      }),
+    );
+
+    await act(() => result.current.handleAddWorkflowStep());
+
+    const updater = setWorkflowSteps.mock.calls[0][0] as (steps: WorkflowStep[]) => WorkflowStep[];
+    expect(updater([])[0]).toMatchObject({
+      id: expect.stringMatching(/^temp-step-[0-9a-f-]{36}$/),
+      name: "New Step",
+    });
   });
 });
 

@@ -133,11 +133,16 @@ it("copyPending writes the pending result and reports success", async () => {
   expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
 });
 
-it("copyPending reports clipboard failure without clearing the result", async () => {
+it("copyPending uses the DOM fallback when clipboard rejects", async () => {
   const writeText = vi.fn().mockRejectedValue(new Error("denied"));
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText },
+  });
+  const execCommand = vi.fn().mockReturnValue(true);
+  Object.defineProperty(document, "execCommand", {
+    configurable: true,
+    value: execCommand,
   });
   const appendChild = vi.spyOn(document.body, "appendChild");
   const createElement = vi.spyOn(document, "createElement");
@@ -161,19 +166,27 @@ it("copyPending reports clipboard failure without clearing the result", async ()
   expect(writeText).toHaveBeenCalledWith(GENERATED_RESULT.content);
   expect(mockToast).toHaveBeenCalledWith(
     expect.objectContaining({
-      description: "Enhanced prompt could not be copied.",
-      variant: "error",
+      description: "Enhanced prompt copied to clipboard.",
+      variant: "success",
     }),
   );
   expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
-  expect(appendChild).not.toHaveBeenCalled();
-  expect(createElement).not.toHaveBeenCalledWith("textarea");
+  expect(execCommand).toHaveBeenCalledWith("copy");
+  expect(appendChild.mock.calls.some(([element]) => element instanceof HTMLTextAreaElement)).toBe(
+    true,
+  );
+  expect(createElement).toHaveBeenCalledWith("textarea");
 });
 
-it("copyPending reports failure without DOM fallback when clipboard is unavailable", async () => {
+it("copyPending uses the DOM fallback when clipboard is unavailable", async () => {
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: undefined,
+  });
+  const execCommand = vi.fn().mockReturnValue(true);
+  Object.defineProperty(document, "execCommand", {
+    configurable: true,
+    value: execCommand,
   });
   const appendChild = vi.spyOn(document.body, "appendChild");
   const createElement = vi.spyOn(document, "createElement");
@@ -196,13 +209,16 @@ it("copyPending reports failure without DOM fallback when clipboard is unavailab
 
   expect(mockToast).toHaveBeenCalledWith(
     expect.objectContaining({
-      description: "Enhanced prompt could not be copied.",
-      variant: "error",
+      description: "Enhanced prompt copied to clipboard.",
+      variant: "success",
     }),
   );
   expect(result.current.pendingResult).toEqual(GENERATED_RESULT);
-  expect(appendChild).not.toHaveBeenCalled();
-  expect(createElement).not.toHaveBeenCalledWith("textarea");
+  expect(execCommand).toHaveBeenCalledWith("copy");
+  expect(appendChild.mock.calls.some(([element]) => element instanceof HTMLTextAreaElement)).toBe(
+    true,
+  );
+  expect(createElement).toHaveBeenCalledWith("textarea");
 });
 
 it("dismissPending clears the retained result", () => {

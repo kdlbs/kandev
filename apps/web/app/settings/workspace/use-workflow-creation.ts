@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { generateUUID } from "@/lib/utils";
 import {
   workflowId as toWorkflowId,
   workspaceId as toWorkspaceId,
@@ -25,7 +26,7 @@ type WorkflowCreationArgs = {
 };
 
 function newClientId(prefix: string): string {
-  return `${prefix}-${crypto.randomUUID()}`;
+  return `${prefix}-${generateUUID()}`;
 }
 
 function remapStepReferences<T>(value: T, mappings: Map<string, string>): T {

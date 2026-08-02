@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { previewAgentCommandAction, type CommandPreviewResponse } from "@/app/actions/agents";
 import type { CLIFlag, ProfileEnvVar } from "@/lib/types/http";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 type CommandPreviewCardProps = {
   agentName: string;
@@ -84,17 +85,7 @@ function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPr
   const handleCopy = async () => {
     if (!displayCommand) return;
 
-    try {
-      await navigator.clipboard.writeText(displayCommand);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      const textArea = document.createElement("textarea");
-      textArea.value = displayCommand;
-      document.body.appendChild(textArea);
-      textArea.select();
-      document.execCommand("copy");
-      document.body.removeChild(textArea);
+    if (await copyToClipboard(displayCommand)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     }
