@@ -204,6 +204,22 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 		}
 	}()
 
+	initialToolCallPersisted := make(chan struct{})
+	var initialToolCallOnce sync.Once
+	messageSubscription, err := ts.EventBus.Subscribe(events.MessageAdded, func(_ context.Context, event *bus.Event) error {
+		data, ok := event.Data.(map[string]interface{})
+		if ok && data["task_id"] == child.ID && data["type"] == string(models.MessageTypeToolCall) {
+			initialToolCallOnce.Do(func() { close(initialToolCallPersisted) })
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	defer func() {
+		if err := messageSubscription.Unsubscribe(); err != nil {
+			t.Errorf("unsubscribe message observer: %v", err)
+		}
+	}()
+
 	launch, err := orchestratorSvc.LaunchSession(context.Background(), &orchestrator.LaunchSessionRequest{
 		TaskID: child.ID, Intent: orchestrator.IntentStart, AgentProfileID: "integration-agent",
 		Prompt: "Keep working until explicitly stopped.",
@@ -212,6 +228,7 @@ func TestMCPStopTask_DirectParentStopsLongRunningChild(t *testing.T) {
 	require.True(t, launch.Success)
 	require.NotEmpty(t, launch.SessionID)
 	mcpStopAwaitSignal(t, running, 2*time.Second, "child RUNNING state")
+	mcpStopAwaitSignal(t, initialToolCallPersisted, 2*time.Second, "initial tool-call persistence")
 
 	sessionBefore, err := ts.TaskRepo.GetTaskSession(context.Background(), launch.SessionID)
 	require.NoError(t, err)
