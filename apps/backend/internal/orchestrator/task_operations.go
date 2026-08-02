@@ -2443,6 +2443,9 @@ func coordinatorStopSessionID(session *models.TaskSession) string {
 }
 
 func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, sessionID string) (bool, error) {
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
+
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 
@@ -3916,20 +3919,50 @@ func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, fun
 	return &guard.mu, release
 }
 
-// isCancelInFlight reports whether sessionID's cancelInFlight guard is
-// currently held by someone else, without itself claiming it — a
-// TryLock-then-immediately-Unlock peek rather than a real acquisition. The
-// guard entry this creates to perform the peek is released (and pruned if
-// nothing else references it) before this returns, so a passive readiness
-// probe never leaves permanent state behind.
+// beginCancelInFlight records that a cancellation operation for sessionID is
+// active (or waiting to claim the shared per-session guard). This is separate
+// from cancelInFlight itself: stream handlers also hold that mutex while
+// persisting output, but must not make boot-ready handling mistake their work
+// for a cancellation. The returned release function is idempotent so callers
+// can safely use it with both explicit and deferred cleanup.
+func (s *Service) beginCancelInFlight(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+
+	s.cancelOperationsMu.Lock()
+	if s.cancelOperations == nil {
+		s.cancelOperations = make(map[string]int)
+	}
+	s.cancelOperations[sessionID]++
+	s.cancelOperationsMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.cancelOperationsMu.Lock()
+			count := s.cancelOperations[sessionID]
+			if count <= 1 {
+				delete(s.cancelOperations, sessionID)
+			} else {
+				s.cancelOperations[sessionID] = count - 1
+			}
+			s.cancelOperationsMu.Unlock()
+		})
+	}
+}
+
+// isCancelInFlight reports whether an actual cancellation operation for
+// sessionID is active or waiting on the shared guard. It deliberately does
+// not inspect the guard mutex itself because stream/lifecycle handlers also
+// use that mutex for non-cancelling side effects.
 func (s *Service) isCancelInFlight(sessionID string) bool {
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	if lock.TryLock() {
-		lock.Unlock()
+	if sessionID == "" {
 		return false
 	}
-	return true
+	s.cancelOperationsMu.Lock()
+	defer s.cancelOperationsMu.Unlock()
+	return s.cancelOperations[sessionID] > 0
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,
@@ -3946,6 +3979,8 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
 
 	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
 	// disable, so impatient users click it multiple times while the agent is

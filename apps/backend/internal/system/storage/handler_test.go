@@ -231,7 +231,10 @@ func (o staticCachedOverview) Capabilities(context.Context, StorageMaintenanceSe
 	return Capabilities{}
 }
 
-func (o staticCachedOverview) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+func (o staticCachedOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	return Capabilities{}
 }
 
@@ -252,7 +255,10 @@ func (o *recordingOverviewReader) Capabilities(context.Context, StorageMaintenan
 	return o.capabilities
 }
 
-func (o *recordingOverviewReader) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+func (o *recordingOverviewReader) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	o.settingsCapabilitiesCalls++
 	return o.capabilities
 }

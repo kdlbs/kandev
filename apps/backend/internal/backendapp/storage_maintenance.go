@@ -168,23 +168,22 @@ func (o *storageOverview) Capabilities(
 	ctx context.Context,
 	settings storagepkg.StorageMaintenanceSettings,
 ) storagepkg.Capabilities {
-	capabilities := o.SettingsCapabilities(settings)
-	dockerAvailable := o.dockerClient.Ping(ctx) == nil
-	capabilities.DockerAvailable = dockerAvailable
-	capabilities.HostGlobalDockerCleanup = dockerAvailable && settings.Docker.DedicatedDaemonAcknowledged
-	return capabilities
+	return o.SettingsCapabilities(ctx, settings)
 }
 
 func (o *storageOverview) SettingsCapabilities(
+	ctx context.Context,
 	settings storagepkg.StorageMaintenanceSettings,
 ) storagepkg.Capabilities {
 	goPath := settings.GoCache.AdoptedPath
 	if goPath == "" {
 		goPath = filepath.Join(o.homeDir, "cache", "go-build")
 	}
+	dockerAvailable := o.dockerClient != nil && o.dockerClient.Ping(ctx) == nil
 	return storagepkg.Capabilities{
 		ManagedGoCachePath: goPath, GoCacheAdoptionAvailable: true,
-		DockerHost: o.dockerHost,
+		DockerAvailable: dockerAvailable, DockerHost: o.dockerHost,
+		HostGlobalDockerCleanup: dockerAvailable && settings.Docker.DedicatedDaemonAcknowledged,
 	}
 }
 

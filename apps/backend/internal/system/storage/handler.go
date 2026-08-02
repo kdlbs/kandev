@@ -54,13 +54,13 @@ type QuarantineSummary struct {
 type OverviewProvider interface {
 	Summary(context.Context) (Summary, error)
 	Capabilities(context.Context, StorageMaintenanceSettings) Capabilities
-	SettingsCapabilities(StorageMaintenanceSettings) Capabilities
+	SettingsCapabilities(context.Context, StorageMaintenanceSettings) Capabilities
 }
 
 type OverviewReader interface {
 	Get(context.Context) (OverviewSnapshot, error)
 	Capabilities(context.Context, StorageMaintenanceSettings) Capabilities
-	SettingsCapabilities(StorageMaintenanceSettings) Capabilities
+	SettingsCapabilities(context.Context, StorageMaintenanceSettings) Capabilities
 }
 
 type HandlerConfig struct {
@@ -271,7 +271,7 @@ func (h *Handler) getStorageSettings(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"settings":     settings,
-		"capabilities": h.config.Overview.SettingsCapabilities(settings),
+		"capabilities": h.config.Overview.SettingsCapabilities(c.Request.Context(), settings),
 	})
 }
 

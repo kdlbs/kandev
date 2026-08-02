@@ -2256,6 +2256,29 @@ func TestAcquireCancelInFlightGuard_PrunesEntryWhenNoLongerReferenced(t *testing
 	}
 }
 
+func TestCancelIntentDoesNotFollowSharedGuard(t *testing.T) {
+	svc := &Service{}
+	lock, release := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+	defer func() {
+		lock.Unlock()
+		release()
+	}()
+
+	if svc.isCancelInFlight("s1") {
+		t.Fatal("a non-cancelling shared guard holder must not look like a cancellation")
+	}
+
+	endCancel := svc.beginCancelInFlight("s1")
+	if !svc.isCancelInFlight("s1") {
+		t.Fatal("active cancellation intent must be visible to readiness probes")
+	}
+	endCancel()
+	if svc.isCancelInFlight("s1") {
+		t.Fatal("released cancellation intent must no longer be visible")
+	}
+}
+
 // --- StartCreatedSession ---
 
 func TestStartCreatedSession_WrongTask(t *testing.T) {

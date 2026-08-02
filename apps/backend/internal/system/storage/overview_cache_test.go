@@ -256,7 +256,10 @@ func (o *countingOverview) Capabilities(context.Context, StorageMaintenanceSetti
 	return Capabilities{}
 }
 
-func (o *countingOverview) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+func (o *countingOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	return Capabilities{}
 }
 
@@ -297,7 +300,10 @@ func (*firstCallBlockingOverview) Capabilities(
 	return Capabilities{}
 }
 
-func (*firstCallBlockingOverview) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+func (*firstCallBlockingOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	return Capabilities{}
 }
 
@@ -316,6 +322,9 @@ func (o *cancellableOverview) Capabilities(context.Context, StorageMaintenanceSe
 	return Capabilities{}
 }
 
-func (o *cancellableOverview) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+func (o *cancellableOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	return Capabilities{}
 }

@@ -898,6 +898,8 @@ func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
 	); err != nil {
 		t.Fatalf("queue prompt: %v", err)
 	}
+	endCancel := svc.beginCancelInFlight("s1")
+	defer endCancel()
 	lock, release := svc.acquireCancelInFlightGuard("s1")
 	defer release()
 	lock.Lock()

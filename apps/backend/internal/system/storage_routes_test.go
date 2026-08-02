@@ -243,6 +243,9 @@ func (emptyStorageOverview) Capabilities(context.Context, storage.StorageMainten
 	return storage.Capabilities{}
 }
 
-func (emptyStorageOverview) SettingsCapabilities(storage.StorageMaintenanceSettings) storage.Capabilities {
+func (emptyStorageOverview) SettingsCapabilities(
+	context.Context,
+	storage.StorageMaintenanceSettings,
+) storage.Capabilities {
 	return storage.Capabilities{}
 }

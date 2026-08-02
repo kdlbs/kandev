@@ -559,6 +559,16 @@ type Service struct {
 	// long-lived backend's lifetime.
 	cancelInFlight map[string]*cancelInFlightGuard
 
+	// cancelOperations tracks cancellation intent separately from the shared
+	// cancelInFlight mutex. Stream and lifecycle handlers use that mutex to
+	// serialize their side effects, but they are not themselves cancellations;
+	// treating every mutex holder as a cancellation would make agent.boot_ready
+	// discard a legitimate boot signal while a stream frame is being persisted.
+	// Values are reference counts so duplicate cancellation requests waiting on
+	// the shared guard keep cancellation priority until the last request exits.
+	cancelOperationsMu sync.Mutex
+	cancelOperations   map[string]int
+
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
 	// A backoff timer per session re-drives the failed prompt; cancelled on

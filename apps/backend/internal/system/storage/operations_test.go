@@ -455,7 +455,10 @@ func (o *recordingRefreshOverview) Capabilities(context.Context, StorageMaintena
 	return Capabilities{}
 }
 
-func (o *recordingRefreshOverview) SettingsCapabilities(StorageMaintenanceSettings) Capabilities {
+func (o *recordingRefreshOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
 	return Capabilities{}
 }
 
