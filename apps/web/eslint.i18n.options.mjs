@@ -441,4 +441,17 @@ export const i18nGuardFiles = [
   // icon `key`s are the persisted enum and only the labels are copy, which now
   // travel as `labelKey` and resolve at render.
   "components/integrations/action-preset-icons.ts",
+  // Settings → Integrations → Slack: the page and the whole of
+  // `components/slack`, which holds nothing else. `slack-settings-state.ts` is
+  // the form state and API actions split out of the component so it stays under
+  // the 600-line cap; it holds no JSX, so `mode: "jsx-only"` never inspects it
+  // and only the pseudo-locale can prove its toast/confirm copy stays migrated.
+  //
+  // Deliberately left in English, each a value the user must find or type
+  // verbatim rather than copy: the `xoxc-` / `xoxd-` token prefixes, the `d`
+  // cookie name, the `••••••••` mask, the `!kandev <instruction>` command
+  // example, and the six `{{Slack…}}` prompt tokens. All are interpolated as
+  // values so the pseudo-locale cannot turn them into dead pointers.
+  "app/settings/integrations/slack/**/*.{ts,tsx}",
+  "components/slack/**/*.{ts,tsx}",
 ];
