@@ -208,14 +208,9 @@ export function useSessionPromptController(
   };
 }
 
-function shouldDisableSubmit(
-  isCreating: boolean,
-  isSummarizing: boolean,
-  hasPrompt: boolean,
-  hasProfiles: boolean,
-) {
-  const isBusy = Number(isCreating) + Number(isSummarizing);
-  const submitPenalty = Number(hasPrompt === false) + Number(hasProfiles === false) + isBusy;
+function shouldDisableSubmit(isBusy: boolean, hasPrompt: boolean, hasProfiles: boolean) {
+  const submitPenalty =
+    Number(hasPrompt === false) + Number(hasProfiles === false) + Number(isBusy);
   return submitPenalty > 0;
 }
 
@@ -398,8 +393,7 @@ function NewSessionForm({
     setIsCreating,
   });
   const isSubmitDisabled = shouldDisableSubmit(
-    isCreating,
-    isSummarizing,
+    isBusyState,
     hasPrompt,
     profileSelection.hasProfiles,
   );
@@ -448,7 +442,7 @@ function NewSessionForm({
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onVoiceAutoSend={() => {
-          if (isSubmitDisabled) return;
+          if (isBusyState || !profileSelection.hasProfiles) return;
           void handleSubmit(VOICE_SUBMIT_EVENT);
         }}
       />

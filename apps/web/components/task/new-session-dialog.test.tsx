@@ -4,6 +4,9 @@ import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types
 
 const mockToast = vi.fn();
 const mockSummarize = vi.fn();
+const mockBuildStartRequest = vi.fn();
+const mockLaunchSession = vi.fn();
+const mockSetActiveSession = vi.fn();
 
 const mockState = {
   kanban: {
@@ -23,6 +26,7 @@ const mockState = {
   tasks: {
     activeSessionId: "session-1",
   },
+  setActiveSession: mockSetActiveSession,
   taskSessions: {
     items: {
       "session-1": {
@@ -75,6 +79,14 @@ vi.mock("@/lib/state/dockview-panel-actions", () => ({
   addSessionPanel: vi.fn(),
 }));
 
+vi.mock("@/lib/services/session-launch-helpers", () => ({
+  buildStartRequest: (...args: unknown[]) => mockBuildStartRequest(...args),
+}));
+
+vi.mock("@/lib/services/session-launch-service", () => ({
+  launchSession: (...args: unknown[]) => mockLaunchSession(...args),
+}));
+
 vi.mock("@/components/task-create-dialog-selectors", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   function TaskFormInputs({
@@ -117,7 +129,14 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
       }),
       React.createElement(
         "button",
-        { type: "button", "aria-label": "Voice input", onClick: onVoiceAutoSend },
+        {
+          type: "button",
+          "aria-label": "Voice input",
+          onClick: () => {
+            updateValue("voice transcript");
+            onVoiceAutoSend?.();
+          },
+        },
         "Voice",
       ),
     );
@@ -205,6 +224,8 @@ describe("NewSessionDialog", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockSummarize.mockResolvedValue({ summary: "summary text" });
+    mockBuildStartRequest.mockReturnValue({ request: { task_id: "task-1" } });
+    mockLaunchSession.mockResolvedValue({ session_id: "session-2" });
   });
 
   it("copies the initial prompt on the first copy_prompt action after opening", async () => {
@@ -234,6 +255,19 @@ describe("NewSessionDialog", () => {
       expect((screen.getByTestId("task-description-input") as HTMLTextAreaElement).value).toBe(
         "summary text",
       ),
+    );
+  });
+
+  it("auto-sends a transcript inserted into a blank composer", async () => {
+    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice input" }));
+
+    await waitFor(() => expect(mockLaunchSession).toHaveBeenCalledTimes(1));
+    expect(mockBuildStartRequest).toHaveBeenCalledWith(
+      "task-1",
+      "profile-1",
+      expect.objectContaining({ prompt: "voice transcript" }),
     );
   });
 });

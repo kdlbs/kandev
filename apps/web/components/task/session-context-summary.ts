@@ -27,14 +27,15 @@ export function applySummarizeSessionResult({
   setHasPrompt: (v: boolean) => void;
   toast: SummaryToastFn;
 }) {
-  const setPromptValue = (value: string) => {
+  const setPromptValue = (value: string): boolean => {
     const target = promptRef.current;
-    if (!target) return;
+    if (!target) return false;
     if ("setValue" in target) {
       target.setValue(value);
     } else {
       target.value = value;
     }
+    return true;
   };
 
   if (result.summary === null) {
@@ -51,8 +52,7 @@ export function applySummarizeSessionResult({
     return;
   }
 
-  if (promptRef.current) {
-    setPromptValue(sanitizePromptText(result.summary));
+  if (setPromptValue(sanitizePromptText(result.summary))) {
     setHasPrompt(true);
   }
 }

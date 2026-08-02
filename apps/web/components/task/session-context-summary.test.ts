@@ -40,6 +40,34 @@ describe("applySummarizeSessionResult", () => {
     expect(toast).not.toHaveBeenCalled();
   });
 
+  it("writes successful summaries through a shared composer handle", () => {
+    let value = "existing";
+    const promptRef = {
+      current: {
+        getValue: () => value,
+        setValue: (next: string) => {
+          value = next;
+        },
+        getAttachments: () => [],
+      },
+    };
+    const setContextValue = vi.fn();
+    const setHasPrompt = vi.fn();
+    const toast = vi.fn();
+
+    applySummarizeSessionResult({
+      result: { summary: "summary text" },
+      promptRef,
+      setContextValue,
+      setHasPrompt,
+      toast,
+    });
+
+    expect(value).toBe("summary text");
+    expect(setHasPrompt).toHaveBeenCalledWith(true);
+    expect(toast).not.toHaveBeenCalled();
+  });
+
   it("resets context and prompt state when summary is null", () => {
     const promptRef = { current: { value: "stale prompt" } as HTMLTextAreaElement };
     const setContextValue = vi.fn();
