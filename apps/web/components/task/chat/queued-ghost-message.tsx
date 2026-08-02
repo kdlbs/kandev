@@ -493,6 +493,10 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
       () => entityReferencesFromMetadata(entry.metadata),
       [entry.metadata],
     );
+    // A row is mergeable only when both the caller gate and the entry itself
+    // pass: workflow/server/system rows are reserved and never mergeable, even
+    // if a parent computed canMerge for a different row.
+    const effectiveCanMerge = canMerge && canMergeEntry(entry);
 
     useEffect(() => {
       if (!editing) setValue(entry.content);
@@ -575,7 +579,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
             entityReferences={entityReferences}
             positionLabel={positionLabel}
             canEdit={canEdit}
-            canMerge={canMerge}
+            canMerge={effectiveCanMerge}
             onStartEdit={startEdit}
             onRemove={onRemove}
             onMerge={onMerge}
