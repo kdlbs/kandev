@@ -30,9 +30,6 @@ var ErrGitWorkClassRequired = errors.New("git work class required")
 var ErrAdmissionCanceled = errors.New("subprocess admission canceled")
 
 func wrapAdmissionError(err error) error {
-	if err == nil {
-		return ErrAdmissionCanceled
-	}
 	return fmt.Errorf("%w: %w", ErrAdmissionCanceled, err)
 }
 

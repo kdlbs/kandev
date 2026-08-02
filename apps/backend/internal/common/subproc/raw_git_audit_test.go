@@ -114,6 +114,9 @@ func scanGoFile(t *testing.T, path string) []string {
 }
 
 func isGitString(expr ast.Expr) bool {
+	// NOTE: this guard intentionally recognizes direct string literals only;
+	// keep production Git construction on the shared subproc seam rather than
+	// relying on constant aliases that this lightweight AST walk cannot resolve.
 	literal, ok := expr.(*ast.BasicLit)
 	if !ok || literal.Kind != token.STRING {
 		return false
