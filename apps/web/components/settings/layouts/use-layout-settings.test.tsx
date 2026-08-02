@@ -361,14 +361,20 @@ describe("useLayoutSettings localization", () => {
     expect(customDefault.result.current.defaultActionLabel).not.toBe("Use built-in Default");
   });
 
-  it("interpolates the source name into a duplicated profile's name", () => {
+  it("interpolates the source name into a localized duplicated profile name", async () => {
+    await act(async () => {
+      await activateLocale("pseudo");
+    });
+
     const { result } = renderLayoutSettings([profile({ name: "My Layout" })]);
 
     act(() => result.current.setSelection({ kind: "custom", id: PROFILE_ID }));
     act(() => result.current.duplicate());
 
-    // The name is user data from here on; only the initial value is copy.
-    expect(result.current.selectedName).toBe("My Layout copy");
+    // Both halves of the contract: the source name is user data and survives
+    // verbatim, while the surrounding " copy" resolves through the catalog.
+    expect(result.current.selectedName).toContain("My Layout");
+    expect(result.current.selectedName).not.toBe("My Layout copy");
   });
 
   it("names a newly created profile and reports validation errors from the catalog", async () => {
