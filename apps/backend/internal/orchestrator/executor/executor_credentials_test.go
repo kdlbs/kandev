@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	osExec "os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,7 +106,7 @@ func TestConfigureGitHubCredentialBroker(t *testing.T) {
 		"GIT_CONFIG_KEY_1":            "credential.https://github.com.helper",
 		"GIT_CONFIG_VALUE_1":          "",
 		"GIT_CONFIG_KEY_2":            "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_2":          "!agentctl git-credential",
+		"GIT_CONFIG_VALUE_2":          gitHubCredentialHelper,
 		"GIT_CONFIG_KEY_3":            "credential.useHttpPath",
 		"GIT_CONFIG_VALUE_3":          "true",
 		"GIT_TERMINAL_PROMPT":         "0",
@@ -195,6 +196,93 @@ func TestApplyGitCredentialSnapshotReturnsResolverError(t *testing.T) {
 	}
 }
 
+func TestConfigureGitHubCredentialBrokerHelperSurvivesPathReset(t *testing.T) {
+	helperDir := filepath.Join(t.TempDir(), "managed github helper")
+	if err := os.MkdirAll(helperDir, 0o700); err != nil {
+		t.Fatalf("create helper directory: %v", err)
+	}
+	helper := filepath.Join(helperDir, "agentctl")
+	const helperScript = `#!/bin/sh
+if [ "$1" != "git-credential" ] || [ "$2" != "get" ]; then
+  exit 2
+fi
+printf 'username=x-access-token\npassword=fake-token\n'
+`
+	if err := os.WriteFile(helper, []byte(helperScript), 0o700); err != nil {
+		t.Fatalf("write helper: %v", err)
+	}
+
+	issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+	exec.SetAgentctlBinaryPath(helper)
+	req := &LaunchAgentRequest{
+		TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+		ExecutorType: string(models.ExecutorTypeWorktree), Env: map[string]string{},
+	}
+	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+	}}
+	if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+		t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+	}
+
+	env := make(map[string]string, len(os.Environ())+len(req.Env)+1)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && !strings.HasPrefix(key, "GIT_CONFIG_") && key != githubauth.CredentialCLIShimDirEnv {
+			env[key] = value
+		}
+	}
+	for key, value := range req.Env {
+		env[key] = value
+	}
+	env[githubauth.CredentialBrokerURLEnv] = "https://kandev.example/api/github/credentials/resolve"
+	env["PATH"] = "/usr/bin:/bin"
+	commandEnv := make([]string, 0, len(env))
+	for key, value := range env {
+		commandEnv = append(commandEnv, key+"="+value)
+	}
+
+	command := osExec.Command("git", "credential", "fill")
+	command.Env = commandEnv
+	command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git credential fill failed with PATH reset: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "username=x-access-token") ||
+		!strings.Contains(string(output), "password=fake-token") {
+		t.Fatalf("credential output = %q, want fake helper credentials", output)
+	}
+}
+
+func TestConfigureGitHubCredentialBrokerPublishesLocalHelperBeforePreparation(t *testing.T) {
+	helperPath := filepath.Join(t.TempDir(), "managed agentctl")
+	for _, executorType := range []models.ExecutorType{models.ExecutorTypeLocal, models.ExecutorTypeWorktree} {
+		t.Run(string(executorType), func(t *testing.T) {
+			issuer := &fakeGitHubCredentialLeaseIssuer{lease: GitHubCredentialLease{Token: "opaque-lease"}}
+			exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+			exec.SetGitHubCredentialBroker(issuer, "https://kandev.example/api/github/credentials/resolve")
+			exec.SetAgentctlBinaryPath(helperPath)
+			req := &LaunchAgentRequest{
+				TaskID: "task-1", WorkspaceID: "workspace-1", SessionID: "session-1",
+				ExecutorType: string(executorType), Env: map[string]string{},
+			}
+			info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
+				Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
+			}}
+
+			if err := exec.configureGitHubCredentialBroker(context.Background(), req, info); err != nil {
+				t.Fatalf("configureGitHubCredentialBroker() error = %v", err)
+			}
+			if got := req.Env[githubauth.CredentialHelperPathEnv]; got != helperPath {
+				t.Fatalf("credential helper path = %q, want %q before preparation", got, helperPath)
+			}
+		})
+	}
+}
+
 func TestConfigureGitHubCredentialBrokerIssuesOneLeasePerRepository(t *testing.T) {
 	issuer := &fakeGitHubCredentialLeaseIssuer{}
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
@@ -270,6 +358,7 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 	})
 	req := &LaunchAgentRequest{WorkspaceID: "workspace-1", Env: map[string]string{
 		githubauth.CredentialBrokerURLEnv:  "http://broker.example/resolve",
+		githubauth.CredentialHelperPathEnv: "/opt/kandev/agentctl",
 		githubauth.CredentialLeaseEnv:      "lease",
 		githubauth.CredentialTaskIDEnv:     "task-1",
 		githubauth.CredentialSessionIDEnv:  "session-1",
@@ -278,13 +367,17 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 		githubauth.CredentialRepoEnv:       "widgets",
 		githubauth.CredentialHostEnv:       "github.com",
 		githubauth.CredentialScopesEnv:     `[{"repo":"widgets"}]`,
-		"GIT_CONFIG_COUNT":                 "3",
+		"GIT_CONFIG_COUNT":                 "5",
 		"GIT_CONFIG_KEY_0":                 "core.hooksPath",
 		"GIT_CONFIG_VALUE_0":               "/work/hooks",
 		"GIT_CONFIG_KEY_1":                 "credential.https://github.com.helper",
 		"GIT_CONFIG_VALUE_1":               "",
 		"GIT_CONFIG_KEY_2":                 "credential.https://github.com.helper",
-		"GIT_CONFIG_VALUE_2":               "!agentctl git-credential",
+		"GIT_CONFIG_VALUE_2":               gitHubCredentialHelper,
+		"GIT_CONFIG_KEY_3":                 "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_3":               legacyShimGitCredentialHelper,
+		"GIT_CONFIG_KEY_4":                 "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_4":               legacyGitHubCredentialHelper,
 	}}
 	info := &repoInfo{RepositoryID: "repo-1", Repository: &models.Repository{
 		Provider: "github", ProviderOwner: "acme", ProviderName: "widgets",
@@ -299,7 +392,7 @@ func TestConfigureGitHubCredentialBrokerSkipsExecutorInheritedPolicy(t *testing.
 	if got := req.Env[githubauth.CredentialBrokerURLEnv]; got != "" {
 		t.Fatalf("broker URL = %q, want none for executor inheritance", got)
 	}
-	for _, key := range []string{githubauth.CredentialLeaseEnv, githubauth.CredentialTaskIDEnv, githubauth.CredentialSessionIDEnv, githubauth.CredentialRepositoryEnv, githubauth.CredentialOwnerEnv, githubauth.CredentialRepoEnv, githubauth.CredentialHostEnv, githubauth.CredentialScopesEnv} {
+	for _, key := range []string{githubauth.CredentialHelperPathEnv, githubauth.CredentialLeaseEnv, githubauth.CredentialTaskIDEnv, githubauth.CredentialSessionIDEnv, githubauth.CredentialRepositoryEnv, githubauth.CredentialOwnerEnv, githubauth.CredentialRepoEnv, githubauth.CredentialHostEnv, githubauth.CredentialScopesEnv} {
 		if _, ok := req.Env[key]; ok {
 			t.Fatalf("Env[%q] still contains a managed credential value", key)
 		}

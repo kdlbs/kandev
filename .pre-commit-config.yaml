@@ -51,3 +51,14 @@ repos:
         language: system
         files: ^apps/web/.*\.(ts|tsx|js|jsx)$
         pass_filenames: true
+
+      # New user-facing copy must go through t()/<Trans>, even in a directory the
+      # i18n migration has not reached. Judges the change, not the file: added
+      # files whole, modified files only on touched lines — so it never asks you
+      # to migrate code you did not write. Mirrors the go-lint hook above.
+      - id: i18n-new-code
+        name: i18n guard (new code only)
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; cd apps/web && node scripts/check-new-code-i18n.mjs && node scripts/check-guard-allowlist.mjs'
+        language: system
+        files: ^apps/web/(components|app|hooks|lib|src)/.*\.tsx?$|^apps/web/eslint\.i18n\.options\.mjs$
+        pass_filenames: false

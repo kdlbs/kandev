@@ -5,11 +5,21 @@ description: "Choose a guide for installing Kandev, running agent work, reviewin
 
 # Kandev Documentation
 
-Kandev is an open-source workbench for assigning repository work to coding agents, coordinating parallel sessions, and reviewing the resulting changes. It runs on infrastructure you control. Agent CLIs, models, executors, and external services remain separate dependencies with their own credentials and limits.
+Kandev lets you assign repository work to coding agents, review the result, and keep control of the environment and credentials.
 
-## Run work in Kandev
+## Start here
 
-Start with the page that matches the job in front of you:
+1. [Get started](use-kandev.md) — install Kandev, add a repository, and run a first task.
+2. [Tasks and workflows](tasks-and-workflows.md) — create work, choose a workflow, and use plans.
+3. [Sessions and review](sessions-and-review.md) — supervise an agent, inspect changes, and finish safely.
+4. [Security and trust](security.md) — choose an appropriate access boundary before sharing Kandev with others.
+
+<details>
+<summary>More guides for running work</summary>
+
+### Run work in Kandev
+
+Choose the guide that matches the job in front of you:
 
 - [Get started](use-kandev.md): install Kandev, add a local repository, configure an agent, and run a first task.
 - [Tasks and workflows](tasks-and-workflows.md): create tasks, use plans, configure workflow steps, and understand the Office-only document and label boundary.
@@ -24,7 +34,12 @@ Start with the page that matches the job in front of you:
 - [Feature status](feature-status.md): check support boundaries, dependencies, experimental features, and unfinished work.
 - [Security and trust](security.md): choose a safe deployment boundary, constrain agent access, protect credentials, and preserve human review.
 
-Installation and operation have dedicated references: [CLI](cli.md), [desktop app](desktop-app.md), [configuration](configuration.md), [service](run-as-a-service.md), [Docker](docker.md), [Kubernetes](k8s.md), and [operations](operations.md).
+Installation and operation: [CLI](cli.md), [desktop app](desktop-app.md), [configuration](configuration.md), [service](run-as-a-service.md), [Docker](docker.md), [Kubernetes](k8s.md), and [operations](operations.md).
+
+</details>
+
+<details>
+<summary>Contributor guides</summary>
 
 ## Contribute to Kandev
 
@@ -41,12 +56,19 @@ These pages describe the current source tree and its development conventions:
 - [Release process](release-process.md): understand versioning and the CLI, runtime, desktop, npm, Homebrew, and container release paths.
 - [Public docs guide](README.md): update or add a published page.
 
+</details>
+
 ## Supported product boundary
 
 The regular Kanban workbench, task sessions, review surfaces, and task-scoped Kandev MCP are the supported product path. Some capabilities still depend on a particular agent, executor, provider, platform, credential, or install channel; those differences are called out on their topic pages.
 
 **Office is separate, disabled in the production runtime profile, feature-flagged, and still in progress.** Its source, tests, specifications, and internal plans do not make persistent teams, routines, budgets, or coordinator-led autonomy a supported production contract. See [Feature status](feature-status.md) for that boundary and [Office provider routing](office-provider-routing.md) for the feature-flagged routing surface.
 
+<details>
+<summary>Version matching</summary>
+
 ## Match docs to the running version
 
 These docs describe the current `main` branch and are not versioned. A released build can lag behind them. Check **Settings > System > About** or run `kandev --version`, then use the matching GitHub tag when exact historical behavior matters.
+
+</details>

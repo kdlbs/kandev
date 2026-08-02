@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/instance"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/githubauth"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/pkg/agent"
 	"go.uber.org/zap"
@@ -121,6 +123,10 @@ func prepareGitHubCLIShim() (func(), error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve agentctl executable for gh shim: %w", err)
 	}
+	executable, err = filepath.Abs(executable)
+	if err != nil {
+		return nil, fmt.Errorf("resolve absolute agentctl executable for GitHub tools: %w", err)
+	}
 	shimDir, cleanup, err := installGitHubCLIShim(executable, "")
 	if err != nil {
 		return nil, err
@@ -128,6 +134,17 @@ func prepareGitHubCLIShim() (func(), error) {
 	if err := os.Setenv(envGitHubCLIShimDir, shimDir); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("configure gh shim directory: %w", err)
+	}
+	if err := os.Setenv(
+		githubauth.CredentialCLIBashEnvEnv,
+		filepath.Join(shimDir, githubauth.CLIBashEnvFilename),
+	); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("configure Bash environment: %w", err)
+	}
+	if err := os.Setenv(githubauth.CredentialHelperPathEnv, executable); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("configure Git credential helper executable: %w", err)
 	}
 	return cleanup, nil
 }

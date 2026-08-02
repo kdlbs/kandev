@@ -9,6 +9,13 @@ Kandev is a developer workbench that runs agents with access to repositories, to
 
 > Kandev does not currently provide a multi-user login, role-based access control, or an authorization boundary for its web UI, HTTP API, WebSocket, or external MCP routes. Treat anyone who can reach the backend as an operator with the potential to read or change developer data.
 
+## Quick checklist
+
+- Keep the backend on loopback or behind an authenticated TLS proxy.
+- Use Worktree, Docker, SSH, or Sprites only when their isolation boundary matches the risk.
+- Scope agent and provider credentials to the smallest repository and operation set.
+- Keep human approval before merge, release, deployment, or other irreversible actions.
+
 ## Choose a deployment boundary
 
 | Use case | Recommended boundary | Avoid |

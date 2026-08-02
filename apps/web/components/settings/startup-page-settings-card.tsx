@@ -1,21 +1,28 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { StartupPage } from "@/lib/types/http";
 import { SettingsCard } from "./settings-card";
 
-const OPTIONS: Array<{ value: StartupPage; label: string; description: string }> = [
+/**
+ * Holds catalog KEYS, not copy. A module-scope table is evaluated once at import,
+ * so a `t()` call here would freeze at the boot locale and never update on a
+ * switch — and the lint guard cannot see literals in a SCREAMING_CASE constant,
+ * so nothing would flag it. Resolved at render in the component below.
+ */
+const OPTIONS: Array<{ value: StartupPage; labelKey: string; descriptionKey: string }> = [
   {
     value: "task_overview",
-    label: "Task overview",
-    description: "Start on your saved Kanban, Pipeline, or List view.",
+    labelKey: "settings:taskOverview",
+    descriptionKey: "settings:startOnYourSavedKanbanPipelineOrList",
   },
   {
     value: "last_task",
-    label: "Last visited task",
-    description: "Resume the most recently opened task in this workspace on this device.",
+    labelKey: "settings:lastVisitedTask",
+    descriptionKey: "settings:resumeTheMostRecentlyOpenedTask",
   },
 ];
 
@@ -28,18 +35,16 @@ export function StartupPageSettingsCard({
   isDirty: boolean;
   onChange: (value: StartupPage) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <SettingsCard isDirty={isDirty} data-testid="startup-page-settings-card">
       <CardHeader>
-        <CardTitle className="text-base">Open Kandev to</CardTitle>
-        <CardDescription>
-          This applies when Kandev starts or you open its bare home page. Home, Back, and workflow
-          navigation always open the task overview.
-        </CardDescription>
+        <CardTitle className="text-base">{t("settings:openKandevTo")}</CardTitle>
+        <CardDescription>{t("settings:thisAppliesWhenKandevStarts")}</CardDescription>
       </CardHeader>
       <CardContent>
         <RadioGroup
-          aria-label="Startup page"
+          aria-label={t("settings:startupPage")}
           value={value}
           onValueChange={(next) => onChange(next as StartupPage)}
           data-settings-dirty={isDirty}
@@ -66,13 +71,13 @@ export function StartupPageSettingsCard({
                 />
                 <span className="min-w-0 space-y-1">
                   <span id={labelId} className="block text-sm font-medium">
-                    {option.label}
+                    {t(option.labelKey)}
                   </span>
                   <span
                     id={descriptionId}
                     className="block whitespace-normal break-words text-xs text-muted-foreground"
                   >
-                    {option.description}
+                    {t(option.descriptionKey)}
                   </span>
                 </span>
               </Label>

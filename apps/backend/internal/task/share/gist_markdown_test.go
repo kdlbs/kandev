@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 func TestBuildGistREADME_FullConversation(t *testing.T) {
@@ -45,7 +47,7 @@ func TestBuildGistREADME_FullConversation(t *testing.T) {
 		Redaction: RedactionLog{AppliedRules: []string{RuleAbsPath}},
 	}
 
-	md := BuildGistREADME(snap, "https://gist.githack.com/jane/mock-gist-1/raw/share.html")
+	md := BuildGistREADME(snap, "https://gist.githack.com/jane/mock-gist-1/raw/share.html", "en")
 	assertContains(t, md, "# Investigate flaky test")
 	assertContains(t, md, "<kbd>claude-acp</kbd>")
 	assertContains(t, md, "<kbd>claude-opus-4-7</kbd>")
@@ -72,13 +74,180 @@ func TestBuildGistREADME_FullConversation(t *testing.T) {
 
 func TestBuildGistREADME_NilAndEmpty(t *testing.T) {
 	t.Parallel()
-	if got := BuildGistREADME(nil, ""); got == "" {
+	if got := BuildGistREADME(nil, "", "en"); got == "" {
 		t.Fatal("nil snapshot should still produce a non-empty README")
 	}
 	empty := &Snapshot{Task: TaskMeta{Title: "Untitled"}}
-	got := BuildGistREADME(empty, "https://gist.githack.com/jane/g1/raw/share.html")
+	got := BuildGistREADME(empty, "https://gist.githack.com/jane/g1/raw/share.html", "en")
 	if !strings.Contains(got, "_(No messages.)_") {
 		t.Fatalf("expected empty-messages placeholder, got: %s", got)
+	}
+}
+
+// markdownFullKeys lists the catalog keys BuildGistREADME renders for a
+// snapshot with content. Interpolated messages are asserted separately
+// because T cannot resolve their placeholders.
+var markdownFullKeys = []string{
+	"share.roleUser",
+	keyRoleAssistant,
+	keyRoleSystem,
+	keyToolOutput,
+	keyToolOutputTruncated,
+	"share.emptyMessage",
+	"share.redactedBeforePublish",
+	"share.sessionDetails",
+	"share.metaAgent",
+	"share.metaModel",
+	"share.metaExecutor",
+	"share.metaStarted",
+	"share.metaCompleted",
+	"share.metaWorkflowStep",
+	"share.rawExport",
+	"share.builtWith",
+}
+
+// markdownEmptyKeys lists the copy that only appears on the degenerate path.
+var markdownEmptyKeys = []string{
+	keyUntitledTask,
+	keyNoMessages,
+	"share.noMetadata",
+	"share.sessionDetails",
+	"share.rawExport",
+	"share.builtWith",
+}
+
+func TestBuildGistREADME_LocalizesCopy(t *testing.T) {
+	t.Parallel()
+	for _, tc := range localizationCases(markdownFullKeys, markdownEmptyKeys) {
+		tc := tc
+		for _, locale := range []string{"en", "pseudo"} {
+			locale := locale
+			t.Run(tc.name+"/"+locale, func(t *testing.T) {
+				t.Parallel()
+				md := BuildGistREADME(tc.snap, "", locale)
+				for _, key := range tc.keys {
+					assertContains(t, md, i18n.T(locale, key))
+				}
+				assertContains(t, md, i18n.Tf(locale, keyMessageCount,
+					map[string]any{"count": len(tc.snap.Messages)}))
+				assertContains(t, md, i18n.Tf(locale, "share.pitch",
+					map[string]any{"url": kandevRepoURL}))
+			})
+		}
+		t.Run(tc.name+"/pseudo_differs", func(t *testing.T) {
+			t.Parallel()
+			assertPseudoDiffers(t, BuildGistREADME(tc.snap, "", "pseudo"), tc.keys)
+		})
+	}
+}
+
+// TestBuildGistREADME_LocalizesBothCTAs covers the two mutually exclusive
+// call-to-action branches, and pins that the interpolated filename and URL
+// survive the pseudo locale untransliterated — a transliterated `share.html`
+// or gist URL would be a dead pointer.
+func TestBuildGistREADME_LocalizesBothCTAs(t *testing.T) {
+	t.Parallel()
+	const rendered = "https://gist.githack.com/jane/g1/raw/share.html"
+	for _, locale := range []string{"en", "pseudo"} {
+		locale := locale
+		t.Run(locale, func(t *testing.T) {
+			t.Parallel()
+			withoutURL := BuildGistREADME(localizationSnapshot(), "", locale)
+			assertContains(t, withoutURL, i18n.Tf(locale, "share.openShareHTML",
+				map[string]any{"file": "`share.html`"}))
+			assertContains(t, withoutURL, "`share.html`")
+
+			withURL := BuildGistREADME(localizationSnapshot(), rendered, locale)
+			assertContains(t, withURL, i18n.Tf(locale, "share.openRenderedView",
+				map[string]any{"url": rendered}))
+			assertContains(t, withURL, rendered)
+		})
+	}
+}
+
+// TestMessageHeading_TranslatesOnlyTheLabel mirrors the HTML builder's
+// TestMessageRoleAttrs_TranslatesOnlyTheLabel: the avatar is decoration, the
+// label is copy, and an unrecognised role is wire data echoed through.
+func TestMessageHeading_TranslatesOnlyTheLabel(t *testing.T) {
+	t.Parallel()
+	for _, role := range []string{roleUser, roleAssistant, roleSystem} {
+		en, pseudo := messageHeading(role, "en"), messageHeading(role, "pseudo")
+		if en == pseudo {
+			t.Fatalf("role %q: heading %q is identical in both locales — it is hardcoded", role, en)
+		}
+		// The avatar is the first rune and must not change with the locale.
+		if []rune(en)[0] != []rune(pseudo)[0] {
+			t.Fatalf("role %q: avatar changed with locale (%q vs %q)", role, en, pseudo)
+		}
+	}
+	// An unrecognised role is wire data: passed through, and escaped because the
+	// heading is rendered as HTML by GitHub.
+	if got := messageHeading("reviewer", "pseudo"); got != "reviewer" {
+		t.Fatalf("unknown role should pass through verbatim, got %q", got)
+	}
+	if got := messageHeading("<img src=x>", "en"); got != "&lt;img src=x&gt;" {
+		t.Fatalf("unknown role must be HTML-escaped, got %q", got)
+	}
+}
+
+// localizationCase pairs a fixture with the catalog keys its render must
+// contain. Two are needed per builder because some copy only appears on the
+// degenerate path — an untitled task with no messages and no metadata.
+type localizationCase struct {
+	name string
+	snap *Snapshot
+	keys []string
+}
+
+func localizationCases(fullKeys, emptyKeys []string) []localizationCase {
+	return []localizationCase{
+		{name: "full", snap: localizationSnapshot(), keys: fullKeys},
+		{name: "degenerate", snap: &Snapshot{}, keys: emptyKeys},
+	}
+}
+
+// localizationSnapshot exercises every branch of both builders that renders
+// copy: all three roles, a plain and a truncated tool result, a message whose
+// blocks are all blank, a redaction note, and complete session metadata.
+// Every value is deliberately free of English words so the pseudo-locale
+// assertions cannot pass by coincidence.
+func localizationSnapshot() *Snapshot {
+	completed := time.Date(2026, 5, 21, 12, 0, 0, 0, time.UTC)
+	return &Snapshot{
+		Task: TaskMeta{Title: "Fixture", WorkflowStep: "step-1"},
+		Session: SessionMeta{
+			AgentType:    "claude-acp",
+			Model:        "claude-opus-4-7",
+			ExecutorType: "local_docker",
+			StartedAt:    completed.Add(-time.Minute),
+			CompletedAt:  &completed,
+		},
+		Messages: []Message{
+			{Role: roleUser, Blocks: []Block{{Kind: blockKindText, Text: "q"}}},
+			{Role: roleAssistant, Blocks: []Block{{Kind: blockKindToolResult, Output: "out"}}},
+			{Role: roleAssistant, Blocks: []Block{
+				{Kind: blockKindToolResult, Output: "cut", Truncated: true},
+			}},
+			{Role: roleSystem, Blocks: []Block{{Kind: blockKindText, Text: "s"}}},
+			// Blocks present but all blank — drives the "(empty)" placeholder.
+			{Role: roleUser, Blocks: []Block{{Kind: blockKindText, Text: "   "}}},
+		},
+		Redaction: RedactionLog{AppliedRules: []string{RuleAbsPath}},
+	}
+}
+
+// assertPseudoDiffers is the real proof that a string is externalized: a
+// hardcoded literal renders byte-identically in every locale, so finding the
+// English message inside a pseudo-locale render means the key is decorative
+// and the call site never went through the catalog.
+func assertPseudoDiffers(t *testing.T, pseudoDoc string, keys []string) {
+	t.Helper()
+	for _, key := range keys {
+		english := i18n.T("en", key)
+		if strings.Contains(pseudoDoc, english) {
+			t.Fatalf("key %q still renders its English message %q under the pseudo locale — the string is hardcoded",
+				key, english)
+		}
 	}
 }
 

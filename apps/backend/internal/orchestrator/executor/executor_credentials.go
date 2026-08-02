@@ -27,7 +27,9 @@ const (
 	envGitLabHost       = "GITLAB_HOST"
 	envKandevGitLabHost = "KANDEV_GITLAB_HOST"
 
-	gitHubCredentialHelper         = "!agentctl git-credential"
+	gitHubCredentialHelper         = githubauth.ManagedGitCredentialHelper
+	legacyShimGitCredentialHelper  = githubauth.LegacyShimGitCredentialHelper
+	legacyGitHubCredentialHelper   = githubauth.LegacyGitCredentialHelper
 	defaultGitHubHost              = "github.com"
 	gitLabCredentialHelper         = `!f() { echo "username=oauth2"; echo "password=$GITLAB_TOKEN"; }; f`
 	taskGitCredentialsModeManaged  = "managed"
@@ -81,6 +83,12 @@ type TaskGitCredentialPolicyResolver interface {
 func (e *Executor) SetGitHubCredentialBroker(issuer GitHubCredentialLeaseIssuer, brokerURL string) {
 	e.githubCredentialIssuer = issuer
 	e.githubCredentialBrokerURL = strings.TrimSpace(brokerURL)
+}
+
+// SetAgentctlBinaryPath configures the launcher-owned helper executable used
+// by host-side Local and Worktree preparation before agentctl startup.
+func (e *Executor) SetAgentctlBinaryPath(path string) {
+	e.agentctlBinaryPath = strings.TrimSpace(path)
 }
 
 // SetTaskGitCredentialPolicyResolver configures workspace-specific task Git routing.
@@ -195,6 +203,12 @@ func (e *Executor) configureGitHubCredentialBrokerForRepositories(
 	req.Env[githubauth.CredentialHostEnv] = primary.Host
 	req.Env[githubauth.CredentialScopesEnv] = string(encodedScopes)
 	req.Env["GIT_TERMINAL_PROMPT"] = "0"
+	switch models.ExecutorType(req.ExecutorType) {
+	case "", models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
+		if e.agentctlBinaryPath != "" {
+			req.Env[githubauth.CredentialHelperPathEnv] = e.agentctlBinaryPath
+		}
+	}
 	// An empty helper resets inherited GitHub HTTPS helpers before the scoped
 	// broker helper is appended. Other indexed Git configuration remains intact.
 	appendGitConfig(req.Env, "credential.https://github.com.helper", "")
@@ -209,6 +223,7 @@ func removeManagedGitHubCredentials(req *LaunchAgentRequest) error {
 	}
 	for _, key := range []string{
 		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
 		githubauth.CredentialLeaseEnv,
 		githubauth.CredentialTaskIDEnv,
 		githubauth.CredentialSessionIDEnv,
@@ -222,18 +237,23 @@ func removeManagedGitHubCredentials(req *LaunchAgentRequest) error {
 	}
 	entries, err := gitconfigenv.Filter(req.Env, func(index int, entries []gitconfigenv.Entry) bool {
 		entry := entries[index]
-		if entry.Key == "credential.https://github.com.helper" && entry.Value == gitHubCredentialHelper {
+		if entry.Key == "credential.https://github.com.helper" && isManagedGitHubCredentialHelper(entry.Value) {
 			return false
 		}
 		return entry.Key != "credential.https://github.com.helper" || entry.Value != "" ||
 			index+1 >= len(entries) || entries[index+1].Key != entry.Key ||
-			entries[index+1].Value != gitHubCredentialHelper
+			!isManagedGitHubCredentialHelper(entries[index+1].Value)
 	})
 	if err != nil {
 		return fmt.Errorf("remove managed GitHub credential helper: %w", err)
 	}
 	req.Env = entries
 	return nil
+}
+
+func isManagedGitHubCredentialHelper(value string) bool {
+	return value == gitHubCredentialHelper || value == legacyShimGitCredentialHelper ||
+		value == legacyGitHubCredentialHelper
 }
 
 func (e *Executor) issueGitHubCredentialScope(

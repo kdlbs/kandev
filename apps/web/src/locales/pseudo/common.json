@@ -1,0 +1,19 @@
+{
+  "agents": "Àĝēńţś",
+  "automations": "Àũţōḿàţĩōńś",
+  "dAgo": "{{diffDay}}ď àĝō",
+  "executors": "Ēxēćũţōŕś",
+  "externalMcp": "Ēxţēŕńàĺ ḾĆƤ",
+  "hAgo": "{{diffHr}}ĥ àĝō",
+  "integrations": "Ĩńţēĝŕàţĩōńś",
+  "justNow": "ĵũśţ ńōŵ",
+  "mAgo": "{{diffMin}}ḿ àĝō",
+  "plugins": "Ƥĺũĝĩńś",
+  "prompts": "Ƥŕōḿƥţś",
+  "settings": "Śēţţĩńĝś",
+  "shell": "Śĥēĺĺ",
+  "status": "Śţàţũś",
+  "system": "Śŷśţēḿ",
+  "workspace": "Ŵōŕķśƥàćē",
+  "workspaces": "Ŵōŕķśƥàćēś"
+}

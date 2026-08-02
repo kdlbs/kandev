@@ -18,6 +18,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 const (
@@ -25,6 +26,7 @@ const (
 	dockerAgentctlInstancePortMax   = 41100
 	boolStringTrue                  = "true"
 	gitHubCredentialHelperConfigKey = "credential.https://github.com.helper"
+	remoteAgentctlExecutablePath    = "/usr/local/bin/agentctl"
 )
 
 // ContainerConfig holds configuration for launching a Docker container
@@ -665,10 +667,14 @@ func (cm *ContainerManager) buildEnvVars(config ContainerConfig) ([]string, erro
 
 	// Inject credentials from the provided credentials map
 	for k, v := range config.Credentials {
-		if k == "GIT_CONFIG_COUNT" || strings.HasPrefix(k, "GIT_CONFIG_KEY_") || strings.HasPrefix(k, "GIT_CONFIG_VALUE_") {
+		if k == "GIT_CONFIG_COUNT" || strings.HasPrefix(k, "GIT_CONFIG_KEY_") ||
+			strings.HasPrefix(k, "GIT_CONFIG_VALUE_") || k == githubauth.CredentialHelperPathEnv {
 			continue
 		}
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+	if hasManagedGitHubBrokerEnv(config.Credentials) {
+		env = append(env, githubauth.CredentialHelperPathEnv+"="+remoteAgentctlExecutablePath)
 	}
 
 	// Add profile-specific label if available

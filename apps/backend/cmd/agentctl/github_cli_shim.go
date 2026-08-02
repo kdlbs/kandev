@@ -16,7 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
-const envGitHubCLIShimDir = "KANDEV_GITHUB_CLI_SHIM_DIR"
+const envGitHubCLIShimDir = githubauth.CredentialCLIShimDirEnv
 
 const windowsOS = "windows"
 
@@ -271,7 +271,28 @@ func installGitHubCLIShim(agentctlExecutable, tempRoot string) (string, func(), 
 		cleanup()
 		return "", nil, fmt.Errorf("install agentctl helper: %w", err)
 	}
+	if err := installGitHubCLIBashEnv(dir); err != nil {
+		cleanup()
+		return "", nil, fmt.Errorf("install Bash environment: %w", err)
+	}
 	return dir, cleanup, nil
+}
+
+func installGitHubCLIBashEnv(shimDir string) error {
+	path := filepath.Join(shimDir, githubauth.CLIBashEnvFilename)
+	const script = `#!/bin/sh
+if [ -n "${KANDEV_GITHUB_PARENT_BASH_ENV:-}" ] &&
+   [ "${KANDEV_GITHUB_PARENT_BASH_ENV}" != "${KANDEV_GITHUB_CLI_BASH_ENV:-}" ]; then
+  . "$KANDEV_GITHUB_PARENT_BASH_ENV"
+fi
+if [ -n "${KANDEV_GITHUB_CLI_SHIM_DIR:-}" ]; then
+  case ":${PATH:-}:" in
+    *:"${KANDEV_GITHUB_CLI_SHIM_DIR}":*) ;;
+    *) PATH="${KANDEV_GITHUB_CLI_SHIM_DIR}:${PATH:-}"; export PATH ;;
+  esac
+fi
+`
+	return os.WriteFile(path, []byte(script), 0o700)
 }
 
 func linkOrCopyExecutable(source, target string) error {

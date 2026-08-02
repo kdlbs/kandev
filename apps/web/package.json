@@ -10,6 +10,7 @@
     "build:vite": "vite build",
     "start": "vite preview --host 0.0.0.0",
     "lint": "eslint --max-warnings 0",
+    "lint:i18n": "eslint --config eslint.i18n.config.mjs",
     "pretypecheck": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
     "typecheck": "tsc --noEmit",
     "pretest": "node scripts/generate-release-notes.mjs && node scripts/generate-changelog.mjs",
@@ -21,7 +22,10 @@
     "e2e:ui": "playwright test --config e2e/playwright.config.ts --ui",
     "e2e:headed": "playwright test --config e2e/playwright.config.ts --headed",
     "e2e:capture": "cross-env CAPTURE_PR_ASSETS=true playwright test --config e2e/playwright.config.ts && tsx e2e/scripts/convert-assets.ts",
-    "licenses:gen": "tsx scripts/generate-licenses.ts"
+    "licenses:gen": "tsx scripts/generate-licenses.ts",
+    "i18n:pseudo": "node scripts/generate-pseudo-locale.mjs",
+    "i18n:check": "node scripts/check-i18n-keys.mjs && node scripts/check-trans-indices.mjs && node scripts/check-inline-plurals.mjs && node scripts/check-module-scope-t.mjs",
+    "i18n:ratchet": "node scripts/run-i18n-ratchet.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.0.0",
@@ -96,6 +100,7 @@
     "diff": "^8.0.3",
     "dockview-react": "^4.13.1",
     "embla-carousel-react": "^8.6.0",
+    "i18next": "^26.3.6",
     "immer": "^10.1.1",
     "input-otp": "^1.4.2",
     "lowlight": "^3.3.0",
@@ -105,6 +110,7 @@
     "react": "19.2.3",
     "react-day-picker": "^9.13.0",
     "react-dom": "19.2.3",
+    "react-i18next": "^17.0.11",
     "react-markdown": "^10.1.0",
     "react-resizable-panels": "^4.4.1",
     "react-virtuoso": "^4.18.1",
@@ -124,6 +130,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@babel/core": "^7.29.6",
     "@eslint/js": "^9.39.2",
     "@playwright/test": "^1.61.1",
     "@tailwindcss/postcss": "^4",
@@ -135,6 +142,7 @@
     "@vitejs/plugin-react": "^6.0.2",
     "cross-env": "^7.0.3",
     "eslint": "^9",
+    "eslint-plugin-i18next": "^6.1.5",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-sonarjs": "^3.0.7",
     "eslint-plugin-unused-imports": "^4.4.1",

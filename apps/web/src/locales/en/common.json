@@ -1,0 +1,19 @@
+{
+  "agents": "Agents",
+  "automations": "Automations",
+  "dAgo": "{{diffDay}}d ago",
+  "executors": "Executors",
+  "externalMcp": "External MCP",
+  "hAgo": "{{diffHr}}h ago",
+  "integrations": "Integrations",
+  "justNow": "just now",
+  "mAgo": "{{diffMin}}m ago",
+  "plugins": "Plugins",
+  "prompts": "Prompts",
+  "settings": "Settings",
+  "shell": "Shell",
+  "status": "Status",
+  "system": "System",
+  "workspace": "Workspace",
+  "workspaces": "Workspaces"
+}

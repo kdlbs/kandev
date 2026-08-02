@@ -12,6 +12,8 @@ import (
 
 	sprites "github.com/superfly/sprites-go"
 	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/githubauth"
 )
 
 var uploadHTTPStatusRE = regexp.MustCompile(`(?i)\b(?:http|status)\s*:?\s*(\d{3})\b`)
@@ -129,7 +131,13 @@ func extractUploadHTTPStatus(msg string) int {
 func (r *SpritesExecutor) buildSpriteEnv(env map[string]string) []string {
 	result := make([]string, 0, len(env))
 	for k, v := range env {
+		if k == githubauth.CredentialHelperPathEnv {
+			continue
+		}
 		result = append(result, k+"="+v)
+	}
+	if hasManagedGitHubBrokerEnv(env) {
+		result = append(result, githubauth.CredentialHelperPathEnv+"="+remoteAgentctlExecutablePath)
 	}
 	return result
 }

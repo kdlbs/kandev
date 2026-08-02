@@ -7,6 +7,13 @@ description: "Run and verify Kandev's version, runtime, desktop, container, npm,
 
 Kandev uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, and Homebrew formula. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
 
+## Quick path
+
+1. Choose one workflow mode.
+2. Verify `main`, checks, credentials, signing inputs, and affected targets.
+3. Run the release workflow and verify every published channel.
+4. Use backfill only to repair the latest release; publish a new patch for defective code or immutable artifacts.
+
 ## Choose the workflow mode
 
 The workflow has four mutually exclusive operating modes:
@@ -63,6 +70,9 @@ Normal mode performs these stages:
 GHCR images are built before the GitHub Release. npm and Homebrew start only after the GitHub Release and may run in parallel. A late failure can therefore leave some channels complete and others missing.
 
 Base image tags include `X.Y.Z`, `vX.Y.Z`, `sha-*`, and `latest`. Universal tags include `X.Y.Z-universal`, `vX.Y.Z-universal`, and the floating `universal`. The weekly universal rebuild updates only floating/dated weekly tags, never a version-specific release tag.
+
+<details>
+<summary>Signing, verification, and partial-release recovery</summary>
 
 ## Signing and updater behavior
 
@@ -131,3 +141,5 @@ Use `backfill_tag` only for the latest release when shipped source is correct an
 Publish a new patch instead when code is defective, an immutable npm package or version-specific image is wrong, manifests disagree, or repair would require changing tagged source. Never delete/reuse a published tag or move an npm version as a routine fix.
 
 For implementation detail, inspect `.github/workflows/release.yml`, `.github/workflows/universal-rebuild.yml`, `scripts/release/`, `apps/cli/README_internal.md`, and desktop packaging scripts. Those files are automation source; this page is the contributor operating contract.
+
+</details>

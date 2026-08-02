@@ -42,7 +42,12 @@ func (s *Service) PreviewSnapshot(ctx context.Context, taskSessionID string) (*S
 
 // CreateShare builds a snapshot, uploads it via the configured backend, and
 // records the row in the repository.
-func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share, error) {
+//
+// locale comes from the creating request and fixes the language of the
+// published artifact; the artifact is static, so this is the only point at
+// which a locale can be chosen. Pass i18n.DefaultLocale when there is no
+// request to resolve one from.
+func (s *Service) CreateShare(ctx context.Context, taskSessionID, locale string) (*Share, error) {
 	workspaceID, err := s.workspaceForSession(ctx, taskSessionID)
 	if err != nil {
 		return nil, err
@@ -57,7 +62,7 @@ func (s *Service) CreateShare(ctx context.Context, taskSessionID string) (*Share
 	if err != nil {
 		return nil, fmt.Errorf("marshal snapshot: %w", err)
 	}
-	extID, extURL, err := s.backend.Upload(ctx, workspaceID, snap)
+	extID, extURL, err := s.backend.Upload(ctx, workspaceID, snap, locale)
 	if err != nil {
 		return nil, fmt.Errorf("upload snapshot: %w", err)
 	}

@@ -7,6 +7,13 @@ description: "Choose and configure local, worktree, Docker, SSH, or Sprites task
 
 An executor determines where Kandev creates a task environment and runs `agentctl`, the selected agent, terminals, and Git commands. An executor profile supplies reusable settings for that executor. A task environment is the concrete workspace created for one task; several sessions may reuse it.
 
+## Quick path
+
+1. Choose **Worktree** for normal isolated Git work.
+2. Choose **Local** only when sharing the selected checkout is intentional.
+3. Choose Docker, SSH, or Sprites when the host boundary or remote location is part of the requirement.
+4. Review credentials, scripts, mounts, and network policy as part of the executor trust boundary.
+
 ## Current support
 
 | Executor      | Current status                                                                  | Workspace                                                               | Use it when                                                              |
@@ -150,6 +157,11 @@ Source batches are atomic: if validation, cloning, or runtime adoption fails, Ka
 
 ## Local Docker
 
+> **Daemon authority:** Dockerfile instructions run with the configured daemon's authority. Treat profile creation as an administrative operation on that daemon.
+
+<details>
+<summary>Local Docker details</summary>
+
 ### Prerequisites and profile creation
 
 Install a reachable Docker Engine and leave `docker.enabled: true` (the non-containerized backend default). The published Kandev service image overrides this to `false`; see [Docker](docker.md#using-docker-for-agent-environments). The runtime health method is currently a no-op and the client is initialized lazily, so a green control-plane startup does not prove daemon access; image build or first task launch is the effective check.
@@ -180,7 +192,14 @@ The current container manager always selects the Linux/amd64 `agentctl` helper. 
 
 Kandev passes each agent definition's CPU and memory limits to Docker. These are agent implementation defaults, not executor-profile controls. Apply additional daemon, cgroup, storage, and network policy outside Kandev when required.
 
+</details>
+
 ### Credentials and security
+
+> **Trust boundary:** A container is useful but not a hostile-code sandbox. The daemon has host-level power, bind mounts expose sources, agents can use injected secrets, and the default image has outbound network access. Kandev does not mount the Docker socket automatically.
+
+<details>
+<summary>Docker credential and security details</summary>
 
 Docker profiles can inject resolved environment secrets. For agent file-based authentication, Kandev selectively seeds a per-execution directory under `<KANDEV_HOME_DIR>/agent-sessions/` and mounts that directory at the agent's expected config path. It does not intentionally mount the entire host home.
 
@@ -192,7 +211,14 @@ Plain Stop preserves a healthy container for resume. A later launch reconnects t
 docker ps -a --filter label=kandev.managed=true
 ```
 
+</details>
+
 ## Sprites.dev
+
+> **Credentials and network:** Sprites sandboxes receive highly sensitive data. Credential upload is best effort, and network policy is installed only after credential upload, prepare, controller startup, and agent-instance creation; bootstrap traffic may happen first, so the policy is not a security boundary.
+
+<details>
+<summary>Sprites.dev details</summary>
 
 ### Configure
 
@@ -209,7 +235,14 @@ Fresh launch creates a sandbox named `kandev-<execution-prefix>`, uploads the Li
 
 Plain Stop preserves the sandbox and workspace for resume. Archive/delete terminal stops attempt to destroy it, and the profile page can list and explicitly destroy Kandev-named sandboxes with the selected provider token. **Reset Environment** also requests sandbox destruction, but the current direct-reset path does not carry the profile's Sprites secret into that destroy request; after a reset or backend restart, verify the old sandbox in the profile page and destroy it there if it remains. Provider retention, quotas, network behavior, and billing remain provider-dependent. Destroying a sandbox out of band breaks any session that still references it.
 
+</details>
+
 ## SSH
+
+> **Trust boundary:** Verify the target host fingerprint before saving. Kandev pins the target key, but unknown ProxyJump bastion keys may be accepted on first use; remote credential transfers write sensitive material under the remote user's home.
+
+<details>
+<summary>SSH details</summary>
 
 SSH is implemented as a separate remote connection per session. Kandev uploads a platform-matched `agentctl` helper over SFTP, starts it in the remote task directory, and forwards its port to local loopback.
 
@@ -241,13 +274,22 @@ The profile editor exposes remote shell and agent-readiness checks. Backend/API 
 
 The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token. These transfers write sensitive material under the remote user's home and are best-effort—verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
+</details>
+
 ### Repository sources and cleanup
+
+> **Cleanup:** SSH task directories, session-runtime data, and cached helpers may remain after disconnect. Audit remote processes and paths before deleting anything.
+
+<details>
+<summary>SSH repository source details</summary>
 
 SSH materializes attached repository sources in the remote task directory. It still ignores profile prepare and cleanup scripts. Ensure the remote host has the required Git credentials and can reach every selected remote; folders cannot be attached to SSH tasks.
 
 The runtime preflights the selected agent command and reports an installation hint when missing; it does not install the agent or its toolchain. Only these resolved credential environment names are forwarded to the remote agent: `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`, `GITHUB_TOKEN`, and `GH_TOKEN`. Arbitrary profile variables and control-plane process variables are not forwarded to that agent process. Agent-specific auth setup scripts can still consume a selected stored secret and materialize their own remote login state.
 
 Stop attempts to kill the session's remote `agentctl` and remove only the remote session-runtime directory, then closes forwarding and SSH. Remote cleanup is best-effort: when the connection has already failed, the process or session directory can remain. The task directory always remains and no background sweeper currently removes it. The cached helper and checksum at `~/.kandev/bin/agentctl` and `agentctl.sha256` also remain for later sessions. Periodically audit the remote process list, session directories, and `<workdir-root>/tasks/` after confirming no session needs the data. Resume re-dials SSH and reuses a live recorded PID when possible; otherwise Kandev starts a fresh remote controller.
+
+</details>
 
 ## Lifecycle and cleanup
 

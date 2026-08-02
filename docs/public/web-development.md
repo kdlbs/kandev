@@ -7,6 +7,13 @@ description: "Develop Kandev's Vite/React routes, domain data flow, settings, wo
 
 `apps/web/` is a React 19 single-page application built by Vite. In production, the Go backend serves its output and remains the API, WebSocket, and authorization boundary.
 
+## Quick path
+
+1. Run `make dev` and use the printed URLs.
+2. Trace the route through `src/spa-routes.tsx` or `src/settings-routes.tsx`.
+3. Put requests in the owning domain client/hook and live updates in the WebSocket handler.
+4. Test loading, error, reconnect, keyboard, desktop, and mobile states before review.
+
 ## Run the application
 
 ```bash

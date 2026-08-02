@@ -25,7 +25,11 @@ type Backend interface {
 
 	// Upload publishes the snapshot and returns the backend-specific
 	// identifier (e.g. gist ID) and the public URL where it can be viewed.
-	Upload(ctx context.Context, workspaceID string, snap *Snapshot) (externalID, externalURL string, err error)
+	//
+	// locale is the share creator's, resolved from the create request. The
+	// published artifact is a static file, so a reader opening it later makes
+	// no request we could resolve a locale from — it has to be baked in here.
+	Upload(ctx context.Context, workspaceID string, snap *Snapshot, locale string) (externalID, externalURL string, err error)
 
 	// Delete removes a previously-uploaded snapshot. Backends MAY return a
 	// "not found" error which the service detects via IsAlreadyGone.

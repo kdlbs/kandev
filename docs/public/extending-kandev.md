@@ -7,6 +7,17 @@ description: "Add agents, executors, integrations, workflow behavior, MCP tools,
 
 An extension is complete when discovery/configuration, durable state, runtime behavior, recovery, security, tests, packaging, and public documentation agree. Registration and UI presence alone are not completion.
 
+## Choose an extension seam
+
+- **Agent:** add a CLI runtime or structured ACP integration.
+- **Executor:** add a task environment and lifecycle backend.
+- **Provider:** add an external service connection, health, and UI.
+- **Workflow/MCP:** add durable automation behavior or a scoped tool.
+- **Plugin:** ship an independently versioned extension.
+- **Settings/workbench:** add a user-facing surface after backend ownership exists.
+
+Use the smallest seam that owns the behavior, then follow the completion checklist at the end.
+
 ## Add an agent
 
 For a local passthrough-only CLI, users can choose **Settings → Agents → Add TUI Agent**. That path persists a custom definition and default profile; no source patch is required.
