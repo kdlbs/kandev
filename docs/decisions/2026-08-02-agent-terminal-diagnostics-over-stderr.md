@@ -32,9 +32,13 @@ existing generation-scoped error lifecycle. Silence without such evidence
 continues to follow
 [ADR-2026-07-29-agent-stall-user-controlled-recovery](2026-07-29-agent-stall-user-controlled-recovery.md).
 
-Raw stderr remains bounded and executor-local. This feature does not persist
-it, include it in browser payloads, or expose a general API for reading agent
-logs. The observable behavior is specified in
+Raw stderr is inspected only in memory by the protocol-specific parser. For
+OpenCode, the process manager applies the parser's safe message projection
+before writing generic logs, the recent-stderr ring, or process-exit events;
+malformed and unrelated records are excluded. Other agents retain their
+existing stderr behavior. Raw OpenCode lines are never persisted, included in
+browser payloads, or exposed through a general API for reading agent logs. The
+observable behavior is specified in
 [`docs/specs/agent-stall-recovery/spec.md`](../specs/agent-stall-recovery/spec.md).
 
 ## Consequences

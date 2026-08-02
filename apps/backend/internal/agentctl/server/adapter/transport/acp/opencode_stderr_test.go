@@ -207,3 +207,42 @@ func TestParseOpenCodeStderrLineSanitizesIdentifiersAndBoundsMessage(t *testing.
 		}
 	}
 }
+
+func TestOpenCodeStderrConsumerDropsWhenPromptChannelIsBacklogged(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = opencodeAgentID
+	a.promptTurn = &promptTurnState{
+		providerErrorCh: make(chan openCodeStderrDiagnostic, 1),
+	}
+	a.promptTurn.providerErrorCh <- openCodeStderrDiagnostic{}
+
+	line := `timestamp=2026-08-02T15:15:44Z level=ERROR message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_123 small=false agent=build error.error="provider failed"`
+	done := make(chan struct{})
+	go func() {
+		a.ConsumeStderrLine(line)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("backlogged provider diagnostic channel blocked stderr consumption")
+	}
+}
+
+func TestSanitizeOpenCodeStderrLineProjectsOnlySafeProviderMessage(t *testing.T) {
+	a := newTestAdapter()
+	a.agentID = opencodeAgentID
+	line := `timestamp=2026-08-02T15:15:44Z level=ERROR message="stream error" providerID=opencode-go modelID=kimi-k3 session.id=ses_123 small=false agent=build error.error="usage limit reached: https://opencode.ai/workspace/wrk_123"`
+
+	safe, keep := a.SanitizeStderrLine(line)
+	if !keep || safe == "" {
+		t.Fatalf("safe line = %q, keep = %t", safe, keep)
+	}
+	if strings.Contains(safe, "https://") || strings.Contains(safe, "wrk_123") {
+		t.Fatalf("safe line contains private details: %q", safe)
+	}
+
+	if safe, keep := a.SanitizeStderrLine("level=ERROR message=title"); keep || safe != "" {
+		t.Fatalf("unrecognized line = %q, keep = %t", safe, keep)
+	}
+}

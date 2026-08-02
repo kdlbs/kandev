@@ -16,13 +16,17 @@ spec: "../../specs/agent-stall-recovery/spec.md"
   while other managed agent commands remain unchanged.
 - Agentctl delivers cleaned live stderr lines to an optional consumer without
   blocking child-process drainage or changing the bounded recent-stderr API.
+- For OpenCode, generic logs, recent-stderr, and nonzero-exit events contain
+  only the parser's safe provider-message projection; unrecognized records are
+  excluded so workspace URLs and identifiers cannot leak through the fallback
+  error path.
 - The OpenCode parser accepts only foreground `stream error` records and
   returns allowlisted, URL-free provider/model/message/timestamp/reset fields;
   background, malformed, and unrelated records are rejected.
 
 ## Verification
 
-- `cd apps/backend && go test ./internal/agent/agents ./internal/agentctl/server/process ./internal/agentctl/server/adapter/transport/acp -run 'Test(OpenCode|ManagedNPMRuntime|Manager.*Stderr|ParseOpenCode)'`
+- `cd apps/backend && go test ./internal/agent/agents ./internal/agentctl/server/process ./internal/agentctl/server/adapter/transport/acp -run 'Test(OpenCode|ManagedNPMRuntime|Manager.*Stderr|ManagerProcessExit|ParseOpenCode)'`
 
 Use TDD: command-contract, stderr-delivery, and parser tests must fail before
 their production changes are added.
@@ -62,9 +66,11 @@ contract introduced here.
 ## Risks
 
 - `readStderr` is a process-liveness boundary; consumer delivery must remain
-  non-blocking.
+  non-blocking, including when the bounded provider-diagnostic channel is full.
 - The parser must not preserve the OpenCode workspace URL or identifiers found
   in the observed `error.error` suffix.
+- The generic process-exit path must consume only the safe OpenCode projection;
+  raw stderr must never appear in logs, the recent-stderr ring, or exit events.
 
 ## Output contract
 
@@ -74,9 +80,11 @@ and update its plan checkbox in the same conversation.
 
 ## Results
 
-RED covered the managed command contract, optional stderr consumer, and parser
-privacy cases before the implementation was added. OpenCode now uses
-`acp --print-logs --log-level ERROR`; the parser keeps only the validated
-foreground session/provider/model/message/timestamp/reset fields and rejects
-title, `small=true`, malformed, unrelated, or incomplete records. The exact
-verification command passed with 24 tests across three packages.
+The managed command contract, optional stderr consumer, parser privacy,
+bounded-channel, and nonzero-exit projection cases all have focused
+regressions. OpenCode now uses `acp --print-logs --log-level ERROR`; the parser
+keeps only the validated foreground
+session/provider/model/message/timestamp/reset fields and rejects title,
+`small=true`, malformed, unrelated, or incomplete records. The focused
+verification passed with 26 tests across three packages; the full backend
+suite also passed.

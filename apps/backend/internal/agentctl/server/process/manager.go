@@ -98,9 +98,10 @@ type Manager struct {
 	exitErr            atomic.Value // error
 
 	// Stderr buffering for error context
-	stderrBuffer   []string
-	stderrMu       sync.RWMutex
-	stderrConsumer adapter.StderrLineConsumer
+	stderrBuffer    []string
+	stderrMu        sync.RWMutex
+	stderrConsumer  adapter.StderrLineConsumer
+	stderrSanitizer adapter.StderrLineSanitizer
 
 	// Workspace tracker for git status and file changes
 	workspaceTracker *WorkspaceTracker
@@ -1463,6 +1464,11 @@ func (m *Manager) createAdapter() error {
 	} else {
 		m.stderrConsumer = nil
 	}
+	if sanitizer, ok := m.adapter.(adapter.StderrLineSanitizer); ok {
+		m.stderrSanitizer = sanitizer
+	} else {
+		m.stderrSanitizer = nil
+	}
 
 	// Set the permission handler
 	m.adapter.SetPermissionHandler(m.handlePermissionRequest)
@@ -2082,14 +2088,25 @@ func (m *Manager) readStderr() {
 
 	scanner := bufio.NewScanner(m.stderr)
 	for scanner.Scan() {
-		line := stripANSI(scanner.Text())
+		rawLine := stripANSI(scanner.Text())
+		if m.stderrConsumer != nil {
+			// Protocol-specific consumers inspect the line in memory. Their
+			// normalized output is projected separately before any generic
+			// logging, buffering, or process-exit event can expose it.
+			m.stderrConsumer.ConsumeStderrLine(rawLine)
+		}
+
+		line, keep := rawLine, true
+		if m.stderrSanitizer != nil {
+			line, keep = m.stderrSanitizer.SanitizeStderrLine(rawLine)
+		}
+		if !keep || line == "" {
+			continue
+		}
 		m.logger.Debug("agent stderr", zap.String("line", line))
 
-		// Buffer the line for error context
+		// Buffer only the safe projection for error context.
 		m.appendStderr(line)
-		if m.stderrConsumer != nil {
-			m.stderrConsumer.ConsumeStderrLine(line)
-		}
 	}
 
 	if err := scanner.Err(); err != nil {

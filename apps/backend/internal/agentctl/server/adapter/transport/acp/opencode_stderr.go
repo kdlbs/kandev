@@ -72,6 +72,20 @@ func (a *Adapter) ConsumeStderrLine(line string) {
 	}
 }
 
+// SanitizeStderrLine keeps only a normalized provider message for OpenCode's
+// generic process diagnostics. Unrecognized records are excluded because they
+// may contain private URLs, identifiers, paths, or credentials.
+func (a *Adapter) SanitizeStderrLine(line string) (string, bool) {
+	if a.agentID != opencodeAgentID {
+		return line, true
+	}
+	diagnostic, ok := parseOpenCodeStderrLine(line)
+	if !ok {
+		return "", false
+	}
+	return diagnostic.ProviderError.Message, true
+}
+
 func parseOpenCodeStderrLine(line string) (openCodeStderrDiagnostic, bool) {
 	fields, ok := parseOpenCodeLogFields(line)
 	if !ok || fields["level"] != "ERROR" || fields["message"] != "stream error" {

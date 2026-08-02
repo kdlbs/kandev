@@ -43,10 +43,13 @@ stall notice.
 - Update `Manager.readStderr` in
   `apps/backend/internal/agentctl/server/process/manager.go` to deliver each
   cleaned line to an installed consumer without allowing parsing or channel
-  backpressure to block draining the child process. Keep `GetRecentStderr` and
-  process-exit diagnostics unchanged.
-- Add a focused process-manager regression proving delivery, ANSI stripping,
-  and non-consumer behavior without persisting stderr.
+  backpressure to block draining the child process. For OpenCode, apply a
+  protocol-specific safe projection before generic logging, the recent-stderr
+  ring, or process-exit events; malformed or unrelated records are excluded.
+  Other managed agents retain their existing stderr behavior.
+- Add focused process-manager regressions proving delivery, ANSI stripping,
+  non-consumer behavior, and that a nonzero OpenCode exit cannot expose raw
+  workspace URLs or identifiers through logs or exit events.
 
 ### OpenCode diagnostic normalization and prompt correlation
 
@@ -166,7 +169,9 @@ stall notice.
   **File:** `apps/backend/internal/agentctl/server/process/manager_test.go` or a
   focused sibling test.
   **How:** fixture process writes ANSI stderr; assertions cover ordered delivery,
-  no consumer, and bounded ring behavior.
+  no consumer, bounded ring behavior, a backlogged diagnostic channel that does
+  not block the drain loop, and a nonzero OpenCode exit whose log, ring, and
+  exit event contain only the safe projection.
 - **What:** only a main-session OpenCode stream error is normalized.
   **File:** `apps/backend/internal/agentctl/server/adapter/transport/acp/opencode_stderr_test.go`.
   **How:** table tests cover the observed quota line, quoted fields, URL
@@ -216,6 +221,7 @@ stall notice.
 - Task 03: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/agent/runtime/routingerr ./internal/orchestrator ./internal/orchestrator/watcher -run 'Test(.*ProviderError|.*OpenCode.*UsageLimit|HandleRecoverableFailure.*Quota|CreateRecoveryStatusMessage.*Quota)' -count=1` — 13 tests passed.
 - Task 04: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/messages/action-message.test.tsx` — 17 tests passed; `cd apps/web && pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
 - Task 05: managed desktop and mobile Playwright runs passed after the E2E seed was corrected to include `completed_at`: one Chromium test and one `mobile-chrome` test passed.
+- Fixup: `cd apps/backend && go test ./internal/agent/agents ./internal/agentctl/server/process ./internal/agentctl/server/adapter/transport/acp -run 'Test(OpenCode|ManagedNPMRuntime|Manager.*Stderr|ManagerProcessExit|ParseOpenCode)' -count=1` — 26 tests passed; `go test ./...` passed with 10,237 tests.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -248,11 +254,14 @@ Wave 5:
   closed: a format change loses the immediate error but cannot fail an
   unrelated turn.
 - The stderr reader must never block, because blocking it can deadlock the
-  supervised process.
+  supervised process; the OpenCode diagnostic channel is bounded and its
+  consumer drops records when backlogged.
 - Prompt RPC completion, user cancellation, and the diagnostic may race; prompt
   generation ownership and a single terminal claim are correctness boundaries.
-- Only the sanitized normalized provider record crosses agentctl. Existing raw
-  recent-stderr diagnostics are not promoted into persisted recovery metadata.
+- Only the sanitized normalized provider record crosses agentctl. OpenCode raw
+  stderr is inspected in memory by its parser but is never written to generic
+  logs, the recent-stderr ring, process-exit events, persisted recovery
+  metadata, or browser payloads.
 - The plan does not read OpenCode log files, add an automatic model switch,
   schedule reset-time retries, change Office routing, or replace the upstream
   ACP fix.

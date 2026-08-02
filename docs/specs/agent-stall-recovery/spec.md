@@ -90,7 +90,7 @@ The internal normalized provider diagnostic contains only:
 | `model_id` | Model identifier reported by the agent, when present |
 | `message` | Sanitized provider message with URLs and identifiers removed |
 | `occurred_at` | Parsed diagnostic timestamp |
-| `reset_at` | Derived capacity-reset timestamp, when the message provides a duration |
+| `reset_at` | Derived by adding a relative reset duration to `occurred_at`; absolute reset timestamps are not accepted in this version |
 
 The persisted recovery-message metadata uses
 `failure_kind: provider_quota_limited`, plus the safe model and reset fields,
