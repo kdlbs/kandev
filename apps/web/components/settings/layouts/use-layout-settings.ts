@@ -305,7 +305,7 @@ function getDefaultActionState(drafts: Drafts, selected: SelectedState) {
     drafts.selection.kind === "built-in" && drafts.selection.id === "default";
   const label =
     builtInDefaultSelected && selectedIsDefault
-      ? "Default"
+      ? t("settings:default")
       : getDefaultActionLabel(selectedSavedDefault, selectedIsDefault);
   return { disabled, label, selectedIsDefault, selectedSavedDefault };
 }

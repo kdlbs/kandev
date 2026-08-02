@@ -55,6 +55,12 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   {
     name: "settings — layouts",
     url: "/settings/general/layouts",
+    // NOTE: everything here must be a PERSISTED name. This list is load-bearing
+    // in the wrong direction — a broad token also hides genuinely un-migrated
+    // copy that happens to match it. "Default" already masked the
+    // default-action button once, which rendered a raw English "Default" until
+    // `getDefaultActionState` was fixed to resolve it through the catalog.
+    //
     // Both groups are display strings that are also PERSISTED, so translating
     // them in place would write locale-dependent values into a user's saved
     // layouts and leave them there after a locale switch:
