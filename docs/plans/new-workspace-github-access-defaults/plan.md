@@ -143,8 +143,8 @@ Targeted browser verification after the fresh-worktree install:
 
 ```bash
 cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts
+cd apps && pnpm --filter @kandev/web run e2e:run -- tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts
+cd apps && pnpm --filter @kandev/web run e2e:run -- --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts
 ```
 
 ---
@@ -169,12 +169,12 @@ node scripts/validate-public-docs.mjs
 
 - `cd apps/backend && go test -tags fts5 ./internal/github ./internal/task/service ./internal/backendapp ./internal/orchestrator/executor -run 'Test.*Workspace.*Defaults|Test.*Workspace.*Initializ|TestTaskGitCredentialModeDefaultsManaged|TestApplyGitCredentialSnapshotUsesExecutorSources' -count=1` — 12 passed in 4 packages.
 - `cd apps/backend && go test -tags fts5 ./internal/github ./internal/task/service ./internal/backendapp ./internal/orchestrator/executor -count=1` — 2402 passed in 4 packages.
-- `cd apps/web && pnpm e2e:run tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts` — 9 passed.
-- `cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts` — 2 passed.
+- `cd apps && pnpm --filter @kandev/web run e2e:run -- tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts` — 9 passed.
+- `cd apps && pnpm --filter @kandev/web run e2e:run -- --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts` — 2 passed.
 - `cd apps/backend && make lint` — 0 issues.
 - `cd apps && pnpm --filter @kandev/web run typecheck` — passed.
 - `cd apps && pnpm --filter @kandev/web run lint` — passed.
-- `cd apps/web && pnpm run i18n:check && pnpm run i18n:ratchet` — passed.
+- `cd apps && pnpm --filter @kandev/web run i18n:check && pnpm --filter @kandev/web run i18n:ratchet` — passed.
 - `node --test scripts/validate-public-docs.test.mjs` — 58 passed.
 - `node scripts/validate-public-docs.mjs` — 41 published docs pages validated.
 - `cd apps && pnpm run format:check` and `git diff --check` — passed.

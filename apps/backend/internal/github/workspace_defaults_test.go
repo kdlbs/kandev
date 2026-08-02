@@ -41,6 +41,25 @@ func TestInitializeWorkspaceDefaultsPersistsExecutorAndBindsActiveCLI(t *testing
 	}
 }
 
+func TestInitializeWorkspaceDefaultsBoundsCLIValidationContext(t *testing.T) {
+	service, _ := newWorkspaceConnectionService(t, "operator")
+	service.ghAccountLister = func(context.Context) ([]GHAccount, error) {
+		return []GHAccount{{Host: "github.com", Login: "operator", Active: true, State: "active"}}, nil
+	}
+	var hasDeadline bool
+	service.resolver.ghToken = func(ctx context.Context, _, _ string) (string, error) {
+		_, hasDeadline = ctx.Deadline()
+		return "mock-gh-token", nil
+	}
+
+	if err := service.InitializeWorkspaceDefaults(context.Background(), "ws-1"); err != nil {
+		t.Fatalf("InitializeWorkspaceDefaults: %v", err)
+	}
+	if !hasDeadline {
+		t.Fatal("CLI validation context has no deadline")
+	}
+}
+
 func TestInitializeWorkspaceDefaultsDoesNotBindOperatorCLIForMember(t *testing.T) {
 	service, _ := newWorkspaceConnectionService(t, "operator")
 	listCalls := 0
@@ -103,7 +122,10 @@ func TestInitializeWorkspaceDefaultsSoftFailsWhenCLIUnavailable(t *testing.T) {
 func TestInitializeWorkspaceDefaultsIgnoresInvalidActiveCLI(t *testing.T) {
 	service, _ := newWorkspaceConnectionService(t, "operator")
 	service.ghAccountLister = func(context.Context) ([]GHAccount, error) {
-		return []GHAccount{{Host: "github.com", Login: "operator", Active: true, State: "revoked"}}, nil
+		return []GHAccount{{Host: "github.com", Login: "operator", Active: true, State: "unexpected"}}, nil
+	}
+	service.resolver.ghToken = func(context.Context, string, string) (string, error) {
+		return "mock-gh-token", nil
 	}
 
 	if err := service.InitializeWorkspaceDefaults(context.Background(), "ws-1"); err != nil {
@@ -140,6 +162,9 @@ func TestInitializeWorkspaceDefaultsPreservesExistingWorkspaceState(t *testing.T
 	}
 	service.ghAccountLister = func(context.Context) ([]GHAccount, error) {
 		return []GHAccount{{Host: "github.com", Login: "operator", Active: true, State: "active"}}, nil
+	}
+	service.resolver.ghToken = func(context.Context, string, string) (string, error) {
+		return "mock-gh-token", nil
 	}
 
 	if err := service.InitializeWorkspaceDefaults(ctx, "ws-1"); err != nil {
@@ -188,6 +213,20 @@ func TestInitializeFreshWorkspaceDefaultsSeedsExistingInitialWorkspace(t *testin
 	}
 	if len(secrets.values) != 0 {
 		t.Fatalf("initial workspace CLI token was persisted: %#v", secrets.values)
+	}
+}
+
+func TestInitializeFreshWorkspaceDefaultsBoundsStartupContext(t *testing.T) {
+	service, _ := newWorkspaceConnectionService(t, "operator")
+	service.ghAccountLister = func(ctx context.Context) ([]GHAccount, error) {
+		if _, ok := ctx.Deadline(); !ok {
+			t.Error("fresh workspace defaults context has no deadline")
+		}
+		return nil, errors.New("gh is not authenticated")
+	}
+
+	if err := service.InitializeFreshWorkspaceDefaults(context.Background()); err != nil {
+		t.Fatalf("InitializeFreshWorkspaceDefaults: %v", err)
 	}
 }
 

@@ -42,22 +42,16 @@ type taskIssueMetadataRow struct {
 func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 	s := &Store{
 		db: writer, ro: reader,
-		freshInstall: !tableExists(writer, "github_workspace_settings") &&
-			!tableExists(writer, "github_workspace_connections"),
 		appLifecycleLocks: make(map[string]*appRegistrationLifecycleLock),
 	}
+	s.freshInstall = !s.tableExists("github_workspace_settings") &&
+		!s.tableExists("github_workspace_connections")
 	legacyUpgrade := s.tableExists("github_workspace_settings") &&
 		!s.tableExists("github_workspace_connections")
 	if err := s.initSchema(legacyUpgrade); err != nil {
 		return nil, fmt.Errorf("github schema init: %w", err)
 	}
 	return s, nil
-}
-
-func tableExists(db *sqlx.DB, name string) bool {
-	var n int
-	err := db.QueryRow(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`, name).Scan(&n)
-	return err == nil
 }
 
 func (s *Store) lockAppRegistrationLifecycle(registrationID string) func() {
@@ -2997,6 +2991,18 @@ func (s *Store) EnsureWorkspaceExecutorDefaults(ctx context.Context, workspaceID
 			saved_presets, default_query_presets, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		workspaceID, TaskGitCredentialsModeExecutor, RepoScopeModeAll, "[]", "[]", "[]", nil, now, now)
+	return err
+}
+
+// DeleteWorkspaceSettings removes the non-secret GitHub settings owned by a
+// workspace after the task repository has deleted the workspace row.
+func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID)
 	return err
 }
 

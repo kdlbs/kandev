@@ -23,8 +23,8 @@ spec: "../../specs/integrations/github-authentication.md"
 
 ```bash
 cd apps/backend && go test -tags fts5 ./internal/github ./internal/task/service ./internal/backendapp ./internal/orchestrator/executor -run 'Test.*Workspace.*Defaults|Test.*Workspace.*Initializ|TestTaskGitCredentialModeDefaultsManaged|TestApplyGitCredentialSnapshotUsesExecutorSources' -count=1
-cd apps/web && pnpm e2e:run tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts
+cd apps && pnpm --filter @kandev/web run e2e:run -- tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts
+cd apps && pnpm --filter @kandev/web run e2e:run -- --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts
 ```
 
 - **Files likely touched:**

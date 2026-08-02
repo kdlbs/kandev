@@ -18,10 +18,11 @@ identity to every authenticated creator.
 
 ## Decision
 
-Every newly created workspace persists **Inherit executor Git credentials** (`executor`) as its
-initial task Git access policy. Local and Worktree tasks therefore use host-visible Git or SSH
-credentials; remote tasks use credentials configured in their executor. The user can later choose
-managed workspace credentials for that workspace.
+Every newly created workspace attempts to persist **Inherit executor Git credentials** (`executor`)
+as its initial task Git access policy. When that persistence succeeds, Local and Worktree tasks use
+host-visible Git or SSH credentials; remote tasks use credentials configured in their executor. If
+the settings write fails, workspace creation remains available and the existing `managed`
+compatibility fallback applies until the workspace is configured or retried.
 
 When workspace creation is performed by an internal trusted caller, an auth-disabled synthetic
 administrator, or a real administrator, Kandev also snapshots the host's active authenticated
@@ -53,6 +54,8 @@ flow to make an explicit named CLI selection automatically.
   the creator is allowed to use operator credentials.
 - Workspace task access remains explicit and persisted; changing the host's active `gh` account
   later does not silently change an existing workspace.
+- A settings persistence failure is logged and leaves the workspace on the existing managed
+  fallback, so a caller must configure or retry task access before relying on executor inheritance.
 - Remote executors do not inherit host credentials merely because the workspace default is
   `executor`; they still require executor-specific credentials.
 - Member-created workspaces remain isolated from the server operator's host identity.

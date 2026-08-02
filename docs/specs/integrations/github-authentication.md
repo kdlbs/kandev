@@ -50,16 +50,18 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
-- Every newly created workspace persists **Inherit executor Git credentials** as its initial task
-  policy. If creation is performed by an internal trusted caller, an auth-disabled synthetic
-  administrator, or a real administrator while host `gh` has an authenticated active account,
-  Kandev also stores that exact host/login as the new workspace's named CLI automation connection.
-  Non-admin member-created workspaces never receive the server operator's CLI identity
-  automatically.
+- Every newly created workspace attempts to persist **Inherit executor Git credentials** as its
+  initial task policy. After a successful settings write, if creation is performed by an internal
+  trusted caller, an auth-disabled synthetic administrator, or a real administrator while host
+  `gh` has an authenticated active account, Kandev also stores that exact host/login as the new
+  workspace's named CLI automation connection. Non-admin member-created workspaces never receive
+  the server operator's CLI identity automatically.
 - If host `gh` is absent, unauthenticated, or cannot validate its active account, workspace creation
-  still succeeds with executor task access and disconnected GitHub automation. Existing workspaces
-  are never migrated to these defaults; their connection, persisted policy, and legacy
-  missing/invalid policy fallback remain unchanged.
+  still succeeds with executor task access and disconnected GitHub automation. If the executor
+  settings write fails, creation still succeeds but the existing managed compatibility fallback
+  remains until the workspace is configured or retried. Existing workspaces are never migrated to
+  these defaults; their connection, persisted policy, and legacy missing/invalid policy fallback
+  remain unchanged.
 - Workspace settings present the automation identity and task Git credential routing as one
   **Workspace GitHub access** group. The page shows a compact read-only summary of both effective
   choices; the existing **Change GitHub connection** dialog contains the full controls for the
@@ -117,7 +119,7 @@ automation under different GitHub Apps without operating separate Kandev deploym
   those variables does not create or configure a registration; operators use the guided import
   flow for an App they already own.
 - Existing released workspaces migrate to `legacy_shared`; upgrades do not rewrite their
-  connection or task policy. New operator-created workspaces use the active authenticated host
+  connection or task policy. New operator-authorized workspaces use the active authenticated host
   `gh` account when one can be validated, while member-created workspaces and workspaces created
   without usable host `gh` remain disconnected. Once a workspace leaves legacy mode it cannot
   return. The unpublished singleton registration
@@ -372,7 +374,8 @@ post-signature processing failures produce `failing`; a later valid successful d
 ### Task Git credential resolution
 
 - Missing settings start at `managed`.
-- New workspace creation persists `executor` before the workspace is exposed for task launch.
+- New workspace creation attempts to persist `executor` before the workspace is exposed for task
+  launch; a persistence failure leaves the existing managed compatibility fallback in place.
 - Operator-authorized creation snapshots a validated active host `gh` host/login as a named CLI
   connection when available; member creation and unavailable/invalid host CLI leave automation
   disconnected.
@@ -452,6 +455,9 @@ post-signature processing failures produce `failing`; a later valid successful d
 - If host `gh` is absent, unauthenticated, or fails active-account validation while a workspace is
   created, the workspace remains disconnected for automation, retains executor task access, and
   creation succeeds.
+- If executor-default persistence fails while a workspace is created, the workspace remains
+  available with the existing managed task-access fallback and a warning for retry/configuration;
+  Kandev does not claim executor inheritance was applied.
 - If Kandev cannot reconcile a managed checkout's `origin` with the selected task policy, Local and
   Worktree preparation fails before the agent starts instead of silently using the other policy's
   transport.

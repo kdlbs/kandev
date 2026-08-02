@@ -5,11 +5,17 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
 
 var errWorkspaceDefaultsUnavailable = errors.New("workspace defaults unavailable")
+
+const (
+	workspaceDefaultsCLIValidationTimeout = 5 * time.Second
+	freshWorkspaceDefaultsTimeout         = 30 * time.Second
+)
 
 // InitializeWorkspaceDefaults persists the task Git policy for a newly
 // created workspace and, when the caller is allowed to use the deployment
@@ -30,6 +36,13 @@ func (s *Service) InitializeWorkspaceDefaults(ctx context.Context, workspaceID s
 	}
 	if err := s.store.EnsureWorkspaceExecutorDefaults(ctx, workspaceID); err != nil {
 		return fmt.Errorf("persist workspace GitHub defaults: %w", err)
+	}
+	connection, err := s.store.GetWorkspaceConnection(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("load existing workspace GitHub connection: %w", err)
+	}
+	if connection != nil {
+		return nil
 	}
 
 	// An authenticated member may create a workspace, but must not receive the
@@ -55,7 +68,9 @@ func (s *Service) InitializeWorkspaceDefaults(ctx context.Context, workspaceID s
 		s.logWorkspaceDefaultsFallback("connection secret store is unavailable", workspaceID, errWorkspaceDefaultsUnavailable)
 		return nil
 	}
-	if _, err := s.SetWorkspaceConnection(ctx, workspaceID, SetWorkspaceConnectionRequest{
+	bindCtx, cancel := context.WithTimeout(ctx, workspaceDefaultsCLIValidationTimeout)
+	defer cancel()
+	if _, err := s.SetWorkspaceConnection(bindCtx, workspaceID, SetWorkspaceConnectionRequest{
 		Source: ConnectionSourceGHCLI,
 		Host:   account.Host,
 		Login:  account.Login,
@@ -71,6 +86,11 @@ func (s *Service) InitializeWorkspaceDefaults(ctx context.Context, workspaceID s
 func (s *Service) InitializeFreshWorkspaceDefaults(ctx context.Context) error {
 	if s == nil || s.store == nil || !s.store.freshInstall {
 		return nil
+	}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, freshWorkspaceDefaultsTimeout)
+		defer cancel()
 	}
 	s.freshDefaultsMu.Lock()
 	defer s.freshDefaultsMu.Unlock()
@@ -118,10 +138,10 @@ func validActiveGHAccount(account GHAccount) bool {
 		return false
 	}
 	switch strings.ToLower(strings.TrimSpace(account.State)) {
-	case "failed", "invalid", "revoked", "suspended":
-		return false
-	default:
+	case "active", checkStatusSuccess:
 		return true
+	default:
+		return false
 	}
 }
 

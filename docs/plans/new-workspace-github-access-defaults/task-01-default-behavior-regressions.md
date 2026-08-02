@@ -25,8 +25,8 @@ spec: "../../specs/integrations/github-authentication.md"
 ```bash
 cd apps/backend && go test -tags fts5 ./internal/github ./internal/task/service ./internal/backendapp -run 'Test.*Workspace.*Defaults|Test.*Workspace.*Initializ' -count=1
 cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts
+cd apps && pnpm --filter @kandev/web run e2e:run -- tests/integrations/github-authentication.spec.ts tests/integrations/github-workspace-settings.spec.ts
+cd apps && pnpm --filter @kandev/web run e2e:run -- --project mobile-chrome tests/integrations/mobile-github-workspace-settings.spec.ts
 ```
 
 - **Files likely touched:**
@@ -57,7 +57,13 @@ cd apps/web && pnpm e2e:run --project mobile-chrome tests/integrations/mobile-gi
 - Added desktop and mobile expectations that create a new workspace and verify executor inheritance;
   the GitHub authentication scenario now proves an active mock CLI account is auto-bound.
 - The initial RED backend command failed at the expected undefined initializer seam before
-  production changes; after implementation the focused suite is green.
-- The first desktop run exposed that the E2E reset fixture intentionally deletes workspace settings
-  (and therefore restores the legacy managed fallback). The scenarios were corrected to create a
-  genuinely new workspace for default assertions.
+  production changes; its first failure was the missing `WorkspaceDefaultsInitializer` seam, and
+  the final focused suite is green.
+- The first desktop command was run after the production edit and exposed that the E2E reset fixture
+  intentionally deletes workspace settings, restoring the legacy managed fallback: five GitHub
+  authentication tests and three workspace-settings tests passed, while the executor-summary test
+  received `Managed workspace credentials`. The scenarios were corrected to create a genuinely new
+  workspace for default assertions, and the final desktop command passed nine tests.
+- The first valid mobile command was run after the fixture correction and passed two tests; no
+  separate pre-production mobile RED assertion was captured because the shared reset behavior made
+  the original expectation invalid before the implementation could be evaluated.
