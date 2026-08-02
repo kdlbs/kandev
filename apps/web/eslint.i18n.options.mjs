@@ -321,4 +321,32 @@ export const i18nGuardFiles = [
   "components/gitlab/watch-form.ts",
   "components/gitlab/watch-settings.tsx",
   "components/gitlab/watch-table.tsx",
+  // Settings → Integrations → Jira: the page and the settings subtree of
+  // `components/jira` — the connection card, the JIRA-watcher section with its
+  // table and dialog, and the task-preset editor. The ticket task surface
+  // (`jira-ticket-*`), the import bar and the `my-jira/**` browse UI live in the
+  // same directory and are NOT migrated, which is why this is a file list rather
+  // than `components/jira/**`.
+  //
+  // The three `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them; the entries record that they are migrated, and only the pseudo-locale
+  // can prove it stays that way. Each carries copy that is deliberately left in
+  // English because it is PERSISTED or sent to an agent verbatim — the default
+  // JQL and issue-watch prompt in `jira-issue-watch-placeholders.ts`, the
+  // seeded preset labels/hints/templates in `my-jira/presets.ts`.
+  //
+  // `my-jira/presets.ts` is shared with the un-migrated My Jira page, which the
+  // per-file guard leaves unaffected; its icon labels now travel as `labelKey`
+  // and resolve at render.
+  "app/settings/integrations/jira/**/*.{ts,tsx}",
+  "components/jira/jira-enabled-control.tsx",
+  "components/jira/jira-issue-watch-dialog.tsx",
+  "components/jira/jira-issue-watch-placeholders.ts",
+  "components/jira/jira-issue-watch-table.tsx",
+  "components/jira/jira-issue-watchers-section.tsx",
+  "components/jira/jira-secret-help.tsx",
+  "components/jira/jira-settings.tsx",
+  "components/jira/my-jira/presets.ts",
+  "components/jira/my-jira/use-task-presets.ts",
+  "components/jira/task-presets-section.tsx",
 ];

@@ -12,6 +12,7 @@ import { ResetWatchDialog, useWatchResetController } from "@/components/watches/
 import { JiraIssueWatchTable } from "./jira-issue-watch-table";
 import { JiraIssueWatchDialog } from "./jira-issue-watch-dialog";
 import type { JiraIssueWatch } from "@/lib/types/jira";
+import { useTranslation } from "react-i18next";
 
 // JiraIssueWatchersSection lists watches across every workspace in a single
 // flat table on the install-wide settings page. The dialog's create flow asks
@@ -29,45 +30,46 @@ type RawActions = {
 // success/failure toasts. Per-row mutations need each watch's own workspaceId,
 // so the wrappers take the watch (not just an id) and pass it through.
 function useToastedActions({ create, update, remove, trigger, reset }: RawActions) {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   const wrappedCreate = useCallback(
     async (req: Parameters<typeof create>[0]) => {
       try {
         await create(req);
-        toast({ description: "Watcher created", variant: "success" });
+        toast({ description: t("jira:watcherCreated"), variant: "success" });
       } catch (err) {
-        toast({ description: `Create failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("jira:createFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [create, toast],
+    [create, t, toast],
   );
 
   const wrappedUpdate = useCallback(
     async (id: string, req: Parameters<typeof update>[1], rowWorkspaceId: string) => {
       try {
         await update(id, req, rowWorkspaceId);
-        toast({ description: "Watcher updated", variant: "success" });
+        toast({ description: t("jira:watcherUpdated"), variant: "success" });
       } catch (err) {
-        toast({ description: `Update failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("jira:updateFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [update, toast],
+    [update, t, toast],
   );
 
   const wrappedDelete = useCallback(
     async (w: JiraIssueWatch) => {
-      if (!confirm("Delete this JIRA watcher?")) return;
+      if (!confirm(t("jira:deleteThisJiraWatcher"))) return;
       try {
         await remove(w.id, w.workspaceId);
-        toast({ description: "Watcher deleted", variant: "success" });
+        toast({ description: t("jira:watcherDeleted"), variant: "success" });
       } catch (err) {
-        toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("jira:deleteFailed", { error: String(err) }), variant: "error" });
       }
     },
-    [remove, toast],
+    [remove, t, toast],
   );
 
   const wrappedTrigger = useCallback(
@@ -75,16 +77,16 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
       try {
         const res = await trigger(w.id, w.workspaceId);
         const n = res?.newIssues ?? 0;
+        // "ticket(s)" was an English plural hack: the count now selects a form,
+        // so a language with more than two can express them all.
         const description =
-          n > 0
-            ? `Found ${n} new ticket(s) — tasks will appear shortly.`
-            : "No new tickets matched.";
+          n > 0 ? t("jira:foundNewTickets", { count: n }) : t("jira:noNewTicketsMatched");
         toast({ description, variant: "success" });
       } catch (err) {
-        toast({ description: `Check failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("jira:checkFailed", { error: String(err) }), variant: "error" });
       }
     },
-    [trigger, toast],
+    [trigger, t, toast],
   );
 
   const wrappedReset = useCallback(
@@ -95,16 +97,16 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
         toast({
           description:
             n > 0
-              ? `Reset complete — deleted ${n} task(s); next poll will re-import matches.`
-              : "Reset complete — next poll will re-import matches.",
+              ? t("jira:resetCompleteDeletedTasks", { count: n })
+              : t("jira:resetCompleteNoTasksDeleted"),
           variant: "success",
         });
       } catch (err) {
-        toast({ description: `Reset failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("jira:resetFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [reset, toast],
+    [reset, t, toast],
   );
 
   return {
@@ -127,6 +129,7 @@ function useEnabledDrafts(items: JiraIssueWatch[], update: RawActions["update"])
 }
 
 export function JiraIssueWatchersSection() {
+  const { t } = useTranslation();
   // Pass undefined to fetch every watch across every workspace.
   const { items, loading, create, update, remove, trigger, previewReset, reset } =
     useJiraIssueWatches();
@@ -182,12 +185,12 @@ export function JiraIssueWatchersSection() {
   return (
     <SettingsSection
       icon={<IconBellRinging className="h-5 w-5" />}
-      title="JIRA watchers"
-      description="Poll a JQL query and auto-create a Kandev task for each newly-matching ticket."
+      title={t("jira:jiraWatchers")}
+      description={t("jira:jiraWatchersDescription")}
       action={
         <Button size="sm" onClick={openCreate} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-1" />
-          New watcher
+          {t("jira:newWatcher")}
         </Button>
       }
     >
@@ -225,7 +228,7 @@ export function JiraIssueWatchersSection() {
         <ResetWatchDialog
           open
           onOpenChange={resetCtrl.onOpenChange}
-          integrationLabel="JIRA watcher"
+          integrationLabel={t("jira:jiraWatcher")}
           previewLoader={resetCtrl.previewLoader}
           onConfirm={resetCtrl.confirmReset}
         />
