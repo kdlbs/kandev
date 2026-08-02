@@ -219,7 +219,9 @@ type Handlers struct {
 	reviewRunner  ReviewRunner
 
 	// Optional task-bound GitHub PR automation controls.
-	taskPRAutomation TaskPRAutomationService
+	taskPRAutomation       TaskPRAutomationService
+	diagnosticBundles      DiagnosticBundleProvider
+	diagnosticMaterializer DiagnosticBundleMaterializer
 }
 
 // NewHandlers creates new MCP handlers.
@@ -330,6 +332,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
 	count := 26
+	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
+		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
+		count++
+	}
 	count += h.registerReviewHandlers(d)
 	count += 2 // task PR automation get/update
 

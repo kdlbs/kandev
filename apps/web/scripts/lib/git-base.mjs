@@ -11,9 +11,12 @@ import path from "node:path";
 export const WEB_DIR = path.resolve(import.meta.dirname, "..", "..");
 export const REPO_ROOT = path.resolve(WEB_DIR, "..", "..");
 
-export function git(args, { quiet = false } = {}) {
+/** The branch every PR is judged against. */
+export const BASE_BRANCH = "origin/main";
+
+export function git(args, { quiet = false, cwd = REPO_ROOT } = {}) {
   return execFileSync("git", args, {
-    cwd: REPO_ROOT,
+    cwd,
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024,
     stdio: ["ignore", "pipe", quiet ? "ignore" : "inherit"],
@@ -30,6 +33,60 @@ export function toPosixPath(value) {
   return value.split(path.sep).join("/");
 }
 
+function mergeBase(ref, cwd) {
+  return git(["merge-base", ref, "HEAD"], { quiet: true, cwd }).trim();
+}
+
+function isAncestor(maybeAncestor, descendant, cwd) {
+  try {
+    git(["merge-base", "--is-ancestor", maybeAncestor, descendant], { quiet: true, cwd });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Raise a caller-supplied base to the point HEAD forked from the base branch.
+ *
+ * An explicit `--base` is routinely STALE. On a `pull_request` event CI checks
+ * out the MERGE REF (`refs/pull/N/merge`), whose first parent is the base branch
+ * tip at check time — but `github.event.pull_request.base.sha` is the base tip
+ * from when the PR event fired. The stale sha is therefore an *ancestor* of
+ * HEAD, so `merge-base` hands it straight back, and every commit the base branch
+ * landed in between reads as "new code in this PR". That fails the ratchet on
+ * files the change never touched, and it is not fixed by a three-dot diff:
+ * `base...HEAD` collapses to `base..HEAD` precisely because base is an ancestor.
+ * Rebasing a branch onto a newer base produces the same shape with no merge
+ * commit at all.
+ *
+ * The ratchet's contract is that it never asks you to migrate code you did not
+ * write, so the base must never sit older than the fork point.
+ */
+function forkPointFloor(base, cwd) {
+  // HEAD is contained in the base branch — a `push` build of that branch. There
+  // is no fork point (the merge base IS HEAD), and advancing to it would compare
+  // HEAD against itself and wave every commit through. Trust the caller's base.
+  if (isAncestor("HEAD", BASE_BRANCH, cwd)) return base;
+
+  let forkPoint;
+  try {
+    forkPoint = mergeBase(BASE_BRANCH, cwd);
+  } catch {
+    // No base branch in this checkout, so there is nothing better to offer.
+    return base;
+  }
+
+  if (forkPoint === base || !isAncestor(base, forkPoint, cwd)) return base;
+
+  console.log(
+    `ℹ base advanced to the ${BASE_BRANCH} fork point ${forkPoint.slice(0, 9)} — ` +
+      `the --base given was older, and everything ${BASE_BRANCH} landed in between\n` +
+      `  is not this change's code.`,
+  );
+  return forkPoint;
+}
+
 /**
  * The fork point to judge against, or `null` when the caller explicitly allows
  * running without one.
@@ -43,13 +100,14 @@ export function toPosixPath(value) {
  *
  * @returns {{ base: string } | { skip: string }}
  */
-export function resolveBase(argv = process.argv) {
+export function resolveBase(argv = process.argv, cwd = REPO_ROOT) {
   const flag = argv.indexOf("--base");
   const explicit = flag !== -1 && argv[flag + 1] ? argv[flag + 1] : null;
-  const requested = explicit ?? "origin/main";
+  const requested = explicit ?? BASE_BRANCH;
 
+  let base;
   try {
-    return { base: git(["merge-base", requested, "HEAD"], { quiet: true }).trim() };
+    base = mergeBase(requested, cwd);
   } catch {
     if (explicit || process.env.CI) {
       console.error(
@@ -62,4 +120,7 @@ export function resolveBase(argv = process.argv) {
     }
     return { skip: `no base ref (tried "${requested}"); pass --base <sha> to check explicitly` };
   }
+
+  // Only an explicit base can be stale; the default IS the fork point already.
+  return { base: explicit ? forkPointFloor(base, cwd) : base };
 }

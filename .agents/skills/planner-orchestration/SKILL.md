@@ -19,15 +19,17 @@ conversation so the active model, transcript, and costs are visible in one place
 1. **Design checkpoint — strong model.** Use the user's strong model for
    clarification, codebase investigation, specs, plans, task decomposition, and
    high-risk design decisions. Default Codex guidance is GPT-5.6 Sol/high.
-2. **Implementation checkpoint — user switch.** Once the spec, plan, and task
-   files are ready, summarize their paths and ask the user to switch the main
-   session to the lower-cost implementation model. Default Codex guidance is
-   GPT-5.6 Terra/medium. Do not silently continue on the strong model when the
-   user has asked for a cost-controlled workflow.
-3. **Execution checkpoint — lower-cost model.** In the same conversation, read
-   the approved task file, mark it `in_progress`, implement with `/tdd`, run its
-   exact targeted checks, and mark it `done`. Work sequentially through the
-   plan by default.
+2. **Design-package handoff.** Once the spec, plan, and task files are ready,
+   summarize their paths and end the turn. Do not call
+   `ask_user_question_kandev` (or an equivalent approval prompt) to ask the
+   user to approve the package or switch models. The user reviews the files,
+   switches the main session if desired, and sends a later explicit
+   implementation request. The files may remain `draft`/`pending`; do not wait
+   for a separate approval marker.
+3. **Execution checkpoint.** After that explicit request, read the
+   task file, mark it `in_progress`, implement with `/tdd`, run its exact
+   targeted checks, and mark it `done`. Work sequentially through the plan by
+   default. The user, not the harness, chooses the active implementation model.
 4. **Escalation checkpoint.** Stop and ask the user to switch back to a stronger
    model before an architectural redesign, a new public contract, a migration or
    persistence boundary, or a high-impact security decision. Record a durable
@@ -113,8 +115,8 @@ Treat the OpenCode App as trusted semantic evidence only when `trusted_producer=
   when the user explicitly asks to manage persistent Kandev tasks or sessions.
 - Do not create worktrees solely to parallelize plan tasks unless the user has
   explicitly authorized subagents for parallel-safe tasks.
-- Do not continue past a model checkpoint by assuming the user accepted the
-  cost. State the recommended switch and wait when the choice materially
-  affects cost or quality.
+- Do not continue from the design-package handoff automatically or treat
+  artifact creation as implementation authorization. Wait for a later explicit
+  implementation request; the user controls any model switch between turns.
 - Do not replace durable specs, plans, task files, tests, or verification with
   chat-only summaries.

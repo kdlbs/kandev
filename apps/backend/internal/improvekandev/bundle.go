@@ -1,6 +1,6 @@
 // Package improvekandev exposes the HTTP endpoints that bootstrap a hidden
-// improve-kandev workflow and capture recent backend/frontend logs into a
-// temporary bundle directory referenced by the resulting task.
+// improve-kandev workflow and lease an identity-owned diagnostic ZIP into the
+// temporary context directory referenced by the resulting task.
 package improvekandev
 
 import (
@@ -9,140 +9,49 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
-	"sort"
 	"strings"
 	"time"
-
-	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
 
-// bundlePrefix is the temp-dir prefix used by os.MkdirTemp.
-// It is also the marker validateBundleDir uses to refuse arbitrary writes.
-const bundlePrefix = "kandev-improve-"
+const (
+	bundlePrefix       = "kandev-improve-"
+	ownerMarkerName    = ".kandev-owner.json"
+	diagnosticFileName = "diagnostic-bundle.zip"
+	staleBundleAge     = 24 * time.Hour
+)
 
-// FrontendLogEntry mirrors apps/web/lib/logger/buffer.ts shape.
-type FrontendLogEntry struct {
-	Timestamp string         `json:"timestamp"`
-	Level     string         `json:"level"`
-	Message   string         `json:"message"`
-	Args      []any          `json:"args,omitempty"`
-	Stack     string         `json:"stack,omitempty"`
-	Metadata  map[string]any `json:"metadata,omitempty"`
+type ownerMarker struct {
+	Owner string `json:"owner"`
 }
 
-// metadata is the JSON payload written to <bundle>/metadata.json.
-type metadata struct {
-	Version    string         `json:"version"`
-	OS         string         `json:"os"`
-	Arch       string         `json:"arch"`
-	GoVersion  string         `json:"go_version"`
-	CapturedAt time.Time      `json:"captured_at"`
-	Health     map[string]any `json:"health,omitempty"`
-}
-
-// createBundleDir creates a fresh temp directory matching bundlePrefix.
-func createBundleDir() (string, error) {
-	return os.MkdirTemp("", bundlePrefix+"*")
-}
-
-// writeMetadata writes metadata.json into the bundle directory.
-// health may be nil if no health snapshot is available.
-func writeMetadata(dir, version string, health map[string]any) error {
-	m := metadata{
-		Version:    version,
-		OS:         runtime.GOOS,
-		Arch:       runtime.GOARCH,
-		GoVersion:  runtime.Version(),
-		CapturedAt: time.Now().UTC(),
-		Health:     health,
+// createBundleDir creates an owner-only temporary context directory and a
+// server-owned marker used to authorize the later diagnostic-bundle lease.
+func createBundleDir(owner string) (string, error) {
+	if owner == "" {
+		return "", errors.New("owner is required")
 	}
-	data, err := json.MarshalIndent(m, "", "  ")
+	dir, err := os.MkdirTemp("", bundlePrefix+"*")
 	if err != nil {
-		return fmt.Errorf("marshal metadata: %w", err)
+		return "", err
 	}
-	return os.WriteFile(filepath.Join(dir, "metadata.json"), data, 0o644)
+	if err := os.Chmod(dir, 0o700); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	data, err := json.Marshal(ownerMarker{Owner: owner})
+	if err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	if err := os.WriteFile(filepath.Join(dir, ownerMarkerName), data, 0o600); err != nil {
+		_ = os.RemoveAll(dir)
+		return "", err
+	}
+	return dir, nil
 }
 
-// writeBackendLog renders the buffer snapshot as plain text and writes it.
-func writeBackendLog(dir string, entries []buffer.Entry) error {
-	var b strings.Builder
-	for _, e := range entries {
-		b.WriteString(formatBackendEntry(e))
-		b.WriteByte('\n')
-	}
-	return os.WriteFile(filepath.Join(dir, "backend.log"), []byte(b.String()), 0o644)
-}
-
-// writeFrontendLog renders frontend entries as plain text and writes them.
-func writeFrontendLog(dir string, entries []FrontendLogEntry) error {
-	var b strings.Builder
-	for _, e := range entries {
-		b.WriteString(formatFrontendEntry(e))
-		b.WriteByte('\n')
-	}
-	return os.WriteFile(filepath.Join(dir, "frontend.log"), []byte(b.String()), 0o644)
-}
-
-// formatBackendEntry renders a single buffer.Entry as a single line of text.
-func formatBackendEntry(e buffer.Entry) string {
-	ts := e.Timestamp.UTC().Format(time.RFC3339Nano)
-	level := strings.ToUpper(e.Level)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\t%s\t%s", ts, level, e.Message)
-	if e.Caller != "" {
-		fmt.Fprintf(&b, "\t%s", e.Caller)
-	}
-	if len(e.Fields) > 0 {
-		fmt.Fprintf(&b, "\t%s", flattenFields(e.Fields))
-	}
-	if e.Stack != "" {
-		fmt.Fprintf(&b, "\n%s", e.Stack)
-	}
-	return b.String()
-}
-
-// formatFrontendEntry mirrors formatBackendEntry for frontend entries.
-func formatFrontendEntry(e FrontendLogEntry) string {
-	level := strings.ToUpper(e.Level)
-	var b strings.Builder
-	fmt.Fprintf(&b, "%s\t%s\t%s", e.Timestamp, level, e.Message)
-	if len(e.Args) > 0 {
-		fmt.Fprintf(&b, "\targs=%v", e.Args)
-	}
-	if e.Stack != "" {
-		fmt.Fprintf(&b, "\n%s", e.Stack)
-	}
-	return b.String()
-}
-
-// flattenFields renders structured fields as space-separated key=value pairs in
-// alphabetical order so log lines are deterministic across runs.
-func flattenFields(fields map[string]any) string {
-	keys := make([]string, 0, len(fields))
-	for k := range fields {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	var b strings.Builder
-	for i, k := range keys {
-		if i > 0 {
-			b.WriteByte(' ')
-		}
-		fmt.Fprintf(&b, "%s=%v", k, fields[k])
-	}
-	return b.String()
-}
-
-// staleBundleAge is the minimum age before a leftover bundle dir is removed
-// by CleanupStaleBundles. Recent dirs are preserved in case a task is still
-// being created and references them.
-const staleBundleAge = 24 * time.Hour
-
-// CleanupStaleBundles removes kandev-improve-* directories under the OS temp
-// dir that are older than staleBundleAge. Errors are logged via onError but
-// do not abort the sweep. Safe to call concurrently with active bundles —
-// fresh dirs are skipped by the mtime check.
+// CleanupStaleBundles removes old server-owned improve-kandev context
+// directories. Fresh directories are preserved for in-flight task creation.
 func CleanupStaleBundles(onError func(path string, err error)) {
 	cleanupStaleBundlesIn(os.TempDir(), staleBundleAge, onError)
 }
@@ -177,14 +86,16 @@ func cleanupStaleBundlesIn(tempDir string, maxAge time.Duration, onError func(pa
 	}
 }
 
-// validateBundleDir refuses paths that do not match the kandev-improve-* temp
-// pattern under the OS temp dir. Returns the cleaned absolute path on success.
-func validateBundleDir(dir string) (string, error) {
+// validateBundleDir accepts only a server-created temp directory whose
+// owner-only marker matches the authenticated caller.
+func validateBundleDir(dir, owner string) (string, error) {
 	if dir == "" {
 		return "", errors.New("bundle_dir is required")
 	}
-	clean := filepath.Clean(dir)
-	abs, err := filepath.Abs(clean)
+	if owner == "" {
+		return "", errors.New("authenticated owner is required")
+	}
+	abs, err := filepath.Abs(filepath.Clean(dir))
 	if err != nil {
 		return "", fmt.Errorf("invalid bundle_dir: %w", err)
 	}
@@ -194,7 +105,7 @@ func validateBundleDir(dir string) (string, error) {
 	}
 	resolved, err := filepath.EvalSymlinks(abs)
 	if err != nil {
-		resolved = abs
+		return "", errors.New("bundle_dir does not exist")
 	}
 	if !strings.HasPrefix(resolved, tempDir+string(os.PathSeparator)) {
 		return "", errors.New("bundle_dir must be inside the OS temp directory")
@@ -205,6 +116,16 @@ func validateBundleDir(dir string) (string, error) {
 	info, err := os.Stat(resolved)
 	if err != nil || !info.IsDir() {
 		return "", errors.New("bundle_dir does not exist or is not a directory")
+	}
+	markerPath := filepath.Join(resolved, ownerMarkerName)
+	markerInfo, err := os.Lstat(markerPath)
+	if err != nil || !markerInfo.Mode().IsRegular() {
+		return "", errors.New("bundle_dir owner marker is missing")
+	}
+	var marker ownerMarker
+	data, err := os.ReadFile(markerPath)
+	if err != nil || json.Unmarshal(data, &marker) != nil || marker.Owner != owner {
+		return "", errors.New("bundle_dir is not owned by the authenticated user")
 	}
 	return resolved, nil
 }

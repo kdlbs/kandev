@@ -54,16 +54,65 @@ export interface SnapshotInfo {
   kind: SnapshotKind;
 }
 
-export interface LogFileInfo {
-  name: string;
-  size: number;
-  /** ISO timestamp. */
-  mtime: string;
-  current: boolean;
+export type DiagnosticBundleStatus =
+  | "collecting"
+  | "building"
+  | "ready"
+  | "partial"
+  | "failed"
+  | "expired";
+
+export type DiagnosticBundleSource = "backend" | "frontend" | "runtime" | "acp";
+
+export interface DiagnosticBundleCapabilities {
+  sources: DiagnosticBundleSource[];
+  acp_debug_enabled: boolean;
+  acp_max_sessions: number;
 }
 
-export interface LogTailResponse {
-  lines: string[];
+export type DiagnosticSessionAvailability = "host_retained" | "reachable" | "unavailable";
+
+export interface DiagnosticSession {
+  task_id: string;
+  /** Returned only by the authorized ACP picker; never included in archive metadata. */
+  task_title?: string;
+  session_id: string;
+  agent?: string;
+  provider?: string;
+  model?: string;
+  status?: string;
+  executor_type?: string;
+  started_at?: string;
+  last_activity_at?: string;
+  acp_availability?: DiagnosticSessionAvailability;
+}
+
+export interface DiagnosticBundleJob {
+  id: string;
+  status: DiagnosticBundleStatus;
+  sources: DiagnosticBundleSource[];
+  session_ids?: string[];
+  reused?: boolean;
+  build_deadline: string;
+  capture_deadline?: string;
+  expires_at: string | null;
+  browser_profiles: number;
+  frontend_entry_count: number;
+  frontend_bytes: number;
+  warnings: string[];
+  runtime_entry_count?: number;
+  acp_session_count?: number;
+  download_url?: string;
+}
+
+export interface FrontendLogUploadChunk {
+  browser_id: string;
+  capture_stream_id: string;
+  chunk_index: number;
+  done: boolean;
+  storage_mode: "indexeddb" | "memory";
+  capture_metadata: Record<string, unknown> | null;
+  entries: unknown[];
 }
 
 export interface UpdatesResponse {
@@ -323,6 +372,11 @@ export interface StorageOverviewResponse {
   summary: StorageSummary;
   analyzed_at: string;
   last_run: StorageMaintenanceRun | null;
+}
+
+export interface StoragePolicyResponse {
+  settings: StorageMaintenanceSettings;
+  capabilities: StorageCapabilities;
 }
 
 export interface StorageSettingsResponse {

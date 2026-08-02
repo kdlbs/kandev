@@ -1,5 +1,4 @@
 import { fetchJson, type ApiRequestOptions } from "../client";
-import type { LogEntry } from "@/lib/logger/buffer";
 
 // Result of the bootstrap fork-capability probe; mirrors backend ForkStatus.
 // "writable": user has push access to upstream, no fork needed.
@@ -16,11 +15,7 @@ export type ImproveKandevBootstrapResponse = {
   issue_workflow_id: string;
   branch: string;
   bundle_dir: string;
-  bundle_files: {
-    metadata: string;
-    backend_log: string;
-    frontend_log: string;
-  };
+  bundle_file: string;
   github_login: string;
   has_write_access: boolean;
   fork_status: ForkStatus;
@@ -41,32 +36,20 @@ export async function bootstrapImproveKandev(
   });
 }
 
-export type FrontendLogPayloadEntry = {
-  timestamp: string;
-  level: string;
-  message: string;
-  args?: unknown[];
-  stack?: string;
-};
-
-export async function uploadFrontendLog(
+export async function leaseDiagnosticBundle(
   bundleDir: string,
-  entries: LogEntry[],
+  bundleId: string,
   options?: ApiRequestOptions,
-): Promise<{ path: string }> {
-  const payload: FrontendLogPayloadEntry[] = entries.map((e) => ({
-    timestamp: e.timestamp,
-    level: e.level,
-    message: e.message,
-    args: e.args,
-    stack: e.stack,
-  }));
-  return fetchJson<{ path: string }>("/api/v1/system/improve-kandev/bundle/frontend-log", {
-    ...options,
-    init: {
-      method: "POST",
-      body: JSON.stringify({ bundle_dir: bundleDir, entries: payload }),
-      ...(options?.init ?? {}),
+): Promise<{ path: string; status: "ready" | "partial"; sources: string[] }> {
+  return fetchJson<{ path: string; status: "ready" | "partial"; sources: string[] }>(
+    "/api/v1/system/improve-kandev/bundle/lease",
+    {
+      ...options,
+      init: {
+        method: "POST",
+        body: JSON.stringify({ bundle_dir: bundleDir, bundle_id: bundleId }),
+        ...(options?.init ?? {}),
+      },
     },
-  });
+  );
 }

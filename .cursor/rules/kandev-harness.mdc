@@ -14,8 +14,10 @@ Use the shared Kandev harness as the source of truth:
 
 For harness edits, load `.agents/skills/harness-improvement/SKILL.md` and the relevant bundled references under `.agents/skills/harness-improvement/references/`. Use `references/platforms/` before external docs.
 
-Use strong models for specs/plans and pause for the user's manual switch to a
-lower-cost model before implementation. Plans may mark parallel-safe waves; the
-feature and fix skills define task validation and any user-authorized
-implementation delegation. Do not create project custom-agent files merely to
-route model tiers. Platform-provided explorers remain available.
+Use the strongest available model for specs/plans, then return
+a design-package handoff and end the turn. Do not ask for approval or a model
+switch; the user reviews the files, changes the model if desired, and later
+asks to implement. Plans may mark parallel-safe waves; the feature and fix
+skills define task validation and any user-authorized implementation delegation.
+Do not create project custom-agent files merely to route model tiers.
+Platform-provided explorers remain available.

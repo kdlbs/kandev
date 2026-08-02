@@ -71,6 +71,81 @@ func TestGetStorageReturnsSnapshotAnalyzedAt(t *testing.T) {
 	}
 }
 
+func TestGetStorageSettingsReturnsPolicyWithoutOverviewScan(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	settings := DefaultSettings()
+	capabilities := Capabilities{
+		ManagedGoCachePath:       "/data/cache/go-build",
+		GoCacheAdoptionAvailable: true,
+		DockerAvailable:          true,
+		DockerHost:               "unix:///var/run/docker.sock",
+		HostGlobalDockerCleanup:  true,
+	}
+	overview := &recordingOverviewReader{capabilities: capabilities}
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+		Settings: staticSettingsManager{settings: settings},
+		Overview: overview,
+	}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/settings", nil))
+
+	if response.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", response.Code)
+	}
+	var body struct {
+		Settings     StorageMaintenanceSettings `json:"settings"`
+		Capabilities Capabilities               `json:"capabilities"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Settings != settings {
+		t.Fatalf("settings = %#v, want %#v", body.Settings, settings)
+	}
+	if body.Capabilities != capabilities {
+		t.Fatalf("capabilities = %#v, want %#v", body.Capabilities, capabilities)
+	}
+	if overview.settingsCapabilitiesCalls != 1 {
+		t.Fatalf("settings capabilities calls = %d, want 1", overview.settingsCapabilitiesCalls)
+	}
+	if overview.capabilitiesCalls != 0 {
+		t.Fatalf("full capabilities calls = %d, want 0", overview.capabilitiesCalls)
+	}
+	if overview.getCalls != 0 {
+		t.Fatalf("overview scans = %d, want 0", overview.getCalls)
+	}
+}
+
+func TestGetStorageSettingsHidesInternalLoadFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	internalErr := errors.New("database credentials leaked")
+	var loggedMessage string
+	var loggedErr error
+	router := gin.New()
+	RegisterRoutes(router.Group("/api/v1/system"), NewHandler(HandlerConfig{
+		Settings: failingSettingsManager{getErr: internalErr},
+		LogError: func(message string, err error) {
+			loggedMessage, loggedErr = message, err
+		},
+	}))
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/v1/system/storage/settings", nil))
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want 500", response.Code)
+	}
+	if strings.Contains(response.Body.String(), "credentials") ||
+		!strings.Contains(response.Body.String(), "failed to load storage settings") {
+		t.Fatalf("response did not use a client-safe message: %s", response.Body.String())
+	}
+	if loggedMessage != "failed to load storage settings" || !errors.Is(loggedErr, internalErr) {
+		t.Fatalf("logged error = (%q, %v), want original error", loggedMessage, loggedErr)
+	}
+}
+
 func TestDeleteQuarantineBulkValidatesConfirmation(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	mutations := &recordingMutations{}
@@ -119,16 +194,25 @@ func (m *recordingMutations) PurgeQuarantine(context.Context, QuarantinePurgeSco
 	return "job", nil
 }
 
-type failingSettingsManager struct{ err error }
+type failingSettingsManager struct {
+	err    error
+	getErr error
+}
 
 func (f failingSettingsManager) GetSettings(context.Context) (StorageMaintenanceSettings, error) {
+	if f.getErr != nil {
+		return DefaultSettings(), f.getErr
+	}
 	return DefaultSettings(), nil
 }
 
-type staticSettingsManager struct{}
+type staticSettingsManager struct{ settings StorageMaintenanceSettings }
 
-func (staticSettingsManager) GetSettings(context.Context) (StorageMaintenanceSettings, error) {
-	return DefaultSettings(), nil
+func (s staticSettingsManager) GetSettings(context.Context) (StorageMaintenanceSettings, error) {
+	if s.settings == (StorageMaintenanceSettings{}) {
+		return DefaultSettings(), nil
+	}
+	return s.settings, nil
 }
 
 func (staticSettingsManager) SaveSettingsWithConfirmations(context.Context, StorageMaintenanceSettings, SaveConfirmations) (StorageMaintenanceSettings, error) {
@@ -145,6 +229,38 @@ func (o staticCachedOverview) Get(context.Context) (OverviewSnapshot, error) { r
 
 func (o staticCachedOverview) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
 	return Capabilities{}
+}
+
+func (o staticCachedOverview) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
+	return Capabilities{}
+}
+
+type recordingOverviewReader struct {
+	capabilities              Capabilities
+	getCalls                  int
+	capabilitiesCalls         int
+	settingsCapabilitiesCalls int
+}
+
+func (o *recordingOverviewReader) Get(context.Context) (OverviewSnapshot, error) {
+	o.getCalls++
+	return OverviewSnapshot{}, nil
+}
+
+func (o *recordingOverviewReader) Capabilities(context.Context, StorageMaintenanceSettings) Capabilities {
+	o.capabilitiesCalls++
+	return o.capabilities
+}
+
+func (o *recordingOverviewReader) SettingsCapabilities(
+	context.Context,
+	StorageMaintenanceSettings,
+) Capabilities {
+	o.settingsCapabilitiesCalls++
+	return o.capabilities
 }
 
 func (f failingSettingsManager) SaveSettingsWithConfirmations(

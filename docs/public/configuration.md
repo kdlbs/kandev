@@ -38,7 +38,6 @@ Viper maps a nested YAML key by replacing `.` with `_`, adding `KANDEV_`, and up
 
 ```text
 database.dbName       -> KANDEV_DATABASE_DBNAME
-logging.maxSizeMb     -> KANDEV_LOGGING_MAXSIZEMB
 repoClone.basePath    -> KANDEV_REPOCLONE_BASEPATH
 ```
 
@@ -138,15 +137,12 @@ The voice fallback sends audio to the configured OpenAI transcription service an
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
-| `logging.level` | `KANDEV_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error`. The CLI normally supplies `warn`, `info`, or `debug`. |
+| `logging.level` | `KANDEV_LOG_LEVEL` | `info` | File threshold: `debug`, `info`, `warn`, or `error`. `--debug` selects `debug`; normal and `--verbose` launches select `info`. |
 | `logging.format` | `KANDEV_LOGGING_FORMAT` | `text`, or `json` in production/Kubernetes | `text` or `json`; `auto` is not accepted. |
-| `logging.outputPath` | `KANDEV_LOGGING_OUTPUTPATH` | `stdout` | `stdout`, `stderr`, or a file path. |
-| `logging.maxSizeMb` | `KANDEV_LOGGING_MAXSIZEMB` | `100` | File-output rotation threshold. Zero uses lumberjack's 100 MiB default. |
-| `logging.maxBackups` | `KANDEV_LOGGING_MAXBACKUPS` | `5` | Rotated-file count; zero means unlimited. |
-| `logging.maxAgeDays` | `KANDEV_LOGGING_MAXAGEDAYS` | `30` | Rotated-file age; zero means unlimited. |
-| `logging.compress` | `KANDEV_LOGGING_COMPRESS` | `true` | Gzip rotated files. |
 
-The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text. Rotation settings apply only to file output. Active log files are created owner-only (`0600`) on Unix, so a log shipper running as another user cannot read them without an explicit permission design.
+Every backend launch writes to `<home>/logs/backend-logs.log` and prints that resolved path at startup. The active file appends across same-day restarts and accepts at most 256 MiB; later entries are dropped until the next UTC day rather than allowing diagnostics to fill the disk. At the next UTC day it rolls to `backend-logs-YYYY-MM-DD.log`; Kandev retains the current UTC day and the two preceding days. Files are owner-only (`0600`) on Unix.
+
+Normal launches write info and above to the file and warn and above to stdout. `--debug` writes debug and above to the file while stdout remains warn and above. `--verbose` writes info and above to both. The format default becomes JSON when `KUBERNETES_SERVICE_HOST` is non-empty or `KANDEV_ENV` is exactly `production`/`prod`; otherwise it is text.
 
 Debug output may contain repository paths, subprocess output, prompts, file content, and tool-call data. Treat it as sensitive.
 
@@ -195,7 +191,6 @@ server:
 
 logging:
   format: "json"
-  outputPath: "/var/log/kandev/backend.log"
 
 repositoryDiscovery:
   roots:
@@ -257,11 +252,6 @@ auth:
 logging:
   level: "info"
   format: "text"
-  outputPath: "stdout"
-  maxSizeMb: 100
-  maxBackups: 5
-  maxAgeDays: 30
-  compress: true
 
 repositoryDiscovery:
   roots: []                # automatic scan roots; explicit paths need not be included

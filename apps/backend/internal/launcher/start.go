@@ -71,11 +71,16 @@ func resolveLogLevel(opts Options) string {
 	switch {
 	case opts.Debug:
 		return "debug"
-	case opts.Verbose:
-		return "info"
 	default:
-		return "warn"
+		return "info"
 	}
+}
+
+func resolveConsoleLogLevel(opts Options) string {
+	if opts.Verbose {
+		return "info"
+	}
+	return "warn"
 }
 
 func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
@@ -87,8 +92,10 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	supervisor := newSupervisorFn()
 	attachSignalsFn(supervisor)
 	shutdownDebugf("runManagedApp signal handler attached")
-	showOutput := cfg.Opts.Verbose || cfg.Opts.Debug
-	backend, dumpLogs, err := launchBackendFn(cfg.Backend, []string{"__backend"}, cfg.BackendCWD, backendEnv(cfg.Ports, cfg.LogLevel, cfg.Opts.Debug), !showOutput, cfg.Ports, cfg.Mode, supervisor)
+	env := backendEnv(cfg.Ports, cfg.LogLevel, resolveConsoleLogLevel(cfg.Opts), cfg.Opts.Debug)
+	backend, dumpLogs, err := launchBackendFn(
+		cfg.Backend, []string{"__backend"}, cfg.BackendCWD, env, false, cfg.Ports, cfg.Mode, supervisor,
+	)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1

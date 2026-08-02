@@ -12,6 +12,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -37,6 +38,10 @@ func TestImproveKandevBootstrapCreatesBothHiddenWorkflowsIdempotently(t *testing
 	repoPath := t.TempDir()
 	require.NoError(t, exec.Command("git", "init", repoPath).Run())
 	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "test-user"})
+		c.Next()
+	})
 	handler := improvekandev.NewHandler(ts.TaskSvc, improveKandevTestCloner{path: repoPath}, "test", ts.Logger)
 	improvekandev.RegisterRoutes(router, handler)
 

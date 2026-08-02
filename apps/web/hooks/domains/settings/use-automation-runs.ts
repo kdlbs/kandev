@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useCallback } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import {
   listAutomationRuns,
   deleteAutomationRun,

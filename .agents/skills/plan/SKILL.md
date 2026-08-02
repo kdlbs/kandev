@@ -6,8 +6,9 @@ description: Create a committed implementation plan from a feature spec. Explore
 # Create Implementation Plan
 
 This is a primary-session artifact skill. The user-started conversation creates
-the plan and task files, then the user manually switches that same conversation
-to an implementation model to execute them.
+the plan and task files, then returns control with a handoff. The user reviews
+the files, switches that same conversation to an implementation model if
+desired, and sends the explicit request to execute them.
 
 Translate a feature spec into a concrete, phased implementation plan saved under
 `docs/plans/<feature>/`. Plans and task files are committed implementation
@@ -220,6 +221,15 @@ actual diff, including modified existing tests used as E2E evidence. It may then
 change `status` to `done`, update its `## Results`, and synchronize the
 corresponding checkbox/status and `## Verification Results` in `plan.md`.
 ```
+
+### 6. End the design turn
+
+After `plan.md` and every task file are written and validated, report their
+paths, dependency order, exact checks, and open risks as a compact handoff,
+then end the turn. Do not call `ask_user_question_kandev` (or an equivalent
+approval prompt) to ask the user to approve the plan or switch models. The user
+reviews the artifacts and controls the next implementation request and model
+choice.
 
 ### Style rules
 

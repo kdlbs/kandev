@@ -174,6 +174,7 @@ func allowedSupervisorEnv(env []string) map[string]string {
 		"KANDEV_WEB_INTERNAL_URL":      true,
 		"KANDEV_AGENT_STANDALONE_PORT": true,
 		"KANDEV_LOG_LEVEL":             true,
+		"KANDEV_CONSOLE_LOG_LEVEL":     true,
 		"KANDEV_DEBUG_DEV_MODE":        true,
 		"KANDEV_DEBUG_AGENT_MESSAGES":  true,
 		"KANDEV_DEBUG_PPROF_ENABLED":   true,

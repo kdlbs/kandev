@@ -3,24 +3,18 @@ import type {
   DiskUsageResponse,
   DatabaseStats,
   SnapshotInfo,
-  LogFileInfo,
   UpdatesResponse,
   SystemJob,
   SystemMetricsSnapshot,
   StorageMaintenanceRun,
   StorageOverviewResponse,
+  StoragePolicyResponse,
   StorageQuarantineEntry,
 } from "@/lib/types/system";
 
 export type SystemBackupsState = {
   items: SnapshotInfo[];
   loaded: boolean;
-};
-
-export type SystemLogsState = {
-  files: LogFileInfo[];
-  tail: string[];
-  tailLoaded: boolean;
 };
 
 export type SystemJobsMap = Record<string, SystemJob>;
@@ -31,11 +25,11 @@ export type SystemSliceState = {
     diskUsage: DiskUsageResponse | null;
     database: DatabaseStats | null;
     backups: SystemBackupsState;
-    logs: SystemLogsState;
     updates: UpdatesResponse | null;
     jobs: SystemJobsMap;
     metrics: SystemMetricsSnapshot | null;
     storage: {
+      policy: StoragePolicyResponse | null;
       overview: StorageOverviewResponse | null;
       runs: StorageMaintenanceRun[];
       quarantine: StorageQuarantineEntry[];
@@ -48,12 +42,11 @@ export type SystemSliceActions = {
   setSystemDiskUsage: (usage: DiskUsageResponse) => void;
   setSystemDatabase: (stats: DatabaseStats) => void;
   setSystemBackups: (items: SnapshotInfo[]) => void;
-  setSystemLogs: (files: LogFileInfo[]) => void;
-  setSystemLogTail: (lines: string[]) => void;
   setSystemUpdates: (updates: UpdatesResponse) => void;
   upsertSystemJob: (job: SystemJob) => void;
   clearSystemJob: (jobId: string) => void;
   setSystemMetricsSnapshot: (snapshot: SystemMetricsSnapshot) => void;
+  setSystemStoragePolicy: (policy: StoragePolicyResponse) => void;
   setSystemStorageOverview: (overview: StorageOverviewResponse) => void;
   setSystemStorageRuns: (runs: StorageMaintenanceRun[]) => void;
   setSystemStorageQuarantine: (entries: StorageQuarantineEntry[]) => void;

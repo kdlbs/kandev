@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 
@@ -384,6 +385,45 @@ type CopyFilesResponse struct {
 	Copied   []string `json:"copied,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 	Error    string   `json:"error,omitempty"`
+}
+
+type DiagnosticMaterializeResponse struct {
+	Path  string `json:"path"`
+	Bytes int64  `json:"bytes"`
+	Error string `json:"error,omitempty"`
+}
+
+// MaterializeDiagnosticBundle streams a bounded archive to the server-owned
+// diagnostics directory inside this agentctl workspace.
+func (c *Client) MaterializeDiagnosticBundle(
+	ctx context.Context,
+	bundleID string,
+	source io.Reader,
+) (*DiagnosticMaterializeResponse, error) {
+	reqURL := fmt.Sprintf("%s/api/v1/workspace/diagnostics/%s", c.baseURL, url.PathEscape(bundleID))
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, reqURL, source)
+	if err != nil {
+		return nil, fmt.Errorf("create diagnostic materialization request: %w", err)
+	}
+	request.Header.Set("Content-Type", "application/zip")
+	response, err := c.httpClient.Do(request)
+	if err != nil {
+		return nil, fmt.Errorf("materialize diagnostic bundle: %w", err)
+	}
+	defer func() {
+		if err := response.Body.Close(); err != nil {
+			c.logger.Debug("failed to close diagnostic response body", zap.Error(err))
+		}
+	}()
+	var result DiagnosticMaterializeResponse
+	if err := json.NewDecoder(io.LimitReader(response.Body, 64*1024)).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode diagnostic materialization response: %w", err)
+	}
+	if response.StatusCode != http.StatusOK || result.Error != "" {
+		return nil, fmt.Errorf("diagnostic materialization failed: status=%d error=%s",
+			response.StatusCode, result.Error)
+	}
+	return &result, nil
 }
 
 // CopyFiles ships a batch of pre-planned files (from copyfiles.Plan on the

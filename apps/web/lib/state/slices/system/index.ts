@@ -4,6 +4,5 @@ export type {
   SystemSliceState,
   SystemSliceActions,
   SystemBackupsState,
-  SystemLogsState,
   SystemJobsMap,
 } from "./types";

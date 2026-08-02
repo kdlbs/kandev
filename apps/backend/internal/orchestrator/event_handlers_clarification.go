@@ -457,6 +457,9 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 // (agent crashed mid-turn). In that case, skip the cancel signal but still reconcile the
 // session's state so clarification recovery can proceed with a fresh prompt.
 func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID string) error {
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
+
 	if s.agentManager == nil {
 		s.logger.Debug("skipping silent clarification cancel because agent manager is not configured",
 			zap.String("task_id", taskID),

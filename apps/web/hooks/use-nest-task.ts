@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { detachTask, updateTask } from "@/lib/api";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";

@@ -77,6 +77,13 @@ func (c *OverviewCache) Capabilities(ctx context.Context, settings StorageMainte
 	return c.provider.Capabilities(ctx, settings)
 }
 
+func (c *OverviewCache) SettingsCapabilities(
+	ctx context.Context,
+	settings StorageMaintenanceSettings,
+) Capabilities {
+	return c.provider.SettingsCapabilities(ctx, settings)
+}
+
 func (c *OverviewCache) Invalidate() {
 	c.mu.Lock()
 	c.generation++

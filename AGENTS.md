@@ -137,20 +137,24 @@ Use the user's strong model for specs, plans, task files, and high-risk design.
 When the user asks to proceed with feature planning, produce the spec, plan,
 and task files as one design package; pause after a spec only when the user
 explicitly requests spec review or a material open question prevents planning.
-At the completed-plan checkpoint, ask the user to manually switch the main
-session to a lower-cost implementation model. Detailed feature, fix,
-validation, and delegation routing lives in the relevant skills, especially
-`planner-orchestration`.
+At the completed-plan checkpoint, return control with a concise handoff. Do not
+call `ask_user_question_kandev` (or an equivalent approval prompt) to ask the
+user to approve the package or switch models. The user reviews the files,
+switches the main session if desired, and sends a later explicit implementation
+request. Detailed feature, fix, validation, and delegation routing lives in the
+relevant skills, especially `planner-orchestration`.
 
 Workflow-generated phase text such as `[IMPROVE PHASE]`, "implement the
 requested change", TDD checklists, verification commands, or commit steps does
 not opt a feature or behavior-changing fix out of spec-driven development. If
-the request does not reference an approved spec, plan, and task file, run
+the request neither references an existing reviewed package nor explicitly asks
+to implement a package created during a prior design turn, run
 `spec-driven-development` through the plan/task checkpoint and stop before
-production or permanent test changes. Continue directly to implementation only
-when approved task artifacts already exist, or when the user explicitly says
-to skip planning; a generic implementation envelope is not that explicit
-opt-out.
+production or permanent test changes. End that turn at the design-package
+handoff; do not ask for approval or a model switch. A generic implementation
+envelope is not an explicit opt-out; the user must either explicitly ask to
+implement the created package in a later turn or explicitly say to skip
+planning.
 
 ### Kandev Task Creation
 
@@ -207,4 +211,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-08-01
+**Last Updated**: 2026-08-02

@@ -23,9 +23,10 @@ import (
 	"github.com/kandev/kandev/internal/system/backups"
 	"github.com/kandev/kandev/internal/system/database"
 	"github.com/kandev/kandev/internal/system/disk"
+	"github.com/kandev/kandev/internal/system/frontenderrors"
 	"github.com/kandev/kandev/internal/system/info"
 	"github.com/kandev/kandev/internal/system/jobs"
-	"github.com/kandev/kandev/internal/system/logs"
+	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/metrics"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
@@ -55,16 +56,17 @@ type Wiring struct {
 // addressable so the cmd/kandev wiring can attach callbacks (Restart)
 // after construction.
 type Service struct {
-	Info     *info.Service
-	Jobs     *jobs.Tracker
-	Disk     *disk.Service
-	Database *database.Service
-	Backups  *backups.Service
-	Logs     *logs.Service
-	Metrics  *metrics.Service
-	Updates  *updates.Service
-	Restart  restart.Manager
-	Storage  *storage.Handler
+	Info           *info.Service
+	Jobs           *jobs.Tracker
+	Disk           *disk.Service
+	Database       *database.Service
+	Backups        *backups.Service
+	LogBundles     *logbundle.Service
+	FrontendErrors *frontenderrors.Service
+	Metrics        *metrics.Service
+	Updates        *updates.Service
+	Restart        restart.Manager
+	Storage        *storage.Handler
 	// StorageRuntime owns the scheduler, reconciliation, and durable cleanup worker.
 	StorageRuntime *storage.Runtime
 }
@@ -90,8 +92,6 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 
 	backupsSvc := backups.NewService(dataDir, pool, tracker, log)
 
-	logDir := log.LogDirectory()
-	logFile := log.LogFilename()
 	settingsStore, err := systemsettings.NewStore(pool)
 	if err != nil {
 		log.Error("Failed to initialize system settings store", zap.Error(err))
@@ -109,10 +109,14 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		Disk:     disk.NewService(homeDir, tracker, log),
 		Database: dbSvc,
 		Backups:  backupsSvc,
-		Logs:     logs.NewService(logDir, logFile, log),
-		Metrics:  metricsSvc,
-		Updates:  updates.NewService(pool, build.Version, nil, log, updatesOpts...),
-		Restart:  restart.NewManagerFromEnv(),
+		LogBundles: logbundle.New(logbundle.Config{
+			HomeDir: homeDir, Version: build.Version, Commit: build.Commit,
+			BuildTime: build.BuildTime, Log: log,
+		}),
+		FrontendErrors: frontenderrors.New(log, nil),
+		Metrics:        metricsSvc,
+		Updates:        updates.NewService(pool, build.Version, nil, log, updatesOpts...),
+		Restart:        restart.NewManagerFromEnv(),
 	}
 }
 
@@ -142,9 +146,12 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	backups.RegisterRoutes(g, s.Backups)
 
-	g.GET("/logs", logs.HandleList(s.Logs))
-	g.GET("/logs/tail", logs.HandleTail(s.Logs))
-	g.GET("/logs/:name/download", logs.HandleDownload(s.Logs))
+	if s.FrontendErrors != nil {
+		g.POST("/logs/frontend-errors", frontenderrors.Handle(s.FrontendErrors))
+	}
+	if s.LogBundles != nil {
+		logbundle.RegisterRoutes(g, s.LogBundles)
+	}
 
 	if s.Metrics != nil {
 		metrics.RegisterRoutes(g, s.Metrics)
@@ -164,6 +171,9 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 // StartBackground kicks off the updates poller goroutine. The poller
 // stops when ctx is cancelled.
 func (s *Service) StartBackground(ctx context.Context) {
+	if s.LogBundles != nil {
+		s.LogBundles.Start(ctx)
+	}
 	if s.Updates != nil {
 		s.Updates.StartPoller(ctx)
 	}
@@ -174,6 +184,9 @@ func (s *Service) StartBackground(ctx context.Context) {
 
 // StopBackground joins owned storage background workers.
 func (s *Service) StopBackground() {
+	if s.LogBundles != nil {
+		s.LogBundles.Stop()
+	}
 	if s.StorageRuntime != nil {
 		s.StorageRuntime.Stop()
 	}

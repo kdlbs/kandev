@@ -38,6 +38,16 @@ func ACPDebugEnabled() bool { return debugMode }
 // env so they resolve to the same directory.
 func ACPLogDir() string { return resolveACPLogDir() }
 
+// FlushACPLogs makes retained raw/normalized files complete before an
+// explicit diagnostic bundle request reads them. It is intentionally not used
+// on the frame hot path.
+func FlushACPLogs() {
+	if !debugMode {
+		return
+	}
+	acpLog.flushAll()
+}
+
 // ACPRingTail returns up to n most recent normalized events for a session as
 // raw JSON lines, for the dev-only live-tail endpoint. Returns nil when the
 // session is unknown.

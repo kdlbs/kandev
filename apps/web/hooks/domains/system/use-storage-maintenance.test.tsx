@@ -3,7 +3,11 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { ApiError } from "@/lib/api/client";
-import type { StorageMaintenanceSettings, StorageOverviewResponse } from "@/lib/types/system";
+import type {
+  StorageMaintenanceSettings,
+  StorageOverviewResponse,
+  StoragePolicyResponse,
+} from "@/lib/types/system";
 
 const mocks = vi.hoisted(() => ({
   adopt: vi.fn(),
@@ -12,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   purge: vi.fn(),
   fetchJob: vi.fn(),
   fetchOverview: vi.fn(),
+  fetchPolicy: vi.fn(),
   fetchQuarantine: vi.fn(),
   fetchRuns: vi.fn(),
   restore: vi.fn(),
@@ -31,6 +36,7 @@ vi.mock("@/lib/api/domains/system-api", () => ({
   purgeStorageQuarantine: mocks.purge,
   fetchSystemJob: mocks.fetchJob,
   fetchStorageOverview: mocks.fetchOverview,
+  fetchStoragePolicy: mocks.fetchPolicy,
   fetchStorageQuarantine: mocks.fetchQuarantine,
   fetchStorageRuns: mocks.fetchRuns,
   restoreStorageQuarantine: mocks.restore,
@@ -99,10 +105,12 @@ const TEST_COMMAND_BUSY_LABEL = "A test command is running";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 function wrapper({ children }: { children: ReactNode }) {
@@ -112,6 +120,10 @@ function wrapper({ children }: { children: ReactNode }) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.fetchOverview.mockResolvedValue(overview);
+  mocks.fetchPolicy.mockResolvedValue({
+    settings: overview.settings,
+    capabilities: overview.capabilities,
+  });
   mocks.fetchRuns.mockResolvedValue([]);
   mocks.fetchQuarantine.mockResolvedValue([]);
   mocks.fetchJob.mockResolvedValue(cleanupJob);
@@ -122,6 +134,29 @@ beforeEach(() => {
 });
 
 describe("useStorageMaintenance", () => {
+  it("publishes fast sections before a cold overview scan finishes", async () => {
+    const overviewRequest = deferred<StorageOverviewResponse>();
+    mocks.fetchOverview.mockReturnValueOnce(overviewRequest.promise);
+
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+
+    await waitFor(() => expect(result.current.policy?.settings).toEqual(settings));
+    expect(result.current.loading).toMatchObject({
+      policy: false,
+      runs: false,
+      quarantine: false,
+      overview: true,
+    });
+    expect(result.current.overview).toBeNull();
+
+    await act(async () => {
+      overviewRequest.resolve(overview);
+      await overviewRequest.promise;
+    });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    expect(result.current.loading.overview).toBe(false);
+  });
+
   it("loads overview, run history, and quarantine through the domain controller", async () => {
     const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
     await waitFor(() => expect(result.current.overview).toEqual(overview));
@@ -141,6 +176,20 @@ describe("useStorageMaintenance", () => {
       title: "Storage policy saved",
       variant: "success",
     });
+  });
+
+  it("refreshes policy after save without starting another overview scan", async () => {
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    mocks.fetchOverview.mockClear();
+    mocks.fetchPolicy.mockClear();
+
+    await act(async () => {
+      await result.current.save(settings);
+    });
+
+    expect(mocks.fetchPolicy).toHaveBeenCalledTimes(1);
+    expect(mocks.fetchOverview).not.toHaveBeenCalled();
   });
 
   it("starts eligible and forced quarantine bulk jobs", async () => {
@@ -462,5 +511,60 @@ describe("useStorageMaintenance reload ordering", () => {
     });
 
     expect(result.current.overview).toEqual(newerOverview);
+  });
+
+  it("does not surface a stale reload failure after a newer result commits", async () => {
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    const olderResponse = deferred<StorageOverviewResponse>();
+    const newerOverview = {
+      ...overview,
+      settings: { ...overview.settings, idle_for_minutes: 24 },
+    };
+    mocks.fetchOverview
+      .mockReturnValueOnce(olderResponse.promise)
+      .mockResolvedValueOnce(newerOverview);
+
+    let olderReload!: Promise<void>;
+    await act(async () => {
+      olderReload = result.current.reload(["overview"]);
+      await result.current.reload(["overview"]);
+    });
+    await waitFor(() => expect(result.current.overview).toEqual(newerOverview));
+
+    await act(async () => {
+      olderResponse.reject(new Error("stale overview unavailable"));
+      await olderReload;
+    });
+
+    expect(result.current.overview).toEqual(newerOverview);
+    expect(result.current.sectionErrors.overview).toBeNull();
+  });
+
+  it("does not let a stale policy response overwrite go-cache adoption", async () => {
+    const { result } = renderHook(() => useStorageMaintenance(), { wrapper });
+    await waitFor(() => expect(result.current.overview).toEqual(overview));
+    const policyResponse = deferred<StoragePolicyResponse>();
+    const adoptedSettings = {
+      ...settings,
+      go_cache: { ...settings.go_cache, adopted_path: "/custom/go-build" },
+    };
+    const adoptedResponse = { settings: adoptedSettings, capabilities: overview.capabilities };
+    mocks.fetchPolicy.mockReturnValueOnce(policyResponse.promise);
+    mocks.adopt.mockResolvedValueOnce(adoptedResponse);
+
+    let staleReload!: Promise<void>;
+    await act(async () => {
+      staleReload = result.current.reload(["policy"]);
+      await result.current.adopt("/custom/go-build");
+    });
+    expect(result.current.policy?.settings).toEqual(adoptedSettings);
+
+    await act(async () => {
+      policyResponse.resolve({ settings, capabilities: overview.capabilities });
+      await staleReload;
+    });
+
+    expect(result.current.policy?.settings).toEqual(adoptedSettings);
   });
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { getPluginConfig, updatePluginConfig } from "@/lib/api/domains/plugins-api";
 import {
   SECRET_MASK,

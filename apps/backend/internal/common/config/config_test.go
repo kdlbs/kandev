@@ -46,6 +46,15 @@ func minimalValidConfig() *Config {
 	}
 }
 
+func TestLoggingConfigExposesOnlyLevelAndFormat(t *testing.T) {
+	cfgType := reflect.TypeOf(LoggingConfig{})
+	for _, field := range []string{"OutputPath", "MaxSizeMB", "MaxBackups", "MaxAgeDays", "Compress"} {
+		if _, exists := cfgType.FieldByName(field); exists {
+			t.Errorf("LoggingConfig still exposes legacy destination field %s", field)
+		}
+	}
+}
+
 func TestResolvedHomeDir_Default(t *testing.T) {
 	cfg := &Config{}
 	home, err := os.UserHomeDir()

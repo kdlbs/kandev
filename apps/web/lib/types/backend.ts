@@ -1,4 +1,5 @@
 import type { TaskPlanEventPayload, TaskPlanRevisionEventPayload } from "./task-plan-events";
+import type { CaptureRequest } from "@/lib/logger/capture";
 
 export type BackendMessageType = keyof BackendMessageMap;
 
@@ -403,7 +404,6 @@ export type UserSettingsUpdatedPayload = Omit<
   workspace_id: string;
   repository_ids: string[];
 };
-
 export type ShellOutputPayload = {
   task_id: string;
   session_id: string;
@@ -524,6 +524,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
+    "system.logs.capture_requested": BackendMessage<
+      "system.logs.capture_requested",
+      CaptureRequest
+    >;
     "system.update_available": BackendMessage<"system.update_available", UpdateAvailablePayload>;
     "workspace.created": BackendMessage<"workspace.created", WorkspacePayload>;
     "workspace.updated": BackendMessage<"workspace.updated", WorkspacePayload>;

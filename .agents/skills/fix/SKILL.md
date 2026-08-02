@@ -1,19 +1,20 @@
 ---
 name: fix
-description: Diagnose a bug, update its behavioral spec, create reviewable fix plan and task files, then implement with TDD after user approval.
+description: Diagnose a bug, update its behavioral spec, create reviewable fix plan and task files, then hand off for explicit implementation with TDD.
 ---
 
 # Fix
 
 Use the same durable, reviewable workflow as feature work. Diagnose first, then
 produce the spec amendment, fix plan, and task files before changing production
-code. The user can review those artifacts, switch the main session to a cheaper
-model, and explicitly authorize native subagents for parallel-safe tasks.
+code. The user reviews those artifacts, switches the main session if desired,
+and sends a later explicit implementation request. Native subagents still
+require explicit authorization.
 
 ## Core Flow
 
 ```text
-Evidence -> Root cause -> Spec amendment -> Fix plan + tasks -> User approval/model switch -> TDD implementation -> PR AI review
+Evidence -> Root cause -> Spec amendment -> Fix plan + tasks -> Design-package handoff -> Explicit implementation request -> TDD implementation -> PR AI review
 ```
 
 Do not patch production code before the planning checkpoint unless the user
@@ -62,7 +63,7 @@ Follow the `/plan` structure, with these fix-specific requirements:
 - Keep `parallelism: sequential` by default in each task; waves are a human
   decision aid, not authorization to delegate.
 
-## Phase 3: User Review And Model Switch
+## Phase 3: Design-Package Handoff
 
 Before changing production or permanent test code, present:
 
@@ -72,13 +73,17 @@ Before changing production or permanent test code, present:
 - task waves, parallel candidates, and exact validation commands; and
 - risks and out-of-scope work.
 
-Pause for the user to approve. At that point the user may switch the main
-session to a lower-cost implementation model and may explicitly ask to use
-subagents. Do not infer subagent authorization from the plan.
+End the turn after this handoff. Do not call `ask_user_question_kandev` (or an
+equivalent approval prompt) to ask the user to approve the package or switch
+models. The user reviews the files, switches the main session if desired, and
+sends a later explicit implementation request. The files may remain
+`draft`/`pending`; do not wait for a separate approval marker. Do not infer
+subagent authorization from the plan.
 
-## Phase 4: Implement With TDD
+## Phase 4: Implement With TDD After Handoff
 
-Execute approved tasks sequentially by default:
+After the user explicitly asks to implement, execute the tasks sequentially by
+default:
 
 1. Mark the task `in_progress`.
 2. Write and run the regression test; confirm it fails for the expected reason.
@@ -93,7 +98,7 @@ runtime usage-metadata confirmation. Only launch tasks marked parallel-safe.
 
 ## Phase 5: PR Review
 
-After all approved task checks pass, commit, push, and open the PR. Do not run
+After all task checks pass, commit, push, and open the PR. Do not run
 automatic local simplify, QA, code/security review, or broad verification. The
 two configured PR AI reviewers are the semantic-review gate. Use `/pr-fixup`
 only for CI failures or actionable reviewer findings, rerunning only the
@@ -107,6 +112,6 @@ disagree, or the same targeted check fails three times.
 
 ## Final Report
 
-Report the root cause, spec/plan/task paths, approval and model-switch point,
+Report the root cause, spec/plan/task paths, design-package handoff,
 subagents explicitly authorized (if any), changed files, tests run, and current
 PR-review status.

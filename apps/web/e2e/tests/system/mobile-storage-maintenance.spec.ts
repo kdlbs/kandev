@@ -126,7 +126,7 @@ test.describe("Mobile storage maintenance", () => {
       .toBe(true);
   });
 
-  test("shows progress while storage data is loading", async ({ testPage }) => {
+  test("shows progress while storage data is loading", async ({ testPage, prCapture }) => {
     let overviewRequestStarted = false;
     let releaseOverview: () => void = () => {};
     let markOverviewObserved: () => void = () => {};
@@ -161,6 +161,15 @@ test.describe("Mobile storage maintenance", () => {
       await expect(spinner).toBeVisible();
       await expect(testPage.getByText("Loading storage data…")).toBeVisible();
       await expect(testPage.getByTestId("storage-overview-card")).toBeInViewport();
+      await expect(testPage.getByTestId("storage-policy-card")).toBeVisible();
+      await expect(testPage.getByTestId("storage-run-history")).toBeVisible();
+      await expect(testPage.getByTestId("storage-quarantine-card")).toBeVisible();
+      await expect(testPage.getByTestId("storage-analysis-total")).toHaveCount(0);
+      await expect(testPage.getByTestId("toast-message")).toHaveCount(0);
+      await prCapture.screenshot("progressive-loading", {
+        caption: "Mobile storage keeps policy, history, and quarantine visible during analysis",
+        fullPage: true,
+      });
       expect(
         await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
       ).toBe(false);
@@ -168,6 +177,8 @@ test.describe("Mobile storage maintenance", () => {
       releaseOverview();
       await expect(spinner).toBeHidden();
       await expect(testPage.getByText("Storage analysis")).toBeVisible();
+      await expect(testPage.getByTestId("storage-analysis-total")).toBeVisible();
+      await expect(testPage.getByTestId("storage-quarantine-total")).toBeVisible();
     } finally {
       releaseOverview();
       if (overviewRequestStarted) await overviewSettled;

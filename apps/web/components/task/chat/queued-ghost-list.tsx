@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { IconLayoutList, IconPlayerPlay, IconTrash, IconX } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
