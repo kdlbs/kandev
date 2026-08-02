@@ -2452,6 +2452,12 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 	if err != nil {
 		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, err)
 	}
+	if result.Changed {
+		// Cancellation takes effect before detached runtime teardown. Tombstone
+		// the execution immediately so buffered agent frames cannot recreate
+		// session output after the coordinator has acknowledged the stop.
+		s.markExecutionFailed(sessionID, result.ExecutionID)
+	}
 	teardownClaimed := result.Changed && s.claimExecutionTeardown(
 		sessionID,
 		result.ExecutionID,
