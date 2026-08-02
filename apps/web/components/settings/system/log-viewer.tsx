@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -17,6 +18,7 @@ import type { DiagnosticBundleJob } from "@/lib/types/system";
 type ViewState = "idle" | "collecting" | "preparing" | "partial" | "busy" | "error";
 
 export function LogViewer() {
+  const { t } = useTranslation();
   const [state, setState] = useState<ViewState>("idle");
   const [message, setMessage] = useState("");
   const mounted = useRef(true);
@@ -34,10 +36,10 @@ export function LogViewer() {
       const job = await prepareDiagnosticBundle((next) => mounted.current && setState(next));
       if (!mounted.current) return;
       if (job.status !== "ready" && job.status !== "partial") {
-        throw new Error(job.warnings?.[0] ?? "The diagnostic bundle could not be prepared.");
+        throw new Error(job.warnings?.[0] ?? t("settings:diagnosticBundlePrepareError"));
       }
       setState(job.status === "partial" ? "partial" : "idle");
-      setMessage(bundleMessage(job));
+      setMessage(bundleMessage(job, t));
       triggerDownload(buildDiagnosticBundleDownloadUrl(job.id));
     } catch (error) {
       if (!mounted.current) return;
@@ -49,7 +51,7 @@ export function LogViewer() {
         return;
       }
       setState("error");
-      setMessage(error instanceof Error ? error.message : "The diagnostic bundle failed.");
+      setMessage(error instanceof Error ? error.message : t("settings:diagnosticBundleFailed"));
     }
   };
 
@@ -58,25 +60,20 @@ export function LogViewer() {
     <div className="min-w-0 space-y-4">
       <Alert>
         <IconAlertTriangle className="size-4" />
-        <AlertTitle>Review before sharing</AlertTitle>
-        <AlertDescription>
-          This ZIP combines up to three days of backend logs with locally retained frontend console
-          events from connected browsers. It may contain URLs, console arguments, stacks, paths,
-          runtime metadata, and user-visible errors.
-        </AlertDescription>
+        <AlertTitle>{t("settings:diagnosticReviewBeforeSharing")}</AlertTitle>
+        <AlertDescription>{t("settings:diagnosticReviewDescription")}</AlertDescription>
       </Alert>
 
       <Card data-testid="system-diagnostic-bundle-card">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <IconFileZip className="size-4" />
-            Frontend + backend diagnostic logs
+            {t("settings:diagnosticBundleTitle")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Kandev asks your connected browser tabs for their bounded three-day console history,
-            combines it with retained backend log files, and downloads one ZIP.
+            {t("settings:diagnosticBundleDescription")}
           </p>
           <Button
             className="min-h-11 w-full cursor-pointer sm:w-auto"
@@ -89,7 +86,7 @@ export function LogViewer() {
             ) : (
               <IconDownload className="mr-2 size-4" />
             )}
-            {buttonLabel(state)}
+            {buttonLabel(state, t)}
           </Button>
           {message && (
             <p
@@ -118,17 +115,20 @@ async function prepareDiagnosticBundle(onStatus: (state: ViewState) => void) {
   return job;
 }
 
-function buttonLabel(state: ViewState): string {
-  if (state === "collecting") return "Collecting frontend logs…";
-  if (state === "preparing") return "Preparing ZIP…";
-  return "Download diagnostic bundle";
+function buttonLabel(state: ViewState, t: (key: string) => string): string {
+  if (state === "collecting") return t("settings:diagnosticCollectingFrontendLogs");
+  if (state === "preparing") return t("settings:diagnosticPreparingZip");
+  return t("settings:downloadDiagnosticBundle");
 }
 
-function bundleMessage(job: DiagnosticBundleJob): string {
-  if (job.status !== "partial") return "Your diagnostic ZIP is downloading.";
+function bundleMessage(
+  job: DiagnosticBundleJob,
+  t: (key: string, options?: Record<string, unknown>) => string,
+): string {
+  if (job.status !== "partial") return t("settings:diagnosticZipDownloading");
   return job.warnings?.length
-    ? `A partial ZIP is downloading: ${job.warnings.join(" ")}`
-    : "A partial diagnostic ZIP is downloading; some frontend logs were unavailable.";
+    ? t("settings:diagnosticPartialZipDownloading", { warnings: job.warnings.join(" ") })
+    : t("settings:diagnosticPartialZipUnavailable");
 }
 
 function triggerDownload(url: string): void {

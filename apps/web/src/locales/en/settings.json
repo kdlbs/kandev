@@ -369,5 +369,19 @@
   "visualEditorUnavailable": "Visual editor unavailable",
   "voiceMode": "Voice Mode",
   "vsCodeRemoteSsh": "VS Code Remote SSH",
-  "whenEnabledInstallYourProjectS": "When enabled, install your project's dependencies (e.g. <2>{{command}}</2> via repository setup scripts) to avoid missing type errors."
+  "whenEnabledInstallYourProjectS": "When enabled, install your project's dependencies (e.g. <2>{{command}}</2> via repository setup scripts) to avoid missing type errors.",
+  "logsPageTitle": "Logs",
+  "logsPageDescription": "Download a bounded diagnostic ZIP containing frontend and backend logs.",
+  "diagnosticReviewBeforeSharing": "Review before sharing",
+  "diagnosticReviewDescription": "This ZIP combines up to three days of backend logs with locally retained frontend console events from connected browsers. It may contain URLs, console arguments, stacks, paths, runtime metadata, and user-visible errors.",
+  "diagnosticBundleTitle": "Frontend + backend diagnostic logs",
+  "diagnosticBundleDescription": "Kandev asks your connected browser tabs for their bounded three-day console history, combines it with retained backend log files, and downloads one ZIP.",
+  "diagnosticBundlePrepareError": "The diagnostic bundle could not be prepared.",
+  "diagnosticBundleFailed": "The diagnostic bundle failed.",
+  "diagnosticCollectingFrontendLogs": "Collecting frontend logs…",
+  "diagnosticPreparingZip": "Preparing ZIP…",
+  "downloadDiagnosticBundle": "Download diagnostic bundle",
+  "diagnosticZipDownloading": "Your diagnostic ZIP is downloading.",
+  "diagnosticPartialZipDownloading": "A partial ZIP is downloading: {{warnings}}",
+  "diagnosticPartialZipUnavailable": "A partial diagnostic ZIP is downloading; some frontend logs were unavailable."
 }

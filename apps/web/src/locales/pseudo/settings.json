@@ -369,5 +369,19 @@
   "visualEditorUnavailable": "Vĩśũàĺ ēďĩţōŕ ũńàvàĩĺàƀĺē",
   "voiceMode": "Vōĩćē Ḿōďē",
   "vsCodeRemoteSsh": "VŚ Ćōďē Ŕēḿōţē ŚŚĤ",
-  "whenEnabledInstallYourProjectS": "Ŵĥēń ēńàƀĺēď, ĩńśţàĺĺ ŷōũŕ ƥŕōĵēćţ'ś ďēƥēńďēńćĩēś (ē.ĝ. <2>{{command}}</2> vĩà ŕēƥōśĩţōŕŷ śēţũƥ śćŕĩƥţś) ţō àvōĩď ḿĩśśĩńĝ ţŷƥē ēŕŕōŕś."
+  "whenEnabledInstallYourProjectS": "Ŵĥēń ēńàƀĺēď, ĩńśţàĺĺ ŷōũŕ ƥŕōĵēćţ'ś ďēƥēńďēńćĩēś (ē.ĝ. <2>{{command}}</2> vĩà ŕēƥōśĩţōŕŷ śēţũƥ śćŕĩƥţś) ţō àvōĩď ḿĩśśĩńĝ ţŷƥē ēŕŕōŕś.",
+  "logsPageTitle": "Ĺōĝś",
+  "logsPageDescription": "Ďōŵńĺōàď à ƀōũńďēď ďĩàĝńōśţĩć ŹĨƤ ćōńţàĩńĩńĝ ƒŕōńţēńď àńď ƀàćķēńď ĺōĝś.",
+  "diagnosticReviewBeforeSharing": "Ŕēvĩēŵ ƀēƒōŕē śĥàŕĩńĝ",
+  "diagnosticReviewDescription": "Ţĥĩś ŹĨƤ ćōḿƀĩńēś ũƥ ţō ţĥŕēē ďàŷś ōƒ ƀàćķēńď ĺōĝś ŵĩţĥ ĺōćàĺĺŷ ŕēţàĩńēď ƒŕōńţēńď ćōńśōĺē ēvēńţś ƒŕōḿ ćōńńēćţēď ƀŕōŵśēŕś. Ĩţ ḿàŷ ćōńţàĩń ŨŔĹś, ćōńśōĺē àŕĝũḿēńţś, śţàćķś, ƥàţĥś, ŕũńţĩḿē ḿēţàďàţà, àńď ũśēŕ-vĩśĩƀĺē ēŕŕōŕś.",
+  "diagnosticBundleTitle": "Ƒŕōńţēńď + ƀàćķēńď ďĩàĝńōśţĩć ĺōĝś",
+  "diagnosticBundleDescription": "Ķàńďēv àśķś ŷōũŕ ćōńńēćţēď ƀŕōŵśēŕ ţàƀś ƒōŕ ţĥēĩŕ ƀōũńďēď ţĥŕēē-ďàŷ ćōńśōĺē ĥĩśţōŕŷ, ćōḿƀĩńēś ĩţ ŵĩţĥ ŕēţàĩńēď ƀàćķēńď ĺōĝ ƒĩĺēś, àńď ďōŵńĺōàďś ōńē ŹĨƤ.",
+  "diagnosticBundlePrepareError": "Ţĥē ďĩàĝńōśţĩć ƀũńďĺē ćōũĺď ńōţ ƀē ƥŕēƥàŕēď.",
+  "diagnosticBundleFailed": "Ţĥē ďĩàĝńōśţĩć ƀũńďĺē ƒàĩĺēď.",
+  "diagnosticCollectingFrontendLogs": "Ćōĺĺēćţĩńĝ ƒŕōńţēńď ĺōĝś…",
+  "diagnosticPreparingZip": "Ƥŕēƥàŕĩńĝ ŹĨƤ…",
+  "downloadDiagnosticBundle": "Ďōŵńĺōàď ďĩàĝńōśţĩć ƀũńďĺē",
+  "diagnosticZipDownloading": "Ŷōũŕ ďĩàĝńōśţĩć ŹĨƤ ĩś ďōŵńĺōàďĩńĝ.",
+  "diagnosticPartialZipDownloading": "À ƥàŕţĩàĺ ŹĨƤ ĩś ďōŵńĺōàďĩńĝ: {{warnings}}",
+  "diagnosticPartialZipUnavailable": "À ƥàŕţĩàĺ ďĩàĝńōśţĩć ŹĨƤ ĩś ďōŵńĺōàďĩńĝ; śōḿē ƒŕōńţēńď ĺōĝś ŵēŕē ũńàvàĩĺàƀĺē."
 }
