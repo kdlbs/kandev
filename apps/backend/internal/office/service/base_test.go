@@ -33,8 +33,8 @@ func initSharedAgentProfilesSchema(t *testing.T, db *sqlx.DB) {
 }
 
 // newTestService creates a Service for testing. Callers may supply a
-// ServiceOptions to inject mocks or override defaults; Repo, Logger,
-// CfgLoader and CfgWriter are always set from the test harness.
+// ServiceOptions to inject mocks or override defaults; Repo, CfgLoader and
+// CfgWriter are always set from the test harness.
 func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.Service {
 	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -71,6 +71,12 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 	)`)
 	if err != nil {
 		t.Fatalf("create tasks table: %v", err)
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspaces (
+		id TEXT PRIMARY KEY,
+		office_workflow_id TEXT DEFAULT ''
+	)`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
 	}
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workflow_steps (
 		id TEXT PRIMARY KEY,
@@ -138,6 +144,9 @@ func newTestService(t *testing.T, overrides ...service.ServiceOptions) *service.
 
 // applyServiceOverrides merges non-zero fields from o into opts.
 func applyServiceOverrides(opts *service.ServiceOptions, o service.ServiceOptions) {
+	if o.Logger != nil {
+		opts.Logger = o.Logger
+	}
 	if o.CfgLoader != nil {
 		opts.CfgLoader = o.CfgLoader
 	}

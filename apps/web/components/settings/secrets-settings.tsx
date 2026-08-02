@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { IconEdit, IconTrash, IconEye, IconEyeOff, IconKey } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import {
@@ -64,6 +65,7 @@ function SecretForm({
   showSubmit = true,
   baselineState,
 }: SecretFormProps) {
+  const { t } = useTranslation();
   const nameIsDirty = Boolean(baselineState) && formState.name.trim() !== baselineState?.name;
   const valueIsDirty = Boolean(baselineState) && formState.value !== baselineState?.value;
   return (
@@ -76,14 +78,14 @@ function SecretForm({
         <Input
           value={formState.name}
           onChange={(e) => onFormChange({ name: e.target.value })}
-          placeholder="Name (e.g. OpenAI Production Key)"
+          placeholder={t("settings:nameEGOpenaiProductionKey")}
           disabled={isBusy}
           data-settings-dirty={nameIsDirty}
         />
         <Textarea
           value={formState.value}
           onChange={(e) => onFormChange({ value: e.target.value })}
-          placeholder="Secret value"
+          placeholder={t("settings:secretValue")}
           rows={2}
           className="resize-y font-mono text-sm"
           disabled={isBusy}
@@ -97,7 +99,7 @@ function SecretForm({
           </Button>
         )}
         <Button variant="ghost" onClick={onCancel} disabled={isBusy} className="cursor-pointer">
-          Cancel
+          {t("settings:cancel")}
         </Button>
       </div>
     </div>
@@ -204,7 +206,16 @@ type DeleteSecretDialogProps = {
   isBusy: boolean;
 };
 
-function DeleteSecretDialog({ target, onClose, onConfirm, isBusy }: DeleteSecretDialogProps) {
+export function DeleteSecretDialog({
+  target,
+  onClose,
+  onConfirm,
+  isBusy,
+}: DeleteSecretDialogProps) {
+  const { t } = useTranslation();
+  // The secret's own name is user data: it is interpolated as a value and never
+  // routed through a catalog key.
+  const name = target?.name ?? t("settings:thisSecret");
   return (
     <Dialog
       open={Boolean(target)}
@@ -214,16 +225,18 @@ function DeleteSecretDialog({ target, onClose, onConfirm, isBusy }: DeleteSecret
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete secret</DialogTitle>
+          <DialogTitle>{t("settings:deleteSecret")}</DialogTitle>
           <DialogDescription>
-            This will permanently remove{" "}
-            <span className="font-medium text-foreground">{target?.name ?? "this secret"}</span>.
-            This action cannot be undone.
+            <Trans i18nKey="settings:thisWillPermanentlyRemoveSecret" values={{ name }}>
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{name}</span>. This action cannot be
+              undone.
+            </Trans>
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose} className="cursor-pointer">
-            Cancel
+            {t("settings:cancel")}
           </Button>
           <Button
             type="button"
@@ -232,7 +245,7 @@ function DeleteSecretDialog({ target, onClose, onConfirm, isBusy }: DeleteSecret
             disabled={isBusy}
             className="cursor-pointer"
           >
-            Delete secret
+            {t("settings:deleteSecret")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -393,6 +406,7 @@ export function getSecretDraftMeta(
 }
 
 export function SecretsSettings() {
+  const { t } = useTranslation();
   const state = useSecretsState();
   const { loaded, editingId, showCreate, formState, setFormState, deleteTarget, items } = state;
   const actions = useSecretsActions(state);
@@ -401,8 +415,8 @@ export function SecretsSettings() {
   let invalidReason: string | undefined;
   if (isDirty && !isValid) {
     invalidReason = showCreate
-      ? "A secret name and value are required."
-      : "A secret name is required.";
+      ? t("settings:aSecretNameAndValueAreRequired")
+      : t("settings:aSecretNameIsRequired");
   }
 
   const onFormChange = (patch: Partial<SecretFormState>) =>
@@ -410,8 +424,8 @@ export function SecretsSettings() {
 
   return (
     <SettingsPageTemplate
-      title="Secrets"
-      description="Manage API keys and credentials. Secrets are encrypted at rest and injected into agent environments via executor profile env vars."
+      title={t("settings:secrets")}
+      description={t("settings:manageApiKeysAndCredentialsSecrets")}
       isDirty={isDirty}
       saveStatus="idle"
       saveId="secrets-item-draft"
@@ -423,26 +437,26 @@ export function SecretsSettings() {
     >
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">Secrets</div>
+          <div className="text-sm font-medium text-foreground">{t("settings:secrets")}</div>
           <Button
             onClick={actions.startCreate}
             disabled={isBusy || Boolean(editingId) || showCreate}
             className="cursor-pointer"
           >
-            Add secret
+            {t("settings:addSecret")}
           </Button>
         </div>
 
         {showCreate && (
           <SecretForm
-            title="New secret"
+            title={t("settings:newSecret")}
             formState={formState}
             onFormChange={onFormChange}
             onSubmit={actions.handleCreate}
             onCancel={actions.resetForm}
             isValid={isValid}
             isBusy={isBusy}
-            submitLabel="Add secret"
+            submitLabel={t("settings:addSecret")}
             showSubmit={false}
             baselineState={defaultFormState}
           />
@@ -450,14 +464,14 @@ export function SecretsSettings() {
 
         {editingId && (
           <SecretForm
-            title="Edit secret"
+            title={t("settings:editSecret")}
             formState={formState}
             onFormChange={onFormChange}
             onSubmit={actions.handleUpdate}
             onCancel={actions.resetForm}
             isValid={isValid}
             isBusy={isBusy}
-            submitLabel="Save changes"
+            submitLabel={t("settings:saveChanges")}
             showSubmit={false}
             baselineState={edit.baseline}
           />
@@ -466,12 +480,12 @@ export function SecretsSettings() {
         <div className="space-y-3">
           {!loaded && (
             <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-              Loading secrets...
+              {t("settings:loadingSecrets")}
             </div>
           )}
           {loaded && items.length === 0 && !showCreate && (
             <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-              No secrets yet. Add your first secret to get started.
+              {t("settings:noSecretsYetAddYourFirst")}
             </div>
           )}
           {items.map((secret) => (

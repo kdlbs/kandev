@@ -127,6 +127,47 @@ describe("local repository creation selection", () => {
   });
 });
 
+describe("repository source changes", () => {
+  function renderRepositoryChangeHandler(
+    rows: Array<{ key: string; repositoryId?: string; localPath?: string; branch: string }>,
+  ) {
+    const fs = {
+      repositories: rows,
+      executorProfileId: WORKTREE_PROFILE_ID,
+      updateRepository: vi.fn(),
+      setExecutorId: vi.fn(),
+      setExecutorProfileId: vi.fn(),
+      setFreshBranchEnabled: vi.fn(),
+      setCurrentLocalBranch: vi.fn(),
+      setCurrentLocalBranchLoading: vi.fn(),
+    } as unknown as Parameters<typeof useDialogHandlers>[0];
+    const { result } = renderHook(() => useDialogHandlers(fs, [repository("repo-1")]));
+    return { fs, result };
+  }
+
+  it("clears the executor when a workspace repository becomes an unmanaged local path", () => {
+    const { fs, result } = renderRepositoryChangeHandler([
+      { key: "row-0", repositoryId: "repo-1", branch: "main" },
+    ]);
+
+    result.current.handleRowRepositoryChange("row-0", "/work/discovered");
+
+    expect(fs.setExecutorId).toHaveBeenCalledWith("");
+    expect(fs.setExecutorProfileId).toHaveBeenCalledWith("");
+  });
+
+  it("clears the executor when an unmanaged local path becomes a workspace repository", () => {
+    const { fs, result } = renderRepositoryChangeHandler([
+      { key: "row-0", localPath: "/work/discovered", branch: "main" },
+    ]);
+
+    result.current.handleRowRepositoryChange("row-0", "repo-1");
+
+    expect(fs.setExecutorId).toHaveBeenCalledWith("");
+    expect(fs.setExecutorProfileId).toHaveBeenCalledWith("");
+  });
+});
+
 describe("task title handling", () => {
   it("clamps astral Unicode input before updating the dialog state", () => {
     const setTaskName = vi.fn();

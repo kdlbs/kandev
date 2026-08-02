@@ -8,6 +8,10 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -73,9 +77,15 @@ func (d *queueRunDispatcher) HandleTrigger(
 // fakeDispatcher / nil via svc.SetWorkflowEngineDispatcher.
 func newTestServiceWithBus(t *testing.T) (*service.Service, bus.EventBus) {
 	t.Helper()
-	svc := newTestService(t)
+	return newTestServiceWithBusLogger(t, logger.Default())
+}
+
+func newTestServiceWithBusLogger(
+	t *testing.T, log *logger.Logger,
+) (*service.Service, bus.EventBus) {
+	t.Helper()
+	svc := newTestService(t, service.ServiceOptions{Logger: log})
 	svc.SetSyncHandlers(true)
-	log := logger.Default()
 	eb := bus.NewMemoryEventBus(log)
 	if err := svc.RegisterEventSubscribers(eb); err != nil {
 		t.Fatalf("register subscribers: %v", err)
@@ -227,6 +237,7 @@ func TestTaskCreated_WakesAssigneeFromStoredRunner(t *testing.T) {
 
 	createTestAgent(t, svc, "ws-1", "worker-created")
 	insertTestTask(t, svc, "task-created-assigned", "ws-1")
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, "task-created-assigned")
 	setTestTaskAssignee(t, svc, "task-created-assigned", "worker-created")
 
 	event := bus.NewEvent(events.TaskCreated, "test", map[string]string{
@@ -286,6 +297,7 @@ func TestTaskAssigned_ReassignmentUsesAgentScopedIdempotency(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-old")
 	createTestAgent(t, svc, "ws-1", "worker-new")
 	insertTestTask(t, svc, "task-reassigned", "ws-1")
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, "task-reassigned")
 
 	for _, agentID := range []string{"worker-old", "worker-new"} {
 		event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
@@ -310,6 +322,54 @@ func TestTaskAssigned_ReassignmentUsesAgentScopedIdempotency(t *testing.T) {
 	}
 	if !seen["worker-old"] || !seen["worker-new"] {
 		t.Fatalf("task assignment runs = %#v, want both old and new assignees", runs)
+	}
+}
+
+func TestTaskAssigned_KanbanRunnerIsIgnored(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-kanban")
+	insertTestTask(t, svc, "task-kanban-assigned", "ws-1")
+	setTestTaskAssignee(t, svc, "task-kanban-assigned", "worker-kanban")
+
+	event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
+		"task_id":                   "task-kanban-assigned",
+		"assignee_agent_profile_id": "worker-kanban",
+	})
+	if err := eb.Publish(ctx, events.TaskUpdated, event); err != nil {
+		t.Fatalf("publish task updated event: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	for _, run := range runs {
+		if run.Reason == service.RunReasonTaskAssigned {
+			t.Fatalf("Kanban assignment queued task_assigned run: %#v", run)
+		}
+	}
+}
+
+func TestTaskAssigned_PropagatesTaskLookupFailure(t *testing.T) {
+	core, logs := observer.New(zapcore.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	svc, eb := newTestServiceWithBusLogger(t, log)
+	svc.ExecSQL(t, `DROP TABLE tasks`)
+
+	event := bus.NewEvent(events.TaskUpdated, "test", map[string]string{
+		"task_id":                   "task-with-broken-lookup",
+		"assignee_agent_profile_id": "worker-1",
+	})
+	if err := eb.Publish(context.Background(), events.TaskUpdated, event); err != nil {
+		t.Fatalf("publish task update: %v", err)
+	}
+	if logs.FilterMessage("Event handler error").Len() == 0 {
+		t.Fatal("task lookup failure was not surfaced by the event bus")
 	}
 }
 

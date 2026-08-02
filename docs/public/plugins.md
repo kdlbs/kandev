@@ -21,6 +21,13 @@ turn on: **Settings > Plugins** is always available in the sidebar. Because
 loaded plugin code runs with backend privileges, install only plugins you
 trust — see [Security posture](#security-posture).
 
+## Quick path
+
+1. Open **Settings > Plugins**.
+2. Install from the marketplace, a URL, or a local tarball.
+3. Let the installer verify package integrity before it extracts or spawns the plugin; review the install result before enabling it.
+4. Disable or uninstall a plugin when it is no longer trusted or needed.
+
 ## How it works
 
 ![Plugin lifecycle: install, verify, extract, and spawn a go-plugin gRPC subprocess; then, over one supervised gRPC connection, kandev delivers bus events and relays external webhooks to the plugin, the plugin calls back into the Host API, and the SPA optionally loads the native UI bundle.](../screenshots/plugin-architecture.png)
@@ -126,6 +133,9 @@ badge (`active`), a signing badge (`unsigned` today), and **Disable** and
 
 ![The Settings > Plugins page listing an installed, active plugin with its category, an unsigned badge, and Disable/Uninstall actions.](../screenshots/plugin-settings-list.png)
 
+<details>
+<summary>Filesystem sideload and synchronization</summary>
+
 ## Filesystem sideload and Sync
 
 Besides install-by-URL/upload, an operator with shell access to the host can
@@ -152,6 +162,8 @@ At boot, kandev runs only the directory-sideload and missing-install steps
 (never the tarball-install step), as part of resuming plugins that were
 already active. This is conservative by design: starting up never spawns a
 binary an operator hasn't explicitly approved via install or Sync.
+
+</details>
 
 ## Enable, disable, uninstall
 
@@ -183,6 +195,9 @@ authenticated"). This is owner-scoped, so a plugin's card only ever appears on
 its own settings page. See [Named
 slots](plugins-authoring.md#named-slots) in the authoring guide.
 
+<details>
+<summary>Package signing, storage, and security details</summary>
+
 ## Signed vs. unsigned packages
 
 Every package's `checksums.txt` is verified at install time — this integrity
@@ -206,6 +221,8 @@ identically to an unsigned one; signing is not required in v1.
     │   └── ui/bundle.js         # optional
     └── data/                    # KANDEV_PLUGIN_DATA_DIR — shared across versions
 ```
+
+</details>
 
 ## Security posture
 

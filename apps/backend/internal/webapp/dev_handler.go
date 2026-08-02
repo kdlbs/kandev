@@ -7,6 +7,8 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 // DevHandler fronts a Vite dev server with the same Go boot-payload shell used
@@ -78,13 +80,13 @@ func (h *DevHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	indexHTML, err := h.fetchViteIndex(r)
 	if err != nil {
-		http.Error(w, "Vite dev server unavailable", http.StatusBadGateway)
+		http.Error(w, i18n.T(i18n.FromRequest(r), "webapp.devServerUnavailable"), http.StatusBadGateway)
 		return
 	}
 	payload := h.payloadFor(r, route)
 	html, err := RenderShellHTML(indexHTML, payload)
 	if err != nil {
-		http.Error(w, "web app shell unavailable", http.StatusServiceUnavailable)
+		http.Error(w, i18n.T(i18n.FromRequest(r), "webapp.shellUnavailable"), http.StatusServiceUnavailable)
 		return
 	}
 

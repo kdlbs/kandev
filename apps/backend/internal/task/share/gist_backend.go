@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 // GistMaxBytes is a conservative cap on a single snapshot.json file. GitHub
@@ -49,7 +50,7 @@ func (b *GistBackend) Name() string { return BackendGitHubGist }
 // the rendered view served via gist.githack.com — that's the link users
 // share. The gist itself is preserved in the database via the externalID
 // so we can still delete it on revoke.
-func (b *GistBackend) Upload(ctx context.Context, workspaceID string, snap *Snapshot) (string, string, error) {
+func (b *GistBackend) Upload(ctx context.Context, workspaceID string, snap *Snapshot, locale string) (string, string, error) {
 	body, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return "", "", fmt.Errorf("marshal snapshot: %w", err)
@@ -62,17 +63,17 @@ func (b *GistBackend) Upload(ctx context.Context, workspaceID string, snap *Snap
 		return "", "", err
 	}
 	resp, err := client.CreateGist(ctx, github.CreateGistInput{
-		Description: gistDescription(snap),
+		Description: gistDescription(snap, locale),
 		Public:      false,
 		Files: map[string]github.GistFile{
 			// share.html sorts first alphabetically in the gist file list,
 			// which puts the rendered view at the top of the gist page too.
-			"share.html":    {Content: BuildShareHTML(snap)},
+			"share.html":    {Content: BuildShareHTML(snap, locale)},
 			"snapshot.json": {Content: string(body)},
 			// README is built with empty renderedURL — the user's primary
 			// link goes to the rendered view; the README is a fallback for
 			// folks who land on the gist directly.
-			"README.md": {Content: BuildGistREADME(snap, "")},
+			"README.md": {Content: BuildGistREADME(snap, "", locale)},
 		},
 	})
 	if err != nil {
@@ -211,11 +212,13 @@ func (b *GistBackend) clientFor(ctx context.Context, workspaceID string) (github
 	return b.client, nil
 }
 
-func gistDescription(snap *Snapshot) string {
+// gistDescription is the one-line summary GitHub shows on the gist page, so
+// it is display copy rather than a diagnostic.
+func gistDescription(snap *Snapshot, locale string) string {
 	if snap == nil || snap.Task.Title == "" {
-		return "kandev task share"
+		return i18n.T(locale, "share.gistDescriptionUntitled")
 	}
-	return "kandev share: " + snap.Task.Title
+	return i18n.Tf(locale, "share.gistDescription", map[string]any{"title": snap.Task.Title})
 }
 
 func nonEmpty(s, fallback string) string {

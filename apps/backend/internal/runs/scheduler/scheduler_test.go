@@ -2,6 +2,7 @@ package scheduler_test
 
 import (
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -23,6 +24,23 @@ func (f *fakeProcessor) Tick(_ context.Context) {
 	f.last.Store(time.Now().UnixNano())
 }
 
+type blockingProcessor struct {
+	calls   atomic.Int64
+	entered chan struct{}
+	second  chan struct{}
+	release chan struct{}
+}
+
+func (p *blockingProcessor) Tick(_ context.Context) {
+	switch p.calls.Add(1) {
+	case 1:
+		close(p.entered)
+	case 2:
+		close(p.second)
+	}
+	<-p.release
+}
+
 func newTestLogger(t *testing.T) *logger.Logger {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console"})
@@ -42,6 +60,7 @@ func TestScheduler_TickFiresProcessor(t *testing.T) {
 	proc := &fakeProcessor{}
 	s := scheduler.New(proc, nil, 20*time.Millisecond, newTestLogger(t))
 	go s.Start(ctx)
+	t.Cleanup(func() { _ = s.Stop() })
 
 	deadline := time.Now().Add(500 * time.Millisecond)
 	for time.Now().Before(deadline) {
@@ -67,6 +86,7 @@ func TestScheduler_SignalDrivesClaimUnder100ms(t *testing.T) {
 	// the signal path, not the safety-net timer.
 	s := scheduler.New(proc, signalCh, 5*time.Second, newTestLogger(t))
 	go s.Start(ctx)
+	t.Cleanup(func() { _ = s.Stop() })
 
 	// Give the goroutine a moment to enter the select.
 	time.Sleep(10 * time.Millisecond)
@@ -97,6 +117,7 @@ func TestScheduler_StopsOnContextCancel(t *testing.T) {
 	proc := &fakeProcessor{}
 	s := scheduler.New(proc, nil, 20*time.Millisecond, newTestLogger(t))
 	go s.Start(ctx)
+	t.Cleanup(func() { _ = s.Stop() })
 
 	time.Sleep(80 * time.Millisecond)
 	cancel()
@@ -108,5 +129,106 @@ func TestScheduler_StopsOnContextCancel(t *testing.T) {
 	// next ticker firing); anything more means the loop kept running.
 	if post > pre+1 {
 		t.Errorf("scheduler kept ticking after cancel: pre=%d post=%d", pre, post)
+	}
+}
+
+func TestScheduler_StartIsIdempotentAndStopWaitsForActiveTick(t *testing.T) {
+	ctx := context.Background()
+	signalCh := make(chan struct{}, 2)
+	proc := &blockingProcessor{
+		entered: make(chan struct{}),
+		second:  make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	s := scheduler.New(proc, signalCh, time.Hour, newTestLogger(t))
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(proc.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = s.Stop()
+	})
+	go s.Start(ctx)
+	go s.Start(ctx)
+
+	signalCh <- struct{}{}
+	select {
+	case <-proc.entered:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("scheduler did not start the processor")
+	}
+
+	signalCh <- struct{}{}
+	select {
+	case <-proc.second:
+		t.Fatal("duplicate Start launched a second scheduler loop")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	stopDone := make(chan struct{})
+	go func() {
+		if err := s.Stop(); err != nil {
+			t.Errorf("Stop returned error: %v", err)
+		}
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+		t.Fatal("Stop returned while a processor tick was still active")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-stopDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Stop did not join the processor loop")
+	}
+	if err := s.Stop(); err != nil {
+		t.Fatalf("Stop returned error: %v", err)
+	}
+}
+
+func TestScheduler_ParentCancellationDrainsActiveTick(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	signalCh := make(chan struct{}, 1)
+	proc := &blockingProcessor{
+		entered: make(chan struct{}),
+		second:  make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	s := scheduler.New(proc, signalCh, time.Hour, newTestLogger(t))
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(proc.release) }) }
+	t.Cleanup(func() {
+		release()
+		_ = s.Stop()
+	})
+	go s.Start(ctx)
+	signalCh <- struct{}{}
+	select {
+	case <-proc.entered:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("scheduler did not start the processor")
+	}
+
+	cancel()
+	stopDone := make(chan struct{})
+	go func() {
+		if err := s.Stop(); err != nil {
+			t.Errorf("Stop returned error: %v", err)
+		}
+		close(stopDone)
+	}()
+	select {
+	case <-stopDone:
+		t.Fatal("parent cancellation did not wait for the active tick")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-stopDone:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Stop did not finish after the active tick drained")
 	}
 }

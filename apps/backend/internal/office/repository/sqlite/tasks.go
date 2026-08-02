@@ -59,6 +59,7 @@ type TaskExecutionFields struct {
 	AssigneeAgentProfileID string `db:"assignee_agent_profile_id"`
 	State                  string `db:"state"`
 	WorkspaceID            string `db:"workspace_id"`
+	IsFromOffice           bool   `db:"is_from_office"`
 }
 
 // GetTaskExecutionFields returns the execution-related fields for a task.
@@ -68,7 +69,8 @@ func (r *Repository) GetTaskExecutionFields(ctx context.Context, taskID string) 
 		SELECT tasks.id,
 		       `+RunnerProjection("tasks")+` as assignee_agent_profile_id,
 		       COALESCE(tasks.state, '') as state,
-		       COALESCE(tasks.workspace_id, '') as workspace_id
+		       COALESCE(tasks.workspace_id, '') as workspace_id,
+		       `+taskrepo.IsFromOfficePredicate("tasks")+` AS is_from_office
 		FROM tasks WHERE tasks.id = ?
 	`), taskID).StructScan(&fields)
 	if err == sql.ErrNoRows {
@@ -812,6 +814,23 @@ type UnstartedTaskRow struct {
 	WorkspaceID            string `db:"workspace_id"`
 }
 
+// HasOfficeAdoption reports whether persisted Office configuration exists
+// anywhere in the backend. It is intentionally cheap because the shared
+// cron loop checks it before every recovery pass.
+func (r *Repository) HasOfficeAdoption(ctx context.Context) (bool, error) {
+	var adopted bool
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM workspaces
+			WHERE COALESCE(office_workflow_id, '') != ''
+		) OR EXISTS (
+			SELECT 1 FROM office_projects
+			WHERE COALESCE(workspace_id, '') != ''
+		)
+	`)).Scan(&adopted)
+	return adopted, err
+}
+
 // ListUnstartedTasks returns TODO tasks with an assignee, not archived,
 // within the lookback window, that have no active run (queued/claimed/finished).
 // CountTasksByWorkspace returns the number of non-archived, non-ephemeral tasks
@@ -837,6 +856,7 @@ func (r *Repository) ListUnstartedTasks(
 		       t.workspace_id
 		FROM tasks t
 		WHERE t.state = 'TODO'
+		  AND `+taskrepo.IsFromOfficePredicate("t")+`
 		  AND `+RunnerProjection("t")+` != ''
 		  AND t.archived_at IS NULL
 		  AND t.created_at >= datetime('now', '-' || ? || ' hours')

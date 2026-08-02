@@ -8,6 +8,7 @@ import {
   updateNotificationProvider,
 } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
+import { t } from "@/lib/i18n";
 import { DEFAULT_NOTIFICATION_EVENTS } from "@/lib/notifications/events";
 import { nativeNotifications } from "@/lib/desktop/native-notification-client";
 import { useNotificationProviders } from "@/hooks/domains/settings/use-notification-providers";
@@ -273,7 +274,7 @@ export function useSaveRequest(state: NotificationsState) {
         ? { name: appriseName, urls: parseAppriseUrls(appriseUrls) }
         : null;
     if (createDraft && createDraft.urls.length === 0) {
-      throw new Error("At least one Apprise service URL is required.");
+      throw new Error(t("settings:appriseUrlRequired"));
     }
     const updates: Array<Promise<NotificationProvider>> = [];
     for (const provider of providers) {
@@ -511,8 +512,8 @@ export function useNotificationsActions(
       bumpPermission();
     }
     if (permission !== "granted") return;
-    new Notification("Test notification", {
-      body: "If you can read this, browser notifications are working.",
+    new Notification(t("settings:testNotificationTitle"), {
+      body: t("settings:testNotificationBody"),
     });
   };
 

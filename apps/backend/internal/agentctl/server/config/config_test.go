@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -15,6 +16,171 @@ func TestCollectAgentEnvKeepsGitHubCLIShimAheadOfProfilePath(t *testing.T) {
 	want := strings.Join([]string{"/kandev/shims", "/profile/bin", "/usr/bin"}, string(os.PathListSeparator))
 	if got := envSliceValue(env, "PATH"); got != want {
 		t.Fatalf("PATH = %q, want %q", got, want)
+	}
+}
+
+func TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Bash login-shell behavior is Unix-specific")
+	}
+	shimDir := filepath.Join(t.TempDir(), "managed github shim")
+	if err := os.MkdirAll(shimDir, 0o700); err != nil {
+		t.Fatalf("create shim directory: %v", err)
+	}
+	for _, name := range []string{"agentctl", "gh"} {
+		path := filepath.Join(shimDir, name)
+		if err := os.WriteFile(path, []byte("#!/bin/sh\n"), 0o700); err != nil {
+			t.Fatalf("write %s shim: %v", name, err)
+		}
+	}
+	marker := filepath.Join(t.TempDir(), "bash-hook-ran")
+	parentBashEnv := filepath.Join(t.TempDir(), "parent-bash-env.sh")
+	if err := os.WriteFile(parentBashEnv, []byte("#!/bin/sh\nprintf hook-ran > \"$KANDEV_BASH_HOOK_MARKER\"\n"), 0o700); err != nil {
+		t.Fatalf("write parent Bash environment: %v", err)
+	}
+	bashEnv := filepath.Join(shimDir, "bash-env.sh")
+	bootstrap := "#!/bin/sh\n" +
+		"if [ -n \"${KANDEV_GITHUB_PARENT_BASH_ENV:-}\" ]; then . \"$KANDEV_GITHUB_PARENT_BASH_ENV\"; fi\n" +
+		"case \":${PATH:-}:\" in *:\"${KANDEV_GITHUB_CLI_SHIM_DIR}\":*) ;; *) PATH=\"${KANDEV_GITHUB_CLI_SHIM_DIR}:${PATH:-}\"; export PATH ;; esac\n"
+	if err := os.WriteFile(bashEnv, []byte(bootstrap), 0o700); err != nil {
+		t.Fatalf("write Bash environment fixture: %v", err)
+	}
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "https://kandev.example/resolve",
+		"KANDEV_GITHUB_CLI_SHIM_DIR":          shimDir,
+		"KANDEV_GITHUB_CLI_BASH_ENV":          bashEnv,
+		"BASH_ENV":                            parentBashEnv,
+		"KANDEV_BASH_HOOK_MARKER":             marker,
+		"PATH":                                "/usr/bin:/bin",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "BASH_ENV"); got != bashEnv {
+		t.Fatalf("BASH_ENV = %q, want generated environment %q", got, bashEnv)
+	}
+	if got := envSliceValue(env, "KANDEV_GITHUB_PARENT_BASH_ENV"); got != parentBashEnv {
+		t.Fatalf("parent Bash environment = %q, want %q", got, parentBashEnv)
+	}
+
+	command := exec.Command("bash", "-lc", "printf 'agentctl=%s\\ngh=%s\\n' \"$(command -v agentctl || true)\" \"$(command -v gh || true)\"")
+	command.Env = env
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("bash login shell failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "agentctl="+filepath.Join(shimDir, "agentctl")) ||
+		!strings.Contains(string(output), "gh="+filepath.Join(shimDir, "gh")) {
+		t.Fatalf("login-shell tool resolution = %q", output)
+	}
+	if hook, err := os.ReadFile(marker); err != nil || string(hook) != "hook-ran" {
+		t.Fatalf("parent Bash hook marker = %q, error = %v", hook, err)
+	}
+}
+
+func TestCollectAgentEnvResolvesParameterizedBashEnv(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Bash startup behavior is Unix-specific")
+	}
+	shimDir := t.TempDir()
+	hookDir := t.TempDir()
+	marker := filepath.Join(hookDir, "parent-hook-ran")
+	parentBashEnv := filepath.Join(hookDir, "parent-bash-env.sh")
+	if err := os.WriteFile(parentBashEnv, []byte("#!/bin/sh\nprintf hook-ran > \"$KANDEV_TEST_HOOK_MARKER\"\n"), 0o700); err != nil {
+		t.Fatalf("write parent Bash environment: %v", err)
+	}
+	bashEnv := filepath.Join(shimDir, "bash-env.sh")
+	if err := os.WriteFile(bashEnv, []byte("#!/bin/sh\n. \"$KANDEV_GITHUB_PARENT_BASH_ENV\"\n"), 0o700); err != nil {
+		t.Fatalf("write managed Bash environment: %v", err)
+	}
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "https://kandev.example/resolve",
+		"KANDEV_GITHUB_CLI_SHIM_DIR":          shimDir,
+		"KANDEV_GITHUB_CLI_BASH_ENV":          bashEnv,
+		"KANDEV_TEST_HOOK_ROOT":               hookDir,
+		"KANDEV_TEST_HOOK_MARKER":             marker,
+		"BASH_ENV":                            "${KANDEV_TEST_HOOK_ROOT}/parent-bash-env.sh",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "KANDEV_GITHUB_PARENT_BASH_ENV"); got != parentBashEnv {
+		t.Fatalf("parent Bash environment = %q, want resolved path %q", got, parentBashEnv)
+	}
+	command := exec.Command("bash", "-c", "true")
+	command.Env = env
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("parameterized Bash environment failed: %v\n%s", err, output)
+	}
+	if hook, err := os.ReadFile(marker); err != nil || string(hook) != "hook-ran" {
+		t.Fatalf("parent Bash hook marker = %q, error = %v", hook, err)
+	}
+}
+
+func TestCollectAgentEnvAvoidsManagedBashEnvSelfSourcing(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Bash startup behavior is Unix-specific")
+	}
+	startupEnv := filepath.Join(t.TempDir(), "managed-bash-env.sh")
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"KANDEV_GITHUB_CREDENTIAL_BROKER_URL": "https://kandev.example/resolve",
+		"KANDEV_GITHUB_CLI_BASH_ENV":          startupEnv,
+		"KANDEV_GITHUB_PARENT_BASH_ENV":       "/stale/parent-bash-env.sh",
+		"BASH_ENV":                            startupEnv,
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "BASH_ENV"); got != startupEnv {
+		t.Fatalf("BASH_ENV = %q, want generated environment %q", got, startupEnv)
+	}
+	if got := envSliceValue(env, "KANDEV_GITHUB_PARENT_BASH_ENV"); got != "" {
+		t.Fatalf("parent Bash environment = %q, want unset for self-sourcing hook", got)
+	}
+}
+
+func TestExpandBashEnvParameters(t *testing.T) {
+	env := map[string]string{"HOME": "/home/agent", "HOOK_ROOT": "/opt/hooks"}
+	for _, tc := range []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "unbraced", value: "$HOME/bash-env.sh", want: "/home/agent/bash-env.sh"},
+		{name: "braced", value: "${HOOK_ROOT}/bash-env.sh", want: "/opt/hooks/bash-env.sh"},
+		{name: "unsupported expansion remains literal", value: "$(printf /tmp/hook)", want: "$(printf /tmp/hook)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := expandBashEnvParameters(tc.value, env); got != tc.want {
+				t.Fatalf("expandBashEnvParameters(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCollectAgentEnvLeavesGitHubStartupHookUntouchedWithoutBroker(t *testing.T) {
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_BROKER_URL", "")
+	parentBashEnv := filepath.Join(t.TempDir(), "parent-bash-env.sh")
+	startupEnv := filepath.Join(t.TempDir(), "managed-bash-env.sh")
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"KANDEV_GITHUB_CLI_SHIM_DIR": " /managed/shims ",
+		"KANDEV_GITHUB_CLI_BASH_ENV": startupEnv,
+		"BASH_ENV":                   parentBashEnv,
+		"PATH":                       "/usr/bin:/bin",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "BASH_ENV"); got != parentBashEnv {
+		t.Fatalf("BASH_ENV = %q, want existing hook %q", got, parentBashEnv)
+	}
+	if got := envSliceValue(env, "KANDEV_GITHUB_PARENT_BASH_ENV"); got != "" {
+		t.Fatalf("parent Bash environment = %q, want unset without broker", got)
+	}
+	if got := envSliceValue(env, "PATH"); got != "/usr/bin:/bin" {
+		t.Fatalf("PATH = %q, want unchanged without broker", got)
 	}
 }
 

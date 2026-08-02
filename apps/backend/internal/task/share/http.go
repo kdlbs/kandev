@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 // HTTPHandlers wires the share endpoints. RegisterRoutes is the public entry
@@ -136,7 +137,10 @@ func (h *HTTPHandlers) httpCreate(c *gin.Context) {
 		return
 	}
 
-	share, err := h.svc.CreateShare(ctx, sessionID)
+	// The gist is a static file: nobody makes a request to us when they open
+	// it, so the creator's locale is the only one we will ever know. Resolve
+	// it here and thread it down rather than letting the builders guess.
+	share, err := h.svc.CreateShare(ctx, sessionID, i18n.FromRequest(c.Request))
 	if mapped, status := mapShareError(err); mapped != nil {
 		h.logServerError(err, "create share failed", sessionID)
 		c.JSON(status, mapped)

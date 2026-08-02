@@ -7,6 +7,13 @@ description: "Install, start, and operate Kandev from the command line."
 
 The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](./desktop-app.md) instead.
 
+## Quick path
+
+1. Install with Homebrew or npm.
+2. Run `kandev` and open the printed URL.
+3. Use `--headless` for a server or SSH session.
+4. Keep the backend on loopback unless a trusted proxy and authentication protect it.
+
 ## Supported release targets
 
 | OS | Architectures | Install channels |
@@ -96,6 +103,9 @@ kandev service <action> [service options]
 
 These commands and options describe the installed native launcher. Unknown arguments fail with exit status 2. In particular, the npm and Homebrew release entrypoints currently invoke that native launcher, which does **not** support `dev`, `--dev`, `--runtime-version`, `--web-internal-port`, or the removed `--web-port` spelling. The source-checkout development launcher has a separate contract described below.
 
+<details>
+<summary>Source checkout and service commands</summary>
+
 ### `dev` and the internal web port are source-checkout options
 
 The repository's TypeScript launcher supports hot-reload development with this logical CLI syntax:
@@ -144,6 +154,8 @@ kandev service logs --follow
 ```
 
 Supported actions are `install`, `uninstall`, `start`, `stop`, `restart`, `status`, `logs`, and `config`. Installation accepts `--system`, `--run-as <user>` (only with `--system`), `--port`, `--home-dir`, and `--no-boot-start`. Reinstalling an existing Kandev-managed system service preserves its account unless `--run-as` is supplied explicitly. A first system install from a root login requires `--run-as`, including `--run-as root` when root is intentional. In the current native installer, `--port` is written as `KANDEV_SERVER_PORT`, but the supervising launcher overwrites that value with its own automatic port selection; the option therefore does not reliably pin a service listener today. The service normally prefers `38429` and falls back when it is busy. Windows service installation is not implemented. Managed user services write owner-only install metadata so **Settings > System > Updates** can offer the guarded Apply action; system services and failed guarded updates use the package manager followed by `kandev service install` and `kandev service restart`. See [Run as a service](./run-as-a-service.md) for privileges, paths, upgrades, and recovery.
+
+</details>
 
 ## Ports and network exposure
 

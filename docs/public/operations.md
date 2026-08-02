@@ -9,6 +9,13 @@ Kandev can run as a desktop app, an interactive CLI process, an OS-managed servi
 
 Kandev does not currently provide a user-login boundary for the web application, HTTP API, WebSocket, or external MCP routes. Treat anyone who can reach the backend as an operator. Keep it on a trusted host or private network, or put the entire origin behind an authenticated TLS reverse proxy.
 
+## Quick path
+
+1. Choose one process owner for the database and Kandev home.
+2. Check `/health` for readiness and **System > Status** for diagnostics.
+3. Back up the database and `master.key` before upgrades, resets, or recovery work.
+4. Preserve Git branches and external provider state separately from database backups.
+
 ## Choose an operating model
 
 | Mode | Start and stop | Durable state | Update path |
@@ -75,6 +82,11 @@ The supported SQLite layout for the System database and restore pages is the der
 
 ## Storage maintenance
 
+> **Destructive:** **Force clear all** permanently removes eligible quarantine entries and discards their restore windows.
+
+<details>
+<summary>Storage maintenance details</summary>
+
 Open **Settings > System > Storage** to inspect Kandev-managed disk usage and configure cleanup.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. If task resources are active, the page names
@@ -126,7 +138,14 @@ cleanup do not delete this legacy data by name or age. Remove it only through a 
 host-administrator procedure after confirming that no live process references the target; stopping
 the Kandev service first provides the clearest maintenance boundary.
 
+</details>
+
 ## Database operation
+
+> **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.
+
+<details>
+<summary>Database operation details</summary>
 
 ### SQLite
 
@@ -155,7 +174,12 @@ pg_dump --host "$PGHOST" --port "${PGPORT:-5432}" \
 
 Switching `database.driver` does not migrate data. PostgreSQL and shared NATS remove two single-process data constraints, but they do not make Kandev horizontally scalable: WebSocket subscriptions, execution lifecycle/control state, and task workspaces remain process- or filesystem-local. The current product and supplied deployment validate one backend replica only; do not add replicas based on the database and event bus alone.
 
+</details>
+
 ## SQLite backups
+
+<details>
+<summary>Backup details</summary>
 
 Open **Settings > System > Backups**.
 
@@ -178,7 +202,14 @@ kandev service start
 
 Adapt the source for a custom `--home-dir`. This archive still does not include external PostgreSQL, remote executors, provider objects, or CLI credentials stored elsewhere in the operating-system home.
 
+</details>
+
 ## Restore and recovery
+
+> **Restore warning:** Stop or finish active sessions, relaunch Kandev after restoring, and reconcile worktrees, containers, pull requests, credentials, and other external state before restarting automation. A database restore does not roll those systems back.
+
+<details>
+<summary>Restore details</summary>
 
 ### Restore a System snapshot
 
@@ -204,6 +235,8 @@ pg_restore --clean --if-exists --no-owner \
 ```
 
 Restart one backend, allow schema initialization to complete, then validate it as a single-replica deployment. Match the restored data with a compatible Kandev version; Kandev has no automatic database downgrade or validated multi-replica operating path.
+
+</details>
 
 ## Factory reset
 

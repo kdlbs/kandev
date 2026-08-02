@@ -1,7 +1,7 @@
 ---
-status: draft
+status: building
 created: 2026-07-19
-amended: 2026-07-31
+amended: 2026-08-01
 owner: Kandev
 ---
 
@@ -78,6 +78,16 @@ automation under different GitHub Apps without operating separate Kandev deploym
   only in memory. PAT/CLI tokens retain their provider-granted scope once delivered to a trusted
   agent subprocess. GitHub HTTPS and the broker-aware `gh` shim fail closed rather than consulting
   another ambient helper after a managed-helper failure.
+- Managed Git helper execution does not depend on the post-startup `PATH`: Git resolves an
+  absolute Kandev-owned `agentctl` executable published before the first managed Git operation.
+  Local and Worktree preparation binds the helper to the standalone launcher's absolute executable
+  before checkout or setup scripts run. Remote preparation binds it to the installed executor
+  binary before cloning, and a running `agentctl` publishes its own executable for child processes.
+  Non-interactive Unix login shells that replace their inherited `PATH` restore the managed
+  CLI-shim directory after profile initialization for broker-enabled tasks, while preserving
+  pre-existing Bash environment hooks, including hook paths containing `$VAR` or `${VAR}`
+  references from the effective child environment. Broker-disabled and executor-inheritance
+  processes receive no shell hook or managed-tool path.
 - Under managed routing, every authorized task execution surface receives the same current
   task-scoped Git environment: the agent subprocess, terminal shells, passthrough-agent PTYs, and
   task-scoped command processes. This includes the broker contract, managed indexed Git
@@ -386,6 +396,12 @@ post-signature processing failures produce `failing`; a later valid successful d
   prompts, and activates Kandev's `agentctl`/`gh` tool directory only for broker-enabled task
   instances. It does not claim to prevent a host-authority agent from manually switching a remote
   to SSH or invoking another credential-bearing tool.
+- The helper command uses a Kandev-owned absolute executable variable rather than searching ambient
+  `PATH`. The variable is bound before executor preparation and refreshed from `os.Executable` by
+  a running `agentctl`. Unix shell-startup restoration composes with an inherited `BASH_ENV`,
+  resolves simple environment-variable references in that hook path from the effective child
+  environment, remains conditional on the broker contract, and never places broker leases, tokens,
+  or credential scopes in shell arguments or startup files.
 - The effective task Git environment is runtime-only. It is copied only after the existing
   task/session or task-environment ownership check, is never persisted in task metadata or terminal
   records, and is never written to logs, errors, browser payloads, or process arguments.
@@ -595,6 +611,25 @@ registration and never creates a global default.
   **THEN** the profile token wins and the session disclosure labels its actor runtime-selected.
 - **GIVEN** a managed helper cannot execute or redeem its lease, **WHEN** Git requests GitHub HTTPS
   credentials, **THEN** the command fails without falling through to a personal helper or prompt.
+- **GIVEN** a broker-enabled managed task whose login profile replaces its inherited `PATH`,
+  **WHEN** Git requests GitHub HTTPS credentials, **THEN** the configured helper invokes the
+  instance-owned `agentctl` directly and does not search or fall through to an ambient helper.
+- **GIVEN** a broker-enabled Local or Worktree task whose checkout or setup script invokes Git
+  before the task instance is created, **WHEN** Git requests GitHub HTTPS credentials, **THEN** the
+  configured helper invokes the standalone launcher's absolute `agentctl` executable without
+  consulting `PATH` or an ambient helper.
+- **GIVEN** a broker-enabled Docker or Sprites task whose prepare script clones before `agentctl`
+  starts, **WHEN** Git requests GitHub HTTPS credentials during that clone, **THEN** the configured
+  helper invokes the already-installed absolute executor binary and redeems the task lease without
+  consulting `PATH` or an ambient helper.
+- **GIVEN** a broker-enabled managed task with an existing Bash environment hook, **WHEN** a
+  non-interactive login shell replaces `PATH`, **THEN** the existing hook still runs and the
+  Kandev-managed `agentctl` and `gh` shims are restored ahead of ambient tools before the requested
+  command starts.
+- **GIVEN** that existing Bash environment hook is expressed as `$HOME/hook.sh` or
+  `${KANDEV_HOOK_ROOT}/hook.sh`, **WHEN** Kandev composes its managed startup fragment, **THEN** it
+  resolves the reference from the effective child environment and sources the intended hook rather
+  than a filename containing literal dollar-sign text.
 - **GIVEN** the host or executor exports indexed Git config for `core.hooksPath` and
   `notes.augment.mergeStrategy`, **WHEN** Kandev appends its managed GitHub helper configuration,
   **THEN** the agent receives one contiguous block containing the original entries first and the
@@ -658,6 +693,8 @@ and the
 the
 [executor clone transport repair plan](../../plans/github-executor-clone-transport/plan.md), and
 the [managed task terminal environment plan](../../plans/task-terminal-git-environment/plan.md),
+and the
+[managed GitHub login-shell repair plan](../../plans/github-managed-tools-login-shell/plan.md),
 and the
 [system-service identity guardrails repair plan](../../plans/system-service-identity-guardrails/plan.md).
 
