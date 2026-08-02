@@ -48,7 +48,7 @@ const NEW_SESSION_PANEL_ID = `session:${NEW_SESSION_ID}`;
 
 type TestPanel = {
   id: string;
-  api: { component?: string; setActive?: () => void; close?: () => void };
+  api: { component?: string; setActive?: ReturnType<typeof vi.fn>; close?: () => void };
   group?: TestGroup;
 };
 
