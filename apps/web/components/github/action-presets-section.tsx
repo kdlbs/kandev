@@ -26,7 +26,6 @@ import {
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
-import { t } from "@/lib/i18n";
 
 // A function, not a const: `description` is copy, and a module-scope `t()` call
 // would freeze at the boot locale (see docs/i18n.md). `key` is the substitution
@@ -48,10 +47,14 @@ function actionPromptPlaceholders(t: TFunction): ScriptPlaceholder[] {
   ];
 }
 
+// `label` is PERSISTED to workspace settings as part of `GitHubActionPreset` and
+// is immediately editable in the row below, so it must stay locale-neutral: a
+// preset seeded in one locale and saved unedited would keep that locale's text
+// forever. Same contract as DEFAULT_PR_PRESETS in my-github/action-presets.ts.
 function newPreset(): GitHubActionPreset {
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-    label: t("github:newAction"),
+    label: "New action",
     hint: "",
     icon: "sparkle",
     prompt_template: "",
@@ -370,7 +373,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
       toast({ description: t("github:failedToSaveQuickActions"), variant: "error" });
       throw new Error("Failed to save quick actions");
     }
-  }, [save, toast]);
+  }, [save, t, toast]);
   useSettingsSaveContributor({
     id: `github-action-presets:${workspaceId}`,
     revision: JSON.stringify([prDraft, issueDraft]),
@@ -384,7 +387,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   return (
     <SettingsSection
       title={t("github:quickActions")}
-      description={t("github:promptsShownOnGithubWhenStarting")}
+      description={t("github:promptsShownOnGithubWhenStarting", { route: "/github" })}
       action={
         <div className="flex gap-2">
           <Button

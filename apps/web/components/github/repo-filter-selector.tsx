@@ -288,11 +288,7 @@ function RepoSearchCombobox({
       </PopoverTrigger>
       <PopoverContent className="w-72 p-0" align="start" portal={false}>
         <Command shouldFilter={false}>
-          <CommandInput
-            value={value}
-            onValueChange={setValue}
-            placeholder={t("github:ownerRepo")}
-          />
+          <CommandInput value={value} onValueChange={setValue} placeholder="owner/repo" />
           <CommandList>
             {searchLoading && (
               <div className="flex items-center gap-2 px-3 py-3 text-xs text-muted-foreground">
@@ -304,7 +300,9 @@ function RepoSearchCombobox({
               <CommandEmpty>{t("github:noReposFoundFor", { org })}</CommandEmpty>
             )}
             {!searchLoading && !org && value.length > 0 && (
-              <CommandEmpty>{t("github:typeOwnerRepoToSearch")}</CommandEmpty>
+              <CommandEmpty>
+                {t("github:typeOwnerRepoToSearch", { format: "owner/repo" })}
+              </CommandEmpty>
             )}
             {filteredResults.length > 0 && (
               <CommandGroup>

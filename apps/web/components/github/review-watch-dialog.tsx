@@ -38,6 +38,7 @@ import type {
   CleanupPolicy,
 } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   REVIEW_CLEANUP_POLICY_OPTIONS,
   cleanupPolicyDescription,
@@ -280,7 +281,7 @@ function QueryField({
       <Textarea
         value={form.customQuery}
         onChange={(e) => setForm((prev) => ({ ...prev, customQuery: e.target.value }))}
-        placeholder={t("github:eGTypePrStateOpen")}
+        placeholder={t("github:queryExample", { query: "type:pr state:open review-requested:@me" })}
         rows={1}
         className="font-mono text-xs resize-y"
       />
@@ -452,7 +453,11 @@ function ProfileFields({
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
           <Label>{t("github:executorProfile")}</Label>
-          <HelpTip text={t("github:theRepositoryWillBeAutomaticallyCloned")} />
+          <HelpTip
+            text={t("github:theRepositoryWillBeAutomaticallyCloned", {
+              path: "~/.kandev/repos/<owner>/<repo>",
+            })}
+          />
         </div>
         <p className="text-xs text-muted-foreground">
           {t("github:optionalFallsBackToStepDefault2")}
@@ -524,9 +529,11 @@ function SettingsFields({
   );
 }
 
-function getSaveButtonLabel(saving: boolean, isEditing: boolean): string {
-  if (saving) return "Saving...";
-  return isEditing ? "Update" : "Create";
+// Plain function, so `t` is threaded in — `mode: "jsx-only"` never inspects a
+// function's return value, which is why these three survived the sweep.
+function getSaveButtonLabel(t: TFunction, saving: boolean, isEditing: boolean): string {
+  if (saving) return t("github:saving");
+  return isEditing ? t("github:update") : t("github:create");
 }
 
 export function ReviewWatchDialog({
@@ -621,7 +628,7 @@ export function ReviewWatchDialog({
             {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
-            {getSaveButtonLabel(saving, !!watch)}
+            {getSaveButtonLabel(t, saving, !!watch)}
           </Button>
         </DialogFooter>
       </DialogContent>

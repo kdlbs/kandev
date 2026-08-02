@@ -21,12 +21,14 @@ import {
   ISSUE_PRESETS as BUILTIN_ISSUE_PRESETS,
 } from "@/components/github/my-github/search-bar";
 import { useTranslation } from "react-i18next";
-import { t } from "@/lib/i18n";
 
+// `label` is PERSISTED as part of `StoredQueryPreset` (github_default_query_presets)
+// and is editable in the row below, so it must stay locale-neutral — see
+// `newPreset` in action-presets-section.tsx for the same contract.
 function newPreset(): StoredQueryPreset {
   return {
     value: `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
-    label: t("github:newQuery"),
+    label: "New query",
     filter: "",
     group: "inbox",
   };
@@ -66,7 +68,7 @@ function QueryRow({
           className="h-8 font-mono text-xs"
           value={preset.filter}
           data-settings-dirty={preset.filter !== baseline?.filter}
-          placeholder={t("github:eGReviewRequestedMeIs")}
+          placeholder={t("github:queryExample", { query: "review-requested:@me is:open" })}
           onChange={(e) => onPatch({ filter: e.target.value })}
         />
       </div>
@@ -202,7 +204,7 @@ function useDefaultQueryDrafts(workspaceId?: string) {
       toast({ description: t("github:failedToSaveDefaultQueries"), variant: "error" });
       throw new Error("Failed to save default queries");
     }
-  }, [issueDraft, prDraft, reset, resetRequested, save, toast]);
+  }, [issueDraft, prDraft, reset, resetRequested, save, t, toast]);
 
   const handleReset = useCallback(() => {
     setPrDraft(toStored(BUILTIN_PR_PRESETS));
@@ -257,7 +259,7 @@ export function DefaultQueriesSection({ workspaceId }: { workspaceId?: string })
   return (
     <SettingsSection
       title={t("github:defaultQueries")}
-      description={t("github:sidebarQueriesShownOnGithubFor")}
+      description={t("github:sidebarQueriesShownOnGithubFor", { route: "/github" })}
       action={
         <div className="flex gap-2">
           <Button

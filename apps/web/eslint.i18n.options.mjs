@@ -289,6 +289,7 @@ export const i18nGuardFiles = [
   "components/github/review-watch-placeholders.ts",
   "components/github/review-watch-prompt-field.tsx",
   "components/github/review-watch-table.tsx",
+  "components/github/watch-cleanup-policy.ts",
   // Shared with the My GitHub page (`app/github`) and the automations trigger
   // config, neither of which is migrated. Per-file guard, so they are
   // unaffected.

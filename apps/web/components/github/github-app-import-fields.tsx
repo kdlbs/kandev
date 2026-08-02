@@ -105,7 +105,7 @@ export function GitHubAppImportSecretFields({
         </Field>
       ))}
       <div className="sm:col-span-2">
-        <Field label={t("github:privateKeyPem")} error={errors.privateKey}>
+        <Field label={t("github:privateKeyPem", { extension: ".pem" })} error={errors.privateKey}>
           <Textarea
             className="min-h-28 font-mono text-xs"
             value={values.privateKey}

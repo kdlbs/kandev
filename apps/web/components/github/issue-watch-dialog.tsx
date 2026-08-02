@@ -40,6 +40,7 @@ import type {
   CleanupPolicy,
 } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   ISSUE_CLEANUP_POLICY_OPTIONS,
   cleanupPolicyDescription,
@@ -246,7 +247,7 @@ function IssueFilterFields({
         <Textarea
           value={form.customQuery}
           onChange={(e) => setForm((prev) => ({ ...prev, customQuery: e.target.value }))}
-          placeholder={t("github:eGTypeIssueStateOpen")}
+          placeholder={t("github:queryExample", { query: "type:issue state:open label:bug" })}
           rows={1}
           className="font-mono text-xs resize-y"
         />
@@ -397,8 +398,9 @@ function parseLabels(labelsStr: string): string[] {
     .filter((l) => l.length > 0);
 }
 
-function getSaveLabel(watch: IssueWatch | null | undefined): string {
-  return watch ? "Update" : "Create";
+// Plain function, so `t` is threaded in — the guard never inspects return values.
+function getSaveLabel(t: TFunction, watch: IssueWatch | null | undefined): string {
+  return watch ? t("github:update") : t("github:create");
 }
 
 export function IssueWatchDialog({
@@ -493,7 +495,7 @@ export function IssueWatchDialog({
             {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
-            {saving ? t("github:saving") : getSaveLabel(watch)}
+            {saving ? t("github:saving") : getSaveLabel(t, watch)}
           </Button>
         </DialogFooter>
       </DialogContent>
