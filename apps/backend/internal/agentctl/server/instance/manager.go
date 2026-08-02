@@ -26,6 +26,11 @@ type ServerFactory func(cfg *config.InstanceConfig, procMgr *process.Manager, lo
 
 const instanceHTTPShutdownGrace = 250 * time.Millisecond
 
+// ErrManagerShuttingDown is returned by CreateInstance once Shutdown has begun.
+// Callers get a clear refusal instead of an instance that the shutdown sequence
+// has already walked past and will never stop.
+var ErrManagerShuttingDown = errors.New("instance manager is shutting down")
+
 // Manager manages multiple agent instances.
 // It handles creation, tracking, and removal of agent instances,
 // each with their own HTTP server on a dedicated port.
@@ -50,7 +55,22 @@ type Manager struct {
 	// caller vanishes mid-creation. They run off the creation mutex so a slow
 	// tracker stop cannot block the queue; Shutdown drains them so a process
 	// exit does not leave half-torn-down trackers behind.
-	abandonWG sync.WaitGroup
+	//
+	// shuttingDown, guarded by mu, closes the window where Shutdown could
+	// observe the counter at zero and a CreateInstance already past its own
+	// checks could then Add(1) behind it. Setting the flag under the same mutex
+	// CreateInstance holds means every creation either completes before the
+	// flag is set — so its Add is visible to the Wait below — or sees the flag
+	// and refuses.
+	abandonWG    sync.WaitGroup
+	shuttingDown bool
+
+	// afterTrackerStart runs immediately after StartAllWorkspaceTrackers and is
+	// nil in production. It exists so a test can cancel the caller's context at
+	// exactly that point and assert the abandonment branch ran, rather than
+	// racing cancellation against tracker startup and accepting whichever
+	// outcome it happens to get.
+	afterTrackerStart func()
 }
 
 // NewManager creates a new instance manager.
@@ -87,6 +107,12 @@ func (m *Manager) SetServerFactory(factory ServerFactory) {
 func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*CreateResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Refuse once Shutdown has begun, so no creation can register an
+	// abandonment teardown after Shutdown drained the wait group.
+	if m.shuttingDown {
+		return nil, ErrManagerShuttingDown
+	}
 
 	// The caller may already be gone. Creation is serialised on m.mu, the
 	// control client gives up after 30s, and callers that give up retry — so
@@ -169,6 +195,9 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Start root + per-repo trackers so file-change events fire even in passthrough mode.
 	procMgr.StartAllWorkspaceTrackers(context.Background())
+	if m.afterTrackerStart != nil {
+		m.afterTrackerStart()
+	}
 
 	// Starting the trackers is the slow part of creation, so re-check: a caller
 	// that was still waiting when we took the lock can time out during it.
@@ -238,6 +267,14 @@ func (m *Manager) abandonPartialInstance(id string, port int, listener net.Liste
 	ctx, cancel := context.WithTimeout(context.Background(), abandonPartialInstanceTimeout)
 	defer cancel()
 
+	// Give the port back first. Nothing was ever published on this listener, and
+	// stopping the trackers below can take seconds — holding the port for that
+	// long shrinks the pool exactly when creations are already piling up.
+	if listener != nil {
+		_ = listener.Close()
+	}
+	m.portAlloc.Release(port)
+
 	if procMgr != nil {
 		procMgr.CloseAdmission()
 		if err := procMgr.StopForTeardown(ctx); err != nil {
@@ -246,10 +283,6 @@ func (m *Manager) abandonPartialInstance(id string, port int, listener net.Liste
 				zap.Error(err))
 		}
 	}
-	if listener != nil {
-		_ = listener.Close()
-	}
-	m.portAlloc.Release(port)
 
 	m.logger.Warn("abandoned partially created instance",
 		zap.String("instance_id", id),
@@ -512,6 +545,12 @@ func (m *Manager) Shutdown(ctx context.Context) error {
 	// Stop the idle reaper first so it doesn't fire StopInstance concurrently
 	// with our explicit per-instance shutdown loop.
 	m.stopReaperOnce()
+
+	// Refuse new creations before draining, so nothing can register another
+	// teardown goroutine behind the Wait below.
+	m.mu.Lock()
+	m.shuttingDown = true
+	m.mu.Unlock()
 
 	// Drain any in-flight abandonment teardowns. They own trackers and a port
 	// that are no longer reachable through m.instances, so nothing below would

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -84,54 +85,82 @@ func TestAbandonPartialInstanceReleasesPort(t *testing.T) {
 	mgr.portAlloc.Release(next)
 }
 
-// TestCreateInstanceAbandonsWhenCallerLeavesMidCreation covers a caller that is
-// still waiting when CreateInstance takes the lock and gives up while it works.
-//
-// It asserts the invariant rather than which of the two context checks caught
-// it: whichever fires, no instance may be registered and no port may be lost.
-// Pinning the branch would mean racing the cancellation against tracker
-// startup, and a test that has to win a race to be meaningful is a test that
-// quietly stops being meaningful.
-func TestCreateInstanceAbandonsWhenCallerLeavesMidCreation(t *testing.T) {
+// TestCreateInstanceAbandonsAfterTrackerStartup drives the second context check
+// deterministically. The caller's context is live when CreateInstance takes the
+// lock and is cancelled exactly once the trackers have started, via the
+// afterTrackerStart seam — so the abandonment branch is guaranteed to run
+// rather than merely likely to.
+func TestCreateInstanceAbandonsAfterTrackerStartup(t *testing.T) {
 	log := newTestLogger(t)
 	mgr := NewManager(&config.Config{
 		Ports:    config.PortConfig{Base: 0, Max: 0},
 		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
 	}, log)
-	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
 
 	ctx, cancel := context.WithCancel(context.Background())
-	started := make(chan struct{})
-	go func() {
-		<-started
-		cancel()
-	}()
-	close(started)
+	mgr.afterTrackerStart = cancel
 
 	resp, err := mgr.CreateInstance(ctx, &CreateRequest{WorkspacePath: t.TempDir()})
 	if err == nil {
-		// The caller can win the race and get a live instance; that is a valid
-		// outcome, and the instance is owned so it is not a leak.
-		if resp == nil {
-			t.Fatal("nil error and nil response")
-		}
-		return
+		t.Fatalf("expected an error once the caller was cancelled mid-creation, got %+v", resp)
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("error = %v, want it to wrap context.Canceled", err)
+	}
+	if !strings.Contains(err.Error(), "during startup") {
+		t.Errorf("error = %v, want the post-startup branch rather than the queued one", err)
 	}
 	if resp != nil {
 		t.Errorf("returned response %+v alongside the error", resp)
 	}
 
-	// Teardown is asynchronous by design — it must not run under the creation
-	// mutex — so wait for it before asserting nothing was left behind.
-	mgr.abandonWG.Wait()
+	mgr.mu.RLock()
+	live := len(mgr.instances)
+	mgr.mu.RUnlock()
+	if live != 0 {
+		t.Errorf("registered %d instances after abandoning creation, want 0", live)
+	}
+
+	// Shutdown must wait for the teardown goroutine rather than racing it.
+	if err := mgr.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	// With teardown drained, the port is back in the pool and bindable.
+	port, listener, err := mgr.allocatePortAndListener("after-abandon")
+	if err != nil {
+		t.Fatalf("port was not released by the abandoned creation: %v", err)
+	}
+	_ = listener.Close()
+	mgr.portAlloc.Release(port)
+}
+
+// TestCreateInstanceRefusedAfterShutdown closes the ordering window Shutdown
+// would otherwise leave: it could observe abandonWG at zero and a creation
+// already past its own checks could register a teardown behind the Wait.
+func TestCreateInstanceRefusedAfterShutdown(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+
+	if err := mgr.Shutdown(context.Background()); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	resp, err := mgr.CreateInstance(context.Background(), &CreateRequest{WorkspacePath: t.TempDir()})
+	if !errors.Is(err, ErrManagerShuttingDown) {
+		t.Fatalf("error = %v, want ErrManagerShuttingDown", err)
+	}
+	if resp != nil {
+		t.Errorf("returned response %+v after shutdown", resp)
+	}
 
 	mgr.mu.RLock()
 	live := len(mgr.instances)
 	mgr.mu.RUnlock()
 	if live != 0 {
-		t.Errorf("registered %d instances for a caller that had gone, want 0", live)
+		t.Errorf("registered %d instances after shutdown, want 0", live)
 	}
 }
