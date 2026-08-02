@@ -52,6 +52,9 @@ type JobView struct {
 	ID                 string     `json:"id"`
 	Status             Status     `json:"status"`
 	Sources            []string   `json:"sources"`
+	SessionIDs         []string   `json:"session_ids,omitempty"`
+	RuntimeEntryCount  int        `json:"runtime_entry_count,omitempty"`
+	ACPSessionCount    int        `json:"acp_session_count,omitempty"`
 	BuildDeadline      time.Time  `json:"build_deadline"`
 	CaptureDeadline    *time.Time `json:"capture_deadline,omitempty"`
 	ExpiresAt          *time.Time `json:"expires_at"`
@@ -92,6 +95,9 @@ type job struct {
 	Owner           string
 	Status          Status
 	Sources         []string
+	SessionIDs      []string
+	RuntimeSessions []DiagnosticSession
+	ACPSessions     []DiagnosticSession
 	SourceKey       string
 	CreatedAt       time.Time
 	BuildDeadline   time.Time
@@ -109,6 +115,8 @@ type job struct {
 func (j *job) view() JobView {
 	view := JobView{
 		ID: j.ID, Status: j.Status, Sources: append([]string(nil), j.Sources...),
+		SessionIDs:        append([]string(nil), j.SessionIDs...),
+		RuntimeEntryCount: len(j.RuntimeSessions), ACPSessionCount: len(j.ACPSessions),
 		BuildDeadline: j.BuildDeadline, CaptureDeadline: j.CaptureDeadline,
 		ExpiresAt: j.ExpiresAt, BrowserProfiles: len(j.Browsers),
 		FrontendEntryCount: j.FrontendEntries, FrontendBytes: j.FrontendBytes,

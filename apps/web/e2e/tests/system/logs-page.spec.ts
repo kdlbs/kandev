@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { inflateRawSync } from "node:zlib";
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("System Logs page", () => {
@@ -23,5 +25,68 @@ test.describe("System Logs page", () => {
     );
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toBe("kandev-diagnostic-logs.zip");
+    const archivePath = await download.path();
+    expect(archivePath).not.toBeNull();
+    const archive = readStoredZip(await readFile(archivePath!));
+    expect(archive.has("manifest.json")).toBe(true);
+    expect([...archive.keys()].some((name) => name.startsWith("backend/"))).toBe(true);
+    expect([...archive.keys()].some((name) => name.startsWith("frontend/"))).toBe(true);
+    const manifest = JSON.parse(archive.get("manifest.json")!.toString("utf8")) as {
+      requested_sources: string[];
+    };
+    expect(manifest.requested_sources).toEqual(["backend", "frontend"]);
+  });
+
+  test("opens the source customizer without enabling ACP from the browser", async ({
+    testPage,
+  }) => {
+    await testPage.goto("/settings/system/logs");
+    await testPage.getByTestId("customize-diagnostic-bundle").click();
+    const dialog = testPage.getByTestId("diagnostic-bundle-dialog");
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByText("Runtime index")).toBeVisible();
+    await expect(testPage.getByTestId("download-diagnostic-bundle-with-acp")).toHaveCount(0);
   });
 });
+
+function readStoredZip(buffer: Buffer): Map<string, Buffer> {
+  const entries = new Map<string, Buffer>();
+  const endOfCentralDirectory = buffer.lastIndexOf(Buffer.from("PK\x05\x06", "binary"));
+  if (endOfCentralDirectory < 0) throw new Error("diagnostic ZIP has no central directory");
+  const count = buffer.readUInt16LE(endOfCentralDirectory + 10);
+  let offset = buffer.readUInt32LE(endOfCentralDirectory + 16);
+  for (let index = 0; index < count; index += 1) {
+    if (buffer.readUInt32LE(offset) !== 0x02014b50) {
+      throw new Error("diagnostic ZIP central directory is truncated");
+    }
+    const flags = buffer.readUInt16LE(offset + 8);
+    const method = buffer.readUInt16LE(offset + 10);
+    const compressedSize = buffer.readUInt32LE(offset + 20);
+    const nameLength = buffer.readUInt16LE(offset + 28);
+    const extraLength = buffer.readUInt16LE(offset + 30);
+    const commentLength = buffer.readUInt16LE(offset + 32);
+    const localOffset = buffer.readUInt32LE(offset + 42);
+    const nameStart = offset + 46;
+    const name = buffer.subarray(nameStart, nameStart + nameLength).toString("utf8");
+    if (flags & 0x1) throw new Error("diagnostic ZIP entry is encrypted");
+    if (buffer.readUInt32LE(localOffset) !== 0x04034b50) {
+      throw new Error("diagnostic ZIP local entry is truncated");
+    }
+    const localNameLength = buffer.readUInt16LE(localOffset + 26);
+    const localExtraLength = buffer.readUInt16LE(localOffset + 28);
+    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
+    const dataEnd = dataStart + compressedSize;
+    if (dataEnd > buffer.length) throw new Error("diagnostic ZIP entry is truncated");
+    const compressed = buffer.subarray(dataStart, dataEnd);
+    let data: Buffer | null = null;
+    if (method === 0) {
+      data = compressed;
+    } else if (method === 8) {
+      data = inflateRawSync(compressed);
+    }
+    if (!data) throw new Error(`diagnostic ZIP uses unsupported method=${method}`);
+    entries.set(name, data);
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}

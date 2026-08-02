@@ -51,6 +51,36 @@ Start with the cheapest faithful reproduction:
 4. UI/browser: launch `scripts/dev-isolated --web`, drive `npx playwright-cli`, and correlate console/network state with a fresh all-source bundle.
 5. Unknown: trace from the symptom backward through code and add temporary instrumentation only where it will split the search space.
 
+### File-first log triage
+
+Start with the retained backend files before asking for a broad export. Each
+Kandev home has `logs/backend-logs.log` plus the two preceding UTC daily files
+(`backend-logs-YYYY-MM-DD.log`). The active file appends across same-day
+restarts and each daily file is bounded, so search the exact files rather than
+loading an entire log into memory:
+
+```bash
+rg --fixed-strings '<task-id>' '<home>/logs' -g 'backend-logs*.log'
+rg --fixed-strings '<session-id>' '<home>/logs' -g 'backend-logs*.log'
+```
+
+Prefer a task ID, session ID, or exact route/error string. Add a bounded time
+window only after the exact search; do not use a broad `rg` over the whole home
+directory because task workspaces and ACP files can contain unrelated private
+content. A zero-match task search is inconclusive when the event is an
+install-wide startup/API event.
+
+Request only the needed bundle sources. Standard bundles contain backend and
+frontend diagnostic events; a custom bundle can add the allow-listed runtime
+index. These sources do not read stored chat transcripts, session messages, or
+agent messages. If the
+maintainer explicitly needs agent protocol evidence, use the debug-only ACP
+source and select the exact authorized sessions; ACP raw/normalized frames may
+contain prompts, responses, tool calls, file/MCP data, environment-derived
+values, and secrets. Always inspect `manifest.json` and its warnings before
+assuming a source is complete, and grep task/session IDs inside the extracted
+ZIP before broadening to route text or timestamps.
+
 ## Reference Files
 
 Load only the reference needed for the selected path:

@@ -20,6 +20,8 @@ import {
   buildBackupDownloadUrl,
   buildDiagnosticBundleDownloadUrl,
   createDiagnosticBundle,
+  fetchDiagnosticBundleCapabilities,
+  fetchDiagnosticACPSessions,
   fetchDiagnosticBundle,
   uploadFrontendBundleChunk,
   fetchUpdates,
@@ -226,6 +228,39 @@ describe("logs", () => {
     expect(buildDiagnosticBundleDownloadUrl("bundle 1")).toBe(
       `${BASE}/logs/bundles/bundle%201/download`,
     );
+  });
+
+  it("sends selected ACP sessions and reads backend capabilities", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(
+        jsonResponse({
+          id: "bundle-acp",
+          status: "collecting",
+          sources: ["acp"],
+          session_ids: ["session-1"],
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({
+          sources: ["backend", "frontend", "runtime", "acp"],
+          acp_debug_enabled: true,
+          acp_max_sessions: 10,
+        }),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ sessions: [{ task_id: "task-1", session_id: "session-1" }] }),
+      );
+    await createDiagnosticBundle(["acp"], ["session-1"]);
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual({
+      sources: ["acp"],
+      session_ids: ["session-1"],
+    });
+    const capabilities = await fetchDiagnosticBundleCapabilities();
+    expect(lastCall().url).toBe(`${BASE}/logs/capabilities`);
+    expect(capabilities.acp_debug_enabled).toBe(true);
+    const sessions = await fetchDiagnosticACPSessions();
+    expect(lastCall().url).toBe(`${BASE}/logs/acp-sessions`);
+    expect(sessions[0]?.session_id).toBe("session-1");
   });
 });
 

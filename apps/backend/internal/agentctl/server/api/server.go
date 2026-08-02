@@ -219,6 +219,9 @@ func (s *Server) setupRoutes() {
 	if acpDebugTailEnabled() {
 		s.router.GET("/api/v1/debug/acp/:session", s.handleACPRingTail)
 	}
+	if acpDebugExportEnabled() {
+		s.router.GET("/api/v1/debug/acp/:session/export", s.handleACPDebugExport)
+	}
 }
 
 // acpDebugTailEnabled gates the ACP live-tail endpoint on both ACP frame

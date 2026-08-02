@@ -1,7 +1,7 @@
 ---
 id: "13-on-demand-acp-collection"
 title: "On-demand ACP collection"
-status: pending
+status: done
 wave: 10
 depends_on:
   - "12-custom-bundle-contracts"
@@ -86,4 +86,18 @@ blockers/risks, and synchronize this task plus `plan.md` status.
 
 ## Results
 
-Pending.
+Implemented on-demand ACP export and collection across agentctl, lifecycle,
+backendapp, and the diagnostic archive service.
+
+- Added a debug/dev-gated agentctl export route that returns only exact-session
+  raw and normalized files, with server-owned ZIP paths, regular-file checks,
+  byte/file limits, and rotated-file matching.
+- Added authenticated runtime-client and lifecycle seams plus the backendapp
+  exporter/provider adapters. Session authorization happens before executor or
+  host-file access; explicit selections are limited to ten and can include
+  host-retained sessions while unavailable sessions are rejected.
+- Added bounded, 30-second ACP collection with 96 MiB ACP and 96 MiB backend
+  budgets. Remote ZIPs are fully validated before any archive entry is written;
+  invalid, unavailable, and truncated evidence produces partial warnings.
+- Verification: `go test ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/system/logbundle ./internal/backendapp -count=1` (pass; 1,468 tests).
+- Verification: `go test -race ./internal/agentctl/server/api ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle ./internal/system/logbundle -count=1` (pass; 1,242 tests).

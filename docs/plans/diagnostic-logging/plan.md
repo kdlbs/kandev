@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/platform/diagnostic-logging.md
 created: 2026-07-30
-status: in_progress
+status: done
 ---
 
 # Implementation Plan: Diagnostic logging
@@ -514,9 +514,9 @@ The implementation follows
 ## Verification Results
 
 Tasks 01–11 record the implemented standard bundle results in their individual
-task files. The custom/runtime/ACP extension in Tasks 12–16 is pending; no
-production code, test fixture, database migration, or browser schema migration
-has been added for that extension yet.
+task files. Tasks 12–16 now record the implemented custom source/runtime-index,
+on-demand ACP, customizer UI, E2E, and privacy-guidance work. No database
+migration or browser schema migration is required by this extension.
 
 ---
 
@@ -575,11 +575,11 @@ URL privacy hardening, and allocation-free IndexedDB pruning.
 
 Wave 9:
 
-- [ ] [Task 12: Custom bundle contracts and runtime index](task-12-custom-bundle-contracts.md)
+- [x] [Task 12: Custom bundle contracts and runtime index](task-12-custom-bundle-contracts.md)
 
 Wave 10:
 
-- [ ] [Task 13: On-demand ACP collection](task-13-on-demand-acp-collection.md)
+- [x] [Task 13: On-demand ACP collection](task-13-on-demand-acp-collection.md)
 
 Task 13 depends on Task 12's source/session and manifest contracts. Both tasks
 are sequential because they share logbundle job/archive state and permission
@@ -587,12 +587,12 @@ boundaries.
 
 Wave 11:
 
-- [ ] [Task 14: Bundle customizer UI](task-14-bundle-customizer-ui.md)
+- [x] [Task 14: Bundle customizer UI](task-14-bundle-customizer-ui.md)
 
 Wave 12:
 
-- [ ] [Task 15: Custom bundle E2E](task-15-custom-bundle-e2e.md)
-- [ ] [Task 16: Diagnostic privacy documentation](task-16-diagnostic-privacy-docs.md)
+- [x] [Task 15: Custom bundle E2E](task-15-custom-bundle-e2e.md)
+- [x] [Task 16: Diagnostic privacy documentation](task-16-diagnostic-privacy-docs.md)
 
 Task 15 follows the completed backend/frontend behavior. Task 16 is
 parallel-safe with Task 15 because it owns public docs and debug guidance while

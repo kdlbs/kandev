@@ -62,10 +62,34 @@ export type DiagnosticBundleStatus =
   | "failed"
   | "expired";
 
+export type DiagnosticBundleSource = "backend" | "frontend" | "runtime" | "acp";
+
+export interface DiagnosticBundleCapabilities {
+  sources: DiagnosticBundleSource[];
+  acp_debug_enabled: boolean;
+  acp_max_sessions: number;
+}
+
+export type DiagnosticSessionAvailability = "host_retained" | "reachable" | "unavailable";
+
+export interface DiagnosticSession {
+  task_id: string;
+  session_id: string;
+  agent?: string;
+  provider?: string;
+  model?: string;
+  status?: string;
+  executor_type?: string;
+  started_at?: string;
+  last_activity_at?: string;
+  acp_availability?: DiagnosticSessionAvailability;
+}
+
 export interface DiagnosticBundleJob {
   id: string;
   status: DiagnosticBundleStatus;
-  sources: Array<"backend" | "frontend">;
+  sources: DiagnosticBundleSource[];
+  session_ids?: string[];
   reused?: boolean;
   build_deadline: string;
   capture_deadline?: string;
@@ -74,6 +98,8 @@ export interface DiagnosticBundleJob {
   frontend_entry_count: number;
   frontend_bytes: number;
   warnings: string[];
+  runtime_entry_count?: number;
+  acp_session_count?: number;
   download_url?: string;
 }
 

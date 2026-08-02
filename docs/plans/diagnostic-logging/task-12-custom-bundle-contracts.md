@@ -1,7 +1,7 @@
 ---
 id: "12-custom-bundle-contracts"
 title: "Custom bundle contracts and runtime index"
-status: pending
+status: done
 wave: 9
 depends_on:
   - "07-diagnostic-bundle-backend"
@@ -78,4 +78,14 @@ this task plus `plan.md` status.
 
 ## Results
 
-Pending.
+Implemented source/session contracts and runtime-index plumbing.
+
+- Added backend-authoritative `backend`, `frontend`, `runtime`, and `acp`
+  source normalization with deterministic selected-session coalescing keys.
+- Added capability and ACP-candidate endpoints with debug gating and bounded
+  allow-listed session records.
+- Added the task-service adapter with owner/admin authorization before session
+  metadata access and no generic task/session serialization.
+- Added `runtime/sessions.json` archive output and manifest counts.
+- Verification: `go test ./internal/system/logbundle ./internal/system ./internal/backendapp -count=1` (pass; 251 tests).
+- Verification: `go test ./internal/backendapp -run TestDiagnosticSessionProvider -count=1` (pass).

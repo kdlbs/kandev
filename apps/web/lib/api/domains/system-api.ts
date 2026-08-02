@@ -6,6 +6,9 @@ import type {
   DatabaseStats,
   SnapshotInfo,
   DiagnosticBundleJob,
+  DiagnosticBundleCapabilities,
+  DiagnosticBundleSource,
+  DiagnosticSession,
   FrontendLogUploadChunk,
   UpdatesResponse,
   JobAcceptResponse,
@@ -126,7 +129,8 @@ export function buildBackupDownloadUrl(name: string, baseUrl?: string): string {
 // --- Logs ---------------------------------------------------------------
 
 export function createDiagnosticBundle(
-  sources: Array<"backend" | "frontend"> = ["backend", "frontend"],
+  sources: DiagnosticBundleSource[] = ["backend", "frontend"],
+  sessionIds: string[] = [],
   options?: ApiRequestOptions,
 ): Promise<DiagnosticBundleJob> {
   return fetchJson<DiagnosticBundleJob>(`${SYSTEM_BASE}/logs/bundles`, {
@@ -134,9 +138,31 @@ export function createDiagnosticBundle(
     init: {
       ...(options?.init ?? {}),
       method: "POST",
-      body: JSON.stringify({ sources }),
+      body: JSON.stringify({
+        sources,
+        ...(sessionIds.length > 0 ? { session_ids: sessionIds } : {}),
+      }),
     },
   });
+}
+
+export function fetchDiagnosticBundleCapabilities(
+  options?: ApiRequestOptions,
+): Promise<DiagnosticBundleCapabilities> {
+  return fetchJson<DiagnosticBundleCapabilities>(`${SYSTEM_BASE}/logs/capabilities`, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export async function fetchDiagnosticACPSessions(
+  options?: ApiRequestOptions,
+): Promise<DiagnosticSession[]> {
+  const response = await fetchJson<{ sessions: DiagnosticSession[] }>(
+    `${SYSTEM_BASE}/logs/acp-sessions`,
+    { ...options, cache: "no-store" },
+  );
+  return response.sessions ?? [];
 }
 
 export function fetchDiagnosticBundle(

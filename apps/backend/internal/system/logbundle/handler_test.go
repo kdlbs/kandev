@@ -46,6 +46,40 @@ func TestBundleRoutesEnforceIdentityOwnership(t *testing.T) {
 	}
 }
 
+func TestBundleCapabilityAndACPSessionRoutesUseBackendDebugState(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	provider := &diagnosticSessionProviderStub{sessions: []DiagnosticSession{
+		{TaskID: "task-1", SessionID: "session-1", Agent: "claude-acp", Status: "running"},
+	}}
+	service := newTestService(t, Config{
+		HomeDir:         t.TempDir(),
+		ACPDebugEnabled: func() bool { return true },
+		SessionProvider: provider,
+	})
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		authn.SetOnGin(c, authn.Identity{UserID: "user-1", Role: authn.RoleMember})
+		c.Next()
+	})
+	group := router.Group("/api/v1/system")
+	RegisterRoutes(group, service)
+
+	capabilities := requestBundle(t, router, http.MethodGet,
+		"/api/v1/system/logs/capabilities", "", "")
+	if capabilities.Code != http.StatusOK {
+		t.Fatalf("capabilities status = %d body=%s", capabilities.Code, capabilities.Body.String())
+	}
+	if !strings.Contains(capabilities.Body.String(), `"acp_debug_enabled":true`) {
+		t.Fatalf("capabilities = %s", capabilities.Body.String())
+	}
+
+	sessions := requestBundle(t, router, http.MethodGet,
+		"/api/v1/system/logs/acp-sessions", "", "")
+	if sessions.Code != http.StatusOK || !strings.Contains(sessions.Body.String(), "session-1") {
+		t.Fatalf("sessions status = %d body=%s", sessions.Code, sessions.Body.String())
+	}
+}
+
 func TestLosingFrontendStreamIsAcknowledgedBeforeEntriesDecode(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	service := newTestService(t, Config{HomeDir: t.TempDir(), CaptureWindow: time.Hour})

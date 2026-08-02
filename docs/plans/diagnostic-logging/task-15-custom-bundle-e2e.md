@@ -1,7 +1,7 @@
 ---
 id: "15-custom-bundle-e2e"
 title: "Custom bundle E2E"
-status: pending
+status: done
 wave: 12
 depends_on:
   - "14-bundle-customizer-ui"
@@ -69,4 +69,15 @@ and synchronize this task plus `plan.md` status.
 
 ## Results
 
-Pending.
+Added desktop and mobile coverage for the customizer and standard bundle
+workflow. The desktop spec parses the downloaded stored ZIP, verifies
+`manifest.json`, backend/frontend entries, and the requested source set, then
+checks the source customizer, runtime-index option, and debug-only ACP button
+boundary. The mobile spec verifies the inset Drawer, internal source surface,
+44px actions, and document-width containment.
+
+- Verification: `pnpm e2e:run e2e/tests/system/logs-page.spec.ts` (pass; 2
+  Chromium tests with production backend/web builds).
+- Verification: `pnpm e2e:run --no-build --project mobile-chrome
+  e2e/tests/system/mobile-logs-bundle.spec.ts` (pass; 2 mobile tests after the
+  production build).

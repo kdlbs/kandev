@@ -20,4 +20,27 @@ test.describe("System Logs mobile", () => {
       fullPage: true,
     });
   });
+
+  test("opens the customizer in an inset drawer with bounded source choices", async ({
+    testPage,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto("/settings/system/logs");
+
+    const customize = testPage.getByTestId("customize-diagnostic-bundle");
+    await expect(customize).toBeVisible();
+    expect((await customize.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    await customize.tap();
+
+    const drawer = testPage.getByTestId("diagnostic-bundle-drawer");
+    await expect(drawer).toBeVisible();
+    await expect(drawer.getByRole("heading", { name: "Evidence sources" })).toBeVisible();
+    const create = drawer.getByTestId("create-custom-diagnostic-bundle");
+    expect((await create.boundingBox())?.height ?? 0).toBeGreaterThanOrEqual(44);
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      ),
+    ).toBe(false);
+  });
 });

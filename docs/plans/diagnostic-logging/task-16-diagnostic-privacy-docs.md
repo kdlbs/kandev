@@ -1,7 +1,7 @@
 ---
 id: "16-diagnostic-privacy-docs"
 title: "Diagnostic privacy documentation"
-status: pending
+status: done
 wave: 12
 depends_on:
   - "14-bundle-customizer-ui"
@@ -77,4 +77,12 @@ blockers/risks, and synchronize this task plus `plan.md` status.
 
 ## Results
 
-Pending.
+Updated public Logs guidance, the remote-cloud ACP warning, and debug skill
+references with source boundaries, event classes, ACP sensitivity, fixed
+budgets, partial behavior, manifest-first inspection, and exact task/session
+grep commands. Standard evidence is explicitly distinguished from stored
+messages and from opt-in ACP protocol content.
+
+- Verification: `node --test scripts/validate-public-docs.test.mjs` (58 passed).
+- Verification: `node scripts/validate-public-docs.mjs` (41 docs validated).
+- Verification: `make lint-harness` (112 harness files passed).

@@ -1,15 +1,22 @@
 package api
 
 import (
+	"archive/zip"
+	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
 const (
 	envMessages = "KANDEV_DEBUG_AGENT_MESSAGES"
 	envDevMode  = "KANDEV_DEBUG_DEV_MODE"
+	envLogDir   = "KANDEV_DEBUG_LOG_DIR"
 	enabled     = "true"
 	disabled    = ""
 )
@@ -78,4 +85,59 @@ func TestACPRingTailHandler_UnknownSession(t *testing.T) {
 	if body.Events == nil {
 		t.Errorf("events should serialize as [] not null")
 	}
+}
+
+func TestACPDebugExportReturnsOnlyExactSessionFiles(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv(envMessages, enabled)
+	t.Setenv(envDevMode, enabled)
+	t.Setenv(envLogDir, dir)
+	writeACPTestFile(t, filepath.Join(dir, "raw-acp-claude-session-1.jsonl"), "raw-session-1\n")
+	writeACPTestFile(t, filepath.Join(dir, "normalized-acp-claude-session-1.1.jsonl"), "normalized-session-1\n")
+	writeACPTestFile(t, filepath.Join(dir, "raw-acp-claude-session-10.jsonl"), "wrong-session\n")
+	writeACPTestFile(t, filepath.Join(dir, "notes.txt"), "private\n")
+
+	server := newTestServer(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/v1/debug/acp/session-1/export?max_bytes=4096", nil)
+	server.router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d body=%s", rec.Code, rec.Body.String())
+	}
+	reader, err := zip.NewReader(bytes.NewReader(rec.Body.Bytes()), int64(rec.Body.Len()))
+	if err != nil {
+		t.Fatalf("zip: %v", err)
+	}
+	if len(reader.File) != 2 {
+		t.Fatalf("entries = %d, want 2", len(reader.File))
+	}
+	for _, entry := range reader.File {
+		if strings.Contains(entry.Name, "session-10") || entry.Name == "notes.txt" {
+			t.Fatalf("unexpected export entry %q", entry.Name)
+		}
+		body, readErr := io.ReadAll(mustOpenZipEntry(t, entry))
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		if !strings.Contains(string(body), "session-1") {
+			t.Fatalf("entry %q body = %q", entry.Name, body)
+		}
+	}
+}
+
+func writeACPTestFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(contents), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func mustOpenZipEntry(t *testing.T, entry *zip.File) io.ReadCloser {
+	t.Helper()
+	reader, err := entry.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return reader
 }

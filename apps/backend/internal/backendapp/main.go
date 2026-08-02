@@ -837,6 +837,8 @@ func startGatewayAndServe(
 	systemSvc.StorageRuntime = storageComposition.runtime
 	if systemSvc.LogBundles != nil {
 		systemSvc.LogBundles.SetNotifier(gateway.Hub)
+		systemSvc.LogBundles.SetSessionProvider(newDiagnosticSessionProvider(services.Task))
+		systemSvc.LogBundles.SetACPExporter(newDiagnosticACPExporter(lifecycleMgr))
 	}
 	if systemSvc.Metrics != nil {
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)

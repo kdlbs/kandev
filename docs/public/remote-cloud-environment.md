@@ -168,7 +168,7 @@ make clean-db
 
 That target removes the entire `.kandev-dev` tree, not only the SQLite file. Any tasks, repositories, sessions, and debug logs below it are lost. Ephemeral-VM deletion likewise loses uncommitted changes and provider-local secrets unless the provider volume persists; push or export wanted work before destroying the workspace.
 
-Development mode writes raw ACP frames under `.kandev-dev/logs/acp`. They can include full prompts, file content, and tool payloads. The built-in writer rotates and prunes them, but you should still exclude them from support bundles and delete the development home when no longer needed.
+Development mode writes raw ACP frames under `.kandev-dev/logs/acp`. They can include full prompts, file content, and tool payloads. The built-in writer rotates and prunes them, but standard support bundles exclude ACP; include ACP only through the explicit debug bundle session picker after reviewing the selected sessions. Delete the development home when no longer needed.
 
 ## Build and test commands
 

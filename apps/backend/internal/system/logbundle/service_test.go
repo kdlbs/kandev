@@ -2,18 +2,396 @@ package logbundle
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
+
+func TestCustomBundleSourcesValidateACPSelectionAndCoalescing(t *testing.T) {
+	provider := &diagnosticSessionProviderStub{sessions: []DiagnosticSession{
+		{TaskID: "task-1", SessionID: "session-1", Agent: "claude-acp", Status: "running"},
+	}}
+	service := newTestService(t, Config{
+		HomeDir:         t.TempDir(),
+		ACPDebugEnabled: func() bool { return true },
+		SessionProvider: provider,
+		CaptureWindow:   time.Hour,
+	})
+	identity := authn.Identity{UserID: "user-1", Role: authn.RoleMember}
+
+	created, reused, err := service.CreateWithIdentity(
+		context.Background(), identity, []string{"acp", "runtime"}, []string{"session-1"},
+	)
+	if err != nil || reused {
+		t.Fatalf("create custom bundle reused=%v err=%v", reused, err)
+	}
+	if !slices.Equal(created.Sources, []string{"acp", "runtime"}) {
+		t.Fatalf("sources = %v, want [acp runtime]", created.Sources)
+	}
+
+	equivalent, reused, err := service.CreateWithIdentity(
+		context.Background(), identity, []string{"runtime", "acp"}, []string{"session-1"},
+	)
+	if err != nil || !reused || equivalent.ID != created.ID {
+		t.Fatalf("equivalent custom create = %#v reused=%v err=%v", equivalent, reused, err)
+	}
+
+	if _, _, err := service.CreateWithIdentity(
+		context.Background(), identity, []string{"backend"}, []string{"session-1"},
+	); !IsKind(err, ErrorInvalid) {
+		t.Fatalf("session without ACP error = %v, want invalid", err)
+	}
+	if _, _, err := service.CreateWithIdentity(
+		context.Background(), identity, []string{"acp"}, nil,
+	); !IsKind(err, ErrorInvalid) {
+		t.Fatalf("ACP without session error = %v, want invalid", err)
+	}
+}
+
+func TestCustomBundleRejectsACPWhenBackendDebugCaptureIsDisabled(t *testing.T) {
+	service := newTestService(t, Config{
+		HomeDir:         t.TempDir(),
+		ACPDebugEnabled: func() bool { return false },
+	})
+	identity := authn.Identity{UserID: "user-1", Role: authn.RoleMember}
+	if _, _, err := service.CreateWithIdentity(
+		context.Background(), identity, []string{"acp"}, []string{"session-1"},
+	); !IsKind(err, ErrorInvalid) {
+		t.Fatalf("disabled ACP error = %v, want invalid", err)
+	}
+}
+
+func TestCustomBundleRejectsUnavailableACPSelection(t *testing.T) {
+	service := newTestService(t, Config{
+		HomeDir:         t.TempDir(),
+		ACPDebugEnabled: func() bool { return true },
+		SessionProvider: &diagnosticSessionProviderStub{sessions: []DiagnosticSession{{
+			TaskID: "task-1", SessionID: "session-1", ACPAvailability: "unavailable",
+		}}},
+	})
+	_, _, err := service.CreateWithIdentity(
+		context.Background(), authn.Identity{UserID: "user-1"},
+		[]string{SourceACP}, []string{"session-1"},
+	)
+	if !IsKind(err, ErrorInvalid) {
+		t.Fatalf("unavailable ACP selection error = %v, want invalid", err)
+	}
+}
+
+func TestRuntimeSourceWritesAllowListedSessionIndex(t *testing.T) {
+	service := newTestService(t, Config{
+		HomeDir: t.TempDir(),
+		SessionProvider: &diagnosticSessionProviderStub{sessions: []DiagnosticSession{
+			{
+				TaskID: "task-1", SessionID: "session-1", Agent: "claude-acp",
+				Provider: "anthropic", Model: "sonnet", Status: "running",
+				ExecutorType: "local_docker", StartedAt: time.Date(2026, 8, 2, 11, 0, 0, 0, time.UTC),
+				LastActivityAt:  time.Date(2026, 8, 2, 11, 1, 0, 0, time.UTC),
+				ACPAvailability: "reachable",
+			},
+		}},
+	})
+	created, _, err := service.CreateWithIdentity(
+		context.Background(), authn.Identity{UserID: "user-1"}, []string{"runtime"}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitForTerminalJob(t, service, "user-1", created.ID)
+	if job.Status != StatusReady {
+		t.Fatalf("status = %q, warnings = %v", job.Status, job.Warnings)
+	}
+
+	file, _, err := service.OpenArchive("user-1", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(file, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var runtimeJSON []byte
+	for _, entry := range reader.File {
+		if entry.Name != "runtime/sessions.json" {
+			continue
+		}
+		source, openErr := entry.Open()
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		runtimeJSON, err = io.ReadAll(source)
+		_ = source.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(runtimeJSON) == 0 {
+		t.Fatal("runtime/sessions.json was not included")
+	}
+	if string(runtimeJSON) == "" || strings.Contains(string(runtimeJSON), "title") ||
+		strings.Contains(string(runtimeJSON), "message") {
+		t.Fatalf("runtime index contains disallowed fields: %s", runtimeJSON)
+	}
+}
+
+func TestRuntimeSourceIsBoundedByItsArchiveBudget(t *testing.T) {
+	rows := make([]DiagnosticSession, maxRuntimeRows)
+	for index := range rows {
+		rows[index] = DiagnosticSession{
+			TaskID: "task-1", SessionID: "session-" + twoDigit(index),
+			Agent: strings.Repeat("agent", 2_000),
+		}
+	}
+	service := newTestService(t, Config{
+		HomeDir: t.TempDir(), SessionProvider: &diagnosticSessionProviderStub{sessions: rows},
+	})
+	created, _, err := service.CreateWithIdentity(
+		context.Background(), authn.Identity{UserID: "user-1"}, []string{SourceRuntime}, nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitForTerminalJob(t, service, "user-1", created.ID)
+	if job.Status != StatusPartial {
+		t.Fatalf("status=%q entries=%d warnings=%v, want truncated partial", job.Status, job.RuntimeEntryCount, job.Warnings)
+	}
+	file, _, err := service.OpenArchive("user-1", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(file, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range reader.File {
+		if entry.Name != "runtime/sessions.json" {
+			continue
+		}
+		source, openErr := entry.Open()
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		var decoded []DiagnosticSession
+		decodeErr := json.NewDecoder(source).Decode(&decoded)
+		_ = source.Close()
+		if decodeErr != nil {
+			t.Fatal(decodeErr)
+		}
+		if len(decoded) >= len(rows) {
+			t.Fatalf("runtime entries=%d, want fewer than %d", len(decoded), len(rows))
+		}
+	}
+}
+
+func TestACPSourceIncludesRawAndNormalizedFilesUnderServerSessionPath(t *testing.T) {
+	home := t.TempDir()
+	acpDir := filepath.Join(home, "logs", "acp")
+	if err := os.MkdirAll(acpDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(acpDir, "raw-acp-claude-acp-session-1.jsonl"), "raw\n")
+	writeTestFile(t, filepath.Join(acpDir, "normalized-acp-claude-acp-session-1.jsonl"), "normalized\n")
+	writeTestFile(t, filepath.Join(acpDir, "raw-acp-claude-acp-session-10.jsonl"), "wrong\n")
+	service := newTestService(t, Config{
+		HomeDir: home, ACPDebugEnabled: func() bool { return true },
+		SessionProvider: &diagnosticSessionProviderStub{sessions: []DiagnosticSession{{
+			TaskID: "task-1", SessionID: "session-1", ACPSessionID: "acp-session-1",
+		}}},
+	})
+	created, _, err := service.CreateWithIdentity(
+		context.Background(), authn.Identity{UserID: "user-1"}, []string{"acp"}, []string{"session-1"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitForTerminalJob(t, service, "user-1", created.ID)
+	if job.Status != StatusReady {
+		t.Fatalf("status = %q, warnings = %v", job.Status, job.Warnings)
+	}
+	file, _, err := service.OpenArchive("user-1", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(file, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range reader.File {
+		names = append(names, entry.Name)
+	}
+	slices.Sort(names)
+	want := []string{
+		"acp/session-01/normalized/normalized-acp-claude-acp-session-1.jsonl",
+		"acp/session-01/raw/raw-acp-claude-acp-session-1.jsonl",
+		"manifest.json",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("archive entries = %v, want %v", names, want)
+	}
+}
+
+func TestACPSourceUsesBoundedExecutorExportAndRevalidatesEntries(t *testing.T) {
+	exporter := &diagnosticACPExporterStub{zipBytes: testACPExportZip(t, map[string]string{
+		"raw/raw-acp-claude-acp-session-remote.jsonl":               "raw remote\n",
+		"normalized/normalized-acp-claude-acp-session-remote.jsonl": "normalized remote\n",
+	})}
+	service := newTestService(t, Config{
+		HomeDir: t.TempDir(), ACPDebugEnabled: func() bool { return true }, ACPExporter: exporter,
+		SessionProvider: &diagnosticSessionProviderStub{sessions: []DiagnosticSession{{
+			TaskID: "task-1", SessionID: "session-1", ACPSessionID: "acp-session-remote",
+		}}},
+	})
+	created, _, err := service.CreateWithIdentity(
+		context.Background(), authn.Identity{UserID: "user-1"}, []string{SourceACP}, []string{"session-1"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitForTerminalJob(t, service, "user-1", created.ID)
+	if job.Status != StatusReady {
+		t.Fatalf("status = %q, warnings = %v", job.Status, job.Warnings)
+	}
+	if exporter.maxBytes != maxACPBytes {
+		t.Fatalf("export max bytes = %d, want %d", exporter.maxBytes, maxACPBytes)
+	}
+	file, _, err := service.OpenArchive("user-1", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(file, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, entry := range reader.File {
+		names = append(names, entry.Name)
+	}
+	slices.Sort(names)
+	want := []string{
+		"acp/session-01/normalized/normalized-acp-claude-acp-session-remote.jsonl",
+		"acp/session-01/raw/raw-acp-claude-acp-session-remote.jsonl",
+		"manifest.json",
+	}
+	if !slices.Equal(names, want) {
+		t.Fatalf("archive entries = %v, want %v", names, want)
+	}
+}
+
+func TestACPSourceOmitsInvalidExecutorExport(t *testing.T) {
+	exporter := &diagnosticACPExporterStub{zipBytes: testACPExportZip(t, map[string]string{
+		"raw/raw-acp-claude-acp-session-remote.jsonl":    "valid before traversal\n",
+		"raw/../raw-acp-claude-acp-session-remote.jsonl": "traversal\n",
+	})}
+	service := newTestService(t, Config{
+		HomeDir: t.TempDir(), ACPDebugEnabled: func() bool { return true }, ACPExporter: exporter,
+		SessionProvider: &diagnosticSessionProviderStub{sessions: []DiagnosticSession{{
+			TaskID: "task-1", SessionID: "session-1", ACPSessionID: "acp-session-remote",
+		}}},
+	})
+	created, _, err := service.CreateWithIdentity(
+		context.Background(), authn.Identity{UserID: "user-1"}, []string{SourceACP}, []string{"session-1"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitForTerminalJob(t, service, "user-1", created.ID)
+	if job.Status != StatusPartial {
+		t.Fatalf("status = %q, warnings = %v, want partial", job.Status, job.Warnings)
+	}
+	file, _, err := service.OpenArchive("user-1", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader, err := zip.NewReader(file, info.Size())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range reader.File {
+		if strings.HasPrefix(entry.Name, "acp/") {
+			t.Fatalf("invalid executor export leaked entry %q", entry.Name)
+		}
+	}
+}
+
+type diagnosticACPExporterStub struct {
+	zipBytes  []byte
+	maxBytes  int64
+	callCount int
+}
+
+func (e *diagnosticACPExporterStub) ExportACP(
+	_ context.Context, _ DiagnosticSession, maxBytes int64,
+) (io.ReadCloser, error) {
+	e.maxBytes = maxBytes
+	e.callCount++
+	return io.NopCloser(bytes.NewReader(e.zipBytes)), nil
+}
+
+func testACPExportZip(t *testing.T, files map[string]string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	for name, contents := range files {
+		entry, err := writer.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(entry, contents); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buffer.Bytes()
+}
+
+type diagnosticSessionProviderStub struct {
+	sessions []DiagnosticSession
+}
+
+func (p *diagnosticSessionProviderStub) ListDiagnosticSessions(
+	context.Context, authn.Identity, time.Time, []string,
+) ([]DiagnosticSession, error) {
+	return append([]DiagnosticSession(nil), p.sessions...), nil
+}
 
 func TestBackendOnlyBundleContainsOnlyRetainedRegularLogFiles(t *testing.T) {
 	home := t.TempDir()

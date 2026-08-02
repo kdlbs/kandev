@@ -17,7 +17,8 @@ const (
 )
 
 type createRequest struct {
-	Sources []string `json:"sources"`
+	Sources    []string `json:"sources"`
+	SessionIDs []string `json:"session_ids"`
 }
 
 type uploadEnvelope struct {
@@ -37,6 +38,8 @@ type createResponse struct {
 
 func RegisterRoutes(group *gin.RouterGroup, service *Service) {
 	group.POST("/logs/bundles", handleCreate(service))
+	group.GET("/logs/capabilities", handleCapabilities(service))
+	group.GET("/logs/acp-sessions", handleACPSessions(service))
 	group.GET("/logs/bundles/:id", handleGet(service))
 	group.POST("/logs/bundles/:id/frontend", handleUpload(service))
 	group.GET("/logs/bundles/:id/download", handleDownload(service))
@@ -53,12 +56,38 @@ func handleCreate(service *Service) gin.HandlerFunc {
 			writeDecodeError(c, err)
 			return
 		}
-		job, reused, err := service.Create(identity.UserID, request.Sources)
+		job, reused, err := service.CreateWithIdentity(
+			c.Request.Context(), identity, request.Sources, request.SessionIDs,
+		)
 		if err != nil {
 			writeServiceError(c, err)
 			return
 		}
 		c.JSON(http.StatusAccepted, createResponse{JobView: job, Reused: reused})
+	}
+}
+
+func handleCapabilities(service *Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if _, ok := requestIdentity(c); !ok {
+			return
+		}
+		c.JSON(http.StatusOK, service.Capabilities())
+	}
+}
+
+func handleACPSessions(service *Service) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		identity, ok := requestIdentity(c)
+		if !ok {
+			return
+		}
+		rows, err := service.ListACPSessions(c.Request.Context(), identity)
+		if err != nil {
+			writeServiceError(c, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"sessions": rows})
 	}
 }
 

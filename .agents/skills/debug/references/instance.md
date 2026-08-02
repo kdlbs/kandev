@@ -50,6 +50,13 @@ When authentication is enabled, export a personal access token through
 `KANDEV_API_TOKEN`; never place it in an argument or print it. No token is
 needed when authentication is disabled.
 
+Use the smallest source set that can answer the question. `backend` covers the
+retained daily files; `frontend` asks connected tabs for their bounded local
+console history; `runtime` adds only allow-listed session status/executor
+metadata; `acp` is an explicit debug-only selection of one to ten authorized
+sessions and can include full protocol content. Standard evidence does not
+include stored chat/session/agent messages, while ACP evidence deliberately can.
+
 Extract into a newly created temporary directory, never a repository, home
 directory, workspace root, or reused path. Reject ZIP entries that are
 absolute or contain `..` before extraction. Inspect `manifest.json` first:
@@ -66,11 +73,14 @@ unzip -q "$diagnostic_zip" -d "$diagnostic_tmp"
 jq . "$diagnostic_tmp/manifest.json"
 ```
 
-If a task ID is known, search it exactly before broadening:
+If a task ID is known, search it exactly before broadening. For a host-side
+instance this is often faster than extracting a new ZIP:
 
 ```bash
 rg --fixed-strings '<task-id>' '<extracted-directory>'
 rg --fixed-strings '<session-id>' '<extracted-directory>'
+rg --fixed-strings '<task-id>' '<HOME_DIR>/logs' -g 'backend-logs*.log'
+rg --fixed-strings '<session-id>' '<HOME_DIR>/logs' -g 'backend-logs*.log'
 ```
 
 A zero-match task-ID search is inconclusive: install-wide backend events and

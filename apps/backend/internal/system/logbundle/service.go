@@ -11,10 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -29,6 +29,8 @@ const (
 	maxBrowserEntries     = 10_000
 	maxBrowserBytes       = 20 * 1024 * 1024
 	maxFrontendBytes      = 80 * 1024 * 1024
+	maxACPFrontendBytes   = 48 * 1024 * 1024
+	maxRuntimeBytes       = 2 * 1024 * 1024
 	maxEntryBytes         = 64 * 1024
 	maxCaptureMetadata    = 8 * 1024
 	maxIdentifierBytes    = 256
@@ -50,6 +52,11 @@ type Config struct {
 	BuildLifetime  time.Duration
 	ReadyLifetime  time.Duration
 	AvailableBytes func(path string) (uint64, error)
+	// ACPDebugEnabled is backend-authoritative. A browser debug flag must never
+	// be sufficient to authorize ACP export.
+	ACPDebugEnabled func() bool
+	SessionProvider DiagnosticSessionProvider
+	ACPExporter     ACPExporter
 }
 
 type Service struct {
@@ -90,6 +97,9 @@ func New(config Config) *Service {
 	if config.AvailableBytes == nil {
 		config.AvailableBytes = availableDiskBytes
 	}
+	if config.ACPDebugEnabled == nil {
+		config.ACPDebugEnabled = func() bool { return os.Getenv("KANDEV_DEBUG_AGENT_MESSAGES") == "true" }
+	}
 	return &Service{
 		config: config, jobs: make(map[string]*job), active: make(map[string]string),
 		latest: make(map[string]string), queue: make(chan string, maxActiveJobs),
@@ -100,6 +110,50 @@ func (s *Service) SetNotifier(notifier IdentityNotifier) {
 	s.mu.Lock()
 	s.notifier = notifier
 	s.mu.Unlock()
+}
+
+func (s *Service) SetSessionProvider(provider DiagnosticSessionProvider) {
+	s.mu.Lock()
+	s.config.SessionProvider = provider
+	s.mu.Unlock()
+}
+
+func (s *Service) SetACPExporter(exporter ACPExporter) {
+	s.mu.Lock()
+	s.config.ACPExporter = exporter
+	s.mu.Unlock()
+}
+
+func (s *Service) Capabilities() CapabilitiesView {
+	debugEnabled := s.config.ACPDebugEnabled()
+	sources := []string{SourceBackend, SourceFrontend, SourceRuntime}
+	if debugEnabled {
+		sources = append(sources, SourceACP)
+	}
+	return CapabilitiesView{
+		Sources: sources, ACPDebugEnabled: debugEnabled, ACPMaxSessions: maxACPSelect,
+	}
+}
+
+func (s *Service) ListACPSessions(
+	ctx context.Context, identity authn.Identity,
+) ([]DiagnosticSession, error) {
+	if !s.config.ACPDebugEnabled() {
+		return nil, newError(ErrorNotFound, "ACP debug capture is unavailable")
+	}
+	if s.config.SessionProvider == nil {
+		return []DiagnosticSession{}, nil
+	}
+	rows, err := s.config.SessionProvider.ListDiagnosticSessions(
+		ctx, identity, s.config.Now().UTC().Add(-maxSessionAge), nil,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) > maxRuntimeRows {
+		rows = rows[:maxRuntimeRows]
+	}
+	return rows, nil
 }
 
 func (s *Service) Start(parent context.Context) {
@@ -129,20 +183,42 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) Create(owner string, sources []string) (JobView, bool, error) {
-	normalized, sourceKey, err := normalizeSources(sources)
+	return s.CreateWithIdentity(context.Background(), authn.Identity{
+		UserID: owner, Role: authn.RoleAdmin, Synthetic: true,
+	}, sources, nil)
+}
+
+// CreateWithIdentity creates a source-selectable bundle. The provider is
+// consulted before admission for runtime/ACP sources so foreign session IDs
+// are rejected without touching files or executor state.
+func (s *Service) CreateWithIdentity(
+	ctx context.Context,
+	identity authn.Identity,
+	sources, sessionIDs []string,
+) (JobView, bool, error) {
+	normalized, normalizedSessions, sourceKey, err := normalizeBundleRequest(sources, sessionIDs)
 	if err != nil {
 		return JobView{}, false, err
 	}
-	if owner == "" {
+	if identity.UserID == "" {
 		return JobView{}, false, newError(ErrorInvalid, "authenticated owner is required")
+	}
+	if slices.Contains(normalized, SourceACP) && !s.config.ACPDebugEnabled() {
+		return JobView{}, false, newError(ErrorInvalid, "ACP debug capture is disabled")
+	}
+	runtimeSessions, acpSessions, err := s.materializeDiagnosticSessions(
+		ctx, identity, normalized, normalizedSessions,
+	)
+	if err != nil {
+		return JobView{}, false, err
 	}
 	now := s.config.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.expireLocked(now)
 
-	latestKey := owner + "\x00" + sourceKey
-	if existing, reused, admissionErr := s.admitLocked(owner, latestKey); reused || admissionErr != nil {
+	latestKey := identity.UserID + "\x00" + sourceKey
+	if existing, reused, admissionErr := s.admitLocked(identity.UserID, latestKey); reused || admissionErr != nil {
 		return existing, reused, admissionErr
 	}
 	id, workDir, err := s.createWorkDirectory()
@@ -150,7 +226,8 @@ func (s *Service) Create(owner string, sources []string) (JobView, bool, error) 
 		return JobView{}, false, err
 	}
 	item := &job{
-		ID: id, Owner: owner, Sources: normalized, SourceKey: sourceKey,
+		ID: id, Owner: identity.UserID, Sources: normalized, SessionIDs: normalizedSessions,
+		RuntimeSessions: runtimeSessions, ACPSessions: acpSessions, SourceKey: sourceKey,
 		CreatedAt: now, BuildDeadline: now.Add(s.config.BuildLifetime),
 		WorkDir: workDir, Browsers: make(map[string]*browserCapture),
 	}
@@ -162,15 +239,67 @@ func (s *Service) Create(owner string, sources []string) (JobView, bool, error) 
 		item.Status = StatusBuilding
 	}
 	s.jobs[id] = item
-	s.active[owner] = id
+	s.active[identity.UserID] = id
 	s.latest[latestKey] = id
 
 	if item.Status == StatusCollecting {
-		go s.beginCollection(owner, id, *item.CaptureDeadline)
+		go s.beginCollection(identity.UserID, id, *item.CaptureDeadline)
 	} else {
 		s.enqueueLocked(id)
 	}
 	return item.view(), false, nil
+}
+
+func (s *Service) materializeDiagnosticSessions(
+	ctx context.Context,
+	identity authn.Identity,
+	sources, sessionIDs []string,
+) ([]DiagnosticSession, []DiagnosticSession, error) {
+	needsRuntime := slices.Contains(sources, SourceRuntime)
+	needsACP := slices.Contains(sources, SourceACP)
+	if !needsRuntime && !needsACP {
+		return nil, nil, nil
+	}
+	if s.config.SessionProvider == nil {
+		if needsACP {
+			return nil, nil, newError(ErrorInvalid, "ACP session catalogue is unavailable")
+		}
+		return nil, nil, nil
+	}
+	records, err := s.config.SessionProvider.ListDiagnosticSessions(
+		ctx, identity, s.config.Now().UTC().Add(-maxSessionAge), sessionIDs,
+	)
+	if err != nil {
+		return nil, nil, err
+	}
+	var runtimeSessions []DiagnosticSession
+	if needsRuntime {
+		runtimeSessions = append(runtimeSessions, records...)
+	}
+	if !needsACP {
+		return runtimeSessions, nil, nil
+	}
+	acpSessions, err := selectACPSessions(records, sessionIDs)
+	if err != nil {
+		return nil, nil, err
+	}
+	return runtimeSessions, acpSessions, nil
+}
+
+func selectACPSessions(records []DiagnosticSession, sessionIDs []string) ([]DiagnosticSession, error) {
+	byID := make(map[string]DiagnosticSession, len(records))
+	for _, record := range records {
+		byID[record.SessionID] = record
+	}
+	selected := make([]DiagnosticSession, 0, len(sessionIDs))
+	for _, sessionID := range sessionIDs {
+		record, ok := byID[sessionID]
+		if !ok || record.ACPAvailability == "unavailable" {
+			return nil, newError(ErrorInvalid, "ACP session is unavailable")
+		}
+		selected = append(selected, record)
+	}
+	return selected, nil
 }
 
 func (s *Service) admitLocked(owner, latestKey string) (JobView, bool, error) {
@@ -320,7 +449,14 @@ func validateChunkPayload(chunk UploadChunk) (int64, error) {
 func captureLimitExceeded(item *job, browser *browserCapture, entries int, bytes int64) bool {
 	return browser.EntryCount+entries > maxBrowserEntries ||
 		browser.Bytes+bytes > maxBrowserBytes ||
-		item.FrontendBytes+bytes > maxFrontendBytes
+		item.FrontendBytes+bytes > frontendByteLimit(item)
+}
+
+func frontendByteLimit(item *job) int64 {
+	if item != nil && slices.Contains(item.Sources, SourceACP) {
+		return maxACPFrontendBytes
+	}
+	return maxFrontendBytes
 }
 
 func writeEntries(file *os.File, entries []json.RawMessage) error {
@@ -557,28 +693,6 @@ func (s *Service) activeCountLocked() int {
 
 func (s *Service) rootDir() string {
 	return filepath.Join(s.config.HomeDir, "tmp", "diagnostic-bundles")
-}
-
-func normalizeSources(sources []string) ([]string, string, error) {
-	if len(sources) == 0 || len(sources) > 2 {
-		return nil, "", newError(ErrorInvalid, "sources must select backend and/or frontend")
-	}
-	seen := make(map[string]bool, len(sources))
-	for _, source := range sources {
-		if source != "backend" && source != "frontend" {
-			return nil, "", newError(ErrorInvalid, "unsupported diagnostic source")
-		}
-		if seen[source] {
-			return nil, "", newError(ErrorInvalid, "diagnostic sources must be unique")
-		}
-		seen[source] = true
-	}
-	normalized := make([]string, 0, len(seen))
-	for source := range seen {
-		normalized = append(normalized, source)
-	}
-	slices.Sort(normalized)
-	return normalized, strings.Join(normalized, ","), nil
 }
 
 func randomID() (string, error) {

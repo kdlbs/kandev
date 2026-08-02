@@ -1,7 +1,7 @@
 ---
 id: "14-bundle-customizer-ui"
 title: "Bundle customizer UI"
-status: pending
+status: done
 wave: 11
 depends_on:
   - "12-custom-bundle-contracts"
@@ -85,4 +85,16 @@ evidence, blockers/risks, and synchronize this task plus `plan.md` status.
 
 ## Results
 
-Pending.
+Implemented the translated standard/custom/ACP bundle workflow.
+
+- Added backend-driven capability and session API clients/types, with standard
+  frontend/backend defaults, optional runtime index, and explicit one-to-ten
+  ACP session selection.
+- Added a shared desktop Dialog / phone inset Drawer customizer with a single
+  mobile scroll owner, safe-area footer, 44px targets, no horizontal overflow,
+  empty/validation states, and the ACP content/secrets disclosure.
+- Updated Logs copy to explain backend/frontend event classes, incidental text,
+  and that standard bundles exclude stored chat, session, and agent messages.
+- Verification: focused system API/Logs UI tests pass (28 tests); `pnpm run
+  i18n:ratchet`, `pnpm run i18n:check`, `pnpm run typecheck`, and `pnpm run
+  lint` all pass.
