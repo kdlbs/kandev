@@ -181,6 +181,13 @@ The repository-wide backend `make test` target was started but stopped after it 
 
 Task 06 verification for the header toggle and profile-backed family choices is complete.
 
+PR conflict fixup: merged `origin/main` at `332353f647cf8ae157db893f529dfc4cb3516ba2` into
+`feature/workflow-step-change-rkm` with merge commit `72bd08c0d116d513e1c63ba274ec94c17c49bbb1`.
+The only conflict was `apps/backend/internal/task/models/models.go`; both original-session
+provenance and context-window metadata keys were retained. At the new PR head,
+`checks_snapshot_complete=true`, `failed_checks=[]`, `pending_checks` contains 15 queued or
+pending checks, and unresolved review threads are zero; GitHub reports the PR as mergeable.
+
 ## Risks
 
 - ACP initialization currently receives only the final effective configuration. Splitting profile and runtime layers must preserve existing chat-selected override, reset, resume, and compact-summary behavior.

@@ -60,3 +60,5 @@ implementation, and the mobile workflow settings scenario.
 - `node --test scripts/validate-public-docs.test.mjs` — 58 tests passed.
 - `node scripts/validate-public-docs.mjs` — 41 published pages validated.
 - `git diff --check` — passed.
+- PR #2137 conflict fixup — merged `origin/main` at `332353f647cf8ae157db893f529dfc4cb3516ba2`; resolved `apps/backend/internal/task/models/models.go` by retaining both metadata-key groups; merge commit `72bd08c0d116d513e1c63ba274ec94c17c49bbb1`.
+- Post-push PR snapshot — mergeable, zero failed checks, 15 queued/pending checks, and zero unresolved review threads.
