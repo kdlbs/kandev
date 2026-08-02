@@ -47,7 +47,7 @@ Skip public docs when the change is:
    - **How-to guide:** help a reader complete a known task, with focused steps, choices, and recovery paths.
    - **Reference:** provide accurate, complete lookup information such as fields, commands, defaults, limits, or protocol contracts.
    - **Explanation:** build understanding of a concept, boundary, rationale, or trade-off.
-   Keep one dominant type per page. Link to another page when a long section changes from learning to procedure, lookup, or explanation; do not force every page into a tutorial-shaped `Quick path`.
+   Keep one dominant type per page. Link to another page when a long section changes from learning to procedure, lookup, or explanation; do not force every page into a generic tutorial-shaped opening.
 7. Keep public docs task-oriented and scan-friendly:
    - Tutorials should lead with prerequisites and a linear first success; how-to guides should lead with the task, expected result, and only the prerequisites it needs.
    - Reference pages should lead with scope and the contract readers need to look up; explanation pages should lead with the question or concept and why it matters.

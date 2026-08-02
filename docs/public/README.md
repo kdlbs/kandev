@@ -104,7 +104,7 @@ Place the indicator immediately after a descriptive heading that names the exper
 
 ## Add a page
 
-1. Search existing pages, choose **Use Kandev** or **Contribute to Kandev**, and identify the page's primary content type.
+1. Search existing pages, choose **Use Kandev** or **Contribute to Kandev**, identify the page's primary content type, and record the audience and type in the PR body.
 2. Create a lowercase, kebab-case Markdown file in `docs/public/`. The filename becomes the stable route; `custom-executors.md` publishes as `/docs/custom-executors`.
 3. Add non-empty `title` and `description` frontmatter, then one level-one heading:
 
@@ -189,4 +189,5 @@ Before review, confirm:
 - links resolve relative to their source file;
 - claims are supported by current code, tests, or workflows;
 - conditional support and platform limits are explicit;
+- the PR body states the audience and primary content type for each new or changed page;
 - source validation and, for publication-sensitive changes, the Landing build pass.
