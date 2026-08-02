@@ -1,0 +1,300 @@
+{
+  "version": 1,
+  "rule": "ARCH-FRONTEND-ROOT-STATE-CAST",
+  "entries": [
+    {
+      "escape": "as any",
+      "marker": "...createKanbanSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createKanbanSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createKanbanSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createWorkspaceSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createWorkspaceSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createWorkspaceSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSettingsSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSettingsSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSettingsSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSessionSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSessionSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSessionSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSessionRuntimeSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSessionRuntimeSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSessionRuntimeSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createGitHubSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createGitHubSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createGitHubSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createGitLabSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createGitLabSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createGitLabSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createAzureDevOpsSlice(set as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createJiraSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createJiraSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createJiraSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createLinearSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createLinearSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createLinearSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createOfficeSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createOfficeSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createOfficeSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createFeaturesSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createFeaturesSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createFeaturesSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createAuthSlice(set as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSystemSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSystemSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createSystemSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createUISlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createUISlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createUISlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createAutomationsSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createAutomationsSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createAutomationsSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createPluginsSlice(set as any, get as any, api as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createPluginsSlice(set as any, get as any, api as any),",
+      "occurrence": 2,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createPluginsSlice(set as any, get as any, api as any),",
+      "occurrence": 3,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "...createReviewSlice(set as any),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    },
+    {
+      "escape": "as any",
+      "marker": "hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),",
+      "occurrence": 1,
+      "path": "apps/web/lib/state/store.ts"
+    }
+  ]
+}

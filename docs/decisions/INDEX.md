@@ -101,6 +101,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-01-validate-mcp-tool-arguments | [Validate MCP Tool Arguments at the Shared Server Boundary](2026-08-01-validate-mcp-tool-arguments.md) | accepted | backend, protocol | 2026-08-01 |
 | 2026-08-01-separate-task-summary-session-stream-traffic | [Separate Task Summary and Session Stream Traffic](2026-08-01-separate-task-summary-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-01 |
 | 2026-08-01-global-run-scheduler-ownership | [Separate Global Run Dispatch from Office Maintenance](2026-08-01-global-run-scheduler-ownership.md) | accepted | backend, workflow | 2026-08-01 |
+| 2026-08-01-architecture-lint-budgets | [Architecture Lint Budgets and Compatibility Expiry](2026-08-01-architecture-lint-budgets.md) | accepted (amended 2026-08-02) | infra | 2026-08-01 |
 | 2026-08-01-release-toggle-gating-contract | [Release Toggles Are Install-Wide Fail-Closed Gates](2026-08-01-release-toggle-gating-contract.md) | proposed | backend, frontend, workflow | 2026-08-01 |
 | 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
 | 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |

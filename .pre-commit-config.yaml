@@ -18,6 +18,12 @@ repos:
         language: system
         pass_filenames: true
 
+      - id: architecture-lint
+        name: Architecture lint and compatibility expiry
+        entry: python3 scripts/lint-architecture.py --all
+        language: system
+        pass_filenames: false
+
   # Backend (Go) hooks
   - repo: local
     hooks:
