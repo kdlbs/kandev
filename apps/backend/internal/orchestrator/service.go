@@ -1186,13 +1186,26 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
+		s.logger.Warn("failed to reconcile active turn",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// completeTurnForTaskSessionChecked closes every open turn for a session and
+// returns an error unless the turn service confirms that none remain. The
+// regular lifecycle paths use completeTurnForTaskSession, which preserves
+// their best-effort behavior; cancellation uses this checked variant because
+// workflow completion must not run while the cancelled turn is still open.
+func (s *Service) completeTurnForTaskSessionChecked(ctx context.Context, taskID, sessionID string) error {
 	// Foreground ownership ends with the turn, but detached background work can
 	// outlive it. Preserve those registrations for accounting; full cleanup
 	// belongs to execution/session teardown paths.
 	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
 
 	if s.turnService == nil {
-		return
+		return nil
 	}
 
 	s.activeTurns.Delete(sessionID)
@@ -1202,34 +1215,29 @@ func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessio
 	for closed < maxIterations {
 		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 		if err != nil {
-			s.logger.Warn("failed to look up active turn",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return
+			return fmt.Errorf("look up active turn: %w", err)
 		}
 		if turn == nil {
-			return
+			return nil
 		}
 		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
 			// GetActiveTurn returns the latest open turn — retrying here
 			// would just hit the same row and loop. Bail; the next
 			// completeTurnForSession call will pick it up.
-			s.logger.Warn("failed to complete turn; will retry on next sweep",
-				zap.String("session_id", sessionID),
-				zap.String("turn_id", turn.ID),
-				zap.Error(err))
-			return
+			return fmt.Errorf("complete turn %s: %w", turn.ID, err)
 		}
 		closed++
 	}
-	// Only warn if turns are *still* accumulating after the cap. Closing
-	// exactly maxIterations turns and then finding the session clean is not a
-	// runaway.
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
-		s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
-			zap.String("session_id", sessionID),
-			zap.Int("max_iterations", maxIterations))
+	// Verify after the cap. Closing exactly maxIterations turns and then
+	// finding the session clean is a successful reconciliation, not a runaway.
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify active turn closure: %w", err)
 	}
+	if turn != nil {
+		return fmt.Errorf("active turn %s remains after %d closure attempts", turn.ID, maxIterations)
+	}
+	return nil
 }
 
 // completeTurnIfCurrent closes turnID only when it is still sessionID's active

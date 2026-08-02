@@ -908,6 +908,7 @@ export class ApiClient {
       };
       wip_limit?: number;
       pull_from_step_id?: string | null;
+      cancel_triggers_turn_complete?: boolean;
     },
   ): Promise<void> {
     await this.request("PUT", `/api/v1/workflow/steps/${stepId}`, { id: stepId, ...updates });

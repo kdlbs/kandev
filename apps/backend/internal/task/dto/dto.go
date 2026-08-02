@@ -872,9 +872,11 @@ type WorkflowStepDTO struct {
 	PullFromStepID        string         `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
-	StageType string    `json:"stage_type,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	StageType                  string    `json:"stage_type,omitempty"`
+	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
+	CreatedAt                  time.Time `json:"created_at"`
+	UpdatedAt                  time.Time `json:"updated_at"`
 }
 
 // StepEventsDTO represents step events for API responses

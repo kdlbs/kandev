@@ -74,6 +74,7 @@ workflows:
         show_in_command_panel: true
         allow_manual_move: true
         auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
       - name: Done
         position: 1
         color: bg-green-500
@@ -82,6 +83,7 @@ workflows:
         show_in_command_panel: true
         allow_manual_move: true
         auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
 ```
 
 Commit the file, then use **Sync now**. The status card reports created, updated, deleted, warning, or unchanged results.
@@ -99,7 +101,7 @@ These rules matter when editing definitions:
 - Manual workflows are never matched, updated, or removed by sync, even when their name is identical.
 - Synced workflows are read-only in normal workflow mutation paths. Edit the repository and sync again. Every run performs a full reconciliation, so it also repairs drift; the stored content hash is for status/observability, not a skip condition.
 
-The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields and preserves non-portable internal stage type. Do not use this facility as an Office-workflow backup.
+The portable format does not carry every internal or Office field. Sync reconciles the portable Kanban fields, including `cancel_triggers_turn_complete`, and preserves non-portable internal stage type. Changing that field in GitHub changes whether an explicit user cancellation can run the step's normal completion actions on the next sync. Pending clarifications and non-user interruption/failure paths remain ineligible. Do not use this facility as an Office-workflow backup.
 
 ### Invalid and empty sources
 

@@ -60,6 +60,8 @@ function toDraftStep(
     is_start_step: definition.is_start_step,
     show_in_command_panel: definition.show_in_command_panel,
     agent_profile_id: definition.agent_profile_id,
+    auto_advance_requires_signal: definition.auto_advance_requires_signal,
+    cancel_triggers_turn_complete: definition.cancel_triggers_turn_complete,
     wip_limit: definition.wip_limit,
     pull_from_step_id: definition.pull_from_step_id
       ? (definitionIds.get(definition.pull_from_step_id) ?? definition.pull_from_step_id)

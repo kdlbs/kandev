@@ -78,6 +78,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [agent-generated-titles](tasks/agent-generated-titles.md) | shipped |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
+| [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | shipped |
 
 ## agents/ — agent governance
 

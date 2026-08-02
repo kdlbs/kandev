@@ -70,3 +70,25 @@ func TestPublishWorkflowStepEventPublishesDeletedStepPayload(t *testing.T) {
 		t.Fatalf("unexpected step payload: %#v", step)
 	}
 }
+
+func TestPublishWorkflowStepEvent_IncludesCancelTriggersTurnComplete(t *testing.T) {
+	eventBus := &recordingWorkflowEventBus{}
+	h := NewHandlers(nil, eventBus, logger.Default())
+	h.publishWorkflowStepEvent(context.Background(), events.WorkflowStepUpdated, &models.WorkflowStep{
+		ID:                         "step-cancel",
+		WorkflowID:                 "workflow-1",
+		CancelTriggersTurnComplete: true,
+	})
+
+	data, ok := eventBus.event.Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("event data type = %T, want map", eventBus.event.Data)
+	}
+	step, ok := data["step"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("step data type = %T, want map", data["step"])
+	}
+	if got, ok := step["cancel_triggers_turn_complete"].(bool); !ok || !got {
+		t.Fatalf("cancel trigger payload = %#v, want true", step["cancel_triggers_turn_complete"])
+	}
+}

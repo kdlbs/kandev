@@ -1,6 +1,7 @@
 package models
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -429,6 +430,27 @@ func TestAutoAdvanceRequiresSignalExport(t *testing.T) {
 		assert.False(t, export.Workflows[0].Steps[0].AutoAdvanceRequiresSignal)
 		assert.True(t, export.Workflows[0].Steps[1].AutoAdvanceRequiresSignal)
 	})
+}
+
+func TestCancelTriggersTurnCompleteExport(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-cancel", Name: "Cancel workflow"}
+	steps := []*WorkflowStep{
+		{ID: "s1", Name: "Paused", Position: 0},
+		{ID: "s2", Name: "Advance", Position: 1},
+	}
+	field := reflect.ValueOf(steps[1]).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !field.IsValid() {
+		t.Fatal("WorkflowStep is missing CancelTriggersTurnComplete")
+	}
+	field.SetBool(true)
+
+	export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-cancel": steps}, nil)
+	require.Len(t, export.Workflows[0].Steps, 2)
+	exportedField := reflect.ValueOf(&export.Workflows[0].Steps[1]).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !exportedField.IsValid() {
+		t.Fatal("StepPortable is missing CancelTriggersTurnComplete")
+	}
+	assert.True(t, exportedField.Bool())
 }
 
 func TestPullFromStepPositionToID(t *testing.T) {

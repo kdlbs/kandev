@@ -17,6 +17,7 @@ import {
   createWorkflowDraftSaveProgress,
   persistWorkflowDraft,
   useWorkflowStepActions,
+  areStepDraftsEqual,
 } from "./workflow-card-actions";
 
 vi.mock("@/app/actions/workspaces", () => ({
@@ -172,6 +173,16 @@ describe("useWorkflowStepActions", () => {
       id: expect.stringMatching(/^temp-step-[0-9a-f-]{36}$/),
       name: "New Step",
     });
+  });
+});
+
+describe("workflow step cancel completion policy", () => {
+  it("treats a persisted policy change as a dirty draft", () => {
+    const saved = step("step-1", "Todo", 0, true);
+    const draft = { ...saved, cancel_triggers_turn_complete: true } as WorkflowStep;
+
+    expect(areStepDraftsEqual(saved, draft)).toBe(false);
+    expect(areStepDraftsEqual(draft, { ...draft })).toBe(true);
   });
 });
 

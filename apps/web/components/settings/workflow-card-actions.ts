@@ -393,6 +393,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     auto_archive_after_hours: step.auto_archive_after_hours ?? 0,
     agent_profile_id: step.agent_profile_id ?? "",
     auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     wip_limit: step.wip_limit ?? 0,
     pull_from_step_id: step.pull_from_step_id ?? "",
   };

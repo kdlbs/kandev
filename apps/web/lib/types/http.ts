@@ -97,6 +97,8 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  auto_advance_requires_signal?: boolean;
+  cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
 };
@@ -130,6 +132,11 @@ export type WorkflowStep = {
    * legacy "any turn-end advances" behaviour.
    */
   auto_advance_requires_signal?: boolean;
+  /**
+   * When true, an explicit user cancellation runs this step's normal
+   * on_turn_complete actions after the cancelled turn settles.
+   */
+  cancel_triggers_turn_complete?: boolean;
   created_at: string;
   updated_at: string;
 };

@@ -131,18 +131,19 @@ func (h *Handlers) handleImportWorkflow(ctx context.Context, msg *ws.Message) (*
 
 func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		WorkflowID                string               `json:"workflow_id"`
-		Name                      string               `json:"name"`
-		Position                  int                  `json:"position"`
-		Color                     string               `json:"color"`
-		Prompt                    string               `json:"prompt"`
-		IsStartStep               *bool                `json:"is_start_step"`
-		AllowManualMove           *bool                `json:"allow_manual_move"`
-		ShowInCommandPanel        *bool                `json:"show_in_command_panel"`
-		AutoAdvanceRequiresSignal *bool                `json:"auto_advance_requires_signal"`
-		WIPLimit                  *int                 `json:"wip_limit"`
-		PullFromStepID            *string              `json:"pull_from_step_id"`
-		Events                    *wfmodels.StepEvents `json:"events"`
+		WorkflowID                 string               `json:"workflow_id"`
+		Name                       string               `json:"name"`
+		Position                   int                  `json:"position"`
+		Color                      string               `json:"color"`
+		Prompt                     string               `json:"prompt"`
+		IsStartStep                *bool                `json:"is_start_step"`
+		AllowManualMove            *bool                `json:"allow_manual_move"`
+		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
+		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
+		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
+		WIPLimit                   *int                 `json:"wip_limit"`
+		PullFromStepID             *string              `json:"pull_from_step_id"`
+		Events                     *wfmodels.StepEvents `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -155,17 +156,18 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 	}
 
 	createReq := workflowctrl.CreateStepRequest{
-		WorkflowID:                req.WorkflowID,
-		Name:                      req.Name,
-		Position:                  req.Position,
-		Color:                     req.Color,
-		Prompt:                    req.Prompt,
-		IsStartStep:               req.IsStartStep,
-		ShowInCommandPanel:        req.ShowInCommandPanel,
-		AutoAdvanceRequiresSignal: req.AutoAdvanceRequiresSignal,
-		WIPLimit:                  req.WIPLimit,
-		PullFromStepID:            req.PullFromStepID,
-		Events:                    req.Events,
+		WorkflowID:                 req.WorkflowID,
+		Name:                       req.Name,
+		Position:                   req.Position,
+		Color:                      req.Color,
+		Prompt:                     req.Prompt,
+		IsStartStep:                req.IsStartStep,
+		ShowInCommandPanel:         req.ShowInCommandPanel,
+		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
+		CancelTriggersTurnComplete: req.CancelTriggersTurnComplete,
+		WIPLimit:                   req.WIPLimit,
+		PullFromStepID:             req.PullFromStepID,
+		Events:                     req.Events,
 	}
 	if req.AllowManualMove != nil {
 		createReq.AllowManualMove = *req.AllowManualMove
@@ -183,18 +185,19 @@ func (h *Handlers) handleCreateWorkflowStep(ctx context.Context, msg *ws.Message
 
 func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var req struct {
-		StepID                    string               `json:"step_id"`
-		Name                      *string              `json:"name"`
-		Color                     *string              `json:"color"`
-		Prompt                    *string              `json:"prompt"`
-		IsStartStep               *bool                `json:"is_start_step"`
-		AllowManualMove           *bool                `json:"allow_manual_move"`
-		ShowInCommandPanel        *bool                `json:"show_in_command_panel"`
-		AutoArchiveAfterHours     *int                 `json:"auto_archive_after_hours"`
-		AutoAdvanceRequiresSignal *bool                `json:"auto_advance_requires_signal"`
-		WIPLimit                  *int                 `json:"wip_limit"`
-		PullFromStepID            *string              `json:"pull_from_step_id"`
-		Events                    *wfmodels.StepEvents `json:"events"`
+		StepID                     string               `json:"step_id"`
+		Name                       *string              `json:"name"`
+		Color                      *string              `json:"color"`
+		Prompt                     *string              `json:"prompt"`
+		IsStartStep                *bool                `json:"is_start_step"`
+		AllowManualMove            *bool                `json:"allow_manual_move"`
+		ShowInCommandPanel         *bool                `json:"show_in_command_panel"`
+		AutoArchiveAfterHours      *int                 `json:"auto_archive_after_hours"`
+		AutoAdvanceRequiresSignal  *bool                `json:"auto_advance_requires_signal"`
+		CancelTriggersTurnComplete *bool                `json:"cancel_triggers_turn_complete"`
+		WIPLimit                   *int                 `json:"wip_limit"`
+		PullFromStepID             *string              `json:"pull_from_step_id"`
+		Events                     *wfmodels.StepEvents `json:"events"`
 	}
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
@@ -204,18 +207,19 @@ func (h *Handlers) handleUpdateWorkflowStep(ctx context.Context, msg *ws.Message
 	}
 
 	updateReq := workflowctrl.UpdateStepRequest{
-		ID:                        req.StepID,
-		Name:                      req.Name,
-		Color:                     req.Color,
-		Prompt:                    req.Prompt,
-		IsStartStep:               req.IsStartStep,
-		AllowManualMove:           req.AllowManualMove,
-		ShowInCommandPanel:        req.ShowInCommandPanel,
-		AutoArchiveAfterHours:     req.AutoArchiveAfterHours,
-		AutoAdvanceRequiresSignal: req.AutoAdvanceRequiresSignal,
-		WIPLimit:                  req.WIPLimit,
-		PullFromStepID:            req.PullFromStepID,
-		Events:                    req.Events,
+		ID:                         req.StepID,
+		Name:                       req.Name,
+		Color:                      req.Color,
+		Prompt:                     req.Prompt,
+		IsStartStep:                req.IsStartStep,
+		AllowManualMove:            req.AllowManualMove,
+		ShowInCommandPanel:         req.ShowInCommandPanel,
+		AutoArchiveAfterHours:      req.AutoArchiveAfterHours,
+		AutoAdvanceRequiresSignal:  req.AutoAdvanceRequiresSignal,
+		CancelTriggersTurnComplete: req.CancelTriggersTurnComplete,
+		WIPLimit:                   req.WIPLimit,
+		PullFromStepID:             req.PullFromStepID,
+		Events:                     req.Events,
 	}
 
 	resp, err := h.workflowCtrl.UpdateStep(ctx, updateReq)
@@ -282,24 +286,25 @@ func (h *Handlers) publishWorkflowStepEvent(ctx context.Context, eventType strin
 	}
 	data := map[string]interface{}{
 		"step": map[string]interface{}{
-			"id":                           step.ID,
-			"workflow_id":                  step.WorkflowID,
-			"name":                         step.Name,
-			"position":                     step.Position,
-			"color":                        step.Color,
-			"prompt":                       step.Prompt,
-			"events":                       step.Events,
-			"show_in_command_panel":        step.ShowInCommandPanel,
-			"allow_manual_move":            step.AllowManualMove,
-			"is_start_step":                step.IsStartStep,
-			"auto_archive_after_hours":     step.AutoArchiveAfterHours,
-			"wip_limit":                    step.WIPLimit,
-			"pull_from_step_id":            step.PullFromStepID,
-			"agent_profile_id":             step.AgentProfileID,
-			"stage_type":                   string(step.StageType),
-			"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
-			"created_at":                   step.CreatedAt,
-			"updated_at":                   step.UpdatedAt,
+			"id":                            step.ID,
+			"workflow_id":                   step.WorkflowID,
+			"name":                          step.Name,
+			"position":                      step.Position,
+			"color":                         step.Color,
+			"prompt":                        step.Prompt,
+			"events":                        step.Events,
+			"show_in_command_panel":         step.ShowInCommandPanel,
+			"allow_manual_move":             step.AllowManualMove,
+			"is_start_step":                 step.IsStartStep,
+			"auto_archive_after_hours":      step.AutoArchiveAfterHours,
+			"wip_limit":                     step.WIPLimit,
+			"pull_from_step_id":             step.PullFromStepID,
+			"agent_profile_id":              step.AgentProfileID,
+			"stage_type":                    string(step.StageType),
+			"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
+			"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
+			"created_at":                    step.CreatedAt,
+			"updated_at":                    step.UpdatedAt,
 		},
 	}
 	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {

@@ -276,6 +276,8 @@
   "restoreTheOriginalBuiltInLayout": "Ŕēśţōŕē ţĥē ōŕĩĝĩńàĺ ƀũĩĺţ-ĩń ĺàŷōũţ àńď ďĩśćàŕď ĩţś ōvēŕŕĩďē.",
   "resumeTheMostRecentlyOpenedTask": "Ŕēśũḿē ţĥē ḿōśţ ŕēćēńţĺŷ ōƥēńēď ţàśķ ĩń ţĥĩś ŵōŕķśƥàćē ōń ţĥĩś ďēvĩćē.",
   "retrySave": "Ŕēţŕŷ śàvē",
+  "runCompletionActionsWhenTurnCancelled": "Ŕũń ćōḿƥĺēţĩōń àćţĩōńś ŵĥēń à ţũŕń ĩś ćàńćēĺĺēď",
+  "runCompletionActionsWhenTurnCancelledHelp": "Àƥƥĺĩēś ōńĺŷ ŵĥēń à ũśēŕ ēxƥĺĩćĩţĺŷ ćàńćēĺś à ţũŕń. Ŧĥē ďēśţĩńàţĩōń śţēƥ’ś ōń-ēńţēŕ àćţĩōńś ḿàŷ ĩḿḿēďĩàţēĺŷ śţàŕţ àńōţĥēŕ àĝēńţ ţũŕń.",
   "runningSprites": "Ŕũńńĩńĝ Śƥŕĩţēś",
   "sameShortcutAs": "Śàḿē śĥōŕţćũţ àś: {{shortcuts}}",
   "saveAndLeave": "Śàvē àńď ĺēàvē",

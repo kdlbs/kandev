@@ -276,6 +276,8 @@
   "restoreTheOriginalBuiltInLayout": "Restore the original built-in layout and discard its override.",
   "resumeTheMostRecentlyOpenedTask": "Resume the most recently opened task in this workspace on this device.",
   "retrySave": "Retry save",
+  "runCompletionActionsWhenTurnCancelled": "Run completion actions when a turn is cancelled",
+  "runCompletionActionsWhenTurnCancelledHelp": "Applies only when a user explicitly cancels a turn. The destination step’s on-enter actions may immediately start another agent turn.",
   "runningSprites": "Running Sprites",
   "sameShortcutAs": "Same shortcut as: {{shortcuts}}",
   "saveAndLeave": "Save and leave",
