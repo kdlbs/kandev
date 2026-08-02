@@ -153,7 +153,12 @@ describe("resolveBase on a pull_request merge ref", () => {
     expect(baseOf(dir, ["--base", mainTip])).toBe(mainTip);
   });
 
-  it("still reports the PR's own hardcoded string", () => {
+  // Selection only — whether the literal inside is then flagged is ESLint's job,
+  // and check-new-code-i18n.mjs resolves its config from this repo's own root, so
+  // it cannot be pointed at a fixture. What matters here is that raising the base
+  // does not narrow the file set past the PR's own work: a file the change added
+  // must still reach the linter.
+  it("still selects the PR's own added file, literal and all", () => {
     const { dir, root, mainTip } = prMergeRef();
     git(dir, ["checkout", "-q", "-B", "pr2", mainTip]);
     write(dir, OWNED, "export const W = () => <p>Hardcoded</p>;\n");
