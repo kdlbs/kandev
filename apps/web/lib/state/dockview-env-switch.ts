@@ -24,7 +24,11 @@ import {
   RIGHT_BOTTOM_GROUP,
 } from "./layout-manager";
 import { resolveResponsiveRightWidth } from "./layout-manager/right-width";
-import type { LayoutNode, LayoutState, LayoutGroupIds } from "./layout-manager";
+import type { LayoutState, LayoutGroupIds } from "./layout-manager";
+import {
+  restoreDefaultActiveViews,
+  restoreSavedActiveViews,
+} from "./dockview-env-switch-active-views";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
@@ -74,145 +78,6 @@ function savedLayoutHasEphemeralPanels(serialized: SerializedDockview): boolean 
     | undefined;
   if (!panels) return false;
   return Object.values(panels).some((p) => EPHEMERAL_COMPONENTS.has(p.contentComponent ?? ""));
-}
-
-/** Walk the serialized grid tree collecting (groupId, activeView) for each leaf. */
-function collectSavedActiveViews(
-  saved: SerializedDockview,
-): Array<{ groupId: string; activeView: string }> {
-  const out: Array<{ groupId: string; activeView: string }> = [];
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const walk = (node: any): void => {
-    if (!node) return;
-    if (Array.isArray(node.data)) {
-      for (const child of node.data) walk(child);
-      return;
-    }
-    const data = node.data;
-    if (data?.id && data.activeView) out.push({ groupId: data.id, activeView: data.activeView });
-  };
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  walk((saved as any).grid?.root);
-  return out;
-}
-
-type ActiveViewEntry = { groupId: string; activeView: string };
-
-type ActiveViewTarget = {
-  entries: ActiveViewEntry[];
-  activeGroup?: string;
-};
-
-function collectDefaultActiveViews(layout: LayoutState): ActiveViewTarget {
-  const entries: Array<ActiveViewEntry & { explicit: boolean }> = [];
-  let explicitActiveGroup: string | undefined;
-
-  const addGroup = (group: LayoutState["columns"][number]["groups"][number]): void => {
-    if (!group.id) return;
-    const activeView = group.activePanel ?? group.panels[0]?.id;
-    if (!activeView) return;
-    const explicit = !!group.activePanel;
-    entries.push({ groupId: group.id, activeView, explicit });
-    if (explicit && !explicitActiveGroup) explicitActiveGroup = group.id;
-  };
-
-  const visit = (node: LayoutNode): void => {
-    if (node.type === "leaf") {
-      addGroup(node.group);
-      return;
-    }
-    for (const child of node.children) visit(child);
-  };
-
-  for (const column of layout.columns) {
-    if (column.tree) {
-      visit(column.tree);
-      continue;
-    }
-    for (const group of column.groups) addGroup(group);
-  }
-
-  return {
-    entries,
-    activeGroup:
-      explicitActiveGroup ?? entries.find((entry) => entry.groupId === CENTER_GROUP)?.groupId,
-  };
-}
-
-function isSemanticAgentView(activeView: string): boolean {
-  return activeView === "chat" || activeView.startsWith("session:");
-}
-
-function resolveTargetPanel(
-  group: DockviewApi["groups"][number],
-  activeView: string,
-  activeSessionId: string | null,
-): DockviewApi["panels"][number] | undefined {
-  if (activeSessionId && isSemanticAgentView(activeView)) {
-    const incomingSessionPanel = group.panels.find(
-      (panel) => panel.id === `session:${activeSessionId}`,
-    );
-    if (incomingSessionPanel) return incomingSessionPanel;
-  }
-  return group.panels.find((panel) => panel.id === activeView);
-}
-
-/**
- * Restore each group's selected panel from the target layout. Agent panel IDs
- * are dynamic, so saved `chat` or stale `session:*` selections resolve to the
- * incoming session panel after session reconciliation. The fast path does not
- * call `fromJSON`, and the slow path replaces stale sessions after it does;
- * both paths therefore need this same post-reconciliation replay.
- *
- * The target `activeGroup` is applied last so the resulting global focus
- * matches what was persisted (or the effective default's explicit Agent
- * selection).
- */
-function restoreTargetActiveViews(
-  api: DockviewApi,
-  target: ActiveViewTarget,
-  activeSessionId: string | null,
-): void {
-  const ordered = target.activeGroup
-    ? [
-        ...target.entries.filter((entry) => entry.groupId !== target.activeGroup),
-        ...target.entries.filter((entry) => entry.groupId === target.activeGroup),
-      ]
-    : target.entries;
-  for (const { groupId, activeView } of ordered) {
-    const group = api.groups.find((g) => g.id === groupId);
-    if (!group) continue;
-    const panel = resolveTargetPanel(group, activeView, activeSessionId);
-    if (panel) {
-      try {
-        panel.api.setActive();
-      } catch {
-        /* panel may be in a transient state */
-      }
-    }
-  }
-}
-
-function restoreSavedActiveViews(
-  api: DockviewApi,
-  saved: SerializedDockview,
-  activeSessionId: string | null,
-): void {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const activeGroup = (saved as any).activeGroup as string | undefined;
-  restoreTargetActiveViews(
-    api,
-    { entries: collectSavedActiveViews(saved), activeGroup },
-    activeSessionId,
-  );
-}
-
-function restoreDefaultActiveViews(
-  api: DockviewApi,
-  defaultLayout: LayoutState,
-  activeSessionId: string | null,
-): void {
-  restoreTargetActiveViews(api, collectDefaultActiveViews(defaultLayout), activeSessionId);
 }
 
 export type EnvSwitchParams = {
@@ -455,7 +320,12 @@ function tryFastEnvSwitch(params: EnvSwitchParams): LayoutGroupIds | null {
   if (saved) {
     restoreSavedActiveViews(api, saved as SerializedDockview, activeSessionId);
   } else {
-    restoreDefaultActiveViews(api, params.getDefaultLayout(), activeSessionId);
+    restoreDefaultActiveViews(
+      api,
+      params.getDefaultLayout(),
+      fromDockviewApi(api),
+      activeSessionId,
+    );
   }
 
   // Column widths from the outgoing env stay live across the switch because

@@ -40,11 +40,13 @@ vi.mock("./layout-manager", () => ({
 }));
 
 import { getEnvLayout } from "@/lib/local-storage";
-import { layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
+import { fromDockviewApi, layoutStructuresMatch, savedLayoutMatchesLive } from "./layout-manager";
 
 const NEW_SESSION_ID = "new-session";
 const OLD_SESSION_PANEL_ID = "session:old-session";
 const NEW_SESSION_PANEL_ID = `session:${NEW_SESSION_ID}`;
+const PR_DETAILS_ID = "pr-detail";
+const PR_DETAILS_TITLE = "PR Details";
 
 type TestPanel = {
   id: string;
@@ -106,7 +108,7 @@ function makeAgentReviewApi(
   const group: TestGroup = { id: groupId, panels: [] };
   group.panels = [
     { id: NEW_SESSION_PANEL_ID, api: { component: "chat", setActive: setActiveAgent }, group },
-    { id: "pr-detail", api: { component: "pr-detail", setActive: setActiveReview }, group },
+    { id: PR_DETAILS_ID, api: { component: PR_DETAILS_ID, setActive: setActiveReview }, group },
   ];
   return {
     group,
@@ -127,7 +129,7 @@ it("rebinds a saved Chat selection to the incoming Agent panel", () => {
   const setActiveAgent = vi.fn();
   const setActiveReview = vi.fn();
   const savedLayout = makeTwoLeafSavedLayout(
-    [{ id: "center", views: ["chat", "pr-detail"], activeView: "chat" }],
+    [{ id: "center", views: ["chat", PR_DETAILS_ID], activeView: "chat" }],
     "center",
   );
   const { api } = makeAgentReviewApi(setActiveAgent, setActiveReview);
@@ -147,7 +149,7 @@ it("rebinds a stale saved session selection to the incoming Agent panel", () => 
     [
       {
         id: "center",
-        views: [OLD_SESSION_PANEL_ID, "pr-detail"],
+        views: [OLD_SESSION_PANEL_ID, PR_DETAILS_ID],
         activeView: OLD_SESSION_PANEL_ID,
       },
     ],
@@ -166,8 +168,26 @@ it("rebinds a stale saved session selection to the incoming Agent panel", () => 
 it("uses the effective default Agent selection when the target has no saved layout", () => {
   const setActiveAgent = vi.fn();
   const setActiveReview = vi.fn();
-  const { api } = makeAgentReviewApi(setActiveAgent, setActiveReview, CANONICAL_CENTER_GROUP_ID);
+  const liveGroupId = "generated-center-group";
+  const { api } = makeAgentReviewApi(setActiveAgent, setActiveReview, liveGroupId);
   vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+  const liveLayout = {
+    columns: [
+      {
+        id: "center",
+        groups: [
+          {
+            id: liveGroupId,
+            panels: [
+              { id: NEW_SESSION_PANEL_ID, component: "chat", title: "Agent" },
+              { id: PR_DETAILS_ID, component: PR_DETAILS_ID, title: PR_DETAILS_TITLE },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+  vi.mocked(fromDockviewApi).mockReturnValueOnce({ columns: [] }).mockReturnValueOnce(liveLayout);
 
   performEnvSwitch(
     makeParams({
@@ -178,11 +198,10 @@ it("uses the effective default Agent selection when the target has no saved layo
             id: "center",
             groups: [
               {
-                id: CANONICAL_CENTER_GROUP_ID,
                 activePanel: "chat",
                 panels: [
                   { id: "chat", component: "chat", title: "Agent" },
-                  { id: "pr-detail", component: "pr-detail", title: "PR Details" },
+                  { id: PR_DETAILS_ID, component: PR_DETAILS_ID, title: PR_DETAILS_TITLE },
                 ],
               },
             ],
@@ -193,6 +212,60 @@ it("uses the effective default Agent selection when the target has no saved layo
   );
 
   expect(setActiveAgent).toHaveBeenCalledOnce();
+  expect(setActiveReview).not.toHaveBeenCalled();
+});
+
+it("does not rebind a default Agent selection when no session exists", () => {
+  const setActiveReview = vi.fn();
+  const groupId = "generated-center-without-session";
+  const group: TestGroup = {
+    id: groupId,
+    panels: [{ id: PR_DETAILS_ID, api: { component: PR_DETAILS_ID, setActive: setActiveReview } }],
+  };
+  const api = {
+    ...makeMockApi(),
+    groups: [group],
+    panels: group.panels,
+  } as unknown as EnvSwitchParams["api"];
+  vi.mocked(layoutStructuresMatch).mockReturnValueOnce(true);
+  const liveLayout = {
+    columns: [
+      {
+        id: "center",
+        groups: [
+          {
+            id: groupId,
+            panels: [{ id: PR_DETAILS_ID, component: PR_DETAILS_ID, title: PR_DETAILS_TITLE }],
+          },
+        ],
+      },
+    ],
+  };
+  vi.mocked(fromDockviewApi).mockReturnValueOnce({ columns: [] }).mockReturnValueOnce(liveLayout);
+
+  performEnvSwitch(
+    makeParams({
+      api,
+      activeSessionId: null,
+      getDefaultLayout: vi.fn(() => ({
+        columns: [
+          {
+            id: "center",
+            groups: [
+              {
+                activePanel: "chat",
+                panels: [
+                  { id: "chat", component: "chat", title: "Agent" },
+                  { id: PR_DETAILS_ID, component: PR_DETAILS_ID, title: PR_DETAILS_TITLE },
+                ],
+              },
+            ],
+          },
+        ],
+      })),
+    }),
+  );
+
   expect(setActiveReview).not.toHaveBeenCalled();
 });
 
@@ -213,8 +286,8 @@ it("rebinds a stale saved session selection after slow-path replacement", () => 
     group,
   };
   const review: TestPanel = {
-    id: "pr-detail",
-    api: { component: "pr-detail", setActive: setActiveReview },
+    id: PR_DETAILS_ID,
+    api: { component: PR_DETAILS_ID, setActive: setActiveReview },
     group,
   };
   panels.push(stale, review);
@@ -233,7 +306,7 @@ it("rebinds a stale saved session selection after slow-path replacement", () => 
     [
       {
         id: group.id,
-        views: [OLD_SESSION_PANEL_ID, "pr-detail"],
+        views: [OLD_SESSION_PANEL_ID, PR_DETAILS_ID],
         activeView: OLD_SESSION_PANEL_ID,
       },
     ],
@@ -260,7 +333,7 @@ it("keeps a deliberately selected PR Details panel selected", () => {
   const setActiveAgent = vi.fn();
   const setActiveReview = vi.fn();
   const savedLayout = makeTwoLeafSavedLayout(
-    [{ id: "center", views: ["chat", "pr-detail"], activeView: "pr-detail" }],
+    [{ id: "center", views: ["chat", PR_DETAILS_ID], activeView: PR_DETAILS_ID }],
     "center",
   );
   const { api } = makeAgentReviewApi(setActiveAgent, setActiveReview);
