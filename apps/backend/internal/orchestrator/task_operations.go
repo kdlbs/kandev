@@ -836,6 +836,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, err
 	}
+	// Surface the newly created session before LaunchPreparedSession performs
+	// potentially slow environment setup (for example, a Docker health check).
+	// The frontend adopts this CREATED session and can render
+	// executor.prepare.progress events while the launch request is still pending.
+	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
 
 	// When the workflow step overrode the caller's profile, tag the session
 	// for provenance: the profile came from workflow routing rather than

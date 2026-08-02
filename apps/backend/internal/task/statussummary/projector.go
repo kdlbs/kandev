@@ -751,13 +751,17 @@ func isActiveSessionState(state string) bool {
 }
 
 func deriveForegroundActivity(activities []string) string {
+	hasBackground := false
 	for _, activity := range activities {
 		if activity == activityGenerating {
 			return activityGenerating
 		}
 		if activity == activityBackground {
-			return activityBackground
+			hasBackground = true
 		}
+	}
+	if hasBackground {
+		return activityBackground
 	}
 	return ""
 }

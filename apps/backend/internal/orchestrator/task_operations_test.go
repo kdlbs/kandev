@@ -3841,6 +3841,49 @@ func TestStartTask_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	assert.False(t, launchCalled)
 }
 
+func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCompleted)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Task",
+		Description: "Do the work",
+		State:       v1.TaskStateInProgress,
+	}
+	eventBus := &mockEventBus{}
+	publishedBeforeLaunch := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			for _, published := range eventBus.published() {
+				if published.Subject != events.TaskSessionStateChanged {
+					continue
+				}
+				data, ok := published.Event.Data.(map[string]any)
+				if !ok {
+					continue
+				}
+				if data[metaKeySessionID] == req.SessionID &&
+					data[metaKeyNewState] == string(models.TaskSessionStateCreated) {
+					publishedBeforeLaunch = true
+				}
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = eventBus
+
+	_, err := svc.StartTask(
+		ctx, "task1", "profile1", "", "", "", "Do the work",
+		"", false, false, nil,
+	)
+	require.NoError(t, err)
+	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
+}
+
 func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

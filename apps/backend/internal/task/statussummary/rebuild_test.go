@@ -86,6 +86,13 @@ func TestBuildFromAuthoritativeAggregatesDurableSources(t *testing.T) {
 	}
 }
 
+func TestDeriveForegroundActivityPrefersGeneratingOverBackground(t *testing.T) {
+	got := deriveForegroundActivity([]string{activityBackground, activityGenerating})
+	if got != activityGenerating {
+		t.Fatalf("foreground activity = %q, want %q", got, activityGenerating)
+	}
+}
+
 func TestBuildFromAuthoritativeLeavesUnavailableOptionalSourcesEmpty(t *testing.T) {
 	got := BuildFromAuthoritative(RebuildInput{
 		Sessions: []RebuildSession{{ID: "session-1", State: "COMPLETED", IsPrimary: true}},
