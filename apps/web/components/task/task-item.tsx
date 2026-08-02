@@ -325,9 +325,7 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
       data-testid="sidebar-task-diff-stats"
       className={cn(
         "mobile-task-diff-stats shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
-        menuOpen
-          ? "opacity-0"
-          : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within:opacity-0",
+        menuOpen ? "opacity-0" : "[@media(hover:hover)]:group-hover:opacity-0",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -618,7 +616,7 @@ function TaskMenuButton({ visible, expanded }: { visible: boolean; expanded: boo
         !visible && "[@media(hover:none)]:hidden",
         visible
           ? "opacity-100"
-          : "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+          : "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto",
       )}
     >
       <button

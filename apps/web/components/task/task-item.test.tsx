@@ -166,6 +166,21 @@ describe("TaskItem status icon", () => {
 });
 
 describe("TaskItem actions", () => {
+  it("keeps diff stats as the idle affordance when the selected row owns focus", () => {
+    renderTaskItem({
+      isSelected: true,
+      diffStats: { additions: 3488, deletions: 199 },
+    });
+
+    const diffStats = screen.getByTestId("sidebar-task-diff-stats");
+    const actionButton = screen.getByRole("button", { name: "Task actions" });
+    const actionContainer = actionButton.parentElement;
+
+    expect(diffStats.className).not.toContain("group-focus-within:opacity-0");
+    expect(actionContainer?.className).not.toContain("group-focus-within:opacity-100");
+    expect(actionContainer?.className).toContain("focus-within:opacity-100");
+  });
+
   it("announces the task menu state", () => {
     renderTaskItem({ menuOpen: true });
 
