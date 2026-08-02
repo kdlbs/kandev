@@ -86,6 +86,7 @@ function makeUnloadedSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
+    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",

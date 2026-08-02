@@ -634,6 +634,10 @@ type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID 
 // frontend receives the primary_session_id.
 type PrimarySessionSetFunc func(ctx context.Context, taskID, sessionID string)
 
+// ContextWindowResetFunc clears a session's persisted context-window reading
+// and invalidates updates captured before the reset.
+type ContextWindowResetFunc func(ctx context.Context, sessionID string) error
+
 // ExecutorTypeCapabilities provides behavioral queries about executor types.
 // Implemented by the lifecycle manager using its backend registry.
 type ExecutorTypeCapabilities interface {
@@ -715,6 +719,10 @@ type Executor struct {
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
+
+	// Callback for model changes that invalidate the current context window.
+	// The orchestrator owns the per-session generation guard used by this reset.
+	onContextWindowReset ContextWindowResetFunc
 
 	// Per-session locks to prevent concurrent resume/launch operations on the same session.
 	// This prevents race conditions when the backend restarts and multiple resume requests
@@ -902,6 +910,11 @@ func (e *Executor) SetOnAgentStartFailed(fn AgentStartFailedFunc) {
 // receives primary_session_id.
 func (e *Executor) SetOnPrimarySessionSet(fn PrimarySessionSetFunc) {
 	e.onPrimarySessionSet = fn
+}
+
+// SetOnContextWindowReset wires the guarded context-window reset callback.
+func (e *Executor) SetOnContextWindowReset(fn ContextWindowResetFunc) {
+	e.onContextWindowReset = fn
 }
 
 // SetOnLaunchFailed sets a callback for launch failures that happen before

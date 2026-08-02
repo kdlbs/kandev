@@ -197,6 +197,44 @@ func (s *Service) AssociateExistingMRByURL(
 	return association, nil
 }
 
+// AssociateExistingMRByURLForSession wraps AssociateExistingMRByURL for
+// callers that have a concrete session to key a refresh watch with — the
+// Create-MR action and manual URL linking triggered from a session's git
+// activity. This mirrors GitHub's split between AssociatePRByURLForWorkspace
+// (session-aware, creates a watch) and AssociateExistingPRByURLForWorkspace
+// (the workspace-level HTTP endpoint, no session, no watch). Watch creation
+// is best-effort: the association already succeeded, so a watch failure is
+// logged rather than surfaced, matching ensureWatchForLinkedMR's convention.
+func (s *Service) AssociateExistingMRByURLForSession(
+	ctx context.Context,
+	workspaceID, sessionID, taskID, repositoryID, mrURL string,
+) (*TaskMR, error) {
+	association, err := s.AssociateExistingMRByURL(ctx, workspaceID, taskID, repositoryID, mrURL)
+	if err != nil {
+		return nil, err
+	}
+	// A cancelable ctx (e.g. an HTTP request context that times out right
+	// after the association commits) must not skip this: the association
+	// already succeeded and is returned as a success below, so a canceled
+	// EnsureMRWatch would silently leave that MR with no refresh watch until
+	// another push recreates it. Detach from ctx's cancellation the same way
+	// DeleteReviewWatch does for its own post-commit side effect, but bound
+	// it with the same timeout so a stalled store call can't hang forever.
+	watchCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), watchDeleteTimeout)
+	defer cancel()
+	if _, err := s.EnsureMRWatch(
+		watchCtx, sessionID, taskID, association.RepositoryID, association.ProjectPath,
+		association.MRIID, association.HeadBranch,
+	); err != nil {
+		s.logger.Warn("failed to ensure MR watch after URL association",
+			zap.String("session_id", sessionID),
+			zap.String("task_id", taskID),
+			zap.Int("mr_iid", association.MRIID),
+			zap.Error(err))
+	}
+	return association, nil
+}
+
 func validateReturnedMRIdentity(status *MRStatus, host, projectPath string, iid int) error {
 	if status == nil || status.MR == nil {
 		return ErrTaskMRNotFound
@@ -213,6 +251,31 @@ func validateReturnedMRIdentity(status *MRStatus, host, projectPath string, iid 
 		return ErrTaskMRNotFound
 	}
 	return nil
+}
+
+// IsConfiguredGitLabHost reports whether remoteURL's host matches the
+// workspace's own configured GitLab connection, self-managed or gitlab.com.
+// Used by push-detection provider routing to recognize self-managed GitLab
+// repositories: unlike github.com/gitlab.com, they never get a durable
+// "gitlab" provider tag at discovery time (see
+// task/service.resolveRepositoryProviderIdentity), so remote_url is their
+// only durable identity signal, and it must be compared against the actual
+// configured host rather than a github.com/gitlab.com hostname allowlist.
+//
+// Best-effort: returns false on any lookup failure (unconfigured workspace,
+// unparsable remote) rather than erroring, since callers use this only to
+// pick a routing branch — ValidateTaskMRRepositoryIdentity is still the real
+// security boundary and still runs before any GitLab API call.
+func (s *Service) IsConfiguredGitLabHost(ctx context.Context, workspaceID, remoteURL string) bool {
+	host, _ := parseGitLabRemoteURLIdentity(remoteURL)
+	if host == "" {
+		return false
+	}
+	cfg, err := s.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil || cfg == nil || cfg.Host == "" {
+		return false
+	}
+	return sameGitLabHost(host, cfg.Host)
 }
 
 // UnlinkTaskMR removes one association and its matching refresh watch without

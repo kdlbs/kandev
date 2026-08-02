@@ -132,8 +132,10 @@ const (
 	SessionCreatedByWorkflowSwitch = "workflow_switch"
 	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
 	// IsPrimary, it never changes when the user selects another conversation tab.
-	SessionMetaKeyOrigin     = "origin"
-	SessionOriginTaskInitial = "task_initial"
+	SessionMetaKeyOrigin                 = "origin"
+	SessionOriginTaskInitial             = "task_initial"
+	SessionMetaKeyContextWindow          = "context_window"
+	SessionMetaKeyContextCompactionCount = "context_compaction_count"
 )
 
 // SessionMetaKeySessionMode records the agent's last-known session permission

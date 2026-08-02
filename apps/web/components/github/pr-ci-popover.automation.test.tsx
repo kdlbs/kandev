@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useState } from "react";
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
@@ -54,6 +55,8 @@ const MERGED_PROMPT_LABEL = "PR merged";
 const CLOSED_PROMPT_LABEL = "PR closed without merging";
 const REVIEW_REQUEST_PROMPT_LABEL = "Your review is requested";
 const REVIEW_FOLLOW_UP_TRIGGER = "ci-review-follow-up-trigger";
+const REMOVE_FIRST_PR_LABEL = "Remove r #1 from task";
+const BACKEND_UNAVAILABLE = "backend unavailable";
 
 function makeOptions(overrides: Partial<TaskCIAutomationOptions> = {}): TaskCIAutomationOptions {
   return {
@@ -290,6 +293,116 @@ describe("PRCIPopover automation status", () => {
   });
 });
 
+describe("MultiPRCIPopover unlink", () => {
+  beforeEach(() => {
+    resetHookMocks();
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("unlinks one multi-PR tab while keeping its sibling visible", async () => {
+    const onCollapseFocus = vi.fn();
+    function RemovablePopover() {
+      const [prs, setPrs] = useState([
+        makePR({ id: "a", pr_number: 1, pr_title: "First PR" }),
+        makePR({ id: "b", pr_number: 2, pr_title: "Second PR", checks_state: "success" }),
+      ]);
+      return (
+        <MultiPRCIPopover
+          prs={prs}
+          enabled={true}
+          onRemovePR={async (pr) =>
+            setPrs((current) => current.filter((item) => item.id !== pr.id))
+          }
+          onCollapseFocus={onCollapseFocus}
+        />
+      );
+    }
+
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ToastProvider>
+            <RemovablePopover />
+          </ToastProvider>
+        </StateProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: REMOVE_FIRST_PR_LABEL }));
+
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: REMOVE_FIRST_PR_LABEL })).toBeNull(),
+    );
+    expect(screen.getByRole("tab", { name: "r #2" })).not.toBeNull();
+    expect(onCollapseFocus).toHaveBeenCalledWith(expect.objectContaining({ id: "b" }));
+  });
+
+  it("keeps a failed unlink tab and reports the error", async () => {
+    const onRemovePR = vi.fn().mockRejectedValue(new Error(BACKEND_UNAVAILABLE));
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ToastProvider>
+            <MultiPRCIPopover
+              prs={[makePR({ id: "a", pr_number: 1 }), makePR({ id: "b", pr_number: 2 })]}
+              enabled={true}
+              onRemovePR={onRemovePR}
+            />
+          </ToastProvider>
+        </StateProvider>
+      </TooltipProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: REMOVE_FIRST_PR_LABEL }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("toast-message").textContent).toContain(BACKEND_UNAVAILABLE),
+    );
+    expect(screen.getByRole("button", { name: REMOVE_FIRST_PR_LABEL })).not.toBeNull();
+    expect(onRemovePR).toHaveBeenCalledWith(expect.objectContaining({ id: "a" }));
+  });
+
+  it("focuses the next adjacent tab when a selected tab is removed from a larger set", async () => {
+    function RemovablePopover() {
+      const [prs, setPrs] = useState([
+        makePR({ id: "a", pr_number: 1, pr_title: "First PR", checks_state: "success" }),
+        makePR({ id: "b", pr_number: 2, pr_title: "Second PR" }),
+        makePR({ id: "c", pr_number: 3, pr_title: "Third PR", checks_state: "success" }),
+      ]);
+      return (
+        <MultiPRCIPopover
+          prs={prs}
+          enabled={true}
+          onRemovePR={async (pr) =>
+            setPrs((current) => current.filter((item) => item.id !== pr.id))
+          }
+        />
+      );
+    }
+
+    render(
+      <TooltipProvider>
+        <StateProvider>
+          <ToastProvider>
+            <RemovablePopover />
+          </ToastProvider>
+        </StateProvider>
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole("tab", { name: "r #2" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Remove r #2 from task" }));
+
+    await waitFor(() => expect(screen.queryByRole("tab", { name: "r #2" })).toBeNull());
+    const nextTab = screen.getByRole("tab", { name: "r #3" });
+    expect(nextTab.getAttribute("aria-selected")).toBe("true");
+    expect(document.activeElement).toBe(nextTab);
+  });
+});
+
 describe("PRCIPopover task prompts", () => {
   beforeEach(() => {
     resetHookMocks();
@@ -338,10 +451,10 @@ describe("PRCIPopover task prompts", () => {
   });
 
   it("offers retry after CI automation options fail to load", () => {
-    hookMocks.error = "backend unavailable";
+    hookMocks.error = BACKEND_UNAVAILABLE;
     renderPopover();
 
-    expect(screen.getByText("backend unavailable")).not.toBeNull();
+    expect(screen.getByText(BACKEND_UNAVAILABLE)).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(hookMocks.refreshMock).toHaveBeenCalledTimes(1);

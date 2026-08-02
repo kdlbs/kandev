@@ -205,6 +205,7 @@ export type UserSettingsState = {
   githubSavedPresets: unknown;
   githubDefaultQueryPresets: unknown;
   gitlabSavedPresets: unknown;
+  azureDevOpsBrowsePreferences: unknown;
   defaultUtilityAgentId: string | null;
   keyboardShortcuts: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
   terminalLinkBehavior: "new_tab" | "browser_panel";

@@ -122,7 +122,7 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 			models.SessionMetaKeyRuntimeConfigOverrides,
 			models.SessionMetaKeyACPConfigBaseline,
 			models.SessionMetaKeyACPModelState,
-			"context_window",
+			models.SessionMetaKeyContextWindow,
 			models.SessionMetaKeyLastAgentError,
 		} {
 			delete(updated.Metadata, key)
@@ -134,7 +134,7 @@ func (e *Executor) rebindOfficeSessionExecutionProfile(
 			models.SessionMetaKeyRuntimeConfigOverrides,
 			models.SessionMetaKeyACPConfigBaseline,
 			models.SessionMetaKeyACPModelState,
-			"context_window",
+			models.SessionMetaKeyContextWindow,
 			models.SessionMetaKeyLastAgentError,
 		})
 		if err != nil {

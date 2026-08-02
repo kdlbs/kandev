@@ -58,6 +58,200 @@ func TestRESTClientAuthAndDiscovery(t *testing.T) {
 	}
 }
 
+func TestRESTClientBoardReads(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/acme/_apis/projects/project-1/teams":
+			_, _ = w.Write([]byte(`{"value":[{"id":"team-1","name":"Platform Team","projectId":"project-1","projectName":"Platform"}]}`))
+		case "/acme/project-1/team-1/_apis/work/backlogs":
+			_, _ = w.Write([]byte(`{"value":[{"id":"Microsoft.RequirementCategory","name":"Stories","isHidden":false},{"id":"Microsoft.TaskCategory","name":"Tasks","isHidden":true}]}`))
+		case "/acme/project-1/team-1/_apis/work/boards/Microsoft.RequirementCategory":
+			_, _ = w.Write([]byte(`{"id":"board-1","name":"Stories","fields":{"columnField":{"referenceName":"System.BoardColumn"},"doneField":{"referenceName":"System.BoardColumnDone"}},"columns":[{"id":"column-todo","name":"To Do","columnType":"incoming","itemLimit":10},{"id":"column-active","name":"Active","columnType":"inProgress"},{"id":"column-done","name":"Done","columnType":"outgoing"}]}`))
+		case "/acme/project-1/team-1/_apis/work/backlogs/Microsoft.RequirementCategory/workItems":
+			_, _ = w.Write([]byte(`{"workItems":[{"target":{"id":2}},{"target":{"id":1}},{"target":{"id":3}}]}`))
+		case "/acme/project-1/_apis/wit/workitemsbatch":
+			_, _ = w.Write([]byte(`{"value":[{"id":1,"rev":4,"fields":{"System.Title":"First","System.WorkItemType":"User Story","System.AssignedTo":"Ada","System.Tags":"one; two","System.BoardColumn":"To Do","System.BoardColumnDone":false}},{"id":2,"rev":5,"fields":{"System.Title":"Second","System.WorkItemType":"Bug","System.BoardColumn":"Done","System.BoardColumnDone":true}}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newTestRESTClient(t, server, "pat")
+	teams, err := client.ListTeams(context.Background(), "project-1")
+	if err != nil || len(teams) != 1 || teams[0].Name != "Platform Team" || teams[0].ProjectID != "project-1" || teams[0].ProjectName != "Platform" {
+		t.Fatalf("ListTeams = %+v, %v", teams, err)
+	}
+	boards, err := client.ListBoards(context.Background(), "project-1", "team-1")
+	if err != nil || len(boards) != 1 || boards[0].ID != "Microsoft.RequirementCategory" {
+		t.Fatalf("ListBoards = %+v, %v", boards, err)
+	}
+	snapshot, err := client.GetBoardSnapshot(context.Background(), "project-1", "team-1", boards[0].ID)
+	if err != nil {
+		t.Fatalf("GetBoardSnapshot: %v", err)
+	}
+	if len(snapshot.Board.Columns) != 3 || len(snapshot.Items) != 2 {
+		t.Fatalf("snapshot = %+v", snapshot)
+	}
+	if snapshot.Items[0].ID != 2 || snapshot.Items[0].ColumnID != "column-done" || !snapshot.Items[0].ColumnDone {
+		t.Fatalf("first board item = %+v", snapshot.Items[0])
+	}
+	if snapshot.Items[1].ID != 1 || snapshot.Items[1].ColumnID != "column-todo" || len(snapshot.Items[1].Tags) != 2 {
+		t.Fatalf("second board item = %+v", snapshot.Items[1])
+	}
+}
+
+func TestRESTClientGetWorkItemDetail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/acme/project-1/_apis/wit/workitems/101" || r.URL.Query().Get("$expand") != "all" {
+			t.Fatalf("detail request = %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":101,"rev":8,"url":"https://api/work-items/101","_links":{"html":{"href":"https://dev.azure.com/acme/project/_workitems/edit/101"}},"fields":{"System.Title":"Ship detail","System.WorkItemType":"User Story","System.State":"Active","System.AssignedTo":{"displayName":"Ada"},"System.Tags":"ui; azure","System.Description":"<p>Useful <strong>detail</strong></p><script>alert('xss')</script>","Microsoft.VSTS.Scheduling.Effort":5,"Microsoft.VSTS.Scheduling.StoryPoints":"3","Microsoft.VSTS.Scheduling.RemainingWork":2.5}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	detail, err := newTestRESTClient(t, server, "pat").GetWorkItemDetail(t.Context(), "project-1", 101)
+	if err != nil {
+		t.Fatalf("GetWorkItemDetail: %v", err)
+	}
+	if detail.ID != 101 || detail.Revision != 8 || detail.AssignedTo != "Ada" || detail.WebURL == "" {
+		t.Fatalf("detail core fields = %+v", detail)
+	}
+	if strings.Contains(detail.Description, "script") || !strings.Contains(detail.Description, "Useful detail") {
+		t.Fatalf("description = %q, want sanitized useful content", detail.Description)
+	}
+	if len(detail.PlanningFields) != 3 || detail.PlanningFields[0].ReferenceName != "Microsoft.VSTS.Scheduling.Effort" || detail.PlanningFields[2].Value != "2.5" {
+		t.Fatalf("planning fields = %+v", detail.PlanningFields)
+	}
+}
+
+func TestRESTClientListWorkItemComments(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/acme/project-1/_apis/wit/workItems/101/comments" || r.URL.Query().Get("continuationToken") != "opaque-token" || r.URL.Query().Get("$top") != "100" {
+			t.Fatalf("comments request = %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("x-ms-continuationtoken", "next-opaque-token")
+		_, _ = w.Write([]byte(`{"comments":[{"id":1,"text":"Older","createdDate":"2026-07-20T10:00:00Z","createdBy":{"id":"u1","displayName":"Ada"}},{"id":2,"text":"Deleted","isDeleted":true,"createdDate":"2026-07-21T10:00:00Z"},{"id":3,"text":"Newest","createdDate":"2026-07-22T10:00:00Z"}]}`))
+	}))
+	t.Cleanup(server.Close)
+
+	page, err := newTestRESTClient(t, server, "pat").ListWorkItemComments(t.Context(), "project-1", 101, "opaque-token")
+	if err != nil {
+		t.Fatalf("ListWorkItemComments: %v", err)
+	}
+	if page.ContinuationToken != "next-opaque-token" || len(page.Comments) != 2 || page.Comments[0].ID != 3 || page.Comments[1].Author.DisplayName != "Ada" {
+		t.Fatalf("comment page = %+v", page)
+	}
+}
+
+func TestRESTClientGetCurrentIdentity(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/acme/_apis/connectionData" {
+			t.Fatalf("identity request = %s", r.URL.String())
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"authenticatedUser":{"id":"u1","providerDisplayName":"Ada","properties":{"Account":{"$value":"ada@example.com"}}}}`))
+	}))
+	t.Cleanup(server.Close)
+
+	identity, err := newTestRESTClient(t, server, "pat").GetCurrentIdentity(t.Context())
+	if err != nil || identity.ID != "u1" || identity.DisplayName != "Ada" || identity.UniqueName != "ada@example.com" {
+		t.Fatalf("GetCurrentIdentity = %+v, %v", identity, err)
+	}
+}
+
+func TestBoardWorkItemPatchAssignCurrentUser(t *testing.T) {
+	action := "assign_current_user"
+	patch, err := boardWorkItemPatch(struct {
+		Columns []BoardColumn `json:"columns"`
+		Fields  BoardFields   `json:"fields"`
+	}{}, BoardWorkItemUpdateRequest{Revision: 7, AssigneeAction: &action, resolvedAssignee: "ada@example.com", hasResolvedAssignee: true})
+	if err != nil {
+		t.Fatalf("boardWorkItemPatch: %v", err)
+	}
+	if len(patch) != 2 || patch[0]["op"] != "test" || patch[0]["path"] != "/rev" || patch[1]["op"] != "add" || patch[1]["path"] != "/fields/System.AssignedTo" || patch[1]["value"] != "ada@example.com" {
+		t.Fatalf("patch = %#v", patch)
+	}
+}
+
+func TestBoardWorkItemPatchUnassign(t *testing.T) {
+	action := "unassign"
+	patch, err := boardWorkItemPatch(struct {
+		Columns []BoardColumn `json:"columns"`
+		Fields  BoardFields   `json:"fields"`
+	}{}, BoardWorkItemUpdateRequest{Revision: 7, AssigneeAction: &action, hasResolvedAssignee: true})
+	if err != nil || len(patch) != 2 || patch[1]["op"] != "remove" || patch[1]["path"] != "/fields/System.AssignedTo" {
+		t.Fatalf("patch = %#v, %v", patch, err)
+	}
+}
+
+func TestBoardWorkItemPatchRejectsUnsupportedFields(t *testing.T) {
+	if _, err := boardWorkItemPatch(struct {
+		Columns []BoardColumn `json:"columns"`
+		Fields  BoardFields   `json:"fields"`
+	}{}, BoardWorkItemUpdateRequest{Revision: 7}); err == nil {
+		t.Fatal("boardWorkItemPatch accepted an unsupported empty mutation")
+	}
+}
+
+func TestRESTClientUpdateBoardWorkItem(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/acme/project-1/team-1/_apis/work/boards/board-1":
+			_, _ = w.Write([]byte(`{"id":"board-1","name":"Stories","fields":{"columnField":{"referenceName":"System.BoardColumn"},"doneField":{"referenceName":"System.BoardColumnDone"}},"columns":[{"id":"column-active","name":"Active"}]}`))
+		case "/acme/project-1/_apis/wit/workitems/101":
+			if r.Method != http.MethodPatch || r.Header.Get("Content-Type") != "application/json-patch+json" {
+				t.Fatalf("request method/content type = %s/%q", r.Method, r.Header.Get("Content-Type"))
+			}
+			var patch []map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+				t.Fatalf("decode patch: %v", err)
+			}
+			if len(patch) != 3 || patch[0]["op"] != "test" || patch[0]["path"] != "/rev" || patch[0]["value"] != float64(7) || patch[1]["path"] != "/fields/System.BoardColumn" || patch[2]["path"] != "/fields/System.BoardColumnDone" {
+				t.Fatalf("patch = %#v", patch)
+			}
+			_, _ = w.Write([]byte(`{"id":101,"rev":8,"fields":{"System.Title":"Updated","System.AssignedTo":"Grace","System.Tags":"one; two","System.BoardColumn":"Active","System.BoardColumnDone":true}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	client := newTestRESTClient(t, server, "pat")
+	column := "column-active"
+	done := true
+	item, err := client.UpdateBoardWorkItem(context.Background(), "project-1", "team-1", "board-1", 101, BoardWorkItemUpdateRequest{Revision: 7, ColumnID: &column, ColumnDone: &done})
+	if err != nil || item == nil || item.Revision != 8 || item.ColumnID != "column-active" || !item.ColumnDone {
+		t.Fatalf("updated item = %+v, %v", item, err)
+	}
+}
+
+func TestRESTClientUpdateWorkItemAssignment(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/acme/project-1/_apis/wit/workitems/101" || r.Method != http.MethodPatch {
+			t.Fatalf("assignment request = %s %s", r.Method, r.URL.Path)
+		}
+		var patch []map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
+			t.Fatalf("decode patch: %v", err)
+		}
+		if len(patch) != 2 || patch[0]["path"] != "/rev" || patch[0]["value"] != float64(7) || patch[1]["path"] != "/fields/System.AssignedTo" || patch[1]["value"] != "ada@example.com" {
+			t.Fatalf("patch = %#v", patch)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":101,"rev":8,"fields":{"System.Title":"Fix build","System.AssignedTo":"Ada"}}`))
+	}))
+	t.Cleanup(server.Close)
+	action := assignCurrentUserAction
+	item, err := newTestRESTClient(t, server, "pat").UpdateWorkItem(context.Background(), "project-1", 101, WorkItemAssignmentRequest{Revision: 7, AssigneeAction: &action, resolvedAssignee: "ada@example.com", hasResolvedAssignee: true})
+	if err != nil || item == nil || item.Revision != 8 || item.AssignedTo != "Ada" {
+		t.Fatalf("updated item = %+v, %v", item, err)
+	}
+}
+
 func TestRESTClientQueryWIQLBatchesAndPreservesOrder(t *testing.T) {
 	var mu sync.Mutex
 	var batches [][]int

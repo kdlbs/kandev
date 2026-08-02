@@ -73,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets              **json.RawMessage
 	GitHubDefaultQueryPresets       **json.RawMessage
 	GitLabSavedPresets              **json.RawMessage
+	AzureDevOpsBrowsePreferences    **json.RawMessage
 	DefaultUtilityAgentID           *string
 	DefaultUtilityModel             *string
 	KeyboardShortcuts               *map[string]interface{}
@@ -628,6 +629,9 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
 		return err
 	}
+	if err := applyUserPreferenceBlob("azure_devops_browse_preferences", req.AzureDevOpsBrowsePreferences, &settings.AzureDevOpsBrowsePreferences); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -706,6 +710,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"github_saved_presets":                settings.GitHubSavedPresets,
 		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
 		"keyboard_shortcuts":                  settings.KeyboardShortcuts,

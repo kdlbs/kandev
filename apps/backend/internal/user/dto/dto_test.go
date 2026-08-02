@@ -8,6 +8,21 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
+	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
+		t.Fatalf("Azure DevOps browse preferences patch field = %+v, want JSON preference field", field)
+	}
+}
+
+func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
+	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
+	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
+	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
+	}
+}
+
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
 		t.Fatal("TasksListShowDetails = false, want true")

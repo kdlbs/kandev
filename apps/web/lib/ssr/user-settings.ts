@@ -65,6 +65,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     githubSavedPresets: undefined,
     githubDefaultQueryPresets: undefined,
     gitlabSavedPresets: undefined,
+    azureDevOpsBrowsePreferences: undefined,
     defaultUtilityAgentId: null,
     keyboardShortcuts: {},
     terminalLinkBehavior: "new_tab",
@@ -290,6 +291,11 @@ export function buildCoreFields(
     gitlabSavedPresets: mapDefined(
       s.gitlab_saved_presets,
       current.gitlabSavedPresets,
+      (value) => value,
+    ),
+    azureDevOpsBrowsePreferences: mapDefined(
+      s.azure_devops_browse_preferences,
+      current.azureDevOpsBrowsePreferences,
       (value) => value,
     ),
     appStatusBarOrder: mapDefined(

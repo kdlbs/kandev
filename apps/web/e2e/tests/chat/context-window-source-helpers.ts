@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -13,6 +13,7 @@ type ContextWindowStore = Window & {
           used: number;
           remaining: number;
           efficiency: number;
+          compactionCount: number;
           source: "acp" | "api";
         },
       ) => void;
@@ -51,9 +52,17 @@ export async function seedContextWindowTask(
       used: 54_100,
       remaining: 204_300,
       efficiency: 21,
+      compactionCount: 2,
       source: "acp",
     });
   }, task.session_id);
+}
+
+export async function expectCompactionCount(contextTooltip: Locator): Promise<void> {
+  const contextUsage = contextTooltip.getByTestId("context-window-usage").first();
+  const row = contextUsage.getByTestId("context-window-compactions-row");
+  await expect(row.getByText("Compactions", { exact: true })).toBeVisible();
+  await expect(row.getByText("2", { exact: true })).toBeVisible();
 }
 
 export async function expectSourceRightOfTokenCount(contextTooltip: Locator): Promise<void> {

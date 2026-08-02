@@ -89,6 +89,24 @@ export async function createTaskPR(
   });
 }
 
+export async function deleteTaskPR(
+  associationId: string,
+  workspaceId: string,
+  options?: ApiRequestOptions,
+) {
+  const query = new URLSearchParams({ workspace_id: workspaceId });
+  return fetchJson<{ deleted: boolean }>(
+    `/api/v1/github/task-prs/${encodeURIComponent(associationId)}?${query.toString()}`,
+    {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "DELETE",
+      },
+    },
+  );
+}
+
 export async function linkTaskIssue(
   taskId: string,
   data: { issue: string; owner?: string; repo?: string; number?: number },

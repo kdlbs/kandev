@@ -516,6 +516,7 @@ github.task_prs.list
 gitlab.action_presets.list
 gitlab.action_presets.reset
 gitlab.action_presets.update
+gitlab.check_session_mr
 gitlab.cleanup.issue_tasks
 gitlab.cleanup.review_tasks
 gitlab.issue_watches.create

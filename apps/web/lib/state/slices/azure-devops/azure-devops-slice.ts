@@ -3,6 +3,7 @@ import type { AzureDevOpsSlice, AzureDevOpsSliceState } from "./types";
 
 export const defaultAzureDevOpsState: AzureDevOpsSliceState = {
   azureDevOpsTaskPullRequests: { byTaskId: {} },
+  azureDevOpsTaskWorkItems: { byTaskId: {} },
 };
 
 type AzureDevOpsStateCreator = StateCreator<
@@ -30,5 +31,21 @@ export const createAzureDevOpsSlice: AzureDevOpsSliceCreator = (set) => ({
   resetAzureDevOpsTaskPullRequests: () =>
     set((draft) => {
       draft.azureDevOpsTaskPullRequests.byTaskId = {};
+    }),
+  setAzureDevOpsTaskWorkItems: (workItems) =>
+    set((draft) => {
+      draft.azureDevOpsTaskWorkItems.byTaskId = workItems;
+    }),
+  setAzureDevOpsTaskWorkItem: (taskId, workItem) =>
+    set((draft) => {
+      const existing = draft.azureDevOpsTaskWorkItems.byTaskId[taskId] ?? [];
+      const index = existing.findIndex((item) => item.id === workItem.id);
+      if (index >= 0) existing[index] = workItem;
+      else existing.push(workItem);
+      draft.azureDevOpsTaskWorkItems.byTaskId[taskId] = existing;
+    }),
+  resetAzureDevOpsTaskWorkItems: () =>
+    set((draft) => {
+      draft.azureDevOpsTaskWorkItems.byTaskId = {};
     }),
 });

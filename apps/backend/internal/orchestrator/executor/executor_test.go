@@ -225,6 +225,11 @@ func TestPersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow(t 
 		},
 	}
 	repo.sessions[session.ID] = session
+	resetCalls := 0
+	exec.SetOnContextWindowReset(func(ctx context.Context, sessionID string) error {
+		resetCalls++
+		return repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
+	})
 
 	exec.persistRuntimeModelMetadata(context.Background(), session.ID, session, "gpt-5.3-codex-spark")
 
@@ -244,6 +249,9 @@ func TestPersistRuntimeModelMetadataStoresRuntimeConfigAndClearsContextWindow(t 
 	}
 	if updated.Metadata["context_window"] != nil {
 		t.Fatalf("expected context_window to be cleared, got %#v", updated.Metadata["context_window"])
+	}
+	if resetCalls != 1 {
+		t.Fatalf("expected guarded context-window reset callback once, got %d", resetCalls)
 	}
 	if len(repo.setSessionMetadataKeyCalls) != 2 {
 		t.Fatalf("expected runtime config and context window metadata writes, got %d", len(repo.setSessionMetadataKeyCalls))

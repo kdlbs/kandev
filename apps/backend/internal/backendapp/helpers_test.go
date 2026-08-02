@@ -1767,7 +1767,8 @@ func TestAppendContextWindowMessage_DoesNotEmitStateSnapshot(t *testing.T) {
 		State:     models.TaskSessionStateRunning,
 		UpdatedAt: time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC),
 		Metadata: map[string]interface{}{
-			"context_window": map[string]interface{}{"size": 100},
+			models.SessionMetaKeyContextWindow:          map[string]interface{}{"size": 100},
+			models.SessionMetaKeyContextCompactionCount: int64(3),
 		},
 	}
 
@@ -1778,6 +1779,13 @@ func TestAppendContextWindowMessage_DoesNotEmitStateSnapshot(t *testing.T) {
 	payload := decodePayload(t, msgs[0].Payload)
 	if _, present := payload["new_state"]; present {
 		t.Fatal("context-window snapshot must not carry new_state and overwrite fresher session state")
+	}
+	metadata, ok := payload["metadata"].(map[string]interface{})
+	if !ok {
+		t.Fatal("context-window snapshot missing metadata")
+	}
+	if got := metadata[models.SessionMetaKeyContextCompactionCount]; got != float64(3) {
+		t.Fatalf("expected compaction count 3, got %v", got)
 	}
 }
 

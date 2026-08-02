@@ -134,6 +134,7 @@ const createTablesSQL = `
 		merged_at DATETIME,
 		closed_at DATETIME,
 		last_synced_at DATETIME,
+		detached_at DATETIME,
 		updated_at DATETIME NOT NULL,
 		UNIQUE(task_id, repository_id, pr_number)
 	);
@@ -494,6 +495,7 @@ func (s *Store) applyIdempotentSchemaColumns() {
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN unresolved_review_threads INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN checks_total INTEGER DEFAULT 0`)
 	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN checks_passing INTEGER DEFAULT 0`)
+	_, _ = s.db.Exec(`ALTER TABLE github_task_prs ADD COLUMN detached_at DATETIME`)
 	// Per-watch cleanup policy for review/issue watches: controls whether the
 	// poller deletes auto-created tasks when the underlying PR/issue reaches
 	// a terminal state. Values: 'auto' (default — preserve only when user
@@ -1140,6 +1142,7 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			merged_at DATETIME,
 			closed_at DATETIME,
 			last_synced_at DATETIME,
+			detached_at DATETIME,
 			updated_at DATETIME NOT NULL,
 			UNIQUE(task_id, repository_id, pr_number)
 		)`,
@@ -1147,12 +1150,12 @@ func (s *Store) migratePRTablesForMultiRepo() error {
 			id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
-			additions, deletions, created_at, merged_at, closed_at, last_synced_at, updated_at
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
 		) SELECT
 			id, COALESCE(workspace_id, ''), task_id, COALESCE(repository_id, ''), owner, repo, pr_number, pr_url, pr_title,
 			head_branch, base_branch, author_login, state, review_state, checks_state,
 			mergeable_state, review_count, pending_review_count, comment_count,
-			additions, deletions, created_at, merged_at, closed_at, last_synced_at, updated_at
+			additions, deletions, created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at
 		FROM github_task_prs`,
 	)
 }
@@ -1460,12 +1463,12 @@ func (s *Store) CreateTaskPR(ctx context.Context, tp *TaskPR) error {
 		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt)
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt)
 	return err
 }
 
@@ -1482,7 +1485,7 @@ const taskPRColumns = `id, workspace_id, task_id, repository_id, owner, repo, pr
 	pr_title, head_branch, base_branch, author_login, state, review_state, checks_state,
 	mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 	unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-	created_at, merged_at, closed_at, last_synced_at, updated_at`
+	created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at`
 
 // taskPRColumnsQualified is taskPRColumns with each column qualified by the
 // `gtp` alias, for queries that join github_task_prs against another table.
@@ -1491,13 +1494,26 @@ const taskPRColumnsQualified = `gtp.id, gtp.workspace_id, gtp.task_id, gtp.repos
 	gtp.state, gtp.review_state, gtp.checks_state, gtp.mergeable_state, gtp.review_count,
 	gtp.pending_review_count, gtp.required_reviews, gtp.comment_count, gtp.unresolved_review_threads,
 	gtp.checks_total, gtp.checks_passing, gtp.additions, gtp.deletions,
-	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.updated_at`
+	gtp.created_at, gtp.merged_at, gtp.closed_at, gtp.last_synced_at, gtp.detached_at, gtp.updated_at`
 
 // GetTaskPR returns the first PR association for a task. For multi-repo tasks
 // the result is non-deterministic across repos — use ListTaskPRsByTask instead.
 func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 	var tp TaskPR
-	err := s.ro.GetContext(ctx, &tp, `SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? LIMIT 1`, taskID)
+	err := s.ro.GetContext(ctx, &tp, `SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND detached_at IS NULL LIMIT 1`, taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &tp, err
+}
+
+// GetTaskPRByID returns an association regardless of whether it was detached.
+// Mutation paths use this exact lookup so detached rows remain durable
+// tombstones and can be explicitly restored by a later link action.
+func (s *Store) GetTaskPRByID(ctx context.Context, associationID string) (*TaskPR, error) {
+	var tp TaskPR
+	err := s.ro.GetContext(ctx, &tp,
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE id = ? LIMIT 1`, associationID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1514,7 +1530,7 @@ func (s *Store) GetTaskPR(ctx context.Context, taskID string) (*TaskPR, error) {
 func (s *Store) GetTaskPRByRepository(ctx context.Context, taskID, repositoryID string) (*TaskPR, error) {
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp,
-		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND repository_id = ?
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND repository_id = ? AND detached_at IS NULL
 		 ORDER BY updated_at DESC LIMIT 1`,
 		taskID, repositoryID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1532,6 +1548,21 @@ func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repository
 	var tp TaskPR
 	err := s.ro.GetContext(ctx, &tp,
 		`SELECT `+taskPRColumns+` FROM github_task_prs
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? AND detached_at IS NULL LIMIT 1`,
+		taskID, repositoryID, prNumber)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	return &tp, err
+}
+
+// GetTaskPRByRepoAndNumberIncludingDetached returns the exact association
+// row, including a detached tombstone, for automatic-versus-explicit link
+// decisions.
+func (s *Store) GetTaskPRByRepoAndNumberIncludingDetached(ctx context.Context, taskID, repositoryID string, prNumber int) (*TaskPR, error) {
+	var tp TaskPR
+	err := s.ro.GetContext(ctx, &tp,
+		`SELECT `+taskPRColumns+` FROM github_task_prs
 		 WHERE task_id = ? AND repository_id = ? AND pr_number = ? LIMIT 1`,
 		taskID, repositoryID, prNumber)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -1545,7 +1576,7 @@ func (s *Store) GetTaskPRByRepoAndNumber(ctx context.Context, taskID, repository
 func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR, error) {
 	var prs []TaskPR
 	if err := s.ro.SelectContext(ctx, &prs,
-		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? ORDER BY created_at ASC`, taskID); err != nil {
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id = ? AND detached_at IS NULL ORDER BY created_at ASC`, taskID); err != nil {
 		return nil, err
 	}
 	out := make([]*TaskPR, 0, len(prs))
@@ -1553,6 +1584,44 @@ func (s *Store) ListTaskPRsByTask(ctx context.Context, taskID string) ([]*TaskPR
 		out = append(out, &prs[i])
 	}
 	return out, nil
+}
+
+// DetachTaskPR marks an association as removed from active task surfaces while
+// retaining the row so automatic PR discovery cannot silently resurrect it.
+// The bool return reports whether this call performed the transition.
+func (s *Store) DetachTaskPR(ctx context.Context, associationID string) (*TaskPR, bool, error) {
+	now := time.Now().UTC()
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE github_task_prs SET detached_at = ?, updated_at = ?
+		 WHERE id = ? AND detached_at IS NULL`, now, now, associationID)
+	if err != nil {
+		return nil, false, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return nil, false, err
+	}
+	tp, err := s.GetTaskPRByID(ctx, associationID)
+	return tp, count > 0, err
+}
+
+// RestoreTaskPR clears a detached tombstone for an explicit link action and
+// refreshes the persisted fields available from the fetched GitHub PR.
+func (s *Store) RestoreTaskPR(ctx context.Context, taskID, repositoryID string, pr *PR) (*TaskPR, error) {
+	if pr == nil {
+		return nil, errors.New("restore task PR: missing PR data")
+	}
+	if _, err := s.db.ExecContext(ctx,
+		`UPDATE github_task_prs SET owner = ?, repo = ?, pr_url = ?, pr_title = ?,
+			head_branch = ?, base_branch = ?, author_login = ?, state = ?, mergeable_state = ?,
+			additions = ?, deletions = ?, merged_at = ?, closed_at = ?, detached_at = NULL, updated_at = ?
+		 WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		pr.RepoOwner, pr.RepoName, pr.HTMLURL, pr.Title, pr.HeadBranch, pr.BaseBranch, pr.AuthorLogin,
+		pr.State, pr.MergeableState, pr.Additions, pr.Deletions, pr.MergedAt, pr.ClosedAt, time.Now().UTC(),
+		taskID, repositoryID, pr.Number); err != nil {
+		return nil, err
+	}
+	return s.GetTaskPRByRepoAndNumber(ctx, taskID, repositoryID, pr.Number)
 }
 
 // ListTaskPRsByTaskIDs returns PR associations for multiple tasks. Each task
@@ -1563,7 +1632,7 @@ func (s *Store) ListTaskPRsByTaskIDs(ctx context.Context, taskIDs []string) (map
 		return make(map[string][]*TaskPR), nil
 	}
 	query, args, err := sqlx.In(
-		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id IN (?) ORDER BY created_at ASC`,
+		`SELECT `+taskPRColumns+` FROM github_task_prs WHERE task_id IN (?) AND detached_at IS NULL ORDER BY created_at ASC`,
 		taskIDs,
 	)
 	if err != nil {
@@ -1585,7 +1654,7 @@ func (s *Store) ListTaskPRsByWorkspaceID(ctx context.Context, workspaceID string
 	if err := s.ro.SelectContext(ctx, &prs,
 		`SELECT `+taskPRColumnsQualified+` FROM github_task_prs gtp
 		 INNER JOIN tasks t ON gtp.task_id = t.id
-		 WHERE t.workspace_id = ?
+		 WHERE t.workspace_id = ? AND gtp.detached_at IS NULL
 		 ORDER BY gtp.created_at ASC`, workspaceID); err != nil {
 		return nil, err
 	}
@@ -1615,7 +1684,7 @@ func (s *Store) ListTaskIDsByPRNumber(ctx context.Context, workspaceID string, p
 	if err := s.ro.SelectContext(ctx, &ids,
 		`SELECT DISTINCT gtp.task_id FROM github_task_prs gtp
 		 INNER JOIN tasks t ON gtp.task_id = t.id
-		 WHERE t.workspace_id = ? AND gtp.pr_number = ?`, workspaceID, prNumber); err != nil {
+			 WHERE t.workspace_id = ? AND gtp.pr_number = ? AND gtp.detached_at IS NULL`, workspaceID, prNumber); err != nil {
 		return nil, err
 	}
 	return ids, nil
@@ -1673,12 +1742,12 @@ func (s *Store) ReplaceTaskPR(ctx context.Context, tp *TaskPR) error {
 		INSERT INTO github_task_prs (id, workspace_id, task_id, repository_id, owner, repo, pr_number, pr_url, pr_title, head_branch, base_branch, author_login,
 			state, review_state, checks_state, mergeable_state, review_count, pending_review_count, required_reviews, comment_count,
 			unresolved_review_threads, checks_total, checks_passing, additions, deletions,
-			created_at, merged_at, closed_at, last_synced_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, merged_at, closed_at, last_synced_at, detached_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		tp.ID, tp.WorkspaceID, tp.TaskID, tp.RepositoryID, tp.Owner, tp.Repo, tp.PRNumber, tp.PRURL, tp.PRTitle, tp.HeadBranch, tp.BaseBranch, tp.AuthorLogin,
 		tp.State, tp.ReviewState, tp.ChecksState, tp.MergeableState, tp.ReviewCount, tp.PendingReviewCount, tp.RequiredReviews, tp.CommentCount,
 		tp.UnresolvedReviewThreads, tp.ChecksTotal, tp.ChecksPassing, tp.Additions, tp.Deletions,
-		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.UpdatedAt); err != nil {
+		tp.CreatedAt, tp.MergedAt, tp.ClosedAt, tp.LastSyncedAt, tp.DetachedAt, tp.UpdatedAt); err != nil {
 		return err
 	}
 	return tx.Commit()

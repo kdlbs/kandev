@@ -158,6 +158,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | archived; superseded by embedded-vscode-executor-availability |
 | [ws-connectivity-warning](ui/ws-connectivity-warning.md) | approved |
+| [context-compaction-count](context-compaction-count/spec.md) | approved |
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI

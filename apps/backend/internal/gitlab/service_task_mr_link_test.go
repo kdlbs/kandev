@@ -214,6 +214,54 @@ func TestAssociateExistingMRByURLCreatesIdempotentWorkspaceScopedLink(t *testing
 	}
 }
 
+// TestAssociateExistingMRByURLForSessionEnsuresWatch pins the gap the
+// gateway wiring used to have: the Create-MR action and manual URL linking
+// triggered from a session both have a concrete sessionID available, and
+// AssociateExistingMRByURLForSession must use it to create a refresh watch
+// immediately — mirroring GitHub's AssociatePRByURLForWorkspace — instead of
+// leaving the MR unwatched until a later push happens to trigger
+// ensureWatchForLinkedMR.
+func TestAssociateExistingMRByURLForSessionEnsuresWatch(t *testing.T) {
+	const host = "https://gitlab.acme.test"
+	svc, store, client := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	setTaskMRRepositoryIdentity(t, store, "repo-1", host, "group/project")
+	client.SeedMR("group/project", &MR{
+		IID: 9, Title: "MR title", WebURL: host + "/group/project/-/merge_requests/9",
+		State: "opened", HeadBranch: "feature", BaseBranch: "main", CreatedAt: time.Now().UTC(),
+	})
+
+	association, err := svc.AssociateExistingMRByURLForSession(
+		context.Background(), "ws-1", "session-1", "task-1", "repo-1",
+		host+"/group/project/-/merge_requests/9",
+	)
+	if err != nil {
+		t.Fatalf("AssociateExistingMRByURLForSession: %v", err)
+	}
+	watch, err := store.GetMRWatchBySessionRepoAndBranch(context.Background(), "session-1", "repo-1", "feature")
+	if err != nil {
+		t.Fatalf("GetMRWatchBySessionRepoAndBranch: %v", err)
+	}
+	if watch == nil {
+		t.Fatal("expected a refresh watch to be created for the session")
+	}
+	if watch.MRIID != 9 || watch.ProjectPath != "group/project" {
+		t.Fatalf("watch = %+v, want mr_iid=9 project_path=group/project", watch)
+	}
+	if association.MRIID != 9 {
+		t.Fatalf("association mr_iid = %d, want 9", association.MRIID)
+	}
+
+	// Calling it again for the same session/branch must not error or
+	// duplicate the watch (EnsureMRWatch is idempotent).
+	if _, err := svc.AssociateExistingMRByURLForSession(
+		context.Background(), "ws-1", "session-1", "task-1", "repo-1",
+		host+"/group/project/-/merge_requests/9",
+	); err != nil {
+		t.Fatalf("second AssociateExistingMRByURLForSession: %v", err)
+	}
+}
+
 func TestAssociateExistingMRByURLAcceptsMRURLWithExplicitDefaultPort(t *testing.T) {
 	// The workspace's configured GitLab host and the incoming MR URL should
 	// match even when only one side spells out the scheme's implicit default

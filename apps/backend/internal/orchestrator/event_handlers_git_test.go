@@ -333,7 +333,7 @@ func TestContextWindowResetDropsStalePersistence(t *testing.T) {
 	staleGeneration := svc.captureContextWindowGeneration("s1")
 	require.NoError(t, svc.clearContextWindowForReset(ctx, "s1"))
 
-	persisted, err := svc.persistContextWindowUpdate(ctx, "s1", staleGeneration, map[string]interface{}{
+	persisted, _, err := svc.persistContextWindowUpdate(ctx, "s1", staleGeneration, map[string]interface{}{
 		"size": int64(200000), "used": int64(195000),
 	})
 	require.NoError(t, err)
@@ -342,6 +342,116 @@ func TestContextWindowResetDropsStalePersistence(t *testing.T) {
 	updated, err := repo.GetTaskSession(ctx, "s1")
 	require.NoError(t, err)
 	require.Nil(t, updated.Metadata["context_window"])
+}
+
+func TestContextWindowUpdatesPersistInArrivalOrder(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyContextWindow, map[string]interface{}{
+		"size": int64(200000), "used": int64(120000),
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleContextWindowUpdated(ctx, watcher.ContextWindowData{
+		TaskID:                 "t1",
+		TaskSessionID:          "s1",
+		ContextWindowSize:      200000,
+		ContextWindowUsed:      80000,
+		ContextWindowRemaining: 120000,
+	})
+	svc.handleContextWindowUpdated(ctx, watcher.ContextWindowData{
+		TaskID:                 "t1",
+		TaskSessionID:          "s1",
+		ContextWindowSize:      200000,
+		ContextWindowUsed:      120000,
+		ContextWindowRemaining: 80000,
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	window, ok := updated.Metadata[models.SessionMetaKeyContextWindow].(map[string]interface{})
+	require.True(t, ok)
+	require.EqualValues(t, 120000, window["used"])
+	require.Equal(t, float64(1), updated.Metadata[models.SessionMetaKeyContextCompactionCount])
+}
+
+func TestContextWindowDecreasePersistsCompactionCount(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", "context_window", map[string]interface{}{
+		"size": int64(200000), "used": int64(120000),
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	generation := svc.captureContextWindowGeneration("s1")
+	persisted, _, err := svc.persistContextWindowUpdate(ctx, "s1", generation, map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	require.NoError(t, err)
+	require.True(t, persisted)
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, float64(1), updated.Metadata["context_compaction_count"])
+}
+
+func TestContextWindowCompactionCountSurvivesResetAndServiceRestart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyContextWindow, map[string]interface{}{
+		"size": int64(200000), "used": int64(120000),
+	}))
+
+	first := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	generation := first.captureContextWindowGeneration("s1")
+	_, _, err := first.persistContextWindowUpdate(ctx, "s1", generation, map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, first.clearContextWindowForReset(ctx, "s1"))
+	cleared, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Nil(t, cleared.Metadata[models.SessionMetaKeyContextWindow])
+	require.Equal(t, float64(1), cleared.Metadata[models.SessionMetaKeyContextCompactionCount])
+
+	second := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	secondGeneration := second.captureContextWindowGeneration("s1")
+	_, count, err := second.persistContextWindowUpdate(ctx, "s1", secondGeneration, map[string]interface{}{
+		"size": int64(200000), "used": int64(40000),
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), count)
+}
+
+func TestContextWindowCompactionCountIsPublishedWithWindowUpdate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyContextWindow, map[string]interface{}{
+		"size": int64(200000), "used": int64(120000),
+	}))
+	eventBus := &recordingEventBus{}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.eventBus = eventBus
+	generation := svc.captureContextWindowGeneration("s1")
+
+	persisted, err := svc.persistAndPublishContextWindowUpdate(ctx, "t1", "s1", generation, map[string]interface{}{
+		"size": int64(200000), "used": int64(80000),
+	})
+	require.NoError(t, err)
+	require.True(t, persisted)
+	require.Len(t, eventBus.events, 1)
+
+	payload, ok := eventBus.events[0].event.Data.(map[string]interface{})
+	require.True(t, ok)
+	metadata, ok := payload["metadata"].(map[string]interface{})
+	require.True(t, ok)
+	require.Equal(t, int64(1), metadata[models.SessionMetaKeyContextCompactionCount])
+	require.NotNil(t, metadata[models.SessionMetaKeyContextWindow])
 }
 
 func TestContextWindowResetDropsStaleBroadcast(t *testing.T) {

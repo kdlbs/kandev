@@ -82,6 +82,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		GitHubSavedPresets:              req.GitHubSavedPresets.ServiceValue(),
 		GitHubDefaultQueryPresets:       req.GitHubDefaultQueryPresets.ServiceValue(),
 		GitLabSavedPresets:              req.GitLabSavedPresets.ServiceValue(),
+		AzureDevOpsBrowsePreferences:    req.AzureDevOpsBrowsePreferences.ServiceValue(),
 		DefaultUtilityAgentID:           req.DefaultUtilityAgentID,
 		DefaultUtilityModel:             req.DefaultUtilityModel,
 		KeyboardShortcuts:               req.KeyboardShortcuts,

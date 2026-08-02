@@ -117,6 +117,12 @@ const (
 	RepositoryDeleted = "repository.deleted"
 )
 
+// Event types emitted by Azure DevOps watcher polling.
+const (
+	AzureDevOpsWorkItemWatchMatch    = "azure_devops.work_item_watch.match"
+	AzureDevOpsPullRequestWatchMatch = "azure_devops.pull_request_watch.match"
+)
+
 // Event types for repository scripts
 const (
 	RepositoryScriptCreated = "repository.script.created"
@@ -270,6 +276,7 @@ const (
 	GitHubNewReviewPR          = "github.new_pr_to_review"        // New PR found needing review
 	GitHubNewIssue             = "github.new_issue"               // New issue found matching issue watch
 	GitHubTaskPRUpdated        = "github.task_pr.updated"         // TaskPR record updated (for UI refresh)
+	GitHubTaskPRDeleted        = "github.task_pr.deleted"         // TaskPR association detached (for UI refresh)
 	GitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Task CI automation options updated
 	GitHubWatchEvent           = "github.watch.event"             // Watch created/deleted
 	GitHubRateLimitUpdated     = "github.rate_limit.updated"      // GitHub API rate-limit snapshot changed

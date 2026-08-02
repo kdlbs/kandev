@@ -62,6 +62,7 @@ export function buildStateOverrides(m: DefaultState) {
     taskCIAutomation: m.taskCIAutomation,
     taskMRs: m.taskMRs,
     azureDevOpsTaskPullRequests: m.azureDevOpsTaskPullRequests,
+    azureDevOpsTaskWorkItems: m.azureDevOpsTaskWorkItems,
     gitlabReviewWatches: m.gitlabReviewWatches,
     gitlabIssueWatches: m.gitlabIssueWatches,
     gitlabMRWatches: m.gitlabMRWatches,

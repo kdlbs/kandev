@@ -822,7 +822,7 @@ func (s *Service) PersistSessionRuntimeModel(ctx context.Context, sessionID, mod
 	}); err != nil {
 		return err
 	}
-	return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+	return s.resetContextWindow(ctx, sessionID)
 }
 
 // PersistSessionRuntimeMode records the session's selected ACP permission mode.
@@ -855,7 +855,7 @@ func (s *Service) PersistSessionRuntimeConfigOption(ctx context.Context, session
 		return err
 	}
 	if configID == runtimeModelConfigID {
-		return s.sessions.SetSessionMetadataKey(ctx, sessionID, "context_window", nil)
+		return s.resetContextWindow(ctx, sessionID)
 	}
 	return nil
 }

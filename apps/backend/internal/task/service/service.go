@@ -243,6 +243,7 @@ type Service struct {
 	discoveryConfig             RepositoryDiscoveryConfig
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
+	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
 	branchMaterializer          BranchMaterializer
 	workspaceSourceMaterializer WorkspaceSourceMaterializer
@@ -368,6 +369,20 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetContextWindowResetter wires the guarded context-window reset callback
+// owned by the orchestrator. It is optional for isolated task-service users;
+// those callers fall back to clearing the session metadata directly.
+func (s *Service) SetContextWindowResetter(resetter func(context.Context, string) error) {
+	s.contextWindowResetter = resetter
+}
+
+func (s *Service) resetContextWindow(ctx context.Context, sessionID string) error {
+	if s.contextWindowResetter != nil {
+		return s.contextWindowResetter(ctx, sessionID)
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
 }
 
 func (s *Service) SetTaskResourceCleanupActivityGate(gate TaskResourceCleanupActivityGate) {

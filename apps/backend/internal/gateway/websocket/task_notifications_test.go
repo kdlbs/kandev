@@ -123,6 +123,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 		events.TaskSessionStateChanged,
 		events.TaskSessionActivityChanged,
 		events.GitHubTaskPRUpdated,
+		events.GitHubTaskPRDeleted,
 		events.GitLabTaskMRUpdated,
 	} {
 		subject := subject

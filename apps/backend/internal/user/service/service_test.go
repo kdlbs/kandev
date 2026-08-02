@@ -1316,6 +1316,46 @@ func TestApplyUserPreferenceBlobsValidation(t *testing.T) {
 			t.Fatalf("expected explicit null to clear blob, got %s", string(settings.JiraSavedViews))
 		}
 	})
+
+}
+
+func TestAzureDevOpsBrowsePreferencesArePatched(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	preferences := json.RawMessage(`{"workspace-a":{"mode":"board","projectId":"project-a"}}`)
+	updatedSettings := &models.UserSettings{
+		UserID:                       store.DefaultUserID,
+		AzureDevOpsBrowsePreferences: preferences,
+	}
+	repo := &recordingUserRepository{
+		getSettings:        &models.UserSettings{UserID: store.DefaultUserID},
+		preservingSettings: updatedSettings,
+	}
+	eventBus := &recordingEventBus{}
+	settings, err := NewService(repo, eventBus, log).UpdateUserSettings(context.Background(), &UpdateUserSettingsRequest{
+		AzureDevOpsBrowsePreferences: rawPatch(preferences),
+	})
+	if err != nil {
+		t.Fatalf("update Azure DevOps preferences: %v", err)
+	}
+	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
+	}
+	if repo.preservingInput == nil || string(repo.preservingInput.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("persisted AzureDevOpsBrowsePreferences = %+v, want %s", repo.preservingInput, preferences)
+	}
+	if len(eventBus.publishedEvents) != 1 {
+		t.Fatalf("settings events = %d, want 1", len(eventBus.publishedEvents))
+	}
+	eventData, ok := eventBus.publishedEvents[0].Data.(map[string]interface{})
+	if !ok {
+		t.Fatalf("settings event data = %T, want map", eventBus.publishedEvents[0].Data)
+	}
+	if got, ok := eventData["azure_devops_browse_preferences"].(json.RawMessage); !ok || string(got) != string(preferences) {
+		t.Fatalf("event AzureDevOpsBrowsePreferences = %s, want %s", got, preferences)
+	}
 }
 
 type recordingUserRepository struct {
@@ -1331,6 +1371,7 @@ type recordingUserRepository struct {
 	getSettings                               *models.UserSettings
 	getErr                                    error
 	preservingSettings                        *models.UserSettings
+	preservingInput                           *models.UserSettings
 	preservingPatch                           *models.TaskCreateLastUsed
 	preservingErr                             error
 	closeCalls                                int
@@ -1359,10 +1400,12 @@ func (r *recordingUserRepository) GetUserSettings(context.Context, string) (*mod
 
 func (r *recordingUserRepository) UpsertUserSettingsPreservingTaskCreateLastUsed(
 	_ context.Context,
-	_ *models.UserSettings,
+	settings *models.UserSettings,
 	patch *models.TaskCreateLastUsed,
 ) (*models.UserSettings, error) {
 	r.upsertUserSettingsPreservingLastUsedCalls++
+	settingsCopy := *settings
+	r.preservingInput = &settingsCopy
 	if patch != nil {
 		patchCopy := *patch
 		r.preservingPatch = &patchCopy

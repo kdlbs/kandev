@@ -547,6 +547,7 @@ func startAgentInfrastructure(
 	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
 		orchestratorSvc.SetGitLabService(services.GitLab)
+		orchestratorSvc.SetGitLabMRLinkService(services.GitLab)
 		orchestratorSvc.SetGitLabCredentialResolver(services.GitLab)
 		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
@@ -559,9 +560,11 @@ func startAgentInfrastructure(
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 
-	// Azure DevOps v1 owns only connection-health polling. PR summaries are
-	// refreshed explicitly through their task association routes.
+	// Azure DevOps owns connection-health and work-item/pull-request watcher
+	// polling. Watch matches flow through the shared orchestrator coordinator.
 	if services.AzureDevOps != nil {
+		orchestratorSvc.SetAzureDevOpsService(services.AzureDevOps)
+		services.AzureDevOps.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
 		if lifecycleErr != nil {
 			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))

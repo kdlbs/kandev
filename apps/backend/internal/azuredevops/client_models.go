@@ -46,6 +46,7 @@ type WorkItem struct {
 	Project     string         `json:"project,omitempty"`
 	AreaPath    string         `json:"areaPath,omitempty"`
 	AssignedTo  string         `json:"assignedTo,omitempty"`
+	Tags        []string       `json:"tags,omitempty"`
 	WebURL      string         `json:"webUrl,omitempty"`
 	APIURL      string         `json:"apiUrl,omitempty"`
 	Fields      map[string]any `json:"fields,omitempty"`
@@ -54,6 +55,38 @@ type WorkItem struct {
 type WorkItemSearchResult struct {
 	Items []WorkItem `json:"items"`
 	Count int        `json:"count"`
+}
+
+// PlanningField is one supported Azure planning value normalized for the
+// work-item detail surface. Values stay strings because Azure returns either
+// numeric or string values depending on the process template.
+type PlanningField struct {
+	ReferenceName string `json:"referenceName"`
+	Label         string `json:"label"`
+	Value         string `json:"value"`
+}
+
+// WorkItemDetail is the full read-only projection used by the Azure work-item
+// detail surface. WorkItem remains embedded so existing card fields retain
+// their response shape.
+type WorkItemDetail struct {
+	WorkItem
+	PlanningFields []PlanningField `json:"planningFields"`
+}
+
+// WorkItemComment is the safe subset of an Azure Boards discussion comment.
+type WorkItemComment struct {
+	ID          int        `json:"id"`
+	Content     string     `json:"content"`
+	Author      Identity   `json:"author"`
+	PublishedAt *time.Time `json:"publishedAt,omitempty"`
+	UpdatedAt   *time.Time `json:"updatedAt,omitempty"`
+}
+
+// WorkItemCommentPage carries Azure's opaque continuation token verbatim.
+type WorkItemCommentPage struct {
+	Comments          []WorkItemComment `json:"comments"`
+	ContinuationToken string            `json:"continuationToken,omitempty"`
 }
 
 type PullRequestFilter struct {
