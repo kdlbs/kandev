@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -100,6 +102,39 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		zap.String("author_type", string(message.AuthorType)))
 
 	return message, nil
+}
+
+// CreateMessageIdempotent persists a caller-owned message ID and returns the
+// existing row when the request is replayed. A client can lose the response
+// after the database commit, so retrying must not create a second user turn.
+// The handler performs the fast preflight before session-state side effects;
+// this method also closes the concurrent two-request race at the repository
+// primary-key boundary.
+func (s *Service) CreateMessageIdempotent(ctx context.Context, id string, req *CreateMessageRequest) (*models.Message, error) {
+	if id == "" {
+		return nil, errors.New("message id is required for idempotent creation")
+	}
+
+	existing, err := s.messages.GetMessage(ctx, id)
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("check existing message: %w", err)
+	}
+
+	message, err := s.CreateMessageWithID(ctx, id, req)
+	if err == nil {
+		return message, nil
+	}
+
+	// Another request may have won the insert while this request was building
+	// its turn. Read the committed row and treat that duplicate as success.
+	existing, lookupErr := s.messages.GetMessage(ctx, id)
+	if lookupErr == nil && existing != nil {
+		return existing, nil
+	}
+	return nil, err
 }
 
 // CreateMessageWithID creates a new message with a pre-generated ID.

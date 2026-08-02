@@ -127,6 +127,16 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
     ],
   },
   { name: "settings — task actions", url: "/settings/general/task-actions" },
+  // NOT YET: "settings — integrations github". The page's own copy is fully
+  // migrated (verified by running this oracle against it — every GitHub-owned
+  // string renders accented), but the route expands the Workspaces > Integrations
+  // branch of the settings nav, and `workspaces-group.tsx` / `settings-tree.tsx`
+  // are not migrated: "Workspaces", "Integrations", "Automations", "Executors",
+  // "Voice Mode", "Utility Agents", "External MCP", "Plugins", "System" and
+  // "Toggle theme" all still render plain English there. The /settings/general/*
+  // screens above pass because their expanded branch is `general-group.tsx`,
+  // which is migrated. Add this entry in the PR that migrates the settings nav —
+  // allowlisting those nav labels here would hide real misses instead.
 ];
 
 /**

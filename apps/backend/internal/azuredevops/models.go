@@ -89,6 +89,27 @@ type TaskPRsResponse struct {
 	TaskPRs map[string][]*TaskPR `json:"taskPrs"`
 }
 
+// TaskWorkItem is the persisted Azure Boards summary associated with a Kandev
+// task. The provider remains authoritative; this record only supports browse
+// and quick-action linkage.
+type TaskWorkItem struct {
+	ID          string    `json:"id" db:"id"`
+	TaskID      string    `json:"taskId" db:"task_id"`
+	WorkspaceID string    `json:"workspaceId" db:"workspace_id"`
+	ProjectID   string    `json:"projectId" db:"project_id"`
+	WorkItemID  int       `json:"workItemId" db:"work_item_id"`
+	WorkItemURL string    `json:"workItemUrl" db:"work_item_url"`
+	Title       string    `json:"title" db:"title"`
+	State       string    `json:"state" db:"state"`
+	Type        string    `json:"type" db:"type"`
+	CreatedAt   time.Time `json:"createdAt" db:"created_at"`
+	UpdatedAt   time.Time `json:"updatedAt" db:"updated_at"`
+}
+
+type TaskWorkItemsResponse struct {
+	TaskWorkItems map[string][]*TaskWorkItem `json:"taskWorkItems"`
+}
+
 // SecretKeyForWorkspace returns the workspace-isolated encrypted PAT key.
 func SecretKeyForWorkspace(workspaceID string) string {
 	return cloneauth.AzureDevOpsPATKey(workspaceID)

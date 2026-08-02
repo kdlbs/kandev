@@ -205,6 +205,7 @@ export type TaskCreateDialogFooterProps = {
   isSessionMode: boolean;
   isCreateMode: boolean;
   isEditMode: boolean;
+  autoTitle?: boolean;
   isTaskStarted: boolean;
   isCreatingSession: boolean;
   isCreatingTask: boolean;
@@ -252,7 +253,8 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
   );
   return (
     props.isCreatingTask ||
-    !props.hasTitle ||
+    (!props.autoTitle && !props.hasTitle) ||
+    (props.autoTitle && !props.hasDescription) ||
     !props.hasRepositorySelection ||
     !props.hasAllBranches ||
     missingCtx ||
@@ -263,6 +265,7 @@ function computeBaseDisabled(props: TaskCreateDialogFooterProps) {
 export type ButtonKind = "update" | "start-task" | "default";
 
 export const REASON_TITLE = "Add a task title";
+export const REASON_PROMPT = "Add a task prompt";
 export const REASON_REPO = "Select a repository";
 export const REASON_BRANCH = "Select a branch";
 export const REASON_WORKSPACE = "Select a workspace";
@@ -276,7 +279,8 @@ function noCompatibleAgentReason(executorProfileName: string | null): string {
 }
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
-  if (!props.hasTitle) return REASON_TITLE;
+  if (props.autoTitle && !props.hasDescription) return REASON_PROMPT;
+  if (!props.autoTitle && !props.hasTitle) return REASON_TITLE;
   if (!props.hasRepositorySelection) return REASON_REPO;
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;

@@ -1,0 +1,220 @@
+package github
+
+import (
+	"context"
+	"reflect"
+	"testing"
+	"time"
+)
+
+func TestServiceDetachTaskPRAuthorizesWorkspaceAndPublishesRemoval(t *testing.T) {
+	svc, store, eventBus := setupSyncTest(t)
+	contract, ok := any(svc).(interface {
+		DetachTaskPR(context.Context, string, string) (*TaskPR, error)
+	})
+	if !ok {
+		t.Fatal("Service does not implement DetachTaskPR")
+	}
+	ctx := context.Background()
+	first := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 1, PRURL: "https://github.com/acme/demo/pull/1", PRTitle: "old", HeadBranch: "old",
+		BaseBranch: "main", State: "merged", CreatedAt: time.Now().UTC(),
+	}
+	second := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 2, PRURL: "https://github.com/acme/demo/pull/2", PRTitle: "new", HeadBranch: "new",
+		BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC().Add(time.Second),
+	}
+	if err := store.CreateTaskPR(ctx, first); err != nil {
+		t.Fatalf("create first PR: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, second); err != nil {
+		t.Fatalf("create second PR: %v", err)
+	}
+	var authorizedWorkspace string
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		authorizedWorkspace = workspaceID
+		return nil
+	})
+
+	detached, err := contract.DetachTaskPR(ctx, "ws-1", first.ID)
+	if err != nil {
+		t.Fatalf("detach task PR: %v", err)
+	}
+	if detached == nil || detached.ID != first.ID || detached.DetachedAt == nil {
+		t.Fatalf("detached = %+v, want stamped first row", detached)
+	}
+	if authorizedWorkspace != "ws-1" {
+		t.Fatalf("authorized workspace = %q, want ws-1", authorizedWorkspace)
+	}
+	active, err := store.ListTaskPRsByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list active task PRs: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != second.ID {
+		t.Fatalf("active task PRs = %+v, want sibling only", active)
+	}
+	if eventBus.publishedCount() != 1 {
+		t.Fatalf("published events = %d, want one deletion event", eventBus.publishedCount())
+	}
+	eventBus.mu.Lock()
+	event := eventBus.events[0]
+	eventBus.mu.Unlock()
+	if event.Type != "github.task_pr.deleted" {
+		t.Fatalf("event type = %q, want github.task_pr.deleted", event.Type)
+	}
+	payload := reflect.ValueOf(event.Data)
+	if payload.Kind() == reflect.Pointer {
+		payload = payload.Elem()
+	}
+	if !payload.IsValid() || payload.FieldByName("AssociationID").String() != first.ID || payload.FieldByName("TaskID").String() != first.TaskID || payload.FieldByName("WorkspaceID").String() != first.WorkspaceID {
+		t.Fatalf("event payload = %#v, want first association identity", event.Data)
+	}
+}
+
+func TestServiceDetachTaskPRFailsClosedForWorkspaceMismatch(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	contract, ok := any(svc).(interface {
+		DetachTaskPR(context.Context, string, string) (*TaskPR, error)
+	})
+	if !ok {
+		t.Fatal("Service does not implement DetachTaskPR")
+	}
+	pr := &TaskPR{WorkspaceID: "ws-1", TaskID: "task-1", Owner: "acme", Repo: "demo", PRNumber: 1, CreatedAt: time.Now().UTC()}
+	if err := store.CreateTaskPR(context.Background(), pr); err != nil {
+		t.Fatalf("create PR: %v", err)
+	}
+
+	_, err := contract.DetachTaskPR(context.Background(), "ws-other", pr.ID)
+	if err == nil || err.Error() != "github task PR not found" {
+		t.Fatalf("error = %v, want github task PR not found", err)
+	}
+	active, err := store.ListTaskPRsByTask(context.Background(), pr.TaskID)
+	if err != nil {
+		t.Fatalf("list task PRs: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != pr.ID {
+		t.Fatalf("active task PRs = %+v, want association unchanged", active)
+	}
+}
+
+func TestServiceDetachTaskPRAllowsLegacyEmptyWorkspace(t *testing.T) {
+	svc, store, eventBus := setupSyncTest(t)
+	ctx := context.Background()
+	pr := &TaskPR{
+		TaskID: "task-legacy", Owner: "acme", Repo: "demo", PRNumber: 7,
+		PRURL: "https://github.com/acme/demo/pull/7", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("create legacy PR: %v", err)
+	}
+	var authorizedWorkspace string
+	svc.SetWorkspaceAuthorizer(func(_ context.Context, workspaceID string) error {
+		authorizedWorkspace = workspaceID
+		return nil
+	})
+
+	detached, err := svc.DetachTaskPR(ctx, "ws-legacy", pr.ID)
+	if err != nil {
+		t.Fatalf("detach legacy PR: %v", err)
+	}
+	if detached == nil || detached.DetachedAt == nil {
+		t.Fatalf("detached legacy PR = %+v, want stamped row", detached)
+	}
+	if authorizedWorkspace != "ws-legacy" {
+		t.Fatalf("authorized workspace = %q, want ws-legacy", authorizedWorkspace)
+	}
+	if eventBus.publishedCount() != 1 {
+		t.Fatalf("published events = %d, want one deletion event", eventBus.publishedCount())
+	}
+	eventBus.mu.Lock()
+	event := eventBus.events[0]
+	eventBus.mu.Unlock()
+	payload := reflect.ValueOf(event.Data)
+	if payload.Kind() == reflect.Pointer {
+		payload = payload.Elem()
+	}
+	if payload.FieldByName("WorkspaceID").String() != "ws-legacy" {
+		t.Fatalf("event workspace = %q, want ws-legacy", payload.FieldByName("WorkspaceID").String())
+	}
+}
+
+func TestAssociatePRWithTaskDoesNotResurrectDetachedAssociation(t *testing.T) {
+	svc, store, _ := setupSyncTest(t)
+	ctx := context.Background()
+	row := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 3, PRURL: "https://github.com/acme/demo/pull/3", PRTitle: "old", HeadBranch: "old",
+		BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, row); err != nil {
+		t.Fatalf("create PR: %v", err)
+	}
+	if _, _, err := store.DetachTaskPR(ctx, row.ID); err != nil {
+		t.Fatalf("detach PR: %v", err)
+	}
+
+	associated, err := svc.AssociatePRWithTask(ctx, row.TaskID, row.RepositoryID, &PR{
+		Number: 3, RepoOwner: "acme", RepoName: "demo", HTMLURL: row.PRURL, Title: "old", HeadBranch: "old", BaseBranch: "main", State: "open",
+	})
+	if err != nil {
+		t.Fatalf("associate PR: %v", err)
+	}
+	if associated == nil || associated.DetachedAt == nil {
+		t.Fatalf("associated = %+v, want detached tombstone to remain", associated)
+	}
+	active, err := store.ListTaskPRsByTask(ctx, row.TaskID)
+	if err != nil {
+		t.Fatalf("list active PRs: %v", err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active PRs = %+v, want no resurrected row", active)
+	}
+}
+
+func TestAssociatePRWithTaskExplicitLinkRestoresDetachedAssociation(t *testing.T) {
+	svc, store, eventBus := setupSyncTest(t)
+	ctx := context.Background()
+	row := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 4, PRURL: "https://github.com/acme/demo/pull/4", PRTitle: "old", HeadBranch: "old",
+		BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, row); err != nil {
+		t.Fatalf("create PR: %v", err)
+	}
+	if _, _, err := store.DetachTaskPR(ctx, row.ID); err != nil {
+		t.Fatalf("detach PR: %v", err)
+	}
+
+	freshPR := &PR{
+		Number: 4, RepoOwner: "acme", RepoName: "demo", HTMLURL: "https://github.com/acme/demo/pull/4",
+		Title: "fresh title", HeadBranch: "fresh-branch", BaseBranch: "develop", AuthorLogin: "bob",
+		State: "closed", MergeableState: "dirty", Additions: 8, Deletions: 3,
+	}
+	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, freshPR, true)
+	if err != nil {
+		t.Fatalf("explicitly associate PR: %v", err)
+	}
+	if associated == nil || associated.DetachedAt != nil {
+		t.Fatalf("associated = %+v, want active restored row", associated)
+	}
+	if associated.PRURL != freshPR.HTMLURL || associated.PRTitle != freshPR.Title ||
+		associated.HeadBranch != freshPR.HeadBranch || associated.BaseBranch != freshPR.BaseBranch ||
+		associated.AuthorLogin != freshPR.AuthorLogin || associated.State != freshPR.State ||
+		associated.MergeableState != freshPR.MergeableState || associated.Additions != freshPR.Additions ||
+		associated.Deletions != freshPR.Deletions {
+		t.Fatalf("restored PR = %+v, want fresh GitHub data", associated)
+	}
+	active, err := store.ListTaskPRsByTask(ctx, row.TaskID)
+	if err != nil {
+		t.Fatalf("list active PRs: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != row.ID {
+		t.Fatalf("active PRs = %+v, want restored row", active)
+	}
+	if eventBus.publishedCount() != 1 {
+		t.Fatalf("published events = %d, want one restoration update", eventBus.publishedCount())
+	}
+}

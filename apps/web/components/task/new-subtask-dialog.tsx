@@ -345,6 +345,7 @@ type SubtaskFormProps = {
   /** Whether the parent dialog is open — required for the GitHub URL effect. */
   isOpen: boolean;
   onClose: () => void;
+  autoTitle: boolean;
 };
 
 // eslint-disable-next-line max-lines-per-function
@@ -363,6 +364,7 @@ function NewSubtaskForm({
   availableRepositories,
   isOpen,
   onClose,
+  autoTitle,
 }: SubtaskFormProps) {
   const { toast } = useToast();
   const isUtilityConfigured = useIsUtilityConfigured();
@@ -417,6 +419,7 @@ function NewSubtaskForm({
     attachments: promptZone.attachments.attachments,
     resolvePrompt: promptZone.resolvePrompt,
     title,
+    autoTitle,
     setIsCreating,
     onClose,
     workspaceMode,
@@ -426,6 +429,7 @@ function NewSubtaskForm({
     handlers,
     title,
     setTitle,
+    autoTitle,
     workspaceId,
     availableRepositories,
     parentRepositoryId,
@@ -497,6 +501,7 @@ export function NewSubtaskDialog({
   const siblingCount = useAppStore(
     (s) => s.kanban.tasks.filter((t) => t.parentTaskId === parentTaskId).length,
   );
+  const autoTitle = useAppStore((s) => s.userSettings.agentGeneratedTaskTitles);
 
   const defaultTitle = useMemo(
     () => `${parentTaskTitle} / Subtask ${siblingCount + 1}`,
@@ -530,6 +535,7 @@ export function NewSubtaskDialog({
           availableRepositories={availableRepositories}
           isOpen={open}
           onClose={() => onOpenChange(false)}
+          autoTitle={autoTitle}
         />
       </DialogContent>
     </Dialog>

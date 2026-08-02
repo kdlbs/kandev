@@ -1,15 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import type { JiraTicket } from "@/lib/types/jira";
-import type { LinearIssue } from "@/lib/types/linear";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
-import type { Task, Repository } from "@/lib/types/http";
+import type { Task } from "@/lib/types/http";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
-import { SHORTCUTS } from "@/lib/keyboard/constants";
-import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
-import { useKeyboardShortcutHandler } from "@/hooks/use-keyboard-shortcut";
-import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { TaskCreateDialogFooter } from "@/components/task-create-dialog-footer";
 import { DiscardLocalChangesDialog } from "@/components/discard-local-changes-dialog";
 import { DialogHeaderContent } from "@/components/task-create-dialog-header";
@@ -23,21 +17,9 @@ import {
   ExecutorProfileSelector,
   InlineTaskName,
 } from "@/components/task-create-dialog-selectors";
-import { useTaskSubmitHandlers } from "@/components/task-create-dialog-submit";
 import { CreateModeSelectors } from "@/components/task-create-dialog-create-mode-selectors";
 import { RepoChipsRow } from "@/components/task-create-dialog-repo-chips";
-import { useToast } from "@/components/toast-provider";
-import {
-  useDialogFormState,
-  useTaskCreateDialogEffects,
-  useDialogHandlers,
-  useLockedFieldSync,
-  useSessionRepoName,
-  useTaskCreateDialogData,
-  computeIsTaskStarted,
-  type DialogFormState,
-  type TaskCreateDialogInitialValues,
-} from "@/components/task-create-dialog-state";
+import type { TaskCreateDialogInitialValues } from "@/components/task-create-dialog-state";
 import type { DialogFormBodyProps } from "@/components/task-create-dialog-types";
 import {
   buildDialogFooterProps,
@@ -47,11 +29,7 @@ import { resetTaskCreateLastUsedSync } from "@/components/task-create-dialog-han
 import { useAppStore } from "@/components/state-provider";
 import { TaskCreateDialogPopoverContainerProvider } from "@/hooks/use-task-create-dialog-popover-container";
 import { shouldShowTaskTitleField } from "@/components/task-create-dialog-helpers";
-import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
-import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-dialog-workflow-context";
-import { truncateRemoteTaskTitle } from "@/lib/task-title";
-
-const PROMPT_INSERTED_MESSAGE = "Enhanced prompt inserted.";
+import { useTaskCreateDialogSetup } from "@/components/task-create-dialog-setup";
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -114,6 +92,7 @@ export interface TaskCreateDialogProps {
 function CreateModeBody(props: DialogFormBodyProps) {
   const {
     isCreateMode,
+    autoTitle,
     isEditMode,
     isTaskStarted,
     workspaceId,
@@ -141,8 +120,9 @@ function CreateModeBody(props: DialogFormBodyProps) {
     isLocalExecutor,
     localRepositoryCreation,
   } = props;
-  const showTaskName = shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted);
-  const taskNameAutoFocus = !isEditMode && !fs.useRemote;
+  const showTaskName =
+    shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted) && !autoTitle;
+  const taskNameAutoFocus = !autoTitle && !isEditMode && !fs.useRemote;
   return (
     <>
       <RepoChipsRow
@@ -258,293 +238,6 @@ function DialogFormBody(props: DialogFormBodyProps) {
   );
 }
 
-function useEnhanceForDialog(
-  fs: DialogFormState,
-  taskId: string | null | undefined,
-  open: boolean,
-) {
-  const isConfigured = useIsUtilityConfigured();
-  const { toast } = useToast();
-  const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
-    sessionId: null,
-    taskTitle: fs.taskName,
-  });
-  const applyDescription = useCallback(
-    (value: string) => {
-      const input = fs.descriptionInputRef.current;
-      if (!input) {
-        return false;
-      }
-      input.setValue(value);
-      const applied = input.getValue() === value;
-      if (applied) {
-        fs.setHasDescription(value.trim().length > 0);
-      }
-      return applied;
-    },
-    [fs],
-  );
-  const promptDelivery = usePromptResultDelivery({
-    scopeKey: `task-create:${open}:${fs.openCycle}:${taskId ?? ""}`,
-    getCurrent: () => fs.descriptionInputRef.current?.getValue() ?? null,
-    apply: applyDescription,
-  });
-  const onEnhance = useCallback(() => {
-    const current = fs.descriptionInputRef.current?.getValue() ?? "";
-    if (!current.trim()) return;
-    const generation = promptDelivery.captureScope();
-    void enhancePrompt(current, (result) => {
-      const inserted = promptDelivery.deliver(current, result, generation);
-      if (inserted) {
-        toast({ description: PROMPT_INSERTED_MESSAGE, variant: "success" });
-      }
-      return inserted;
-    });
-  }, [enhancePrompt, fs.descriptionInputRef, promptDelivery, toast]);
-  return {
-    onEnhance,
-    isLoading: isEnhancingPrompt,
-    isConfigured,
-    pendingResult: promptDelivery.pendingResult,
-    onApplyPending: promptDelivery.applyPending,
-    onCopyPending: promptDelivery.copyPending,
-  };
-}
-
-function useJiraImportHandler(fs: DialogFormState, handleTaskNameChange: (value: string) => void) {
-  return useCallback(
-    (ticket: JiraTicket) => {
-      handleTaskNameChange(truncateRemoteTaskTitle(`[${ticket.key}] ${ticket.summary}`));
-      const description = ticket.description?.trim()
-        ? `${ticket.description}\n\n---\nJira: ${ticket.url}`
-        : `Jira: ${ticket.url}`;
-      fs.descriptionInputRef.current?.setValue(description);
-      fs.setHasDescription(true);
-    },
-    [fs, handleTaskNameChange],
-  );
-}
-
-function useLinearImportHandler(
-  fs: DialogFormState,
-  handleTaskNameChange: (value: string) => void,
-) {
-  return useCallback(
-    (issue: LinearIssue) => {
-      handleTaskNameChange(truncateRemoteTaskTitle(`[${issue.identifier}] ${issue.title}`));
-      const description = issue.description?.trim()
-        ? `${issue.description}\n\n---\nLinear: ${issue.url}`
-        : `Linear: ${issue.url}`;
-      fs.descriptionInputRef.current?.setValue(description);
-      fs.setHasDescription(true);
-    },
-    [fs, handleTaskNameChange],
-  );
-}
-
-type SubmitWiringArgs = {
-  props: TaskCreateDialogProps;
-  fs: ReturnType<typeof useDialogFormState>;
-  computed: ReturnType<typeof useTaskCreateDialogData>["computed"];
-  workspaceRepositories: ReturnType<typeof useTaskCreateDialogData>["repositories"];
-  repositoryLocalPath: string;
-  isSessionMode: boolean;
-  isEditMode: boolean;
-  preserveQueuedLastUsedOnClose: () => void;
-};
-
-function useSubmitHandlersWiring({
-  props,
-  fs,
-  computed,
-  workspaceRepositories,
-  repositoryLocalPath,
-  isSessionMode,
-  isEditMode,
-  preserveQueuedLastUsedOnClose,
-}: SubmitWiringArgs) {
-  const { workspaceId, workflowId, editingTask, onSuccess, onCreateSession, onOpenChange } = props;
-  const { parentTaskId } = props;
-  const taskId = props.taskId ?? null;
-  return useTaskSubmitHandlers({
-    isSessionMode,
-    isEditMode,
-    isPassthroughProfile: computed.isPassthroughProfile,
-    taskName: fs.taskName,
-    workspaceId,
-    workflowId,
-    effectiveWorkflowId: computed.effectiveWorkflowId,
-    effectiveDefaultStepId: computed.effectiveDefaultStepId,
-    repositories: fs.repositories,
-    discoveredRepositories: fs.discoveredRepositories,
-    workspaceRepositories,
-    useRemote: fs.useRemote,
-    remoteRepos: fs.remoteRepos,
-    prInfoByUrl: fs.prInfoByUrl,
-    agentProfileId: computed.effectiveAgentProfileId,
-    executorId: fs.executorId,
-    executorProfileId: fs.executorProfileId,
-    editingTask,
-    onSuccess,
-    onCreateSession,
-    onOpenChange,
-    preserveTaskCreateLastUsedOnClose: preserveQueuedLastUsedOnClose,
-    taskId,
-    parentTaskId,
-    descriptionInputRef: fs.descriptionInputRef,
-    setIsCreatingSession: fs.setIsCreatingSession,
-    setIsCreatingTask: fs.setIsCreatingTask,
-    setHasTitle: fs.setHasTitle,
-    setHasDescription: fs.setHasDescription,
-    setTaskName: fs.setTaskName,
-    setRepositories: fs.setRepositories,
-    setRemoteRepos: fs.setRemoteRepos,
-    setAgentProfileId: fs.setAgentProfileId,
-    setExecutorId: fs.setExecutorId,
-    setSelectedWorkflowId: fs.setSelectedWorkflowId,
-    setFetchedSteps: fs.setFetchedSteps,
-    clearDraft: fs.clearDraft,
-    freshBranchEnabled: fs.freshBranchEnabled,
-    isLocalExecutor: computed.isLocalExecutor,
-    repositoryLocalPath,
-    noRepository: fs.noRepository,
-    workspacePath: fs.workspacePath,
-  });
-}
-
-/**
- * Resolves the on-disk path for the (single) selected row, used by the
- * fresh-branch consent flow. Multi-row tasks hide fresh-branch in the UI,
- * so we only need to resolve a path when there is exactly one row.
- */
-function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository[]): string {
-  if (fs.repositories.length !== 1) return "";
-  const row = fs.repositories[0];
-  if (row.localPath) return row.localPath;
-  if (row.repositoryId) {
-    return repositories.find((r) => r.id === row.repositoryId)?.local_path ?? "";
-  }
-  return "";
-}
-
-export function useTaskCreateDialogSetup(
-  props: TaskCreateDialogProps,
-  options: { preserveQueuedLastUsedOnClose?: () => void } = {},
-) {
-  const resolvedProps = useResolvedTaskCreateWorkflowContext(props);
-  const { open, mode = "create", workspaceId, workflowId, defaultStepId } = resolvedProps;
-  const { editingTask, initialValues } = resolvedProps;
-  const isSessionMode = mode === "session";
-  const isEditMode = mode === "edit";
-  const isTaskStarted = computeIsTaskStarted(isEditMode, editingTask);
-  const fs = useDialogFormState(open, workspaceId, workflowId, initialValues);
-  const upsertWorkspaceRepository = useAppStore((state) => state.upsertRepository);
-  const { toast } = useToast();
-  const sessionRepoName = useSessionRepoName(isSessionMode);
-  const {
-    workflows,
-    agentProfiles,
-    executors,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
-    taskCreateLastUsed,
-    userSettingsLoaded,
-    computed,
-  } = useTaskCreateDialogData(open, workspaceId, workflowId, defaultStepId, fs);
-  const repositoryLocalPath = resolveSingleRowLocalPath(fs, repositories);
-  useTaskCreateDialogEffects(fs, {
-    open,
-    workspaceId,
-    workflowId,
-    effectiveWorkflowId: computed.effectiveWorkflowId,
-    repositories,
-    repositoriesLoading,
-    agentProfiles,
-    compatibleAgentProfiles: computed.compatibleAgentProfiles,
-    authLoaded: computed.authLoaded,
-    executors,
-    workspaceDefaults: computed.workspaceDefaults,
-    toast,
-    workflows,
-    isLocalExecutor: computed.isLocalExecutor,
-    lastUsedRepositoryId: taskCreateLastUsed.repositoryId,
-    userSettingsLoaded,
-    lastUsedAgentProfileId: taskCreateLastUsed.agentProfileId,
-    lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
-    lastUsedBranch: taskCreateLastUsed.branch,
-    preserveBranch: initialValues?.checkoutBranch || initialValues?.branch,
-  });
-  useLockedFieldSync(open, workflowId, initialValues, fs);
-  const handlers = useDialogHandlers(fs, repositories, {
-    workspaceId,
-    executors,
-    upsertWorkspaceRepository,
-  });
-  const submitHandlers = useSubmitHandlersWiring({
-    props: resolvedProps,
-    fs,
-    computed,
-    workspaceRepositories: repositories,
-    repositoryLocalPath,
-    isSessionMode,
-    isEditMode,
-    preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
-  });
-  const guardedHandleSubmit = useGuardedSubmit(
-    submitHandlers.handleSubmit,
-    resolvedProps.submitBlockedReason,
-  );
-  const handleKeyDown = useKeyboardShortcutHandler(SHORTCUTS.SUBMIT, (event) => {
-    guardedHandleSubmit(event as unknown as FormEvent);
-  });
-  const freshBranchAvailable =
-    !fs.useRemote && computed.isLocalExecutor && fs.repositories.length === 1;
-  return {
-    fs,
-    isSessionMode,
-    isEditMode,
-    isCreateMode: mode === "create",
-    isTaskStarted,
-    sessionRepoName,
-    workflows,
-    agentProfiles,
-    snapshots,
-    repositories,
-    repositoriesLoading,
-    refreshRepositories,
-    computed,
-    handlers,
-    submitHandlers,
-    handleKeyDown,
-    freshBranchAvailable,
-    taskCreateLastUsed,
-    userSettingsLoaded,
-    guardedHandleSubmit,
-    enhance: useEnhanceForDialog(fs, resolvedProps.taskId, resolvedProps.open),
-    handleJiraImport: useJiraImportHandler(fs, handlers.handleTaskNameChange),
-    handleLinearImport: useLinearImportHandler(fs, handlers.handleTaskNameChange),
-  };
-}
-
-// Buttons are disabled when submitBlockedReason is set, but the form can still
-// be submitted via Enter; gate the submit path here so a wrapper's async
-// bootstrap step always finishes before any task is created.
-function useGuardedSubmit(
-  handleSubmit: (e: FormEvent) => void,
-  blockedReason: string | null | undefined,
-) {
-  const blocked = Boolean(blockedReason);
-  return useCallback(
-    (e: FormEvent) => {
-      if (blocked) e.preventDefault();
-      else handleSubmit(e);
-    },
-    [blocked, handleSubmit],
-  );
-}
-
 // Synthetic submit event used by the voice auto-send path. Calling the form
 // handler directly (instead of `form.requestSubmit()`) matches the chat
 // composer's pattern and avoids the Safari < 16 gap where `requestSubmit` is
@@ -634,7 +327,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
 function PendingDiscardModal({
   pending,
 }: {
-  pending: ReturnType<typeof useTaskSubmitHandlers>["pendingDiscard"];
+  pending: ReturnType<typeof useTaskCreateDialogSetup>["submitHandlers"]["pendingDiscard"];
 }) {
   if (!pending) return null;
   return (

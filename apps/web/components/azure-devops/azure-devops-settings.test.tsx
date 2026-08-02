@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StateProvider } from "@/components/state-provider";
+import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import type { AzureDevOpsConfig } from "@/lib/types/azure-devops";
 
 const mocks = vi.hoisted(() => ({
@@ -30,8 +32,34 @@ vi.mock("@/lib/api/domains/azure-devops-api", () => ({
   setAzureDevOpsConfig: mocks.setConfig,
   testAzureDevOpsConnection: mocks.testConnection,
 }));
+vi.mock("@/components/azure-devops/azure-devops-watch-settings", () => ({
+  AzureDevOpsWatchSettings: () => (
+    <>
+      <section>
+        <h3>Pull-request watches</h3>
+      </section>
+      <section>
+        <h3>Work-item watches</h3>
+      </section>
+    </>
+  ),
+}));
+vi.mock("@/components/azure-devops/azure-devops-quick-actions", () => ({
+  AzureDevOpsQuickActionsSection: () => (
+    <section>
+      <h3>Quick actions</h3>
+    </section>
+  ),
+}));
+vi.mock("@/components/azure-devops/azure-devops-default-queries", () => ({
+  AzureDevOpsDefaultQueriesSection: () => (
+    <section>
+      <h3>Default queries</h3>
+    </section>
+  ),
+}));
 
-import { AzureDevOpsConnectionSection } from "./azure-devops-settings";
+import { AzureDevOpsConnectionSection, AzureDevOpsIntegrationPage } from "./azure-devops-settings";
 
 const OLD_ORGANIZATION_URL = "https://dev.azure.com/old-org";
 
@@ -140,5 +168,38 @@ describe("AzureDevOpsConnectionSection", () => {
       authMethod: "pat",
       pat: "new-pat",
     });
+  });
+});
+
+describe("AzureDevOpsIntegrationPage", () => {
+  it("matches GitHub's analogous section order and includes default queries", async () => {
+    render(
+      <StateProvider>
+        <SettingsSaveProvider>
+          <AzureDevOpsIntegrationPage workspaceId="workspace-a" />
+        </SettingsSaveProvider>
+      </StateProvider>,
+    );
+
+    await screen.findByText("Azure DevOps integration");
+    const sectionTitles = screen
+      .getAllByRole("heading")
+      .map((heading) => heading.textContent)
+      .filter((title) =>
+        [
+          "Azure DevOps integration",
+          "Pull-request watches",
+          "Work-item watches",
+          "Quick actions",
+          "Default queries",
+        ].includes(title ?? ""),
+      );
+    expect(sectionTitles).toEqual([
+      "Azure DevOps integration",
+      "Pull-request watches",
+      "Work-item watches",
+      "Quick actions",
+      "Default queries",
+    ]);
   });
 });

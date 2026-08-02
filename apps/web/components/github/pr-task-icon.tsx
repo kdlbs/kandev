@@ -7,16 +7,47 @@ import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
 
 const MUTED_FOREGROUND = "text-muted-foreground";
+const PURPLE_500 = "text-purple-500";
+const RED_500 = "text-red-500";
+const YELLOW_500 = "text-yellow-500";
+const SKY_400 = "text-sky-400";
+const EMERALD_400 = "text-emerald-400";
+const GREEN_500 = "text-green-500";
+
+/** Maps the task-level PR projection to the same visual language as live PRs. */
+export function getPRAggregateStatusColor(state: string | null | undefined): string {
+  switch (state?.toLowerCase()) {
+    case "merged":
+      return PURPLE_500;
+    case "closed":
+    case "failure":
+      return RED_500;
+    case "pending":
+      return YELLOW_500;
+    case "awaiting_review":
+      return SKY_400;
+    case "ready":
+      return EMERALD_400;
+    case "passing":
+      return GREEN_500;
+    case "draft":
+    case "blocked":
+    case "neutral":
+    case "open":
+    default:
+      return MUTED_FOREGROUND;
+  }
+}
 
 const STATUS_RANK: Record<string, number> = {
   // Higher = more attention-worthy. Drives the aggregated icon color when a
   // task has multiple PRs (we surface the worst state).
-  "text-red-500": 5,
-  "text-yellow-500": 4,
-  "text-sky-400": 3,
-  "text-emerald-400": 2,
-  "text-green-500": 1,
-  "text-purple-500": 0,
+  [RED_500]: 5,
+  [YELLOW_500]: 4,
+  [SKY_400]: 3,
+  [EMERALD_400]: 2,
+  [GREEN_500]: 1,
+  [PURPLE_500]: 0,
   [MUTED_FOREGROUND]: 0,
 };
 
@@ -97,16 +128,16 @@ export function isPRWaitingOnBranchProtection(pr: TaskPR): boolean {
 // awaiting-review, so an outstanding review still reads as sky.)
 function openMergeBlockerColor(pr: TaskPR): string | null {
   if (pr.state !== "open") return null;
-  if (pr.mergeable_state === "dirty") return "text-red-500";
-  if (pr.mergeable_state === "behind") return "text-yellow-500";
+  if (pr.mergeable_state === "dirty") return RED_500;
+  if (pr.mergeable_state === "behind") return YELLOW_500;
   return null;
 }
 
 export function getPRStatusColor(pr: TaskPR): string {
-  if (pr.state === "merged") return "text-purple-500";
-  if (pr.state === "closed") return "text-red-500";
+  if (pr.state === "merged") return PURPLE_500;
+  if (pr.state === "closed") return RED_500;
   if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
-    return "text-red-500";
+    return RED_500;
   }
   if (isPRDraft(pr)) {
     return MUTED_FOREGROUND;
@@ -114,12 +145,12 @@ export function getPRStatusColor(pr: TaskPR): string {
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;
   if (isPRReadyToMerge(pr)) {
-    return "text-emerald-400";
+    return EMERALD_400;
   }
   // Check awaiting-review before the plain-green fallback so an approved PR
   // with pending reviewers (1 of N required) doesn't read as fully approved.
   if (isPRAwaitingReview(pr)) {
-    return "text-sky-400";
+    return SKY_400;
   }
   // Branch protection can be a normal repository-rule wait after CI has passed.
   // Keep it muted so it doesn't read like a failure.
@@ -127,10 +158,10 @@ export function getPRStatusColor(pr: TaskPR): string {
     return MUTED_FOREGROUND;
   }
   if (hasPRChecksPassedWithoutReviewWaitForDisplay(pr)) {
-    return "text-green-500";
+    return GREEN_500;
   }
   if (hasPRChecksInProgressForDisplay(pr) || pr.review_state === "pending") {
-    return "text-yellow-500";
+    return YELLOW_500;
   }
   return MUTED_FOREGROUND;
 }

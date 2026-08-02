@@ -24,6 +24,7 @@ import {
   type GitHubAppImportValues,
 } from "./github-app-import-fields";
 import { GitHubAppVisibilityField } from "./github-app-visibility-field";
+import { useTranslation } from "react-i18next";
 
 type RegistrationHook = ReturnType<typeof useGitHubAppRegistrations>;
 
@@ -36,6 +37,7 @@ export function GitHubAppImportForm({
   registrations: RegistrationHook;
   onImported: (registrationId: string) => void;
 }) {
+  const { t } = useTranslation();
   const [preparation, setPreparation] = useState<PrepareGitHubAppImportResponse | null>(null);
   const [values, setValues] = useState(initialValues);
   const [errors, setErrors] = useState<AppSetupErrors>({});
@@ -56,7 +58,7 @@ export function GitHubAppImportForm({
     try {
       setPreparation(await registrations.prepareImport({ public_base_url: publicBaseUrl }));
     } catch (error) {
-      showError(error, "Import setup could not start", toast);
+      showError(error, t("github:importSetupCouldNotStart"), toast);
     }
   }
 
@@ -87,12 +89,12 @@ export function GitHubAppImportForm({
       });
       setValues(clearImportSecrets);
       toast({
-        description: "GitHub App imported. It is ready to install.",
+        description: t("github:githubAppImportedItIsReady"),
         variant: "success",
       });
       onImported(imported.id);
     } catch (error) {
-      showError(error, "GitHub App could not be imported", toast);
+      showError(error, t("github:githubAppCouldNotBeImported"), toast);
     }
   }
 
@@ -136,16 +138,16 @@ function PrepareImportForm(props: {
   onPublicBaseUrl: (value: string) => void;
   onSubmit: (event: React.FormEvent) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <form onSubmit={props.onSubmit} className="space-y-3">
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">Add an existing GitHub App</h3>
+        <h3 className="text-sm font-medium">{t("github:addAnExistingGithubApp")}</h3>
         <p className="text-xs leading-5 text-muted-foreground">
-          Kandev first reserves exact callback and webhook URLs, then guides you through GitHub's
-          App settings. Existing workspace access is unchanged until you install the imported App.
+          {t("github:kandevFirstReservesExactCallbackAnd")}
         </p>
       </div>
-      <Field label="Public Kandev URL" error={props.error}>
+      <Field label={t("github:publicKandevUrl")} error={props.error}>
         <Input
           className="h-11"
           type="url"
@@ -156,7 +158,7 @@ function PrepareImportForm(props: {
       </Field>
       <Button type="submit" disabled={props.mutating} className="h-11 cursor-pointer">
         {props.mutating && <Spinner className="mr-2 h-4 w-4" />}
-        Generate setup instructions
+        {t("github:generateSetupInstructions")}
       </Button>
     </form>
   );
@@ -175,6 +177,7 @@ type PreparedImportProps = {
 };
 
 function PreparedImportForm(props: PreparedImportProps) {
+  const { t } = useTranslation();
   return (
     <form onSubmit={props.onSubmit} className="space-y-5">
       <GitHubAppImportIdentityFields
@@ -192,7 +195,7 @@ function PreparedImportForm(props: PreparedImportProps) {
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button type="submit" disabled={props.mutating} className="h-11 cursor-pointer">
           {props.mutating && <Spinner className="mr-2 h-4 w-4" />}
-          Verify and import App
+          {t("github:verifyAndImportApp")}
         </Button>
         <Button
           type="button"
@@ -200,7 +203,7 @@ function PreparedImportForm(props: PreparedImportProps) {
           className="h-11 cursor-pointer"
           onClick={props.onStartOver}
         >
-          Start over
+          {t("github:startOver")}
         </Button>
       </div>
     </form>

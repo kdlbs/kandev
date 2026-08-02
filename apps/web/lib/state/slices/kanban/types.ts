@@ -3,6 +3,7 @@ import type {
   TaskPendingAction,
   TaskState as TaskStatus,
 } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 export type KanbanStepEvents = {
   on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -98,6 +99,7 @@ export type KanbanState = {
     isIssueWatch?: boolean;
     issueUrl?: string;
     issueNumber?: number;
+    statusSummary?: TaskStatusSummary | null;
   }>;
   isLoading?: boolean;
 };

@@ -14,6 +14,9 @@ import type {
 } from "./ids";
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
+import type { TaskStatusSummary } from "./task-status-summary";
+
+export type { TaskStatusSummary } from "./task-status-summary";
 
 export type { ExecutorType } from "./executor";
 export type { ActiveSubagentCountFields, ForegroundActivity } from "./activity";
@@ -346,6 +349,7 @@ export type Task = ActiveSubagentCountFields & {
   // OR workflow_id matches the workspace's office_workflow_id. See
   // isFromOfficeProjection in the Go task repo for the canonical rule.
   is_from_office?: boolean;
+  status_summary?: TaskStatusSummary | null;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.

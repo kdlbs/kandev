@@ -304,6 +304,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPListTasks, h.handleListTasks)
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
+	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
@@ -328,7 +329,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 25
+	count := 26
 	count += h.registerReviewHandlers(d)
 	count += 2 // task PR automation get/update
 
@@ -1312,6 +1313,46 @@ func (h *Handlers) handleUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	}
 
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))
+}
+
+// handleSetTaskTitle resolves the one-shot provisional title created for a
+// prompt-first task. The MCP server supplies the bound task ID; a missing
+// pending marker makes the call an idempotent no-op so a human rename wins.
+func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req struct {
+		TaskID string `json:"task_id"`
+		Title  string `json:"title"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	if req.TaskID == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if strings.TrimSpace(req.Title) == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "title is required", nil)
+	}
+
+	task, accepted, err := h.taskSvc.SetPendingAgentTitle(ctx, req.TaskID, req.Title)
+	if err != nil {
+		if errors.Is(err, taskrepo.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+		}
+		if errors.Is(err, service.ErrTaskTitleTooLong) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
+		h.logger.Error("failed to set pending task title", zap.String("task_id", req.TaskID), zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to set task title", nil)
+	}
+	result := map[string]interface{}{
+		"accepted": accepted,
+		"task_id":  req.TaskID,
+		"title":    task.Title,
+	}
+	if !accepted {
+		result["reason"] = "title_not_pending"
+	}
+	return ws.NewResponse(msg.ID, msg.Action, result)
 }
 
 // handleAddBranchToTask attaches a new (repository, checkout_branch) pair to

@@ -9,11 +9,13 @@ import { useGitHubAppRegistrations } from "@/hooks/domains/github/use-github-app
 import { GitHubAppCreateForm } from "./github-app-create-form";
 import { GitHubAppImportForm } from "./github-app-import-form";
 import { GitHubAppRegistrationList } from "./github-app-registration-list";
+import { useTranslation } from "react-i18next";
 
 type AppView = "choose" | "import" | "create";
 type RegistrationHook = ReturnType<typeof useGitHubAppRegistrations>;
 
 export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const registrations = useGitHubAppRegistrations(workspaceId);
   const [view, setView] = useState<AppView>("choose");
   const { selectedId, setSelectedId, selectedRegistration } = useAppRegistrationSelection(
@@ -31,11 +33,12 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
     try {
       const response = await registrations.startInstall(selectedRegistration.id);
       const url = response.url ?? response.URL;
-      if (!url) throw new Error("GitHub did not return an installation URL");
+      // Surfaced to the user by the catch below, so it is copy.
+      if (!url) throw new Error(t("github:githubDidNotReturnAnInstallationUrl"));
       window.location.assign(url);
     } catch (error) {
       toast({
-        description: error instanceof Error ? error.message : "App installation failed",
+        description: error instanceof Error ? error.message : t("github:appInstallationFailed"),
         variant: "error",
       });
     }
@@ -67,16 +70,14 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">Choose a GitHub App</h3>
+        <h3 className="text-sm font-medium">{t("github:chooseAGithubApp")}</h3>
         <p className="text-xs leading-5 text-muted-foreground">
-          Use an App when automation needs its own identity, short-lived tokens, and
-          repository-level installation control. Setup is more involved and requires a publicly
-          reachable HTTPS URL.
+          {t("github:useAnAppWhenAutomationNeeds")}
         </p>
       </div>
       {registrations.loading ? (
         <div className="flex min-h-11 items-center gap-2 text-sm text-muted-foreground">
-          <Spinner className="h-4 w-4" /> Loading registered Apps...
+          <Spinner className="h-4 w-4" /> {t("github:loadingRegisteredApps")}
         </div>
       ) : (
         <GitHubAppRegistrationList
@@ -94,19 +95,18 @@ export function GitHubAppConnectionPanel({ workspaceId }: { workspaceId: string 
           data-testid="github-app-install-button"
         >
           {registrations.mutating && <Spinner className="mr-2 h-4 w-4" />}
-          Install for this workspace
+          {t("github:installForThisWorkspace")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
         <Button variant="outline" className="h-11 cursor-pointer" onClick={() => setView("import")}>
-          <IconPlus className="mr-2 h-4 w-4" /> Add existing App
+          <IconPlus className="mr-2 h-4 w-4" /> {t("github:addExistingApp")}
         </Button>
         <Button variant="outline" className="h-11 cursor-pointer" onClick={() => setView("create")}>
-          <IconPlus className="mr-2 h-4 w-4" /> Create new App
+          <IconPlus className="mr-2 h-4 w-4" /> {t("github:createNewApp")}
         </Button>
       </div>
       <p className="text-xs leading-5 text-muted-foreground">
-        A registration can be reused across workspaces, or you can keep work and personal Apps
-        separate. Each workspace selects and installs its own credential.
+        {t("github:aRegistrationCanBeReusedAcross")}
       </p>
     </div>
   );
@@ -129,9 +129,10 @@ function useAppRegistrationSelection(workspaceId: string, registrations: Registr
 }
 
 function BackButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <Button variant="ghost" className="h-11 cursor-pointer px-2" onClick={onClick}>
-      Back to registered Apps
+      {t("github:backToRegisteredApps")}
     </Button>
   );
 }

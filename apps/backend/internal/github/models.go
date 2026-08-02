@@ -432,6 +432,7 @@ type TaskPR struct {
 	MergedAt                *time.Time `json:"merged_at,omitempty" db:"merged_at"`
 	ClosedAt                *time.Time `json:"closed_at,omitempty" db:"closed_at"`
 	LastSyncedAt            *time.Time `json:"last_synced_at,omitempty" db:"last_synced_at"`
+	DetachedAt              *time.Time `json:"-" db:"detached_at"`
 	UpdatedAt               time.Time  `json:"updated_at" db:"updated_at"`
 }
 

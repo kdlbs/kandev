@@ -1812,6 +1812,60 @@ func TestCleanupUnstartedExecutionAfterPersistError_CancelledWithTeardownSkipsEx
 	}
 }
 
+func TestStartAgentProcessAsync_MarksStartingSessionRunning(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	repo.tasks["task-123"] = &models.Task{ID: "task-123", State: v1.TaskStateScheduling}
+
+	agentManager := &mockAgentManager{
+		startAgentProcessFunc: func(context.Context, string) error { return nil },
+	}
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetOnSessionStateChange(func(
+		ctx context.Context,
+		_ string,
+		sessionID string,
+		state models.TaskSessionState,
+		errorMessage string,
+	) error {
+		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	reconciled := make(chan struct{})
+	exec.SetOnTaskRuntimeStateReconcile(func(
+		ctx context.Context,
+		taskID, _ string,
+		state v1.TaskState,
+	) error {
+		defer close(reconciled)
+		_, _, err := repo.UpdateTaskStateIfNotArchived(ctx, taskID, state)
+		return err
+	})
+
+	exec.startAgentProcessAsync(context.Background(), "task-123", "session-123", "exec-456")
+	select {
+	case <-reconciled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for runtime state reconciliation")
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-123")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING", session.State)
+	}
+	task, err := repo.GetTask(context.Background(), "task-123")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task.State != v1.TaskStateInProgress {
+		t.Fatalf("task state = %q, want IN_PROGRESS", task.State)
+	}
+}
+
 func TestStartAgentProcessAsync_StopWinningStartRacePreservesReview(t *testing.T) {
 	repo := newMockRepository()
 	repo.sessions["session-123"] = &models.TaskSession{

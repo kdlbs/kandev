@@ -669,6 +669,12 @@ export class SessionPage {
     return this.page.getByTestId(`pr-popover-tab-${owner}-${repo}-${prNumber}`);
   }
 
+  /** Unlink control for one PR association in the multi-PR popover. */
+  prMultiPopoverRemove(owner: string, repo: string, prNumber: number): Locator {
+    const activePopover = this.page.locator("[data-testid='pr-multi-popover']:visible").last();
+    return activePopover.getByTestId(`pr-popover-remove-${owner}-${repo}-${prNumber}`);
+  }
+
   /**
    * A specific bucket group inside the popover by kind.
    *

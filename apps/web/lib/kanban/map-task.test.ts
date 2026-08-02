@@ -131,6 +131,22 @@ describe("toKanbanTask — HTTP DTO / WS payload parity", () => {
     expect(toKanbanTask(httpDTO(invalid)).taskPendingAction).toBeUndefined();
     expect(toKanbanTask(wsPayload(invalid)).taskPendingAction).toBeUndefined();
   });
+
+  it("maps the bounded status summary from HTTP and WS task shapes", () => {
+    const statusSummary = {
+      revision: 7,
+      updated_at: "2026-08-01T18:56:13.512Z",
+      pending_action: "permission" as const,
+      git: { additions: 4, deletions: 2, changed_files: 3 },
+      pull_request: { count: 1, open_count: 1, attention: true, number: 42 },
+    };
+    const http = toKanbanTask(httpDTO({ status_summary: statusSummary }));
+    const ws = toKanbanTask(wsPayload({ status_summary: statusSummary }));
+
+    expect(http.statusSummary).toEqual(statusSummary);
+    expect(ws.statusSummary).toEqual(statusSummary);
+    expect(http).toEqual(ws);
+  });
 });
 
 describe("toKanbanTask — state normalization", () => {

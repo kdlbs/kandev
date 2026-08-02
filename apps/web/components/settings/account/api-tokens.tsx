@@ -17,6 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { IconCheck, IconCopy, IconKey } from "@tabler/icons-react";
 import { ApiError } from "@/lib/api/client";
 import { listTokens, mintToken, revokeToken, type ApiToken } from "@/lib/api/domains/auth-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 function useTokensList() {
   const [tokens, setTokens] = useState<ApiToken[]>([]);
@@ -193,8 +194,9 @@ function MintTokenDialog({
             rawToken={rawToken}
             copied={copied}
             onCopy={() => {
-              void navigator.clipboard.writeText(rawToken);
-              setCopied(true);
+              void copyToClipboard(rawToken).then((success) => {
+                if (success) setCopied(true);
+              });
             }}
             onDone={() => onOpenChange(false)}
           />

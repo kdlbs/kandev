@@ -47,6 +47,9 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
 	}
+	if task != nil && models.IsAgentTitlePending(task.Metadata) {
+		return McpModeTaskTitlePending, nil
+	}
 	return "", nil
 }
 
@@ -203,9 +206,13 @@ func (e *Executor) stopStartedExecutionIfSessionTerminal(
 	return terminalState, true
 }
 
-// startAgentProcessAsync starts the agent subprocess and transitions the task to IN_PROGRESS on success.
+// startAgentProcessAsync starts the agent subprocess and transitions its session
+// to RUNNING before reconciling the owning task to IN_PROGRESS on success.
 func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
+		if !e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
+			return
+		}
 		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
 				zap.String("task_id", taskID),
@@ -213,6 +220,45 @@ func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID
 				zap.Error(updateErr))
 		}
 	}, true, false)
+}
+
+// markSessionRunningAfterProcessStart records that a successfully started
+// process is active. Agent stream events may settle a fast turn before this
+// callback runs, so only a still-STARTING session may move to RUNNING.
+func (e *Executor) markSessionRunningAfterProcessStart(ctx context.Context, taskID, sessionID string) bool {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		e.logger.Warn("failed to load session after agent start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+	if session == nil {
+		e.logger.Warn("session missing after agent start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return false
+	}
+
+	switch session.State {
+	case models.TaskSessionStateRunning:
+		return true
+	case models.TaskSessionStateStarting:
+		changed, finalState, transitionErr := e.transitionSessionState(
+			ctx, taskID, sessionID, models.TaskSessionStateRunning, "",
+		)
+		if transitionErr != nil {
+			e.logger.Warn("failed to mark session running after agent start",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(transitionErr))
+			return false
+		}
+		return changed || finalState == models.TaskSessionStateRunning
+	default:
+		return false
+	}
 }
 
 func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentExecutionID string) {

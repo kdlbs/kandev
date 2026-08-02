@@ -121,11 +121,13 @@ func PlanMode() string { return prompts.Get("plan-mode") }
 
 // KandevContext returns the task-mode system prompt template that provides
 // Kandev-specific instructions and session context to agents. Contains
-// {task_id}, {session_id}, and {step_complete_section} placeholders — use
+// {task_id}, {session_id}, {step_complete_section}, and {task_title_section}
+// placeholders — use
 // [FormatKandevContext] to inject values.
 func KandevContext() string {
 	return Resolve("kandev-context", map[string]string{
 		"coordinator_task_control_section": coordinatorTaskControlSection,
+		"task_title_section":               "",
 	})
 }
 
@@ -161,20 +163,43 @@ const coordinatorTaskControlSection = " Optional: session_id, delivery_mode. " +
 	"- stop_task_kandev: Halt all live sessions observed for a direct child, with no prompt and no replacement turn. " +
 	"Only the target task's direct parent may call it. Required params: task_id."
 
+// taskTitleSection is included only for task sessions whose task metadata says
+// the provisional title still needs an agent-generated replacement. It ends in
+// a newline because the template inlines it directly before the next tool item.
+const taskTitleSection = "- set_task_title_kandev: Set the user-facing title for the CURRENT task. " +
+	"Call this as your first action in the session, before planning, inspecting files, or doing any other work. " +
+	"Call it even when the provisional title looks usable. " +
+	"Use a concise title targeting about 3 words (no more than 6 words when practical), as a short noun phrase rather than a sentence or progress update. " +
+	"Required param: title.\n"
+
+// PendingTaskTitlePassthroughInstruction is the compact equivalent of the
+// structured first-turn title section for CLI passthrough sessions. Those
+// sessions intentionally skip the full hidden MCP context because it would be
+// printed into the user's terminal.
+func PendingTaskTitlePassthroughInstruction() string {
+	return "Before doing any other work, call set_task_title_kandev for the current task. " +
+		"Use a concise title targeting about 3 words (no more than 6 words when practical), " +
+		"even if the provisional title looks usable."
+}
+
 // KandevContextOptions controls capability-dependent sections in the first-turn
 // Kandev context.
 type KandevContextOptions struct {
 	RequiresCompletionSignal       bool
 	IncludeCoordinatorTaskControls bool
+	IncludeTaskTitleTool           bool
 }
 
 // FormatKandevContext returns the Kandev context prompt with task and session IDs injected.
 // When requiresCompletionSignal is true, the step_complete_kandev tool description is
-// included; otherwise the placeholder is collapsed to an empty string.
+// included; otherwise the placeholder is collapsed to an empty string. The
+// title-tool capability is intentionally false in this compatibility wrapper;
+// callers with a pending title use FormatKandevContextWithOptions directly.
 func FormatKandevContext(taskID, sessionID string, requiresCompletionSignal bool) string {
 	return FormatKandevContextWithOptions(taskID, sessionID, KandevContextOptions{
 		RequiresCompletionSignal:       requiresCompletionSignal,
 		IncludeCoordinatorTaskControls: true,
+		IncludeTaskTitleTool:           false,
 	})
 }
 
@@ -188,10 +213,15 @@ func FormatKandevContextWithOptions(taskID, sessionID string, options KandevCont
 	if options.IncludeCoordinatorTaskControls {
 		coordinatorControls = coordinatorTaskControlSection
 	}
+	taskTitle := ""
+	if options.IncludeTaskTitleTool {
+		taskTitle = taskTitleSection
+	}
 	return Resolve("kandev-context", map[string]string{
 		"task_id":                          taskID,
 		"session_id":                       sessionID,
 		"step_complete_section":            section,
+		"task_title_section":               taskTitle,
 		"coordinator_task_control_section": coordinatorControls,
 	})
 }

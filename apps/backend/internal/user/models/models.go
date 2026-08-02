@@ -72,6 +72,7 @@ type UserSettings struct {
 	ReviewAutoMarkOnScroll          bool                              `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive              bool                              `json:"confirm_task_archive"`
 	UnreadDivider                   bool                              `json:"unread_divider"`
+	AgentGeneratedTaskTitles        bool                              `json:"agent_generated_task_titles"`
 	MCPTaskAgentProfileDefault      string                            `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar           bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
 	ShowScrollToLastPrompt          bool                              `json:"show_scroll_to_last_prompt"`
@@ -93,6 +94,7 @@ type UserSettings struct {
 	GitHubSavedPresets              json.RawMessage                   `json:"github_saved_presets"`
 	GitHubDefaultQueryPresets       json.RawMessage                   `json:"github_default_query_presets"`
 	GitLabSavedPresets              json.RawMessage                   `json:"gitlab_saved_presets"`
+	AzureDevOpsBrowsePreferences    json.RawMessage                   `json:"azure_devops_browse_preferences"`
 	DefaultUtilityAgentID           string                            `json:"default_utility_agent_id"` // Default inference agent for utility agents
 	DefaultUtilityModel             string                            `json:"default_utility_model"`    // Default model for utility agents
 	KeyboardShortcuts               map[string]interface{}            `json:"keyboard_shortcuts"`       // User-configured keyboard shortcut overrides

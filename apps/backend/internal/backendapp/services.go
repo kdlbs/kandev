@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -79,6 +80,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskEnvironments:  repos.Task,
 			Reviews:           repos.Task,
 			ResourceCleanups:  repos.Task,
+			StatusSummaries:   repos.Task,
 		},
 		eventBus,
 		log,
@@ -112,6 +114,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	githubSvc := initGitHubService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if githubSvc != nil {
+		taskSvc.SetTaskStatusSummaryPRReader(&githubTaskStatusSummaryPRReader{gh: githubSvc})
 		githubSvc.SetPromptResolver(promptSvc)
 		if brokerErr := githubSvc.ConfigureCredentialBroker(&githubBrokerScopeAuthorizer{repo: repos.Task}); brokerErr != nil {
 			log.Warn("GitHub credential broker initialization failed", zap.Error(brokerErr))
@@ -121,6 +124,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	azureDevOpsSvc := initAzureDevOpsService(dbPool, eventBus, repos.Secrets, log)
 	if azureDevOpsSvc != nil {
 		azureDevOpsSvc.SetRepositoryLookup(&repositoryLookupAdapter{svc: taskSvc})
+		azureDevOpsSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
 	}
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
@@ -141,6 +145,13 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 		taskSvc.SetPRTaskResolver(githubSvc)
 		githubSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		taskSvc.SetWorkspaceDefaultsInitializer(githubSvc)
+		startupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := githubSvc.InitializeFreshWorkspaceDefaults(startupCtx)
+		cancel()
+		if err != nil {
+			log.Warn("GitHub fresh workspace defaults initialization failed", zap.Error(err))
+		}
 	}
 
 	// Initialize Automation service

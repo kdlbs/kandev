@@ -46,6 +46,7 @@ async function seedTaskWithPR({
     },
   );
   await apiClient.mockGitHubAssociateTaskPR({
+    workspace_id: seedData.workspaceId,
     task_id: task.id,
     owner: OWNER,
     repo: REPO,
@@ -77,6 +78,29 @@ async function seedTaskWithPRAndTodos(args: SeedTaskArgs): Promise<string> {
       ...args.prOverrides,
     },
   });
+}
+
+async function seedTaskWithTwoPRs(args: SeedTaskArgs): Promise<string> {
+  const taskId = await seedTaskWithPR(args);
+  await args.apiClient.mockGitHubAssociateTaskPR({
+    workspace_id: args.seedData.workspaceId,
+    task_id: taskId,
+    owner: OWNER,
+    repo: "api",
+    pr_number: 100,
+    pr_url: `https://github.com/${OWNER}/api/pull/100`,
+    pr_title: "Follow-up mobile PR",
+    head_branch: "feat/mobile-follow-up",
+    base_branch: "main",
+    author_login: "test-user",
+    state: "open",
+    checks_state: "success",
+    checks_total: 2,
+    checks_passing: 2,
+    review_state: "approved",
+    review_count: 1,
+  });
+  return taskId;
 }
 
 async function openTask(testPage: import("@playwright/test").Page, taskId: string) {
@@ -198,5 +222,84 @@ test.describe("mobile PR CI chip drawer", () => {
 
     await session.prStatusChipDrawerClose().tap();
     await expect(session.prStatusChipDrawer()).toHaveCount(0, { timeout: 5_000 });
+  });
+
+  test("unlink control works inside the multi-PR drawer with a touch-sized target", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithTwoPRs({
+      apiClient,
+      seedData,
+      title: "Mobile multi PR unlink",
+      prOverrides: {
+        checks_state: "success",
+        checks_total: 2,
+        checks_passing: 2,
+      },
+    });
+    const session = await openTask(testPage, taskId);
+
+    await expect(session.prStatusChip()).toHaveAttribute("data-pr-count", "2", {
+      timeout: 15_000,
+    });
+    await session.tapPRStatusChip();
+    await prCapture.screenshot("mobile-pr-unlink-drawer", {
+      caption: "Mobile multi-PR drawer with touch-sized unlink controls",
+    });
+
+    const removeFirst = session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER);
+    await expect(removeFirst).toBeVisible();
+    const box = await removeFirst.boundingBox();
+    expect(box?.height).toBeGreaterThanOrEqual(44);
+    await removeFirst.tap();
+
+    await expect(session.prStatusChip()).toHaveAttribute("data-pr-number", "100");
+    await expect(session.prStatusChip()).toBeFocused();
+    await expect(session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER)).toHaveCount(0);
+    await expect(session.prStatusChipDrawer()).toHaveCount(0);
+    await expect
+      .poll(() =>
+        testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+      )
+      .toBe(true);
+
+    await testPage.reload();
+    const reloaded = new SessionPage(testPage);
+    await reloaded.waitForLoad();
+    await expect(reloaded.prStatusChip()).toHaveAttribute("data-pr-number", "100");
+  });
+
+  test("keeps a terminal sibling unlinkable on touch", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithTwoPRs({
+      apiClient,
+      seedData,
+      title: "Mobile terminal PR unlink",
+      prOverrides: {
+        state: "merged",
+      },
+    });
+    const session = await openTask(testPage, taskId);
+
+    await expect(session.prStatusChip()).toHaveAttribute("data-pr-count", "2", {
+      timeout: 15_000,
+    });
+    await session.tapPRStatusChip();
+
+    const removeMerged = session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER);
+    await expect(removeMerged).toBeVisible();
+    await removeMerged.tap();
+
+    await expect(session.prStatusChip()).toHaveAttribute("data-pr-number", "100");
+    await expect(session.prMultiPopoverRemove(OWNER, REPO, PR_NUMBER)).toHaveCount(0);
+    await expect(session.prStatusChipDrawer()).toHaveCount(0);
   });
 });

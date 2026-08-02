@@ -160,6 +160,7 @@ export type BuildCreatePayloadArgs = {
   effectiveWorkflowId: string;
   trimmedTitle: string;
   trimmedDescription: string;
+  autoTitle?: boolean;
   repositoriesPayload: CreateTaskParams["repositories"];
   agentProfileId: string;
   executorId: string;
@@ -175,7 +176,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
   return {
     workspace_id: args.workspaceId,
     workflow_id: args.effectiveWorkflowId,
-    title: args.trimmedTitle,
+    ...(args.autoTitle ? { auto_title: true } : { title: args.trimmedTitle }),
     description: args.trimmedDescription,
     repositories: args.repositoriesPayload,
     state: args.withAgent ? "IN_PROGRESS" : "CREATED",
@@ -193,6 +194,8 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
 
 export function validateCreateInputs(inputs: {
   trimmedTitle: string;
+  trimmedDescription?: string;
+  autoTitle?: boolean;
   workspaceId: string | null;
   effectiveWorkflowId: string | null;
   /** Unified repos list. The form is valid if any row has a repo set OR URL mode is filled. */
@@ -208,7 +211,7 @@ export function validateCreateInputs(inputs: {
     inputs.repositories.some((r) => r.repositoryId || r.localPath) ||
     hasRemoteRepo;
   return Boolean(
-    inputs.trimmedTitle &&
+    (inputs.autoTitle ? inputs.trimmedDescription : inputs.trimmedTitle) &&
     inputs.workspaceId &&
     inputs.effectiveWorkflowId &&
     inputs.agentProfileId &&

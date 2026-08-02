@@ -65,8 +65,8 @@ func TestCreatedChangeAssociationRouterRoutesGitLabSingleAndMultiRepo(t *testing
 			return "repo-" + repo
 		},
 		resolveWorkspaceID: func(context.Context, string) (string, error) { return "workspace-1", nil },
-		associateGitLab: func(_ context.Context, workspaceID, taskID, repositoryID, mrURL string) error {
-			got = append(got, workspaceID+"|"+taskID+"|"+repositoryID+"|"+mrURL)
+		associateGitLab: func(_ context.Context, workspaceID, sessionID, taskID, repositoryID, mrURL string) error {
+			got = append(got, workspaceID+"|"+sessionID+"|"+taskID+"|"+repositoryID+"|"+mrURL)
 			return nil
 		},
 	}
@@ -76,8 +76,8 @@ func TestCreatedChangeAssociationRouterRoutesGitLabSingleAndMultiRepo(t *testing
 		}
 	}
 	want := []string{
-		"workspace-1|task-1|repo-primary|https://gitlab.example/g/r/-/merge_requests/4",
-		"workspace-1|task-1|repo-secondary|https://gitlab.example/g/r/-/merge_requests/4",
+		"workspace-1|session-1|task-1|repo-primary|https://gitlab.example/g/r/-/merge_requests/4",
+		"workspace-1|session-1|task-1|repo-secondary|https://gitlab.example/g/r/-/merge_requests/4",
 	}
 	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("associations = %#v", got)
@@ -112,7 +112,7 @@ func TestCreatedChangeAssociationRouterGitLabFailureCanRetry(t *testing.T) {
 	router := createdChangeAssociationRouter{
 		resolveRepositoryID: func(context.Context, string, string) string { return "repo-1" },
 		resolveWorkspaceID:  func(context.Context, string) (string, error) { return "workspace-1", nil },
-		associateGitLab: func(context.Context, string, string, string, string) error {
+		associateGitLab: func(context.Context, string, string, string, string, string) error {
 			attempts++
 			if attempts == 1 {
 				return errors.New("temporary failure containing sensitive provider output")

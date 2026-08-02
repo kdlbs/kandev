@@ -51,6 +51,7 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll          *bool
 	ConfirmTaskArchive              *bool
 	UnreadDivider                   *bool
+	AgentGeneratedTaskTitles        *bool
 	MCPTaskAgentProfileDefault      *string
 	ShowAnchoredPromptBar           *bool
 	ShowScrollToLastPrompt          *bool
@@ -72,6 +73,7 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets              **json.RawMessage
 	GitHubDefaultQueryPresets       **json.RawMessage
 	GitLabSavedPresets              **json.RawMessage
+	AzureDevOpsBrowsePreferences    **json.RawMessage
 	DefaultUtilityAgentID           *string
 	DefaultUtilityModel             *string
 	KeyboardShortcuts               *map[string]interface{}
@@ -284,6 +286,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
+	}
+	if req.AgentGeneratedTaskTitles != nil {
+		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -624,6 +629,9 @@ func applyUserPreferenceBlobs(settings *models.UserSettings, req *UpdateUserSett
 	if err := applyUserPreferenceBlob("gitlab_saved_presets", req.GitLabSavedPresets, &settings.GitLabSavedPresets); err != nil {
 		return err
 	}
+	if err := applyUserPreferenceBlob("azure_devops_browse_preferences", req.AzureDevOpsBrowsePreferences, &settings.AzureDevOpsBrowsePreferences); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -680,6 +688,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
 		"unread_divider":                      settings.UnreadDivider,
+		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
@@ -701,6 +710,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"github_saved_presets":                settings.GitHubSavedPresets,
 		"github_default_query_presets":        settings.GitHubDefaultQueryPresets,
 		"gitlab_saved_presets":                settings.GitLabSavedPresets,
+		"azure_devops_browse_preferences":     settings.AzureDevOpsBrowsePreferences,
 		"default_utility_agent_id":            settings.DefaultUtilityAgentID,
 		"default_utility_model":               settings.DefaultUtilityModel,
 		"keyboard_shortcuts":                  settings.KeyboardShortcuts,

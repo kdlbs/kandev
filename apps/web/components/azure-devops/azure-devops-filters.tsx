@@ -11,7 +11,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import type { AzureDevOpsProject, AzureDevOpsRepository } from "@/lib/types/azure-devops";
 import { cn } from "@/lib/utils";
 
-export type AzureDevOpsBrowseMode = "work-items" | "pull-requests";
+export type AzureDevOpsBrowseMode = "board" | "work-items" | "pull-requests";
 
 export type AzureDevOpsFiltersState = {
   projectId: string;

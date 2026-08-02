@@ -13,7 +13,7 @@ import {
   IconPinFilled,
   IconShieldQuestion,
 } from "@tabler/icons-react";
-import { PRTaskIcon } from "@/components/github/pr-task-icon";
+import { getPRAggregateStatusColor, PRTaskIcon } from "@/components/github/pr-task-icon";
 import { IssueTaskIcon } from "@/components/github/issue-task-icon";
 import { useAppStore } from "@/components/state-provider";
 import { cn, formatRelativeTime } from "@/lib/utils";
@@ -84,7 +84,7 @@ type TaskItemProps = {
   /** Toggles subtask visibility when the chevron is clicked. */
   onToggleSubtasks?: () => void;
   repositories?: string[];
-  prInfo?: { number: number; state: string };
+  prInfo?: { number: number; state: string; aggregateState?: string };
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
@@ -284,7 +284,7 @@ function TaskItemStatsRow({
   primarySessionId,
 }: {
   updatedAt?: string;
-  prInfo?: { number: number; state: string };
+  prInfo?: { number: number; state: string; aggregateState?: string };
   primarySessionId?: string | null;
 }) {
   const pollMode = useAppStore((s) =>
@@ -342,17 +342,18 @@ function TaskPRIcon({
   prInfo,
 }: {
   taskId?: string;
-  prInfo?: { number: number; state: string };
+  prInfo?: { number: number; state: string; aggregateState?: string };
 }) {
   const hasStorePR = useAppStore((s) => !!taskId && (s.taskPRs.byTaskId[taskId]?.length ?? 0) > 0);
   if (hasStorePR) return <PRTaskIcon taskId={taskId!} />;
   if (!prInfo) return null;
-  const state = prInfo.state.toLowerCase();
-  let color = "text-muted-foreground";
-  if (state === "merged") color = "text-purple-500";
-  else if (state === "closed") color = "text-red-500";
+  const color = getPRAggregateStatusColor(prInfo.aggregateState ?? prInfo.state);
   return (
-    <span className={cn("inline-flex items-center shrink-0", color)}>
+    <span
+      data-testid={taskId ? `pr-task-icon-${taskId}` : "pr-task-icon"}
+      data-pr-state={prInfo.state}
+      className={cn("inline-flex items-center shrink-0", color)}
+    >
       <IconGitPullRequest className="h-3.5 w-3.5" />
     </span>
   );
@@ -383,7 +384,7 @@ function TaskItemContent({
   isPinned?: boolean;
   repositories?: string[];
   updatedAt?: string;
-  prInfo?: { number: number; state: string };
+  prInfo?: { number: number; state: string; aggregateState?: string };
   issueInfo?: { url: string; number: number };
   agentErrorMessage?: string | null;
 }) {

@@ -1681,6 +1681,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			Environments:     taskRepo,
 			TaskEnvironments: taskRepo,
 			Reviews:          taskRepo,
+			StatusSummaries:  taskRepo,
 		},
 		eventBus,
 		log,

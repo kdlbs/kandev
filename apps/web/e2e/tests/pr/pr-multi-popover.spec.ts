@@ -94,8 +94,9 @@ async function seedTask(
 }
 
 /** Associate two open PRs with the task: web#42 failing, api#77 all green. */
-async function associateTwoPRs(apiClient: ApiClient, taskId: string) {
+async function associateTwoPRs(apiClient: ApiClient, workspaceId: string, taskId: string) {
   await apiClient.mockGitHubAssociateTaskPR({
+    workspace_id: workspaceId,
     task_id: taskId,
     owner: OWNER,
     repo: "web",
@@ -113,6 +114,7 @@ async function associateTwoPRs(apiClient: ApiClient, taskId: string) {
     review_count: 1,
   });
   await apiClient.mockGitHubAssociateTaskPR({
+    workspace_id: workspaceId,
     task_id: taskId,
     owner: OWNER,
     repo: "api",
@@ -166,7 +168,7 @@ test.describe("Multi-PR CI popover", () => {
       seedData.repositoryId,
       title,
     );
-    await associateTwoPRs(apiClient, seed.taskId);
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     await expect(session.prTopbarButton()).toHaveAttribute("data-pr-count", "2");
@@ -209,7 +211,7 @@ test.describe("Multi-PR CI popover", () => {
       seedData.repositoryId,
       title,
     );
-    await associateTwoPRs(apiClient, seed.taskId);
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     const chip = session.prStatusChip();
@@ -226,6 +228,46 @@ test.describe("Multi-PR CI popover", () => {
     );
   });
 
+  test("unlinks one PR tab and keeps the association detached after reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+    const title = "Multi Popover Unlink";
+    const seed = await seedTask(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      title,
+    );
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
+    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+
+    await session.hoverPRTopbar();
+    await prCapture.screenshot("desktop-pr-unlink-popover", {
+      caption: "Desktop multi-PR popover with per-tab unlink controls",
+    });
+    const removeWeb = session.prMultiPopoverRemove(OWNER, "web", 42);
+    await expect(removeWeb).toBeVisible();
+    await removeWeb.click();
+
+    // Removing the first association collapses the multi-PR control to the
+    // remaining single PR without touching the remote PR itself.
+    await expect(session.prTopbarButton()).toHaveAttribute("data-pr-number", "77");
+    await expect(session.prTopbarButton()).toBeFocused();
+    await expect(session.prMultiPopoverRemove(OWNER, "web", 42)).toHaveCount(0);
+
+    // The tombstone is persisted in Kandev, so a fresh page load does not
+    // resurrect the older merged/follow-up PR association.
+    await testPage.reload();
+    const reloaded = new SessionPage(testPage);
+    await reloaded.waitForLoad();
+    await expect(reloaded.prTopbarButton()).toHaveAttribute("data-pr-number", "77");
+  });
+
   test("clicking the multi-PR button still opens the dropdown with per-PR rows", async ({
     testPage,
     apiClient,
@@ -240,7 +282,7 @@ test.describe("Multi-PR CI popover", () => {
       seedData.repositoryId,
       title,
     );
-    await associateTwoPRs(apiClient, seed.taskId);
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     await session.prTopbarButton().click();
@@ -262,7 +304,7 @@ test.describe("Multi-PR CI popover", () => {
       seedData.repositoryId,
       title,
     );
-    await associateTwoPRs(apiClient, seed.taskId);
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
     const expectedMuted = await mutedBackgroundColor(testPage);
     const expectedForeground = await foregroundColor(testPage);
@@ -300,7 +342,7 @@ test.describe("Multi-PR CI popover", () => {
       seedData.repositoryId,
       title,
     );
-    await associateTwoPRs(apiClient, seed.taskId);
+    await associateTwoPRs(apiClient, seedData.workspaceId, seed.taskId);
     const session = await openTaskAndWait(testPage, apiClient, seed, title);
 
     // The layout-owned canonical panel follows the primary/first-associated PR (web#42).

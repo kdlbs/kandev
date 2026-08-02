@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -167,14 +168,15 @@ func TestValidate_PostgresSSLMode(t *testing.T) {
 	})
 }
 
-// TestFeatures_ProductionDefaults pins the production policy: in-progress
-// features remain off, while the shipped app status bar remains on unless a
-// deployment or saved runtime override explicitly disables it.
+// TestFeatures_ProductionDefaults pins the production policy: new and
+// in-progress features remain off until a deployment explicitly opts in.
 func TestFeatures_ProductionDefaults(t *testing.T) {
 	// Force a clean env so KANDEV_FEATURES_* and profile-selector vars from the
 	// host shell cannot change the production-profile defaults under test.
 	t.Setenv("KANDEV_FEATURES_OFFICE", "")
 	unsetEnv(t, "KANDEV_FEATURES_APP_STATUS_BAR")
+	unsetEnv(t, "KANDEV_FEATURES_AUTH")
+	unsetEnv(t, "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF")
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
 	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "")
 	t.Setenv("KANDEV_E2E_MOCK", "")
@@ -189,6 +191,12 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	}
 	if cfg.Features.AppStatusBar {
 		t.Error("Features.AppStatusBar = true, want false (status surface must remain opt-in by default)")
+	}
+	if cfg.Features.Auth {
+		t.Error("Features.Auth = true, want false (authentication must remain opt-in by default)")
+	}
+	if cfg.Features.ClaudeBackgroundPromptHandoff {
+		t.Error("Features.ClaudeBackgroundPromptHandoff = true, want false (experiment must remain opt-in by default)")
 	}
 }
 
@@ -409,24 +417,54 @@ func TestServerHostsFromConfigWhenHostUnset(t *testing.T) {
 }
 
 // TestFeaturesConfig_JSONShape pins the wire format of GET /api/v1/features.
-// The handler in helpers.go serializes FeaturesConfig directly so new
-// fields flow through without an extra edit; this test guarantees the
-// `json` tag is present on every field. A regression (struct field added
-// without a tag) would surface as a capitalized JSON key and break the
-// frontend's case-sensitive read in apps/web/app/actions/features.ts.
+// The handler in helpers.go serializes FeaturesConfig directly so new fields
+// flow through without an extra edit. Every feature field must remain a bool
+// with explicit JSON and profile/mapstructure names so the runtime flag
+// registry and frontend contract can derive from the same declaration.
 func TestFeaturesConfig_JSONShape(t *testing.T) {
-	cfg := FeaturesConfig{
-		Office:       true,
-		AppStatusBar: true,
-		Auth:         true,
+	typeOfFeatures := reflect.TypeOf(FeaturesConfig{})
+	cfgValue := reflect.New(typeOfFeatures).Elem()
+	seenJSONNames := make(map[string]struct{}, typeOfFeatures.NumField())
+	seenMapstructureNames := make(map[string]struct{}, typeOfFeatures.NumField())
+	for i := 0; i < typeOfFeatures.NumField(); i++ {
+		field := typeOfFeatures.Field(i)
+		if field.Type.Kind() != reflect.Bool {
+			t.Fatalf("FeaturesConfig.%s has type %s; want bool", field.Name, field.Type)
+		}
+		jsonName := strings.Split(field.Tag.Get("json"), ",")[0]
+		if jsonName == "" || jsonName == "-" || jsonName == field.Name {
+			t.Fatalf("FeaturesConfig.%s has invalid json tag %q", field.Name, field.Tag.Get("json"))
+		}
+		if _, exists := seenJSONNames[jsonName]; exists {
+			t.Fatalf("FeaturesConfig has duplicate json tag %q", jsonName)
+		}
+		seenJSONNames[jsonName] = struct{}{}
+		mapstructureName := strings.Split(field.Tag.Get("mapstructure"), ",")[0]
+		if mapstructureName == "" || mapstructureName == "-" || mapstructureName == field.Name {
+			t.Fatalf("FeaturesConfig.%s has invalid mapstructure tag %q", field.Name, field.Tag.Get("mapstructure"))
+		}
+		if _, exists := seenMapstructureNames[mapstructureName]; exists {
+			t.Fatalf("FeaturesConfig has duplicate mapstructure tag %q", mapstructureName)
+		}
+		seenMapstructureNames[mapstructureName] = struct{}{}
+		cfgValue.Field(i).SetBool(true)
 	}
+	cfg := cfgValue.Interface().(FeaturesConfig)
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		t.Fatalf("json.Marshal: %v", err)
 	}
-	got := string(raw)
-	want := `{"office":true,"appStatusBar":true,"auth":true,"claudeBackgroundPromptHandoff":false}`
-	if got != want {
-		t.Errorf("FeaturesConfig JSON = %s; want %s — missing or wrong `json:` struct tag", got, want)
+	var decoded map[string]bool
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("json.Unmarshal: %v", err)
+	}
+	if len(decoded) != typeOfFeatures.NumField() {
+		t.Fatalf("FeaturesConfig JSON has %d fields; want %d", len(decoded), typeOfFeatures.NumField())
+	}
+	for i := 0; i < typeOfFeatures.NumField(); i++ {
+		jsonName := strings.Split(typeOfFeatures.Field(i).Tag.Get("json"), ",")[0]
+		if got, ok := decoded[jsonName]; !ok || !got {
+			t.Errorf("FeaturesConfig JSON missing true field %q: %#v", jsonName, decoded)
+		}
 	}
 }

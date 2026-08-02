@@ -117,6 +117,7 @@ export type GitHubSliceActions = {
   setGitHubAppRegistrationsLoading: (workspaceId: string, loading: boolean) => void;
   resetGitHubAppRegistrations: (workspaceId: string) => void;
   setTaskPRs: (prs: Record<string, TaskPR[]>) => void;
+  removeTaskPR: (taskId: string, associationId: string) => void;
   setTaskIssues: (workspaceId: string, issues: Record<string, TaskIssueLink>) => void;
   upsertTaskIssue: (workspaceId: string, issue: TaskIssueLink) => void;
   setTaskPR: (taskId: string, pr: TaskPR) => void;

@@ -68,6 +68,7 @@ export type UserSettings = {
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
+  agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -85,6 +86,7 @@ export type UserSettings = {
   github_saved_presets?: unknown;
   github_default_query_presets?: unknown;
   gitlab_saved_presets?: unknown;
+  azure_devops_browse_preferences?: unknown;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;
@@ -123,6 +125,7 @@ export type UserSettingsUpdatePayload = {
   review_auto_mark_on_scroll?: boolean;
   confirm_task_archive?: boolean;
   unread_divider?: boolean;
+  agent_generated_task_titles?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -140,6 +143,7 @@ export type UserSettingsUpdatePayload = {
   github_saved_presets?: unknown[] | null;
   github_default_query_presets?: object | null;
   gitlab_saved_presets?: unknown[] | null;
+  azure_devops_browse_preferences?: object | null;
   default_utility_agent_id?: string;
   default_utility_model?: string;
   keyboard_shortcuts?: Record<string, { key: string; modifiers?: Record<string, boolean> }>;

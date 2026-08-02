@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -16,16 +17,37 @@ import (
 type sqliteRepository struct {
 	db *sqlx.DB // writer
 	ro *sqlx.DB // reader
+
+	mu           sync.Mutex
+	sessionLocks map[string]*sync.Mutex
 }
 
 // NewSQLiteRepository creates a SQLite-backed Repository. The supplied writer
 // and reader are taken from the shared DB pool. initSchema runs idempotently.
 func NewSQLiteRepository(writer, reader *sqlx.DB) (Repository, error) {
-	r := &sqliteRepository{db: writer, ro: reader}
+	r := &sqliteRepository{db: writer, ro: reader, sessionLocks: make(map[string]*sync.Mutex)}
 	if err := r.initSchema(); err != nil {
 		return nil, fmt.Errorf("messagequeue: init schema: %w", err)
 	}
 	return r, nil
+}
+
+// withSessionLock serializes the queue mutations of one session so a concurrent
+// merge and drain cannot interleave between their reads and writes. It is
+// per-session (not global), so unrelated sessions proceed in parallel. The
+// affected-row checks remain the authoritative guard across processes (e.g.
+// multiple backends sharing a Postgres queue); the lock makes in-process
+// merge-wins/drain-wins ordering deterministic.
+func (r *sqliteRepository) withSessionLock(sessionID string) func() {
+	r.mu.Lock()
+	lock := r.sessionLocks[sessionID]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		r.sessionLocks[sessionID] = lock
+	}
+	r.mu.Unlock()
+	lock.Lock()
+	return func() { lock.Unlock() }
 }
 
 func (r *sqliteRepository) initSchema() error {
@@ -516,6 +538,11 @@ func (r *sqliteRepository) CountBySession(ctx context.Context, sessionID string)
 }
 
 func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
+	// Share the per-session lock with MergeIntoAbove so a drain and a merge on
+	// the same queue are serialized in-process, not just at the DB layer.
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin take tx: %w", err)
@@ -561,6 +588,9 @@ func (r *sqliteRepository) TakeHead(ctx context.Context, sessionID string) (*Que
 }
 
 func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*QueuedMessage, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin reserve tx: %w", err)
@@ -622,6 +652,9 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 }
 
 func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entryID string) error {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM queued_messages WHERE id = ? AND session_id = ?
 	`), entryID, sessionID)
@@ -648,6 +681,9 @@ func (r *sqliteRepository) AcknowledgeByID(ctx context.Context, sessionID, entry
 // the SELECT and DELETE can't have it removed out from under the new
 // session — same session-scope invariant DeleteByID/UpdateContent enforce.
 func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("begin take tx: %w", err)
@@ -734,6 +770,156 @@ func (r *sqliteRepository) UpdateContentAndMetadata(ctx context.Context, session
 		return ErrEntryNotFound
 	}
 	return tx.Commit()
+}
+
+// MergeIntoAbove folds the source entry into the entry directly above it within
+// the same session, updating the target row and deleting the source row in one
+// transaction so a concurrent drain can never observe a half-merged queue.
+// The per-session lock serializes against drains (TakeHead/ReserveHead/
+// TakeByID) and the affected-row checks turn a lost write into an
+// ErrEntryNotFound rollback rather than a silent content loss. See
+// Repository.MergeIntoAbove for the merge rules and error mapping.
+func (r *sqliteRepository) MergeIntoAbove(ctx context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin merge tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	source, err := readMergeSource(ctx, r, tx, sessionID, sourceID)
+	if err != nil {
+		return nil, err
+	}
+
+	target, err := readMergeTarget(ctx, r, tx, sessionID, source.Position)
+	if err != nil {
+		return nil, err
+	}
+
+	if !mergeAllowed(source, target, queuedBy) {
+		return nil, ErrNoMergeTarget
+	}
+
+	content, attachments, metadata, err := buildMergedEntry(target, source)
+	if err != nil {
+		return nil, err
+	}
+	if err := applyMergeWrites(ctx, r, tx, target, source, content, attachments, metadata, sessionID); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	merged := *target
+	merged.Content = content
+	merged.Attachments = attachments
+	merged.Metadata = metadata
+	return &merged, nil
+}
+
+// readMergeSource loads the source entry by id, mapping a missing row to
+// ErrEntryNotFound so the caller can report it without wrapping.
+func readMergeSource(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID, sourceID string) (*QueuedMessage, error) {
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE id = ? AND session_id = ?
+	`), sourceID, sessionID)
+	source, err := scanQueuedRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrEntryNotFound
+		}
+		return nil, fmt.Errorf("read merge source: %w", err)
+	}
+	return source, nil
+}
+
+// readMergeTarget loads the entry with the greatest position strictly below
+// the source, mapping a missing row to ErrNoMergeTarget.
+func readMergeTarget(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, sessionID string, sourcePosition int64) (*QueuedMessage, error) {
+	row := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT id, session_id, task_id, position, content, model, plan_mode,
+		       attachments_json, metadata_json, queued_at, queued_by
+		FROM queued_messages
+		WHERE session_id = ? AND position < ?
+		ORDER BY position DESC
+		LIMIT 1
+	`), sessionID, sourcePosition)
+	target, err := scanQueuedRow(row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNoMergeTarget
+		}
+		return nil, fmt.Errorf("read merge target: %w", err)
+	}
+	return target, nil
+}
+
+// buildMergedEntry computes the merged content, attachments, and metadata for
+// a source folded into its target, returning the metadata marshalled to JSON
+// so the caller can write both rows in the same transaction.
+func buildMergedEntry(target, source *QueuedMessage) (string, []MessageAttachment, map[string]interface{}, error) {
+	content := joinMergeContent(target.Content, source.Content)
+	attachments := append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
+	metadata, err := mergeEntryMetadata(target.Metadata, source.Metadata)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return content, attachments, metadata, nil
+}
+
+// applyMergeWrites updates the target row and deletes the source row, turning
+// a lost write into ErrEntryNotFound so the transaction rolls back cleanly
+// instead of silently dropping a queued message.
+func applyMergeWrites(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, target, source *QueuedMessage, content string, attachments []MessageAttachment, metadata map[string]interface{}, sessionID string) error {
+	attachmentsJSON, err := marshalAttachments(attachments)
+	if err != nil {
+		return err
+	}
+	metadataJSON, err := marshalMetadata(metadata)
+	if err != nil {
+		return err
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE queued_messages
+		SET content = ?, attachments_json = ?, metadata_json = ?
+		WHERE id = ? AND session_id = ?
+	`), content, attachmentsJSON, metadataJSON, target.ID, sessionID)
+	if err != nil {
+		return fmt.Errorf("update merge target: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("update merge target rows affected: %w", err)
+	}
+	if affected == 0 {
+		// The target was drained concurrently. Rolling back leaves the source
+		// untouched instead of folding into a row that no longer exists.
+		return ErrEntryNotFound
+	}
+	res, err = tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queued_messages
+		WHERE id = ? AND session_id = ?
+	`), source.ID, sessionID)
+	if err != nil {
+		return fmt.Errorf("delete merge source: %w", err)
+	}
+	affected, err = res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("delete merge source rows affected: %w", err)
+	}
+	if affected == 0 {
+		// The source was drained concurrently; rollback restores the target
+		// update so the merge is all-or-nothing.
+		return ErrEntryNotFound
+	}
+	return nil
 }
 
 func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {

@@ -431,6 +431,10 @@ type RepoSpec struct {
 // config, tasks). Used when plan_mode is enabled on a session.
 const McpModeConfig = "config"
 
+// McpModeTaskTitlePending exposes the task-mode MCP surface plus the one-shot
+// title tool while a prompt-first task still has its provisional title.
+const McpModeTaskTitlePending = "task-title-pending"
+
 // McpModeOffice restricts the MCP toolset for office (autonomous) agents to
 // interaction + plan tools. Office agents manage tasks via the kandev CLI
 // (exposed through agentctl + $KANDEV_CLI), not MCP — see
@@ -445,7 +449,7 @@ type LaunchOptions struct {
 	Prompt               string
 	WorkflowStepID       string
 	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeConfig, or McpModeOffice
+	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, or McpModeOffice
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
 	// RouteOverride carries a provider-routing override resolved by the

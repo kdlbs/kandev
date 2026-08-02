@@ -16,6 +16,7 @@ import { useOpenSessionInEditor } from "@/hooks/use-open-session-in-editor";
 import { useOpenSessionFolder } from "@/hooks/use-open-session-folder";
 import { useAppStore } from "@/components/state-provider";
 import type { EditorOption } from "@/lib/types/http";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 type FileActionsDropdownProps = {
   /** File path to open / copy */
@@ -77,8 +78,9 @@ function useFileActions({
   }, [worktreePath, filePath]);
 
   const handleCopyPath = useCallback(() => {
-    navigator.clipboard.writeText(absolutePath);
-    onCopied?.();
+    void copyToClipboard(absolutePath).then((success) => {
+      if (success) onCopied?.();
+    });
   }, [absolutePath, onCopied]);
 
   const handleOpenInEditor = useCallback(

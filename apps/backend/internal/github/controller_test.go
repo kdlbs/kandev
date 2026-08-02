@@ -312,6 +312,57 @@ func TestCredentialBrokerReadinessUsesExactResolveRoute(t *testing.T) {
 	}
 }
 
+func TestHttpDeleteTaskPRDetachesOnlyTheRequestedWorkspaceAssociation(t *testing.T) {
+	router, store := setupControllerStoreTest(t)
+	ctx := context.Background()
+	first := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 10, PRURL: "https://github.com/acme/demo/pull/10", PRTitle: "old", HeadBranch: "old",
+		BaseBranch: "main", State: "merged", CreatedAt: time.Now().UTC(),
+	}
+	second := &TaskPR{
+		WorkspaceID: "ws-1", TaskID: "task-1", RepositoryID: "repo-1", Owner: "acme", Repo: "demo",
+		PRNumber: 11, PRURL: "https://github.com/acme/demo/pull/11", PRTitle: "new", HeadBranch: "new",
+		BaseBranch: "main", State: "open", CreatedAt: time.Now().UTC().Add(time.Second),
+	}
+	if err := store.CreateTaskPR(ctx, first); err != nil {
+		t.Fatalf("create first PR: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, second); err != nil {
+		t.Fatalf("create second PR: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodDelete, "/api/v1/github/task-prs/"+first.ID+"?workspace_id=ws-1", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("delete status = %d, body = %s", response.Code, response.Body.String())
+	}
+	var body struct {
+		Deleted bool `json:"deleted"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+		t.Fatalf("decode delete response: %v", err)
+	}
+	if !body.Deleted {
+		t.Fatal("delete response deleted=false, want true")
+	}
+	active, err := store.ListTaskPRsByTask(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list active PRs: %v", err)
+	}
+	if len(active) != 1 || active[0].ID != second.ID {
+		t.Fatalf("active PRs = %+v, want second association only", active)
+	}
+
+	request = httptest.NewRequest(http.MethodDelete, "/api/v1/github/task-prs/"+second.ID+"?workspace_id=other", nil)
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace delete status = %d, want 404", response.Code)
+	}
+}
+
 func TestHttpListTaskIssues_WorkspaceScopedMetadataLinks(t *testing.T) {
 	router, store := setupControllerStoreTest(t)
 	rows := []struct {

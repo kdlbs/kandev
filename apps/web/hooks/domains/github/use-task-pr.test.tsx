@@ -2,8 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createElement, type ReactNode } from "react";
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
+import type { TaskPR } from "@/lib/types/github";
 
 const requestMock = vi.fn();
+const deleteTaskPRMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => ({ request: requestMock }),
@@ -13,6 +16,7 @@ vi.mock("@/lib/ws/connection", () => ({
 // here). Stub it so the module import doesn't fail in jsdom.
 vi.mock("@/lib/api/domains/github-api", () => ({
   listWorkspaceTaskPRs: vi.fn().mockResolvedValue(null),
+  deleteTaskPR: deleteTaskPRMock,
 }));
 
 import { useTaskPR } from "./use-task-pr";
@@ -20,6 +24,12 @@ import { useAppStoreApi } from "@/components/state-provider";
 
 function wrapper({ children }: { children: ReactNode }) {
   return createElement(StateProvider, null, children);
+}
+
+function createStateWrapper(initialState: Partial<AppState>) {
+  return function StateTestWrapper({ children }: { children: ReactNode }) {
+    return createElement(StateProvider, { initialState, children });
+  };
 }
 
 // Renders the hook alongside the store api so a test can drive
@@ -30,9 +40,20 @@ function useTaskPRWithStore(taskId: string | null) {
   return { result, store };
 }
 
+const linkedPR = { id: "association-1", task_id: "task-1" } as TaskPR;
+
+function unlinkState(workspaceId: string | null): Partial<AppState> {
+  return {
+    workspaces: { items: [], activeId: workspaceId },
+    taskPRs: { byTaskId: { "task-1": [linkedPR] } },
+  };
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   requestMock.mockReset();
+  requestMock.mockResolvedValue({ prs: [] });
+  deleteTaskPRMock.mockReset();
 });
 afterEach(() => {
   cleanup();
@@ -87,6 +108,49 @@ describe("useTaskPR — permanent flag", () => {
       await vi.advanceTimersByTimeAsync(5_000);
     });
     expect(requestMock).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe("useTaskPR — unlink", () => {
+  it("rejects without a task or active workspace and skips the API", async () => {
+    const noTask = renderHook(() => useTaskPR(null), {
+      wrapper: createStateWrapper(unlinkState("ws-1")),
+    });
+    await expect(noTask.result.current.unlink(linkedPR.id)).rejects.toThrow(
+      "No active workspace is selected.",
+    );
+
+    const noWorkspace = renderHook(() => useTaskPR("task-1"), {
+      wrapper: createStateWrapper(unlinkState(null)),
+    });
+    await expect(noWorkspace.result.current.unlink(linkedPR.id)).rejects.toThrow(
+      "No active workspace is selected.",
+    );
+    expect(deleteTaskPRMock).not.toHaveBeenCalled();
+  });
+
+  it("deletes through the active workspace before removing local state", async () => {
+    deleteTaskPRMock.mockResolvedValue(undefined);
+    const view = renderHook(() => useTaskPRWithStore("task-1"), {
+      wrapper: createStateWrapper(unlinkState("ws-1")),
+    });
+
+    await act(async () => {
+      await view.result.current.result.unlink(linkedPR.id);
+    });
+
+    expect(deleteTaskPRMock).toHaveBeenCalledWith(linkedPR.id, "ws-1");
+    expect(view.result.current.store.getState().taskPRs.byTaskId["task-1"]).toBeUndefined();
+  });
+
+  it("propagates API failures without removing the local association", async () => {
+    deleteTaskPRMock.mockRejectedValue(new Error("unlink failed"));
+    const view = renderHook(() => useTaskPRWithStore("task-1"), {
+      wrapper: createStateWrapper(unlinkState("ws-1")),
+    });
+
+    await expect(view.result.current.result.unlink(linkedPR.id)).rejects.toThrow("unlink failed");
+    expect(view.result.current.store.getState().taskPRs.byTaskId["task-1"]).toEqual([linkedPR]);
   });
 });
 

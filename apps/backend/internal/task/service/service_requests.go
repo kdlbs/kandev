@@ -41,6 +41,7 @@ type CreateTaskRequest struct {
 	WorkflowStepID string                 `json:"workflow_step_id"`
 	Title          string                 `json:"title"`
 	Description    string                 `json:"description"`
+	AutoTitle      bool                   `json:"auto_title,omitempty"`
 	Priority       string                 `json:"priority"`
 	State          *v1.TaskState          `json:"state,omitempty"`
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`

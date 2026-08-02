@@ -233,4 +233,68 @@ export const i18nGuardFiles = [
   "components/settings/keyboard-shortcuts-card.tsx",
   "components/settings/mcp-task-agent-profile-default-settings.tsx",
   "components/settings/unread-divider-settings.tsx",
+  // Settings → Integrations → GitHub, connection and authentication half: the
+  // page, the settings shell, the status/identity panels, the connection dialog
+  // and its PAT / CLI / App forms, and the App onboarding flow. The watch
+  // dialogs, watch tables and My-GitHub default sections that the same page
+  // renders are NOT migrated yet and are deliberately absent from this list.
+  //
+  // `github-app-onboarding-model.ts` and `github-access-help.tsx` hold no
+  // literals of their own — the first is a plain `.ts` module that
+  // `mode: "jsx-only"` never inspects, the second takes all its copy as props.
+  // Both entries record that they are migrated; only the pseudo-locale can
+  // prove they stay that way.
+  "app/settings/integrations/github/**/*.{ts,tsx}",
+  "components/github/github-access-help.tsx",
+  "components/github/github-app-connection-panel.tsx",
+  "components/github/github-app-create-form.tsx",
+  "components/github/github-app-import-fields.tsx",
+  "components/github/github-app-import-form.tsx",
+  "components/github/github-app-import-guide.tsx",
+  "components/github/github-app-onboarding-model.ts",
+  "components/github/github-app-policy-dialog.tsx",
+  "components/github/github-app-registration-list.tsx",
+  "components/github/github-app-visibility-field.tsx",
+  "components/github/github-auth-method-list.tsx",
+  "components/github/github-callback-notice.tsx",
+  "components/github/github-cli-form.tsx",
+  "components/github/github-connection-dialog.tsx",
+  "components/github/github-connection-settings-form.tsx",
+  "components/github/github-pat-form.tsx",
+  "components/github/github-permissions-dialog.tsx",
+  "components/github/github-rate-limit.tsx",
+  "components/github/github-repo-scope-section.tsx",
+  "components/github/github-settings.tsx",
+  "components/github/github-status.tsx",
+  "components/github/github-task-credentials-section.tsx",
+  // Shared with surfaces that are not migrated. The guard is per-file, so
+  // `app/stats` and the Jira/Linear/Sentry/GitLab watch settings that also
+  // render these are unaffected.
+  "components/github/pr-stats.tsx",
+  "components/integrations/workspace-scoped-section.tsx",
+  "components/watches/reset-watch-dialog.tsx",
+  // Settings → Integrations → GitHub, watches and My-GitHub defaults: the review
+  // and issue watch dialogs and tables, the prompt field, and the quick-action /
+  // default-query sections. With these the page is fully migrated.
+  //
+  // The three `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them; the entries record that they are migrated, and only the pseudo-locale
+  // can prove it stays that way.
+  "components/github/action-presets-section.tsx",
+  "components/github/default-queries-section.tsx",
+  "components/github/issue-watch-dialog.tsx",
+  "components/github/issue-watch-placeholders.ts",
+  "components/github/issue-watch-table.tsx",
+  "components/github/review-watch-dialog.tsx",
+  "components/github/review-watch-placeholders.ts",
+  "components/github/review-watch-prompt-field.tsx",
+  "components/github/review-watch-table.tsx",
+  "components/github/watch-cleanup-policy.ts",
+  // Shared with the My GitHub page (`app/github`) and the automations trigger
+  // config, neither of which is migrated. Per-file guard, so they are
+  // unaffected.
+  "components/github/my-github/action-presets.ts",
+  "components/github/my-github/search-bar.tsx",
+  "components/github/my-github/use-default-query-presets.ts",
+  "components/github/repo-filter-selector.tsx",
 ];

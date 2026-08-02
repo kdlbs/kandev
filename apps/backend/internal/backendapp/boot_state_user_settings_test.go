@@ -18,6 +18,17 @@ func TestMapUserSettingsStateIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestMapUserSettingsStateIncludesAgentGeneratedTaskTitles(t *testing.T) {
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{AgentGeneratedTaskTitles: true},
+	}, "workspace-1")
+
+	got, ok := state["agentGeneratedTaskTitles"].(bool)
+	if !ok || !got {
+		t.Fatalf("agentGeneratedTaskTitles = %#v, want true", state["agentGeneratedTaskTitles"])
+	}
+}
+
 func TestMapUserSettingsStateIncludesTasksListShowDetails(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{
 		Settings: userdto.UserSettingsDTO{TasksListShowDetails: true},

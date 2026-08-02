@@ -143,7 +143,7 @@ func TestCreateStartSession_KanbanRunnerCreatesDistinctSession(t *testing.T) {
 	if isOffice {
 		t.Fatal("kanban task with a runner was classified as office-owned")
 	}
-	sessionID, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, _, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
 	}
@@ -196,9 +196,12 @@ func TestCreateStartSession_OfficeRunnerReusesPersistentSession(t *testing.T) {
 	if !isOffice {
 		t.Fatal("office-owned assigned task was not classified as office")
 	}
-	sessionID, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
+	sessionID, created, err := svc.createStartSession(ctx, task.ToAPI(), "copilot-runner", "", "", "")
 	if err != nil {
 		t.Fatalf("create start session: %v", err)
+	}
+	if created {
+		t.Fatal("office launch reuse must not report a newly created session")
 	}
 	if sessionID != "existing-office-session" {
 		t.Fatalf("office launch session = %q, want existing-office-session", sessionID)
@@ -3098,7 +3101,10 @@ func TestStartCreatedSession_ConfigModeOmitsCoordinatorTaskControls(t *testing.T
 	require.NoError(t, repo.UpdateSessionMetadata(ctx, "session1", map[string]interface{}{"config_mode": true}))
 
 	taskRepo := newMockTaskRepo()
-	taskRepo.tasks["task1"] = &v1.Task{ID: "task1", Title: "Config chat", State: v1.TaskStateInProgress}
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID: "task1", Title: "Config chat", State: v1.TaskStateInProgress,
+		Metadata: map[string]interface{}{models.MetaKeyAgentTitlePending: true},
+	}
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	messages := &mockMessageCreator{}
@@ -3110,6 +3116,8 @@ func TestStartCreatedSession_ConfigModeOmitsCoordinatorTaskControls(t *testing.T
 	assert.Contains(t, messages.userMessages[0].content, "KANDEV CONFIG MCP TOOLS")
 	assert.NotContains(t, messages.userMessages[0].content, "stop_task_kandev",
 		"Config first-turn context must not advertise a task-mode-only tool")
+	assert.NotContains(t, messages.userMessages[0].content, "set_task_title_kandev",
+		"Config first-turn context must not advertise the title tool")
 }
 
 func TestStartCreatedSession_AssignedKanbanTaskUsesTaskMode(t *testing.T) {
@@ -3839,6 +3847,49 @@ func TestStartTask_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 	assert.Contains(t, err.Error(), "office runtime context")
 	assert.Contains(t, err.Error(), "start or wake the task through Office")
 	assert.False(t, launchCalled)
+}
+
+func TestStartTaskPublishesCreatedSessionBeforeLaunch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "existing-session", models.TaskSessionStateCompleted)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["task1"] = &v1.Task{
+		ID:          "task1",
+		Title:       "Task",
+		Description: "Do the work",
+		State:       v1.TaskStateInProgress,
+	}
+	eventBus := &mockEventBus{}
+	publishedBeforeLaunch := false
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			for _, published := range eventBus.published() {
+				if published.Subject != events.TaskSessionStateChanged {
+					continue
+				}
+				data, ok := published.Event.Data.(map[string]any)
+				if !ok {
+					continue
+				}
+				if data[metaKeySessionID] == req.SessionID &&
+					data[metaKeyNewState] == string(models.TaskSessionStateCreated) {
+					publishedBeforeLaunch = true
+				}
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.eventBus = eventBus
+
+	_, err := svc.StartTask(
+		ctx, "task1", "profile1", "", "", "", "Do the work",
+		"", false, false, nil,
+	)
+	require.NoError(t, err)
+	assert.True(t, publishedBeforeLaunch, "created session event must arrive before the runtime starts")
 }
 
 func TestStartTask_PreservesOnlyResolvedWorkflowPromptExpansion(t *testing.T) {

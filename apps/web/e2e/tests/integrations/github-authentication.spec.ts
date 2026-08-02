@@ -11,21 +11,16 @@ test.describe("GitHub workspace authentication", () => {
     apiClient,
     seedData,
   }, testInfo) => {
+    await apiClient.mockGitHubSetCLIAccounts([
+      { host: "github.com", login: "alice-automation", active: false, state: "active" },
+      { host: "github.com", login: "bob-cli", active: true, state: "active" },
+    ]);
     const workspaceB = await apiClient.createWorkspace("GitHub Workspace B");
     await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
       source: "pat",
       status: "active",
       login: "alice-automation",
     });
-    await apiClient.mockGitHubSetWorkspaceConnection(workspaceB.id, {
-      source: "gh_cli",
-      status: "active",
-      login: "bob-cli",
-    });
-    await apiClient.mockGitHubSetCLIAccounts([
-      { host: "github.com", login: "alice-automation", active: true, state: "active" },
-      { host: "github.com", login: "bob-cli", active: false, state: "active" },
-    ]);
     let releaseWorkspaceBStatus: () => void = () => {};
     const workspaceBStatusGate = new Promise<void>((resolve) => {
       releaseWorkspaceBStatus = resolve;
@@ -68,6 +63,9 @@ test.describe("GitHub workspace authentication", () => {
       timeout: 15_000,
     });
     await expect(automation.getByText("GitHub CLI", { exact: true })).toBeVisible();
+    await expect(automation.getByTestId("github-task-access-summary")).toContainText(
+      "Inherit executor Git credentials",
+    );
     await expect(testPage.getByText("My GitHub identity", { exact: true })).toHaveCount(0);
     await expect(
       automation.getByText("This account also powers My GitHub and user-triggered actions.", {

@@ -21,6 +21,7 @@ import { buildContextFilesContext, buildTaskMentionsContext } from "@/hooks/use-
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import type { AppState } from "@/lib/state/store";
+import { generateUUID } from "@/lib/utils";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -243,6 +244,7 @@ async function requestPassthroughMessage({
     {
       task_id: taskId,
       session_id: sessionId,
+      client_message_id: generateUUID(),
       content: message.content,
       ...(hasAttachments && { attachments }),
       ...(message.contextFilesMeta && { context_files: message.contextFilesMeta }),

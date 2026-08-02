@@ -27,6 +27,17 @@ issue, or Sentry issue is identified later.
 - Creating a task from a GitHub issue on the GitHub integration page automatically applies the same metadata-backed link after task creation.
 - The GitHub issues list resolves all metadata-backed issue links in the active workspace and shows the linked task title with navigation to that task. Links created manually, by the GitHub issue quick launcher, and by issue watches use the same indicator.
 - Pull request linking reuses the existing task PR association model and rendering.
+- When a task has multiple linked GitHub pull requests, every PR tab in the
+  task PR status surface includes an explicit close action that unlinks that PR
+  from the task. The action is available in the desktop hover popover and the
+  existing touch drawer.
+- Unlinking removes only the selected Kandev task-PR association. It does not
+  close or modify the GitHub pull request, delete its branch, change task
+  repositories, or affect sibling PR associations.
+- A successfully unlinked PR disappears from every task PR surface and no
+  longer participates in task-level PR automation. The removal survives page
+  reloads and Kandev restarts. Explicitly linking the same PR again restores
+  the association.
 - A linked issue can be explicitly changed or unlinked from the same dialog.
 - Jira ticket linking is shown only when Jira is enabled and healthy for the
   current workspace. It accepts a Jira key or URL, validates it through the
@@ -88,6 +99,24 @@ GIVEN an existing task that already has GitHub issue metadata
 WHEN the user opens Link > GitHub Issue and chooses Unlink
 THEN Kandev removes only the issue metadata keys and preserves unrelated task metadata
 
+### Unlink one of several pull requests
+
+GIVEN a task has two or more linked GitHub pull requests
+WHEN the user activates the close action on one PR tab
+THEN Kandev removes only that task-PR association, leaves the remote GitHub pull request and sibling associations unchanged, and immediately renders the remaining PRs
+
+### Keep an association when unlink fails
+
+GIVEN a task has two or more linked GitHub pull requests
+WHEN unlinking one association fails
+THEN Kandev keeps the PR tab and association visible and shows an actionable error
+
+### Reach unlink from a touch device
+
+GIVEN a task has two or more linked GitHub pull requests on a coarse-pointer device
+WHEN the user opens the PR status drawer
+THEN every PR tab exposes a touch-sized, accessible unlink action with the same result as desktop
+
 ### Create and link a task from the GitHub issues list
 
 GIVEN a GitHub issue shown on the GitHub integration page
@@ -118,12 +147,27 @@ THEN no task indicator is shown and the existing issue actions remain available
 - Each task links to at most one GitHub issue, while one GitHub issue may link to multiple tasks.
 - `GET /api/v1/github/task-issues?workspace_id=<id>` returns links grouped by task ID for the requested workspace. The lookup derives owner, repository, and issue number from the canonical GitHub issue URL and never returns links from another workspace.
 - The workspace lookup uses the indexed task workspace boundary and does not depend on the GitHub token being currently configured because it reads persisted task metadata.
+- `github_task_prs.detached_at` is nullable. A null value identifies an active
+  association; unlinking stamps the selected row, and active task-PR reads,
+  search results, review sources, and automation omit detached rows. Explicit
+  relinking clears the detached state for the exact task, repository, and PR
+  number.
+- `DELETE /api/v1/github/task-prs/:associationId?workspace_id=<id>` unlinks one
+  association inside the authorized workspace and returns `{ "deleted": true
+  }`. An unknown association or workspace mismatch returns `404` without
+  revealing cross-workspace data.
+- Successful unlink publishes `github.task_pr.deleted` with the workspace,
+  task, and association IDs so all connected clients remove the same PR from
+  local state.
 
 ## Failure Modes
 
 - A failed automatic link attempt does not roll back a successfully created task or block navigation to it.
 - Invalid or incomplete GitHub issue metadata is ignored by the workspace reverse lookup instead of producing a misleading issue-row association.
 - Existing link validation continues to reject issues from repositories not attached to the task.
+- A failed PR unlink leaves the persisted association active and keeps the
+  current UI selection intact. The UI reports the failure instead of
+  optimistically hiding the tab.
 
 ### Link a Jira ticket to an existing task
 
@@ -154,5 +198,7 @@ THEN Kandev renames the task to `ENG-20: Fix login` instead of stacking prefixes
 - Linking does not change task state, session history, repositories, or unrelated metadata.
 - Invalid issue references and repository mismatches return clear errors.
 - Right-click context menu, sidebar menu, and touch/dropdown menu users can reach the Link submenu.
+- Desktop pointer and coarse-pointer users can unlink one PR when at least two
+  are associated, and the remaining association still renders after reload.
 - Jira, Linear, and Sentry actions are hidden when the corresponding integration is disabled or unauthenticated.
 - GitHub issue links are visible only in their task workspace, including after page reload.

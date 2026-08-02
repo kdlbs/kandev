@@ -94,6 +94,7 @@ func (m *Manager) Start(ctx context.Context) error {
 				initSpan.End()
 				continue
 			}
+			m.setRuntimeInterest(execution.SessionID, true)
 
 			// Reconcile the persistence row to match the recovered in-memory ID.
 			// If executors_running.agent_execution_id had drifted (e.g. from a
@@ -312,6 +313,7 @@ func (m *Manager) RemoveExecution(executionID string) {
 	m.releaseActivity(executionActivityKey(executionID))
 	if execution, ok := m.executionStore.Get(executionID); ok {
 		m.cleanupPassthroughMCPConfig(execution)
+		m.setRuntimeInterest(execution.SessionID, false)
 	}
 	m.executionStore.Remove(executionID)
 	m.logger.Debug("removed execution from tracking",

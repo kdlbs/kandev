@@ -14,6 +14,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import type { ReviewWatch } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { formatRelative } from "@/lib/i18n/formats";
 
 type ReviewWatchTableProps = {
   watches: ReviewWatch[];
@@ -27,19 +30,16 @@ type ReviewWatchTableProps = {
   onToggleEnabled: (watch: ReviewWatch) => void;
 };
 
-function formatLastPolled(dateStr: string | null): string {
-  if (!dateStr) return "Never";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+// `formatRelative` already implements these exact buckets (just now / Nm / Nh /
+// Nd ago) against the catalog, so the local copy is dropped rather than
+// translated — it was English-only and duplicated the shared helper.
+function formatLastPolled(t: TFunction, dateStr: string | null): string {
+  if (!dateStr) return t("github:never");
+  return formatRelative(dateStr);
 }
 
-function formatRepoNames(watch: ReviewWatch): string {
-  if (watch.repos.length === 0) return "All repositories";
+function formatRepoNames(t: TFunction, watch: ReviewWatch): string {
+  if (watch.repos.length === 0) return t("github:allRepositories");
   return watch.repos
     .map((r) => (r.name === "" ? `${r.owner}/*` : `${r.owner}/${r.name}`))
     .join(", ");
@@ -54,6 +54,7 @@ type WatchActionsProps = {
 };
 
 function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: WatchActionsProps) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   return (
     <div className="flex items-center justify-end gap-1">
@@ -75,7 +76,7 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: 
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{watch.enabled ? "Pause" : "Enable"}</TooltipContent>
+        <TooltipContent>{watch.enabled ? t("github:pause") : t("github:enable")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -86,13 +87,13 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: 
             onClick={(e) => {
               e.stopPropagation();
               onTrigger(watch.id);
-              toast({ description: "Checking for new PRs..." });
+              toast({ description: t("github:checkingForNewPrs") });
             }}
           >
             <IconRefresh className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Check now</TooltipContent>
+        <TooltipContent>{t("github:checkNow")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -101,7 +102,7 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: 
             size="sm"
             className="h-7 w-7 p-0 cursor-pointer"
             data-testid="watch-reset-button"
-            aria-label="Reset watch"
+            aria-label={t("github:resetWatch")}
             onClick={(e) => {
               e.stopPropagation();
               onReset(watch.id);
@@ -110,7 +111,7 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: 
             <IconRestore className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Reset</TooltipContent>
+        <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -126,7 +127,7 @@ function WatchActions({ watch, onToggleEnabled, onTrigger, onReset, onDelete }: 
             <IconTrash className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("github:delete")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -141,13 +142,14 @@ export function ReviewWatchTable({
   onReset,
   onToggleEnabled,
 }: ReviewWatchTableProps) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
 
   if (watches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
-        No review watches configured. Create one to start monitoring PRs.
+        {t("github:noReviewWatchesConfiguredCreateOne")}
       </p>
     );
   }
@@ -156,12 +158,12 @@ export function ReviewWatchTable({
     <Table>
       <TableHeader>
         <TableRow>
-          {showWorkspace && <TableHead>Workspace</TableHead>}
-          <TableHead>Repository</TableHead>
-          <TableHead>Interval</TableHead>
-          <TableHead>Last Polled</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          {showWorkspace && <TableHead>{t("common:workspace")}</TableHead>}
+          <TableHead>{t("github:repository")}</TableHead>
+          <TableHead>{t("github:interval")}</TableHead>
+          <TableHead>{t("github:lastPolled")}</TableHead>
+          <TableHead>{t("common:status")}</TableHead>
+          <TableHead className="text-right">{t("github:actions")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -172,16 +174,16 @@ export function ReviewWatchTable({
                 {workspaceName(watch.workspace_id)}
               </TableCell>
             )}
-            <TableCell className="font-medium">{formatRepoNames(watch)}</TableCell>
+            <TableCell className="font-medium">{formatRepoNames(t, watch)}</TableCell>
             <TableCell className="text-xs text-muted-foreground">
               {Math.round(watch.poll_interval_seconds / 60)}m
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {formatLastPolled(watch.last_polled_at)}
+              {formatLastPolled(t, watch.last_polled_at)}
             </TableCell>
             <TableCell>
               <Badge variant={watch.enabled ? "default" : "secondary"} className="text-xs">
-                {watch.enabled ? "Active" : "Paused"}
+                {watch.enabled ? t("github:active") : t("github:paused")}
               </Badge>
             </TableCell>
             <TableCell className="text-right">

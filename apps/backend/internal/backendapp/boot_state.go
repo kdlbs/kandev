@@ -11,6 +11,7 @@ import (
 	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	"github.com/kandev/kandev/internal/webapp"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -611,20 +612,33 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			taskIDs = append(taskIDs, task.ID)
 		}
 	}
+	statusSummaries, summaryErr := b.p.taskSvc.GetTaskStatusSummaries(ctx, taskIDs)
+	if summaryErr != nil {
+		b.logBootError("batch task status summaries", summaryErr)
+		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
+	}
 	sessionsByTask, err := b.p.taskSvc.BatchGetSessionsForTasks(ctx, taskIDs)
 	if err != nil {
 		b.logBootError("batch task detail sessions", err)
-		return taskDTOs(tasks)
+		return taskDTOsWithStatusSummaries(tasks, statusSummaries)
 	}
 	primaryInfoByTask, err := b.p.taskSvc.GetPrimarySessionInfoForTasks(ctx, taskIDs)
 	if err != nil {
 		b.logBootError("get task detail primary session info", err)
-		return taskDTOs(tasks)
+		return taskDTOsWithStatusSummaries(tasks, statusSummaries)
 	}
-	pendingActionsBySession, err := b.bootPendingActionsForInputCapableSessions(ctx, sessionsByTask)
-	if err != nil {
-		b.logBootError("get task detail pending actions", err)
+	pendingActionsBySession, pendingErr := b.bootPendingActionsForInputCapableSessions(ctx, sessionsByTask)
+	if pendingErr != nil {
+		b.logBootError("get task detail pending actions", pendingErr)
 		pendingActionsBySession = map[string]taskmodels.TaskPendingAction{}
+	}
+	if summaryErr == nil && pendingErr == nil {
+		statusSummaries, err = b.p.taskSvc.HydrateMissingTaskStatusSummaries(
+			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+		)
+		if err != nil {
+			b.logBootError("repair missing task status summaries", err)
+		}
 	}
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
@@ -667,6 +681,20 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichTaskForegroundActivity(&dto, sessions, b.p.orchestratorSvc)
 		}
+		dto.StatusSummary = statusSummaries[task.ID]
+		result = append(result, dto)
+	}
+	return result
+}
+
+func taskDTOsWithStatusSummaries(tasks []*taskmodels.Task, summaries map[string]*statussummary.TaskStatusSummary) []taskdto.TaskDTO {
+	result := make([]taskdto.TaskDTO, 0, len(tasks))
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		dto := taskdto.FromTask(task)
+		dto.StatusSummary = summaries[task.ID]
 		result = append(result, dto)
 	}
 	return result

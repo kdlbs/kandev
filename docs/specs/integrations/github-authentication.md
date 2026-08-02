@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-19
-amended: 2026-08-01
+amended: 2026-08-02
 owner: Kandev
 ---
 
@@ -50,6 +50,18 @@ automation under different GitHub Apps without operating separate Kandev deploym
   workspace automation connection. **Inherit executor Git credentials** injects no GitHub broker
   helper or `gh` shim: Local and Worktree tasks use host-visible Git/SSH credentials, while remote
   tasks use credentials configured in that executor.
+- Every newly created workspace attempts to persist **Inherit executor Git credentials** as its
+  initial task policy. After a successful settings write, if creation is performed by an internal
+  trusted caller, an auth-disabled synthetic administrator, or a real administrator while host
+  `gh` has an authenticated active account, Kandev also stores that exact host/login as the new
+  workspace's named CLI automation connection. Non-admin member-created workspaces never receive
+  the server operator's CLI identity automatically.
+- If host `gh` is absent, unauthenticated, or cannot validate its active account, workspace creation
+  still succeeds with executor task access and disconnected GitHub automation. If the executor
+  settings write fails, creation still succeeds but the existing managed compatibility fallback
+  remains until the workspace is configured or retried. Existing workspaces are never migrated to
+  these defaults; their connection, persisted policy, and legacy missing/invalid policy fallback
+  remain unchanged.
 - Workspace settings present the automation identity and task Git credential routing as one
   **Workspace GitHub access** group. The page shows a compact read-only summary of both effective
   choices; the existing **Change GitHub connection** dialog contains the full controls for the
@@ -106,8 +118,11 @@ automation under different GitHub Apps without operating separate Kandev deploym
 - The unpublished `KANDEV_GITHUB_APP_*` configuration introduced on this branch is removed. Setting
   those variables does not create or configure a registration; operators use the guided import
   flow for an App they already own.
-- Existing released workspaces migrate to `legacy_shared`; new workspaces start disconnected.
-  Once a workspace leaves legacy mode it cannot return. The unpublished singleton registration
+- Existing released workspaces migrate to `legacy_shared`; upgrades do not rewrite their
+  connection or task policy. New operator-authorized workspaces use the active authenticated host
+  `gh` account when one can be validated, while member-created workspaces and workspaces created
+  without usable host `gh` remain disconnected. Once a workspace leaves legacy mode it cannot
+  return. The unpublished singleton registration
   schema on this branch is rewritten directly and receives no compatibility migration. A valid
   legacy connection supplies both the existing API client abstraction and an in-memory Git
   transport credential so provider-backed repositories can be rematerialized from legacy shared
@@ -218,8 +233,8 @@ The non-secret operational settings row adds `task_git_credentials_mode`, with a
 
 | Value | Behavior |
 | --- | --- |
-| `managed` | Default. Inject the workspace broker contract for attached GitHub repositories unless an explicit executor-profile token overrides it. |
-| `executor` | Inject no Kandev GitHub helper or `gh` shim; use credentials available where the selected executor runs. |
+| `managed` | Inject the workspace broker contract for attached GitHub repositories unless an explicit executor-profile token overrides it. Existing missing/invalid values continue to normalize here for upgrade compatibility. |
+| `executor` | Default persisted for newly created workspaces. Inject no Kandev GitHub helper or `gh` shim; use credentials available where the selected executor runs. |
 
 Missing or invalid persisted values normalize to `managed`. Workspace-settings copy includes this
 policy because it is operational configuration, not authentication material.
@@ -359,6 +374,11 @@ post-signature processing failures produce `failing`; a later valid successful d
 ### Task Git credential resolution
 
 - Missing settings start at `managed`.
+- New workspace creation attempts to persist `executor` before the workspace is exposed for task
+  launch; a persistence failure leaves the existing managed compatibility fallback in place.
+- Operator-authorized creation snapshots a validated active host `gh` host/login as a named CLI
+  connection when available; member creation and unavailable/invalid host CLI leave automation
+  disconnected.
 - `managed + explicit profile GITHUB_TOKEN/GH_TOKEN -> executor_profile`.
 - `managed + attached GitHub repository + active workspace connection -> workspace broker`.
 - `executor -> executor-visible credentials`, regardless of PAT/CLI/App automation method.
@@ -432,6 +452,12 @@ post-signature processing failures produce `failing`; a later valid successful d
   truncating, partially merging, or executing a different block.
 - If executor inheritance is selected but no usable credential exists in that executor, Git/SSH
   reports its normal authentication failure. Kandev does not probe or guess the actor.
+- If host `gh` is absent, unauthenticated, or fails active-account validation while a workspace is
+  created, the workspace remains disconnected for automation, retains executor task access, and
+  creation succeeds.
+- If executor-default persistence fails while a workspace is created, the workspace remains
+  available with the existing managed task-access fallback and a warning for retry/configuration;
+  Kandev does not claim executor inheritance was applied.
 - If Kandev cannot reconcile a managed checkout's `origin` with the selected task policy, Local and
   Worktree preparation fails before the agent starts instead of silently using the other policy's
   transport.
@@ -518,6 +544,23 @@ registration and never creates a global default.
   runtime-selected.
 
 ## Scenarios
+
+- **GIVEN** a brand-new Kandev database and an authenticated active host `gh` account, **WHEN** the
+  initial workspace is seeded, **THEN** its automation connection records that exact CLI
+  host/login, its task access is executor inheritance, and its first task does not request a
+  managed credential lease.
+- **GIVEN** an administrator or internal trusted caller and an authenticated active host `gh`
+  account, **WHEN** a workspace is created, **THEN** the workspace records that exact named CLI
+  automation connection and executor task access.
+- **GIVEN** a non-admin member and an authenticated server-operator `gh` account, **WHEN** the
+  member creates a workspace, **THEN** the workspace has executor task access but no automatic
+  GitHub automation connection.
+- **GIVEN** no usable authenticated host `gh` account, **WHEN** an authorized caller creates a
+  workspace, **THEN** workspace creation succeeds, task access is executor inheritance, and
+  GitHub automation remains disconnected.
+- **GIVEN** an existing installation with managed, disconnected, or legacy missing workspace
+  settings, **WHEN** Kandev upgrades, **THEN** those connections and task policies remain
+  unchanged.
 
 - **GIVEN** a workspace GitHub status is visible, **WHEN** the user refreshes it and the status
   request is still pending, **THEN** the existing workspace content remains visible and usable
@@ -697,11 +740,15 @@ and the
 [managed GitHub login-shell repair plan](../../plans/github-managed-tools-login-shell/plan.md),
 and the
 [system-service identity guardrails repair plan](../../plans/system-service-identity-guardrails/plan.md).
+The new-workspace default repair is tracked in
+[the new workspace GitHub access defaults plan](../../plans/new-workspace-github-access-defaults/plan.md).
 
 ## Decision
 
 See [ADR-2026-07-21-workspace-selectable-github-app-registrations](../../decisions/2026-07-21-workspace-selectable-github-app-registrations.md)
 and
 [ADR-2026-07-27-task-git-credential-policy](../../decisions/2026-07-27-task-git-credential-policy.md).
+New-workspace defaults are defined by
+[ADR-2026-08-02-new-workspace-github-access-defaults](../../decisions/2026-08-02-new-workspace-github-access-defaults.md).
 The system-service ownership boundary is defined by
 [ADR-2026-07-31-system-service-user-continuity](../../decisions/2026-07-31-system-service-user-continuity.md).

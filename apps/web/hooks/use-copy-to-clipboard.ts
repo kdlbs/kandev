@@ -1,69 +1,12 @@
 import { useState, useCallback } from "react";
-
-/**
- * Fallback copy method for non-secure contexts (HTTP)
- * where navigator.clipboard is not available.
- *
- * Appends the temp textarea inside the nearest Radix dialog container
- * (if the active element lives inside one) to avoid the Radix FocusScope
- * stealing focus back to the dialog before execCommand runs.
- */
-function fallbackCopy(text: string): boolean {
-  const previousActive = document.activeElement as HTMLElement | null;
-
-  // Mount inside the dialog so Radix FocusScope doesn't steal focus away.
-  const container =
-    previousActive?.closest<HTMLElement>('[data-slot="dialog-content"], [role="dialog"]') ??
-    document.body;
-
-  const textArea = document.createElement("textarea");
-  textArea.value = text;
-  // Avoid scrolling to bottom
-  textArea.style.top = "0";
-  textArea.style.left = "0";
-  textArea.style.position = "fixed";
-  textArea.style.opacity = "0";
-  container.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
-
-  let success = false;
-  try {
-    success = document.execCommand("copy");
-  } catch {
-    success = false;
-  } finally {
-    try {
-      container.removeChild(textArea);
-    } catch {
-      // Node may already be gone (e.g. dialog closed mid-copy); ignore.
-    }
-    previousActive?.focus();
-  }
-  return success;
-}
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 export function useCopyToClipboard(duration = 2000) {
   const [copied, setCopied] = useState(false);
 
   const copy = useCallback(
     async (text: string) => {
-      let success = false;
-
-      // Try modern clipboard API first
-      if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(text);
-          success = true;
-        } catch {
-          // Fall through to fallback
-        }
-      }
-
-      // Fallback for non-secure contexts
-      if (!success) {
-        success = fallbackCopy(text);
-      }
+      const success = await copyToClipboard(text);
 
       if (success) {
         setCopied(true);

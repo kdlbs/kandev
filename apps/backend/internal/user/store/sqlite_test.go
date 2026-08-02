@@ -150,6 +150,31 @@ func TestScanUserSettingsUnreadDividerDefault(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsAgentGeneratedTaskTitlesDefault(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "empty settings disable title generation", raw: `{}`, want: false},
+		{name: "missing setting disables title generation", raw: `{"chat_submit_key":"enter"}`, want: false},
+		{name: "explicit false disables title generation", raw: `{"agent_generated_task_titles":false}`, want: false},
+		{name: "explicit true enables title generation", raw: `{"agent_generated_task_titles":true}`, want: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.AgentGeneratedTaskTitles != tt.want {
+				t.Fatalf("AgentGeneratedTaskTitles = %v, want %v", settings.AgentGeneratedTaskTitles, tt.want)
+			}
+		})
+	}
+}
+
 func TestScanUserSettingsMCPTaskAgentProfileDefault(t *testing.T) {
 	tests := []struct {
 		name string

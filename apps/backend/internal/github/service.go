@@ -135,6 +135,8 @@ type Service struct {
 	ghAccountLister      func(context.Context) ([]GHAccount, error)
 	mockAuth             *MockAuthState
 	workspaceAuthorizer  func(context.Context, string) error
+	freshDefaultsMu      sync.Mutex
+	freshDefaultsDone    bool
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently

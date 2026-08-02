@@ -4,10 +4,13 @@ import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-git-credentials";
 import type { TaskGitCredentialsMode } from "@/lib/types/github";
 import { GitHubAccessHelp } from "./github-access-help";
+import { useTranslation } from "react-i18next";
 
-const taskAccessLabels: Record<TaskGitCredentialsMode, string> = {
-  managed: "Managed workspace credentials",
-  executor: "Inherit executor Git credentials",
+// Keyed by the wire mode, which is never translated. Catalog keys rather than
+// `t()` calls, because this is module scope (see docs/i18n.md).
+const taskAccessLabelKeys: Record<TaskGitCredentialsMode, string> = {
+  managed: "github:managedWorkspaceCredentials",
+  executor: "github:inheritExecutorGitCredentials",
 };
 
 export function GitHubTaskAccessSummary({
@@ -15,21 +18,22 @@ export function GitHubTaskAccessSummary({
   loading,
   error,
 }: Omit<TaskGitCredentialsState, "save">) {
-  let value = taskAccessLabels[mode];
-  if (loading) value = "Loading task access…";
-  if (error) value = "Task access unavailable";
+  const { t } = useTranslation();
+  let value = t(taskAccessLabelKeys[mode]);
+  if (loading) value = t("github:loadingTaskAccess");
+  if (error) value = t("github:taskAccessUnavailable");
   return (
     <div
       className="flex items-center gap-1 text-xs text-muted-foreground"
       data-testid="github-task-access-summary"
     >
       <GitHubAccessHelp
-        label="Explain task Git access"
-        title="Task Git access"
-        description="Controls how newly launched tasks authenticate to GitHub for Git HTTPS and gh commands. Managed workspace credentials use Kandev's workspace connection; executor credentials use the selected executor's Git or SSH setup."
+        label={t("github:explainTaskGitAccess")}
+        title={t("github:taskGitAccess")}
+        description={t("github:controlsHowNewlyLaunchedTasksAuthenticate")}
       />
       <span>
-        <span className="font-medium text-foreground">Task access: </span>
+        <span className="font-medium text-foreground">{t("github:taskAccess")} </span>
         {value}
       </span>
     </div>
@@ -47,20 +51,20 @@ export function GitHubTaskAccessForm({
   onChange: (value: TaskGitCredentialsMode) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <section className="space-y-4 border-t pt-5" data-testid="github-task-access-settings">
       <div className="space-y-1">
         <div className="flex items-center gap-1">
-          <h3 className="text-sm font-medium">Task Git access</h3>
+          <h3 className="text-sm font-medium">{t("github:taskGitAccess")}</h3>
           <GitHubAccessHelp
-            label="Explain how managed task credentials work"
-            title="How managed task credentials work"
-            description="With Managed workspace credentials, Kandev configures agentctl as Git's credential helper inside newly launched task processes. When Git requests credentials for an attached GitHub HTTPS repository, the helper redeems a task- and repository-scoped broker lease. The credential is returned to Git on demand and is not written to the repository or Git config. The gh command uses Kandev's broker-aware shim. Executor inheritance skips both and uses credentials visible in the selected executor. Changes apply to new task launches and the next resume, not already-running processes."
+            label={t("github:explainHowManagedTaskCredentialsWork")}
+            title={t("github:howManagedTaskCredentialsWork")}
+            description={t("github:withManagedWorkspaceCredentialsKandevConfigures")}
           />
         </div>
         <p className="text-xs leading-5 text-muted-foreground">
-          Choose how newly launched tasks authenticate to GitHub. This does not change the workspace
-          automation connection above.
+          {t("github:chooseHowNewlyLaunchedTasksAuthenticate")}
         </p>
       </div>
       <RadioGroup
@@ -75,10 +79,9 @@ export function GitHubTaskAccessForm({
         >
           <RadioGroupItem value="managed" className="mt-0.5" />
           <span>
-            <span className="font-medium">Managed workspace credentials</span>
+            <span className="font-medium">{t("github:managedWorkspaceCredentials")}</span>
             <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-              Kandev brokers the workspace PAT, named GitHub CLI account, or App identity to this
-              task for GitHub HTTPS and gh.
+              {t("github:kandevBrokersTheWorkspacePatNamed")}
             </span>
           </span>
         </label>
@@ -88,20 +91,23 @@ export function GitHubTaskAccessForm({
         >
           <RadioGroupItem value="executor" className="mt-0.5" />
           <span>
-            <span className="font-medium">Inherit executor Git credentials</span>
+            <span className="font-medium">{t("github:inheritExecutorGitCredentials")}</span>
             <span className="mt-1 block text-xs leading-5 text-muted-foreground">
-              Local and Worktree tasks use host-visible Git or SSH credentials. Docker, SSH, and
-              cloud tasks use credentials configured in that executor.
+              {t("github:localAndWorktreeTasksUseHost")}
             </span>
           </span>
         </label>
       </RadioGroup>
       <p className="text-xs leading-5 text-muted-foreground">
-        An executor-profile GH_TOKEN or GITHUB_TOKEN overrides managed workspace credentials for
-        that task.
+        {/* Env var names are identifiers the user must type exactly, so they are
+            interpolated rather than left for the pseudo-locale to mangle. */}
+        {t("github:anExecutorProfileGhTokenOr", {
+          ghToken: "GH_TOKEN",
+          githubToken: "GITHUB_TOKEN",
+        })}
       </p>
       {taskAccess.error && (
-        <p className="text-sm text-destructive">Unable to load the current task access setting.</p>
+        <p className="text-sm text-destructive">{t("github:unableToLoadTheCurrentTask")}</p>
       )}
     </section>
   );
