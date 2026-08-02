@@ -112,6 +112,7 @@ function QuarantineHeader({
   bulkDisabledReason,
   schedulingEnabled,
   checkIntervalHours,
+  showTotal,
   onPurge,
   totalBytes,
 }: {
@@ -121,6 +122,7 @@ function QuarantineHeader({
   bulkDisabledReason?: string;
   schedulingEnabled: boolean;
   checkIntervalHours: number;
+  showTotal: boolean;
   onPurge: (scope: StorageQuarantinePurgeScope) => void;
   totalBytes: number;
 }) {
@@ -173,9 +175,11 @@ function QuarantineHeader({
         item if you still need it, or delete it permanently when you are certain. {counts.eligible}{" "}
         eligible now · {counts.protected} protected
       </CardDescription>
-      <p className="text-xs font-medium" data-testid="storage-quarantine-total">
-        {t("settings:storageQuarantineTotal", { size: formatGigabytes(totalBytes) })}
-      </p>
+      {showTotal && (
+        <p className="text-xs font-medium" data-testid="storage-quarantine-total">
+          {t("settings:storageQuarantineTotal", { size: formatGigabytes(totalBytes) })}
+        </p>
+      )}
       <p className="text-xs text-muted-foreground" data-testid="storage-quarantine-schedule-copy">
         {schedulingEnabled
           ? `Eligible entries are removed by the first successful maintenance run after their deadline (every ${checkIntervalHours} hours when the idle gate allows it).`
@@ -274,6 +278,7 @@ export function StorageQuarantineCard({
         bulkDisabledReason={bulkDisabledReason}
         schedulingEnabled={schedulingEnabled}
         checkIntervalHours={checkIntervalHours}
+        showTotal={!loading && !error}
         onPurge={setPurgeScope}
         totalBytes={totalBytes}
       />

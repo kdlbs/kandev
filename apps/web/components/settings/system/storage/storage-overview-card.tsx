@@ -4,7 +4,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kand
 import { Spinner } from "@kandev/ui/spinner";
 import { IconChartPie, IconTrash } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import type { StorageOverviewResponse, StorageQuarantineSummary } from "@/lib/types/system";
+import type {
+  StorageMaintenanceSettings,
+  StorageOverviewResponse,
+  StorageQuarantineSummary,
+} from "@/lib/types/system";
 import { formatRelativeTime } from "@/lib/utils";
 import { StorageActionButton } from "./storage-action-button";
 import { formatGigabytes } from "./storage-units";
@@ -12,6 +16,7 @@ import { storageAnalysisTotal } from "./storage-totals";
 
 interface Props {
   overview: StorageOverviewResponse | null;
+  settings?: StorageMaintenanceSettings;
   loading?: boolean;
   error?: string | null;
   disabledReason?: string;
@@ -26,12 +31,19 @@ interface StorageResource {
   warning?: string;
 }
 
-function goCacheDisabledReason(overview: StorageOverviewResponse, pendingReason?: string) {
+function goCacheDisabledReason(
+  overview: StorageOverviewResponse,
+  pendingReason?: string,
+  settings?: StorageMaintenanceSettings,
+) {
   if (pendingReason) return pendingReason;
   if (overview.summary.go_cache.owned !== true) {
     return "Only a Kandev-owned Go build cache can be cleaned.";
   }
-  if ((overview.summary.go_cache.size_bytes ?? 0) <= overview.settings.go_cache.max_bytes) {
+  if (
+    (overview.summary.go_cache.size_bytes ?? 0) <=
+    (settings ?? overview.settings).go_cache.max_bytes
+  ) {
     return "The Go build cache is below its configured size limit.";
   }
   return undefined;
@@ -177,6 +189,7 @@ function ResourceRow({ resource, goCacheCleanupDisabledReason, onRunGoCache }: R
 
 export function StorageOverviewCard({
   overview,
+  settings,
   loading,
   error,
   disabledReason,
@@ -199,7 +212,7 @@ export function StorageOverviewCard({
   }
   const { summary } = overview;
   const analyzedAt = new Date(overview.analyzed_at).toLocaleString();
-  const cleanupDisabledReason = goCacheDisabledReason(overview, disabledReason);
+  const cleanupDisabledReason = goCacheDisabledReason(overview, disabledReason, settings);
   const resources = storageResources(overview);
   const total = storageAnalysisTotal(summary);
   return (
@@ -207,6 +220,7 @@ export function StorageOverviewCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2 text-base">
           <IconChartPie className="size-4" /> Storage analysis
+          {isLoading && <Spinner className="size-4" data-testid="storage-overview-spinner" />}
           {!summary.docker.available && <Badge variant="outline">Docker unavailable</Badge>}
         </CardTitle>
         <CardDescription>

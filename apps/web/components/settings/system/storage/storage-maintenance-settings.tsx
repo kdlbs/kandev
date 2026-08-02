@@ -203,10 +203,8 @@ function policyBlockedReason(
 
 function storageActionDisabledReason(
   action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
-  policyLoading: boolean,
 ) {
   if (action) return "Wait for the current storage action to finish.";
-  if (policyLoading) return "Wait for storage settings to finish loading.";
   return undefined;
 }
 
@@ -291,6 +289,7 @@ function StoragePrimarySections({
     <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
       <StorageOverviewCard
         overview={controller.overview}
+        settings={savedSettings ?? undefined}
         loading={controller.loading?.overview}
         error={controller.sectionErrors?.overview}
         disabledReason={disabledReason}
@@ -373,9 +372,7 @@ function StoragePageSections({
 
 export function StorageMaintenanceSettings() {
   const controller = useStorageMaintenance();
-  const savedSettings = controller.policy?.settings ?? controller.overview?.settings ?? null;
-  const policyLoading = controller.loading?.policy ?? !savedSettings;
-  const actionDisabledReason = storageActionDisabledReason(controller.pendingAction, policyLoading);
+  const actionDisabledReason = storageActionDisabledReason(controller.pendingAction);
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">

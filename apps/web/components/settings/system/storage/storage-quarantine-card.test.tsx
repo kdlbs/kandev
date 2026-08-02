@@ -41,6 +41,7 @@ describe("StorageQuarantineCard", () => {
     expect(screen.getByTestId("storage-quarantine-spinner")).toBeTruthy();
     expect(screen.getByText("Loading quarantine…")).toBeTruthy();
     expect(screen.queryByText("No restorable quarantined resources.")).toBeNull();
+    expect(screen.queryByTestId("storage-quarantine-total")).toBeNull();
   });
 
   it("renders an isolated error state", () => {
@@ -50,6 +51,7 @@ describe("StorageQuarantineCard", () => {
       "quarantine unavailable",
     );
     expect(screen.queryByTestId("storage-quarantine-spinner")).toBeNull();
+    expect(screen.queryByTestId("storage-quarantine-total")).toBeNull();
   });
 
   it("shows the total of all listed entries", () => {
