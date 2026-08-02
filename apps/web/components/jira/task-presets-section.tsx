@@ -195,6 +195,11 @@ function PresetPromptEditor({
   onPatch: (patch: Partial<JiraStoredPreset>) => void;
 }) {
   const { t } = useTranslation();
+  // Memoized because `ScriptEditor` keys its Monaco completion-provider
+  // registration on `placeholders` identity. This used to be a module-scope
+  // const, so it was stable for free; now that it is built from `t`, a fresh
+  // array on every render would re-register the provider on every keystroke.
+  const placeholders = useMemo(() => jiraPromptPlaceholders(t), [t]);
   return (
     <div className="px-2 pb-2 space-y-1">
       <div className="rounded-md border overflow-hidden" data-settings-dirty={isDirty}>
@@ -204,7 +209,7 @@ function PresetPromptEditor({
           language="markdown"
           height={computeEditorHeight(preset.prompt_template)}
           lineNumbers="off"
-          placeholders={jiraPromptPlaceholders(t)}
+          placeholders={placeholders}
         />
       </div>
       <p className="text-[11px] text-muted-foreground/60">

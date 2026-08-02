@@ -332,7 +332,7 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
         title={disableTest ? t("jira:pasteATokenToTestTheConnection") : undefined}
         data-testid="jira-test-button"
       >
-        {testing ? t("jira:testing") : t("jira:testConnection")}
+        {testing ? t("jira:testingConnection") : t("jira:testConnection")}
       </Button>
       {hasConfig && (
         <Button

@@ -227,7 +227,7 @@ function JQLField({
           disabled={!jql.trim() || testing}
           className="cursor-pointer h-7"
         >
-          {testing ? t("jira:testingEllipsis") : t("jira:testJql")}
+          {testing ? t("jira:testingJql") : t("jira:testJql")}
         </Button>
       </div>
       <Textarea
@@ -276,6 +276,11 @@ function PlaceholdersHelp() {
 
 function PromptField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
   const { t } = useTranslation();
+  // Memoized because `ScriptEditor` keys its Monaco completion-provider
+  // registration on `placeholders` identity. This used to be a module-scope
+  // const, so it was stable for free; now that it is built from `t`, a fresh
+  // array on every render would re-register the provider on every keystroke.
+  const placeholders = useMemo(() => jiraIssueWatchPlaceholders(t), [t]);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
@@ -294,7 +299,7 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
           language="markdown"
           height={computeEditorHeight(value)}
           lineNumbers="off"
-          placeholders={jiraIssueWatchPlaceholders(t)}
+          placeholders={placeholders}
         />
       </div>
     </div>

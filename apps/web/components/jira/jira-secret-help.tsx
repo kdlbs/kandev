@@ -95,8 +95,8 @@ function SessionSnippet() {
 
 // `t` is threaded in rather than read from a hook: this is a plain function, and
 // the guard only inspects JSX, so a literal returned from here would never be
-// reported.
-function formatExpiry(
+// reported. Exported for its unit test.
+export function formatExpiry(
   t: TFunction,
   expiresAt: string,
 ): { label: string; tone: "ok" | "warn" | "danger" } {
@@ -127,7 +127,15 @@ export function CookieExpiry({ expiresAt }: { expiresAt: string }) {
   // `formatDateTime` follows the active app locale; the previous bare
   // `toLocaleString()` followed the browser's, so the tooltip could disagree
   // with the rest of the page after a language switch.
-  const absolute = formatDateTime(expiresAt);
+  //
+  // Guarded because the two disagree on a malformed date, which a legacy or
+  // corrupted `secretExpiresAt` really can be — `formatExpiry` has a branch for
+  // exactly that. `toLocaleString()` returned the string "Invalid Date";
+  // `Intl.DateTimeFormat` throws `RangeError`, which would take the whole Jira
+  // settings card down with it. No tooltip is the right fallback: the label
+  // already says the expiry is unknown.
+  const parsed = new Date(expiresAt);
+  const absolute = Number.isNaN(parsed.getTime()) ? undefined : formatDateTime(parsed);
   return (
     <p className={`text-xs ${TONE_CLASSES[tone]}`} title={absolute}>
       {label}
