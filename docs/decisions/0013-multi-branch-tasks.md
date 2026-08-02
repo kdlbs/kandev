@@ -1,4 +1,4 @@
-# 0012: Multi-branch task support — extend multi-repo to allow N branches per repo
+# 0013: Multi-branch task support — extend multi-repo to allow N branches per repo
 
 **Status:** accepted
 **Date:** 2026-06-01

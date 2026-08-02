@@ -3,7 +3,7 @@
 **Status:** shipped
 **Owner:** Kandev backend
 **Date:** 2026-06-01
-**Related:** [ADR 0013](../../decisions/0013-multi-branch-tasks.md)
+**Related:** [ADR 0013](../../../decisions/0013-multi-branch-tasks.md)
 
 ## What
 
