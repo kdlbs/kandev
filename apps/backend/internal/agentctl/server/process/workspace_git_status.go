@@ -216,6 +216,11 @@ func (wt *WorkspaceTracker) computeGitStatus(ctx context.Context) (types.GitStat
 		return update, err
 	}
 
+	wt.getRemoteAheadBehindCounts(ctx, &update, prior)
+	if err := ctx.Err(); err != nil {
+		return update, err
+	}
+
 	if err := wt.parseGitStatusOutput(ctx, &update); err != nil {
 		return update, err
 	}
@@ -253,7 +258,9 @@ func (wt *WorkspaceTracker) getGitBranchInfo(ctx context.Context, update *types.
 	}
 	update.Branch = strings.TrimSpace(string(branchOut))
 
-	// Get remote branch
+	// Get remote branch. A non-nil error here is the normal, expected case
+	// for a branch with no upstream yet (not logged — this fires on every
+	// poll of every unpushed branch).
 	if remoteOut, err := wt.runGitOutput(ctx, "rev-parse", "--abbrev-ref", "@{upstream}"); err == nil {
 		update.RemoteBranch = strings.TrimSpace(string(remoteOut))
 	}
@@ -393,6 +400,37 @@ func (wt *WorkspaceTracker) getAheadBehindCounts(ctx context.Context, update *ty
 	update.Behind, _ = strconv.Atoi(parts[1])
 }
 
+// getRemoteAheadBehindCounts populates RemoteAhead/RemoteBehind relative to
+// this branch's own upstream (@{upstream}) — the counts push-detection needs
+// to tell "has this branch been pushed" apart from Ahead/Behind, which are
+// deliberately base-branch-relative (see getAheadBehindCounts) and never
+// reach zero just because a push happened. Left at 0/0 when RemoteBranch is
+// empty (no upstream configured yet — nothing to compare against).
+//
+// Same carry-forward-on-failure treatment as getAheadBehindCounts: a
+// transient rev-list failure keeps the prior counts instead of flashing 0/0
+// (which would look like "just pushed" to a push-detection consumer).
+func (wt *WorkspaceTracker) getRemoteAheadBehindCounts(ctx context.Context, update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if update.RemoteBranch == "" {
+		update.RemoteAhead = 0
+		update.RemoteBehind = 0
+		return
+	}
+	countOut, err := wt.runGitOutput(ctx, "rev-list", "--left-right", "--count", "HEAD..."+update.RemoteBranch)
+	if err != nil {
+		wt.logger.Debug("getRemoteAheadBehindCounts: rev-list failed, carrying forward", zap.Error(err))
+		carryRemoteAheadBehind(update, prior)
+		return
+	}
+	parts := strings.Fields(string(countOut))
+	if len(parts) != 2 {
+		carryRemoteAheadBehind(update, prior)
+		return
+	}
+	update.RemoteAhead, _ = strconv.Atoi(parts[0])
+	update.RemoteBehind, _ = strconv.Atoi(parts[1])
+}
+
 // branchDiffCandidates is the integration-branch priority list used when the
 // task has no recorded base_branch (legacy tasks / external branches). Kept
 // in sync between base-commit and ahead/behind resolution.
@@ -501,6 +539,15 @@ func carryAheadBehind(update *types.GitStatusUpdate, prior types.GitStatusUpdate
 	}
 	update.Ahead = prior.Ahead
 	update.Behind = prior.Behind
+}
+
+// carryRemoteAheadBehind mirrors carryAheadBehind for RemoteAhead/RemoteBehind.
+func carryRemoteAheadBehind(update *types.GitStatusUpdate, prior types.GitStatusUpdate) {
+	if prior.HeadCommit == "" || prior.HeadCommit != update.HeadCommit {
+		return
+	}
+	update.RemoteAhead = prior.RemoteAhead
+	update.RemoteBehind = prior.RemoteBehind
 }
 
 // parseGitStatusOutput runs git status --porcelain and populates the file lists and map.

@@ -235,6 +235,79 @@ func mapKeys[V any](m map[string]V) []string {
 // ahead/behind git command fails (timeout, missing upstream). The contract:
 // preserve prior counts when HEAD is unchanged, leave them zero when HEAD
 // moved (the prior counts are stale by definition) or when prior is empty.
+// TestGetGitStatus_RemoteAheadTracksUpstreamNotBaseBranch pins the fix for a
+// production bug: push-detection (event_handlers_git.go) needs a signal that
+// reaches zero once a branch is pushed. Ahead/Behind are deliberately
+// base-branch-relative (see getAheadBehindCounts) and stay elevated for a
+// real feature branch's entire life — pushing the branch doesn't move the
+// base branch, so Ahead never reflects push state. RemoteAhead/RemoteBehind
+// (relative to this branch's own @{upstream}) do reach zero on push, which
+// is what this test proves end-to-end against a real git repo and remote.
+func TestGetGitStatus_RemoteAheadTracksUpstreamNotBaseBranch(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	runGit(t, repoDir, "checkout", "-b", "feature/x")
+	writeFile(t, repoDir, "feature.txt", "first change")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "first change")
+
+	// No upstream yet for feature/x — RemoteBranch empty, RemoteAhead is
+	// defined as 0 (nothing to compare against), even though there's a real
+	// unpushed commit sitting locally.
+	status, err := wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (pre-push): %v", err)
+	}
+	if status.RemoteBranch != "" {
+		t.Fatalf("expected no upstream before first push, got %q", status.RemoteBranch)
+	}
+	if status.RemoteAhead != 0 {
+		t.Fatalf("RemoteAhead = %d, want 0 (no upstream to compare against)", status.RemoteAhead)
+	}
+
+	runGit(t, repoDir, "push", "-u", "origin", "feature/x")
+
+	writeFile(t, repoDir, "feature.txt", "second change")
+	runGit(t, repoDir, "add", ".")
+	runGit(t, repoDir, "commit", "-m", "second change")
+
+	// One commit ahead of main from the first push, plus this second
+	// unpushed commit: Ahead (vs main) = 2, RemoteAhead (vs upstream) = 1 —
+	// the two diverge exactly as documented, proving Ahead alone could never
+	// signal "just pushed" for a real feature branch.
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (post-first-push, one unpushed commit): %v", err)
+	}
+	if status.Ahead != 2 {
+		t.Fatalf("Ahead = %d, want 2 (both commits ahead of main)", status.Ahead)
+	}
+	if status.RemoteAhead != 1 {
+		t.Fatalf("RemoteAhead = %d, want 1 (only the second commit is unpushed)", status.RemoteAhead)
+	}
+
+	runGit(t, repoDir, "push", "origin", "feature/x")
+
+	// After the second push: RemoteAhead drops to 0 (the push-detection
+	// signal), while Ahead stays at 2 (still 2 commits ahead of main —
+	// pushing a feature branch never reduces its distance from main).
+	status, err = wt.getGitStatus(ctx)
+	if err != nil {
+		t.Fatalf("getGitStatus (post-second-push): %v", err)
+	}
+	if status.RemoteAhead != 0 {
+		t.Fatalf("RemoteAhead = %d, want 0 after push", status.RemoteAhead)
+	}
+	if status.Ahead != 2 {
+		t.Fatalf("Ahead = %d, want 2 (unchanged by push — still ahead of main)", status.Ahead)
+	}
+}
+
 func TestCarryAheadBehind(t *testing.T) {
 	head := "abc123"
 	tests := []struct {
@@ -272,6 +345,48 @@ func TestCarryAheadBehind(t *testing.T) {
 			carryAheadBehind(update, tt.prior)
 			if update.Ahead != tt.wantAhead || update.Behind != tt.wantBehind {
 				t.Errorf("ahead/behind = %d/%d, want %d/%d", update.Ahead, update.Behind, tt.wantAhead, tt.wantBehind)
+			}
+		})
+	}
+}
+
+func TestCarryRemoteAheadBehind(t *testing.T) {
+	head := "abc123"
+	tests := []struct {
+		name       string
+		prior      types.GitStatusUpdate
+		updateHead string
+		wantAhead  int
+		wantBehind int
+	}{
+		{
+			name:       "same head preserves counts",
+			prior:      types.GitStatusUpdate{HeadCommit: head, RemoteAhead: 1, RemoteBehind: 3},
+			updateHead: head,
+			wantAhead:  1,
+			wantBehind: 3,
+		},
+		{
+			name:       "different head drops counts",
+			prior:      types.GitStatusUpdate{HeadCommit: head, RemoteAhead: 1, RemoteBehind: 3},
+			updateHead: "def456",
+			wantAhead:  0,
+			wantBehind: 0,
+		},
+		{
+			name:       "empty prior head no-op",
+			prior:      types.GitStatusUpdate{RemoteAhead: 9, RemoteBehind: 9},
+			updateHead: head,
+			wantAhead:  0,
+			wantBehind: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			update := &types.GitStatusUpdate{HeadCommit: tt.updateHead}
+			carryRemoteAheadBehind(update, tt.prior)
+			if update.RemoteAhead != tt.wantAhead || update.RemoteBehind != tt.wantBehind {
+				t.Errorf("remote ahead/behind = %d/%d, want %d/%d", update.RemoteAhead, update.RemoteBehind, tt.wantAhead, tt.wantBehind)
 			}
 		})
 	}

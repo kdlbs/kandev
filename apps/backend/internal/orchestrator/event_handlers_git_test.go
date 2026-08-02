@@ -130,6 +130,23 @@ func TestHandleBranchSwitched_ResetsPRWatch(t *testing.T) {
 // after the push had completed would silently never get its PR associated,
 // because the >0→0 transition was never observed. See task
 // 4fdff41b-095a-4158-a311-4a1a23abe064 for the original failure mode.
+//
+// Fixtures set RemoteAhead (commits ahead of this branch's own upstream),
+// not Ahead (commits ahead of the base branch) — Ahead never reaches zero
+// just because a branch got pushed, since pushing doesn't move the base
+// branch, so it can't signal push state. This was itself a production bug
+// (push detection silently never fired for any real feature branch) found
+// via an e2e regression test and fixed alongside this predicate.
+//
+// `prev` fixtures use pushTrackerUnsynced (not 0) to represent "no upstream
+// yet" — trackPushAndAssociatePR's own tracked value, not a raw prior
+// RemoteAhead. Collapsing "no upstream" and "upstream, nothing to push"
+// into the same 0 value was itself a production bug: a task's very first
+// observation (before any push) reads as remote-ahead=0-with-no-branch,
+// which would consume the one-time first-observation fast path, and the
+// real no-upstream-to-synced transition on the next observation would then
+// compare prevValue(0) > 0 and never fire — found via an e2e regression
+// test and fixed alongside this predicate.
 func TestShouldFirePushDetection(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -140,47 +157,60 @@ func TestShouldFirePushDetection(t *testing.T) {
 		wantWhy string
 	}{
 		{
-			name:    "first observation, ahead=0 with remote branch fires (push happened pre-poll)",
+			name:    "first observation, remote-ahead=0 with remote branch fires (push happened pre-poll)",
 			loaded:  false,
-			prev:    0,
-			status:  &lifecycle.GitStatusData{Ahead: 0, RemoteBranch: "origin/feature/x"},
+			prev:    pushTrackerUnsynced,
+			status:  &lifecycle.GitStatusData{RemoteAhead: 0, RemoteBranch: "origin/feature/x"},
 			wantOn:  true,
 			wantWhy: "first-observation sync — pre-existing remote branch in synced state means a push completed before we started watching",
 		},
 		{
 			name:   "first observation, no remote branch does not fire",
 			loaded: false,
-			prev:   0,
+			prev:   pushTrackerUnsynced,
 			// Branch never been pushed — RemoteBranch is empty.
-			status: &lifecycle.GitStatusData{Ahead: 0, RemoteBranch: ""},
+			status: &lifecycle.GitStatusData{RemoteAhead: 0, RemoteBranch: ""},
 			wantOn: false,
 		},
 		{
-			name:   "first observation, ahead>0 does not fire (waiting for transition)",
+			name:   "first observation, remote-ahead>0 does not fire (waiting for transition)",
 			loaded: false,
-			prev:   0,
-			status: &lifecycle.GitStatusData{Ahead: 3, RemoteBranch: "origin/feature/x"},
+			prev:   pushTrackerUnsynced,
+			status: &lifecycle.GitStatusData{RemoteAhead: 3, RemoteBranch: "origin/feature/x"},
 			wantOn: false,
 		},
 		{
 			name:   "transition >0 to 0 with remote fires (legacy in-session push)",
 			loaded: true,
 			prev:   2,
-			status: &lifecycle.GitStatusData{Ahead: 0, RemoteBranch: "origin/feature/x"},
+			status: &lifecycle.GitStatusData{RemoteAhead: 0, RemoteBranch: "origin/feature/x"},
+			wantOn: true,
+		},
+		{
+			name: "no-upstream-to-synced transition fires (the previously-missed case)",
+			// This is the exact bug: a task's first-ever status observation
+			// (no commits, no upstream yet) burns the !loaded fast path with
+			// a negative result, so the *next* observation — the real push,
+			// going from "never had an upstream" to "synced" — must still be
+			// recognized as a transition even though it's not a literal
+			// N>0-to-0 drop.
+			loaded: true,
+			prev:   pushTrackerUnsynced,
+			status: &lifecycle.GitStatusData{RemoteAhead: 0, RemoteBranch: "origin/feature/x"},
 			wantOn: true,
 		},
 		{
 			name:   "stays at 0 after first fire does not refire",
 			loaded: true,
 			prev:   0,
-			status: &lifecycle.GitStatusData{Ahead: 0, RemoteBranch: "origin/feature/x"},
+			status: &lifecycle.GitStatusData{RemoteAhead: 0, RemoteBranch: "origin/feature/x"},
 			wantOn: false,
 		},
 		{
 			name:   "transition with no remote does not fire (local-only commit was undone)",
 			loaded: true,
 			prev:   1,
-			status: &lifecycle.GitStatusData{Ahead: 0, RemoteBranch: ""},
+			status: &lifecycle.GitStatusData{RemoteAhead: 0, RemoteBranch: ""},
 			wantOn: false,
 		},
 		{
@@ -189,6 +219,17 @@ func TestShouldFirePushDetection(t *testing.T) {
 			prev:   1,
 			status: nil,
 			wantOn: false,
+		},
+		{
+			name: "base-branch-ahead is irrelevant: real feature branch, just pushed, still fires",
+			// This is the exact production bug: a branch with real commits
+			// ahead of main (Ahead > 0, as any normal feature branch has)
+			// must still be detected as "just pushed" once RemoteAhead drops
+			// to 0 — Ahead staying high must not suppress detection.
+			loaded: false,
+			prev:   pushTrackerUnsynced,
+			status: &lifecycle.GitStatusData{Ahead: 12, RemoteAhead: 0, RemoteBranch: "origin/feature/x"},
+			wantOn: true,
 		},
 	}
 	for _, tt := range tests {

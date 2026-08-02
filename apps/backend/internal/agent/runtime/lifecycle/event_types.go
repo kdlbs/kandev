@@ -264,17 +264,23 @@ func (p GitEventPayload) GetSessionID() string {
 }
 
 type GitStatusData struct {
-	Branch          string      `json:"branch"`
-	RemoteBranch    string      `json:"remote_branch,omitempty"`
-	HeadCommit      string      `json:"head_commit,omitempty"`
-	BaseCommit      string      `json:"base_commit,omitempty"`
-	Modified        []string    `json:"modified"`
-	Added           []string    `json:"added"`
-	Deleted         []string    `json:"deleted"`
-	Untracked       []string    `json:"untracked"`
-	Renamed         []string    `json:"renamed"`
-	Ahead           int         `json:"ahead"`
-	Behind          int         `json:"behind"`
+	Branch       string   `json:"branch"`
+	RemoteBranch string   `json:"remote_branch,omitempty"`
+	HeadCommit   string   `json:"head_commit,omitempty"`
+	BaseCommit   string   `json:"base_commit,omitempty"`
+	Modified     []string `json:"modified"`
+	Added        []string `json:"added"`
+	Deleted      []string `json:"deleted"`
+	Untracked    []string `json:"untracked"`
+	Renamed      []string `json:"renamed"`
+	Ahead        int      `json:"ahead"`
+	Behind       int      `json:"behind"`
+	// RemoteAhead/RemoteBehind compare against this branch's own upstream
+	// (@{upstream}), unlike Ahead/Behind which are relative to the base
+	// branch and never reach zero just because the branch was pushed. Push
+	// detection (event_handlers_git.go) reads RemoteAhead, not Ahead.
+	RemoteAhead     int         `json:"remote_ahead"`
+	RemoteBehind    int         `json:"remote_behind"`
 	Files           interface{} `json:"files,omitempty"`
 	BranchAdditions int         `json:"branch_additions,omitempty"`
 	BranchDeletions int         `json:"branch_deletions,omitempty"`

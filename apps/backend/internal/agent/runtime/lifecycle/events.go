@@ -296,6 +296,8 @@ func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *age
 			Renamed:         update.Renamed,
 			Ahead:           update.Ahead,
 			Behind:          update.Behind,
+			RemoteAhead:     update.RemoteAhead,
+			RemoteBehind:    update.RemoteBehind,
 			Files:           update.Files,
 			BranchAdditions: update.BranchAdditions,
 			BranchDeletions: update.BranchDeletions,
