@@ -22,8 +22,10 @@ import {
   destroyAllSprites,
 } from "@/lib/api/domains/sprites-api";
 import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
+import { Trans, useTranslation } from "react-i18next";
 
 export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
+  const { t } = useTranslation();
   const { status } = useSprites(secretId);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<SpritesTestResult | null>(null);
@@ -40,12 +42,12 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
         steps: [],
         total_duration_ms: 0,
         sprite_name: "",
-        error: "Failed to connect to backend",
+        error: t("settings:failedToConnectToBackend"),
       });
     } finally {
       setTesting(false);
     }
-  }, [secretId]);
+  }, [secretId, t]);
 
   return (
     <Card>
@@ -54,10 +56,10 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
           <div>
             <CardTitle className="flex items-center gap-2">
               <IconSparkles className="h-5 w-5" />
-              Connection
+              {t("settings:connection")}
             </CardTitle>
             <CardDescription>
-              Sprites.dev provides ephemeral cloud sandboxes for running agents remotely.
+              {t("settings:spritesDevProvidesEphemeralCloudSandboxes")}
             </CardDescription>
           </div>
           <TokenBadge
@@ -70,15 +72,17 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
         <div className="text-sm text-muted-foreground">
           {status?.token_configured ? (
             <p>
-              API token is configured.
+              {t("settings:apiTokenIsConfigured")}{" "}
               {status.connected
-                ? ` ${status.instance_count} active sprite${status.instance_count !== 1 ? "s" : ""}.`
-                : " Unable to connect."}
+                ? t("settings:activeSprites", { count: status.instance_count })
+                : t("settings:unableToConnect")}
             </p>
           ) : (
             <p>
-              Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable in
-              the executor profile, referencing a secret with your Sprites.dev API token.
+              <Trans i18nKey="settings:configureSpritesApiToken">
+                Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable
+                in the executor profile, referencing a secret with your Sprites.dev API token.
+              </Trans>
             </p>
           )}
         </div>
@@ -95,7 +99,7 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
             ) : (
               <IconTestPipe className="mr-1.5 h-4 w-4" />
             )}
-            Test Connection
+            {t("settings:testConnection")}
           </Button>
         </div>
         {testResult && <TestResultDisplay result={testResult} />}
@@ -105,20 +109,22 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
 }
 
 function TokenBadge({ configured, connected }: { configured: boolean; connected: boolean }) {
+  const { t } = useTranslation();
   if (!configured) {
-    return <Badge variant="secondary">Not Configured</Badge>;
+    return <Badge variant="secondary">{t("settings:notConfigured")}</Badge>;
   }
   if (connected) {
     return (
       <Badge variant="default" className="bg-green-600">
-        Connected
+        {t("settings:connected")}
       </Badge>
     );
   }
-  return <Badge variant="destructive">Disconnected</Badge>;
+  return <Badge variant="destructive">{t("settings:disconnected")}</Badge>;
 }
 
 function TestResultDisplay({ result }: { result: SpritesTestResult }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-md border p-3 space-y-2">
       <div className="flex items-center gap-2 text-sm font-medium">
@@ -127,7 +133,7 @@ function TestResultDisplay({ result }: { result: SpritesTestResult }) {
         ) : (
           <IconX className="h-4 w-4 text-red-600" />
         )}
-        {result.success ? "Connection test passed" : "Connection test failed"}
+        {result.success ? t("settings:connectionTestPassed") : t("settings:connectionTestFailed")}
         <span className="text-muted-foreground font-normal">({result.total_duration_ms}ms)</span>
       </div>
       {result.steps.map((step: SpritesTestStep) => (
@@ -156,6 +162,7 @@ function StepRow({ step }: { step: SpritesTestStep }) {
 }
 
 export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
+  const { t } = useTranslation();
   const { instances, loading } = useSprites(secretId);
   const removeSpritesInstance = useAppStore((state) => state.removeSpritesInstance);
   const [destroying, setDestroying] = useState<string | null>(null);
@@ -191,9 +198,9 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Running Sprites</CardTitle>
+            <CardTitle>{t("settings:runningSprites")}</CardTitle>
             <CardDescription>
-              Active Kandev sprites. Sprites are destroyed when agents stop.
+              {t("settings:activeKandevSpritesSpritesAreDestroyed")}
             </CardDescription>
           </div>
           {instances.length > 0 && (
@@ -209,7 +216,7 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
               ) : (
                 <IconTrash className="mr-1.5 h-4 w-4" />
               )}
-              Destroy All
+              {t("settings:destroyAll")}
             </Button>
           )}
         </div>
@@ -237,24 +244,25 @@ function InstancesContent({
   destroying: string | null;
   onDestroy: (name: string) => void;
 }) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
         <IconLoader2 className="h-4 w-4 animate-spin" />
-        Loading...
+        {t("settings:loading")}
       </div>
     );
   }
   if (instances.length === 0) {
-    return <p className="text-sm text-muted-foreground py-4">No active sprites.</p>;
+    return <p className="text-sm text-muted-foreground py-4">{t("settings:noActiveSprites")}</p>;
   }
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Name</TableHead>
-          <TableHead>Health</TableHead>
-          <TableHead>Uptime</TableHead>
+          <TableHead>{t("settings:name")}</TableHead>
+          <TableHead>{t("settings:health")}</TableHead>
+          <TableHead>{t("settings:uptime")}</TableHead>
           <TableHead className="w-[80px]" />
         </TableRow>
       </TableHeader>
@@ -290,8 +298,31 @@ function InstancesContent({
   );
 }
 
+/**
+ * Health status arrives from the backend as a sentinel and is switched on below,
+ * so it is never translated — only the rendered label is, via a per-status key.
+ *
+ * The backend lower-cases whatever Sprites.dev reports and does not constrain it
+ * (`NormalizeSpriteStatus`), so a status outside this map is possible; those keep
+ * the previous capitalize-the-sentinel rendering rather than showing raw
+ * lowercase.
+ */
+const HEALTH_STATUS_LABEL_KEYS: Record<string, string> = {
+  running: "settings:spriteHealthRunning",
+  cold: "settings:spriteHealthCold",
+  starting: "settings:spriteHealthStarting",
+  stopped: "settings:spriteHealthStopped",
+  stopping: "settings:spriteHealthStopping",
+  failed: "settings:spriteHealthFailed",
+  healthy: "settings:spriteHealthHealthy",
+  unhealthy: "settings:spriteHealthUnhealthy",
+  unknown: "settings:spriteHealthUnknown",
+};
+
 function HealthBadge({ status }: { status: string }) {
-  const label = status.charAt(0).toUpperCase() + status.slice(1);
+  const { t } = useTranslation();
+  const labelKey = HEALTH_STATUS_LABEL_KEYS[status];
+  const label = labelKey ? t(labelKey) : status.charAt(0).toUpperCase() + status.slice(1);
   switch (status) {
     case "running":
       return (
@@ -326,13 +357,14 @@ function formatUptime(seconds: number): string {
 }
 
 export function SpritesSettings() {
+  const { t } = useTranslation();
   return (
     <div className="space-y-8">
       <div>
+        {/* Brand noun — not translatable copy (docs/i18n.md, "Do not translate"). */}
         <h2 className="text-2xl font-bold">Sprites.dev</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Manage Sprites.dev remote sandbox integration for running agents in isolated cloud
-          environments.
+          {t("settings:manageSpritesDevRemoteSandboxIntegration")}
         </p>
       </div>
       <Separator />

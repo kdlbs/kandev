@@ -8,6 +8,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { useTranslation } from "react-i18next";
 
 type TranscriptNavigationSettings = {
   showAnchoredPromptBar: boolean;
@@ -83,6 +84,7 @@ function TranscriptNavigationSwitch({
 }
 
 export function AnchoredPromptBarSettings() {
+  const { t } = useTranslation();
   const userSettings = useAppStore((state) => state.userSettings);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -127,13 +129,13 @@ export function AnchoredPromptBarSettings() {
   return (
     <SettingsCard isDirty={isDirty} data-testid="anchored-prompt-bar-card">
       <CardHeader>
-        <CardTitle className="text-base">Transcript Navigation</CardTitle>
+        <CardTitle className="text-base">{t("settings:transcriptNavigation")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <TranscriptNavigationSwitch
           id="show-anchored-prompt-bar"
-          label="Show anchored prompt bar"
-          description="Desktop only. While you scroll past your last prompt, stick a shortened copy to the top of the transcript with an expand toggle."
+          label={t("settings:showAnchoredPromptBar")}
+          description={t("settings:desktopOnlyWhileYouScrollPast")}
           checked={draft.showAnchoredPromptBar}
           isDirty={isDirty}
           onCheckedChange={(showAnchoredPromptBar) =>
@@ -142,8 +144,8 @@ export function AnchoredPromptBarSettings() {
         />
         <TranscriptNavigationSwitch
           id="show-scroll-to-last-prompt"
-          label="Show scroll to last prompt"
-          description="Show the jump control after your latest prompt scrolls above the transcript."
+          label={t("settings:showScrollToLastPrompt")}
+          description={t("settings:showTheJumpControlAfterYour")}
           checked={draft.showScrollToLastPrompt}
           isDirty={isDirty}
           onCheckedChange={(showScrollToLastPrompt) =>
@@ -152,8 +154,8 @@ export function AnchoredPromptBarSettings() {
         />
         <TranscriptNavigationSwitch
           id="show-scroll-to-start"
-          label="Show scroll to start"
-          description="Show the control that jumps to the beginning of the transcript."
+          label={t("settings:showScrollToStart")}
+          description={t("settings:showTheControlThatJumpsTo")}
           checked={draft.showScrollToStart}
           isDirty={isDirty}
           onCheckedChange={(showScrollToStart) =>
@@ -162,8 +164,8 @@ export function AnchoredPromptBarSettings() {
         />
         <TranscriptNavigationSwitch
           id="show-transcript-auto-scroll-control"
-          label="Show transcript auto-scroll control"
-          description="Show the per-session button that temporarily turns transcript auto-scroll on or off. Hiding it does not change the default: new transcripts still auto-scroll."
+          label={t("settings:showTranscriptAutoScrollControl")}
+          description={t("settings:showThePerSessionButtonThat")}
           checked={draft.showTranscriptAutoScrollControl}
           isDirty={isDirty}
           onCheckedChange={(showTranscriptAutoScrollControl) =>

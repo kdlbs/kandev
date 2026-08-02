@@ -210,4 +210,27 @@ export const i18nGuardFiles = [
   "components/settings/editors-settings-state.tsx",
   "components/settings/editors-settings.tsx",
   "components/settings/lsp-language-options.ts",
+  // Settings → General → Sprites.
+  "app/settings/general/sprites/**/*.{ts,tsx}",
+  "components/settings/sprites-settings.tsx",
+  // Settings → General → Layouts: the page and the whole layouts component
+  // directory. `layout-editor-actions.ts` and `use-layout-settings.ts` hold no
+  // JSX, so `mode: "jsx-only"` never inspects them — the entries record that
+  // they are migrated, but only the pseudo-locale can prove it stays that way.
+  "app/settings/general/layouts/**/*.{ts,tsx}",
+  "components/settings/layouts/**/*.{ts,tsx}",
+  // Settings → General → Resource Metrics, Keyboard Shortcuts and Task Actions.
+  // The pages render from general-settings.tsx (already listed above); these
+  // entries add the routes plus the per-setting cards those two pages own.
+  // Shortcut *names* still come from `lib/keyboard/shortcut-overrides.ts`, a
+  // registry shared with the un-migrated voice-mode page — deliberately not
+  // migrated here.
+  "app/settings/general/resource-metrics/**/*.{ts,tsx}",
+  "app/settings/general/keyboard-shortcuts/**/*.{ts,tsx}",
+  "app/settings/general/task-actions/**/*.{ts,tsx}",
+  "components/settings/anchored-prompt-bar-settings.tsx",
+  "components/settings/archive-confirmation-settings.tsx",
+  "components/settings/keyboard-shortcuts-card.tsx",
+  "components/settings/mcp-task-agent-profile-default-settings.tsx",
+  "components/settings/unread-divider-settings.tsx",
 ];

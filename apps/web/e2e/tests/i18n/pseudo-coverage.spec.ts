@@ -46,6 +46,81 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   },
   { name: "settings — secrets", url: "/settings/general/secrets" },
   { name: "settings — terminal", url: "/settings/general/terminal" },
+  {
+    name: "settings — sprites",
+    url: "/settings/general/sprites",
+    // Product name of the sandbox provider.
+    allow: ["Sprites.dev"],
+  },
+  {
+    name: "settings — layouts",
+    url: "/settings/general/layouts",
+    // Both groups are display strings that are also PERSISTED, so translating
+    // them in place would write locale-dependent values into a user's saved
+    // layouts and leave them there after a locale switch:
+    //   - Built-in profile names/descriptions (lib/layout/layout-profiles.ts).
+    //     `upsertBuiltInLayoutOverride` copies `builtIn.name` into the saved
+    //     record the first time a built-in is customized.
+    //   - Dockview panel titles (lib/state/layout-manager/constants.ts), which
+    //     `toSerializedDockview` writes into the stored layout JSON. That path
+    //     is already in `EXCLUDED` in scripts/externalize-strings.mjs.
+    // Localizing either needs a key/persisted-value split in those modules.
+    allow: [
+      "Default",
+      "Plan Mode",
+      "Preview Mode",
+      "VS Code",
+      "Agent with Files, Changes, PR Details, and Terminal",
+      "Agent and Plan side by side",
+      "Agent and Browser side by side",
+      "Agent and VS Code side by side",
+      "Agent",
+      "Plan",
+      "Changes",
+      "Files",
+      "Browser",
+      "Terminal",
+      "PR Details",
+      "Merge Request",
+    ],
+  },
+  {
+    name: "settings — keyboard shortcuts",
+    url: "/settings/general/keyboard-shortcuts",
+    // Modifier/key names label a physical key and are out of scope for
+    // translation — the same rule the eslint guard's keyboard pattern encodes.
+    //
+    // Shortcut names come from CONFIGURABLE_SHORTCUTS in
+    // lib/keyboard/shortcut-overrides.ts, a registry shared with the
+    // un-migrated voice-mode settings page; it migrates with that page.
+    allow: [
+      "Ctrl",
+      "Shift",
+      "Alt",
+      "Cmd",
+      "Meta",
+      "Space",
+      "Enter",
+      "Tab",
+      "Command Panel",
+      "Command Panel (Alt)",
+      "File Search",
+      "Search Task Contents",
+      "Quick Chat",
+      "Toggle Bottom Terminal",
+      "Toggle Sidebar",
+      "New Task",
+      "Focus Chat Input",
+      "Focus CLI Chat Input",
+      "Toggle Plan Mode",
+      "Recent Task Switcher",
+      "Recent Task Switcher (Backward)",
+      "Voice Input",
+      "Reverse Chat Search",
+      "Open Task Pull Request",
+    ],
+  },
+  { name: "settings — task actions", url: "/settings/general/task-actions" },
 ];
 
 /**
@@ -105,8 +180,12 @@ async function findUnlocalizedText(page: Page, allowed: string[]): Promise<strin
       if (rect.width === 0 && rect.height === 0) continue;
 
       // Strip allowlisted tokens; if nothing word-like remains, it's fine.
+      // Longest first: stripping "VS Code" before "Agent and VS Code side by
+      // side" would leave "side by side" behind and report it as a leftover.
       let residue = text;
-      for (const token of allowedList) residue = residue.split(token).join(" ");
+      for (const token of [...allowedList].sort((a, b) => b.length - a.length)) {
+        residue = residue.split(token).join(" ");
+      }
       if (!wordlike.test(residue)) continue;
 
       found.add(text.slice(0, 120));
