@@ -31,10 +31,6 @@ type PendingResult = {
   generation: number;
 };
 
-async function copyText(text: string): Promise<boolean> {
-  return copyToClipboard(text);
-}
-
 export function usePromptResultDelivery({
   scopeKey,
   getCurrent,
@@ -103,7 +99,7 @@ export function usePromptResultDelivery({
       return;
     }
 
-    const copied = await copyText(pendingResult.result.content);
+    const copied = await copyToClipboard(pendingResult.result.content);
     toast({
       description: copied ? COPY_SUCCESS_MESSAGE : COPY_FAILURE_MESSAGE,
       variant: copied ? "success" : "error",
