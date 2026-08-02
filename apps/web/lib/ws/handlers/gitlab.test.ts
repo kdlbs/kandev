@@ -9,15 +9,18 @@ const WORKSPACE_A = "workspace-a";
 function makeStore(activeWorkspaceId: string | null) {
   const setTaskMR = vi.fn();
   const setTaskMRAutomationOptions = vi.fn();
+  const markTaskMRAutomationExternalUpdate = vi.fn();
   const state = {
     workspaces: { activeId: activeWorkspaceId },
     setTaskMR,
     setTaskMRAutomationOptions,
+    markTaskMRAutomationExternalUpdate,
   } as unknown as AppState;
   return {
     store: { getState: () => state } as StoreApi<AppState>,
     setTaskMR,
     setTaskMRAutomationOptions,
+    markTaskMRAutomationExternalUpdate,
   };
 }
 
@@ -72,13 +75,17 @@ describe("GitLab WebSocket handlers", () => {
   });
 
   it("stores a task MR automation options update pushed for the current task", () => {
-    const { store, setTaskMRAutomationOptions } = makeStore(WORKSPACE_A);
+    const { store, setTaskMRAutomationOptions, markTaskMRAutomationExternalUpdate } =
+      makeStore(WORKSPACE_A);
     const handler = registerGitLabHandlers(store)["gitlab.task_mr_options.updated"]!;
     const options = taskMRAutomationOptions();
 
     handler({ type: "notification", action: "gitlab.task_mr_options.updated", payload: options });
 
     expect(setTaskMRAutomationOptions).toHaveBeenCalledWith("task-1", options);
+    // Marks the write as externally-sourced so an in-flight local
+    // refresh()/update() in the hook knows not to overwrite it.
+    expect(markTaskMRAutomationExternalUpdate).toHaveBeenCalledWith("task-1");
   });
 
   it("ignores a task MR automation options update with no task_id", () => {

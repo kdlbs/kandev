@@ -1,12 +1,151 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { getTaskMRAutomation, updateTaskMRAutomation } from "@/lib/api/domains/gitlab-api";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
 import type { TaskMRAutomationOptions, TaskMRAutomationPatch } from "@/lib/types/gitlab";
+
+type AppStoreApi = ReturnType<typeof useAppStoreApi>;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "Failed to load MR automation options.";
+}
+
+// True when `requestId` is still the latest request this hook issued for
+// `taskId` on `requestRef`, and no externally-sourced write (a WS push) has
+// landed since `externalGenAtStart` was captured. Shared by refresh()'s
+// commit check and update()'s commit/rollback checks.
+function isCurrentAndUnchangedExternally(
+  automation: AppState["taskMRAutomation"],
+  requestRef: Record<string, number>,
+  taskId: string,
+  requestId: number,
+  externalGenAtStart: number,
+): boolean {
+  return (
+    requestRef[taskId] === requestId &&
+    (automation.externalGeneration[taskId] ?? 0) === externalGenAtStart
+  );
+}
+
+type MRAutomationRequestContext = {
+  taskId: string;
+  storeApi: AppStoreApi;
+  refreshRequestRef: RefObject<Record<string, number>>;
+  updateRequestRef: RefObject<Record<string, number>>;
+  updateSettleCounterRef: RefObject<Record<string, number>>;
+  setOptions: AppState["setTaskMRAutomationOptions"];
+  setLoading: AppState["setTaskMRAutomationLoading"];
+  setSaving: AppState["setTaskMRAutomationSaving"];
+  setError: AppState["setTaskMRAutomationError"];
+};
+
+async function performRefresh(
+  ctx: MRAutomationRequestContext,
+): Promise<TaskMRAutomationOptions | null> {
+  const {
+    taskId,
+    storeApi,
+    refreshRequestRef,
+    updateSettleCounterRef,
+    setOptions,
+    setLoading,
+    setError,
+  } = ctx;
+  const requestId = (refreshRequestRef.current[taskId] ?? 0) + 1;
+  refreshRequestRef.current[taskId] = requestId;
+  const settleCounterAtStart = updateSettleCounterRef.current[taskId] ?? 0;
+  const externalGenAtStart = storeApi.getState().taskMRAutomation.externalGeneration[taskId] ?? 0;
+  setLoading(taskId, true);
+  setError(taskId, null);
+  try {
+    const response = await getTaskMRAutomation(taskId, { cache: "no-store" });
+    const automation = storeApi.getState().taskMRAutomation;
+    const safeToCommit =
+      isCurrentAndUnchangedExternally(
+        automation,
+        refreshRequestRef.current,
+        taskId,
+        requestId,
+        externalGenAtStart,
+      ) &&
+      !automation.saving[taskId] &&
+      (updateSettleCounterRef.current[taskId] ?? 0) === settleCounterAtStart;
+    if (safeToCommit) {
+      setOptions(taskId, response);
+    }
+    return response;
+  } catch (err) {
+    if (refreshRequestRef.current[taskId] === requestId) {
+      setError(taskId, errorMessage(err));
+    }
+    throw err;
+  } finally {
+    if (refreshRequestRef.current[taskId] === requestId) {
+      setLoading(taskId, false);
+    }
+  }
+}
+
+async function performUpdate(
+  ctx: MRAutomationRequestContext,
+  patch: TaskMRAutomationPatch,
+): Promise<TaskMRAutomationOptions | null> {
+  const {
+    taskId,
+    storeApi,
+    updateRequestRef,
+    updateSettleCounterRef,
+    setOptions,
+    setSaving,
+    setError,
+  } = ctx;
+  const requestId = (updateRequestRef.current[taskId] ?? 0) + 1;
+  updateRequestRef.current[taskId] = requestId;
+  const externalGenAtStart = storeApi.getState().taskMRAutomation.externalGeneration[taskId] ?? 0;
+  const previous = storeApi.getState().taskMRAutomation.byTaskId[taskId] ?? null;
+  // Optimistic update: apply immediately, revert on failure (AC27).
+  if (previous) {
+    setOptions(taskId, { ...previous, ...patch });
+  }
+  setSaving(taskId, true);
+  setError(taskId, null);
+  try {
+    const response = await updateTaskMRAutomation(taskId, patch, { cache: "no-store" });
+    const automation = storeApi.getState().taskMRAutomation;
+    if (
+      isCurrentAndUnchangedExternally(
+        automation,
+        updateRequestRef.current,
+        taskId,
+        requestId,
+        externalGenAtStart,
+      )
+    ) {
+      setOptions(taskId, response);
+    }
+    return response;
+  } catch (err) {
+    if (updateRequestRef.current[taskId] === requestId) {
+      const automation = storeApi.getState().taskMRAutomation;
+      // Only revert to the pre-optimistic snapshot if nothing fresher has
+      // landed externally since — otherwise a failed PATCH would erase a
+      // WS-pushed update that arrived while it was in flight.
+      const unchangedExternally =
+        (automation.externalGeneration[taskId] ?? 0) === externalGenAtStart;
+      if (previous && unchangedExternally) {
+        setOptions(taskId, previous);
+      }
+      setError(taskId, errorMessage(err));
+    }
+    throw err;
+  } finally {
+    updateSettleCounterRef.current[taskId] = (updateSettleCounterRef.current[taskId] ?? 0) + 1;
+    if (updateRequestRef.current[taskId] === requestId) {
+      setSaving(taskId, false);
+    }
+  }
 }
 
 /**
@@ -23,18 +162,30 @@ function errorMessage(error: unknown): string {
  * active task" gating is needed. An already-populated slot (from a WS
  * push or an earlier mount) is trusted rather than re-fetched.
  *
- * refresh and update still track independent per-taskId generation
- * counters so a refresh started while an update's PATCH is still in
- * flight cannot suppress the update's response, or vice versa, for the
- * same task.
+ * refresh and update (performRefresh/performUpdate above) track independent
+ * per-taskId generation counters so a refresh started while an update's
+ * PATCH is still in flight cannot suppress the update's response, or vice
+ * versa, for the same task.
  *
- * refresh's own response is further gated on updateSettleCounterRef: a GET
- * can be in flight when a PATCH starts and resolve afterward with pre-patch
- * data (the server hadn't processed the PATCH yet when the GET ran). Since
- * that GET's own generation check alone can't detect this — it's still
- * "current" — refresh additionally requires that no update has settled since
- * it started; update bumps the counter in its `finally` regardless of
- * success/failure so a stale GET can never flip a just-saved switch back.
+ * Three additional races are guarded explicitly:
+ *  - A WS push can land while a local refresh()/update() is still in
+ *    flight. Both capture taskMRAutomation.externalGeneration[taskId] at
+ *    the start and re-check it before committing their own result (a
+ *    fresh fetch, or an optimistic-update revert) — a push bumps the
+ *    generation, so a slower local response that would otherwise
+ *    clobber the pushed value is dropped instead.
+ *  - refresh()'s own response is gated on updateSettleCounterRef: a GET
+ *    can be in flight when a PATCH starts and resolve afterward with
+ *    pre-patch data (the server hadn't processed the PATCH yet when the
+ *    GET ran). refresh requires that no update has settled since it
+ *    started; update bumps the counter in its `finally` regardless of
+ *    success/failure so a stale GET can never flip a just-saved switch
+ *    back.
+ *  - refresh() also skips committing while an update for the same task
+ *    is still saving (not yet settled) — otherwise its pre-patch
+ *    response can land mid-PATCH and visibly flip an optimistically-set
+ *    switch back off for a moment before the PATCH's own response
+ *    corrects it again.
  */
 export function useTaskMRAutomationOptions(taskId: string | null) {
   const refreshRequestRef = useRef<Record<string, number>>({});
@@ -61,63 +212,38 @@ export function useTaskMRAutomationOptions(taskId: string | null) {
 
   const refresh = useCallback(async (): Promise<TaskMRAutomationOptions | null> => {
     if (!taskId) return null;
-    const requestId = (refreshRequestRef.current[taskId] ?? 0) + 1;
-    refreshRequestRef.current[taskId] = requestId;
-    const settleCounterAtStart = updateSettleCounterRef.current[taskId] ?? 0;
-    setLoading(taskId, true);
-    setError(taskId, null);
-    try {
-      const response = await getTaskMRAutomation(taskId, { cache: "no-store" });
-      const noNewerUpdateSettled =
-        (updateSettleCounterRef.current[taskId] ?? 0) === settleCounterAtStart;
-      if (refreshRequestRef.current[taskId] === requestId && noNewerUpdateSettled) {
-        setOptions(taskId, response);
-      }
-      return response;
-    } catch (err) {
-      if (refreshRequestRef.current[taskId] === requestId) {
-        setError(taskId, errorMessage(err));
-      }
-      throw err;
-    } finally {
-      if (refreshRequestRef.current[taskId] === requestId) {
-        setLoading(taskId, false);
-      }
-    }
-  }, [setError, setLoading, setOptions, taskId]);
+    return performRefresh({
+      taskId,
+      storeApi,
+      refreshRequestRef,
+      updateRequestRef,
+      updateSettleCounterRef,
+      setOptions,
+      setLoading,
+      setSaving,
+      setError,
+    });
+  }, [setError, setLoading, setOptions, setSaving, storeApi, taskId]);
 
   const update = useCallback(
     async (patch: TaskMRAutomationPatch): Promise<TaskMRAutomationOptions | null> => {
       if (!taskId) return null;
-      const requestId = (updateRequestRef.current[taskId] ?? 0) + 1;
-      updateRequestRef.current[taskId] = requestId;
-      const previous = storeApi.getState().taskMRAutomation.byTaskId[taskId] ?? null;
-      // Optimistic update: apply immediately, revert on failure (AC27).
-      if (previous) {
-        setOptions(taskId, { ...previous, ...patch });
-      }
-      setSaving(taskId, true);
-      setError(taskId, null);
-      try {
-        const response = await updateTaskMRAutomation(taskId, patch, { cache: "no-store" });
-        if (updateRequestRef.current[taskId] === requestId) {
-          setOptions(taskId, response);
-        }
-        return response;
-      } catch (err) {
-        if (updateRequestRef.current[taskId] === requestId) {
-          if (previous) setOptions(taskId, previous);
-          setError(taskId, errorMessage(err));
-        }
-        throw err;
-      } finally {
-        updateSettleCounterRef.current[taskId] = (updateSettleCounterRef.current[taskId] ?? 0) + 1;
-        if (updateRequestRef.current[taskId] === requestId) {
-          setSaving(taskId, false);
-        }
-      }
+      return performUpdate(
+        {
+          taskId,
+          storeApi,
+          refreshRequestRef,
+          updateRequestRef,
+          updateSettleCounterRef,
+          setOptions,
+          setLoading,
+          setSaving,
+          setError,
+        },
+        patch,
+      );
     },
-    [setError, setOptions, setSaving, storeApi, taskId],
+    [setError, setLoading, setOptions, setSaving, storeApi, taskId],
   );
 
   useEffect(() => {

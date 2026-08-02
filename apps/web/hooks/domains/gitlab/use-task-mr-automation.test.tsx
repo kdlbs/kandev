@@ -34,10 +34,12 @@ const NETWORK_DOWN_ERROR = "network down";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
     resolve = res;
+    reject = rej;
   });
-  return { promise, resolve };
+  return { promise, resolve, reject };
 }
 
 beforeEach(() => vi.clearAllMocks());
@@ -288,5 +290,138 @@ describe("useTaskMRAutomationOptions live updates", () => {
     expect(result.current.hook.options?.prompt_on_merged).toBe(true);
     // The push updates the store directly — no extra fetch triggered by it.
     expect(api.getTaskMRAutomation).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a slower update response overwrite a WS push that landed while it was in flight", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions());
+    const update = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation.mockImplementation(() => update.promise);
+    const { result } = renderHook(
+      () => ({
+        hook: useTaskMRAutomationOptions("task-1"),
+        setOptions: useAppStore((state) => state.setTaskMRAutomationOptions),
+        markExternal: useAppStore((state) => state.markTaskMRAutomationExternalUpdate),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hook.options).not.toBeNull());
+
+    act(() => {
+      void result.current.hook.update({ prompt_on_merged: true });
+    });
+    await waitFor(() => expect(result.current.hook.saving).toBe(true));
+
+    // A push from another tab/MCP lands while the PATCH is still in flight.
+    act(() => {
+      result.current.setOptions("task-1", baseOptions({ prompt_on_closed: true }));
+      result.current.markExternal("task-1");
+    });
+
+    // The PATCH's own (now-stale) response must not clobber the push.
+    await act(async () => {
+      update.resolve(baseOptions({ prompt_on_merged: true }));
+    });
+    expect(result.current.hook.options?.prompt_on_closed).toBe(true);
+    expect(result.current.hook.options?.prompt_on_merged).toBe(false);
+  });
+});
+
+describe("useTaskMRAutomationOptions rollback vs WS push", () => {
+  it("does not let a failed update's rollback overwrite a WS push that landed while it was in flight", async () => {
+    api.getTaskMRAutomation.mockResolvedValue(baseOptions());
+    const update = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation.mockImplementation(() => update.promise);
+    const { result } = renderHook(
+      () => ({
+        hook: useTaskMRAutomationOptions("task-1"),
+        setOptions: useAppStore((state) => state.setTaskMRAutomationOptions),
+        markExternal: useAppStore((state) => state.markTaskMRAutomationExternalUpdate),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hook.options).not.toBeNull());
+
+    let updateCall: Promise<TaskMRAutomationOptions | null>;
+    act(() => {
+      updateCall = result.current.hook.update({ prompt_on_merged: true });
+    });
+    await waitFor(() => expect(result.current.hook.saving).toBe(true));
+
+    act(() => {
+      result.current.setOptions("task-1", baseOptions({ prompt_on_closed: true }));
+      result.current.markExternal("task-1");
+    });
+
+    await act(async () => {
+      update.reject(new Error(NETWORK_DOWN_ERROR));
+      await expect(updateCall).rejects.toThrow(NETWORK_DOWN_ERROR);
+    });
+    // The rollback must not erase the pushed value — only the error surfaces.
+    expect(result.current.hook.options?.prompt_on_closed).toBe(true);
+    expect(result.current.hook.error).toBe(NETWORK_DOWN_ERROR);
+  });
+
+  it("does not let a slower refresh response overwrite a WS push that landed while it was in flight", async () => {
+    const refreshCall = deferred<TaskMRAutomationOptions>();
+    api.getTaskMRAutomation
+      .mockResolvedValueOnce(baseOptions())
+      .mockReturnValueOnce(refreshCall.promise);
+    const { result } = renderHook(
+      () => ({
+        hook: useTaskMRAutomationOptions("task-1"),
+        setOptions: useAppStore((state) => state.setTaskMRAutomationOptions),
+        markExternal: useAppStore((state) => state.markTaskMRAutomationExternalUpdate),
+      }),
+      { wrapper },
+    );
+    await waitFor(() => expect(result.current.hook.options).not.toBeNull());
+
+    act(() => {
+      void result.current.hook.refresh();
+    });
+
+    act(() => {
+      result.current.setOptions("task-1", baseOptions({ prompt_on_closed: true }));
+      result.current.markExternal("task-1");
+    });
+
+    await act(async () => {
+      refreshCall.resolve(baseOptions({ prompt_on_merged: true }));
+    });
+    expect(result.current.hook.options?.prompt_on_closed).toBe(true);
+    expect(result.current.hook.options?.prompt_on_merged).toBe(false);
+  });
+});
+
+describe("useTaskMRAutomationOptions refresh/save interaction", () => {
+  it("does not let a refresh in flight during a pending save flip the optimistic switch back off", async () => {
+    const refreshCall = deferred<TaskMRAutomationOptions>();
+    api.getTaskMRAutomation
+      .mockResolvedValueOnce(baseOptions())
+      .mockReturnValueOnce(refreshCall.promise);
+    const update = deferred<TaskMRAutomationOptions>();
+    api.updateTaskMRAutomation.mockImplementation(() => update.promise);
+    const { result } = renderHook(() => useTaskMRAutomationOptions("task-1"), { wrapper });
+    await waitFor(() => expect(result.current.options).not.toBeNull());
+
+    act(() => {
+      void result.current.update({ prompt_on_merged: true });
+    });
+    await waitFor(() => expect(result.current.saving).toBe(true));
+
+    act(() => {
+      void result.current.refresh();
+    });
+    // The refresh's pre-patch response resolves while the save is still
+    // pending — it must not flip the optimistic switch back off.
+    await act(async () => {
+      refreshCall.resolve(baseOptions({ prompt_on_merged: false }));
+    });
+    expect(result.current.options?.prompt_on_merged).toBe(true);
+
+    await act(async () => {
+      update.resolve(baseOptions({ prompt_on_merged: true }));
+    });
+    expect(result.current.options?.prompt_on_merged).toBe(true);
   });
 });

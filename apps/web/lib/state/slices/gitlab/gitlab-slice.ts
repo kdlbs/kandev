@@ -10,7 +10,7 @@ export const defaultGitLabState: GitLabSliceState = {
   gitlabActionPresets: { byWorkspaceId: {}, loading: false },
   gitlabStats: { data: null, loading: false, loadedAt: null },
   gitlabStatus: { workspaceId: null, data: null, loading: false, loadedAt: null },
-  taskMRAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {} },
+  taskMRAutomation: { byTaskId: {}, loading: {}, saving: {}, errors: {}, externalGeneration: {} },
 };
 
 type ImmerSet = Parameters<
@@ -228,6 +228,11 @@ function taskMRAutomationActions(set: ImmerSet) {
     setTaskMRAutomationError: (taskId: string, error: string | null) =>
       set((draft) => {
         draft.taskMRAutomation.errors[taskId] = error;
+      }),
+    markTaskMRAutomationExternalUpdate: (taskId: string) =>
+      set((draft) => {
+        draft.taskMRAutomation.externalGeneration[taskId] =
+          (draft.taskMRAutomation.externalGeneration[taskId] ?? 0) + 1;
       }),
   };
 }

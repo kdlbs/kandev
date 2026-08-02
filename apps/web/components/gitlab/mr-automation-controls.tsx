@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconInfoCircle } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
@@ -122,6 +123,7 @@ function MRAutomationErrorRow({ error }: { error: string }) {
  */
 function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetry: () => void }) {
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
   const minHeight = isMobile || !isFinePointer ? "min-h-11" : "min-h-7";
   return (
     <div
@@ -137,7 +139,7 @@ function MRAutomationLoadErrorBanner({ error, onRetry }: { error: string; onRetr
         className={`cursor-pointer px-2 text-[11px] ${minHeight}`}
         onClick={onRetry}
       >
-        Retry
+        {t("gitlab:mrAutomationRetry")}
       </Button>
     </div>
   );
@@ -154,8 +156,9 @@ function ReviewRequestedPromptRow({
   disabled: boolean;
   patchOption: (patch: TaskMRAutomationPatch) => void;
 }) {
+  const { t } = useTranslation();
   const helpID = `task-mr-review-requested-prompt-${taskId}-description`;
-  const help = "Wake the agent when you're added as a reviewer, including re-review after changes.";
+  const help = t("gitlab:mrAutomationReviewRequestedHelp");
   return (
     <>
       <span id={helpID} className="sr-only">
@@ -163,7 +166,7 @@ function ReviewRequestedPromptRow({
       </span>
       <MRAutomationRow
         id={`task-mr-review-requested-prompt-${taskId}`}
-        label="Your review is requested"
+        label={t("gitlab:mrAutomationReviewRequestedLabel")}
         describedBy={helpID}
         checked={Boolean(options?.prompt_on_review_requested)}
         disabled={disabled}
@@ -171,7 +174,7 @@ function ReviewRequestedPromptRow({
         help={
           <MRAutomationHelpButton
             testId="mr-review-requested-help"
-            ariaLabel="Explain review request notifications"
+            ariaLabel={t("gitlab:mrAutomationReviewRequestedHelpAriaLabel")}
           >
             {help}
           </MRAutomationHelpButton>
@@ -192,8 +195,9 @@ function MRAgentPromptRows({
   disabled: boolean;
   patchOption: (patch: TaskMRAutomationPatch) => void;
 }) {
+  const { t } = useTranslation();
   const terminalHelpID = `task-mr-terminal-help-${taskId}`;
-  const terminalHelp = "Wake the agent when review work ends. Choose either or both outcomes.";
+  const terminalHelp = t("gitlab:mrAutomationTerminalHelp");
   return (
     <>
       <ReviewRequestedPromptRow
@@ -207,7 +211,7 @@ function MRAgentPromptRows({
       </span>
       <MRAutomationRow
         id={`task-mr-merged-prompt-${taskId}`}
-        label="MR merged"
+        label={t("gitlab:mrAutomationMergedLabel")}
         describedBy={terminalHelpID}
         checked={Boolean(options?.prompt_on_merged)}
         disabled={disabled}
@@ -215,7 +219,7 @@ function MRAgentPromptRows({
         help={
           <MRAutomationHelpButton
             testId="mr-terminal-help"
-            ariaLabel="Explain final MR state notifications"
+            ariaLabel={t("gitlab:mrAutomationTerminalHelpAriaLabel")}
           >
             {terminalHelp}
           </MRAutomationHelpButton>
@@ -223,7 +227,7 @@ function MRAgentPromptRows({
       />
       <MRAutomationRow
         id={`task-mr-closed-prompt-${taskId}`}
-        label="MR closed without merging"
+        label={t("gitlab:mrAutomationClosedLabel")}
         describedBy={terminalHelpID}
         checked={Boolean(options?.prompt_on_closed)}
         disabled={disabled}
@@ -242,6 +246,7 @@ function MRAgentPromptRows({
 export function MRAutomationControls({ taskId }: { taskId: string }) {
   const { options, loading, saving, error, update, refresh } = useTaskMRAutomationOptions(taskId);
   const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const { toast } = useToast();
   const lifecycleEnabled = Boolean(
@@ -256,8 +261,9 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
   const patchOption = (patch: TaskMRAutomationPatch) => {
     update(patch).catch((err) => {
       toast({
-        title: "Failed to update MR automation",
-        description: err instanceof Error ? err.message : "The setting was not saved.",
+        title: t("gitlab:mrAutomationUpdateFailedTitle"),
+        description:
+          err instanceof Error ? err.message : t("gitlab:mrAutomationUpdateFailedDescription"),
         variant: "error",
       });
     });
@@ -284,10 +290,10 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
             variant="ghost"
             size="sm"
             data-testid="mr-review-follow-up-trigger"
-            aria-label="Toggle review follow-up automation"
+            aria-label={t("gitlab:mrAutomationToggleAriaLabel")}
             className={`w-full cursor-pointer justify-between px-1 text-xs text-muted-foreground ${minHeight}`}
           >
-            Review follow-up
+            {t("gitlab:mrAutomationTriggerLabel")}
             <IconChevronDown
               aria-hidden="true"
               className={`h-3.5 w-3.5 transition-transform ${open ? "rotate-180" : ""}`}
@@ -295,6 +301,9 @@ export function MRAutomationControls({ taskId }: { taskId: string }) {
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-1">
+          <p className="px-1 text-[11px] leading-snug text-muted-foreground">
+            {t("gitlab:mrAutomationDescription")}
+          </p>
           <MRAgentPromptRows
             taskId={taskId}
             options={options}

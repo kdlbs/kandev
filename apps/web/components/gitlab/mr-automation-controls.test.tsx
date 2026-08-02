@@ -109,6 +109,17 @@ describe("MRAutomationControls", () => {
     expect(screen.getByLabelText(MERGED_LABEL)).not.toBeNull();
   });
 
+  it("shows persistent plain-language copy explaining the switch group, not just on hover/tap", () => {
+    renderControls();
+    fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
+
+    // Visible as soon as the group is open — no help-icon interaction
+    // required (apps/web/AGENTS.md's self-documenting-settings convention).
+    expect(
+      screen.getByText(/Wakes this task's agent when your review is requested/),
+    ).not.toBeNull();
+  });
+
   it("wires aria-describedby to sr-only descriptions for each row", () => {
     renderControls();
     fireEvent.click(screen.getByTestId(FOLLOW_UP_TRIGGER));
@@ -124,7 +135,7 @@ describe("MRAutomationControls", () => {
     );
     expect(
       screen.getByText(
-        "Wake the agent when you're added as a reviewer, including re-review after changes.",
+        "Wake the agent when the workspace's connected GitLab account is added as a reviewer. Being re-added after removal counts as a new request; staying assigned across MR updates does not.",
       ),
     ).not.toBeNull();
     expect(
@@ -209,7 +220,7 @@ describe("MRAutomationControls help affordance", () => {
     // apps/web/CLAUDE.md); assert the tooltip's role="tooltip" surface
     // rendered with the help copy.
     expect(screen.getByRole("tooltip").textContent).toContain(
-      "Wake the agent when you're added as a reviewer",
+      "Wake the agent when the workspace's connected GitLab account is added as a reviewer",
     );
   });
 
@@ -225,7 +236,7 @@ describe("MRAutomationControls help affordance", () => {
     expect(helpButton.getAttribute("aria-haspopup")).toBe("dialog");
     expect(
       screen.getAllByText(
-        "Wake the agent when you're added as a reviewer, including re-review after changes.",
+        "Wake the agent when the workspace's connected GitLab account is added as a reviewer. Being re-added after removal counts as a new request; staying assigned across MR updates does not.",
       ).length,
     ).toBeGreaterThan(1);
   });

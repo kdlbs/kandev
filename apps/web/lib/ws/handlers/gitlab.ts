@@ -15,6 +15,10 @@ export function registerGitLabHandlers(store: StoreApi<AppState>): WsHandlers {
       const options = message.payload as TaskMRAutomationOptions;
       if (options.task_id) {
         store.getState().setTaskMRAutomationOptions(options.task_id, options);
+        // Marks this write as externally-sourced so a slower in-flight local
+        // refresh()/update() in useTaskMRAutomationOptions knows not to
+        // overwrite it with a stale response.
+        store.getState().markTaskMRAutomationExternalUpdate(options.task_id);
       }
     },
   };

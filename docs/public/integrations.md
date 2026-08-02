@@ -353,7 +353,7 @@ For a task with a linked GitLab merge request, open the MR topbar control and ex
 
 Kandev reuses the existing lightweight task MR poller, which checks linked MRs roughly once per minute; it does not add a separate scheduler. Saving enabled options also evaluates the task's current linked MRs without waiting for the next poll.
 
-**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list — GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; a later transition to being a reviewer wakes the agent, including a re-review after changes. Clearing the reviewer assignment rearms the next transition.
+**Your review is requested** matches the GitLab account connected to the task's workspace against the MR's current reviewer list — GitLab has no separate "review requested" API event, so appearing as a reviewer is the signal. The first observation is a quiet baseline; only a later false-to-true transition to being a reviewer wakes the agent. Staying assigned across MR updates does not re-fire it; clearing the reviewer assignment and being re-added — for example, for a re-review after changes — rearms the next transition.
 
 **MR merged** and **MR closed without merging** each notify once when the linked MR enters that terminal state; reopening and re-closing an MR re-arms the notification. Kandev delivers lifecycle notifications to the task's active promptable session, preferring the primary session, and does not interrupt a busy session — it queues the message for delivery when that session is available. Lifecycle messages report only the observed event and the MR's canonical URL and cannot be customized.
 

@@ -47,6 +47,13 @@ export type TaskMRAutomationOptionsState = {
   loading: Record<string, boolean>;
   saving: Record<string, boolean>;
   errors: Record<string, string | null>;
+  // Bumped only by an externally-sourced write (the WS push handler), never
+  // by the hook's own refresh()/update() calls. A pending refresh or update
+  // captures this counter before it starts and checks it hasn't moved before
+  // committing its own result — so a WS push that lands mid-request always
+  // wins over a slower local response, instead of a stale fetch/optimistic
+  // rollback clobbering fresher externally-pushed state.
+  externalGeneration: Record<string, number>;
 };
 
 export type GitLabSliceState = {
@@ -96,6 +103,7 @@ export type GitLabSliceActions = {
   setTaskMRAutomationLoading: (taskId: string, loading: boolean) => void;
   setTaskMRAutomationSaving: (taskId: string, saving: boolean) => void;
   setTaskMRAutomationError: (taskId: string, error: string | null) => void;
+  markTaskMRAutomationExternalUpdate: (taskId: string) => void;
 };
 
 export type GitLabSlice = GitLabSliceState & GitLabSliceActions;

@@ -82,7 +82,7 @@ test.describe("GitLab MR automation options", () => {
       testPage
         .getByRole("tooltip")
         .getByText(
-          "Wake the agent when you're added as a reviewer, including re-review after changes.",
+          "Wake the agent when the workspace's connected GitLab account is added as a reviewer. Being re-added after removal counts as a new request; staying assigned across MR updates does not.",
         ),
     ).toBeVisible();
     await controls.getByTestId("mr-terminal-help").hover();

@@ -246,7 +246,7 @@ Lifecycle messages only report the observed event and canonical PR URL; the task
 
 The GitLab MR topbar control has a **Review follow-up** group with the same three notification switches as GitHub's. The switches are task-level and apply to every merge request linked to the task:
 
-- **Your review is requested** wakes the agent when the workspace's connected GitLab account appears as a reviewer on the MR, including re-review after changes.
+- **Your review is requested** wakes the agent when the workspace's connected GitLab account is newly added as a reviewer on the MR. Staying assigned across MR updates does not re-fire it; being removed and re-added — for example, for a re-review after changes — does.
 - **MR merged** and **MR closed without merging** independently wake the agent when review work ends.
 
 GitLab has no auto-fix or auto-merge automation. Lifecycle messages only report the observed event and canonical MR URL, and Kandev delivers them through the same task-session queue as GitHub's. See [Integrations](integrations.md#gitlab).

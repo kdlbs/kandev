@@ -280,5 +280,18 @@
   "workflow": "Workflow",
   "workflowStep": "Workflow step",
   "workflowThatReceivesNewTasks": "Workflow that receives new tasks.",
-  "yourTokenMayStillBeValid": "Your token may still be valid — this looks like a network or upstream issue."
+  "yourTokenMayStillBeValid": "Your token may still be valid — this looks like a network or upstream issue.",
+  "mrAutomationClosedLabel": "MR closed without merging",
+  "mrAutomationDescription": "Wakes this task's agent when your review is requested on a linked merge request, or when one merges or closes. Notifications go to whichever session queue is active for this task.",
+  "mrAutomationMergedLabel": "MR merged",
+  "mrAutomationRetry": "Retry",
+  "mrAutomationReviewRequestedHelp": "Wake the agent when the workspace's connected GitLab account is added as a reviewer. Being re-added after removal counts as a new request; staying assigned across MR updates does not.",
+  "mrAutomationReviewRequestedHelpAriaLabel": "Explain review request notifications",
+  "mrAutomationReviewRequestedLabel": "Your review is requested",
+  "mrAutomationTerminalHelp": "Wake the agent when review work ends. Choose either or both outcomes.",
+  "mrAutomationTerminalHelpAriaLabel": "Explain final MR state notifications",
+  "mrAutomationToggleAriaLabel": "Toggle review follow-up automation",
+  "mrAutomationTriggerLabel": "Review follow-up",
+  "mrAutomationUpdateFailedDescription": "The setting was not saved.",
+  "mrAutomationUpdateFailedTitle": "Failed to update MR automation"
 }
