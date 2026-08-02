@@ -231,21 +231,27 @@ func (wt *WorkspaceTracker) readGitPollSnapshot(ctx context.Context) (gitPollSna
 	}
 	snap := parseGitPollSnapshot(out)
 	if snap.upstream != "" {
-		snap.upstreamSHA = wt.getUpstreamSHA(ctx)
+		sha, err := wt.getUpstreamSHA(ctx)
+		if err != nil {
+			// Propagate rather than coerce to "", which would be
+			// indistinguishable from "no upstream" and could mask a real
+			// transition. Returning the error routes through the same
+			// gitPollTick failure/retry path as the status read above, so
+			// the next tick just tries the snapshot again.
+			return gitPollSnapshot{}, err
+		}
+		snap.upstreamSHA = sha
 	}
 	return snap, nil
 }
 
-// getUpstreamSHA resolves the current branch's upstream ref to a SHA. Returns
-// "" if there is no upstream or the resolution fails (e.g. the upstream ref
-// was deleted) — callers treat that the same as "no upstream" for change
-// detection.
-func (wt *WorkspaceTracker) getUpstreamSHA(ctx context.Context) string {
+// getUpstreamSHA resolves the current branch's upstream ref to a SHA.
+func (wt *WorkspaceTracker) getUpstreamSHA(ctx context.Context) (string, error) {
 	out, err := wt.runPollingGitOutput(ctx, "rev-parse", "@{upstream}")
 	if err != nil {
-		return ""
+		return "", err
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(string(out)), nil
 }
 
 // parseGitPollSnapshot splits porcelain v2 output into the branch headers and
@@ -344,13 +350,24 @@ func (wt *WorkspaceTracker) checkGitChanges(ctx context.Context, snap gitPollSna
 // handleUpstreamOnlyChange records a push or fetch that moved the upstream
 // ref without changing HEAD, the branch, or the index — the case the other
 // three signals can't see on their own.
+//
+// Unlike the other three handlers, the cache write happens only after
+// tryUpdateGitStatus confirms it actually published a status. If it was
+// skipped (updateMu held by a concurrent RefreshGitStatus) or getGitStatus
+// itself failed, cachedUpstreamSHA is left at its old value on purpose: the
+// next tick's compareToCachedState will see the same "changed" delta again
+// and retry, instead of the event being silently marked handled while no
+// refreshed RemoteAhead/RemoteBranch was ever published — which push
+// detection depends on to fire (event_handlers_git.go).
 func (wt *WorkspaceTracker) handleUpstreamOnlyChange(ctx context.Context, delta gitPollDelta) {
+	wt.logger.Debug("git upstream ref changed (push or fetch detected)")
+	if !wt.tryUpdateGitStatus(ctx) {
+		return
+	}
+
 	wt.gitStateMu.Lock()
 	wt.cachedUpstreamSHA = delta.snap.upstreamSHA
 	wt.gitStateMu.Unlock()
-
-	wt.logger.Debug("git upstream ref changed (push or fetch detected)")
-	wt.tryUpdateGitStatus(ctx)
 }
 
 // handleIndexOnlyChange records staging/unstaging that left HEAD and the branch

@@ -23,15 +23,18 @@ var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 
 // updateGitStatus updates the git status. Callers must coordinate access
 // via updateMu — use tryUpdateGitStatus for polling loops, RefreshGitStatus
-// for user-triggered operations.
-func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
+// for user-triggered operations. Returns whether a new status was computed
+// and published; false on a getGitStatus failure or a context already
+// cancelled, so callers that must not lose the event they're reacting to
+// (see tryUpdateGitStatus) know a retry is needed.
+func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) bool {
 	status, err := wt.getGitStatus(ctx)
 	if err != nil {
 		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
-		return
+		return false
 	}
 	if ctx.Err() != nil || wt.cancelCtx.Err() != nil {
-		return
+		return false
 	}
 
 	wt.mu.Lock()
@@ -40,17 +43,23 @@ func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) {
 
 	// Notify workspace stream subscribers
 	wt.notifyWorkspaceStreamGitStatus(status)
+	return true
 }
 
 // tryUpdateGitStatus attempts a non-blocking git status update. If another
 // update is already in progress (from the other polling loop or an explicit
-// refresh), the call is skipped — the running update will produce the same result.
-func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) {
+// refresh), the call is skipped — the running update will produce the same
+// result. Returns whether it actually published a new status: false either
+// because it was skipped (lock contention) or because updateGitStatus itself
+// failed. Callers reacting to a specific change (e.g. an upstream ref move)
+// must check this before treating that change as observed — see
+// handleUpstreamOnlyChange in workspace_git_poll.go.
+func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) bool {
 	if !wt.updateMu.TryLock() {
-		return
+		return false
 	}
 	defer wt.updateMu.Unlock()
-	wt.updateGitStatus(ctx)
+	return wt.updateGitStatus(ctx)
 }
 
 // RefreshGitStatus forces a git status refresh and notifies subscribers.

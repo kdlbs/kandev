@@ -19,7 +19,10 @@ test.describe("GitHub PR push-detection auto-link", () => {
     seedData,
     backend,
   }) => {
-    test.setTimeout(180_000);
+    // Sequential assertion budget: 45s + 45s + 150s + 30s = 270s. Give it
+    // headroom above that so the documented ~90s push-detection retry window
+    // can actually run to completion instead of the test timing out first.
+    test.setTimeout(330_000);
     // The default seeded repository has no git "origin" configured — nothing
     // in the existing PR-detection coverage ever pushes for real. The path
     // segment here isn't provider-specific: the test-harness endpoint checks
