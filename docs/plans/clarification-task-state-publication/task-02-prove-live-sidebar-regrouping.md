@@ -23,9 +23,10 @@ spec: "../../specs/tasks/runtime-state-publication-order.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/chat/clarification.spec.ts -- \
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run tests/chat/clarification.spec.ts -- \
   --grep 'moves answered task from Review to In progress without reload'
+)
 ```
 
 ## Files likely touched

@@ -13,7 +13,10 @@ transition is published before the already-correct `RUNNING` session event.
 The confirmed root cause is that `setTaskInProgressForClarification` writes
 through the raw SQLite task repository; the database reaches `IN_PROGRESS`, but
 that repository does not own `task.state_changed`, so connected clients remain
-on `REVIEW` until boot hydration reloads the row.
+on `REVIEW` until boot hydration reloads the row. Review follow-up also
+requires preserving that order when another task publication is already
+draining and reporting the persisted session transition if task reconciliation
+fails.
 
 The fix reuses the task service's existing session-state-guarded update and
 event publisher. It does not change task/session schemas, WebSocket payloads,
@@ -28,8 +31,13 @@ frontend merge rules, sidebar grouping, or clarification UI.
   service for the production guarded `REVIEW -> IN_PROGRESS` transition.
 - Reuse `task.Service.UpdateTaskStateIfSessionState` with expected session state
   `RUNNING`. This keeps cancellation/archive guards and emits the canonical
-  rich `task.state_changed` payload synchronously before the handler publishes
-  `session.state_changed(RUNNING)`.
+  rich `task.state_changed` payload before the handler publishes
+  `session.state_changed(RUNNING)`. Enqueue the session event through the same
+  per-task FIFO so a busy queue cannot reverse the order and reentrant
+  subscribers do not deadlock.
+- If guarded task reconciliation returns an error, log it and still publish the
+  authoritative `session.state_changed(RUNNING)` event. Retain the early return
+  for a clean `taskStateChanged == false` stale-state guard.
 - Preserve the existing repository fallback for narrow handler tests or
   alternate construction where no task service is available.
 - Do not infer task state from session state in the frontend or add a second
@@ -56,6 +64,13 @@ proves the shared state event, so no duplicate mobile layout test is required.
   event bus; record lifecycle events through one wildcard subscription and
   assert durable state plus exact event order. The regression test must first
   fail with only the session event on the current implementation.
+- **What:** a pre-existing task publication cannot be overtaken by the
+  clarification task/session pair, and a task-service reconciliation error
+  still emits the session event.
+  **File:** `apps/backend/internal/mcp/handlers/handlers_test.go`.
+  **How:** block one task publication with a channel barrier, resume the
+  clarification concurrently, and assert the final FIFO order; inject a task
+  repository error and assert the session event remains observable.
 - **What:** the existing clarification cancellation races remain fail-closed.
   **File:** `apps/backend/internal/mcp/handlers/clarification_pause_test.go`.
   **How:** rerun the focused coordinator-stop race cases alongside the new test,
@@ -86,6 +101,9 @@ proves the shared state event, so no duplicate mobile layout test is required.
 - The E2E setup waits for the mock session's `WAITING_FOR_INPUT` state and
   establishes `REVIEW` before navigation, keeping the pre-answer sidebar group
   deterministic without adding production hooks or fixed assertion waits.
+- Review follow-up targeted tests passed in normal and race modes for the
+  busy-queue ordering and task-service-error paths. The changed-file
+  `golangci-lint` check passed with no issues.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -99,6 +117,13 @@ Wave 2:
 
 Both tasks are sequential. The E2E proof depends on the backend event repair;
 the waves do not authorize subagents.
+
+Wave 3:
+
+- [x] [Task 03: Address ordered publication review findings](task-03-address-publication-review.md) — completed
+
+Task 03 is sequential with the backend implementation and documentation
+corrections.
 
 ## Risks
 

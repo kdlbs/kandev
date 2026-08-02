@@ -22,12 +22,12 @@ spec: "../../specs/tasks/runtime-state-publication-order.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test -count=1 \
+(cd apps/backend && go test -count=1 \
   -run 'Test(SetSessionRunning_PublishesTaskStateBeforeSession|SessionStateEventsIncludeUpdatedAt|HandleAskUserQuestion_CoordinatorStopWinsRunningTransition|HandleAskUserQuestion_CoordinatorStopWinsAfterRunningTransition)$' \
-  ./internal/mcp/handlers
-cd apps/backend && go test -race -count=1 \
+  ./internal/mcp/handlers)
+(cd apps/backend && go test -race -count=1 \
   -run 'Test(SetSessionRunning_PublishesTaskStateBeforeSession|HandleAskUserQuestion_CoordinatorStopWinsRunningTransition|HandleAskUserQuestion_CoordinatorStopWinsAfterRunningTransition)$' \
-  ./internal/mcp/handlers
+  ./internal/mcp/handlers)
 ```
 
 ## Files likely touched

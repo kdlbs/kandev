@@ -3097,9 +3097,7 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 			h.logger.Warn("failed to update task state to IN_PROGRESS",
 				zap.String("task_id", taskID),
 				zap.Error(err))
-			return
-		}
-		if !taskStateChanged {
+		} else if !taskStateChanged {
 			h.logger.Debug("skipping stale clarification resume after session state changed",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID))
@@ -3107,28 +3105,36 @@ func (h *Handlers) setSessionRunning(ctx context.Context, taskID, sessionID stri
 		}
 	}
 
-	// Publish session state changed event
-	if h.eventBus != nil {
-		eventData := map[string]any{
-			"task_id":    taskID,
-			"session_id": sessionID,
-			"new_state":  string(models.TaskSessionStateRunning),
-		}
-		if !updatedAt.IsZero() {
-			eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
-		} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
-			eventData["updated_at"] = persistedUpdatedAt
-		} else {
-			h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
-				zap.String("session_id", sessionID))
-			return
-		}
-		_ = h.eventBus.Publish(ctx, events.TaskSessionStateChanged, bus.NewEvent(
+	// Publish session state changed event after any task event for this task.
+	if h.eventBus == nil {
+		return
+	}
+	eventData := map[string]any{
+		"task_id":    taskID,
+		"session_id": sessionID,
+		"new_state":  string(models.TaskSessionStateRunning),
+	}
+	if !updatedAt.IsZero() {
+		eventData["updated_at"] = updatedAt.UTC().Format(time.RFC3339Nano)
+	} else if persistedUpdatedAt, ok := h.sessionUpdatedAtForStateEvent(ctx, sessionID); ok {
+		eventData["updated_at"] = persistedUpdatedAt
+	} else {
+		h.logger.Warn("skipping session state_changed publish; could not load authoritative updated_at",
+			zap.String("session_id", sessionID))
+		return
+	}
+	publish := func(publicationCtx context.Context) {
+		_ = h.eventBus.Publish(publicationCtx, events.TaskSessionStateChanged, bus.NewEvent(
 			events.TaskSessionStateChanged,
 			"mcp-handlers",
 			eventData,
 		))
 	}
+	if h.taskSvc != nil && taskID != "" {
+		h.taskSvc.PublishAfterTaskEvents(ctx, taskID, events.TaskSessionStateChanged, publish)
+		return
+	}
+	publish(ctx)
 }
 
 func (h *Handlers) setTaskInProgressForClarification(

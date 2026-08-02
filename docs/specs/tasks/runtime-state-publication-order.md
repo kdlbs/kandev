@@ -24,6 +24,9 @@ though the task's workflow step and runtime are already active.
   prompt or waiting for a later runtime stream event.
 - When reconciliation changes the task state, observers receive
   `task.state_changed` before `session.state_changed` announces `RUNNING`.
+- The task and session publications share the task's existing per-task FIFO, so
+  a session event cannot overtake an earlier task event when another
+  task-scoped publication is already draining.
 - The WebSocket gateway consumes both lifecycle notifications through one
   ordered NATS-style subscription, preserving that order when the event bus is
   remote; the in-memory event bus supports the same wildcard semantics.
@@ -79,6 +82,9 @@ The ordering contract is defined by
   persisted, Kandev logs the error and still reports the truthful session
   state. The existing executor-success reconciliation remains available to
   heal the task state.
+- If the task publication queue is already draining, the task-state and
+  session-state events append in lifecycle order without waiting reentrantly on
+  the active publication.
 - Office task status remains controlled by the Office lifecycle and is not
   promoted by this runtime reconciliation.
 
