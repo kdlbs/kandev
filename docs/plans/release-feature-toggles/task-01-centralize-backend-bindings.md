@@ -50,9 +50,10 @@ spec: "../../specs/feature-toggles/spec.md"
   both directions; validates registration metadata and binding isolation; and
   reserves graduated key/environment identities in an append-only tombstone
   set. The graduated plugins identity is the first tombstone.
-- Review verification: focused tests passed (37 tests across runtimeflags and
-  profiles), the full backend suite passed, and backend lint reported 0 issues.
-- Verification: focused `go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`
-  passed (87 tests across 3 packages), `make -C apps/backend test` passed, and
-  `make -C apps/backend lint` passed with 0 issues.
+- Review verification: `go test ./internal/runtimeflags ./internal/profiles`
+  from `apps/backend` passed (37 tests across 2 packages); the full backend
+  suite passed, and backend lint reported 0 issues.
+- Verification: `go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`
+  from `apps/backend` passed (91 tests across 3 packages), `make -C apps/backend
+  test` passed, and `make -C apps/backend lint` passed with 0 issues.
 - External side effects: none.

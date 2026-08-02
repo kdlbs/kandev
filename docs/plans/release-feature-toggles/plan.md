@@ -190,7 +190,7 @@ and be released independently.
 
 ## Verification Results
 
-- Backend-focused tests: passed (87 tests across runtimeflags, common/config,
+- Backend-focused tests: passed (91 tests across runtimeflags, common/config,
   and profiles).
 - Backend lint: passed with 0 issues.
 - Frontend-focused Vitest: passed (2 files, 8 tests).
@@ -202,8 +202,9 @@ and be released independently.
 
 - Red phase: focused runtimeflags tests failed because the retired-identity set
   did not exist.
-- Backend-focused tests passed (37 tests across runtimeflags and profiles), the
-  full backend suite passed, and backend lint reported 0 issues.
+- `go test ./internal/runtimeflags ./internal/profiles` from `apps/backend`
+  passed (37 tests across 2 packages); the full backend suite passed, and
+  backend lint reported 0 issues.
 - The new backend/frontend contract test passed; the full web Vitest suite,
   web typecheck, and web lint passed.
 - Public docs validation passed (58 tests; 41 published pages), and
