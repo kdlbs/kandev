@@ -9,7 +9,13 @@ Agents running in separate Kandev tasks can talk to each other directly. One age
 
 Communication works across all relationship types — parent to child, child to parent, sibling to sibling, and tasks in entirely different workspaces or workflows ("projects"). The only requirement is that each agent knows the other task's full UUID.
 
-The examples below use canonical MCP protocol names ending in `_kandev`. An agent client may show a server-qualified display or registry alias, such as `mcp__kandev__message_task_kandev`; the prefix is client-specific, so use the form exposed by the active client rather than treating the qualified form as universal.
+The examples below use canonical MCP protocol names ending in `_kandev`. An agent client may show a server-qualified alias; use the form exposed by that client.
+
+## Quick path
+
+1. Discover the peer task's full UUID.
+2. Send a bounded request with the expected result and reply target.
+3. Read the reply, confirm the contract, then implement and test.
 
 ## Discovering task IDs
 
@@ -82,6 +88,9 @@ There is no persistent channel or shared socket between tasks. Each `message_tas
 - audit what was actually communicated.
 
 Pagination and filtering are available via `limit`, `before`, `after`, `sort`, and `message_types` parameters. `message_types=["message"]` returns every regular chat/prompt row — the same `message` type covers ordinary user turns and cross-task deliveries alike, so this filter alone does not isolate coordination traffic. To identify a message that arrived via `message_task_kandev`, check the returned message's `metadata.sender_task_id` (and `sender_task_title`): messages sent within the same task have no `sender_task_id`. Include `"tool_call"` in `message_types` to see tool outputs too.
+
+<details>
+<summary>Worked example: API contract negotiation</summary>
 
 ## Worked example — API contract negotiation
 
@@ -162,6 +171,8 @@ get_task_conversation_kandev(
 ### What Agent B does
 
 Task B processes each incoming message as a normal turn. When it receives Agent A's proposal, it reads the current frontend component that consumes the API, identifies the missing field, and sends back a specific counter-proposal. When the agreement arrives, it proceeds to implement its API client with the agreed shape.
+
+</details>
 
 ## Good practices
 

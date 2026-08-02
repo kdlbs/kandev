@@ -365,9 +365,11 @@ type VoiceConfig struct {
 	OpenAIAPIKey string `mapstructure:"openAIApiKey"`
 }
 
-// FeaturesConfig is the central registry of runtime feature flags. Every flag
-// defaults to false so production binaries ship with new work hidden until a
-// deployment explicitly opts in (env var, e.g. KANDEV_FEATURES_OFFICE=true).
+// FeaturesConfig is the typed wire/config shape for runtime feature flags.
+// Every new release toggle defaults to false so production binaries ship with
+// new work hidden until a deployment explicitly opts in (env var, e.g.
+// KANDEV_FEATURES_OFFICE=true). The runtimeflags package owns metadata and
+// typed config bindings.
 //
 // The struct doubles as the wire shape for GET /api/v1/features — `json` tags
 // keep the field names lowercase and the handler in helpers.go just calls

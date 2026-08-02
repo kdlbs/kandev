@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconPlus } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
@@ -174,12 +175,12 @@ function SessionConfigBody({
   ) => void;
   onUpdateRules: (rules: ConfigureSessionRule[]) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {step.agent_profile_id && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
-          Remove the fixed profile override before configuring the original session. The two
-          behaviors are mutually exclusive.
+          {t("settings:sessionConfigFixedProfileWarning")}
         </p>
       )}
       {!action && warnings.length > 0 && !step.agent_profile_id && (
@@ -273,9 +274,7 @@ function SessionConfigRuleList({
         />
       ))}
       {rules.length === 0 && (
-        <p className="text-xs text-muted-foreground">
-          Add a condition to choose which initial agent receives settings.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("settings:sessionConfigEmptyRules")}</p>
       )}
     </div>
   );
@@ -300,6 +299,7 @@ function SessionConfigHeader({
   onAddRule: () => void;
   canAddRule: boolean;
 }) {
+  const { t } = useTranslation();
   const disabled = readOnly || !!step.agent_profile_id;
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -313,13 +313,13 @@ function SessionConfigHeader({
         />
         <div className="min-w-0">
           <Label htmlFor={`${step.id}-configure-session`} className="text-sm font-medium">
-            Configure original session
+            {t("settings:configureOriginalSession")}
           </Label>
           <p className="text-xs text-muted-foreground">
-            Change the existing conversation tab only when its initial agent family matches a rule.
+            {t("settings:configureOriginalSessionDescription")}
           </p>
         </div>
-        <HelpTip text="Rules apply to the task's first agent session. They never create or switch conversation tabs." />
+        <HelpTip text={t("settings:sessionConfigRulesHelp")} />
       </div>
       {enabled && !readOnly && !step.agent_profile_id && (
         <Button
@@ -332,7 +332,7 @@ function SessionConfigHeader({
           data-testid={`${step.id}-add-session-config-rule`}
         >
           <IconPlus className="mr-1.5 h-4 w-4" />
-          Add condition
+          {t("settings:addCondition")}
         </Button>
       )}
     </div>

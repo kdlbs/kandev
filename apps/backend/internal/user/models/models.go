@@ -72,6 +72,7 @@ type UserSettings struct {
 	ReviewAutoMarkOnScroll          bool                              `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive              bool                              `json:"confirm_task_archive"`
 	UnreadDivider                   bool                              `json:"unread_divider"`
+	AgentGeneratedTaskTitles        bool                              `json:"agent_generated_task_titles"`
 	MCPTaskAgentProfileDefault      string                            `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar           bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
 	ShowScrollToLastPrompt          bool                              `json:"show_scroll_to_last_prompt"`

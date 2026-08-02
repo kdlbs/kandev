@@ -16,15 +16,22 @@ import type {
 } from "@/lib/types/github";
 import type { TaskPreset } from "./quick-task-launcher";
 
-export const PRESET_ICON_CHOICES: { key: GitHubActionPresetIcon; icon: Icon; label: string }[] = [
-  { key: "eye", icon: IconEye, label: "Eye" },
-  { key: "message", icon: IconMessageDots, label: "Message" },
-  { key: "tool", icon: IconTool, label: "Tool" },
-  { key: "code", icon: IconCode, label: "Code" },
-  { key: "search", icon: IconSearch, label: "Search" },
-  { key: "bug", icon: IconBug, label: "Bug" },
-  { key: "sparkle", icon: IconSparkles, label: "Sparkle" },
-  { key: "check", icon: IconChecks, label: "Check" },
+// `key` is the persisted GitHubActionPresetIcon enum; only the label is copy, so
+// it travels as a catalog key resolved at render (module-scope `t()` would
+// freeze at the boot locale — see docs/i18n.md).
+export const PRESET_ICON_CHOICES: {
+  key: GitHubActionPresetIcon;
+  icon: Icon;
+  labelKey: string;
+}[] = [
+  { key: "eye", icon: IconEye, labelKey: "github:presetIconEye" },
+  { key: "message", icon: IconMessageDots, labelKey: "github:presetIconMessage" },
+  { key: "tool", icon: IconTool, labelKey: "github:presetIconTool" },
+  { key: "code", icon: IconCode, labelKey: "github:presetIconCode" },
+  { key: "search", icon: IconSearch, labelKey: "github:presetIconSearch" },
+  { key: "bug", icon: IconBug, labelKey: "github:presetIconBug" },
+  { key: "sparkle", icon: IconSparkles, labelKey: "github:presetIconSparkle" },
+  { key: "check", icon: IconChecks, labelKey: "github:presetIconCheck" },
 ];
 
 const ICON_BY_KEY: Record<string, Icon> = Object.fromEntries(
@@ -60,6 +67,13 @@ export function toTaskPreset(stored: GitHubActionPreset): TaskPreset {
   };
 }
 
+// NOTE: `label`, `hint` and `prompt_template` below are NOT translated, and must
+// not be. These records seed the editable draft in action-presets-section.tsx
+// (`setPrDraft(DEFAULT_PR_PRESETS)`) and are persisted to workspace settings as
+// `GitHubActionPreset`, so translating them would write locale-dependent values
+// into a user's saved presets and leave them there after a locale switch.
+// `prompt_template` is additionally sent to the agent verbatim. Localizing these
+// needs a key/persisted-value split, the same open item as PR_PRESETS.
 export const DEFAULT_PR_PRESETS: GitHubActionPreset[] = [
   {
     id: "review",

@@ -29,6 +29,8 @@ import type {
   RepoFilter,
   UpdateGitHubWorkspaceSettingsRequest,
 } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
+import { t as translate } from "@/lib/i18n";
 
 function splitCSV(value: string): string[] {
   return value
@@ -51,10 +53,30 @@ function repoFiltersToInput(repos: RepoFilter[]): string {
   return repos.map((repo) => `${repo.owner}/${repo.name}`).join(", ");
 }
 
-const repositoryScopeHelp =
-  "Limits the GitHub pull requests and issues Kandev discovers for this workspace, including My GitHub results and review and issue watches. It does not change GitHub permissions or repository access.";
+// Only the list matching the selected mode is sent; the other stays untouched
+// server-side.
+function scopePayload({
+  workspaceId,
+  mode,
+  orgs,
+  parsedRepos,
+}: {
+  workspaceId: string;
+  mode: GitHubRepoScopeMode;
+  orgs: string;
+  parsedRepos: RepoFilter[];
+}): UpdateGitHubWorkspaceSettingsRequest {
+  const payload: UpdateGitHubWorkspaceSettingsRequest = {
+    workspace_id: workspaceId,
+    repo_scope_mode: mode,
+  };
+  if (mode === "orgs") payload.repo_scope_orgs = splitCSV(orgs);
+  if (mode === "repos") payload.repo_scope_repos = parsedRepos;
+  return payload;
+}
 
 function RepositoryScopeHelp() {
+  const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const [open, setOpen] = useState(false);
   const button = (
@@ -65,7 +87,7 @@ function RepositoryScopeHelp() {
       className="h-11 w-11 cursor-pointer text-muted-foreground sm:h-7 sm:w-7"
       aria-haspopup="dialog"
       aria-expanded={open}
-      aria-label="Explain repository scope"
+      aria-label={t("github:explainRepositoryScope")}
     >
       <IconInfoCircle className="h-4 w-4" />
     </Button>
@@ -77,7 +99,7 @@ function RepositoryScopeHelp() {
     <Tooltip>
       <TooltipTrigger asChild>{drawerTrigger}</TooltipTrigger>
       <TooltipContent side="top" align="start" className="max-w-[320px] text-xs leading-relaxed">
-        {repositoryScopeHelp}
+        {t("github:repositoryScopeHelp")}
       </TooltipContent>
     </Tooltip>
   );
@@ -87,8 +109,8 @@ function RepositoryScopeHelp() {
       {trigger}
       <DrawerContent>
         <DrawerHeader>
-          <DrawerTitle>Repository Scope</DrawerTitle>
-          <DrawerDescription>{repositoryScopeHelp}</DrawerDescription>
+          <DrawerTitle>{t("github:repositoryScope")}</DrawerTitle>
+          <DrawerDescription>{t("github:repositoryScopeHelp")}</DrawerDescription>
         </DrawerHeader>
       </DrawerContent>
     </Drawer>
@@ -118,6 +140,7 @@ function RepositoryScopeFields({
   onOrgsChange,
   onReposChange,
 }: ScopeFieldsProps) {
+  const { t } = useTranslation();
   return (
     <SettingsCard
       isDirty={mode !== baseline.mode || orgs !== baseline.orgs || repos !== baseline.repos}
@@ -125,7 +148,7 @@ function RepositoryScopeFields({
       <CardContent className="grid gap-4 py-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <div className="space-y-1.5">
           <label className="text-sm font-medium" htmlFor="github-scope-mode">
-            Mode
+            {t("github:mode")}
           </label>
           <Select
             value={mode}
@@ -140,16 +163,16 @@ function RepositoryScopeFields({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All repositories</SelectItem>
-              <SelectItem value="orgs">Organizations</SelectItem>
-              <SelectItem value="repos">Selected repositories</SelectItem>
+              <SelectItem value="all">{t("github:allRepositories")}</SelectItem>
+              <SelectItem value="orgs">{t("github:organizations")}</SelectItem>
+              <SelectItem value="repos">{t("github:selectedRepositories")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="grid gap-3">
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="github-scope-orgs">
-              Organizations
+              {t("github:organizations")}
             </label>
             <Input
               id="github-scope-orgs"
@@ -163,7 +186,7 @@ function RepositoryScopeFields({
           </div>
           <div className="space-y-1.5">
             <label className="text-sm font-medium" htmlFor="github-scope-repos">
-              Repositories
+              {t("github:repositories")}
             </label>
             <Input
               id="github-scope-repos"
@@ -176,7 +199,9 @@ function RepositoryScopeFields({
               data-testid="github-scope-repos-input"
             />
             {invalidRepos && (
-              <p className="text-xs text-destructive">Use comma-separated owner/repo values.</p>
+              <p className="text-xs text-destructive">
+                {t("github:useCommaSeparatedOwnerRepoValues")}
+              </p>
             )}
           </div>
         </div>
@@ -186,6 +211,7 @@ function RepositoryScopeFields({
 }
 
 function useGitHubRepoScopeDraft(workspaceId: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [mode, setMode] = useState<GitHubRepoScopeMode>("all");
   const [orgs, setOrgs] = useState("");
@@ -219,8 +245,15 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
         setRepos(next.repos);
       })
       .catch(() => {
+        // The module-level `t` resolves at call time, so this follows the active
+        // locale without putting the hook's `t` in the effect deps — that would
+        // refetch on every locale switch and overwrite the user's unsaved edits
+        // via the setMode/setOrgs/setRepos calls above.
         if (!cancelled)
-          toast({ description: "Failed to load GitHub workspace settings", variant: "error" });
+          toast({
+            description: translate("github:failedToLoadGithubWorkspaceSettings"),
+            variant: "error",
+          });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -233,17 +266,9 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
   const save = useCallback(async () => {
     const submitted = { mode, orgs, repos };
     try {
-      const payload: UpdateGitHubWorkspaceSettingsRequest = {
-        workspace_id: workspaceId,
-        repo_scope_mode: mode,
-      };
-      if (mode === "orgs") {
-        payload.repo_scope_orgs = splitCSV(orgs);
-      }
-      if (mode === "repos") {
-        payload.repo_scope_repos = parsedRepos;
-      }
-      const updated = await updateGitHubWorkspaceSettings(payload);
+      const updated = await updateGitHubWorkspaceSettings(
+        scopePayload({ workspaceId, mode, orgs, parsedRepos }),
+      );
       const saved = {
         mode: updated.repo_scope_mode,
         orgs: (updated.repo_scope_orgs ?? []).join(", "),
@@ -253,12 +278,12 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
       setMode((current) => (current === submitted.mode ? saved.mode : current));
       setOrgs((current) => (current === submitted.orgs ? saved.orgs : current));
       setRepos((current) => (current === submitted.repos ? saved.repos : current));
-      toast({ description: "GitHub workspace settings saved", variant: "success" });
+      toast({ description: t("github:githubWorkspaceSettingsSaved"), variant: "success" });
     } catch {
-      toast({ description: "Failed to save GitHub workspace settings", variant: "error" });
+      toast({ description: t("github:failedToSaveGithubWorkspaceSettings"), variant: "error" });
       throw new Error("Failed to save GitHub workspace settings");
     }
-  }, [mode, orgs, parsedRepos, repos, toast, workspaceId]);
+  }, [mode, orgs, parsedRepos, repos, t, toast, workspaceId]);
   const discard = useCallback(() => {
     setMode(baseline.mode);
     setOrgs(baseline.orgs);
@@ -272,7 +297,7 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
     revision,
     isDirty: dirty,
     canSave: !loading && !invalidRepos,
-    invalidReason: invalidRepos ? "Use comma-separated owner/repo values." : undefined,
+    invalidReason: invalidRepos ? t("github:useCommaSeparatedOwnerRepoValues") : undefined,
     save,
     discard,
   });
@@ -291,13 +316,14 @@ function useGitHubRepoScopeDraft(workspaceId: string) {
 }
 
 export function GitHubRepoScopeSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const draft = useGitHubRepoScopeDraft(workspaceId);
 
   return (
     <SettingsSection
-      title="Repository Scope"
+      title={t("github:repositoryScope")}
       titleAccessory={<RepositoryScopeHelp />}
-      description="Limits GitHub pull requests and issues shown or imported in this workspace."
+      description={t("github:limitsGithubPullRequestsAndIssues")}
     >
       <RepositoryScopeFields
         mode={draft.mode}

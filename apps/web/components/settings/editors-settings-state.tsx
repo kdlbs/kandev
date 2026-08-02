@@ -17,6 +17,7 @@ import {
   isCustomEditor,
 } from "@/components/settings/editor-form";
 import { Badge } from "@kandev/ui/badge";
+import { useTranslation } from "react-i18next";
 
 export function useEditorsSettingsState() {
   const setEditors = useAppStore((state) => state.setEditors);
@@ -99,6 +100,7 @@ export function useLspConfigActions(
   setLspConfigStrings: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
   setLspConfigErrors: (updater: (prev: Record<string, string>) => Record<string, string>) => void,
 ) {
+  const { t } = useTranslation();
   const clearLspConfigError = useCallback(
     (langId: string) => {
       setLspConfigErrors((prev) => {
@@ -127,18 +129,40 @@ export function useLspConfigActions(
       try {
         const parsed = JSON.parse(value);
         if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-          setLspConfigErrors((prev) => ({ ...prev, [langId]: "Must be a JSON object" }));
+          setLspConfigErrors((prev) => ({ ...prev, [langId]: t("settings:mustBeAJsonObject") }));
         } else {
           clearLspConfigError(langId);
         }
       } catch {
-        setLspConfigErrors((prev) => ({ ...prev, [langId]: "Invalid JSON" }));
+        setLspConfigErrors((prev) => ({ ...prev, [langId]: t("settings:invalidJson") }));
       }
     },
-    [setLspConfigStrings, setLspConfigErrors, clearLspConfigError],
+    [setLspConfigStrings, setLspConfigErrors, clearLspConfigError, t],
   );
 
   return { updateLspConfigString };
+}
+
+/** Add/remove a language id in the auto-start and auto-install sets. */
+export function useLspLanguageToggles(state: EditorsSettingsState) {
+  const { setLspAutoStartLanguages, setLspAutoInstallLanguages } = state;
+  const toggleAutoStart = useCallback(
+    (langId: string, checked: boolean) => {
+      setLspAutoStartLanguages((prev) =>
+        checked ? [...prev, langId] : prev.filter((id) => id !== langId),
+      );
+    },
+    [setLspAutoStartLanguages],
+  );
+  const toggleAutoInstall = useCallback(
+    (langId: string, checked: boolean) => {
+      setLspAutoInstallLanguages((prev) =>
+        checked ? [...prev, langId] : prev.filter((id) => id !== langId),
+      );
+    },
+    [setLspAutoInstallLanguages],
+  );
+  return { toggleAutoStart, toggleAutoInstall };
 }
 
 export function parseLspConfigStrings(
@@ -158,9 +182,15 @@ export function parseLspConfigStrings(
   return result;
 }
 
+/**
+ * `t` is a parameter rather than a module import: the option list is built in a
+ * `useMemo`, so passing the caller's `t` both keeps the copy out of module scope
+ * and gives the memo a dependency that changes on a locale switch.
+ */
 export function buildDefaultEditorOptions(
   availableEditors: EditorOption[],
   defaultEditorId: string,
+  t: (key: string) => string,
 ): ComboboxOption[] {
   if (availableEditors.length === 0) return [];
   const selected = defaultEditorId ? availableEditors.filter((e) => e.id === defaultEditorId) : [];
@@ -174,11 +204,11 @@ export function buildDefaultEditorOptions(
         <span className="truncate">{editor.name}</span>
         {editor.kind === "built_in" ? (
           <Badge variant={editor.installed ? "secondary" : "outline"} className="ml-auto">
-            {editor.installed ? "Installed" : "Not installed"}
+            {editor.installed ? t("settings:installed") : t("settings:notInstalled")}
           </Badge>
         ) : (
           <Badge variant="secondary" className="ml-auto">
-            {getCustomKindLabel(editor.kind)}
+            {getCustomKindLabel(t, editor.kind)}
           </Badge>
         )}
       </div>

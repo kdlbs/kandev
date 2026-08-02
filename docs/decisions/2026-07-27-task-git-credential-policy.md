@@ -1,5 +1,10 @@
 # ADR-2026-07-27-task-git-credential-policy: Separate GitHub Automation From Task Git Credential Policy
 
+> Amended by
+> [ADR-2026-08-02-new-workspace-github-access-defaults](2026-08-02-new-workspace-github-access-defaults.md):
+> newly created workspaces persist `executor` as their initial task Git policy, while existing
+> persisted and legacy fallback behavior remains unchanged.
+
 **Status:** accepted
 **Date:** 2026-07-27
 **Area:** backend, frontend, security
@@ -19,10 +24,12 @@ control process can start successfully while leaving the child Git helper unable
 Workspace GitHub automation identity and task Git credential policy are separate workspace-owned
 settings:
 
-- `managed` is the default. Kandev injects task/repository-bound broker leases for attached GitHub
+- `managed` is the backward-compatible fallback for existing missing or invalid settings. Kandev
+  injects task/repository-bound broker leases for attached GitHub
   repositories. PAT, named GitHub CLI, GitHub App, and migration-only legacy connections remain
   automation methods rather than task-policy values.
-- `executor` is the explicit inheritance mode. Kandev injects no GitHub broker helper or `gh` shim.
+- `executor` is the initial mode persisted for newly created workspaces and remains an explicit
+  inheritance mode. Kandev injects no GitHub broker helper or `gh` shim.
   Local and Worktree tasks use credentials visible on the Kandev host; Docker, SSH, Sprites, and
   other remote tasks use credentials configured in that executor.
 - An explicit executor-profile `GITHUB_TOKEN` or `GH_TOKEN` remains an unmanaged override. It takes

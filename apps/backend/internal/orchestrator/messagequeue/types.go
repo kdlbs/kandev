@@ -22,6 +22,12 @@ const (
 
 // IsReservedQueuedBy reports identities owned by backend dispatch paths.
 // WebSocket/MCP clients may create and mutate only user-owned entries.
+//
+// MergeIntoAbove is the single controlled exception: a client with session
+// access may fold one agent-owned entry into the agent-owned entry above it
+// when both carry the same sender_task_id. That preserves the reserved row's
+// provenance (the merged entry keeps the target's identity) while consolidating
+// additive prompts from one agent into a single delivery. See ADR 0051.
 func IsReservedQueuedBy(queuedBy string) bool {
 	switch queuedBy {
 	case QueuedByAgent, QueuedByWorkflow, QueuedByServer:
@@ -57,6 +63,11 @@ const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 // carries the flag.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
+// MetadataSenderTaskID identifies the task that produced an agent message. Two
+// agent entries may only merge when their sender task ids match, so the merge
+// never mixes prompts issued by different agents.
+const MetadataSenderTaskID = "sender_task_id"
+
 // QueueFullErrorCode is the well-known WS / MCP error code surfaced when an
 // insert would exceed the per-session cap. Shared between the user-side WS
 // handlers and the inter-task MCP handler so the wire contract stays in sync.
@@ -69,6 +80,11 @@ var (
 	// ErrEntryNotFound is returned when an operation targets an entry that no
 	// longer exists (e.g. it was drained between fetch and update).
 	ErrEntryNotFound = errors.New("queue entry not found")
+	// ErrNoMergeTarget is returned when a merge source exists but has no valid
+	// entry above it: the source is the head, the sender kinds differ, agent
+	// sender tasks differ, the caller does not own the rows, or the target is a
+	// reserved in-flight lifecycle entry.
+	ErrNoMergeTarget = errors.New("no mergeable message above")
 	// ErrTaskInactive means a lifecycle prompt could not be accepted because
 	// its task was deleted or archived before the queue transaction claimed it.
 	ErrTaskInactive = errors.New("queue task is inactive")

@@ -136,6 +136,93 @@ func TestAggregator_NoExecutionIsNoOp(t *testing.T) {
 	}
 }
 
+func TestAggregator_RuntimeInterestKeepsSlowModeWithoutUISubscription(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+	addExecution(mgr, "s1", "/tmp/ws1")
+
+	// An active execution must keep workspace polling alive even when the
+	// browser has no session subscription for it.
+	mgr.pollAggregator.HandleRuntimeInterest("s1", true)
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModePaused)
+
+	mgr.pollAggregator.mu.Lock()
+	got := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	runtimeEntries := len(mgr.pollAggregator.runtimeSessions)
+	mgr.pollAggregator.mu.Unlock()
+
+	if got != WorkspacePollModeSlow {
+		t.Errorf("active execution without UI subscription = %q, want slow", got)
+	}
+	if runtimeEntries != 1 {
+		t.Errorf("runtime interest entries = %d, want 1", runtimeEntries)
+	}
+}
+
+func TestAggregator_RuntimeInterestDoesNotOverrideFocusedSession(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+	addExecution(mgr, "s1", "/tmp/ws1")
+
+	mgr.pollAggregator.HandleRuntimeInterest("s1", true)
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModeFast)
+
+	mgr.pollAggregator.mu.Lock()
+	focused := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if focused != WorkspacePollModeFast {
+		t.Errorf("focused active execution = %q, want fast", focused)
+	}
+
+	// Losing focus must fall back to the runtime baseline, not to paused.
+	mgr.pollAggregator.HandleSessionMode("s1", WorkspacePollModePaused)
+	mgr.pollAggregator.mu.Lock()
+	unfocused := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if unfocused != WorkspacePollModeSlow {
+		t.Errorf("unfocused active execution = %q, want slow", unfocused)
+	}
+}
+
+func TestAggregator_RuntimeInterestRemovalYieldsPaused(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+	addExecution(mgr, "s1", "/tmp/ws1")
+
+	mgr.pollAggregator.HandleRuntimeInterest("s1", true)
+	mgr.pollAggregator.HandleRuntimeInterest("s1", false)
+
+	mgr.pollAggregator.mu.Lock()
+	_, hasLastPushed := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	runtimeEntries := len(mgr.pollAggregator.runtimeSessions)
+	workspaceEntries := len(mgr.pollAggregator.workspaceRuntimeSessions)
+	mgr.pollAggregator.mu.Unlock()
+
+	if hasLastPushed {
+		t.Error("expected lastPushed entry to be removed after runtime interest ends")
+	}
+	if runtimeEntries != 0 || workspaceEntries != 0 {
+		t.Errorf("runtime indexes not cleaned up: sessions=%d workspaces=%d", runtimeEntries, workspaceEntries)
+	}
+}
+
+func TestAggregator_FlushSessionMode_PushesRuntimeBaselineWithoutCachedUIState(t *testing.T) {
+	mgr := newTestManagerForAggregator(t)
+	addExecution(mgr, "s1", "/tmp/ws1")
+	mgr.pollAggregator.HandleRuntimeInterest("s1", true)
+
+	// Simulate the first push being lost before agentctl was ready. Flush must
+	// still force the runtime baseline even though no UI mode was cached.
+	mgr.pollAggregator.mu.Lock()
+	delete(mgr.pollAggregator.lastPushed, "/tmp/ws1")
+	mgr.pollAggregator.mu.Unlock()
+	mgr.pollAggregator.FlushSessionMode("s1")
+
+	mgr.pollAggregator.mu.Lock()
+	got := mgr.pollAggregator.lastPushed["/tmp/ws1"]
+	mgr.pollAggregator.mu.Unlock()
+	if got != WorkspacePollModeSlow {
+		t.Errorf("flushed runtime baseline = %q, want slow", got)
+	}
+}
+
 func TestAggregator_DifferentWorkspacesAreIndependent(t *testing.T) {
 	mgr := newTestManagerForAggregator(t)
 	addExecution(mgr, "s1", "/tmp/ws1")

@@ -146,6 +146,43 @@ jobs:
       - name: Run lint
         run: pnpm --filter @kandev/web lint
 
+      # Unlike the eslint literal-string guard (scoped to already-migrated paths
+      # via i18nGuardFiles), these four checks scan components/app/hooks/lib
+      # repo-wide. Each one pins a class of i18n bug that fails silently at
+      # runtime: a key with no catalog entry, <Trans> tag markup rendered
+      # verbatim, an English plural ending passed as a value, and t() at module
+      # scope frozen at the boot locale. See docs/i18n.md.
+      - name: Run i18n checks
+        run: pnpm --filter @kandev/web i18n:check
+
+      # New-code ratchet. The eslint literal guard is an error only on migrated
+      # paths, which leaves new files under un-migrated directories unguarded.
+      # These two judge the CHANGE instead of the FILE: an added file must be
+      # clean outright, a modified file only on the lines it touched, and the
+      # guard allowlist may not shrink. Same model as
+      # `golangci-lint --new-from-rev` for Go. Base SHA is resolved the same way
+      # as the Prettier step above.
+      - name: Run i18n new-code ratchet
+        shell: bash
+        # The job defaults to `apps`; these scripts live one level deeper.
+        working-directory: apps/web
+        run: |
+          set -euo pipefail
+
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          else
+            BASE_SHA="${{ github.event.before }}"
+          fi
+
+          if [[ -z "${BASE_SHA}" || "${BASE_SHA}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "No usable base SHA; skipping the new-code ratchet."
+            exit 0
+          fi
+
+          node scripts/check-new-code-i18n.mjs --base "${BASE_SHA}"
+          node scripts/check-guard-allowlist.mjs --base "${BASE_SHA}"
+
       - name: Run tests
         run: pnpm --filter @kandev/web test
 

@@ -74,3 +74,22 @@ func TestApplyLaunchPromptContext_PassthroughKeepsAttributionWithoutMCPBlock(t *
 	assert.Contains(t, out, "session sess-spawner of task task-spawner")
 	assert.Contains(t, out, "review the diff please")
 }
+
+func TestApplyLaunchPromptContext_PassthroughAddsPendingTitleInstructionOnlyWhenNeeded(t *testing.T) {
+	withTitle := (&Service{}).applyLaunchPromptContext(context.Background(), launchPromptContext{
+		prompt:               "review the diff please",
+		isPassthrough:        true,
+		includeTaskTitleTool: true,
+	})
+	assert.Contains(t, withTitle, "set_task_title_kandev")
+	assert.Contains(t, withTitle, "targeting about 3 words")
+	assert.Contains(t, withTitle, "review the diff please")
+	assert.NotContains(t, withTitle, sysprompt.TagStart)
+
+	withoutTitle := (&Service{}).applyLaunchPromptContext(context.Background(), launchPromptContext{
+		prompt:        "review the diff please",
+		isPassthrough: true,
+	})
+	assert.NotContains(t, withoutTitle, "set_task_title_kandev")
+	assert.Equal(t, "review the diff please", withoutTitle)
+}

@@ -8,6 +8,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { useTranslation } from "react-i18next";
 
 /**
  * Edits the per-user preference that controls transcript unread dividers and
@@ -15,6 +16,7 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
  * lifecycle and commits the persisted preference to the app store on save.
  */
 export function UnreadDividerSettings() {
+  const { t } = useTranslation();
   const unreadDivider = useAppStore((state) => state.userSettings.unreadDivider);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -47,14 +49,14 @@ export function UnreadDividerSettings() {
   return (
     <SettingsCard isDirty={isDirty} data-testid="unread-divider-settings-card">
       <CardHeader>
-        <CardTitle className="text-base">Unread Messages</CardTitle>
+        <CardTitle className="text-base">{t("settings:unreadMessages")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex min-h-11 items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="show-unread-divider">Show New divider in transcripts</Label>
+            <Label htmlFor="show-unread-divider">{t("settings:showNewDividerInTranscripts")}</Label>
             <p className="text-xs text-muted-foreground">
-              Mark messages that arrived while a task was out of view. Takes effect immediately.
+              {t("settings:markMessagesThatArrivedWhileA")}
             </p>
           </div>
           <Switch

@@ -62,6 +62,7 @@ function makeUnloadedSettings(): UserSettingsState {
     reviewAutoMarkOnScroll: true,
     confirmTaskArchive: true,
     unreadDivider: true,
+    agentGeneratedTaskTitles: false,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,

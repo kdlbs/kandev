@@ -5,6 +5,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -194,6 +195,11 @@ type TaskDTO struct {
 	// task-listing MCP tools so agents can reason about PR status (e.g. find
 	// tasks whose PRs are merged). Omitted when empty.
 	PRs []v1.TaskPRSummary `json:"prs,omitempty"`
+
+	// StatusSummary is the bounded task-level projection consumed by task rows.
+	// It is loaded in batches and is absent when no projection exists yet; the
+	// existing coarse fields above remain the compatibility fallback.
+	StatusSummary *statussummary.TaskStatusSummary `json:"status_summary,omitempty"`
 }
 
 type TaskRepositoryDTO struct {

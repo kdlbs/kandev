@@ -5,7 +5,14 @@ description: "Install Kandev, add a repository, configure an agent, run a first 
 
 # Get Started with Kandev
 
-This guide establishes the smallest useful Kandev setup: one local Git repository, one coding-agent profile, the built-in Worktree executor profile, and the default Development workflow.
+Use this guide to run one agent on one local Git repository. Start with the built-in Worktree profile so the agent works in a separate checkout.
+
+## Quick path
+
+1. Install and start Kandev.
+2. Add a local repository and review its scripts and trust boundary.
+3. Configure an agent profile and keep Worktree selected for the first task.
+4. Start, inspect, test, and review the task before archiving or opening a pull request.
 
 ## Prerequisites
 
@@ -39,6 +46,9 @@ By default, persistent state is under `~/.kandev`, including the SQLite database
 
 See the [CLI reference](cli.md) for commands, port and logging flags, data paths, environment variables, and update behavior. Other supported entry points are the [desktop app](desktop-app.md), [service](run-as-a-service.md), and [Docker deployment](docker.md). Read [Security and trust](security.md) before making any installation remotely reachable.
 
+<details>
+<summary>First-run records and onboarding details</summary>
+
 ## Know what a fresh database contains
 
 Kandev creates these records when no prior workspace or executor configuration exists:
@@ -50,6 +60,8 @@ Kandev creates these records when no prior workspace or executor configuration e
 - A disabled Sprites executor entry.
 
 The first-run dialog scans supported agent CLIs, lets you inspect detected profiles, and introduces executors, workflows, and the command panel. **Skip** stores only a browser-local onboarding marker. Advancing/completing also saves any dirty agent-profile edits made in the dialog. Neither path creates another workspace. The dialog warns that default agent profiles can have **Auto Approve** enabled. Inspect every profile before assigning trusted code or credentials.
+
+</details>
 
 ## Add a local repository
 
@@ -127,6 +139,9 @@ See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks a
 
 Use the [Security and trust](security.md) guide to choose a local, remote, shared-team, or unattended-automation boundary and to review the deployment checklist.
 
+<details>
+<summary>Troubleshoot a task that will not start</summary>
+
 ## Troubleshoot a task that will not start
 
 Check in this order:
@@ -147,3 +162,5 @@ Common corrections:
 - If the browser did not open, use the URL printed by the launcher or start with `--headless`; do not assume port `38429` when the launcher selected a fallback.
 
 For backup, update, log, database, and recovery details, see [Operations](operations.md). For release-specific disagreement, record the version from **Settings > System > About** and compare it with the matching GitHub tag.
+
+</details>

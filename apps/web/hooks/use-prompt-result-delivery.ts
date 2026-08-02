@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useToast } from "@/components/toast-provider";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 import type { UtilityGenerationResult } from "./use-utility-agent-generator";
 
@@ -29,19 +30,6 @@ type PendingResult = {
   result: UtilityGenerationResult;
   generation: number;
 };
-
-async function copyText(text: string): Promise<boolean> {
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  return false;
-}
 
 export function usePromptResultDelivery({
   scopeKey,
@@ -111,7 +99,7 @@ export function usePromptResultDelivery({
       return;
     }
 
-    const copied = await copyText(pendingResult.result.content);
+    const copied = await copyToClipboard(pendingResult.result.content);
     toast({
       description: copied ? COPY_SUCCESS_MESSAGE : COPY_FAILURE_MESSAGE,
       variant: copied ? "success" : "error",

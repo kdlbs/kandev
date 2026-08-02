@@ -30,14 +30,22 @@ import (
 
 type messageAddSwitchRepo struct {
 	mockRepository
-	tasks        map[string]*models.Task
-	sessions     map[string]*models.TaskSession
-	primaryID    string
-	messages     []*models.Message
-	turns        []*models.Turn
-	getCalls     map[string]int
-	failReload   bool
-	taskGetCalls int
+	tasks             map[string]*models.Task
+	sessions          map[string]*models.TaskSession
+	primaryID         string
+	messages          []*models.Message
+	turns             []*models.Turn
+	idempotentMessage *models.Message
+	getCalls          map[string]int
+	failReload        bool
+	taskGetCalls      int
+}
+
+func (r *messageAddSwitchRepo) GetMessage(_ context.Context, id string) (*models.Message, error) {
+	if r.idempotentMessage != nil && r.idempotentMessage.ID == id {
+		return r.idempotentMessage, nil
+	}
+	return nil, sql.ErrNoRows
 }
 
 func (r *messageAddSwitchRepo) GetTask(_ context.Context, id string) (*models.Task, error) {
@@ -578,6 +586,51 @@ func TestWSAddMessageUsesSessionSelectedByOnTurnStart(t *testing.T) {
 	}
 	assert.Equal(t, "s2", orch.getStartedSession())
 	assert.Empty(t, orch.getForwardedSession())
+}
+
+func TestWSAddMessageRetryAcceptsMessagePersistedAfterSessionSwitch(t *testing.T) {
+	now := time.Now().UTC()
+	repo := &messageAddSwitchRepo{
+		tasks: map[string]*models.Task{
+			"t1": {ID: "t1", State: v1.TaskStateReview, UpdatedAt: now},
+		},
+		sessions: map[string]*models.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: models.TaskSessionStateWaitingForInput, UpdatedAt: now},
+			"s2": {ID: "s2", TaskID: "t1", State: models.TaskSessionStateCreated, UpdatedAt: now},
+		},
+		primaryID: "s1",
+		idempotentMessage: &models.Message{
+			ID:            "client-1",
+			TaskID:        "t1",
+			TaskSessionID: "s2",
+			AuthorType:    models.MessageAuthorUser,
+			Content:       "continue here",
+			CreatedAt:     now,
+		},
+	}
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	require.NoError(t, err)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := NewMessageHandlers(svc, &switchingTurnStartOrchestrator{repo: repo}, log)
+
+	req, err := ws.NewRequest("req-retry", ws.ActionMessageAdd, map[string]interface{}{
+		"task_id":           "t1",
+		"session_id":        "s1",
+		"client_message_id": "client-1",
+		"content":           "continue here",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsAddMessage(context.Background(), req)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	assert.Empty(t, repo.messages, "an idempotent retry must not create a second message")
 }
 
 func TestWSAddMessageFailsWhenOnTurnStartCompletesSessionWithoutReplacement(t *testing.T) {

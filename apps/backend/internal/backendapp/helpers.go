@@ -49,6 +49,7 @@ import (
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/health"
 	"github.com/kandev/kandev/internal/health/oslimits"
+	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
@@ -64,6 +65,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -119,6 +121,19 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 		result = appendSessionModeMessage(sessionID, session, lifecycleMgr, result)
 		result = appendSessionModelsMessage(sessionID, session, lifecycleMgr, result)
 		return result, nil
+	}
+}
+
+// buildSessionGitDataProvider constructs the narrow provider used by the diff
+// panel's explicit refresh request. It intentionally does not hydrate session
+// state, agent readiness, commands, mode, models, or context-window data.
+func buildSessionGitDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
+	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
+		session, err := taskRepo.GetTaskSession(ctx, sessionID)
+		if err != nil {
+			return nil, nil
+		}
+		return appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, nil, log), nil
 	}
 }
 
@@ -706,18 +721,26 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 	}
 }
 
-func webRuntimeConfig(debug bool) webapp.RuntimeConfig {
+// webRuntimeConfig builds the SPA's runtime block. `req` supplies the active
+// locale (from the kandev_locale cookie) so the shell can set <html lang> and the
+// client can activate the right catalog before first paint.
+func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:     "/api/v1",
 		WebSocketPath: "/ws",
 		Debug:         debug,
+		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
+		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
+		// this from its own build mode.
+		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:        i18n.FromRequest(req),
 	}
 }
 
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode),
+		webRuntimeConfig(p.devMode, req),
 		bootInitialState(ctx, req, p, route),
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)

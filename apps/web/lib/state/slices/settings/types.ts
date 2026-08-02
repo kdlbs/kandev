@@ -183,6 +183,7 @@ export type UserSettingsState = {
   reviewAutoMarkOnScroll: boolean;
   confirmTaskArchive: boolean;
   unreadDivider: boolean;
+  agentGeneratedTaskTitles: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;

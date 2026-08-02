@@ -33,6 +33,9 @@ type BackendClient interface {
 const (
 	// ModeTask registers kanban, plan, and interaction tools (default for task-solving agents).
 	ModeTask = "task"
+	// ModeTaskTitlePending registers the task-mode tools plus the one-shot
+	// title tool used while a prompt-first task still has its provisional title.
+	ModeTaskTitlePending = "task-title-pending"
 	// ModeConfig registers configuration tools for workflows, agents, and MCP servers.
 	ModeConfig = "config"
 	// ModeExternal registers config tools plus create_task_kandev for external coding agents
@@ -75,7 +78,7 @@ func locatorCount(locators ...string) int {
 // normalizeMode returns a valid MCP mode, defaulting unknown values to ModeTask.
 func normalizeMode(mode string) string {
 	switch mode {
-	case ModeConfig, ModeExternal, ModeOffice:
+	case ModeConfig, ModeExternal, ModeOffice, ModeTaskTitlePending:
 		return mode
 	default:
 		return ModeTask
@@ -88,7 +91,7 @@ type Server struct {
 	sessionID          string
 	taskID             string
 	disableAskQuestion bool
-	mode               string // "task" (default), "config", or "office"
+	mode               string // "task" (default), "task-title-pending", "config", or "office"
 	mcpServer          *server.MCPServer
 	sseServer          *server.SSEServer
 	httpServer         *server.StreamableHTTPServer
@@ -485,7 +488,7 @@ func (s *Server) registerTools() {
 		count++
 		s.registerTaskDocumentTools()
 		count += 3
-	default: // ModeTask
+	case ModeTask, ModeTaskTitlePending:
 		// Kanban tasks get list_related_tasks_kandev (useful for finding
 		// a sibling to message_task_kandev) but NOT the task-document
 		// tools — those are office coordination plumbing.
@@ -515,6 +518,10 @@ func (s *Server) registerTools() {
 		// session.
 		s.registerStepCompleteTool()
 		count++
+		if s.mode == ModeTaskTitlePending {
+			s.registerSetTaskTitleTool()
+			count++
+		}
 	}
 	s.logger.Info("registered MCP tools",
 		zap.String("mode", s.mode),
@@ -990,6 +997,50 @@ The summary you provide is shown to the user in chat and may be forwarded to the
 		),
 		s.wrapHandler("step_complete_kandev", s.stepCompleteHandler()),
 	)
+}
+
+// registerSetTaskTitleTool registers the one-shot title handoff used by
+// prompt-first task sessions. The server is bound to the current task, so the
+// agent only supplies the short user-facing title it wants to keep.
+func (s *Server) registerSetTaskTitleTool() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("set_task_title_kandev",
+			mcp.WithDescription(`Set the user-facing title for the CURRENT task.
+
+Call this as your first action in the session, before planning, inspecting files,
+or doing any other work. The task currently has a provisional title derived from
+the prompt; call this tool even when that provisional title looks usable.
+
+Use a concise title targeting about 3 words (no more than 6 words when practical).
+Write a short noun phrase, not a sentence or a progress update. Your title should
+summarize the requested outcome and will replace the provisional title.`),
+			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short task title targeting about 3 words; use no more than 6 words when practical.")),
+		),
+		s.wrapHandler("set_task_title_kandev", s.setTaskTitleHandler()),
+	)
+}
+
+func (s *Server) setTaskTitleHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		if s.taskID == "" {
+			return mcp.NewToolResultError("set_task_title_kandev requires a bound task"), nil
+		}
+		title := strings.TrimSpace(req.GetString(titleArg, ""))
+		if title == "" {
+			return mcp.NewToolResultError("title is required"), nil
+		}
+		payload := map[string]interface{}{
+			mcpKeyTaskID: s.taskID,
+			"session_id": s.sessionID,
+			titleArg:     title,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPSetTaskTitle, payload, &result); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
 }
 
 func (s *Server) stepCompleteHandler() server.ToolHandlerFunc {

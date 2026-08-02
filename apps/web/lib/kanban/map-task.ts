@@ -10,6 +10,7 @@ import type {
   TaskState,
   TaskSessionState,
 } from "@/lib/types/http";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 type KanbanTask = KanbanState["tasks"][number];
 
@@ -63,6 +64,7 @@ export type TaskLike = {
   queued_for_step_id?: string | null;
   queued_at?: string | null;
   metadata?: Record<string, unknown> | null;
+  status_summary?: TaskStatusSummary | null;
 };
 
 export type WorkspaceMode = "inherit_parent" | "new_workspace" | "shared_group";
@@ -154,6 +156,7 @@ export function toKanbanTask(source: TaskLike): KanbanTask {
     wipAdmitted: source.wip_admitted,
     queuedForStepId: source.queued_for_step_id,
     queuedAt: source.queued_at,
+    statusSummary: source.status_summary,
     isPRReview: isPRReviewFromMetadata(source.metadata),
     isIssueWatch: isIssueWatchFromMetadata(source.metadata),
     ...issueFieldsFromMetadata(source.metadata),

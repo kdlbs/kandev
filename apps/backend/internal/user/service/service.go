@@ -51,6 +51,7 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll          *bool
 	ConfirmTaskArchive              *bool
 	UnreadDivider                   *bool
+	AgentGeneratedTaskTitles        *bool
 	MCPTaskAgentProfileDefault      *string
 	ShowAnchoredPromptBar           *bool
 	ShowScrollToLastPrompt          *bool
@@ -284,6 +285,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.UnreadDivider != nil {
 		settings.UnreadDivider = *req.UnreadDivider
+	}
+	if req.AgentGeneratedTaskTitles != nil {
+		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -680,6 +684,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
 		"unread_divider":                      settings.UnreadDivider,
+		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,

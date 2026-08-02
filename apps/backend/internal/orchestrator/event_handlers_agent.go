@@ -1293,6 +1293,28 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
+		return
+	}
+	if s.eventBus != nil {
+		eventData := map[string]interface{}{
+			"task_id":            data.TaskID,
+			"session_id":         data.SessionID,
+			"active":             true,
+			"message":            lastErr.Message,
+			"occurred_at":        lastErr.OccurredAt.Format(time.RFC3339Nano),
+			"stamp":              lastErr.Stamp(),
+			"agent_execution_id": lastErr.AgentExecutionID,
+		}
+		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+			events.TaskSessionErrorChanged,
+			"orchestrator",
+			eventData,
+		)); err != nil {
+			s.logger.Warn("failed to publish task session error event",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(err))
+		}
 	}
 }
 

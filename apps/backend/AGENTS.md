@@ -28,11 +28,7 @@ apps/backend/
 │   │   ├── settings/     # Agent settings
 │   │   ├── mcpconfig/    # MCP server configuration
 │   │   └── remoteauth/   # Remote auth catalog and method IDs for remote executors/UI
-│   ├── auth/             # Opt-in user authentication + per-user scoping
-│   │   ├── authn/        # Request-identity plumbing (context + gin helpers, RequireAdmin)
-│   │   ├── httpmw/       # Global enforcement middleware (allowlist, synthetic identity)
-│   │   ├── httpapi/      # /api/v1/auth/* + /api/v1/users endpoints
-│   │   └── store/        # auth_identities, auth_sessions, auth_api_tokens, auth_invites
+│   ├── auth/             # Opt-in auth, per-user scoping, middleware, API, store
 │   ├── agentctl/
 │   │   └── server/       # agentctl HTTP server
 │   │       ├── acp/      # ACP protocol implementation
@@ -60,27 +56,9 @@ apps/backend/
 │   │   ├── models/       # Task, Session, Executor, Message models
 │   │   ├── repository/   # Database access (SQLite)
 │   │   └── service/      # Task business logic
-│   ├── office/           # Autonomous agent management (Office feature)
-│   │   ├── agents/       # Agent instance CRUD + auth guards
-│   │   ├── approvals/    # Approval requests and decisions
-│   │   ├── channels/     # External integration channels (webhooks)
-│   │   ├── config/       # Config sync (DB ↔ filesystem)
-│   │   ├── configloader/ # Filesystem config reader/writer
-│   │   ├── costs/        # Cost tracking and budget policies
-│   │   ├── dashboard/    # Dashboard API, issues, activity, live runs
-│   │   ├── infra/        # GC, reconciliation
-│   │   ├── labels/       # Task labels
-│   │   ├── onboarding/   # Workspace onboarding wizard API
-│   │   ├── projects/     # Project management
-│   │   ├── repository/   # Office SQLite persistence
-│   │   ├── runtime/      # Agent run context, capabilities, and runtime action surface
-│   │   ├── routines/     # Scheduled recurring tasks
-│   │   ├── routing/      # Provider routing: resolver, validators, catalogue, backoff, agent-overrides
-│   │   ├── scheduler/    # Wakeup scheduler (duplicate of service scheduler features)
-│   │   ├── service/      # Core office service (wakeups, event subscribers, execution policy)
-│   │   ├── shared/       # Shared interfaces and activity logging
-│   │   ├── skills/       # Skill injection and materialization
-│   │   └── workspaces/   # Workspace deletion handler
+│   ├── office/           # Autonomous agent management (agents, approvals, channels, config, costs,
+│   │                     # dashboard, infra, labels, onboarding, projects, repository, runtime,
+│   │                     # routines, routing, scheduler, service, shared, skills, workspaces)
 │   ├── events/           # Event bus for internal pub/sub
 │   ├── gateway/          # WebSocket gateway
 │   ├── github/           # GitHub API integration (PRs, reviews, webhooks)
@@ -296,4 +274,5 @@ golangci-lint run ./... --new-from-rev="<base-sha>" --timeout=5m
 - `internal/agentctl/AGENTS.md` — agentctl server route groups, adapter model, ACP protocol
 - `internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping
 - `internal/integrations/AGENTS.md` — playbook for adding a new third-party integration (Jira/Linear pattern)
+- `docs/i18n.md` ("Backend") — `internal/i18n` covers only what Go renders straight to a browser: the SPA-unavailable error pages and the shared-task artifacts (`share.html`, gist README and description). Both are complete. Everything else stays English by design; for new user-facing output prefer a stable error code the frontend translates. Use `i18n.Tf` for anything carrying a value — never `fmt.Sprintf` a translated string, and never build a plural in Go. A locale for output that outlives the request is resolved once at write time and threaded as an argument, not a context value (ADR `2026-08-01-share-artifact-locale.md`).
 - `cmd/mock-agent/AGENTS.md` — predefined `/e2e:<name>` scenarios vs inline `e2e:...` scripts, recipe for adding a scenario, and the rebuild-before-e2e requirement

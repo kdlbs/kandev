@@ -131,6 +131,12 @@ type WorkspaceBootstrapper interface {
 	CreateWorkspaceWithKanban(ctx context.Context, workspace *models.Workspace) (*models.Workflow, error)
 }
 
+// WorkspaceDefaultsInitializer persists integration defaults after a
+// workspace row exists and before its creation event is published.
+type WorkspaceDefaultsInitializer interface {
+	InitializeWorkspaceDefaults(ctx context.Context, workspaceID string) error
+}
+
 // WorkflowStepGetter retrieves workflow step information.
 type WorkflowStepGetter interface {
 	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
@@ -209,6 +215,7 @@ type Repos struct {
 	TaskEnvironments  repository.TaskEnvironmentRepository
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
+	StatusSummaries   repository.TaskStatusSummaryRepository
 }
 
 // Service provides task business logic
@@ -229,6 +236,8 @@ type Service struct {
 	taskEnvironments            repository.TaskEnvironmentRepository
 	reviews                     repository.ReviewRepository
 	resourceCleanups            repository.TaskResourceCleanupRepository
+	statusSummaries             repository.TaskStatusSummaryRepository
+	statusSummaryPRs            TaskStatusSummaryPRReader
 	eventBus                    bus.EventBus
 	logger                      *logger.Logger
 	discoveryConfig             RepositoryDiscoveryConfig
@@ -256,6 +265,8 @@ type Service struct {
 	comments                    CommentRepository
 	baseBranchPusher            AgentBaseBranchPusher
 	runtimeOverridesMu          sync.Mutex
+
+	workspaceDefaultsInitializer WorkspaceDefaultsInitializer
 	// foregroundActivity resolves the live fine-grained busy substate of a RUNNING
 	// session (satisfied by the orchestrator). Used to compute the task-level
 	// MOST-ACTIVE-WINS activity aggregate carried on task.updated events. Optional.
@@ -308,6 +319,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		taskEnvironments:      repos.TaskEnvironments,
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
+		statusSummaries:       repos.StatusSummaries,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
@@ -374,6 +386,13 @@ func (s *Service) SetWorkflowStepCreator(creator WorkflowStepCreator) {
 
 func (s *Service) SetWorkspaceBootstrapper(bootstrapper WorkspaceBootstrapper) {
 	s.workspaceBootstrapper = bootstrapper
+}
+
+// SetWorkspaceDefaultsInitializer wires the integration initializer used by
+// workspace creation. It is optional so the task service remains usable in
+// deployments without GitHub.
+func (s *Service) SetWorkspaceDefaultsInitializer(initializer WorkspaceDefaultsInitializer) {
+	s.workspaceDefaultsInitializer = initializer
 }
 
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.

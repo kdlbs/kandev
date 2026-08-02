@@ -291,6 +291,24 @@ describe("mapUserSettingsResponse unread divider", () => {
   });
 });
 
+describe("mapUserSettingsResponse agent-generated task titles", () => {
+  it("defaults the preference off and preserves explicit enablement", () => {
+    const fallback = mapUserSettingsResponse(null) as { agentGeneratedTaskTitles?: boolean };
+    const enabled = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        agent_generated_task_titles: true,
+        updated_at: UPDATED_AT,
+      } as unknown as NonNullable<Parameters<typeof mapUserSettingsResponse>[0]>["settings"],
+    }) as { agentGeneratedTaskTitles?: boolean };
+
+    expect(fallback.agentGeneratedTaskTitles).toBe(false);
+    expect(enabled.agentGeneratedTaskTitles).toBe(true);
+  });
+});
+
 describe("transcript navigation settings", () => {
   it("uses the requested defaults when settings are unavailable", () => {
     const settings = mapUserSettingsResponse(null);

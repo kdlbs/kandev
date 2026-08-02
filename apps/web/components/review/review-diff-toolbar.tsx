@@ -33,6 +33,7 @@ import {
   ExternalVcsFileMenuItem,
 } from "@/components/editors/external-vcs-file-link";
 import { useGlobalViewMode } from "@/hooks/use-global-view-mode";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { isMarkdownFile } from "@/lib/utils/file-types";
 
@@ -203,7 +204,7 @@ function MobileFileActionsMenu(props: FileDiffToolbarProps) {
     repo,
   } = props;
   const handleCopyDiff = useCallback(() => {
-    void navigator.clipboard.writeText(diff || "");
+    void copyToClipboard(diff || "");
   }, [diff]);
   const [open, setOpen] = useState(false);
 
@@ -304,7 +305,7 @@ function DesktopFileDiffToolbar(props: FileDiffToolbarProps) {
   } = props;
   const [globalViewMode, setGlobalViewMode] = useGlobalViewMode();
   const handleCopyDiff = useCallback(() => {
-    void navigator.clipboard.writeText(diff || "");
+    void copyToClipboard(diff || "");
   }, [diff]);
   const handleToggleViewMode = useCallback(
     () => setGlobalViewMode(globalViewMode === "split" ? "unified" : "split"),

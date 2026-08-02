@@ -26,6 +26,7 @@ import {
 } from "./session-dialog-shared";
 import { ContextZone } from "./chat/context-items/context-zone";
 import { clampTaskTitleInput } from "@/lib/task-title";
+import { useTranslation } from "react-i18next";
 
 export function WorktreeBadge({ show, branch }: { show: boolean; branch: string | null }) {
   if (!show || !branch) return null;
@@ -253,6 +254,7 @@ type SubtaskFormBodyProps = {
   handlers: ReturnType<typeof useDialogHandlers>;
   title: string;
   setTitle: (v: string) => void;
+  autoTitle?: boolean;
   workspaceId: string | null;
   availableRepositories: Repository[];
   parentRepositoryId: string | null;
@@ -391,11 +393,13 @@ function shouldShowWorktreeBadge(
  * context picker, prompt zone, footer). Extracted from `NewSubtaskForm` so
  * the parent stays under the per-function complexity cap.
  */
+// eslint-disable-next-line max-lines-per-function -- shared form keeps workspace, prompt, and submit controls together.
 export function SubtaskFormBody({
   fs,
   handlers,
   title,
   setTitle,
+  autoTitle = false,
   workspaceId,
   availableRepositories,
   parentRepositoryId,
@@ -416,24 +420,30 @@ export function SubtaskFormBody({
   onClose,
   onSubmit,
 }: SubtaskFormBodyProps) {
+  const { t } = useTranslation();
   const showWorktreeBadge = shouldShowWorktreeBadge(fs, worktreeBranch, parentRepositoryId);
   const inheritParent = workspaceMode === "inherit_parent";
   return (
     <form onSubmit={onSubmit} className="min-w-0 space-y-4">
-      <div className="space-y-1.5">
-        <label htmlFor="subtask-title-input" className="text-xs font-medium text-muted-foreground">
-          Title
-        </label>
-        <Input
-          id="subtask-title-input"
-          value={title}
-          onChange={(e) => setTitle(clampTaskTitleInput(e.target.value))}
-          placeholder="Subtask title"
-          className="min-w-0 max-w-full text-sm"
-          data-testid="subtask-title-input"
-          disabled={isCreating}
-        />
-      </div>
+      {!autoTitle && (
+        <div className="space-y-1.5">
+          <label
+            htmlFor="subtask-title-input"
+            className="text-xs font-medium text-muted-foreground"
+          >
+            {t("common:title")}
+          </label>
+          <Input
+            id="subtask-title-input"
+            value={title}
+            onChange={(e) => setTitle(clampTaskTitleInput(e.target.value))}
+            placeholder={t("common:subtaskTitle")}
+            className="min-w-0 max-w-full text-sm"
+            data-testid="subtask-title-input"
+            disabled={isCreating}
+          />
+        </div>
+      )}
       <WorkspaceModeToggle
         value={workspaceMode}
         onChange={onWorkspaceModeChange}
@@ -479,7 +489,7 @@ export function SubtaskFormBody({
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt}
+          disabled={isCreating || isSummarizing || !hasPrompt || (!autoTitle && !title.trim())}
           className="cursor-pointer"
         >
           {isCreating ? "Creating..." : "Create Subtask"}

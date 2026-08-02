@@ -222,7 +222,7 @@ func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir st
 	}
 	subs := m.snapshotSubscribers()
 	children := scanRepositorySubdirs(resolved, roots)
-	bare := NewWorkspaceTrackerForRepo(resolved, "", m.logger)
+	bare := m.newTrackerForRepo(resolved, "")
 	bare.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
 	bare.SetAllowedSourceRoots(roots)
 	bare.Start(ctx)
@@ -231,7 +231,7 @@ func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir st
 	}
 	repos := make([]*WorkspaceTracker, 0, len(children))
 	for _, child := range children {
-		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
+		tracker := m.newTrackerForRepo(child.path, child.name)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
 		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
@@ -244,6 +244,7 @@ func (m *Manager) RebindWorkspaceWithSourceRoots(ctx context.Context, workDir st
 	m.repoTrackersMu.Lock()
 	oldBare, oldRepos := m.workspaceTracker, m.repoTrackers
 	m.cfg.WorkDir, m.workspaceTracker, m.repoTrackers, m.workspaceSourceRoots = resolved, bare, repos, append([]string(nil), roots...)
+	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{bare}, repos...)...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
 	m.repoTrackersMu.Unlock()
 	if oldBare != nil {
@@ -270,7 +271,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 		zap.String("work_dir", workDir),
 		zap.Int("children", len(children)))
 
-	bareRoot := NewWorkspaceTrackerForRepo(workDir, "", m.logger)
+	bareRoot := m.newTrackerForRepo(workDir, "")
 	bareRoot.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), ""))
 	bareRoot.SetAllowedSourceRoots(roots)
 	bareRoot.Start(ctx)
@@ -280,7 +281,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 
 	newRepoTrackers := make([]*WorkspaceTracker, 0, len(children))
 	for _, child := range children {
-		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
+		tracker := m.newTrackerForRepo(child.path, child.name)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
 		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
@@ -294,6 +295,7 @@ func (m *Manager) transitionToMultiRepoMode(ctx context.Context, workDir string,
 	old := m.workspaceTracker
 	m.workspaceTracker = bareRoot
 	m.repoTrackers = append(m.repoTrackers, newRepoTrackers...)
+	m.applyWorkspacePollModeLocked(append([]*WorkspaceTracker{bareRoot}, newRepoTrackers...)...)
 	m.cfg.WorkDir = workDir
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)
@@ -326,7 +328,7 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 		m.logger.Info("adding per-repo tracker after rescan",
 			zap.String("repository_name", child.name),
 			zap.String("path", child.path))
-		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
+		tracker := m.newTrackerForRepo(child.path, child.name)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
 		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
@@ -352,6 +354,7 @@ func (m *Manager) appendNewRepoTrackers(ctx context.Context, workDir string, chi
 			continue
 		}
 		m.repoTrackers = append(m.repoTrackers, t)
+		m.applyWorkspacePollModeLocked(t)
 	}
 	m.cfg.WorkDir = workDir
 	m.workspaceSourceRoots = append([]string(nil), roots...)
@@ -390,7 +393,7 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, chi
 		if _, needed := wanted[repositoryTrackerIdentity(child.name, child.path)]; !needed {
 			continue
 		}
-		tracker := NewWorkspaceTrackerForRepo(child.path, child.name, m.logger)
+		tracker := m.newTrackerForRepo(child.path, child.name)
 		tracker.SetBaseBranch(lookupBaseBranch(m.getBaseBranches(), child.name))
 		tracker.SetAllowedSourceRoots(roots)
 		tracker.Start(ctx)
@@ -402,6 +405,7 @@ func (m *Manager) reconcileRepoTrackers(ctx context.Context, workDir string, chi
 	m.repoTrackersMu.Lock()
 	retained = append(retained, newTrackers...)
 	m.repoTrackers = retained
+	m.applyWorkspacePollModeLocked(newTrackers...)
 	m.cfg.WorkDir = workDir
 	m.workspaceSourceRoots = append([]string(nil), roots...)
 	m.cfg.WorkspaceSourceRoots = append([]string(nil), roots...)

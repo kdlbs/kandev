@@ -1,4 +1,4 @@
-import { render, renderHook, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DesktopNotificationsSection,
@@ -23,6 +23,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   Object.defineProperty(globalThis, "Notification", {
     configurable: true,
     value: originalNotification,
@@ -86,5 +87,22 @@ describe("DesktopNotificationsSection", () => {
     );
 
     expect(screen.getByRole("button", { name: "Refresh notification permission" })).toBeTruthy();
+  });
+
+  it.each([
+    ["default" as const, "Enable"],
+    ["granted" as const, "Enabled"],
+    ["error" as const, "Retry"],
+  ])("labels the permission button %s as %s", (permission, label) => {
+    render(
+      <DesktopNotificationsSection
+        notificationPermission={permission}
+        onRequestPermission={vi.fn()}
+        onRefreshPermission={vi.fn()}
+        onTestNotification={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: label })).toBeTruthy();
   });
 });

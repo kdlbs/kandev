@@ -101,6 +101,75 @@ func TestRenderShellPrependsScriptWhenHeadCloseIsMissing(t *testing.T) {
 	}
 }
 
+func TestRenderShellSetsHTMLLangFromLocale(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		locale   string
+		wantLang string
+	}{
+		{name: "default when empty", locale: "", wantLang: `lang="en"`},
+		{name: "supported pseudo", locale: "pseudo", wantLang: `lang="pseudo"`},
+		{name: "unknown coerces to en", locale: "klingon", wantLang: `lang="en"`},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assets := fstest.MapFS{
+				"index.html": {
+					Data: []byte(`<!doctype html><html lang="en"><head><title>Kandev</title></head><body></body></html>`),
+				},
+			}
+			payload := NewBootPayload(ClassifyRoute("/"), RuntimeConfig{Locale: tc.locale}, nil)
+			html, err := RenderShell(assets, "index.html", payload)
+			if err != nil {
+				t.Fatalf("RenderShell: %v", err)
+			}
+			got := string(html)
+			if !strings.Contains(got, tc.wantLang) {
+				t.Fatalf("expected %q in shell, got: %s", tc.wantLang, got)
+			}
+			// Exactly one lang attribute on the <html> tag.
+			if n := strings.Count(got, "lang="); n != 1 {
+				t.Fatalf("expected one lang attribute, found %d: %s", n, got)
+			}
+		})
+	}
+}
+
+func TestRenderShellInsertsLangWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	assets := fstest.MapFS{
+		"index.html": {Data: []byte(`<!doctype html><html><head></head><body></body></html>`)},
+	}
+	payload := NewBootPayload(ClassifyRoute("/"), RuntimeConfig{Locale: "pseudo"}, nil)
+	html, err := RenderShell(assets, "index.html", payload)
+	if err != nil {
+		t.Fatalf("RenderShell: %v", err)
+	}
+	if !strings.Contains(string(html), `<html lang="pseudo">`) {
+		t.Fatalf("expected inserted lang attribute, got: %s", html)
+	}
+}
+
+func TestNormalizeLocale(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct{ in, want string }{
+		{"en", "en"},
+		{"pseudo", "pseudo"},
+		{"", "en"},
+		{"fr", "en"},
+	} {
+		if got := NormalizeLocale(tc.in); got != tc.want {
+			t.Fatalf("NormalizeLocale(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
 func TestBytesCapacityReturnsZeroOnOverflow(t *testing.T) {
 	t.Parallel()
 

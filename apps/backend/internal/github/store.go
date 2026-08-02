@@ -21,6 +21,7 @@ import (
 type Store struct {
 	db                         *sqlx.DB // writer
 	ro                         *sqlx.DB // reader
+	freshInstall               bool
 	deploymentAppPersistenceMu sync.Mutex
 	appLifecycleLocksMu        sync.Mutex
 	appLifecycleLocks          map[string]*appRegistrationLifecycleLock
@@ -43,6 +44,8 @@ func NewStore(writer, reader *sqlx.DB) (*Store, error) {
 		db: writer, ro: reader,
 		appLifecycleLocks: make(map[string]*appRegistrationLifecycleLock),
 	}
+	s.freshInstall = !s.tableExists("github_workspace_settings") &&
+		!s.tableExists("github_workspace_connections")
 	legacyUpgrade := s.tableExists("github_workspace_settings") &&
 		!s.tableExists("github_workspace_connections")
 	if err := s.initSchema(legacyUpgrade); err != nil {
@@ -2970,6 +2973,49 @@ func (s *Store) GetWorkspaceSettings(ctx context.Context, workspaceID string) (*
 		return nil, fmt.Errorf("unmarshal repo scope repos: %w", err)
 	}
 	return normalizeWorkspaceSettings(settings), nil
+}
+
+// EnsureWorkspaceExecutorDefaults creates the initial task Git policy without
+// rewriting any settings that already exist. This is intentionally separate
+// from GetWorkspaceSettings' managed fallback so upgrades do not change the
+// behavior of existing workspaces that have never stored a settings row.
+func (s *Store) EnsureWorkspaceExecutorDefaults(ctx context.Context, workspaceID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	now := time.Now().UTC()
+	_, err := s.db.ExecContext(ctx, `
+		INSERT OR IGNORE INTO github_workspace_settings (
+			workspace_id, task_git_credentials_mode, repo_scope_mode, repo_scope_orgs, repo_scope_repos,
+			saved_presets, default_query_presets, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		workspaceID, TaskGitCredentialsModeExecutor, RepoScopeModeAll, "[]", "[]", "[]", nil, now, now)
+	return err
+}
+
+// DeleteWorkspaceSettings removes the non-secret GitHub settings owned by a
+// workspace after the task repository has deleted the workspace row.
+func (s *Store) DeleteWorkspaceSettings(ctx context.Context, workspaceID string) error {
+	workspaceID = strings.TrimSpace(workspaceID)
+	if workspaceID == "" {
+		return fmt.Errorf("workspace_id is required")
+	}
+	_, err := s.db.ExecContext(ctx,
+		`DELETE FROM github_workspace_settings WHERE workspace_id = ?`, workspaceID)
+	return err
+}
+
+func (s *Store) listWorkspaceIDs(ctx context.Context) ([]string, error) {
+	if !s.tableExists("workspaces") {
+		return nil, nil
+	}
+	var ids []string
+	if err := s.ro.SelectContext(ctx, &ids, `
+		SELECT id FROM workspaces WHERE TRIM(id) <> '' ORDER BY id`); err != nil {
+		return nil, err
+	}
+	return ids, nil
 }
 
 // UpsertWorkspaceSettings stores per-workspace GitHub settings.

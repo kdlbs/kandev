@@ -85,6 +85,12 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	}
 
 	wt.pollModeMu.Lock()
+	// Record the push and drop the fallback timer before the no-op check: a
+	// push that matches the current mode changes nothing about the cadence but
+	// still proves the gateway is managing this workspace, which is exactly
+	// what the grace demotion exists to detect the absence of.
+	wt.pollModePushed = true
+	wt.disarmPollModeGraceLocked()
 	prev := wt.pollMode
 	if prev == mode {
 		wt.pollModeMu.Unlock()
@@ -93,11 +99,35 @@ func (wt *WorkspaceTracker) SetPollMode(mode PollMode) {
 	wt.pollMode = mode
 	wt.pollModeMu.Unlock()
 
-	// Wake both polling loops. Each has its own buffered(1) channel because
-	// a single shared channel would let whichever loop selects first steal
-	// the signal, leaving the other loop blocked on its old timer interval
-	// (potentially 30s) before noticing the mode change. Sends are non-blocking:
-	// if the buffer is full, a notification is already pending which is fine.
+	wt.wakePollLoops()
+}
+
+// demoteUnpushedPollMode drops the tracker to slow once pollModeGracePeriod
+// elapses with no explicit SetPollMode. Fires at most once — the timer is not
+// rearmed — so a later push always wins.
+func (wt *WorkspaceTracker) demoteUnpushedPollMode() {
+	wt.pollModeMu.Lock()
+	wt.pollModeGraceTimer = nil
+	if wt.pollModePushed || wt.pollMode == PollModeSlow {
+		wt.pollModeMu.Unlock()
+		return
+	}
+	wt.pollMode = PollModeSlow
+	wt.pollModeMu.Unlock()
+
+	wt.logger.Info("no poll mode pushed within grace period, demoting to slow",
+		zap.Duration("grace", wt.pollModeGrace),
+		zap.String("workDir", wt.workDir))
+	wt.wakePollLoops()
+}
+
+// wakePollLoops nudges both polling loops so they re-read the mode and reset
+// their timers immediately. Each has its own buffered(1) channel because a
+// single shared channel would let whichever loop selects first steal the
+// signal, leaving the other blocked on its old timer interval (potentially
+// 30s) before noticing the change. Sends are non-blocking: if the buffer is
+// full, a notification is already pending which is fine.
+func (wt *WorkspaceTracker) wakePollLoops() {
 	for _, ch := range []chan struct{}{wt.monitorModeChanged, wt.gitPollModeChanged} {
 		select {
 		case ch <- struct{}{}:

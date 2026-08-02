@@ -25,6 +25,13 @@ The source of truth is the combination of:
 
 An action constant alone is not evidence that an action is registered or emitted. The request catalog below was checked against non-test `RegisterFunc` calls and the gateway's special subscription dispatch, not just the constant list.
 
+## Quick path
+
+1. Prefer the UI, CLI, MCP tools, or documented HTTP routes for supported integrations.
+2. If you need the WebSocket, connect to `/ws` and send one JSON request per frame.
+3. Correlate responses by `id`, refetch after reconnects, and treat notifications as invalidation hints.
+4. Protect the endpoint: it has no client authentication boundary.
+
 ## Security and network boundary
 
 The current `/ws` upgrade handler does **not authenticate clients**. It reads `?token=` or the `Authorization` header but does not validate or use the value; JWT validation is still a code TODO. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
@@ -232,6 +239,8 @@ A successful response returns the normalized query and an ordered `groups` array
 
 `message.queue.add` accepts the same optional array. `message.queue.update` also accepts it and treats the array as a replacement: send `[]` after removing every generated reference link so stale metadata is cleared. Queue status and message responses return validated entries under `metadata.entity_references`.
 
+`message.queue.merge` folds a queued entry into the entry directly above it. The payload requires `session_id` and `entry_id` (the source entry being merged away); `user_id` is optional and defaults to `user`. On success the response carries the surviving merged entry's `entry_id` (the target's id) and the server broadcasts an updated `message.queue.status_changed`. The request is rejected with `entry_not_found` when the entry was already drained or is not owned by the caller, with a validation error when no mergeable entry exists above it, and with `merge_reference_overflow` when the combined entity-reference lists would exceed the per-message cap (the merge is rejected atomically — neither row changes).
+
 If the agent is busy, use the `message.queue.*` operations rather than retrying `message.add`. Permission prompts are represented in persisted/session message data; answer one with `permission.respond`. Its payload requires `session_id` and `pending_id`, plus `option_id` unless `cancelled:true`; optional `rejected:true` distinguishes an explicit denial from dismissing the prompt.
 
 For a raw diagnostic session, install a WebSocket client such as `websocat`, connect, then paste one request object per line:
@@ -245,6 +254,9 @@ websocat ws://127.0.0.1:38429/ws
 ```
 
 `websocat` is a third-party diagnostic dependency, not bundled with Kandev. Remember that an originless tool is accepted only because the current endpoint trusts its network boundary.
+
+<details>
+<summary>Registered actions and emitted notifications</summary>
 
 ## Registered request action catalog
 
@@ -329,6 +341,7 @@ message.queue.append
 message.queue.cancel
 message.queue.drain
 message.queue.get
+message.queue.merge
 message.queue.remove
 message.queue.update
 message.search
@@ -782,6 +795,8 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | metrics subscribers | `system.metrics.updated` | Live resource snapshot; collection interest follows subscribers. |
 
 Routing is an efficiency mechanism, not an access-control boundary. The server does not authenticate resource ownership, global messages can contain IDs for other workspaces, and a client can request arbitrary subscription IDs.
+
+</details>
 
 ## Reconnect and troubleshooting
 

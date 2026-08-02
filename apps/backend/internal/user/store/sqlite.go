@@ -460,6 +460,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"review_auto_mark_on_scroll":          settings.ReviewAutoMarkOnScroll,
 		"confirm_task_archive":                settings.ConfirmTaskArchive,
 		"unread_divider":                      settings.UnreadDivider,
+		"agent_generated_task_titles":         settings.AgentGeneratedTaskTitles,
 		"mcp_task_agent_profile_default":      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":            settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":          settings.ShowScrollToLastPrompt,
@@ -579,6 +580,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ReviewAutoMarkOnScroll:          true,
 		ConfirmTaskArchive:              true,
 		UnreadDivider:                   false,
+		AgentGeneratedTaskTitles:        false,
 		MCPTaskAgentProfileDefault:      models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:           false,
 		ShowScrollToLastPrompt:          true,
@@ -626,6 +628,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		ReviewAutoMarkOnScroll          *bool                               `json:"review_auto_mark_on_scroll"`
 		ConfirmTaskArchive              *bool                               `json:"confirm_task_archive"`
 		UnreadDivider                   *bool                               `json:"unread_divider"`
+		AgentGeneratedTaskTitles        *bool                               `json:"agent_generated_task_titles"`
 		MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar           *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt          *bool                               `json:"show_scroll_to_last_prompt"`
@@ -687,6 +690,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.UnreadDivider != nil {
 		settings.UnreadDivider = *payload.UnreadDivider
+	}
+	if payload.AgentGeneratedTaskTitles != nil {
+		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {

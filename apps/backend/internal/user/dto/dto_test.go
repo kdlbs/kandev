@@ -93,6 +93,36 @@ func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 	}
 }
 
+func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
+	if !FromUserSettings(&models.UserSettings{AgentGeneratedTaskTitles: true}).AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = false, want true")
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted request: %v", err)
+	}
+	if omitted.AgentGeneratedTaskTitles != nil {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want nil for omitted field", omitted.AgentGeneratedTaskTitles)
+	}
+
+	var explicit UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"agent_generated_task_titles":true}`), &explicit); err != nil {
+		t.Fatalf("decode explicit request: %v", err)
+	}
+	if explicit.AgentGeneratedTaskTitles == nil || !*explicit.AgentGeneratedTaskTitles {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want true", explicit.AgentGeneratedTaskTitles)
+	}
+
+	var disabled UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"agent_generated_task_titles":false}`), &disabled); err != nil {
+		t.Fatalf("decode explicit false request: %v", err)
+	}
+	if disabled.AgentGeneratedTaskTitles == nil || *disabled.AgentGeneratedTaskTitles {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want false", disabled.AgentGeneratedTaskTitles)
+	}
+}
+
 func TestFromUserSettingsIncludesNormalizedMCPTaskAgentProfileDefault(t *testing.T) {
 	tests := []struct {
 		name  string

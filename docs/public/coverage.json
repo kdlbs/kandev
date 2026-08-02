@@ -80,6 +80,7 @@
         "delete_task_kandev",
         "list_tasks_kandev",
         "move_task_kandev",
+        "set_task_title_kandev",
         "step_complete_kandev",
         "stop_task_kandev",
         "update_repository_base_branch_kandev",

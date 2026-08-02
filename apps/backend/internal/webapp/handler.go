@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"path"
 	"strings"
+
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 const IndexHTML = "index.html"
@@ -79,9 +81,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	payload := h.payloadFor(r, route)
+	locale := NormalizeLocale(payload.Runtime.Locale)
 	html, err := RenderShell(h.assets, h.indexPath, payload)
 	if err != nil {
-		http.Error(w, "web app shell unavailable", http.StatusServiceUnavailable)
+		http.Error(w, i18n.T(locale, "webapp.shellUnavailable"), http.StatusServiceUnavailable)
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -117,7 +120,7 @@ func (h *Handler) serveAsset(w http.ResponseWriter, r *http.Request) bool {
 	if !ok {
 		data, readErr := io.ReadAll(file)
 		if readErr != nil {
-			http.Error(w, "read web asset", http.StatusInternalServerError)
+			http.Error(w, i18n.T(i18n.FromRequest(r), "webapp.assetReadFailed"), http.StatusInternalServerError)
 			return true
 		}
 		_, _ = w.Write(data)

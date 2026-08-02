@@ -32,6 +32,7 @@ type UserSettingsDTO struct {
 	ReviewAutoMarkOnScroll          bool                                `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive              bool                                `json:"confirm_task_archive"`
 	UnreadDivider                   bool                                `json:"unread_divider"`
+	AgentGeneratedTaskTitles        bool                                `json:"agent_generated_task_titles"`
 	MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar           bool                                `json:"show_anchored_prompt_bar"`
 	ShowScrollToLastPrompt          bool                                `json:"show_scroll_to_last_prompt"`
@@ -98,6 +99,7 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll          *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive              *bool                              `json:"confirm_task_archive,omitempty"`
 	UnreadDivider                   *bool                              `json:"unread_divider,omitempty"`
+	AgentGeneratedTaskTitles        *bool                              `json:"agent_generated_task_titles,omitempty"`
 	MCPTaskAgentProfileDefault      *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowAnchoredPromptBar           *bool                              `json:"show_anchored_prompt_bar,omitempty"`
 	ShowScrollToLastPrompt          *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
@@ -225,6 +227,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ReviewAutoMarkOnScroll:          settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:              settings.ConfirmTaskArchive,
 		UnreadDivider:                   settings.UnreadDivider,
+		AgentGeneratedTaskTitles:        settings.AgentGeneratedTaskTitles,
 		MCPTaskAgentProfileDefault:      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowAnchoredPromptBar:           settings.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:          settings.ShowScrollToLastPrompt,

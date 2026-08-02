@@ -1,4 +1,5 @@
 "use client";
+import { Trans, useTranslation } from "react-i18next";
 
 import {
   AlertDialog,
@@ -41,12 +42,13 @@ export function SettingsFloatingSave({
   onDiscardAndLeave,
   onContinueEditing,
 }: SettingsFloatingSaveProps) {
+  const { t } = useTranslation();
   const isSaving = status === "saving";
   const isSaved = status === "saved";
   const isInvalid = Boolean(invalidReason);
   const isBusy = isSaving || isDiscarding;
-  const buttonLabel = status === "error" ? "Retry save" : "Save changes";
-  const accessibleLabel = getAccessibleLabel(status, buttonLabel);
+  const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status);
+  const accessibleLabel = t(accessibleKey);
   const configChatFloatingActionsHost = useConfigChatFloatingActionsHost();
   const isHostedByConfigChat = configChatFloatingActionsHost !== null;
   const saveAction = (
@@ -62,8 +64,10 @@ export function SettingsFloatingSave({
       <div className="pointer-events-auto flex min-h-11 max-w-full flex-col items-stretch gap-2 rounded-md border bg-background p-2 shadow-lg sm:flex-row sm:items-center">
         {status === "error" && (
           <span className="flex items-center gap-1 text-xs text-destructive" role="status">
-            <IconAlertCircle className="size-4" />
-            Couldn't save
+            <Trans i18nKey="settings:couldnTSave">
+              <IconAlertCircle className="size-4" />
+              {t("settings:couldnTSave2")}
+            </Trans>
           </span>
         )}
         {invalidReason && (
@@ -80,7 +84,7 @@ export function SettingsFloatingSave({
           onClick={() => void onSave()}
         >
           <SaveButtonIcon status={status} />
-          {accessibleLabel === "Saving changes" ? "Saving..." : accessibleLabel}
+          {t(labelKey)}
         </Button>
       </div>
     </div>
@@ -90,46 +94,82 @@ export function SettingsFloatingSave({
     <>
       {isHostedByConfigChat ? createPortal(saveAction, configChatFloatingActionsHost) : saveAction}
 
-      <AlertDialog open={navigationIntent !== null}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Save changes before leaving?</AlertDialogTitle>
-            <AlertDialogDescription>
-              This page has unsaved changes. Save them, discard them, or continue editing.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel
-              className="cursor-pointer"
-              disabled={isBusy}
-              onClick={onContinueEditing}
-            >
-              Continue editing
-            </AlertDialogCancel>
-            <Button
-              type="button"
-              variant="outline"
-              className="cursor-pointer"
-              disabled={isBusy}
-              onClick={() => void onDiscardAndLeave()}
-            >
-              {isDiscarding ? "Discarding..." : "Discard and leave"}
-            </Button>
-            <AlertDialogAction
-              className="cursor-pointer bg-success text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35"
-              data-dialog-default-action
-              disabled={isBusy || isInvalid}
-              onClick={(event) => {
-                event.preventDefault();
-                void onSave();
-              }}
-            >
-              {isSaving ? "Saving..." : "Save and leave"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <LeaveWithUnsavedChangesDialog
+        open={navigationIntent !== null}
+        isBusy={isBusy}
+        isInvalid={isInvalid}
+        isDiscarding={isDiscarding}
+        isSaving={isSaving}
+        onSave={onSave}
+        onDiscardAndLeave={onDiscardAndLeave}
+        onContinueEditing={onContinueEditing}
+      />
     </>
+  );
+}
+
+// LeaveWithUnsavedChangesDialog is the navigation-guard prompt offering save,
+// discard, or continue editing when leaving a page with unsaved settings.
+function LeaveWithUnsavedChangesDialog({
+  open,
+  isBusy,
+  isInvalid,
+  isDiscarding,
+  isSaving,
+  onSave,
+  onDiscardAndLeave,
+  onContinueEditing,
+}: {
+  open: boolean;
+  isBusy: boolean;
+  isInvalid: boolean;
+  isDiscarding: boolean;
+  isSaving: boolean;
+  onSave: () => Promise<boolean>;
+  onDiscardAndLeave: () => Promise<void> | void;
+  onContinueEditing: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <AlertDialog open={open}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t("settings:saveChangesBeforeLeaving")}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {t("settings:thisPageHasUnsavedChangesSave")}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel
+            className="cursor-pointer"
+            disabled={isBusy}
+            onClick={onContinueEditing}
+          >
+            {t("settings:continueEditing")}
+          </AlertDialogCancel>
+          <Button
+            type="button"
+            variant="outline"
+            className="cursor-pointer"
+            disabled={isBusy}
+            onClick={() => void onDiscardAndLeave()}
+          >
+            {isDiscarding ? t("settings:discarding") : t("settings:discardAndLeave")}
+          </Button>
+          <AlertDialogAction
+            className="cursor-pointer bg-success text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35"
+            data-dialog-default-action
+            disabled={isBusy || isInvalid}
+            onClick={(event) => {
+              event.preventDefault();
+              void onSave();
+            }}
+          >
+            {isSaving ? t("settings:saving") : t("settings:saveAndLeave")}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -139,8 +179,19 @@ function SaveButtonIcon({ status }: { status: SettingsSaveStatus }) {
   return <IconDeviceFloppy className="size-4" />;
 }
 
-function getAccessibleLabel(status: SettingsSaveStatus, buttonLabel: string): string {
-  if (status === "saving") return "Saving changes";
-  if (status === "saved") return "Saved";
-  return buttonLabel;
+/**
+ * Catalog keys for the save button, by status.
+ *
+ * Returns KEYS, not resolved copy: the caller resolves them with `t()` at render
+ * so a locale switch re-renders. The visible label is deliberately shorter than
+ * the accessible name while saving ("Saving…" vs "Saving changes"), so the two
+ * are separate keys rather than one string compared against itself.
+ */
+function saveButtonKeys(status: SettingsSaveStatus): { label: string; accessible: string } {
+  if (status === "saving") {
+    return { label: "settings:saving", accessible: "settings:savingChanges" };
+  }
+  if (status === "saved") return { label: "settings:saved", accessible: "settings:saved" };
+  if (status === "error") return { label: "settings:retrySave", accessible: "settings:retrySave" };
+  return { label: "settings:saveChanges", accessible: "settings:saveChanges" };
 }

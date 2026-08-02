@@ -1,6 +1,7 @@
 "use client";
 
 import { IconTrash } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
@@ -96,9 +97,12 @@ function SessionConfigRuleHeader({
   onChange: (rule: ConfigureSessionRule) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-      <Label className="text-xs font-medium text-muted-foreground sm:w-24">When agent is</Label>
+      <Label className="text-xs font-medium text-muted-foreground sm:w-24">
+        {t("settings:whenAgentIs")}
+      </Label>
       <Select
         value={rule.agent_name}
         onValueChange={(agentName) =>
@@ -116,7 +120,7 @@ function SessionConfigRuleHeader({
           className="min-h-10 w-full cursor-pointer sm:flex-1"
           data-testid={`session-config-agent-${index}`}
         >
-          <SelectValue placeholder="Choose agent family" />
+          <SelectValue placeholder={t("settings:chooseAgentFamily")} />
         </SelectTrigger>
         <SelectContent>
           {choices.map((choice) => (
@@ -140,9 +144,9 @@ function SessionConfigRuleHeader({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="set">Set settings</SelectItem>
-          <SelectItem value="keep">Keep current</SelectItem>
-          <SelectItem value="restore_original">Restore original</SelectItem>
+          <SelectItem value="set">{t("settings:setSettings")}</SelectItem>
+          <SelectItem value="keep">{t("settings:keepCurrent")}</SelectItem>
+          <SelectItem value="restore_original">{t("settings:restoreOriginal")}</SelectItem>
         </SelectContent>
       </Select>
       <Button
@@ -152,7 +156,7 @@ function SessionConfigRuleHeader({
         className="min-h-10 cursor-pointer self-end text-destructive hover:text-destructive sm:self-auto"
         onClick={onRemove}
         disabled={readOnly}
-        aria-label={`Remove agent condition ${index + 1}`}
+        aria-label={t("settings:removeAgentCondition", { index: index + 1 })}
       >
         <IconTrash className="h-4 w-4" />
       </Button>
@@ -189,6 +193,7 @@ function SessionConfigRuleSettings({
   readOnly: boolean;
   onChange: (rule: ConfigureSessionRule) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2 border-t border-border/60 pt-3">
       {modelOptions.length > 0 || configOptions.length > 0 ? (
@@ -204,14 +209,13 @@ function SessionConfigRuleSettings({
             })
           }
           disabled={readOnly}
-          placeholder="Choose model and session settings"
-          ariaLabel={`Settings for ${rule.agent_name}`}
+          placeholder={t("settings:chooseModelAndSessionSettings")}
+          ariaLabel={t("settings:settingsForAgent", { agent: rule.agent_name })}
           triggerClassName="min-h-11 w-full sm:min-h-10"
         />
       ) : (
         <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">
-          Model options are unavailable for this agent. Refresh agent capabilities before saving
-          this condition.
+          {t("settings:sessionConfigModelOptionsUnavailable")}
         </p>
       )}
     </div>

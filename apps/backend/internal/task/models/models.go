@@ -110,7 +110,19 @@ const (
 	// because the winner will (or already did) handle it.
 	// Absent on ordinary (non-watcher) auto-start tasks, which launch normally.
 	MetaKeyAutoStartClaimed = "auto_start_claimed"
+	// MetaKeyAgentTitlePending marks tasks created in prompt-first mode whose
+	// provisional title still needs the first eligible agent session to replace it.
+	MetaKeyAgentTitlePending = "agent_title_pending"
 )
+
+// IsAgentTitlePending reports whether task metadata contains the durable
+// prompt-first title marker. JSON rehydration produces bool values, while a
+// few in-process callers may provide typed metadata, so only an explicit true
+// value enables the capability.
+func IsAgentTitlePending(metadata map[string]interface{}) bool {
+	pending, ok := metadata[MetaKeyAgentTitlePending].(bool)
+	return ok && pending
+}
 
 // TaskSession.Metadata key that records how the session came into existence.
 // workflow_switch means the session profile was selected by workflow routing

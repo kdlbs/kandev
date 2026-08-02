@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconRobot, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -41,6 +42,7 @@ function StepAgentProfileSelect({
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
 }) {
+  const { t } = useTranslation();
   const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
   const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
 
@@ -80,8 +82,8 @@ function StepAgentProfileSelect({
       <HelpTip
         text={
           hasConditionalSessionConfig
-            ? "Remove the conditional session configuration before choosing a fixed agent profile for this step."
-            : "Override the agent profile for this step. A different profile creates a new session with fresh context when entering this step."
+            ? t("settings:removeConditionalSessionConfigBeforeProfile")
+            : t("settings:overrideAgentProfileHelp")
         }
       />
     </div>

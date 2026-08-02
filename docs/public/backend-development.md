@@ -7,6 +7,13 @@ description: "Change Kandev's Go backend across domain, API, event, persistence,
 
 The Go module in `apps/backend/` builds both the unified `kandev` binary and the `agentctl` helper installed in task environments.
 
+## Quick path
+
+1. Find the owning domain before editing a handler or component.
+2. Run the smallest focused Go test with CGO and FTS5 enabled.
+3. Keep persistence, events, runtime lifecycle, and external calls behind their existing boundaries.
+4. Add fresh-schema, recovery, and failure-path tests for changed behavior.
+
 ## Run focused loops
 
 Use `make dev` for normal full-stack work: it isolates state, starts Vite, and configures the backend proxy. A raw `make dev-backend` uses the normal application home unless you set an isolated `KANDEV_HOME_DIR`; see [Contributing](contributing.md).

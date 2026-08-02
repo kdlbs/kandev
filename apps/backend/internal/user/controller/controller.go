@@ -60,6 +60,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ReviewAutoMarkOnScroll:          req.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:              req.ConfirmTaskArchive,
 		UnreadDivider:                   req.UnreadDivider,
+		AgentGeneratedTaskTitles:        req.AgentGeneratedTaskTitles,
 		MCPTaskAgentProfileDefault:      req.MCPTaskAgentProfileDefault,
 		ShowAnchoredPromptBar:           req.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:          req.ShowScrollToLastPrompt,

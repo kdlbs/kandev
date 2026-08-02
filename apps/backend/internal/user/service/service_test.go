@@ -183,6 +183,30 @@ func TestApplyBasicSettings_ConfirmTaskArchive(t *testing.T) {
 	})
 }
 
+func TestApplyBasicSettingsAgentGeneratedTaskTitles(t *testing.T) {
+	settings := &models.UserSettings{AgentGeneratedTaskTitles: false}
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{}); err != nil {
+		t.Fatalf("apply omitted setting: %v", err)
+	}
+	if settings.AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles changed on omitted patch")
+	}
+
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{AgentGeneratedTaskTitles: ptr(true)}); err != nil {
+		t.Fatalf("apply enabled setting: %v", err)
+	}
+	if !settings.AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = false, want true")
+	}
+
+	if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{AgentGeneratedTaskTitles: ptr(false)}); err != nil {
+		t.Fatalf("apply disabled setting: %v", err)
+	}
+	if settings.AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = true, want false")
+	}
+}
+
 func TestApplyBasicSettingsAppStatusBarOrder(t *testing.T) {
 	saved := models.AppStatusBarOrder{
 		LeftItemIDs:  []string{"builtin:connection"},

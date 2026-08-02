@@ -21,6 +21,8 @@ import { GitHubAuthMethodList, type GitHubAutomationMethod } from "./github-auth
 import { GitHubCLIForm } from "./github-cli-form";
 import { GitHubPATForm } from "./github-pat-form";
 import { GitHubTaskAccessForm } from "./github-task-credentials-section";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
   if (status.automation?.source === "github_app_installation") return "app";
@@ -28,16 +30,29 @@ function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
   return "pat";
 }
 
-function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "The settings could not be saved";
+// `t` is threaded in: these are plain functions, and their messages are shown
+// to the user through the caller's toast.
+function errorMessage(t: TFunction, error: unknown) {
+  return error instanceof Error ? error.message : t("github:theSettingsCouldNotBeSaved");
+}
+
+// A partial save reports which change failed alongside the ones that landed.
+function saveFailureToast(t: TFunction, reason: unknown, successes: number) {
+  const detail = errorMessage(t, reason);
+  return {
+    description: successes > 0 ? t("github:someSettingsWereSavedButAnother", { detail }) : detail,
+    variant: "error" as const,
+  };
 }
 
 function runSaveOperations({
+  t,
   workspaceId,
   connectionRequest,
   taskMode,
   saveTask,
 }: {
+  t: TFunction;
   workspaceId: string;
   connectionRequest: SetGitHubConnectionRequest | null;
   taskMode: TaskGitCredentialsMode | null;
@@ -50,7 +65,7 @@ function runSaveOperations({
   if (taskMode) {
     operations.push(
       saveTask(taskMode).then((saved) => {
-        if (!saved) throw new Error("The workspace changed before task access was saved");
+        if (!saved) throw new Error(t("github:theWorkspaceChangedBeforeTaskAccess"));
       }),
     );
   }
@@ -104,6 +119,7 @@ function useConnectionSettingsDraft({
   onComplete,
   taskAccess,
 }: SettingsFormProps) {
+  const { t } = useTranslation();
   const [token, setToken] = useState("");
   const [cliAccount, setCLIAccount] = useState<GitHubCLIAccount | null>(null);
   const [taskMode, setTaskMode] = useState<TaskGitCredentialsMode>(taskAccess.mode);
@@ -148,6 +164,7 @@ function useConnectionSettingsDraft({
     const savingWorkspaceId = workspaceId;
     setSaving(true);
     const results = await runSaveOperations({
+      t,
       workspaceId,
       connectionRequest,
       taskMode: taskDirty ? taskMode : null,
@@ -162,21 +179,17 @@ function useConnectionSettingsDraft({
     if (successes > 0) onSaved();
     if (failures.length === 0) {
       setToken("");
-      toast({ description: "GitHub access settings saved", variant: "success" });
+      toast({ description: t("github:githubAccessSettingsSaved"), variant: "success" });
       onComplete();
       return;
     }
-    const detail = errorMessage(failures[0].reason);
-    toast({
-      description:
-        successes > 0 ? `Some settings were saved, but another change failed: ${detail}` : detail,
-      variant: "error",
-    });
+    toast(saveFailureToast(t, failures[0].reason, successes));
   }, [
     canSave,
     connectionRequest,
     onComplete,
     onSaved,
+    t,
     taskAccess,
     taskDirty,
     taskMode,
@@ -197,6 +210,7 @@ function useConnectionSettingsDraft({
 }
 
 export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
+  const { t } = useTranslation();
   const { method, workspaceId, onMethodChange, taskAccess, isMobile } = props;
   const {
     token,
@@ -248,8 +262,7 @@ export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
             />
             {methodNeedsWorkflow && (
               <p className="text-xs leading-5 text-muted-foreground">
-                Install a GitHub App above to change the workspace connection. Task access can be
-                saved after the installation finishes.
+                {t("github:installAGithubAppAboveTo")}
               </p>
             )}
           </div>
@@ -275,7 +288,7 @@ export function GitHubConnectionSettingsForm(props: SettingsFormProps) {
           data-dialog-default-action
         >
           {saving && <Spinner className="mr-2 h-4 w-4" />}
-          {saving ? "Saving changes…" : "Save changes"}
+          {saving ? t("github:savingChanges") : t("github:saveChanges")}
         </Button>
       </div>
     </div>

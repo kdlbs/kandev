@@ -76,9 +76,10 @@ func (h *TaskHandlers) wsListTasks(ctx context.Context, msg *ws.Message) (*ws.Me
 		h.logger.Error("failed to list tasks", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
 	}
-	taskDTOs := make([]dto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		taskDTOs = append(taskDTOs, dto.FromTask(task))
+	taskDTOs, err := h.toTaskDTOsWithSessionInfo(ctx, tasks)
+	if err != nil {
+		h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list tasks", nil)
 	}
 	resp := dto.ListTasksResponse{
 		Tasks: taskDTOs,

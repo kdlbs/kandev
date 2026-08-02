@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -25,8 +26,10 @@ import (
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	"github.com/kandev/kandev/internal/orchestrator"
 	orchestratorhandlers "github.com/kandev/kandev/internal/orchestrator/handlers"
+	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	terminalrepo "github.com/kandev/kandev/internal/terminal/repository"
 	terminalservice "github.com/kandev/kandev/internal/terminal/service"
 	userservice "github.com/kandev/kandev/internal/user/service"
@@ -273,6 +276,29 @@ func provideGateway(
 
 	go gateway.Hub.Run(ctx)
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
+	if taskRepo != nil && eventBus != nil {
+		projector := statussummary.NewProjector(statussummary.ProjectorConfig{
+			Store:    taskRepo,
+			EventBus: eventBus,
+			LoadGitObservations: func(ctx context.Context, taskID string) ([]statussummary.GitObservation, error) {
+				return loadTaskGitObservations(ctx, taskRepo, taskID)
+			},
+			ResolveWorkspace: func(ctx context.Context, taskID string) (string, error) {
+				task, err := taskRepo.GetTask(ctx, taskID)
+				if err != nil {
+					return "", err
+				}
+				if task == nil {
+					return "", fmt.Errorf("task %q not found", taskID)
+				}
+				return task.WorkspaceID, nil
+			},
+			Logger: log,
+		})
+		if err := projector.Start(ctx); err != nil {
+			log.Error("failed to start task status summary projector", zap.Error(err))
+		}
+	}
 	gateways.RegisterUserNotifications(ctx, eventBus, gateway.Hub, log)
 	gateways.RegisterOfficeNotifications(ctx, eventBus, gateway.Hub, taskWorkspaceResolver(taskRepo), log)
 	gateways.RegisterRunNotifications(ctx, eventBus, gateway.Hub, log)
@@ -368,6 +394,85 @@ func provideGateway(
 	}
 
 	return gateway, notificationSvc, notificationCtrl, terminalSvc, nil
+}
+
+func loadTaskGitObservations(
+	ctx context.Context,
+	taskRepo *sqliterepo.Repository,
+	taskID string,
+) ([]statussummary.GitObservation, error) {
+	sessions, err := taskRepo.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	sessionIDs := make([]string, 0, len(sessions))
+	for _, session := range sessions {
+		if session != nil && session.ID != "" {
+			sessionIDs = append(sessionIDs, session.ID)
+		}
+	}
+	snapshots, err := taskRepo.GetLatestGitSnapshotsBySessionIDs(ctx, sessionIDs)
+	if err != nil {
+		return nil, err
+	}
+	observations := make([]statussummary.GitObservation, 0, len(snapshots))
+	for _, session := range sessions {
+		observation, ok := taskGitObservation(session, snapshots[session.ID])
+		if ok {
+			observations = append(observations, observation)
+		}
+	}
+	return observations, nil
+}
+
+func taskGitObservation(
+	session *models.TaskSession,
+	snapshot *models.GitSnapshot,
+) (statussummary.GitObservation, bool) {
+	if session == nil || snapshot == nil {
+		return statussummary.GitObservation{}, false
+	}
+	repository := session.ID
+	if name, ok := snapshot.Metadata["repository_name"].(string); ok && name != "" {
+		repository = name
+	}
+	return statussummary.GitObservation{
+		Repository: repository,
+		Summary: statussummary.GitSummary{
+			Additions:    nonNegativeMetadataInt(snapshot.Metadata, "branch_additions"),
+			Deletions:    nonNegativeMetadataInt(snapshot.Metadata, "branch_deletions"),
+			ChangedFiles: len(snapshot.Files),
+			Ahead:        maxNonNegative(snapshot.Ahead),
+			Behind:       maxNonNegative(snapshot.Behind),
+		},
+	}, true
+}
+
+func nonNegativeMetadataInt(metadata map[string]interface{}, key string) int {
+	if metadata == nil {
+		return 0
+	}
+	switch value := metadata[key].(type) {
+	case int:
+		return maxNonNegative(value)
+	case int64:
+		return maxNonNegative(int(value))
+	case float64:
+		return maxNonNegative(int(value))
+	case json.Number:
+		parsed, err := value.Int64()
+		if err == nil {
+			return maxNonNegative(int(parsed))
+		}
+	}
+	return 0
+}
+
+func maxNonNegative(value int) int {
+	if value < 0 {
+		return 0
+	}
+	return value
 }
 
 func isAbandonedTurnCompletion(data map[string]interface{}) bool {

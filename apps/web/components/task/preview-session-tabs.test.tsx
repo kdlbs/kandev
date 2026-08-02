@@ -82,6 +82,7 @@ describe("PreviewSessionBody send failures", () => {
       {
         task_id: "task-1",
         session_id: "session-1",
+        client_message_id: expect.any(String),
         content: "reference",
         attachments: [{ type: "image", data: "base64", mime_type: "image/png" }],
         entity_references: [reference],

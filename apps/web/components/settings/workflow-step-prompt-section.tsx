@@ -1,6 +1,7 @@
 "use client";
 
 import type { WorkflowStep } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import {
@@ -28,6 +29,7 @@ export function StepPromptSection({
   debouncedUpdatePrompt: (prompt: string) => void;
   readOnly: boolean;
 }) {
+  const { t } = useTranslation();
   const { prompts } = useCustomPrompts();
   return (
     <div className="space-y-2">
@@ -36,13 +38,13 @@ export function StepPromptSection({
           htmlFor={`${step.id}-prompt`}
           className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
         >
-          Step Prompt
+          {t("settings:stepPrompt")}
         </Label>
-        <HelpTip text="Custom instructions for the agent on this step. Use {{task_prompt}} to include the task description." />
+        <HelpTip text={t("settings:stepPromptHelp", { taskPrompt: "{{task_prompt}}" })} />
       </div>
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground/60">Templates:</span>
+          <span className="text-[11px] text-muted-foreground/60">{t("settings:templates")}</span>
           {PROMPT_TEMPLATES.map((template) => (
             <button
               key={template.label}
@@ -78,12 +80,10 @@ export function StepPromptSection({
         />
       </div>
       <p className="text-[11px] text-muted-foreground/60">
-        Type {"{{"} for placeholders (
-        <code className="rounded bg-muted px-1 py-0.5 text-[10px]">{"{{task_prompt}}"}</code>{" "}
-        inserts the task description) or {"@"} to reference a saved prompt by name — its content is
-        attached as hidden context, and editing the saved prompt updates every step that references
-        it. Note: {"{{task_prompt}}"} only expands in the step prompt itself, not inside a
-        referenced saved prompt.
+        {t("settings:stepPromptUsageHint", {
+          open: "{{",
+          taskPrompt: "{{task_prompt}}",
+        })}
       </p>
     </div>
   );

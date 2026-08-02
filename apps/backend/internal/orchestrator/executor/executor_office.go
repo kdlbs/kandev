@@ -36,29 +36,42 @@ type officeSessionMetadataUpdater interface {
 func (e *Executor) EnsureSessionForAgent(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
 ) (*models.TaskSession, error) {
+	session, _, err := e.EnsureSessionForAgentWithCreation(
+		ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID,
+	)
+	return session, err
+}
+
+// EnsureSessionForAgentWithCreation is the same office-session lookup as
+// EnsureSessionForAgent, but also reports whether the returned row was
+// inserted by this call. Reused rows already have a CREATED lifecycle event;
+// callers must not publish another one for every office turn.
+func (e *Executor) EnsureSessionForAgentWithCreation(
+	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
+) (*models.TaskSession, bool, error) {
 	if task == nil || task.ID == "" {
-		return nil, errors.New("EnsureSessionForAgent: task is required")
+		return nil, false, errors.New("EnsureSessionForAgent: task is required")
 	}
 	if agentInstanceID == "" {
-		return nil, errors.New("EnsureSessionForAgent: agent_profile_id is required")
+		return nil, false, errors.New("EnsureSessionForAgent: agent_profile_id is required")
 	}
 	if agentProfileID == "" {
-		return nil, ErrNoAgentProfileID
+		return nil, false, ErrNoAgentProfileID
 	}
 
 	existing, err := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 	if err != nil {
-		return nil, fmt.Errorf("lookup (task,agent) session: %w", err)
+		return nil, false, fmt.Errorf("lookup (task,agent) session: %w", err)
 	}
 	if existing != nil {
 		if err := e.rebindOfficeSessionExecutionProfile(ctx, existing, agentProfileID); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		reused, decision := e.tryReuseExistingSession(ctx, existing)
 		if decision == reuseDecisionTerminal {
 			// Fall through to create a new row below.
 		} else {
-			return reused, nil
+			return reused, false, nil
 		}
 	}
 
@@ -68,15 +81,15 @@ func (e *Executor) EnsureSessionForAgent(
 		raced, lookupErr := e.repo.GetTaskSessionByTaskAndAgent(ctx, task.ID, agentInstanceID)
 		if lookupErr == nil && raced != nil {
 			if rebindErr := e.rebindOfficeSessionExecutionProfile(ctx, raced, agentProfileID); rebindErr != nil {
-				return nil, rebindErr
+				return nil, false, rebindErr
 			}
 			reused, _ := e.tryReuseExistingSession(ctx, raced)
 			if reused != nil {
-				return reused, nil
+				return reused, false, nil
 			}
 		}
 	}
-	return created, err
+	return created, err == nil, err
 }
 
 func (e *Executor) rebindOfficeSessionExecutionProfile(

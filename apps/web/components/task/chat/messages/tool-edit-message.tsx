@@ -11,6 +11,7 @@ import {
 } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { transformPathsInText } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import type { Message } from "@/lib/types/http";
 import { DiffViewBlock } from "./diff-view-block";
 import { ExpandableRow } from "./expandable-row";
@@ -181,9 +182,12 @@ export const ToolEditMessage = memo(function ToolEditMessage({
   const handleCopyPath = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (filePath) {
-      navigator.clipboard?.writeText(filePath);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      void copyToClipboard(filePath).then((success) => {
+        if (success) {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        }
+      });
     }
   };
 

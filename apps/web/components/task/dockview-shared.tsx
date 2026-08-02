@@ -226,10 +226,10 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * This is the diff-side analog of `useResyncOnTabActivate` in
  * file-editor-panel.tsx (which force-syncs editor content on activation). Tab
  * activation is a deterministic, user-driven "I'm about to look at this diff"
- * signal, so we ask the backend for a fresh git-status snapshot via
- * `refreshSessionData` (re-sends `session.focus`, whose handler pushes a fresh
- * `GetGitStatusMultiFresh` result) — closing the WS-event-miss gap without
- * depending on poll cadence. No-op when the session isn't focused.
+ * signal, so we ask the backend for a fresh git-status snapshot via the
+ * explicit `session.git.refresh` request. Focus itself remains an ACK-only
+ * control signal, avoiding replay on ordinary task switching. No-op when the
+ * session isn't focused.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   useEffect(() => {

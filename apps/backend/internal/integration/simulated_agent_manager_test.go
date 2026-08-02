@@ -253,11 +253,12 @@ func (s *SimulatedAgentManagerClient) publishACPMessages(instance *simulatedInst
 			sessionID = instance.sessionID
 		}
 		msgData := map[string]interface{}{
-			"type":       msg.Type,
-			"task_id":    msg.TaskID,
-			"session_id": sessionID,
-			"timestamp":  msg.Timestamp,
-			"data":       msg.Data,
+			"type":         msg.Type,
+			"task_id":      msg.TaskID,
+			"session_id":   sessionID,
+			"execution_id": instance.id,
+			"timestamp":    msg.Timestamp,
+			"data":         msg.Data,
 		}
 
 		event := bus.NewEvent(events.AgentStream, "simulated-agent", msgData)

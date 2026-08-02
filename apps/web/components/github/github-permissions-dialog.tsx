@@ -11,6 +11,7 @@ import {
   DialogTrigger,
 } from "@kandev/ui/dialog";
 import type { GitHubStatus } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 type PermissionState = {
   name: string;
@@ -37,6 +38,7 @@ function permissionStates(status: GitHubStatus): PermissionState[] {
 }
 
 export function GitHubPermissionsDialog({ status }: { status: GitHubStatus }) {
+  const { t } = useTranslation();
   if (status.automation?.source !== "github_app_installation") return null;
   const permissions = permissionStates(status);
   if (permissions.length === 0) return null;
@@ -51,14 +53,14 @@ export function GitHubPermissionsDialog({ status }: { status: GitHubStatus }) {
           ) : (
             <IconShieldCheck className="mr-2 h-4 w-4" />
           )}
-          View permissions
+          {t("github:viewPermissions")}
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>GitHub App permissions</DialogTitle>
+          <DialogTitle>{t("github:githubAppPermissions")}</DialogTitle>
           <DialogDescription>
-            Permissions available to Kandev through this workspace's GitHub App installation.
+            {t("github:permissionsAvailableToKandevThroughThis")}
           </DialogDescription>
         </DialogHeader>
         <div className="max-h-[55vh] divide-y overflow-y-auto" data-testid="github-capabilities">
@@ -77,7 +79,7 @@ export function GitHubPermissionsDialog({ status }: { status: GitHubStatus }) {
                   permission.available ? "text-muted-foreground" : "font-medium text-destructive"
                 }
               >
-                {permission.available ? "Available" : "Missing"}
+                {permission.available ? t("github:available") : t("github:missing")}
               </span>
             </div>
           ))}

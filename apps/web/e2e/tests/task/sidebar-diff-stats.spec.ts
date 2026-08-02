@@ -4,8 +4,7 @@ import { SessionPage } from "../../pages/session-page";
 /**
  * Regression test for the task sidebar diff badge bug.
  *
- * The sidebar bulk-subscribes to every task's primary session on connect and
- * expects an initial git status snapshot per session, including the global
+ * The sidebar consumes the task status summary, including the global
  * branch_additions/branch_deletions diff against the merge-base. Before the
  * fix, the backend's `tryGetLiveGitStatus` only returned data when an
  * agentctl execution was actively running for that session. For any task
@@ -18,8 +17,8 @@ import { SessionPage } from "../../pages/session-page";
  * keeping the DB-snapshot fallback fresh across restarts and unavailability.
  *
  * This test creates two tasks that produce diffs, restarts the backend
- * (which kills all running executors), then asserts the sidebar still shows
- * +N/-N badges for BOTH tasks — not just an active one.
+ * (which kills all running executors), then asserts the inactive sidebar row
+ * still shows its +N/-N badge from the persisted task summary.
  */
 test.describe("Task sidebar diff stats", () => {
   test("badges survive backend restart for non-active tasks", async ({

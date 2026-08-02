@@ -7,6 +7,7 @@ import { moveTask } from "@/lib/api/domains/kanban-api";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { generateUUID } from "@/lib/utils";
 import { useImplementFresh } from "./use-implement-fresh";
 import { markPlanImplementationStarted } from "@/lib/api/domains/plan-api";
 import type {
@@ -176,6 +177,7 @@ function useImplementPlan(
         {
           task_id: taskId,
           session_id: resolvedSessionId,
+          client_message_id: generateUUID(),
           content,
           plan_mode: false,
           ...(attachments.length > 0 && { attachments }),

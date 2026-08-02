@@ -7,6 +7,13 @@ description: "Coordinate parallel sessions, subtasks, repositories, branches, me
 
 Kandev can coordinate several agents without turning every unit of work into a separate task. Choose the smallest boundary that gives the work the isolation, workflow state, and review surface it needs.
 
+## Quick path
+
+1. Use another session for parallel work in the same task environment.
+2. Use a subtask when work needs its own workflow state.
+3. Choose an isolated workspace for concurrent writers or a different repository.
+4. Send bounded messages and keep the human review gate explicit.
+
 ## Choose a coordination boundary
 
 | Need                                                                 | Use                                       | Filesystem relationship                    | Independent workflow state |
@@ -65,7 +72,7 @@ Open it from either:
 - the current task action beside **New Task** in the sidebar (**New subtask of current task**); or
 - the task workbench **Task** split menu → **Subtask**.
 
-The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are required, and **Create Subtask** starts the agent immediately. The subtask inherits the parent's workflow. Its profile starts from the active parent session's profile and can be changed, but the dialog does not filter profiles for executor compatibility.
+The dialog proposes `_Parent title_ / Subtask _N_`. Title and prompt are required, and **Create Subtask** starts the agent immediately. When **Agent-generated task titles** is enabled, the title field is hidden and the prompt is required instead; Kandev derives the same six-word provisional title and lets the first session replace it. The subtask inherits the parent's workflow. Its profile starts from the active parent session's profile and can be changed, but the dialog does not filter profiles for executor compatibility.
 
 Choose a workspace mode:
 
@@ -154,6 +161,9 @@ It ignores archived and ephemeral children, ignores grandchildren, and does not 
 
 For a human gate, use **On Turn Complete → Do nothing (wait for user)** and require a person to review before moving the task or sending the next instruction. `step_complete_kandev` proves only that the agent emitted the configured completion signal.
 
+<details>
+<summary>Work across repositories and branches</summary>
+
 ## Work across repositories and branches
 
 ### Create a multi-repository task
@@ -168,7 +178,12 @@ Before starting, document:
 - the merge order for dependent changes; and
 - the test command required in each repository.
 
+</details>
+
 ### Add sources after creation
+
+<details>
+<summary>Adding sources details</summary>
 
 For an idle, non-archived repository-backed task, use **Files → Workspace actions → Add Repositories to workspace**. **Add repository** offers a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, including refresh and create-repository actions. **Add folder** appears when the executor supports it. Add multiple mixed sources together; validation, persistence, and materialization are atomic. Desktop uses a dialog and phones use a full-height drawer with a touch-sized repository menu.
 
@@ -201,6 +216,8 @@ Use `update_repository_base_branch_kandev` with a task-repository ID to change t
 
 Separate worktrees isolate file state. They do not by themselves isolate host credentials, ports, background processes, or other machine resources.
 
+</details>
+
 ## Keep durable coordination state
 
 Regular tasks have one versioned plan. Use the parent plan for the overall breakdown, then put each child's precise scope and file ownership in that child's description. A subtask does not share a second live copy of the parent plan.
@@ -215,6 +232,9 @@ Before handing work to another session or task, record:
 - files another writer must not overwrite.
 
 Commit before switching isolated branches when the repository process requires it. Conversation summaries are useful context, but plans, repository files, commits, and pull requests are the durable sources of truth.
+
+<details>
+<summary>Coordinator-led and human-led patterns</summary>
 
 ## Coordinator-led and human-led patterns
 
@@ -241,12 +261,14 @@ Regular Kanban does not currently expose a dependency editor or blocker filter. 
 
 When Office is enabled, it prototypes **Blocked by** and **Blocking** properties with same-workspace, self-reference, and cycle validation. Treat these as an evaluation surface rather than a production coordination contract.
 
+</details>
+
 ## Troubleshooting
 
 - **New Agent has no usable profile:** configure credentials under **Settings → Agents** and a compatible executor under **Settings → Executors**.
 - **Summarize session is missing:** configure a utility agent; otherwise use **Blank** or **Copy initial prompt**.
 - **Parallel agents overwrite work:** stop one writer, assign disjoint files, or create an isolated subtask workspace.
-- **Subtask cannot be created:** confirm title, prompt, compatible profile, workflow, and the one-level Kanban depth limit.
+- **Subtask cannot be created:** confirm the prompt (and title unless **Agent-generated task titles** is enabled), compatible profile, workflow, and the one-level Kanban depth limit.
 - **Subtask creates but its agent or repositories fail to start:** the dialog does not enforce agent/executor compatibility. Confirm the agent is configured on that executor; multi-repository creation supports Worktree, Local Docker, SSH, and Sprites.
 - **Inherited subtask sees unexpected changes:** it intentionally shares the parent's materialized files and branch.
 - **Message remains queued:** the target is busy and only one queued message drains per turn. Check for `queue_full` before retrying.

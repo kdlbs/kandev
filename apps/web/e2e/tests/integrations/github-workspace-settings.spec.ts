@@ -72,21 +72,22 @@ test.describe("GitHub workspace settings", () => {
   test("configures task Git access from the workspace connection dialog", async ({
     testPage,
     apiClient,
-    seedData,
     prCapture,
   }) => {
-    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+    const workspace = await apiClient.createWorkspace("GitHub task defaults workspace");
+    const workspaceId = workspace.id;
+    await apiClient.mockGitHubSetWorkspaceConnection(workspaceId, {
       source: "legacy_shared",
       status: "active",
     });
     await apiClient.mockGitHubSetCLIAccounts([
       { host: "github.com", login: "workspace-cli", active: true, state: "active" },
     ]);
-    await stubGitHubRateLimits(testPage, seedData.workspaceId);
-    await testPage.goto(`/settings/workspace/${seedData.workspaceId}/integrations/github`);
+    await stubGitHubRateLimits(testPage, workspaceId);
+    await testPage.goto(`/settings/workspace/${workspaceId}/integrations/github`);
     const automation = testPage.getByTestId("github-workspace-automation");
     await expect(automation.getByTestId("github-task-access-summary")).toContainText(
-      "Managed workspace credentials",
+      "Inherit executor Git credentials",
     );
     await expect(testPage.getByRole("heading", { name: "My GitHub identity" })).toHaveCount(0);
     await expect(testPage.getByRole("heading", { name: "Task Git credentials" })).toHaveCount(0);
@@ -206,13 +207,13 @@ test.describe("GitHub workspace settings", () => {
 
     const response = await apiClient.rawRequest(
       "GET",
-      `/api/v1/github/workspace-settings?workspace_id=${seedData.workspaceId}`,
+      `/api/v1/github/workspace-settings?workspace_id=${workspaceId}`,
     );
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({ task_git_credentials_mode: "executor" });
     const statusResponse = await apiClient.rawRequest(
       "GET",
-      `/api/v1/github/status?workspace_id=${seedData.workspaceId}`,
+      `/api/v1/github/status?workspace_id=${workspaceId}`,
     );
     expect(await statusResponse.json()).toMatchObject({
       automation: { source: "gh_cli", login: "workspace-cli" },

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   IconEdit,
   IconTrash,
@@ -31,6 +31,7 @@ import type { RequestStatus } from "@/lib/http/use-request";
 import {
   useEditorsSettingsState,
   useLspConfigActions,
+  useLspLanguageToggles,
   useApplyEditors,
   useEditorRequests,
   useSaveRequest,
@@ -41,40 +42,17 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
+import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
+import { Trans, useTranslation } from "react-i18next";
 
-const LSP_LANGUAGE_OPTIONS = [
-  {
-    id: "typescript",
-    label: "TypeScript / JavaScript",
-    binary: "typescript-language-server",
-    docsUrl:
-      "https://github.com/typescript-language-server/typescript-language-server#workspace-configuration",
-    installHint:
-      "Installs typescript-language-server and typescript via npm into ~/.kandev/lsp-servers/",
-  },
-  {
-    id: "go",
-    label: "Go",
-    binary: "gopls",
-    docsUrl: "https://github.com/golang/tools/blob/master/gopls/doc/settings.md",
-    installHint: 'Runs "go install golang.org/x/tools/gopls@latest". Requires Go to be installed.',
-  },
-  {
-    id: "rust",
-    label: "Rust",
-    binary: "rust-analyzer",
-    docsUrl: "https://rust-analyzer.github.io/book/configuration.html",
-    installHint:
-      "Downloads the rust-analyzer binary from GitHub releases into ~/.kandev/lsp-servers/",
-  },
-  {
-    id: "python",
-    label: "Python",
-    binary: "pyright-langserver",
-    docsUrl: "https://microsoft.github.io/pyright/#/settings",
-    installHint: "Installs pyright via npm into ~/.kandev/lsp-servers/",
-  },
-];
+/**
+ * Code identifiers rendered inside `<Trans>` copy. They are passed as
+ * interpolation VALUES rather than left in the tag body: text inside a `<n>` tag
+ * is part of the message a translator edits, and translating a command name or
+ * an LSP method breaks the thing it names.
+ */
+const NPM_INSTALL_COMMAND = "npm install";
+const LSP_CONFIG_METHOD = "workspace/configuration";
 
 type LspLanguageCardsProps = {
   lspAutoStartLanguages: string[];
@@ -93,17 +71,22 @@ function LspLanguageCards({
   toggleAutoStart,
   toggleAutoInstall,
 }: LspLanguageCardsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div>
-        <div className="text-sm font-medium text-foreground">Language Servers</div>
+        <div className="text-sm font-medium text-foreground">{t("settings:languageServers")}</div>
         <div className="text-xs text-muted-foreground">
-          Auto-start language servers when opening files to get diagnostics, hover info, and
-          go-to-definition. You can also toggle each server on/off per file.
+          {t("settings:autoStartLanguageServersWhenOpening")}
           <br />
-          When enabled, install your project&apos;s dependencies (e.g.{" "}
-          <code className="text-[11px] bg-muted px-1 rounded">npm install</code> via repository
-          setup scripts) to avoid missing type errors.
+          <Trans
+            i18nKey="settings:whenEnabledInstallYourProjectS"
+            values={{ command: NPM_INSTALL_COMMAND }}
+          >
+            When enabled, install your project&apos;s dependencies (e.g.{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">{NPM_INSTALL_COMMAND}</code> via
+            repository setup scripts) to avoid missing type errors.
+          </Trans>
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -123,7 +106,7 @@ function LspLanguageCards({
                 <div className="text-xs text-muted-foreground">{lang.binary}</div>
               </div>
               <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">Auto-start</span>
+                <span className="text-xs text-muted-foreground">{t("settings:autoStart")}</span>
                 <Switch
                   checked={lspAutoStartLanguages.includes(lang.id)}
                   onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
@@ -142,14 +125,14 @@ function LspLanguageCards({
                   htmlFor={`lsp-install-${lang.id}`}
                   className="text-xs text-muted-foreground cursor-pointer"
                 >
-                  Auto-install if not found
+                  {t("settings:autoInstallIfNotFound")}
                 </label>
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-[260px] text-xs">
-                    {lang.installHint}
+                    {t(lang.installHintKey, lang.installHintValues)}
                   </TooltipContent>
                 </Tooltip>
               </div>
@@ -178,14 +161,22 @@ function LspServerConfigSection({
   setExpandedConfigLang,
   updateLspConfigString,
 }: LspServerConfigSectionProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div>
-        <div className="text-sm font-medium text-foreground">Server Configuration</div>
+        <div className="text-sm font-medium text-foreground">
+          {t("settings:serverConfiguration")}
+        </div>
         <div className="text-xs text-muted-foreground">
-          Override settings sent to each language server via{" "}
-          <code className="text-[11px] bg-muted px-1 rounded">workspace/configuration</code>. JSON
-          format.
+          <Trans
+            i18nKey="settings:overrideSettingsSentToEachLanguage"
+            values={{ method: LSP_CONFIG_METHOD }}
+          >
+            Override settings sent to each language server via{" "}
+            <code className="text-[11px] bg-muted px-1 rounded">{LSP_CONFIG_METHOD}</code>. JSON
+            format.
+          </Trans>
         </div>
       </div>
       {LSP_LANGUAGE_OPTIONS.map((lang) => {
@@ -210,7 +201,7 @@ function LspServerConfigSection({
                 <span className="text-sm text-foreground">{lang.label}</span>
                 {configStr.trim() && (
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-                    custom
+                    {t("settings:lspConfigCustomBadge")}
                   </Badge>
                 )}
               </div>
@@ -222,7 +213,7 @@ function LspServerConfigSection({
               <div className="border-t border-border/60 px-4 py-3 space-y-2">
                 {hasDefaults && (
                   <div className="text-[11px] text-muted-foreground">
-                    Defaults:{" "}
+                    {t("settings:defaults")}{" "}
                     <code className="bg-muted px-1 rounded">{JSON.stringify(defaultConfig)}</code>
                   </div>
                 )}
@@ -232,7 +223,7 @@ function LspServerConfigSection({
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  View available settings
+                  {t("settings:viewAvailableSettings")}
                   <IconExternalLink className="h-3 w-3" />
                 </a>
                 <Textarea
@@ -286,6 +277,7 @@ function CustomEditorRow({
   updateRequest,
   deleteRequest,
 }: CustomEditorRowProps) {
+  const { t } = useTranslation();
   return (
     <EditableCard
       key={editor.id}
@@ -295,12 +287,12 @@ function CustomEditorRow({
       onClose={() => setEditingId(null)}
       renderEdit={({ close }) => (
         <EditorForm
-          title={`Edit ${editor.name}`}
+          title={t("settings:editEditor", { name: editor.name })}
           initialState={formStateFromEditor(editor)}
           onCancel={close}
           onSave={(state) => updateRequest.run(editor.id, state)}
           onSaved={close}
-          submitLabel="Save changes"
+          submitLabel={t("settings:saveChanges")}
           isSaving={updateRequest.isLoading}
           coordinatedSaveId={`custom-editor:${editor.id}`}
         />
@@ -313,7 +305,7 @@ function CustomEditorRow({
           <div className="min-w-0">
             <div className="font-medium text-sm text-foreground truncate">{editor.name}</div>
             <div className="text-xs text-muted-foreground truncate">
-              {getCustomEditorSummary(editor)}
+              {getCustomEditorSummary(t, editor)}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -328,7 +320,7 @@ function CustomEditorRow({
               }}
             >
               <IconEdit className="h-4 w-4" />
-              Edit
+              {t("settings:edit")}
             </Button>
             <Button
               type="button"
@@ -341,7 +333,7 @@ function CustomEditorRow({
               }}
             >
               <IconTrash className="h-4 w-4" />
-              Remove
+              {t("settings:remove")}
             </Button>
           </div>
         </div>
@@ -360,22 +352,23 @@ function CustomEditorsList({
   updateRequest,
   deleteRequest,
 }: CustomEditorsListProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-medium text-foreground">Custom Editors</div>
+        <div className="text-sm font-medium text-foreground">{t("settings:customEditors")}</div>
         <Button type="button" variant="outline" onClick={() => setIsAdding(true)}>
-          Add custom editor
+          {t("settings:addCustomEditor")}
         </Button>
       </div>
       {isAdding && (
         <EditorForm
-          title="New custom editor"
+          title={t("settings:newCustomEditor")}
           initialState={defaultFormState()}
           onCancel={() => setIsAdding(false)}
           onSave={(state) => createRequest.run(state)}
           onSaved={() => setIsAdding(false)}
-          submitLabel="Add editor"
+          submitLabel={t("settings:addEditor")}
           isSaving={createRequest.isLoading}
           coordinatedSaveId="custom-editor:new"
           dirtyWhenMounted
@@ -384,7 +377,7 @@ function CustomEditorsList({
       <div className="space-y-3">
         {customEditors.length === 0 && !isAdding && (
           <div className="rounded-lg border border-dashed border-border/70 bg-muted/30 p-4 text-sm text-muted-foreground">
-            No custom editors yet.
+            {t("settings:noCustomEditorsYet")}
           </div>
         )}
         {customEditors.map((editor) => (
@@ -435,13 +428,14 @@ function EditorsSection({
   updateRequest,
   deleteRequest,
 }: EditorsSectionProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-6">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Editors
+        {t("settings:editors")}
       </div>
       <div className="space-y-2">
-        <div className="text-sm font-medium text-foreground">Default</div>
+        <div className="text-sm font-medium text-foreground">{t("settings:default")}</div>
         <div
           className="min-w-[280px] rounded-md border border-transparent"
           data-settings-dirty={defaultEditorId !== baselineDefaultId}
@@ -453,9 +447,9 @@ function EditorsSection({
               if (!value) return;
               onDefaultEditorChange(value);
             }}
-            placeholder="Select a default editor"
-            searchPlaceholder="Search editors..."
-            emptyMessage="No editor found."
+            placeholder={t("settings:selectADefaultEditor")}
+            searchPlaceholder={t("settings:searchEditors")}
+            emptyMessage={t("settings:noEditorFound")}
             disabled={availableEditors.length === 0}
           />
         </div>
@@ -472,7 +466,9 @@ function EditorsSection({
       />
       {builtInEditors.length > 0 && (
         <div className="space-y-2">
-          <div className="text-sm font-medium text-foreground">Supported Editors</div>
+          <div className="text-sm font-medium text-foreground">
+            {t("settings:supportedEditors")}
+          </div>
           <div className="grid gap-2 md:grid-cols-2">
             {builtInEditors.map((editor) => (
               <div
@@ -481,7 +477,7 @@ function EditorsSection({
               >
                 <span className="text-sm text-foreground truncate">{editor.name}</span>
                 <Badge variant={editor.installed ? "secondary" : "outline"}>
-                  {editor.installed ? "Installed" : "Not installed"}
+                  {editor.installed ? t("settings:installed") : t("settings:notInstalled")}
                 </Badge>
               </div>
             ))}
@@ -506,39 +502,17 @@ function useSyncEditors(editors: EditorOption[], setEditors: (editors: EditorOpt
 }
 
 export function EditorsSettings() {
+  const { t } = useTranslation();
   const state = useEditorsSettingsState();
-  const {
-    setLspAutoStartLanguages,
-    setLspAutoInstallLanguages,
-    setLspConfigStrings,
-    setLspConfigErrors,
-    setEditors,
-    editors,
-  } = state;
+  const { setLspConfigStrings, setLspConfigErrors, setEditors, editors } = state;
   const applyEditors = useApplyEditors(state);
   const saveDefaultRequest = useSaveRequest(state);
   const { createRequest, updateRequest, deleteRequest } = useEditorRequests(state, applyEditors);
   const { updateLspConfigString } = useLspConfigActions(setLspConfigStrings, setLspConfigErrors);
+  const { toggleAutoStart, toggleAutoInstall } = useLspLanguageToggles(state);
   const isDirty = isEditorsSettingsDirty(state);
   const saveRevision = getEditorsSaveRevision(state);
   const hasInvalidConfig = Object.keys(state.lspConfigErrors).length > 0;
-
-  const toggleAutoStart = useCallback(
-    (langId: string, checked: boolean) => {
-      setLspAutoStartLanguages((prev) =>
-        checked ? [...prev, langId] : prev.filter((id) => id !== langId),
-      );
-    },
-    [setLspAutoStartLanguages],
-  );
-  const toggleAutoInstall = useCallback(
-    (langId: string, checked: boolean) => {
-      setLspAutoInstallLanguages((prev) =>
-        checked ? [...prev, langId] : prev.filter((id) => id !== langId),
-      );
-    },
-    [setLspAutoInstallLanguages],
-  );
 
   const customEditors = useMemo(() => sortCustomEditors(editors.filter(isCustomEditor)), [editors]);
   const builtInEditors = useMemo(
@@ -547,29 +521,32 @@ export function EditorsSettings() {
   );
   const availableEditors = useMemo(() => resolveAvailableEditors(editors), [editors]);
   const defaultOptions = useMemo<ComboboxOption[]>(
-    () => buildDefaultEditorOptions(availableEditors, state.defaultEditorId),
-    [availableEditors, state.defaultEditorId],
+    () => buildDefaultEditorOptions(availableEditors, state.defaultEditorId, t),
+    [availableEditors, state.defaultEditorId, t],
   );
 
   useSyncEditors(editors, setEditors);
 
   return (
     <SettingsPageTemplate
-      title="Editors"
-      description="Configure the included code editor and external editors"
+      title={t("settings:editors")}
+      description={t("settings:configureTheIncludedCodeEditorAnd")}
+      // Explicit, because the template otherwise derives the save-contributor id
+      // from `title` — which is now translated, and an identity must not be.
+      saveId="settings-page:editors"
       isDirty={isDirty}
       saveStatus={saveDefaultRequest.status}
       saveRevision={saveRevision}
       canSave={!hasInvalidConfig}
       invalidReason={
-        hasInvalidConfig ? "Fix invalid LSP server configuration before saving." : undefined
+        hasInvalidConfig ? t("settings:fixInvalidLspServerConfigurationBefore") : undefined
       }
       onSave={() => saveDefaultRequest.run()}
     >
       <div className="space-y-6">
         <div className="space-y-4">
           <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-            File Editor
+            {t("settings:fileEditor")}
           </div>
           <LspLanguageCards
             lspAutoStartLanguages={state.lspAutoStartLanguages}

@@ -17,12 +17,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/pkg/agent"
 )
 
@@ -539,8 +541,9 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("compose indexed Git config: %w", err)
 	}
-	if envMap["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] != "" {
-		prependPathEntry(envMap, envMap["KANDEV_GITHUB_CLI_SHIM_DIR"])
+	if envMap[githubauth.CredentialBrokerURLEnv] != "" {
+		prependPathEntry(envMap, envMap[githubauth.CredentialCLIShimDirEnv])
+		configureGitHubCLIStartupEnv(envMap)
 	}
 
 	// Convert back to slice
@@ -549,6 +552,83 @@ func CollectAgentEnvWithError(additional map[string]string) ([]string, error) {
 		result = append(result, k+"="+v)
 	}
 	return result, nil
+}
+
+func configureGitHubCLIStartupEnv(env map[string]string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	startupEnv := env[githubauth.CredentialCLIBashEnvEnv]
+	if startupEnv == "" {
+		return
+	}
+	parentEnv := env["BASH_ENV"]
+	resolvedParentEnv := expandBashEnvParameters(parentEnv, env)
+	if resolvedParentEnv != "" && filepath.Clean(resolvedParentEnv) != filepath.Clean(startupEnv) {
+		env[githubauth.CredentialParentBashEnv] = resolvedParentEnv
+	} else {
+		delete(env, githubauth.CredentialParentBashEnv)
+	}
+	env["BASH_ENV"] = startupEnv
+}
+
+func expandBashEnvParameters(value string, env map[string]string) string {
+	var expanded strings.Builder
+	for index := 0; index < len(value); {
+		dollarOffset := strings.IndexByte(value[index:], '$')
+		if dollarOffset < 0 {
+			expanded.WriteString(value[index:])
+			break
+		}
+		dollar := index + dollarOffset
+		expanded.WriteString(value[index:dollar])
+		name, end, ok := bashEnvParameterAt(value, dollar)
+		if !ok {
+			expanded.WriteByte('$')
+			index = dollar + 1
+			continue
+		}
+		expanded.WriteString(env[name])
+		index = end
+	}
+	return expanded.String()
+}
+
+func bashEnvParameterAt(value string, dollar int) (string, int, bool) {
+	if dollar+1 >= len(value) {
+		return "", 0, false
+	}
+	if value[dollar+1] == '{' {
+		closeOffset := strings.IndexByte(value[dollar+2:], '}')
+		if closeOffset < 0 {
+			return "", 0, false
+		}
+		end := dollar + 2 + closeOffset
+		name := value[dollar+2 : end]
+		return name, end + 1, isBashEnvName(name)
+	}
+	end := dollar + 1
+	for end < len(value) && isBashEnvNameByte(value[end], end == dollar+1) {
+		end++
+	}
+	if end == dollar+1 {
+		return "", 0, false
+	}
+	return value[dollar+1 : end], end, true
+}
+
+func isBashEnvName(name string) bool {
+	for index := range len(name) {
+		if !isBashEnvNameByte(name[index], index == 0) {
+			return false
+		}
+	}
+	return name != ""
+}
+
+func isBashEnvNameByte(value byte, first bool) bool {
+	letter := value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
+	return letter || value == '_' || !first && value >= '0' && value <= '9'
 }
 
 func prependPathEntry(env map[string]string, entry string) {

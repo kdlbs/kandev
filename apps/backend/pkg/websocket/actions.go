@@ -118,6 +118,7 @@ const (
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
+	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueStatusChanged = "message.queue.status_changed" // Notification: queue status changed
 
 	// Workflow template/step actions
@@ -207,6 +208,7 @@ const (
 	ActionSessionMessageDeleted       = "session.message.deleted"
 	ActionSessionStateChanged         = "session.state_changed"
 	ActionSessionActivityChanged      = "session.activity_changed"
+	ActionTaskStatusSummaryUpdated    = "task.status_summary.updated"
 	ActionSessionAgentctlStarting     = "session.agentctl_starting"
 	ActionSessionAgentctlReady        = "session.agentctl_ready"
 	ActionSessionAgentctlError        = "session.agentctl_error"
@@ -292,6 +294,12 @@ const (
 	// Session git event (unified notification)
 	ActionSessionGitEvent = "session.git.event" // Notification: unified git event
 
+	// Session git refresh (explicit detail-surface git snapshot request)
+	ActionSessionGitRefresh = "session.git.refresh"
+	// Retained for older clients. New detail surfaces should use the narrower
+	// ActionSessionGitRefresh request instead.
+	ActionSessionDataRefresh = "session.data.refresh"
+
 	// Process runner actions
 	ActionSessionProcessOutput = "session.process.output"
 	ActionSessionProcessStatus = "session.process.status"
@@ -372,6 +380,7 @@ const (
 	ActionMCPDeleteWalkthrough          = "mcp.delete_walkthrough"
 	ActionMCPPublishReviewFindings      = "mcp.publish_review_findings"
 	ActionMCPClarificationTimeout       = "mcp.clarification_timeout"
+	ActionMCPSetTaskTitle               = "mcp.set_task_title"
 
 	// Office task handoffs (cross-task context).
 	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"

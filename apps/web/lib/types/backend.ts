@@ -23,6 +23,7 @@ import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type { GitHubRateLimitUpdate, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 import type { SystemMetricsSnapshot } from "./system";
 import type { FileChangeNotificationPayload } from "./workspace-files";
 import type {
@@ -107,6 +108,7 @@ export type TaskEventPayload = {
   metadata?: Record<string, unknown> | null;
   /** Deletion reason on task.deleted (e.g. "pr_approved_by_user"). Absent otherwise. */
   reason?: string;
+  status_summary?: TaskStatusSummary | null;
 };
 
 export type AgentUpdatePayload = {
@@ -475,6 +477,12 @@ export type QueueStatusChangedPayload = {
   max?: number;
 };
 
+export type TaskStatusSummaryUpdatedPayload = {
+  task_id: string;
+  workspace_id: string;
+  status_summary: TaskStatusSummary;
+};
+
 export type BackendMessageMap = OfficeBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
@@ -483,6 +491,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
     "task.state_changed": BackendMessage<"task.state_changed", TaskEventPayload>;
+    "task.status_summary.updated": BackendMessage<
+      "task.status_summary.updated",
+      TaskStatusSummaryUpdatedPayload
+    >;
     "task.plan.created": BackendMessage<"task.plan.created", TaskPlanEventPayload>;
     "task.plan.updated": BackendMessage<"task.plan.updated", TaskPlanEventPayload>;
     "task.plan.deleted": BackendMessage<"task.plan.deleted", TaskPlanEventPayload>;

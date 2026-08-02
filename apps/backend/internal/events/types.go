@@ -68,7 +68,17 @@ const (
 	// operator-facing composer and status indicator can distinguish
 	// "generating" from "waiting on spawned background work".
 	TaskSessionActivityChanged = "task_session.activity_changed"
+	// TaskSessionErrorChanged is emitted when a recoverable agent error is
+	// created, replaced, or dismissed. It is a bounded status source; the
+	// error message itself is projected into the task summary rather than
+	// streamed to task-list subscribers.
+	TaskSessionErrorChanged = "task_session.error_changed"
 )
+
+// TaskStatusSummaryUpdated is a complete replacement projection for one
+// task. Consumers should subscribe to this event instead of session streams
+// when they only need sidebar/task-switcher status.
+const TaskStatusSummaryUpdated = "task.status_summary.updated"
 
 // Event types for task plans
 const (

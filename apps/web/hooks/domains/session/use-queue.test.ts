@@ -13,6 +13,7 @@ const queueApiMock = vi.hoisted(() => {
     getQueueStatus: vi.fn(),
     updateQueuedMessage: vi.fn(),
     removeQueuedEntry: vi.fn(),
+    mergeQueuedEntry: vi.fn(),
   };
 });
 
@@ -201,5 +202,107 @@ describe("useQueue", () => {
       attachments: undefined,
       entity_references: [],
     });
+  });
+});
+
+describe("useQueue mergeEntry", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  it("merges an entry and refetches the queue", async () => {
+    queueApiMock.mergeQueuedEntry.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.mergeEntry("q-2");
+    });
+
+    expect(queueApiMock.mergeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-2",
+    });
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("forwards an explicit user_id on merge", async () => {
+    queueApiMock.mergeQueuedEntry.mockResolvedValue({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    await act(async () => {
+      await result.current.mergeEntry("q-2", "alice");
+    });
+
+    expect(queueApiMock.mergeQueuedEntry).toHaveBeenCalledWith({
+      session_id: SESSION_ID,
+      entry_id: "q-2",
+      user_id: "alice",
+    });
+  });
+
+  it("refetches the queue when the merge target was already drained", async () => {
+    queueApiMock.mergeQueuedEntry.mockRejectedValue(new queueApiMock.QueueEntryNotFoundError());
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.mergeEntry("q-2")).rejects.toThrow(
+        queueApiMock.QueueEntryNotFoundError,
+      );
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+});
+
+describe("useQueue clearAll", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+    queueApiMock.clearQueue.mockResolvedValue(undefined);
+  });
+
+  it("discards an in-flight refetch that resolves after the clear", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+
+    // A refetch starts before the clear and resolves afterwards with the
+    // pre-clear entries.
+    let resolveStale: (status: { entries: QueuedMessage[]; count: number; max: number }) => void;
+    queueApiMock.getQueueStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveStale = resolve;
+        }),
+    );
+    let staleRefetch: Promise<void>;
+    act(() => {
+      staleRefetch = result.current.refetch();
+    });
+    expect(mockState.setQueueEntries).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    await act(async () => {
+      resolveStale!({ entries: [entry({ id: "pre-clear" })], count: 1, max: 10 });
+      await staleRefetch!;
+    });
+
+    // The stale pre-clear snapshot must never be applied; the empty snapshot
+    // from clearAll stays the last one written.
+    expect(mockState.setQueueEntries).not.toHaveBeenCalledWith(
+      SESSION_ID,
+      [entry({ id: "pre-clear" })],
+      { count: 1, max: 10 },
+    );
   });
 });

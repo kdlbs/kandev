@@ -19,6 +19,7 @@ import {
 import { GitHubAppPolicyDialog } from "./github-app-policy-dialog";
 import { GitHubAppVisibilityField } from "./github-app-visibility-field";
 import type { useGitHubAppRegistrations } from "@/hooks/domains/github/use-github-app-registrations";
+import { useTranslation } from "react-i18next";
 
 type RegistrationHook = ReturnType<typeof useGitHubAppRegistrations>;
 
@@ -29,6 +30,7 @@ export function GitHubAppCreateForm({
   workspaceId: string;
   registrations: RegistrationHook;
 }) {
+  const { t } = useTranslation();
   const [displayName, setDisplayName] = useState("");
   const [ownerType, setOwnerType] = useState<"user" | "organization">("organization");
   const [ownerLogin, setOwnerLogin] = useState("");
@@ -70,7 +72,10 @@ export function GitHubAppCreateForm({
       );
     } catch (error) {
       const detail = appRegistrationError(error);
-      toast({ description: detail?.error ?? "GitHub App setup could not start", variant: "error" });
+      toast({
+        description: detail?.error ?? t("github:githubAppSetupCouldNotStart"),
+        variant: "error",
+      });
     }
   }
 
@@ -104,13 +109,13 @@ function ManifestHandoff({
   handoff: StartGitHubAppManifestResponse;
   onEdit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">GitHub is ready to create the App</h3>
+        <h3 className="text-sm font-medium">{t("github:githubIsReadyToCreateThe")}</h3>
         <p className="text-xs leading-5 text-muted-foreground">
-          GitHub will show the generated permissions and ask you to confirm. Returning from GitHub
-          adds the registration; installing it for this workspace remains an explicit step.
+          {t("github:githubWillShowTheGeneratedPermissions")}
         </p>
       </div>
       <div className="flex flex-col gap-2 sm:flex-row">
@@ -118,11 +123,11 @@ function ManifestHandoff({
           className="h-11 cursor-pointer"
           onClick={() => submitManifestToGitHub(handoff.registration_url, handoff.manifest)}
         >
-          Continue on GitHub
+          {t("github:continueOnGithub")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
         <Button variant="outline" className="h-11 cursor-pointer" onClick={onEdit}>
-          Edit details
+          {t("github:editDetails")}
         </Button>
       </div>
     </div>
@@ -146,24 +151,24 @@ type CreateFieldsProps = {
 };
 
 function CreateAppFields(props: CreateFieldsProps) {
+  const { t } = useTranslation();
   return (
     <form onSubmit={props.onSubmit} className="space-y-4">
       <div className="space-y-1">
-        <h3 className="text-sm font-medium">Create a GitHub App</h3>
+        <h3 className="text-sm font-medium">{t("github:createAGithubApp")}</h3>
         <p className="text-xs leading-5 text-muted-foreground">
-          Kandev generates the exact App policy. You confirm creation on GitHub; Kandev then stores
-          this registration so it can be selected by a workspace.
+          {t("github:kandevGeneratesTheExactAppPolicy")}
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Name in Kandev" error={props.errors.displayName}>
+        <Field label={t("github:nameInKandev")} error={props.errors.displayName}>
           <Input
             className="h-11"
             value={props.displayName}
             onChange={(event) => props.onDisplayName(event.target.value)}
           />
         </Field>
-        <Field label="GitHub owner login" error={props.errors.ownerLogin}>
+        <Field label={t("github:githubOwnerLogin")} error={props.errors.ownerLogin}>
           <Input
             className="h-11"
             value={props.ownerLogin}
@@ -177,13 +182,13 @@ function CreateAppFields(props: CreateFieldsProps) {
         className="flex min-h-11 flex-wrap items-center gap-5"
       >
         <Label className="flex cursor-pointer items-center gap-2">
-          <RadioGroupItem value="organization" /> Organization
+          <RadioGroupItem value="organization" /> {t("github:organization")}
         </Label>
         <Label className="flex cursor-pointer items-center gap-2">
-          <RadioGroupItem value="user" /> Personal account
+          <RadioGroupItem value="user" /> {t("github:personalAccount")}
         </Label>
       </RadioGroup>
-      <Field label="Public Kandev URL" error={props.errors.publicBaseUrl}>
+      <Field label={t("github:publicKandevUrl")} error={props.errors.publicBaseUrl}>
         <Input
           className="h-11"
           type="url"
@@ -192,14 +197,12 @@ function CreateAppFields(props: CreateFieldsProps) {
           onChange={(event) => props.onPublicBaseUrl(event.target.value)}
         />
       </Field>
-      <p className="text-xs text-muted-foreground">
-        GitHub must reach this HTTPS origin for signed webhooks and callbacks.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("github:githubMustReachThisHttpsOrigin")}</p>
       <GitHubAppVisibilityField value={props.visibility} onChange={props.onVisibility} />
       <div className="flex flex-col gap-2 sm:flex-row">
         <Button type="submit" disabled={props.mutating} className="h-11 cursor-pointer">
           {props.mutating && <Spinner className="mr-2 h-4 w-4" />}
-          Prepare App on GitHub
+          {t("github:prepareAppOnGithub")}
           <IconExternalLink className="ml-2 h-4 w-4" />
         </Button>
         <GitHubAppPolicyDialog />

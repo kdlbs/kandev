@@ -10,6 +10,7 @@ import { useGitOperations } from "@/hooks/use-git-operations";
 import { useSessionFileReviews } from "@/hooks/use-session-file-reviews";
 import { useCommentsStore, isDiffComment } from "@/lib/state/slices/comments";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { generateUUID } from "@/lib/utils";
 import { updateUserSettings } from "@/lib/api";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { ReviewDiffList } from "@/components/review/review-diff-list";
@@ -299,17 +300,15 @@ function useChangesActions(
     const markdown = formatReviewCommentsAsMarkdown(comments);
     if (!markdown) return;
     const client = getWebSocketClient();
-    if (client) {
+    if (client)
       client
         .request("message.add", {
           task_id: activeTaskId,
           session_id: activeSessionId,
+          client_message_id: generateUUID(),
           content: markdown,
         })
-        .catch(() => {
-          toast({ title: "Failed to send comments", variant: "error" });
-        });
-    }
+        .catch(() => toast({ title: "Failed to send comments", variant: "error" }));
     markCommentsSent(comments.map((c) => c.id));
   }, [activeSessionId, activeTaskId, getPendingComments, markCommentsSent, toast]);
 

@@ -27,7 +27,7 @@ import {
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import {
-  ISSUE_WATCH_PLACEHOLDERS,
+  issueWatchPlaceholders,
   DEFAULT_ISSUE_WATCH_PROMPT,
 } from "@/components/github/issue-watch-placeholders";
 import { RepoFilterSelector } from "@/components/github/repo-filter-selector";
@@ -39,6 +39,13 @@ import type {
   UpdateIssueWatchRequest,
   CleanupPolicy,
 } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import {
+  ISSUE_CLEANUP_POLICY_OPTIONS,
+  cleanupPolicyDescription,
+  cleanupPolicyItems,
+} from "./watch-cleanup-policy";
 
 type IssueWatchDialogProps = {
   open: boolean;
@@ -68,24 +75,6 @@ type FormState = {
 };
 
 const DEFAULT_QUERY = "type:issue state:open";
-
-const CLEANUP_POLICY_OPTIONS: Array<{ id: CleanupPolicy; label: string; description: string }> = [
-  {
-    id: "auto",
-    label: "Auto (recommended)",
-    description: "Delete closed-issue tasks unless you typed a message in them.",
-  },
-  {
-    id: "always",
-    label: "Always delete",
-    description: "Delete on close even if you engaged with the task.",
-  },
-  {
-    id: "never",
-    label: "Never auto-delete",
-    description: "Keep all tasks. Delete them manually from the task list.",
-  },
-];
 
 function makeDefaultForm(workspaceId: string): FormState {
   return {
@@ -155,6 +144,8 @@ function SectionHeader({ children }: { children: React.ReactNode }) {
 }
 
 function PlaceholdersHelp() {
+  const { t } = useTranslation();
+  const placeholders = useMemo(() => issueWatchPlaceholders(t), [t]);
   return (
     <TooltipProvider>
       <Tooltip>
@@ -162,9 +153,9 @@ function PlaceholdersHelp() {
           <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0" />
         </TooltipTrigger>
         <TooltipContent className="max-w-xs" align="start">
-          <p className="text-xs font-medium mb-1">Available placeholders:</p>
+          <p className="text-xs font-medium mb-1">{t("github:availablePlaceholders")}</p>
           <ul className="text-xs space-y-0.5">
-            {ISSUE_WATCH_PLACEHOLDERS.map((p) => (
+            {placeholders.map((p) => (
               <li key={p.key}>
                 <code className="text-[10px] bg-white/15 px-1 rounded">{`{{${p.key}}}`}</code>{" "}
                 <span className="opacity-70">{p.description}</span>
@@ -229,9 +220,10 @@ function IssueFilterFields({
   onAllReposChange: (checked: boolean) => void;
   onSelectedReposChange: (repos: RepoFilter[]) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <SectionHeader>Filter</SectionHeader>
+      <SectionHeader>{t("github:filter")}</SectionHeader>
       <RepoFilterSelector
         allRepos={form.allRepos}
         selectedRepos={form.selectedRepos}
@@ -240,27 +232,27 @@ function IssueFilterFields({
         workspaceId={form.workspaceId}
       />
       <div className="space-y-1.5">
-        <Label>Labels (comma-separated)</Label>
+        <Label>{t("github:labelsCommaSeparated")}</Label>
         <Input
           value={form.labels}
           onChange={(e) => setForm((prev) => ({ ...prev, labels: e.target.value }))}
-          placeholder="e.g. bug, enhancement, priority:high"
+          placeholder={t("github:eGBugEnhancementPriorityHigh")}
         />
         <p className="text-xs text-muted-foreground">
-          Only match issues with these labels. Leave empty for all issues.
+          {t("github:onlyMatchIssuesWithTheseLabels")}
         </p>
       </div>
       <div className="space-y-1.5">
-        <Label>Custom Query</Label>
+        <Label>{t("github:customQuery")}</Label>
         <Textarea
           value={form.customQuery}
           onChange={(e) => setForm((prev) => ({ ...prev, customQuery: e.target.value }))}
-          placeholder="e.g. type:issue state:open label:bug"
+          placeholder={t("github:queryExample", { query: "type:issue state:open label:bug" })}
           rows={1}
           className="font-mono text-xs resize-y"
         />
         <p className="text-xs text-muted-foreground">
-          GitHub search query. When set, overrides the label filter above.
+          {t("github:githubSearchQueryWhenSetOverrides")}
         </p>
       </div>
     </>
@@ -274,24 +266,26 @@ function IssueAutomationFields({
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
+  const { t } = useTranslation();
   const { workflows, agentProfiles, allExecutorProfiles } = useWatchFormData(form.workspaceId);
   const { steps: workflowSteps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
+  const placeholders = useMemo(() => issueWatchPlaceholders(t), [t]);
 
   return (
     <>
-      <SectionHeader>Automation</SectionHeader>
+      <SectionHeader>{t("github:automation")}</SectionHeader>
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          label="Workflow"
-          description="The workflow to create tasks in."
+          label={t("github:workflow")}
+          description={t("github:theWorkflowToCreateTasksIn")}
           value={form.workflowId}
           onChange={(v) => setForm((prev) => ({ ...prev, workflowId: v, workflowStepId: "" }))}
-          placeholder="Select workflow"
+          placeholder={t("github:selectWorkflow")}
           items={workflows.map((w) => ({ id: w.id, label: w.name }))}
         />
         <SelectField
-          label="Workflow Step"
-          description="Initial step for new tasks."
+          label={t("github:workflowStep")}
+          description={t("github:initialStepForNewTasks")}
           value={form.workflowStepId}
           onChange={(v) => setForm((prev) => ({ ...prev, workflowStepId: v }))}
           placeholder={stepPlaceholder(form.workflowId, stepsLoading, workflowSteps.length)}
@@ -301,8 +295,8 @@ function IssueAutomationFields({
       </div>
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          label="Agent Profile"
-          description="Optional — falls back to step default."
+          label={t("github:agentProfile")}
+          description={t("github:optionalFallsBackToStepDefault")}
           value={form.agentProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((prev) => ({ ...prev, agentProfileId: resolveProfileId(v) }))}
           placeholder={STEP_DEFAULT_LABEL}
@@ -316,8 +310,8 @@ function IssueAutomationFields({
           ]}
         />
         <SelectField
-          label="Executor Profile"
-          description="Optional — falls back to step default."
+          label={t("github:executorProfile")}
+          description={t("github:optionalFallsBackToStepDefault")}
           value={form.executorProfileId || STEP_DEFAULT}
           onChange={(v) => setForm((prev) => ({ ...prev, executorProfileId: resolveProfileId(v) }))}
           placeholder={STEP_DEFAULT_LABEL}
@@ -329,11 +323,13 @@ function IssueAutomationFields({
       </div>
       <div className="space-y-1.5">
         <div className="flex items-center gap-1.5">
-          <Label>Task Prompt</Label>
+          <Label>{t("github:taskPrompt")}</Label>
           <PlaceholdersHelp />
         </div>
         <p className="text-xs text-muted-foreground">
-          The prompt sent to the agent for each new issue. Type {"{{"} to insert placeholders.
+          {/* `{{` is passed as a value so it never reaches the catalog, where
+              i18next would read it as an interpolation opener. */}
+          {t("github:issueWatchPromptHelp", { token: "{{" })}
         </p>
         <div className="rounded-md border border-border overflow-hidden">
           <ScriptEditor
@@ -342,7 +338,7 @@ function IssueAutomationFields({
             language="markdown"
             height={computeEditorHeight(form.prompt)}
             lineNumbers="off"
-            placeholders={ISSUE_WATCH_PLACEHOLDERS}
+            placeholders={placeholders}
           />
         </div>
       </div>
@@ -357,14 +353,13 @@ function IssueSettingsFields({
   form: FormState;
   setForm: React.Dispatch<React.SetStateAction<FormState>>;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <SectionHeader>Settings</SectionHeader>
+      <SectionHeader>{t("common:settings")}</SectionHeader>
       <div className="space-y-1.5">
-        <Label>Poll Interval (seconds)</Label>
-        <p className="text-xs text-muted-foreground">
-          How often to check for new issues. Minimum 60s, maximum 3600s.
-        </p>
+        <Label>{t("github:pollIntervalSeconds")}</Label>
+        <p className="text-xs text-muted-foreground">{t("github:howOftenToCheckForNew")}</p>
         <Input
           type="number"
           value={form.pollInterval}
@@ -375,8 +370,8 @@ function IssueSettingsFields({
       </div>
       <div className="flex items-center justify-between">
         <div>
-          <Label>Enabled</Label>
-          <p className="text-xs text-muted-foreground">Pause or resume polling.</p>
+          <Label>{t("github:enabled")}</Label>
+          <p className="text-xs text-muted-foreground">{t("github:pauseOrResumePolling")}</p>
         </div>
         <Switch
           checked={form.enabled}
@@ -385,14 +380,12 @@ function IssueSettingsFields({
         />
       </div>
       <SelectField
-        label="Cleanup behavior"
-        description={
-          CLEANUP_POLICY_OPTIONS.find((p) => p.id === form.cleanupPolicy)?.description ?? ""
-        }
+        label={t("github:cleanupBehavior")}
+        description={cleanupPolicyDescription(t, ISSUE_CLEANUP_POLICY_OPTIONS, form.cleanupPolicy)}
         value={form.cleanupPolicy}
         onChange={(v) => setForm((prev) => ({ ...prev, cleanupPolicy: v as CleanupPolicy }))}
-        placeholder="Auto"
-        items={CLEANUP_POLICY_OPTIONS.map((p) => ({ id: p.id, label: p.label }))}
+        placeholder={t("github:auto")}
+        items={cleanupPolicyItems(t, ISSUE_CLEANUP_POLICY_OPTIONS)}
       />
     </>
   );
@@ -405,8 +398,9 @@ function parseLabels(labelsStr: string): string[] {
     .filter((l) => l.length > 0);
 }
 
-function getSaveLabel(watch: IssueWatch | null | undefined): string {
-  return watch ? "Update" : "Create";
+// Plain function, so `t` is threaded in — the guard never inspects return values.
+function getSaveLabel(t: TFunction, watch: IssueWatch | null | undefined): string {
+  return watch ? t("github:update") : t("github:create");
 }
 
 export function IssueWatchDialog({
@@ -417,6 +411,7 @@ export function IssueWatchDialog({
   onCreate,
   onUpdate,
 }: IssueWatchDialogProps) {
+  const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => makeDefaultForm(workspaceId ?? ""));
@@ -483,10 +478,10 @@ export function IssueWatchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full max-w-full sm:w-[900px] sm:max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{watch ? "Edit Issue Watch" : "Create Issue Watch"}</DialogTitle>
-          <DialogDescription>
-            Automatically create tasks when new GitHub issues match your criteria.
-          </DialogDescription>
+          <DialogTitle>
+            {watch ? t("github:editIssueWatch") : t("github:createIssueWatch")}
+          </DialogTitle>
+          <DialogDescription>{t("github:automaticallyCreateTasksWhenNewGithub")}</DialogDescription>
         </DialogHeader>
         <IssueWatchFormFields
           form={form}
@@ -497,10 +492,10 @@ export function IssueWatchDialog({
         />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
-            {saving ? "Saving..." : getSaveLabel(watch)}
+            {saving ? t("github:saving") : getSaveLabel(t, watch)}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -559,14 +554,15 @@ function WorkspacePicker({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   return (
     <SelectField
-      label="Workspace"
-      description="Tasks created by this watcher land in the selected workspace."
+      label={t("common:workspace")}
+      description={t("github:tasksCreatedByThisWatcherLand")}
       value={value}
       onChange={onChange}
-      placeholder="Select workspace"
+      placeholder={t("github:selectWorkspace")}
       items={workspaces.map((w) => ({ id: w.id, label: w.name }))}
       disabled={disabled}
     />

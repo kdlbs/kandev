@@ -68,6 +68,36 @@ When you hit a limit: extract a helper function, custom hook, or sub-component. 
 
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
 
+### Internationalization
+
+The web UI is localized with i18next (`namespace:key`). **All new user-facing copy
+must go through `t()` / `<Trans>`** — never a hardcoded literal — regardless of
+which directory you are in.
+
+This is enforced, not just requested. Two ratchets, both of which only tighten:
+
+- **New code, everywhere** — `pnpm run i18n:ratchet` (pre-commit + CI) fails on a
+  hardcoded string in a file you added, or on a line you changed, regardless of
+  directory. Untouched lines are never judged, so you are never asked to migrate
+  code you did not write.
+- **Migrated paths, whole file** — `i18next/no-literal-string` is a lint error for
+  the paths in `i18nGuardFiles` (`apps/web/eslint.i18n.options.mjs`). The
+  migration of existing strings proceeds **one directory per PR**: when you
+  migrate one, append it to that list in the same PR. Never remove an entry to
+  make a build pass — a check rejects that.
+
+Three rules that cause silent, hard-to-find bugs when broken: never translate a
+string compared with `===` (type-to-confirm tokens become impossible to type);
+never call `t()` at module scope (it freezes at the boot locale and the
+pseudo-locale cannot detect it); never pass an English plural ending as a value —
+use `count` with `_one`/`_other`. `pnpm run i18n:check` enforces the last two.
+
+A clean lint is not proof a file is done. The rule only sees literals in JSX, and
+it **skips anything assigned to a SCREAMING_CASE identifier** — so a
+`const ROWS = [{ label: "Disk usage" }]` config table passes silently. Review
+those by eye. The pseudo-locale (Settings → General → Appearance, dev/e2e builds)
+is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
+
 ### Knowledge
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
 - **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the durable "what & why" of a feature, written before coding. Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.
@@ -89,7 +119,7 @@ For multiline Markdown issue or PR bodies, write the body to a file and pass it
 with the relevant `gh ... --body-file <path>` option. Do not send escaped
 newlines through `--body`; GitHub will render them literally.
 
-For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>` to reply, resolve, and react in one call. Use `--body-file` whenever a reply has Markdown or shell-sensitive characters (especially backticks, `$`, or quotes); it prevents shell substitution from corrupting the GitHub reply.
+For PR review/fixup workflows, prefer the repo helpers before manually querying GitHub/GraphQL: `scripts/pr-state --summary <PR>` for checks and unresolved-thread state, `scripts/pr-state --comment <comment_id>` for a full review-comment body, `scripts/pr-resolve list <PR>` for actionable unresolved review threads, and `scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply, resolve, and react in one call.
 
 When a Kandev system message references an MCP tool that is not visible in the active tool list, use the runtime's tool discovery mechanism, such as `tool_search` when available, before falling back to a less specific workflow. Some task messaging and platform helpers are exposed on demand.
 
@@ -155,11 +185,11 @@ Production Kandev plugins live in dedicated repositories, not in this monorepo. 
 
 **`profiles.yaml` at the repo root** is the single source of truth for env-driven runtime defaults — feature flags, mock providers (agent / GitHub / Jira / Linear), debug switches, and e2e tuning knobs. The backend embeds it (`//go:embed` via `apps/backend/internal/profiles/`) and at startup calls `profiles.ApplyProfile()` to write the matching profile's env vars onto its own process, *only when each var is not already set* — so launchers, shells, and per-spec overrides still win.
 
-Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; add or update registry metadata when exposing a flag in the UI.
+Runtime feature toggles add a SQLite-backed override tier managed through `Settings > System > Feature Toggles`. Effective values use this precedence: explicit environment variable > SQLite override > profile default. The typed runtime flag registry lives in `apps/backend/internal/runtimeflags/registry.go`; each registration owns the public metadata, environment variable, config reader, and config applier. Do not add parallel per-flag maps or switches.
 
-Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` → `dev`, otherwise `prod`. `apps/cli/src/dev.ts` and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
+Profile selection: `KANDEV_E2E_MOCK=true` → `e2e`, `KANDEV_DEBUG_DEV_MODE=true` or `KANDEV_DEBUG_PPROF_ENABLED=true` → `dev`, otherwise `prod`. `apps/cli/src/dev.ts` and `apps/web/e2e/fixtures/backend.ts` set only the selector — they no longer hardcode the underlying values.
 
-To flip a feature on for every user: change its `prod:` to `"true"` in `profiles.yaml`. To add a new feature flag: 1 line in `profiles.yaml` + 1 `FeaturesConfig` field + the runtime flag registry entry when it should be user-toggleable + the gate at the call site + the frontend additions (`FeatureFlags` type, `useFeature` checks, `notFound()` from a server-side layout). Full pattern in `docs/decisions/0007-runtime-feature-flags.md`; runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
+For any task that adds, rolls out, promotes, graduates, or removes a release toggle, use `/runtime-feature-flags`. That skill contains the file-by-file checklist, disabled-path requirements, test commands, promotion procedure, and retired-identity removal steps; do not rely on an agent discovering an ADR or public docs. In brief: merge risky features off in every shipped profile, enable a selected install with an admin override or explicit environment, restart and test, then change `prod:` to `"true"` for the all-user release while retaining the registry entry as a kill-switch. Remove the live flag after the feature is permanent, move its key and environment variable to the append-only retired identities in `runtimeflags/registry.go`, and never reuse either identity. Completeness tests cover the registry/profile/frontend contracts. Runtime overrides and restart support are documented in `docs/decisions/0018-runtime-settings-overrides.md` and `docs/decisions/0019-restart-supervisor.md`.
 
 ---
 
@@ -177,4 +207,4 @@ For developing in ephemeral cloud VMs (Cursor Cloud, Codex, GitHub Codespaces, e
 
 ---
 
-**Last Updated**: 2026-07-27
+**Last Updated**: 2026-08-01

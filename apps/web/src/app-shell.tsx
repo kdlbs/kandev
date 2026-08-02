@@ -16,6 +16,7 @@ import { ThemeProvider } from "@/components/theme-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import { WebSocketConnector } from "@/components/ws-connector";
 import { CommandRegistryProvider } from "@/lib/commands/command-registry";
+import { I18nProvider } from "@/lib/i18n/provider";
 import { Toaster as SonnerToaster } from "@kandev/ui/sonner";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
@@ -25,36 +26,38 @@ type AppShellProps = {
 
 export function AppShell({ children }: AppShellProps) {
   return (
-    <ThemeProvider>
-      <DiffWorkerPoolProvider>
-        <TooltipProvider>
-          <ToastProvider>
-            <SonnerToaster richColors position="top-right" />
-            <SessionFailureToastBridge />
-            <TaskDeletedToastBridge />
-            <UpdateAvailableToastBridge />
-            <SidebarViewsSyncBridge />
-            <LogBufferBridge />
-            <CommandRegistryProvider>
-              <DesktopCommandHost />
-              <WebSocketConnector />
-              <GlobalCommands />
-              <CommandPanel />
-              <RecentTaskSwitcher />
-              <ConfigChatProvider>
-                <QuickChatProvider>
-                  <div className="flex h-dvh min-h-0 w-full overflow-hidden">
-                    <AppSidebar />
-                    <AppStatusSurfaceProvider>
-                      <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
-                    </AppStatusSurfaceProvider>
-                  </div>
-                </QuickChatProvider>
-              </ConfigChatProvider>
-            </CommandRegistryProvider>
-          </ToastProvider>
-        </TooltipProvider>
-      </DiffWorkerPoolProvider>
-    </ThemeProvider>
+    <I18nProvider>
+      <ThemeProvider>
+        <DiffWorkerPoolProvider>
+          <TooltipProvider>
+            <ToastProvider>
+              <SonnerToaster richColors position="top-right" />
+              <SessionFailureToastBridge />
+              <TaskDeletedToastBridge />
+              <UpdateAvailableToastBridge />
+              <SidebarViewsSyncBridge />
+              <LogBufferBridge />
+              <CommandRegistryProvider>
+                <DesktopCommandHost />
+                <WebSocketConnector />
+                <GlobalCommands />
+                <CommandPanel />
+                <RecentTaskSwitcher />
+                <ConfigChatProvider>
+                  <QuickChatProvider>
+                    <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+                      <AppSidebar />
+                      <AppStatusSurfaceProvider>
+                        <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                      </AppStatusSurfaceProvider>
+                    </div>
+                  </QuickChatProvider>
+                </ConfigChatProvider>
+              </CommandRegistryProvider>
+            </ToastProvider>
+          </TooltipProvider>
+        </DiffWorkerPoolProvider>
+      </ThemeProvider>
+    </I18nProvider>
   );
 }

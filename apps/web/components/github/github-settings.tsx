@@ -25,6 +25,7 @@ import { useWatcherEnabledDrafts } from "@/components/integrations/use-watcher-e
 import { ResetWatchDialog, useWatchResetController } from "@/components/watches/reset-watch-dialog";
 import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 // CleanupNowButton runs a manual global sweep over the dedup tables. Useful
 // for users who upgraded with a pile of legacy merged-PR / closed-issue
@@ -37,6 +38,7 @@ function CleanupNowButton({
   label: string;
   run: () => Promise<{ deleted: number }>;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [busy, setBusy] = useState(false);
   return (
@@ -51,12 +53,12 @@ function CleanupNowButton({
           toast({
             description:
               deleted === 0
-                ? "No tasks to clean up"
-                : `Deleted ${deleted} task${deleted === 1 ? "" : "s"}`,
+                ? t("github:noTasksToCleanUp")
+                : t("github:deletedTasks", { count: deleted }),
             variant: "success",
           });
         } catch {
-          toast({ description: "Cleanup failed", variant: "error" });
+          toast({ description: t("github:cleanupFailed"), variant: "error" });
         } finally {
           setBusy(false);
         }
@@ -64,12 +66,13 @@ function CleanupNowButton({
       className="cursor-pointer"
     >
       <IconTrashX className="h-4 w-4 mr-1" />
-      {busy ? "Cleaning…" : label}
+      {busy ? t("github:cleaning") : label}
     </Button>
   );
 }
 
 function useWatchActions(workspaceId?: string | null) {
+  const { t } = useTranslation();
   const {
     items: watches,
     create,
@@ -85,24 +88,24 @@ function useWatchActions(workspaceId?: string | null) {
     async (id: string) => {
       const watch = watches.find((item) => item.id === id);
       if (!watch) {
-        toast({ description: "Review watch not found", variant: "error" });
+        toast({ description: t("github:reviewWatchNotFound"), variant: "error" });
         return;
       }
       try {
         await remove(id, watch.workspace_id);
-        toast({ description: "Review watch deleted", variant: "success" });
+        toast({ description: t("github:reviewWatchDeleted"), variant: "success" });
       } catch {
-        toast({ description: "Failed to delete review watch", variant: "error" });
+        toast({ description: t("github:failedToDeleteReviewWatch"), variant: "error" });
       }
     },
-    [remove, toast, watches],
+    [remove, t, toast, watches],
   );
 
   const handleTrigger = useCallback(
     async (id: string) => {
       const watch = watches.find((item) => item.id === id);
       if (!watch) {
-        toast({ description: "Review watch not found", variant: "error" });
+        toast({ description: t("github:reviewWatchNotFound"), variant: "error" });
         return;
       }
       try {
@@ -110,17 +113,17 @@ function useWatchActions(workspaceId?: string | null) {
         const count = result?.new_prs_found ?? 0;
         if (count > 0) {
           toast({
-            description: `Found ${count} new PR${count > 1 ? "s" : ""}`,
+            description: t("github:foundNewPrs", { count }),
             variant: "success",
           });
         } else {
-          toast({ description: "No new PRs found" });
+          toast({ description: t("github:noNewPrsFound") });
         }
       } catch {
-        toast({ description: "Failed to check for PRs", variant: "error" });
+        toast({ description: t("github:failedToCheckForPrs"), variant: "error" });
       }
     },
-    [trigger, toast, watches],
+    [trigger, t, toast, watches],
   );
 
   const handleReset = useCallback(
@@ -130,16 +133,16 @@ function useWatchActions(workspaceId?: string | null) {
         toast({
           description:
             tasksDeleted > 0
-              ? `Reset complete — deleted ${tasksDeleted} task(s); next poll will re-import.`
-              : "Reset complete — next poll will re-import matches.",
+              ? t("github:resetCompleteDeletedTasks", { count: tasksDeleted })
+              : t("github:resetCompleteNextPollWillRe"),
           variant: "success",
         });
       } catch {
-        toast({ description: "Failed to reset review watch", variant: "error" });
+        toast({ description: t("github:failedToResetReviewWatch"), variant: "error" });
         throw new Error("reset failed");
       }
     },
-    [reset, toast],
+    [reset, t, toast],
   );
 
   return {
@@ -154,6 +157,7 @@ function useWatchActions(workspaceId?: string | null) {
 }
 
 function useIssueWatchActions(workspaceId?: string | null) {
+  const { t } = useTranslation();
   const {
     items: watches,
     create,
@@ -169,24 +173,24 @@ function useIssueWatchActions(workspaceId?: string | null) {
     async (id: string) => {
       const watch = watches.find((item) => item.id === id);
       if (!watch) {
-        toast({ description: "Issue watch not found", variant: "error" });
+        toast({ description: t("github:issueWatchNotFound"), variant: "error" });
         return;
       }
       try {
         await remove(id, watch.workspace_id);
-        toast({ description: "Issue watch deleted", variant: "success" });
+        toast({ description: t("github:issueWatchDeleted"), variant: "success" });
       } catch {
-        toast({ description: "Failed to delete issue watch", variant: "error" });
+        toast({ description: t("github:failedToDeleteIssueWatch"), variant: "error" });
       }
     },
-    [remove, toast, watches],
+    [remove, t, toast, watches],
   );
 
   const handleTrigger = useCallback(
     async (id: string) => {
       const watch = watches.find((item) => item.id === id);
       if (!watch) {
-        toast({ description: "Issue watch not found", variant: "error" });
+        toast({ description: t("github:issueWatchNotFound"), variant: "error" });
         return;
       }
       try {
@@ -194,17 +198,17 @@ function useIssueWatchActions(workspaceId?: string | null) {
         const count = result?.new_issues_found ?? 0;
         if (count > 0) {
           toast({
-            description: `Found ${count} new issue${count > 1 ? "s" : ""}`,
+            description: t("github:foundNewIssues", { count }),
             variant: "success",
           });
         } else {
-          toast({ description: "No new issues found" });
+          toast({ description: t("github:noNewIssuesFound") });
         }
       } catch {
-        toast({ description: "Failed to check for issues", variant: "error" });
+        toast({ description: t("github:failedToCheckForIssues"), variant: "error" });
       }
     },
-    [trigger, toast, watches],
+    [trigger, t, toast, watches],
   );
 
   const handleReset = useCallback(
@@ -214,16 +218,16 @@ function useIssueWatchActions(workspaceId?: string | null) {
         toast({
           description:
             tasksDeleted > 0
-              ? `Reset complete — deleted ${tasksDeleted} task(s); next poll will re-import.`
-              : "Reset complete — next poll will re-import matches.",
+              ? t("github:resetCompleteDeletedTasks", { count: tasksDeleted })
+              : t("github:resetCompleteNextPollWillRe"),
           variant: "success",
         });
       } catch {
-        toast({ description: "Failed to reset issue watch", variant: "error" });
+        toast({ description: t("github:failedToResetIssueWatch"), variant: "error" });
         throw new Error("reset failed");
       }
     },
-    [reset, toast],
+    [reset, t, toast],
   );
 
   return {
@@ -238,6 +242,7 @@ function useIssueWatchActions(workspaceId?: string | null) {
 }
 
 export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   return (
     <>
       <div>
@@ -246,17 +251,17 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
           data-testid="github-integration-heading"
         >
           <IconBrandGithub className="h-6 w-6" />
-          GitHub Integration
+          {t("github:githubIntegration")}
         </h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Choose the automation and personal identities used by this workspace.
+          {t("github:chooseTheAutomationAndPersonalIdentities")}
         </p>
       </div>
       <Separator />
       <GitHubCallbackNotice workspaceId={workspaceId} />
       <SettingsSection
-        title="Workspace GitHub access"
-        description="Credential used for repository sync, watches, and managed agent git and gh commands. Executor profile tokens take precedence."
+        title={t("github:workspaceGithubAccess")}
+        description={t("github:credentialUsedForRepositorySyncWatches")}
       >
         <GitHubAutomationSettings workspaceId={workspaceId} />
       </SettingsSection>
@@ -268,6 +273,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
 }
 
 function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-8">
       <GitHubConnectionSection workspaceId={workspaceId} />
@@ -275,7 +281,10 @@ function PerWorkspaceSection({ workspaceId }: { workspaceId: string }) {
       <IssueWatchSection workspaceId={workspaceId} />
       <GitHubRepoScopeSection workspaceId={workspaceId} />
       <ActionPresetsSection workspaceId={workspaceId} />
-      <SettingsSection title="PR Analytics" description="Pull request activity for this workspace.">
+      <SettingsSection
+        title={t("github:prAnalytics")}
+        description={t("github:pullRequestActivityForThisWorkspace")}
+      >
         <PRStatsPanel workspaceId={workspaceId} />
       </SettingsSection>
       <DefaultQueriesSection workspaceId={workspaceId} />
@@ -300,6 +309,7 @@ export function GitHubIntegrationPage({ workspaceId }: GitHubIntegrationPageProp
 }
 
 function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const { watches, create, update, previewReset, handleDelete, handleTrigger, handleReset } =
     useWatchActions(workspaceId);
   const { toast } = useToast();
@@ -338,12 +348,12 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       <SettingsSection
-        title="Review Watches"
-        description="Automatically create tasks for PRs that need your review."
+        title={t("github:reviewWatches")}
+        description={t("github:automaticallyCreateTasksForPrsThat")}
         action={
           <div className="flex items-center gap-2">
             <CleanupNowButton
-              label="Clean up merged"
+              label={t("github:cleanUpMerged")}
               run={() => cleanupMergedReviewTasks(workspaceId)}
             />
             <Button
@@ -355,7 +365,7 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
               className="cursor-pointer"
             >
               <IconPlus className="h-4 w-4 mr-1" />
-              Add Watch
+              {t("github:addWatch")}
             </Button>
           </div>
         }
@@ -380,20 +390,20 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
         workspaceId={workspaceId}
         onCreate={async (req) => {
           await create(req);
-          toast({ description: "Review watch created", variant: "success" });
+          toast({ description: t("github:reviewWatchCreated"), variant: "success" });
         }}
         onUpdate={async (id, req) => {
           const watch = watches.find((item) => item.id === id);
           if (!watch) throw new Error("review watch not found");
           await update(id, watch.workspace_id, req);
-          toast({ description: "Review watch updated", variant: "success" });
+          toast({ description: t("github:reviewWatchUpdated"), variant: "success" });
         }}
       />
       {resetCtrl.resetting && (
         <ResetWatchDialog
           open
           onOpenChange={resetCtrl.onOpenChange}
-          integrationLabel="review watch"
+          integrationLabel={t("github:reviewWatch")}
           previewLoader={resetCtrl.previewLoader}
           onConfirm={resetCtrl.confirmReset}
         />
@@ -403,6 +413,7 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
 }
 
 function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const issueActions = useIssueWatchActions(workspaceId);
   const { toast } = useToast();
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -440,12 +451,12 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
   return (
     <>
       <SettingsSection
-        title="Issue Watches"
-        description="Automatically create tasks for GitHub issues matching your criteria."
+        title={t("github:issueWatches")}
+        description={t("github:automaticallyCreateTasksForGithubIssues")}
         action={
           <div className="flex items-center gap-2">
             <CleanupNowButton
-              label="Clean up closed"
+              label={t("github:cleanUpClosed")}
               run={() => cleanupClosedIssueTasks(workspaceId)}
             />
             <Button
@@ -457,7 +468,7 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
               className="cursor-pointer"
             >
               <IconPlus className="h-4 w-4 mr-1" />
-              Add Watch
+              {t("github:addWatch")}
             </Button>
           </div>
         }
@@ -482,20 +493,20 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
         workspaceId={workspaceId}
         onCreate={async (req) => {
           await issueActions.create(req);
-          toast({ description: "Issue watch created", variant: "success" });
+          toast({ description: t("github:issueWatchCreated"), variant: "success" });
         }}
         onUpdate={async (id, req) => {
           const watch = issueActions.watches.find((item) => item.id === id);
           if (!watch) throw new Error("issue watch not found");
           await issueActions.update(id, watch.workspace_id, req);
-          toast({ description: "Issue watch updated", variant: "success" });
+          toast({ description: t("github:issueWatchUpdated"), variant: "success" });
         }}
       />
       {resetCtrl.resetting && (
         <ResetWatchDialog
           open
           onOpenChange={resetCtrl.onOpenChange}
-          integrationLabel="issue watch"
+          integrationLabel={t("github:issueWatch")}
           previewLoader={resetCtrl.previewLoader}
           onConfirm={resetCtrl.confirmReset}
         />

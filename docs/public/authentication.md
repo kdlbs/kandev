@@ -9,6 +9,14 @@ Kandev ships as a single-user local tool with authentication **disabled** — no
 
 Authentication is a **runtime feature toggle** — the same system as the other feature flags — so there is no separate "Authentication" configuration page.
 
+## Quick checklist
+
+1. Keep authentication off only for a single-user laptop bound to loopback or another private listener.
+2. For any server reachable by other users or networks, enable **Authentication & users** and restart.
+3. Create the first admin immediately after setup mode appears.
+4. Use personal access tokens for scripts and external MCP clients.
+5. Keep TLS, filesystem permissions, and agent credentials as separate security boundaries.
+
 ## What changes when authentication is on
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
