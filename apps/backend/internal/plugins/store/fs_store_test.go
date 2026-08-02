@@ -216,6 +216,51 @@ func TestFSStore_Save_PersistsUpdatedRecord(t *testing.T) {
 	}
 }
 
+func TestFSStore_Save_PersistsFailureDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+
+	failedAt := time.Date(2026, time.August, 2, 12, 34, 56, 0, time.UTC)
+	rec := testRecord("kandev-plugin-slack")
+	rec.Status = StatusError
+	rec.LastError = "plugins/runtime: connect to plugin: handshake failed"
+	rec.LastErrorAt = &failedAt
+	if err := s.Save(rec); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	got, err := s.Get(rec.ID)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.LastError != rec.LastError {
+		t.Fatalf("Get().LastError = %q, want %q", got.LastError, rec.LastError)
+	}
+	if got.LastErrorAt == nil || !got.LastErrorAt.Equal(failedAt) {
+		t.Fatalf("Get().LastErrorAt = %v, want %v", got.LastErrorAt, failedAt)
+	}
+}
+
+func TestFSStore_Get_LegacyRecordDefaultsFailureDiagnostics(t *testing.T) {
+	dir := t.TempDir()
+	s := NewFSStore(dir)
+	rec := testRecord("kandev-plugin-slack")
+	if err := s.Save(rec); err != nil {
+		t.Fatalf("Save() unexpected error: %v", err)
+	}
+
+	got, err := s.Get(rec.ID)
+	if err != nil {
+		t.Fatalf("Get() unexpected error: %v", err)
+	}
+	if got.LastError != "" {
+		t.Fatalf("legacy record LastError = %q, want empty", got.LastError)
+	}
+	if got.LastErrorAt != nil {
+		t.Fatalf("legacy record LastErrorAt = %v, want nil", got.LastErrorAt)
+	}
+}
+
 func TestFSStore_SetConfigThenGetConfig_RoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	s := NewFSStore(dir)

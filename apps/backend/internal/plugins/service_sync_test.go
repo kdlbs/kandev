@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -216,6 +217,9 @@ func TestServiceSync_MissingInstallPathSetsErrorAndStopsRuntime(t *testing.T) {
 	}
 	if got.Status != StatusError {
 		t.Fatalf("Status after missing-install detection = %q, want %q", got.Status, StatusError)
+	}
+	if got.LastError == "" || got.LastErrorAt == nil || !strings.Contains(got.LastError, "install path") {
+		t.Fatalf("diagnostic after missing-install detection = (%q, %v), want install path/non-nil", got.LastError, got.LastErrorAt)
 	}
 }
 

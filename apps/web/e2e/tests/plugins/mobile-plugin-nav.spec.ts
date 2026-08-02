@@ -8,6 +8,7 @@
  * was always reachable through the settings menu sheet; this covers the
  * plugin's *own* nav item.
  */
+import fs from "node:fs";
 import path from "node:path";
 import type { Browser, BrowserContext, Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
@@ -20,6 +21,15 @@ const PACKAGE_PATH = path.resolve(
   __dirname,
   "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
 );
+
+function pluginExecutablePath(installPath: string): string {
+  const serverDir = path.join(installPath, "server");
+  const executable = fs
+    .readdirSync(serverDir, { withFileTypes: true })
+    .find((entry) => entry.isFile())?.name;
+  if (!executable) throw new Error(`no plugin executable found under ${serverDir}`);
+  return path.join(serverDir, executable);
+}
 
 /** A desktop-sized client against the same backend, for the parity screenshot. */
 async function openDesktopClient(
@@ -111,5 +121,136 @@ test.describe("Mobile plugin navigation", () => {
     await desktop.context.close();
 
     capture.flush();
+  });
+
+  test("retries an errored plugin from the phone settings row", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    await testPage.goto("/settings/plugins");
+    await testPage.getByTestId("install-plugin-trigger").click();
+    await testPage.getByTestId("install-plugin-tab-upload").click();
+    await testPage.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
+    await testPage.getByTestId("install-plugin-upload-submit").click();
+
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 30_000 });
+    const listResponse = await apiClient.rawRequest("GET", "/api/plugins");
+    const listBody = (await listResponse.json()) as {
+      plugins?: Array<{ id: string; install_path: string }>;
+    };
+    const installPath = listBody.plugins?.find((plugin) => plugin.id === PLUGIN_ID)?.install_path;
+    if (!installPath) throw new Error(`plugin ${PLUGIN_ID} install path was not returned`);
+
+    const executablePath = pluginExecutablePath(installPath);
+    const unavailablePath = `${executablePath}.unavailable`;
+    fs.renameSync(executablePath, unavailablePath);
+    try {
+      await backend.restart();
+      await expect
+        .poll(
+          async () => {
+            const response = await apiClient.rawRequest("GET", `/api/plugins/${PLUGIN_ID}`);
+            if (!response.ok) return "missing";
+            return ((await response.json()) as { status?: string }).status ?? "missing";
+          },
+          { timeout: 20_000, intervals: [250, 500, 1000] },
+        )
+        .toBe("error");
+
+      await testPage.goto("/settings/plugins");
+      await expect(pluginRow.getByText("Error", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-error-${PLUGIN_ID}`)).toBeVisible();
+      await expect(pluginRow.getByRole("button", { name: "Enable" })).toBeVisible();
+      expect(
+        (await pluginRow.getByRole("button", { name: "Enable" }).boundingBox())?.height,
+      ).toBeGreaterThanOrEqual(44);
+
+      fs.renameSync(unavailablePath, executablePath);
+      await pluginRow.getByRole("button", { name: "Enable" }).click();
+      await expect(pluginRow.getByText("Active", { exact: true })).toBeVisible({ timeout: 15_000 });
+      await expect(pluginRow.getByTestId(`plugin-error-${PLUGIN_ID}`)).toHaveCount(0);
+    } finally {
+      if (fs.existsSync(unavailablePath) && !fs.existsSync(executablePath)) {
+        fs.renameSync(unavailablePath, executablePath);
+      }
+    }
+  });
+
+  test("wraps a long plugin diagnostic without phone horizontal overflow", async ({
+    testPage,
+    apiClient,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    await testPage.goto("/settings/plugins");
+    await testPage.getByTestId("install-plugin-trigger").click();
+    await testPage.getByTestId("install-plugin-tab-upload").click();
+    await testPage.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
+    await testPage.getByTestId("install-plugin-upload-submit").click();
+
+    const pluginRow = testPage.getByTestId(`plugin-row-${PLUGIN_ID}`);
+    await expect(pluginRow).toBeVisible({ timeout: 30_000 });
+    const listResponse = await apiClient.rawRequest("GET", "/api/plugins");
+    const listBody = (await listResponse.json()) as {
+      plugins?: Array<{ id: string; install_path: string }>;
+    };
+    const installPath = listBody.plugins?.find((plugin) => plugin.id === PLUGIN_ID)?.install_path;
+    if (!installPath) throw new Error(`plugin ${PLUGIN_ID} install path was not returned`);
+
+    const executablePath = pluginExecutablePath(installPath);
+    const unavailablePath = `${executablePath}.unavailable`;
+    fs.renameSync(executablePath, unavailablePath);
+    const longDiagnostic = "X".repeat(2048);
+
+    try {
+      await backend.restart();
+      await expect
+        .poll(
+          async () => {
+            const response = await apiClient.rawRequest("GET", `/api/plugins/${PLUGIN_ID}`);
+            if (!response.ok) return "missing";
+            return ((await response.json()) as { status?: string }).status ?? "missing";
+          },
+          { timeout: 20_000, intervals: [250, 500, 1000] },
+        )
+        .toBe("error");
+
+      await testPage.route("**/api/plugins", async (route) => {
+        const response = await route.fetch();
+        const body = (await response.json()) as {
+          plugins?: Array<Record<string, unknown> & { id?: string }>;
+        };
+        body.plugins = body.plugins?.map((plugin) =>
+          plugin.id === PLUGIN_ID
+            ? {
+                ...plugin,
+                last_error: longDiagnostic,
+                last_error_at: "2026-08-02T12:34:56Z",
+              }
+            : plugin,
+        );
+        await route.fulfill({ response, json: body });
+      });
+
+      await testPage.reload();
+      const diagnostic = pluginRow.getByTestId(`plugin-error-${PLUGIN_ID}`);
+      await expect(diagnostic).toBeVisible({ timeout: 15_000 });
+      await expect(diagnostic.locator("span")).toHaveText(longDiagnostic);
+
+      const hasHorizontalOverflow = await testPage.evaluate(
+        () => document.documentElement.scrollWidth > document.documentElement.clientWidth,
+      );
+      expect(hasHorizontalOverflow).toBe(false);
+    } finally {
+      await testPage.unroute("**/api/plugins").catch(() => undefined);
+      if (fs.existsSync(unavailablePath) && !fs.existsSync(executablePath)) {
+        fs.renameSync(unavailablePath, executablePath);
+      }
+    }
   });
 });

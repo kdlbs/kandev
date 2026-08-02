@@ -15,6 +15,7 @@ import { PluginConfigForm } from "./plugin-config-form";
 import { PluginManifestCard } from "./plugin-manifest-card";
 import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
+import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import { UninstallPluginDialog } from "./uninstall-plugin-dialog";
 import { usePluginActions } from "./use-plugin-actions";
 import { usePluginConfigForm } from "./use-plugin-config-form";
@@ -114,6 +115,7 @@ function PluginDetailHeader({ plugin }: PluginDetailHeaderProps) {
           {plugin.description && (
             <p className="text-sm text-muted-foreground">{plugin.description}</p>
           )}
+          <PluginErrorDiagnostic plugin={plugin} />
         </div>
       </div>
     </div>
@@ -178,7 +180,8 @@ type PluginDangerZoneProps = {
 
 function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
   const busy = actions.busyId === plugin.id;
-  const canEnable = plugin.status === "disabled" || plugin.status === "registered";
+  const canEnable =
+    plugin.status === "disabled" || plugin.status === "registered" || plugin.status === "error";
   const canDisable = plugin.status === "active" || plugin.status === "error";
 
   return (
@@ -187,7 +190,7 @@ function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => actions.handleEnable(plugin)}
         >
@@ -198,7 +201,7 @@ function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
         <Button
           variant="outline"
           size="sm"
-          className="cursor-pointer"
+          className="cursor-pointer min-h-11 sm:min-h-0"
           disabled={busy}
           onClick={() => actions.handleDisable(plugin)}
         >
@@ -208,7 +211,7 @@ function PluginDangerZone({ plugin, actions }: PluginDangerZoneProps) {
       <Button
         variant="ghost"
         size="sm"
-        className="cursor-pointer text-destructive hover:text-destructive"
+        className="cursor-pointer min-h-11 text-destructive hover:text-destructive sm:min-h-0"
         disabled={busy}
         onClick={() => actions.openUninstall(plugin)}
       >

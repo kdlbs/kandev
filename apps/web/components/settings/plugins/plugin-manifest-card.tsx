@@ -112,9 +112,18 @@ function DeclarationList({
 }
 
 /** The manifest-declared fields only — runtime bookkeeping (status, install
- * path, restart counter) is shown elsewhere and just noise here. */
+ * path, restart counter, and failure diagnostic) is shown elsewhere and just
+ * noise here. */
 function manifestOnly(plugin: PluginRecord): Record<string, unknown> {
-  const { status: _s, install_path: _i, restart_count: _r, installed_at: _a, ...manifest } = plugin;
+  const {
+    status: _s,
+    install_path: _i,
+    restart_count: _r,
+    installed_at: _a,
+    last_error: _e,
+    last_error_at: _ea,
+    ...manifest
+  } = plugin;
   return manifest;
 }
 
