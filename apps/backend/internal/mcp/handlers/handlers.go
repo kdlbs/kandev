@@ -3135,6 +3135,15 @@ func (h *Handlers) setTaskInProgressForClarification(
 	ctx context.Context,
 	taskID, sessionID string,
 ) (bool, error) {
+	if h.taskSvc != nil {
+		return h.taskSvc.UpdateTaskStateIfSessionState(
+			ctx,
+			taskID,
+			sessionID,
+			models.TaskSessionStateRunning,
+			v1.TaskStateInProgress,
+		)
+	}
 	if updater, ok := h.taskRepo.(sessionOwnedTaskStateUpdater); ok {
 		_, updated, err := updater.UpdateTaskStateIfSessionState(
 			ctx,

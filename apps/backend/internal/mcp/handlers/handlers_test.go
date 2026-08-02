@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/clarification"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -408,6 +409,39 @@ func TestSessionStateEventsIncludeUpdatedAt(t *testing.T) {
 			assert.Equal(t, updatedSession.UpdatedAt.UTC().Format(time.RFC3339Nano), gotUpdatedAt)
 		})
 	}
+}
+
+func TestSetSessionRunning_PublishesTaskStateBeforeSession(t *testing.T) {
+	svc, repo, eventBus := newTestTaskServiceWithEventBus(t)
+	const taskID = "task-clarification-order"
+	const sessionID = "session-clarification-order"
+	seedMCPHandlerSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	require.NoError(t, repo.UpdateTaskState(context.Background(), taskID, v1.TaskStateReview))
+
+	var published []string
+	sub, err := eventBus.Subscribe(">", func(_ context.Context, event *bus.Event) error {
+		switch event.Type {
+		case events.TaskStateChanged, events.TaskSessionStateChanged:
+			published = append(published, event.Type)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = sub.Unsubscribe() })
+
+	h := &Handlers{
+		taskSvc:     svc,
+		sessionRepo: repo,
+		taskRepo:    repo,
+		eventBus:    eventBus,
+		logger:      testLogger(t).WithFields(),
+	}
+	h.setSessionRunning(context.Background(), taskID, sessionID)
+
+	require.Equal(t, []string{events.TaskStateChanged, events.TaskSessionStateChanged}, published)
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, v1.TaskStateInProgress, task.State)
 }
 
 func TestHandleCreateTask_SubtaskMissingDescription(t *testing.T) {

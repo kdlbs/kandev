@@ -19,6 +19,9 @@ though the task's workflow step and runtime are already active.
 - For a non-Office, unarchived task whose session transitions into `RUNNING`,
   Kandev reconciles the persisted task state to `IN_PROGRESS` before publishing
   that session's `session.state_changed` event.
+- The same ordering applies when an answered `ask_user_question_kandev` call
+  resumes the still-open agent turn directly, without launching a replacement
+  prompt or waiting for a later runtime stream event.
 - When reconciliation changes the task state, observers receive
   `task.state_changed` before `session.state_changed` announces `RUNNING`.
 - The WebSocket gateway consumes both lifecycle notifications through one
@@ -61,6 +64,10 @@ The ordering contract is defined by
 - When a prompt or runtime transition successfully changes an owning session to
   `RUNNING`, the same lifecycle operation reconciles the task to
   `IN_PROGRESS` before exposing the new session state to clients.
+- When a clarification answer wakes a `WAITING_FOR_INPUT` session inside the
+  open MCP call, the clarification lifecycle performs the guarded task
+  reconciliation and publishes its task event before publishing the
+  `RUNNING` session event.
 - When the turn settles and no sibling session is working, existing behavior
   returns the task to `REVIEW`.
 
@@ -81,6 +88,12 @@ The ordering contract is defined by
   `WAITING_FOR_INPUT`, **WHEN** the session accepts a new prompt and transitions
   to `RUNNING`, **THEN** `tasks.state` is `IN_PROGRESS` and
   `task.state_changed` is published before `session.state_changed(RUNNING)`.
+- **GIVEN** a non-Office task in `REVIEW` whose owning session is
+  `WAITING_FOR_INPUT` inside an open `ask_user_question_kandev` call, **WHEN**
+  the user answers and the same agent turn resumes, **THEN** the persisted task
+  becomes `IN_PROGRESS`, WebSocket observers receive `task.state_changed`
+  before `session.state_changed(RUNNING)`, and the State-grouped sidebar moves
+  the task out of `Review` without a page reload.
 - **GIVEN** the sidebar is grouped by State, **WHEN** it observes a session
   transition to `RUNNING`, **THEN** the task is not rendered with a running
   spinner inside the `Review` group.

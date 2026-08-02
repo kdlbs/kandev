@@ -6,6 +6,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { seedClarificationSession } from "../../helpers/clarification";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
+import { SidebarFilterPopoverPage } from "../../pages/sidebar-filter-popover";
 
 /**
  * Seed a task + session with a clarification scenario and navigate to the session page.
@@ -25,6 +26,12 @@ const PLAN_WITH_CLARIFICATION_SCRIPT = [
   'e2e:mcp:kandev:create_task_plan_kandev({"task_id":"{task_id}","content":"## Plan\\n\\nEdit 1 item","title":"Implementation Plan"})',
   "e2e:delay(100)",
   'e2e:mcp:kandev:ask_user_question_kandev({"questions":[{"id":"db","prompt":"Which database should we use?","options":[{"label":"PostgreSQL","description":"Relational"},{"label":"SQLite","description":"Embedded"}]},{"id":"language","prompt":"Which language should we use?","options":[{"label":"Go","description":"Compiled"},{"label":"TypeScript","description":"Web"}]},{"id":"deploy","prompt":"How should we deploy?","options":[{"label":"Docker","description":"Containerized"},{"label":"Bare metal","description":"Direct"}]}]})',
+].join("\n");
+
+const CLARIFICATION_WITH_POST_ANSWER_DELAY_SCRIPT = [
+  'e2e:mcp:kandev:ask_user_question_kandev({"questions":[{"id":"db","prompt":"Which database should we use?","options":[{"label":"PostgreSQL","description":"Relational"},{"label":"SQLite","description":"Embedded"}]}]})',
+  "e2e:delay(5000)",
+  'e2e:message("The clarification answer resumed the active turn.")',
 ].join("\n");
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
@@ -80,6 +87,61 @@ test.describe("Clarification flow", () => {
 
     await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
     await expect(session.chat).toContainText(/You answered|selected_option/);
+  });
+
+  test("moves answered task from Review to In progress without reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Clarification State Group",
+      seedData.agentProfileId,
+      {
+        description: CLARIFICATION_WITH_POST_ANSWER_DELAY_SCRIPT,
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+
+    // The mock agent reaches the clarification call asynchronously. Wait for
+    // the owning session to park before opening the page, then explicitly
+    // establish the Review state that the answer should move it out of.
+    await expect
+      .poll(
+        async () =>
+          (await apiClient.listTaskSessions(task.id)).sessions.find((s) => s.id === task.session_id)
+            ?.state,
+        { timeout: 30_000 },
+      )
+      .toBe("WAITING_FOR_INPUT");
+    await apiClient.updateTaskState(task.id, "REVIEW");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    const filters = new SidebarFilterPopoverPage(testPage);
+    await filters.open();
+    await filters.setGroup("State");
+    await filters.close();
+
+    const reviewGroup = session.sidebar.locator(
+      '[data-testid="sidebar-group-header"][data-group-key="REVIEW"]',
+    );
+    await expect(reviewGroup).toBeVisible();
+
+    await session.clarificationOption("PostgreSQL").click();
+
+    await expect(
+      session.sidebar.locator('[data-testid="sidebar-group-header"][data-group-key="IN_PROGRESS"]'),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(reviewGroup).toHaveCount(0);
   });
 
   test("custom answer accepts multiple lines via Shift+Enter", async ({
