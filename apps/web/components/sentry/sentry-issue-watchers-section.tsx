@@ -13,6 +13,7 @@ import { ResetWatchDialog, useWatchResetController } from "@/components/watches/
 import { SentryIssueWatchTable } from "./sentry-issue-watch-table";
 import { SentryIssueWatchDialog } from "./sentry-issue-watch-dialog";
 import type { SentryIssueWatch } from "@/lib/types/sentry";
+import { useTranslation } from "react-i18next";
 
 // SentryIssueWatchersSection lists watches for the workspace resolved by its
 // parent integration page. Creating a watch is locked to that workspace and
@@ -26,45 +27,46 @@ type RawActions = {
 };
 
 function useToastedActions({ create, update, remove, trigger, reset }: RawActions) {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   const wrappedCreate = useCallback(
     async (req: Parameters<typeof create>[0]) => {
       try {
         await create(req);
-        toast({ description: "Watcher created", variant: "success" });
+        toast({ description: t("sentry:watcherCreated"), variant: "success" });
       } catch (err) {
-        toast({ description: `Create failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("sentry:createFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [create, toast],
+    [create, toast, t],
   );
 
   const wrappedUpdate = useCallback(
     async (id: string, workspaceId: string, req: Parameters<typeof update>[2]) => {
       try {
         await update(id, workspaceId, req);
-        toast({ description: "Watcher updated", variant: "success" });
+        toast({ description: t("sentry:watcherUpdated"), variant: "success" });
       } catch (err) {
-        toast({ description: `Update failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("sentry:updateFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [update, toast],
+    [update, toast, t],
   );
 
   const wrappedDelete = useCallback(
     async (id: string, workspaceId: string) => {
-      if (!confirm("Delete this Sentry watcher?")) return;
+      if (!confirm(t("sentry:deleteThisSentryWatcher"))) return;
       try {
         await remove(id, workspaceId);
-        toast({ description: "Watcher deleted", variant: "success" });
+        toast({ description: t("sentry:watcherDeleted"), variant: "success" });
       } catch (err) {
-        toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("sentry:deleteFailed", { error: String(err) }), variant: "error" });
       }
     },
-    [remove, toast],
+    [remove, toast, t],
   );
 
   const wrappedTrigger = useCallback(
@@ -72,14 +74,17 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
       try {
         const res = await trigger(id, workspaceId);
         const n = res?.published ?? 0;
+        // The old copy hedged with "issue(s)". `count` lets i18next pick the
+        // form, which reads better in English and is the only shape a language
+        // with more than two plural forms can translate.
         const description =
-          n > 0 ? `Found ${n} new issue(s) — tasks will appear shortly.` : "No new issues matched.";
+          n > 0 ? t("sentry:foundNewIssues", { count: n }) : t("sentry:noNewIssuesMatched");
         toast({ description, variant: "success" });
       } catch (err) {
-        toast({ description: `Check failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("sentry:checkFailed", { error: String(err) }), variant: "error" });
       }
     },
-    [trigger, toast],
+    [trigger, toast, t],
   );
 
   const wrappedReset = useCallback(
@@ -90,16 +95,16 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
         toast({
           description:
             n > 0
-              ? `Reset complete — deleted ${n} task(s); next poll will re-import matches.`
-              : "Reset complete — next poll will re-import matches.",
+              ? t("sentry:resetCompleteDeletedTasks", { count: n })
+              : t("sentry:resetCompleteNoTasksDeleted"),
           variant: "success",
         });
       } catch (err) {
-        toast({ description: `Reset failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("sentry:resetFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [reset, toast],
+    [reset, toast, t],
   );
 
   return {
@@ -112,15 +117,18 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
 }
 
 export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const { items, loading, create, update, remove, trigger, previewReset, reset } =
     useSentryIssueWatches(workspaceId);
   const { instances } = useSentryInstances(workspaceId);
   const instanceName = useCallback(
     (id: string) => {
+      // An em dash is a glyph, not copy — it stays out of the catalog. The
+      // resolved name is the user's own instance name, also never translated.
       if (!id) return "—";
-      return instances.find((i) => i.id === id)?.name ?? "(unavailable)";
+      return instances.find((i) => i.id === id)?.name ?? t("sentry:instanceUnavailable");
     },
-    [instances],
+    [instances, t],
   );
   const actions = useToastedActions({ create, update, remove, trigger, reset });
   const saveEnabled = useCallback(
@@ -163,12 +171,12 @@ export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: strin
   return (
     <SettingsSection
       icon={<IconBellRinging className="h-5 w-5" />}
-      title="Sentry watchers"
-      description="Poll a Sentry filter and auto-create a Kandev task for each newly-matching issue."
+      title={t("sentry:sentryWatchers")}
+      description={t("sentry:sentryWatchersDescription")}
       action={
         <Button size="sm" onClick={openCreate} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-1" />
-          New watcher
+          {t("sentry:newWatcher")}
         </Button>
       }
     >
@@ -200,7 +208,7 @@ export function SentryIssueWatchersSection({ workspaceId }: { workspaceId: strin
         <ResetWatchDialog
           open
           onOpenChange={resetCtrl.onOpenChange}
-          integrationLabel="Sentry watcher"
+          integrationLabel={t("sentry:sentryWatcher")}
           previewLoader={resetCtrl.previewLoader}
           onConfirm={resetCtrl.confirmReset}
         />

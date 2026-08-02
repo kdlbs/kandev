@@ -12,6 +12,9 @@ import { Badge } from "@kandev/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { SentryIssueWatch, SentrySearchFilter } from "@/lib/types/sentry";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { formatRelative } from "@/lib/i18n/formats";
 
 type SentryIssueWatchTableProps = {
   watches: SentryIssueWatch[];
@@ -27,21 +30,30 @@ type SentryIssueWatchTableProps = {
   onToggleEnabled: (watch: SentryIssueWatch) => void;
 };
 
-function formatLastPolled(dateStr?: string | null): string {
-  if (!dateStr) return "Never";
-  const ts = new Date(dateStr).getTime();
-  if (Number.isNaN(ts)) return "Never";
-  const diff = Date.now() - ts;
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+// `t` is threaded in rather than read from a hook: this is a plain function, and
+// the guard never inspects a return value, so a literal here would survive lint.
+//
+// The bucket copy now comes from `formatRelative`, which owns the same
+// just-now/m/h/d ladder for every surface and reads the active app locale. Two
+// consequences, both deliberate and matching the Linear and Jira tables: the
+// first bucket reads "just now" rather than "Just now" (it is shared with the
+// rest of the app), and an unparseable timestamp renders empty instead of
+// "NaNm ago".
+function formatLastPolled(t: TFunction, dateStr?: string | null): string {
+  if (!dateStr) return t("sentry:never");
+  return formatRelative(dateStr);
 }
 
 // summarizeFilter renders the structured filter as a short tag-style label
 // the user can scan at a glance.
+//
+// Deliberately NOT translated. This is a filter *expression*, not prose: the
+// `org:` / `project:` / `env:` / `level:` / `status:` / `period:` / `q:` prefixes
+// mirror Sentry's own search syntax, every value is either a slug the user typed
+// or a `SentryLevel` / `SentryStatus` union member that must stay byte-identical
+// to what is on the wire, and the column is rendered in monospace. Same call as
+// the Linear watch table's summary and the Jira table's raw JQL. "(any)" is the
+// empty state of that expression, so it stays with it.
 function summarizeFilter(filter: SentrySearchFilter | undefined): string {
   if (!filter) return "(any)";
   const parts: string[] = [];
@@ -76,6 +88,7 @@ function WatchActions({
   onReset: (id: string, workspaceId: string) => void;
   onDelete: (id: string, workspaceId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-1">
       <Tooltip>
@@ -98,7 +111,7 @@ function WatchActions({
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{watch.enabled ? "Pause" : "Enable"}</TooltipContent>
+        <TooltipContent>{watch.enabled ? t("sentry:pause") : t("sentry:enable")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -114,7 +127,7 @@ function WatchActions({
             <IconRefresh className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Check now</TooltipContent>
+        <TooltipContent>{t("sentry:checkNow")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -123,7 +136,7 @@ function WatchActions({
             size="sm"
             className="h-7 w-7 p-0 cursor-pointer"
             data-testid="watch-reset-button"
-            aria-label="Reset watch"
+            aria-label={t("sentry:resetWatch")}
             onClick={(e) => {
               e.stopPropagation();
               onReset(watch.id, watch.workspaceId);
@@ -132,7 +145,7 @@ function WatchActions({
             <IconRestore className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Reset</TooltipContent>
+        <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -148,7 +161,7 @@ function WatchActions({
             <IconTrash className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("sentry:delete")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -164,10 +177,11 @@ export function SentryIssueWatchTable({
   onReset,
   onToggleEnabled,
 }: SentryIssueWatchTableProps) {
+  const { t } = useTranslation();
   if (watches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
-        No Sentry watchers configured. Create one to auto-create tasks from filtered issues.
+        {t("sentry:noWatchersConfigured")}
       </p>
     );
   }
@@ -176,12 +190,12 @@ export function SentryIssueWatchTable({
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Instance</TableHead>
-          <TableHead>Filter</TableHead>
-          <TableHead>Interval</TableHead>
-          <TableHead>Last Polled</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          <TableHead>{t("sentry:instance")}</TableHead>
+          <TableHead>{t("sentry:filter")}</TableHead>
+          <TableHead>{t("sentry:interval")}</TableHead>
+          <TableHead>{t("sentry:lastPolled")}</TableHead>
+          <TableHead>{t("common:status")}</TableHead>
+          <TableHead className="text-right">{t("sentry:actions")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -204,14 +218,16 @@ export function SentryIssueWatchTable({
               {summarizeFilter(watch.filter)}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {Math.round(watch.pollIntervalSeconds / 60)}m
+              {t("sentry:intervalMinutes", {
+                count: Math.round(watch.pollIntervalSeconds / 60),
+              })}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {formatLastPolled(watch.lastPolledAt)}
+              {formatLastPolled(t, watch.lastPolledAt)}
             </TableCell>
             <TableCell>
               <Badge variant={watch.enabled ? "default" : "secondary"} className="text-xs">
-                {watch.enabled ? "Active" : "Paused"}
+                {watch.enabled ? t("sentry:active") : t("sentry:paused")}
               </Badge>
             </TableCell>
             <TableCell className="text-right">
