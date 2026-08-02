@@ -138,7 +138,7 @@ describe("generateUUID", () => {
     expect(getRandomValues).toHaveBeenCalledOnce();
   });
 
-  it("falls back to a deterministic UUID when Web Crypto is unavailable", () => {
+  it("falls back to a UUID-shaped value when Web Crypto is unavailable", () => {
     vi.stubGlobal("crypto", {});
     const id = generateUUID();
     expect(id).toMatch(UUID_V4_REGEX);
