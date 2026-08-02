@@ -133,6 +133,7 @@ ui:                                            # Native frontend plugin (see "Fr
 status: "active"
 version: "1.0.0"
 install_path: "~/.kandev/plugins/kandev-plugin-slack/1.0.0"
+signed: false
 installed_at: "2026-04-26T10:00:00Z"
 restart_count: 0
 last_error: null
@@ -648,8 +649,8 @@ complete.
 ## Persistence guarantees
 
 - Plugin installation records (`id`, `version`, `install_path`, capabilities, status,
-  `last_error`, `last_error_at`) persist to disk under `~/.kandev/plugins/<id>/` and
-  survive backend restarts.
+  `signed`, `last_error`, `last_error_at`) persist to disk as
+  `~/.kandev/plugins/<id>.yml` and survive backend restarts.
 - Extracted plugin packages persist at `~/.kandev/plugins/<id>/<version>/` until
   uninstall.
 - Plugin state in SQLite survives restarts.

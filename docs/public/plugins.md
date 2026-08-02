@@ -116,8 +116,8 @@ Either path runs the same pipeline:
 3. Parse and validate `manifest.yaml` **before any code runs**: schema, `id`
    pattern, the `categories` and UI-surface enums, and that
    `runtime.executables` contains an entry for the host's OS/arch.
-4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the
-   installation.
+4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the installation
+   in `~/.kandev/plugins/<id>.yml`.
 5. Spawn the platform-matched binary and complete the go-plugin handshake.
    Status is `registered` while this is pending, `active` once the
    handshake succeeds, or `error` if spawn/handshake fails (the operator can
@@ -227,7 +227,7 @@ identically to an unsigned one; signing is not required in v1.
 
 ```
 ~/.kandev/plugins/
-├── <id>.yml                    # registration record (status, install_path, last_error, ...)
+├── <id>.yml                    # registration record (signed, status, install_path, last_error, last_error_at, ...)
 ├── <id>.config.yml             # operator-editable config (PATCH /api/plugins/{id})
 └── <id>/
     ├── <version>/              # extracted package (InstallPath)
@@ -238,6 +238,11 @@ identically to an unsigned one; signing is not required in v1.
 ```
 
 </details>
+
+Each `<id>.yml` registration record stores the installed package metadata and
+host-managed runtime fields, including `signed`, `last_error`, and
+`last_error_at`. The diagnostic fields are empty until a runtime failure is
+recorded and are cleared after successful recovery.
 
 ## Security posture
 

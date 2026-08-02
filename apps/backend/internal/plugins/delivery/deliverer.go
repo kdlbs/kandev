@@ -405,7 +405,6 @@ type pluginWorker struct {
 	mu              sync.Mutex
 	subs            []bus.Subscription
 	status          string
-	overflowMu      sync.Mutex
 	overflowLogAt   time.Time
 	overflowLogSet  bool
 	overflowDropped int
@@ -513,7 +512,6 @@ func (w *pluginWorker) process(d Delivery) {
 // since the previous warning.
 func (w *pluginWorker) logOverflow(dropped string) {
 	now := w.deps.nowFn().UTC()
-	w.overflowMu.Lock()
 	w.overflowDropped++
 	count := w.overflowDropped
 	shouldLog := !w.overflowLogSet || !now.Before(w.overflowLogAt.Add(w.deps.overflowLogInterval))
@@ -522,7 +520,6 @@ func (w *pluginWorker) logOverflow(dropped string) {
 		w.overflowLogAt = now
 		w.overflowLogSet = true
 	}
-	w.overflowMu.Unlock()
 
 	if !shouldLog {
 		return

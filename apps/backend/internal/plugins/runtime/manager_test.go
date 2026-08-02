@@ -519,6 +519,7 @@ func TestManager_ConcurrentEnableDuringRestartExhaustionDoesNotDeadlock(t *testi
 		<-releaseCallback
 		_ = m.RestartCount(id)
 	}, testLogger(t))
+	t.Cleanup(m.StopAll)
 
 	const id = "deadlock-plugin"
 	p := newProcess(id, testLogger(t), nil, m.onStatusChange)

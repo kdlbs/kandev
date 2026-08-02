@@ -28,7 +28,7 @@ needed to hand off the repair confidently.
 ## Acceptance
 
 - Public docs validation passes.
-- Backend targeted tests, web tests/typecheck/lint, and plugin E2E checks pass,
+- Backend targeted tests, web tests, type checking, linting, and plugin E2E checks pass,
   including the concurrent runtime barrier and phone overflow assertions.
 - Backend formatting and required repository gates pass, or any environment
   limitation is recorded explicitly in the handoff.

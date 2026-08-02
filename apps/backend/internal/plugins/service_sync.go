@@ -273,6 +273,12 @@ func (s *Service) scanMissingInstalls() []string {
 		}
 		if _, err := os.Stat(rec.InstallPath); err == nil {
 			continue
+		} else if !os.IsNotExist(err) {
+			s.log.Warn("plugins: sync could not inspect install path",
+				zap.String("plugin_id", rec.ID),
+				zap.String("path", rec.InstallPath),
+				zap.Error(err))
+			continue
 		}
 		if s.runtime != nil && s.runtime.Running(rec.ID) {
 			s.runtime.Stop(rec.ID)

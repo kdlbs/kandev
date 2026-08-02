@@ -16,7 +16,8 @@ import (
 //
 // Get and List return copies of the stored *store.Record so callers cannot
 // mutate registry state by holding onto a returned pointer; all writes go
-// through Add / Remove / SetRuntimeState / SetAutoUpdate / SetRestartCount.
+// through Add / Remove / SetStatus / SetRuntimeState / SetAutoUpdate /
+// SetRestartCount.
 type Registry struct {
 	mu   sync.RWMutex
 	byID map[string]*store.Record
@@ -154,6 +155,10 @@ func (r *Registry) SetRuntimeState(id string, status Status, lastError string, l
 
 func cloneRecord(rec *store.Record) *store.Record {
 	clone := *rec
+	if rec.AutoUpdate != nil {
+		autoUpdate := *rec.AutoUpdate
+		clone.AutoUpdate = &autoUpdate
+	}
 	if rec.LastErrorAt != nil {
 		at := *rec.LastErrorAt
 		clone.LastErrorAt = &at

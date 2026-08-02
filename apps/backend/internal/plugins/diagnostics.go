@@ -4,6 +4,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -15,10 +16,14 @@ const maxPluginErrorBytes = 2048
 
 var (
 	pluginBearerTokenPattern   = regexp.MustCompile(`(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+`)
-	pluginLabeledSecretPattern = regexp.MustCompile(`(?i)\b(password|passwd|passphrase|secret|token|api[_ -]?(?:key|token|secret)|access[_ -]?token|refresh[_ -]?token|pat)\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`)
+	pluginLabeledSecretPattern = regexp.MustCompile(`(?i)\b((?:[A-Za-z0-9]+[_-])*(?:password|passwd|passphrase|secret|token|api[_ -]?(?:key|token|secret)|access[_ -]?token|refresh[_ -]?token|pat))\b(\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)`)
 	pluginPATPattern           = regexp.MustCompile(`\b(?:github_pat_[A-Za-z0-9_]+|gh[pousr]_[A-Za-z0-9]+|glpat-[A-Za-z0-9_-]+)\b`)
 	pluginHomePathPattern      = regexp.MustCompile(`(/Users/[^/\s]+|/home/[^/\s]+|/root)(/|$)`)
 	pluginWindowsHomePattern   = regexp.MustCompile(`(?i)([A-Za-z]:[/\\]Users[/\\][^/\\\s]+)([/\\]|$)`)
+	pluginURLCredentialPattern = regexp.MustCompile(`(?i)(https?|ftp)://[^:@/\s]+:[^@/\s]+@`)
+
+	pluginHomePatternOnce   sync.Once
+	cachedPluginHomePattern *regexp.Regexp
 )
 
 // normalizePluginError turns a runtime failure into a compact, single-line
@@ -50,12 +55,17 @@ func truncatePluginError(message string) string {
 }
 
 func redactPluginError(message string) string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/" {
-		homePattern := regexp.MustCompile(regexp.QuoteMeta(home) + `([/\\]|$)`)
-		message = homePattern.ReplaceAllString(message, "~$1")
+	pluginHomePatternOnce.Do(func() {
+		if home, err := os.UserHomeDir(); err == nil && home != "" && home != "/" {
+			cachedPluginHomePattern = regexp.MustCompile(regexp.QuoteMeta(home) + `([/\\]|$)`)
+		}
+	})
+	if cachedPluginHomePattern != nil {
+		message = cachedPluginHomePattern.ReplaceAllString(message, "~$1")
 	}
 	message = pluginHomePathPattern.ReplaceAllString(message, "~$2")
 	message = pluginWindowsHomePattern.ReplaceAllString(message, "~$2")
+	message = pluginURLCredentialPattern.ReplaceAllString(message, "${1}://[REDACTED]@")
 	message = pluginBearerTokenPattern.ReplaceAllString(message, "Bearer [REDACTED]")
 	message = pluginLabeledSecretPattern.ReplaceAllString(message, "${1}${2}[REDACTED]")
 	message = pluginPATPattern.ReplaceAllString(message, "[REDACTED]")

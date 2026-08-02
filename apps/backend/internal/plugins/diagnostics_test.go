@@ -37,13 +37,15 @@ func TestNormalizePluginErrorRedactsCredentialsAndHomePath(t *testing.T) {
 	}
 
 	const (
-		classicPAT = "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB"
-		bearer     = "eyJhbGciOiJIUzI1NiJ9.super-secret-signature"
-		password   = "hunter2-rocks"
-		token      = "plugin-token-value"
-		secret     = "s3cret-value"
-		apiKey     = "key-value-123"
-		apiToken   = "api-token-value"
+		classicPAT   = "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB"
+		bearer       = "eyJhbGciOiJIUzI1NiJ9.super-secret-signature"
+		password     = "hunter2-rocks"
+		token        = "plugin-token-value"
+		secret       = "s3cret-value"
+		apiKey       = "key-value-123"
+		apiToken     = "api-token-value"
+		clientSecret = "client-secret-value"
+		urlPassword  = "url-password-value"
 	)
 	cases := []struct {
 		name   string
@@ -68,6 +70,18 @@ func TestNormalizePluginErrorRedactsCredentialsAndHomePath(t *testing.T) {
 			input:  "password=" + password + " token: " + token + " secret='" + secret + "' api_key=\"" + apiKey + "\" api_token=" + apiToken,
 			secret: []string{password, token, secret, apiKey, apiToken},
 			want:   "[REDACTED]",
+		},
+		{
+			name:   "compound labeled secret",
+			input:  "plugin failed with client_secret=" + clientSecret,
+			secret: []string{clientSecret},
+			want:   "client_secret=[REDACTED]",
+		},
+		{
+			name:   "URL credentials",
+			input:  "dial failed: https://admin:" + urlPassword + "@internal.example/api",
+			secret: []string{urlPassword},
+			want:   "https://[REDACTED]@internal.example/api",
 		},
 		{
 			name:   "home path",

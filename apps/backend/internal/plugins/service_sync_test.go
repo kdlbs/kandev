@@ -223,6 +223,28 @@ func TestServiceSync_MissingInstallPathSetsErrorAndStopsRuntime(t *testing.T) {
 	}
 }
 
+func TestServiceSync_StatErrorDoesNotMarkInstallMissing(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	rec := installTestPlugin(t, svc, "kandev-plugin-stat-error")
+	rec.InstallPath = "\x00"
+	svc.registry.Add(rec)
+
+	result, err := svc.Sync(context.Background())
+	if err != nil {
+		t.Fatalf("Sync() unexpected error: %v", err)
+	}
+	if len(result.Missing) != 0 {
+		t.Fatalf("Sync().Missing = %v, want none for a non-NotExist stat error", result.Missing)
+	}
+	got, err := svc.Get("kandev-plugin-stat-error")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if got.Status != StatusActive {
+		t.Fatalf("Status after stat error = %q, want %q", got.Status, StatusActive)
+	}
+}
+
 // TestServiceSync_MissingInstallAlreadyErrorIsIdempotent proves the "direct
 // status write if transition invalid" fallback: once a plugin is already
 // StatusError, canTransition(error, error) is false (SetStatus rejects
