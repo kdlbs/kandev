@@ -249,6 +249,14 @@
     {
       "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
       "path": "apps/backend/internal/utility/handlers/handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/diagnostic_acp_exporter.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/mcp/handlers/diagnostic_bundle.go"
     }
   ]
 }
