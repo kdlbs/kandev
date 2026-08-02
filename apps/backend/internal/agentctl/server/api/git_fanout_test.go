@@ -73,7 +73,7 @@ func TestFanOutReposRunsConcurrently(t *testing.T) {
 func TestFanOutReposRespectsLimit(t *testing.T) {
 	const capacity = 3
 	restore := subproc.Git().SetCapForTest(capacity)
-	defer restore()
+	t.Cleanup(restore)
 	subpaths := make([]string, capacity+4)
 	for i := range subpaths {
 		subpaths[i] = fmt.Sprintf("repo%d", i)

@@ -558,10 +558,17 @@ func (wt *WorkspaceTracker) ApplyFileDiff(ctx context.Context, reqPath, unifiedD
 	}()
 
 	// Use git apply to apply the patch directly to the file
-	cmd := subproc.NewGitCommand(ctx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
-	cmd.Dir = wt.workDir
-
-	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitInteractive, cmd)
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, "apply", "-p0", "--unidiff-zero", "--whitespace=nowarn", patchFile)
+			cmd.Dir = wt.workDir
+			return cmd
+		},
+	)
+	err = gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		// Treat caller cancellation / deadline as a transient failure and
 		// propagate rather than overwriting the file from desiredContent —
@@ -912,10 +919,18 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 	// Preflight: check blob size before materializing content to avoid memory spikes.
 	// Use CombinedOutput to capture stderr for error detection (git writes errors to stderr).
 	// Set LC_ALL=C to ensure English error messages for reliable parsing.
-	sizeCmd := subproc.NewGitCommand(ctx, "cat-file", "-s", gitRef)
-	sizeCmd.Dir = wt.workDir
-	sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
-	sizeOut, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitInteractive, sizeCmd)
+	sizeOut, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			sizeCmd := subproc.NewGitCommand(execCtx, "cat-file", "-s", gitRef)
+			sizeCmd.Dir = wt.workDir
+			sizeCmd.Env = append(os.Environ(), "LC_ALL=C")
+			return sizeCmd
+		},
+	)
+	err := gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		output := string(sizeOut)
 		if strings.Contains(output, "does not exist") ||
@@ -934,10 +949,17 @@ func (wt *WorkspaceTracker) GetFileContentAtRef(ctx context.Context, reqPath str
 		return "", blobSize, false, fmt.Errorf("file too large (max 10MB)")
 	}
 
-	cmd := subproc.NewGitCommand(ctx, "show", gitRef)
-	cmd.Dir = wt.workDir
-
-	content, err := subproc.RunGitOutputClass(ctx, subproc.GitInteractive, cmd)
+	content, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, "show", gitRef)
+			cmd.Dir = wt.workDir
+			return cmd
+		},
+	)
+	err = gitCommandError(runErr, execCtxErr)
 	if err != nil {
 		return "", 0, false, fmt.Errorf("failed to get file at ref: %w", err)
 	}

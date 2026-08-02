@@ -152,8 +152,9 @@ func readCurrentBranchForLocal(workDir string) string {
 	// fall through to a same-branch-checkout that touches the working tree.
 	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancelAcquire()
-	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+	out, runErr, execCtxErr := subproc.RunGitOutputAfterAcquireWithExecutionContext(
 		acquireCtx,
+		context.Background(),
 		subproc.GitLifecycle,
 		5*time.Second,
 		func(execCtx context.Context) *exec.Cmd {

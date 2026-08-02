@@ -195,7 +195,7 @@ func TestClassAdmissionCancellationWinsReleaseBoundary(t *testing.T) {
 	}
 }
 
-func TestClassAdmissionCancellationDoesNotCountAsAcquire(t *testing.T) {
+func TestClassAdmissionCancellationCountsAggregateAndClassAttempt(t *testing.T) {
 	pool := NewNamedClassThrottle("class-cancel-metrics-"+t.Name(), 1)
 	hold, err := pool.AcquireClass(context.Background(), GitInteractive)
 	if err != nil {
@@ -217,11 +217,11 @@ func TestClassAdmissionCancellationDoesNotCountAsAcquire(t *testing.T) {
 		t.Fatalf("canceled acquire = %v, want context.Canceled", acquireErr)
 	}
 
-	if got := metricInt(subprocAcquireTotal, pool.name); got != beforeAggregate {
-		t.Fatalf("aggregate acquire total = %d, want unchanged %d", got, beforeAggregate)
+	if got := metricInt(subprocAcquireTotal, pool.name); got != beforeAggregate+1 {
+		t.Fatalf("aggregate acquire total = %d, want %d", got, beforeAggregate+1)
 	}
-	if got := metricInt(subprocClassAcquireTotal, classMetricKey(pool.name, GitLifecycle)); got != beforeClass {
-		t.Fatalf("lifecycle acquire total = %d, want unchanged %d", got, beforeClass)
+	if got := metricInt(subprocClassAcquireTotal, classMetricKey(pool.name, GitLifecycle)); got != beforeClass+1 {
+		t.Fatalf("lifecycle acquire total = %d, want %d", got, beforeClass+1)
 	}
 }
 
@@ -385,6 +385,53 @@ func TestRunGitOutputAfterAcquireStartsTimeoutAfterAdmission(t *testing.T) {
 	case <-started:
 	default:
 		t.Fatal("command builder did not run after admission")
+	}
+}
+
+func TestRunGitOutputAfterAcquireWithExecutionContextDetachesAdmissionDeadline(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("uses POSIX `true` binary as a no-op subprocess")
+	}
+	restore := Git().SetCapForTest(1)
+	t.Cleanup(restore)
+	hold, err := AcquireGit(context.Background(), GitInteractive)
+	if err != nil {
+		t.Fatalf("hold slot: %v", err)
+	}
+
+	acquireCtx, cancelAcquire := context.WithTimeout(context.Background(), 350*time.Millisecond)
+	t.Cleanup(cancelAcquire)
+	var remaining time.Duration
+	resultCh := make(chan error, 1)
+	go func() {
+		_, runErr, execErr := RunGitOutputAfterAcquireWithExecutionContext(
+			acquireCtx,
+			context.Background(),
+			GitInteractive,
+			100*time.Millisecond,
+			func(execCtx context.Context) *exec.Cmd {
+				if deadline, ok := execCtx.Deadline(); ok {
+					remaining = time.Until(deadline)
+				}
+				return exec.CommandContext(execCtx, "true")
+			},
+		)
+		if runErr != nil {
+			resultCh <- runErr
+			return
+		}
+		resultCh <- execErr
+	}()
+	waitForClassWaiters(t, Git(), GitInteractive, 1)
+	timer := time.NewTimer(300 * time.Millisecond)
+	<-timer.C
+	hold()
+
+	if err := <-resultCh; err != nil {
+		t.Fatalf("queued command failed: %v", err)
+	}
+	if remaining < 80*time.Millisecond {
+		t.Fatalf("execution deadline has only %v remaining; admission deadline leaked into execution", remaining)
 	}
 }
 

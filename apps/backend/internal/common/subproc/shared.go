@@ -102,8 +102,9 @@ func RunGitCombinedOutputClass(ctx context.Context, class GitWorkClass, cmd *exe
 	return cmd.CombinedOutput()
 }
 
-// RunGitOutputClass is RunGitClass's Output sibling. stderr ends up in
-// (*exec.ExitError).Stderr when set by the caller.
+// RunGitOutputClass is RunGitClass's Output sibling. Stderr is captured in
+// (*exec.ExitError).Stderr only when cmd.Stderr is left nil; callers that set
+// cmd.Stderr must read it from their provided writer.
 func RunGitOutputClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) ([]byte, error) {
 	release, err := gitThrottle.AcquireClass(ctx, class)
 	if err != nil {
@@ -135,19 +136,35 @@ func RunGitCombinedAfterAcquire(
 
 // RunGitOutputAfterAcquire is RunGitCombinedAfterAcquire's Output sibling.
 // The command is built only after admission, and stderr retains exec.Cmd's
-// standard Output behavior through *exec.ExitError.Stderr.
+// standard Output behavior through *exec.ExitError.Stderr. The acquisition
+// context also owns the execution deadline; use
+// RunGitOutputAfterAcquireWithExecutionContext when those lifetimes differ.
 func RunGitOutputAfterAcquire(
 	ctx context.Context,
 	class GitWorkClass,
 	execTimeout time.Duration,
 	build func(execCtx context.Context) *exec.Cmd,
 ) ([]byte, error, error) {
-	release, err := gitThrottle.AcquireClass(ctx, class)
+	return RunGitOutputAfterAcquireWithExecutionContext(ctx, ctx, class, execTimeout, build)
+}
+
+// RunGitOutputAfterAcquireWithExecutionContext admits using acquireCtx, then
+// starts the command timeout from execBaseCtx only after a slot is granted.
+// This is useful for best-effort probes that need a bounded queue wait but
+// must not inherit the queue deadline as their execution deadline.
+func RunGitOutputAfterAcquireWithExecutionContext(
+	acquireCtx context.Context,
+	execBaseCtx context.Context,
+	class GitWorkClass,
+	execTimeout time.Duration,
+	build func(execCtx context.Context) *exec.Cmd,
+) ([]byte, error, error) {
+	release, err := gitThrottle.AcquireClass(acquireCtx, class)
 	if err != nil {
 		return nil, wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	execCtx, cancel := withExecTimeout(execBaseCtx, execTimeout)
 	defer cancel()
 	out, runErr := build(execCtx).Output()
 	return out, runErr, execCtx.Err()

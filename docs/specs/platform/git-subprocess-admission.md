@@ -85,7 +85,7 @@ dedicated capacity seam without weakening production classification.
 
 - Existing aggregate Git subprocess metrics remain available for compatibility.
 - Admission metrics additionally expose, per class: active work, waiters,
-  successful acquisitions, and cumulative admission wait time.
+  admission attempts, and cumulative admission wait time.
 - The agentctl control server exposes its process-wide admission snapshot through
   an authenticated debug endpoint.
 - Admission state is in-memory and resets when its owning process restarts.

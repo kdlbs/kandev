@@ -200,6 +200,11 @@ Client (WS) ← Orchestrator ← Lifecycle Manager ←──── stream update
 
 - Provider pattern for DI; stderr for logs, stdout for ACP only.
 - Pass context through chains; event bus for cross-component comm.
+- Production Git commands must use `subproc.NewGitCommand` with a classified
+  `subproc.RunGit*` helper, or hold a classified admission slot across
+  streaming `Start`/`Wait`. Do not construct raw Git commands outside
+  `internal/common/subproc`; choose `interactive`, `lifecycle`, or `background`
+  explicitly for each operation.
 - **Event-bus wildcard parity:** New NATS wildcard subscriptions must verify equivalent `MemoryEventBus` semantics in `go test ./internal/events/bus`.
 - **Repository provider identity:** Provider-backed repositories are keyed by workspace, provider, normalized `provider_host` origin, full owner/namespace, and name. Persist `provider_host` when importing or resolving a remote; do not infer self-managed GitLab rows from owner/name alone. Legacy rows with an empty host have unknown identity and must fail closed for provider write/link operations.
 - **Execution access:** Workspace-oriented handlers (files, shell, inference, ports, vscode, LSP) MUST use `GetOrEnsureExecution(ctx, sessionID)` — it recovers from backend restarts by creating executions on-demand. Only use `GetExecutionBySessionID` for operations that require a running agent process (prompt, cancel, mode).

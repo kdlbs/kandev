@@ -254,6 +254,7 @@ func (a *classAdmission) discardCanceledLocked(waiter *classWaiter) {
 	waiter.canceled = true
 	a.owner.incWaiters(-1)
 	addClassWaiters(a.owner.name, gitWorkClassOrder[waiter.class], -1)
+	a.recordAcquireLocked(gitWorkClassOrder[waiter.class], time.Since(waiter.enqueuedAt))
 }
 
 func (a *classAdmission) recordAcquireLocked(class GitWorkClass, wait time.Duration) {

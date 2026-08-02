@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"regexp"
 	"strings"
 
@@ -148,8 +149,18 @@ func discardLocalChanges(ctx context.Context, repoPath string) error {
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := subproc.NewGitCommand(ctx, args...)
-	cmd.Dir = dir
-	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitInteractive, cmd)
-	return strings.TrimSpace(string(out)), err
+	out, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		branchFetchTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = dir
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
+	}
+	return strings.TrimSpace(string(out)), runErr
 }
