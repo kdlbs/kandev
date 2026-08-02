@@ -54,6 +54,26 @@ const CLEANUP_POLICY_KEYS: Record<string, string> = {
   never: "azuredevops:cleanupNever",
 };
 
+/**
+ * Sentence-cased labels for the watch card's status line. The map key is the
+ * Azure DevOps pull-request status sent on the wire; `all` shares the label used
+ * when no status is set, since both mean "not filtered by status". The editor's
+ * menu items use the standalone (capitalized) forms instead.
+ */
+const WATCH_STATUS_KEYS: Record<string, string> = {
+  active: "azuredevops:watchStatusActive",
+  completed: "azuredevops:watchStatusCompleted",
+  abandoned: "azuredevops:watchStatusAbandoned",
+  all: "azuredevops:pullRequestAny",
+};
+
+/** An unrecognized status is echoed verbatim rather than blanked. */
+function watchStatusLabel(t: Translate, status: string | undefined): string {
+  if (!status) return t("azuredevops:pullRequestAny");
+  const key = WATCH_STATUS_KEYS[status];
+  return key ? t(key) : status;
+}
+
 function formatLastChecked(t: Translate, value?: string | null): string {
   if (!value) return t("azuredevops:notCheckedYet");
   const date = new Date(value);
@@ -222,8 +242,7 @@ function WatchCard({
         {kind === "pull-request" && (
           <div className="text-xs text-muted-foreground">
             {t("azuredevops:statusLine", {
-              status:
-                (watch as AzureDevOpsPullRequestWatch).status || t("azuredevops:pullRequestAny"),
+              status: watchStatusLabel(t, (watch as AzureDevOpsPullRequestWatch).status),
             })}
           </div>
         )}
