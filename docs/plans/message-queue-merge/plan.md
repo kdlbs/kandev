@@ -65,7 +65,11 @@ that expose it, then the frontend API/hook/components, then E2E.
          replaced by the union of both entries' reference lists, deduplicated
          by canonical `ref` (`normalizeEntityReferences`-style dedupe — reuse
          the existing `MetadataEntityReferences` key; see `types.go` and the
-         memory repo's `applyMetadataUpdates`).
+         memory repo's `applyMetadataUpdates`). The deduplicated union must
+         not exceed the shared per-message cap
+         (`entityrefs.MaxReferencesPerMessage`): an over-cap union fails with
+         `ErrMergeReferenceOverflow` before either row is written, leaving
+         both entries unchanged (atomic rejection, sqlite and memory alike).
     5. `UPDATE` the target row (content/attachments/metadata, scoped by
        `id` + `session_id`), then `DELETE` the source row (scoped the same),
        then commit. Return the merged target entry.
@@ -117,12 +121,15 @@ that expose it, then the frontend API/hook/components, then E2E.
 
 - `queued-ghost-message.tsx`
   - Export a mergeability helper:
-    `canMergeEntry(entry)` → sender kind is `"user"` or `"agent"`;
-    `canMergeWithAbove(entry, above)` → both mergeable and same sender kind.
-    Reuse the existing `senderKindOf`.
+    `canMergeEntry(entry)` → sender kind is `"user"` or `"agent"`, plus — for
+    agent entries — a non-empty `metadata[sender_task_id]`; `canMergeWithAbove(entry,
+    above)` → both mergeable and same sender kind **and** equal non-empty
+    `sender_task_id` values for agent entries (mirrors the backend
+    `mergeAllowed` rule so the UI never offers a merge the backend will
+    reject). Reuse the existing `senderKindOf`.
   - Add optional `canMerge: boolean` + `onMerge: () => void | Promise<void>`
     props to `QueuedGhostMessage`; pass through to `DisplayView`.
-  - Render a **Merge with above** ghost button (title `Merge with above`,
+  - Render a **Merge with above** ghost button (title `t("chat:mergeWithAbove")`,
     `data-testid="queue-entry-merge"`, `IconArrowMerge` from
     `@tabler/icons-react`, same styling as Edit/Remove) before the Edit
     button, only when `canMerge` and the row is not in edit mode.
@@ -131,8 +138,9 @@ that expose it, then the frontend API/hook/components, then E2E.
     `canMergeWithAbove(entry, entries[index - 1])` and pass
     `onMerge={() => onMerge(entry.id)}`.
   - Thread `onMerge` through `QueuePanelProps` and `useQueuePanelHandlers` (new
-    `handleMerge` → `mergeEntry` + `toast.error("Failed to merge queued messages.")`
-    on failure, matching `handleRemove`).
+    `handleMerge` → `mergeEntry`; on failure, `toast.error(t("chat:failedToMergeQueuedMessages"))`
+    or, for an over-cap reference union, `toast.error(t("chat:mergeReferenceOverflow"))`,
+    matching `handleRemove`).
   - Pull `mergeEntry` from `useQueue(sessionId)` in `QueueAffordance`.
 
 ## Tests
@@ -155,6 +163,13 @@ that expose it, then the frontend API/hook/components, then E2E.
   different `sender_task_id` → `ErrNoMergeTarget`.
 - **Repository — ownership guard** (`repository_sqlite_merge_test.go`): user merge
   with caller `queuedBy` not equal to both rows → `ErrNoMergeTarget`.
+- **Repository — reference overflow rejected atomically**
+  (`repository_sqlite_merge_test.go`, `repository_postgres_merge_test.go`,
+  `service_test.go`): a deduplicated reference union over
+  `entityrefs.MaxReferencesPerMessage` → `ErrMergeReferenceOverflow`, both
+  rows' content/attachments/references unchanged, queue count unchanged
+  (sqlite, postgres, and in-memory repositories all assert the target is
+  untouched on the rejected path).
 - **Repository — missing source** (`repository_sqlite_merge_test.go`): drained source
   id → `ErrEntryNotFound`.
 - **Repository — reserved in-flight target** (`repository_sqlite_merge_test.go`): a
@@ -205,13 +220,25 @@ Wave 4:
 ```
 
 All four tasks execute sequentially in the primary conversation. The default is
-sequential; `task-01` and `task-03` touch disjoint files and are the only
-parallel-safe candidates, but no subagents run unless the user explicitly asks.
+sequential; `task-01` and `task-03` touch disjoint files and are parallel-safe
+candidates **only with a frozen backend contract** — task-03 consumes the
+`message.queue.merge` WS action and `mergeEntry` hook from task-02, so it must
+not merge before task-02 lands. No subagents run unless the user explicitly
+asks.
 
 ## Verification commands
 
-- `make fmt`
-- `make typecheck test lint` (from repo root per AGENTS.md)
-- Targeted Go: `cd apps/backend && go test -race ./internal/orchestrator/messagequeue/... ./internal/orchestrator/handlers/...`
-- Targeted frontend: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/queued-ghost-message.test.tsx components/task/chat/queued-ghost-list.test.tsx`
-- E2E: `cd apps/web && pnpm e2e:run --host tests/chat/message-queue.spec.ts --project=chromium`
+All commands pass on the final head (`2b657e61d`, 2026-08-02); CI run
+[#30742525141](https://github.com/kdlbs/kandev/actions/runs/30742525141)
+(Frontend: lint, i18n checks + ratchet, tests, build — ✓) and
+[#30742525164](https://github.com/kdlbs/kandev/actions/runs/30742525164)
+(Backend: gofmt, golangci-lint, `go test -race` incl. Postgres — ✓), E2E
+[#30742525129](https://github.com/kdlbs/kandev/actions/runs/30742525129) (all
+14 shards + containers + desktop smoke — ✓).
+
+- `make fmt` — ✓ 2026-08-02 (gofmt clean on changed Go files)
+- `make typecheck test lint` (from repo root per AGENTS.md) — ✓ via CI runs
+  above
+- Targeted Go: `cd apps/backend && go test -race ./internal/orchestrator/messagequeue/... ./internal/orchestrator/handlers/...` — ✓ 2026-08-02
+- Targeted frontend: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/queued-ghost-message.test.tsx components/task/chat/queued-ghost-list.test.tsx` — ✓ 2026-08-02
+- E2E: `cd apps/web && pnpm e2e:run --host tests/chat/message-queue.spec.ts --project=chromium` — ✓ 2026-08-02 (in E2E CI shards above)
