@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { WorkflowStep } from "@/lib/types/http";
-import { SessionConfigEditor } from "./workflow-session-config-editor";
+import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-config-editor";
 
 const CODEX_AGENT = "codex";
+const GROK_AGENT = "grok";
 const EFFORT_OPTION = "reasoning_effort";
 const MODEL_ID = "gpt-5.6-sol";
 
@@ -44,6 +45,17 @@ vi.mock("@/hooks/domains/settings/use-available-agents", () => ({
           supports_dynamic_models: true,
         },
       },
+      {
+        name: GROK_AGENT,
+        display_name: "Grok",
+        model_config: {
+          default_model: "grok-4",
+          current_model_id: "grok-4",
+          available_models: [{ id: "grok-4", name: "Grok 4" }],
+          config_options: [],
+          supports_dynamic_models: true,
+        },
+      },
     ],
   }),
 }));
@@ -63,34 +75,63 @@ function step(id: string, position: number, events?: WorkflowStep["events"]): Wo
   };
 }
 
+function SessionConfigEditorHarness({
+  currentStep,
+  steps,
+  onUpdate,
+}: {
+  currentStep: WorkflowStep;
+  steps: WorkflowStep[];
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+}) {
+  return (
+    <>
+      <SessionConfigToggle step={currentStep} onUpdate={onUpdate} readOnly={false} />
+      <SessionConfigEditor step={currentStep} steps={steps} onUpdate={onUpdate} readOnly={false} />
+    </>
+  );
+}
+
 describe("SessionConfigEditor", () => {
-  it("adds a conditional rule and exposes the model settings picker", () => {
+  it("keeps conditional settings hidden until the header toggle is enabled", () => {
     const onUpdate = vi.fn();
-    render(
-      <SessionConfigEditor
-        step={step("work", 0)}
-        steps={[step("work", 0)]}
+    const currentStep = step("work", 0);
+    const { rerender } = render(
+      <SessionConfigEditorHarness
+        currentStep={currentStep}
+        steps={[currentStep]}
         onUpdate={onUpdate}
-        readOnly={false}
       />,
     );
 
-    fireEvent.click(screen.getByLabelText("Configure original session"));
+    expect(screen.queryByTestId("work-session-config-editor")).toBeNull();
+    const toggle = screen.getByLabelText("Override original session options");
+    expect(toggle).toBeTruthy();
 
-    expect(onUpdate).toHaveBeenCalledWith(
+    fireEvent.click(toggle);
+    const updates = onUpdate.mock.calls[0]?.[0] as Partial<WorkflowStep>;
+    expect(updates.events?.on_enter?.[0]).toEqual(
       expect.objectContaining({
-        events: expect.objectContaining({
-          on_enter: [
-            expect.objectContaining({
-              type: "configure_session",
-              config: {
-                rules: [expect.objectContaining({ agent_name: CODEX_AGENT, operation: "set" })],
-              },
-            }),
-          ],
-        }),
+        type: "configure_session",
+        config: {
+          rules: [expect.objectContaining({ agent_name: CODEX_AGENT, operation: "set" })],
+        },
       }),
     );
+
+    const enabledStep = { ...currentStep, ...updates };
+    rerender(
+      <SessionConfigEditorHarness
+        currentStep={enabledStep}
+        steps={[enabledStep]}
+        onUpdate={onUpdate}
+      />,
+    );
+    expect(screen.getByTestId("work-session-config-editor")).toBeTruthy();
+    expect(screen.getByText("Configure original settings options")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("session-config-agent-0"));
+    expect(screen.getAllByText("Codex").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Grok")).toBeNull();
   });
 
   it("offers keep, restore, and set-new choices for carried settings", () => {
@@ -104,15 +145,16 @@ describe("SessionConfigEditor", () => {
       ],
       on_turn_complete: [{ type: "move_to_next" }],
     });
+    const reviewStep = step("review", 1);
     render(
-      <SessionConfigEditor
-        step={step("review", 1)}
-        steps={[source, step("review", 1)]}
+      <SessionConfigEditorHarness
+        currentStep={reviewStep}
+        steps={[source, reviewStep]}
         onUpdate={onUpdate}
-        readOnly={false}
       />,
     );
 
+    expect(screen.getByLabelText("Override original session options")).toBeTruthy();
     expect(screen.getByTestId("session-config-carry-warning")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
     expect(onUpdate).toHaveBeenCalledWith(
@@ -132,18 +174,17 @@ describe("SessionConfigEditor", () => {
   });
 
   it("disables conditional configuration while a fixed profile override is selected", () => {
+    const fixedStep = { ...step("work", 0), agent_profile_id: "codex-profile" };
     render(
-      <SessionConfigEditor
-        step={{ ...step("work", 0), agent_profile_id: "codex-profile" }}
-        steps={[]}
-        onUpdate={vi.fn()}
-        readOnly={false}
-      />,
+      <>
+        <SessionConfigToggle step={fixedStep} onUpdate={vi.fn()} readOnly={false} />
+        <SessionConfigEditor step={fixedStep} steps={[]} onUpdate={vi.fn()} readOnly={false} />
+      </>,
     );
 
     expect(
-      screen.getByLabelText("Configure original session").getAttribute("disabled"),
+      screen.getByLabelText("Override original session options").getAttribute("disabled"),
     ).not.toBeNull();
-    expect(screen.getByText(/mutually exclusive/i)).toBeTruthy();
+    expect(screen.queryByTestId("work-session-config-editor")).toBeNull();
   });
 });

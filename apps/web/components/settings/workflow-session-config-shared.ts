@@ -21,16 +21,54 @@ export function configureSessionAction(step: WorkflowStep): ConfigureSessionActi
   );
 }
 
-export function buildAgentChoices(
-  profiles: AgentProfileOption[],
-  availableAgents: AvailableAgent[],
-): AgentChoice[] {
+export function buildAgentChoices(profiles: AgentProfileOption[]): AgentChoice[] {
   const choices = new Map<string, string>();
   for (const profile of profiles) {
     choices.set(profile.agent_name, profile.label.split(" • ")[0] || profile.agent_name);
   }
-  for (const agent of availableAgents) choices.set(agent.name, agent.display_name || agent.name);
   return [...choices.entries()].map(([name, label]) => ({ name, label }));
+}
+
+export function withConfigureSessionRules(
+  step: WorkflowStep,
+  rules: ConfigureSessionRule[],
+): Partial<WorkflowStep> {
+  const events = step.events ?? {};
+  const onEnter = events.on_enter ?? [];
+  const nextAction: OnEnterAction = {
+    type: "configure_session",
+    config: { rules },
+  };
+  const nextOnEnter = onEnter.some((candidate) => candidate.type === "configure_session")
+    ? onEnter.map((candidate) => (candidate.type === "configure_session" ? nextAction : candidate))
+    : [...onEnter, nextAction];
+  return { events: { ...events, on_enter: nextOnEnter } };
+}
+
+export function withoutConfigureSession(step: WorkflowStep): Partial<WorkflowStep> {
+  const events = step.events ?? {};
+  return {
+    events: {
+      ...events,
+      on_enter: (events.on_enter ?? []).filter(
+        (candidate) => candidate.type !== "configure_session",
+      ),
+    },
+  };
+}
+
+export function defaultConfigureSessionRule(
+  profiles: AgentProfileOption[],
+  availableAgents: AvailableAgent[],
+): ConfigureSessionRule | undefined {
+  const selectedAgent = buildAgentChoices(profiles)[0]?.name;
+  if (!selectedAgent) return undefined;
+  const model = defaultModelForAgent(selectedAgent, availableAgents);
+  return {
+    agent_name: selectedAgent,
+    operation: "set",
+    ...(model ? { model } : {}),
+  };
 }
 
 export function defaultModelForAgent(

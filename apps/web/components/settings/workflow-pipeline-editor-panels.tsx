@@ -25,7 +25,7 @@ import {
   ChildrenCompletedSelect,
 } from "./workflow-pipeline-editor-step-actions";
 import { StepWipControls } from "./workflow-pipeline-editor-wip-controls";
-import { SessionConfigEditor } from "./workflow-session-config-editor";
+import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-config-editor";
 import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 
@@ -47,7 +47,7 @@ function StepAgentProfileSelect({
   const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto">
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
       <Select
         value={step.agent_profile_id || "none"}
         onValueChange={(value) => {
@@ -79,6 +79,12 @@ function StepAgentProfileSelect({
           ))}
         </SelectContent>
       </Select>
+      <SessionConfigToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+      />
       <HelpTip
         text={
           hasConditionalSessionConfig

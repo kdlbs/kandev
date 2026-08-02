@@ -22,8 +22,8 @@ test.describe("Workflow settings on mobile", () => {
     await expect(card).toBeVisible();
     await page.selectStep(card, "Work", true);
 
+    await card.getByLabel("Override original session options").tap();
     const editor = card.getByTestId(`${workStep.id}-session-config-editor`);
-    await editor.getByLabel("Configure original session").tap();
     const rule = editor.getByTestId("session-config-rule-0");
     await expect(rule).toBeVisible();
 

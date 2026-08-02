@@ -74,6 +74,14 @@ Implement carry-forward analysis as a pure frontend utility. Reuse or extract th
 
 Warn only when changed settings can enter a step and that step has no explicit rule for the family. Manual card moves remain outside the graph.
 
+The step header keeps the fixed profile selector and adds an `Override original
+session options` checkbox beside it. The checkbox's help copy includes the
+Sol-to-Luna implementation example and is mutually exclusive with a fixed
+profile. The conditional editor renders below WIP controls only while the
+checkbox is enabled. Family choices are derived solely from configured agent
+profiles; capability entries without a profile remain unavailable as new rule
+targets.
+
 ### Mobile contract
 
 Desktop and mobile use the same expanded workflow-step panel and the same rule data/helpers. Desktop may place family, operation, and selector controls in a compact row; below the existing phone breakpoint each rule becomes a one-column card. The page/document remains the single vertical scroll owner, with no nested full-height surface and no horizontal overflow. Add/remove/operation controls must retain at least 44px touch targets, and the shared selector's existing touch disclosure remains responsible for model/option selection.
@@ -117,6 +125,10 @@ Wave 4:
 
 - [x] [task-05-e2e-docs-and-verification](task-05-e2e-docs-and-verification.md)
 
+Wave 5:
+
+- [x] [task-06-workflow-session-options-toggle](task-06-workflow-session-options-toggle.md)
+
 ## Verification
 
 Targeted backend:
@@ -156,12 +168,18 @@ Recorded results for the implementation:
 - `cd apps && pnpm --filter @kandev/web exec vitest run lib/workflows components/settings` — 62 files and 321 tests passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps && pnpm --filter @kandev/web run lint` — passed with zero warnings.
-- Chromium and mobile Playwright E2E — both focused original-session editor scenarios passed with production-build setup; no-build reruns also passed.
+- `cd apps/web && pnpm e2e:run --project chromium tests/workflow/workflow-settings.spec.ts` — 14 tests passed with production-build setup.
+- `cd apps/web && pnpm e2e:run --project mobile-chrome tests/workflow/mobile-workflow-settings.spec.ts` — 3 tests passed with production-build setup.
+- `cd apps/web && pnpm run i18n:check` — passed with zero orphan keys and pseudo-locale in sync.
+- `cd apps/web && pnpm run i18n:ratchet` — passed; all added and modified files clean.
 - `node --test scripts/validate-public-docs.test.mjs` — 58 tests passed.
 - `node scripts/validate-public-docs.mjs` — 41 published pages validated.
+- Public workflow docs updated in `docs/public/tasks-and-workflows.md` for the new toggle and profile-backed family choices.
 - `git diff --check` and backend `gofmt -l` checks — clean.
 
 The repository-wide backend `make test` target was started but stopped after it exceeded the useful local verification window; the focused packages above cover every changed backend subsystem.
+
+Task 06 verification for the header toggle and profile-backed family choices is complete.
 
 ## Risks
 

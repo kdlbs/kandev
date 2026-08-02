@@ -33,6 +33,9 @@ Workflow authors can currently select a different agent profile for a step, but 
 - From that warning, the workflow author can explicitly keep the inherited values, restore the original values, or choose new values for the affected family. Saving any of those choices resolves the warning for that family and path.
 - Workflow-path warnings consider configured relative and explicit transitions, including cycles. They are advisory and do not attempt to predict arbitrary manual card moves.
 - The conditional rule editor is fully usable on desktop and mobile. On phones, rule cards form a one-column flow; family, operation, model, and option controls remain reachable by touch without document-level horizontal scrolling.
+- The step header places an `Override original session options` checkbox beside the fixed agent-profile selector. Its help text explains that checking it keeps the original conversation tab while allowing a workflow step to change session settings (for example, starting with model 5.6 Sol and switching to 5.6 Luna for implementation work).
+- The conditional rule editor is shown below the WIP controls only when `Override original session options` is checked. The fixed profile selector and this checkbox are mutually exclusive.
+- Agent-family choices in conditional rules come only from agent families represented by configured agent profiles; capability data for an unconfigured family does not create a new choice.
 - Read-only synced workflows display their rules and carry-forward warnings but do not allow edits, matching existing workflow settings behavior.
 
 Decision: [ADR-2026-08-01-workflow-session-original-configuration](../../decisions/2026-08-01-workflow-session-original-configuration.md).
@@ -164,6 +167,9 @@ The same users who can edit a workspace workflow can create, change, or remove c
 - **GIVEN** a legacy task session with no trustworthy original effective snapshot, **WHEN** a restore rule matches, **THEN** no value is guessed or changed and the conversation shows that restoration is unavailable.
 - **GIVEN** a saved conditional-settings step, **WHEN** the workflow is exported and imported into another workspace with the same agent family capability, **THEN** the family rule, model, option values, and operations round-trip without profile matching.
 - **GIVEN** a phone viewport, **WHEN** the author adds Codex and Claude rules and chooses model/config values, **THEN** every action is reachable by touch, the rule list has one vertical scroll owner, and the page has no horizontal overflow.
+- **GIVEN** a step with no fixed profile override, **WHEN** the author leaves `Override original session options` unchecked, **THEN** the conditional rule editor is not shown below the WIP controls.
+- **GIVEN** the same step, **WHEN** the author checks `Override original session options`, **THEN** the conditional rule editor appears below the WIP controls and the original-session help text explains the Sol-to-Luna example.
+- **GIVEN** capability data for Codex and Grok but configured profiles only for Codex, **WHEN** the author adds a conditional rule, **THEN** the family selector offers Codex but not Grok.
 
 ## Out of scope
 

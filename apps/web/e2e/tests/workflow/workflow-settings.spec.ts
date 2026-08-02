@@ -72,8 +72,8 @@ test.describe("Workflow settings", () => {
     await expect(card).toBeVisible();
     await page.selectStep(card, "Work");
 
+    await card.getByLabel("Override original session options").click();
     const editor = card.getByTestId(`${workStep.id}-session-config-editor`);
-    await editor.getByLabel("Configure original session").click();
     await expect(editor.getByTestId("session-config-rule-0")).toBeVisible();
     await expect(page.stepAgentProfileSelect(card)).toBeDisabled();
 
