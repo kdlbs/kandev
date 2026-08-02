@@ -124,6 +124,13 @@ func TestShowCommit_MergeCommitUsesFirstParentDiff(t *testing.T) {
 	if _, ok := result.Files["incoming.txt"]; !ok {
 		t.Fatalf("merge diff missing incoming first-parent change; files=%v", fileKeys(result.Files))
 	}
+	entry, ok := result.Files["incoming.txt"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("incoming.txt entry type = %T, want map[string]interface{}", result.Files["incoming.txt"])
+	}
+	if status := entry["status"]; status != "added" {
+		t.Errorf("incoming.txt status = %v, want added", status)
+	}
 	if _, ok := result.Files["feature-only.txt"]; ok {
 		t.Fatalf("merge diff incorrectly included a file already present in the first parent")
 	}
