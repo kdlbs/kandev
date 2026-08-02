@@ -49,6 +49,27 @@ function isTaskSessionListHydrating(state: AppState, taskId: string): boolean {
   return !byTask.loadedByTaskId?.[taskId];
 }
 
+function isSiblingWorktree(
+  existing: { worktree_id?: string } | undefined,
+  payload: { worktree_id?: string } | undefined,
+): boolean {
+  const existingWorktreeId = existing?.worktree_id;
+  const payloadWorktreeId = payload?.worktree_id;
+  return !!existingWorktreeId && !!payloadWorktreeId && existingWorktreeId !== payloadWorktreeId;
+}
+
+function getAgentctlWorktreeFields(
+  payload: { worktree_id?: string; worktree_path?: string; worktree_branch?: string },
+  isSibling: boolean,
+): Record<string, string | undefined> {
+  if (isSibling) return {};
+  return {
+    worktree_id: payload.worktree_id,
+    worktree_path: payload.worktree_path,
+    worktree_branch: payload.worktree_branch,
+  };
+}
+
 /**
  * Manual session selection pins a task-scoped session. Background WS events
  * may only override that pin once the pinned session is known terminal, or
@@ -366,6 +387,7 @@ function syncEnvFromAgentctlPayload(
   const taskId = toTaskId(rawTaskId);
   const sessionId = toSessionId(rawSessionId);
   const existing = store.getState().taskSessions.items[sessionId];
+  const isSibling = isSiblingWorktree(existing, payload);
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
     task_id: taskId,
@@ -373,15 +395,14 @@ function syncEnvFromAgentctlPayload(
     started_at: existing?.started_at ?? "",
     updated_at: existing?.updated_at ?? "",
     task_environment_id: envId,
-    worktree_id: payload.worktree_id,
-    worktree_path: payload.worktree_path,
-    worktree_branch: payload.worktree_branch,
+    ...getAgentctlWorktreeFields(payload, isSibling),
+    workspace_path: payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path,
   });
 }
 
 /** Builds the partial-session patch applied for an agentctl_ready event.
- *  On sibling materialize we repoint worktree_path to the task root and keep
- *  the primary's id/branch; the initial ready event sets id/path/branch
+ *  On sibling materialize we update workspace_path to the task root and keep
+ *  the primary's id/path/branch; the initial ready event sets id/path/branch
  *  straight from the payload. */
 function buildAgentctlReadySessionUpdate(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -390,12 +411,16 @@ function buildAgentctlReadySessionUpdate(
 ): Record<string, unknown> {
   const update: Record<string, unknown> = {};
   if (isSibling) {
-    if (payload.task_workspace_path) update.worktree_path = payload.task_workspace_path;
+    const workspacePath = payload.workspace_path ?? payload.task_workspace_path;
+    if (workspacePath) update.workspace_path = workspacePath;
     return update;
   }
   if (payload.worktree_id) update.worktree_id = payload.worktree_id;
   if (payload.worktree_path) update.worktree_path = payload.worktree_path;
   if (payload.worktree_branch) update.worktree_branch = payload.worktree_branch;
+  const workspacePath =
+    payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path;
+  if (workspacePath) update.workspace_path = workspacePath;
   return update;
 }
 
@@ -429,7 +454,7 @@ function recordAgentctlReadyWorktree(
  *    2. Sibling materialized (multi-branch add_branch flow) — payload
  *       describes a NEW worktree being added alongside the primary. The
  *       primary's worktree_id/branch must NOT be clobbered (they still own
- *       the chat/agent process); only worktree_path moves to the task root
+ *       the chat/agent process); only workspace_path moves to the task root
  *       so the file browser repoints from "primary worktree" to "task root
  *       containing both worktree siblings". A commits refetch is bumped so
  *       the Commits panel re-queries with the new multi-repo subpaths
@@ -440,10 +465,7 @@ function handleAgentctlReady(store: StoreApi<AppState>, payload: any): void {
   const existingSession = store.getState().taskSessions.items[payload.session_id];
   if (!existingSession) return;
 
-  const isSibling =
-    !!payload.worktree_id &&
-    !!existingSession.worktree_id &&
-    payload.worktree_id !== existingSession.worktree_id;
+  const isSibling = isSiblingWorktree(existingSession, payload);
 
   const sessionUpdate = buildAgentctlReadySessionUpdate(payload, isSibling);
   if (Object.keys(sessionUpdate).length > 0) {
@@ -539,7 +561,9 @@ function handleWorkspaceSourcesUpdated(
     adopted_session_ids: adoptedSessionIds,
   } = payload;
   const existing = store.getState().taskSessions.items[sessionId];
-  if (existing) store.getState().setTaskSession({ ...existing, worktree_path: workspacePath });
+  if (existing && workspacePath) {
+    store.getState().setTaskSession({ ...existing, workspace_path: workspacePath });
+  }
   store.getState().reconcileWorkspaceSourcesAdopted(adoptedSessionIds ?? [sessionId]);
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
   store.getState().clearLegacyGitStatusEntry(sessionId);

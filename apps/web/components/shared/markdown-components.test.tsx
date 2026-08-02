@@ -13,7 +13,7 @@ const appState = vi.hoisted(() => ({
         "session-1": {
           worktree_path: "/root/.kandev/tasks/example/kandev",
         },
-      } as Record<string, { worktree_path: string }>,
+      } as Record<string, { worktree_path: string; workspace_path?: string }>,
     },
   },
 }));
@@ -222,6 +222,27 @@ describe("markdownComponents", () => {
 
     expect(openFile).not.toHaveBeenCalled();
     expect(link.getAttribute("target")).toBe("_blank");
+  });
+});
+
+describe("markdownComponents workspace roots", () => {
+  afterEach(resetMarkdownComponentTestState);
+
+  it("opens multi-repository absolute links relative to the task workspace root", () => {
+    appState.value.taskSessions.items["session-1"].workspace_path = "/root/.kandev/tasks/example";
+    render(
+      <Markdown>
+        {
+          "[primary](/root/.kandev/tasks/example/kandev/docs/specs/native/spec.md) [sibling](/root/.kandev/tasks/example/plugin/ui/bundle.js)"
+        }
+      </Markdown>,
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "primary" }));
+    fireEvent.click(screen.getByRole("link", { name: "sibling" }));
+
+    expect(openFile).toHaveBeenNthCalledWith(1, "kandev/docs/specs/native/spec.md");
+    expect(openFile).toHaveBeenNthCalledWith(2, "plugin/ui/bundle.js");
   });
 });
 

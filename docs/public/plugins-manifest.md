@@ -12,6 +12,13 @@ optional UI bundle. Kandev parses and validates it **before any plugin code
 runs**. See [Authoring a plugin](plugins-authoring.md) for the build
 workflow and [Plugins](plugins.md) for install/operate.
 
+## Quick path
+
+1. Start from the annotated example.
+2. Set identity, version, runtime executable, and only the capabilities the plugin needs.
+3. Add config, webhooks, events, or UI fields only when the plugin uses them.
+4. Validate the manifest before packaging.
+
 ## Annotated example
 
 ```yaml
@@ -74,6 +81,11 @@ ui:                                           # optional native frontend plugin
 ```
 
 ## Field reference
+
+> **Security:** `capabilities.auth` lets a plugin assert external login identities. Grant it only to trusted plugins whose identity provider verifies email ownership; a spoofed email claim can take over an account.
+
+<details>
+<summary>Complete field reference and validation rules</summary>
 
 | Field | Required | Type | Notes |
 |---|---|---|---|
@@ -264,3 +276,5 @@ they have no effect there and are overwritten on install:
 | `restart_count` | Best-effort restart bookkeeping used by the supervision loop. |
 
 Related: [Plugins](plugins.md), [Authoring a plugin](plugins-authoring.md).
+
+</details>

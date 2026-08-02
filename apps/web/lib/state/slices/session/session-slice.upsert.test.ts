@@ -89,6 +89,22 @@ describe("upsertTaskSessionFromEvent", () => {
     expect(store.getState().environmentIdBySessionId[SESSION_ID]).toBe("env-1");
   });
 
+  it("preserves the live workspace root when a later partial refresh omits it", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ workspace_path: "/task-root", worktree_path: "/task-root/kandev" }),
+      );
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.workspace_path).toBe("/task-root");
+    expect(session.worktree_path).toBe("/task-root/kandev");
+  });
+
   it("does not seed environmentIdBySessionId when task_environment_id is absent", () => {
     const store = makeStore();
 

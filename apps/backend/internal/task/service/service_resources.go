@@ -103,6 +103,12 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		return nil, err
 	}
 
+	if s.workspaceDefaultsInitializer != nil {
+		if err := s.workspaceDefaultsInitializer.InitializeWorkspaceDefaults(ctx, workspace.ID); err != nil {
+			s.logger.Warn("failed to initialize workspace defaults", zap.String("workspace_id", workspace.ID), zap.Error(err))
+		}
+	}
+
 	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
 	if kanbanWorkflow != nil {

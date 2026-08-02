@@ -19,6 +19,15 @@ func newSearchTestRepo(t *testing.T) *sqlite.Repository {
 	repo := newTestRepo(t)
 	ctx := context.Background()
 
+	if _, err := repo.ExecRaw(ctx, `
+		CREATE TABLE IF NOT EXISTS workspaces (
+			id TEXT PRIMARY KEY,
+			office_workflow_id TEXT DEFAULT ''
+		)
+	`); err != nil {
+		t.Fatalf("create workspaces table: %v", err)
+	}
+
 	_, err := repo.ExecRaw(ctx, `
 		CREATE TABLE IF NOT EXISTS tasks (
 			id TEXT PRIMARY KEY,
@@ -122,6 +131,61 @@ func TestGetTaskExecutionFields_FallsBackToLatestTaskRunner(t *testing.T) {
 	}
 	if fields.AssigneeAgentProfileID != "runner-on-review" {
 		t.Fatalf("expected runner-on-review, got %q", fields.AssigneeAgentProfileID)
+	}
+}
+
+func TestListUnstartedTasks_OnlyReturnsOfficeTasks(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workspaces (id, office_workflow_id) VALUES
+			('ws-office', 'wf-office'),
+			('ws-kanban', '')
+	`); err != nil {
+		t.Fatalf("insert workspaces: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_steps (id, agent_profile_id) VALUES
+			('step-office', 'runner-office'),
+			('step-kanban', 'runner-kanban')
+	`); err != nil {
+		t.Fatalf("insert workflow steps: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO tasks
+			(id, workspace_id, workflow_id, workflow_step_id, project_id, state, title, created_at, updated_at)
+		VALUES
+			('task-office-workflow', 'ws-office', 'wf-office', 'step-office', '', 'TODO', 'Office workflow', datetime('now'), datetime('now')),
+			('task-office-project', 'ws-kanban', 'wf-kanban', 'step-kanban', 'project-1', 'TODO', 'Office project', datetime('now'), datetime('now')),
+			('task-kanban', 'ws-kanban', 'wf-kanban', 'step-kanban', '', 'TODO', 'Kanban task', datetime('now'), datetime('now'))
+	`); err != nil {
+		t.Fatalf("insert tasks: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position)
+		VALUES
+			('runner-office-workflow', 'step-office', 'task-office-workflow', 'runner', 'runner-office', 0, 0),
+			('runner-office-project', 'step-kanban', 'task-office-project', 'runner', 'runner-kanban', 0, 0),
+			('runner-kanban', 'step-kanban', 'task-kanban', 'runner', 'runner-kanban', 0, 0)
+	`); err != nil {
+		t.Fatalf("insert runners: %v", err)
+	}
+
+	rows, err := repo.ListUnstartedTasks(ctx, 24, 10)
+	if err != nil {
+		t.Fatalf("ListUnstartedTasks: %v", err)
+	}
+	got := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		got[row.ID] = true
+	}
+	if !got["task-office-workflow"] || !got["task-office-project"] {
+		t.Fatalf("office tasks = %#v, want workflow and project tasks", got)
+	}
+	if got["task-kanban"] {
+		t.Fatalf("ordinary Kanban task was recovered: %#v", got)
 	}
 }
 

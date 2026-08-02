@@ -417,11 +417,15 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Effective task root containing every attached workspace source. */
+  workspace_path?: string;
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
+  /** Compact pending-input projection used when this session's messages are unloaded. */
+  pending_action?: TaskPendingAction | null;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
   agent_profile_snapshot?: Record<string, unknown> | null;

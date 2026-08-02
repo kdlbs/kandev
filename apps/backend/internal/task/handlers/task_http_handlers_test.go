@@ -432,6 +432,34 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
 }
 
+func TestHTTPCreateTaskRejectsOverlongTitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id": "ws-1",
+		"workflow_id": "wf-1",
+		"title": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+	assert.Nil(t, repo.captured, "overlong title must not reach repository persistence")
+}
+
 func TestHTTPCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)
@@ -640,6 +668,36 @@ func TestWSCreateTaskRecordsFinalLastUsedSelections(t *testing.T) {
 		AgentProfileID:    "agent-2",
 		ExecutorProfileID: "exec-profile-2",
 	}, recorder.got)
+}
+
+func TestWSCreateTaskReturnsValidationErrorForOverlongTitle(t *testing.T) {
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	msg, err := ws.NewRequest("msg-title", ws.ActionTaskCreate, map[string]any{
+		"workspace_id": "ws-1",
+		"workflow_id":  "wf-1",
+		"title":        "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+	})
+	require.NoError(t, err)
+
+	resp, err := h.wsCreateTask(context.Background(), msg)
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, resp.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeValidation, payload.Code)
+	assert.Contains(t, payload.Message, "60")
+	assert.Nil(t, repo.captured, "overlong title must not reach repository persistence")
 }
 
 func TestWSCreateTaskRecordsFreshBranchRequestBase(t *testing.T) {

@@ -24,6 +24,13 @@ const DefaultGitPollInterval = 3 * time.Second
 // a wedged Git process cannot retain the tracker flight indefinitely.
 const workspaceGitStatusObserveTimeout = 60 * time.Second
 
+// pollModeGracePeriod is how long a tracker stays at its fast construction
+// default before demoting itself to slow when no explicit mode ever arrives.
+// Long enough to cover a freshly-spawned instance being opened by the user
+// (the gateway pushes within milliseconds of a focus), short enough that a
+// workspace nobody watches stops scanning almost immediately.
+const pollModeGracePeriod = 60 * time.Second
+
 // fileStatus constants for FileInfo.Status values.
 const (
 	fileStatusDeleted   = "deleted"
@@ -75,11 +82,20 @@ type WorkspaceTracker struct {
 	gitPollInterval  time.Duration
 
 	// pollMode is the current rate at which the polling loops scan git state.
-	// Default at construction is PollModeSlow — safe fallback before the gateway
-	// pushes a focus signal. Mutate via SetPollMode (never directly) so loops
-	// receive the wake-up notification on transitions.
+	// Default at construction is PollModeFast so a freshly-spawned instance has
+	// no blind window, then pollModeGraceTimer demotes it to slow unless the
+	// gateway pushes a mode first. Mutate via SetPollMode (never directly) so
+	// loops receive the wake-up notification on transitions.
 	pollMode   PollMode
 	pollModeMu sync.RWMutex
+	// pollModePushed records that an explicit SetPollMode arrived, which
+	// disarms the grace demotion for good — from then on the gateway owns the
+	// mode. Guarded by pollModeMu.
+	pollModePushed     bool
+	pollModeGraceTimer *time.Timer
+	// pollModeGrace is pollModeGracePeriod in production; tests shorten it the
+	// same way they shorten filePollInterval / gitPollInterval.
+	pollModeGrace time.Duration
 	// One channel per loop because we need both loops to wake up on a mode
 	// change. A single shared channel would let the first reader steal the
 	// signal so only one loop wakes.
@@ -238,15 +254,17 @@ func newWorkspaceTracker(resolvedWorkDir, repositoryName string, log *logger.Log
 		workspaceStreamSubscribers: make(map[types.WorkspaceStreamSubscriber]struct{}),
 		filePollInterval:           DefaultFilePollInterval,
 		gitPollInterval:            DefaultGitPollInterval,
-		// Default to fast polling — matches pre-PR behavior so newly-created
-		// agentctl instances don't have a startup window where changes go
-		// undetected for up to 30s. The gateway pushes slow/paused once it
-		// knows no client is actively watching this workspace; until then,
-		// fast is the safe default (a freshly-spawned instance was always
-		// about to be used by someone, historically). Retained-task CPU
-		// savings still apply because those instances eventually receive a
-		// slow or paused mode push.
+		// Start fast so a freshly-spawned instance — which is usually about to
+		// be opened by someone — has no window where changes go unnoticed.
+		// Start() then arms pollModeGraceTimer: the gateway only pushes a mode
+		// for workspaces a client focuses or subscribes to, and it deliberately
+		// skips the paused push for a workspace it has never pushed to
+		// (workspacePollAggregator.plan). Without the timer, a tracker the
+		// gateway never speaks about scans at 2s/3s for the life of the
+		// process. Trackers created after launch inherit the workspace's
+		// current mode instead — see Manager.configurePollMode.
 		pollMode:                PollModeFast,
+		pollModeGrace:           pollModeGracePeriod,
 		monitorModeChanged:      make(chan struct{}, 1),
 		gitPollModeChanged:      make(chan struct{}, 1),
 		stopCh:                  make(chan struct{}),
@@ -390,6 +408,28 @@ func (wt *WorkspaceTracker) Start(_ context.Context) {
 	// Start git polling for detecting manual git operations (commits, resets, etc.)
 	wt.wg.Add(1)
 	go wt.pollGitChanges(wt.cancelCtx)
+
+	wt.armPollModeGrace()
+}
+
+// armPollModeGrace schedules the fallback demotion to slow. Armed here rather
+// than in the constructor so a tracker that is built but never started leaves
+// no timer behind. A SetPollMode that lands first disarms it permanently.
+func (wt *WorkspaceTracker) armPollModeGrace() {
+	wt.pollModeMu.Lock()
+	defer wt.pollModeMu.Unlock()
+	if wt.pollModePushed || wt.pollModeGraceTimer != nil || wt.pollModeGrace <= 0 {
+		return
+	}
+	wt.pollModeGraceTimer = time.AfterFunc(wt.pollModeGrace, wt.demoteUnpushedPollMode)
+}
+
+// disarmPollModeGraceLocked stops the fallback timer. Caller must hold pollModeMu.
+func (wt *WorkspaceTracker) disarmPollModeGraceLocked() {
+	if wt.pollModeGraceTimer != nil {
+		wt.pollModeGraceTimer.Stop()
+		wt.pollModeGraceTimer = nil
+	}
 }
 
 // stopTimeout is the maximum time Stop() will wait for goroutines to exit.
@@ -399,6 +439,10 @@ const stopTimeout = 5 * time.Second
 // up to 5 seconds for goroutines to exit before proceeding.
 func (wt *WorkspaceTracker) Stop() {
 	wt.stopOnce.Do(func() {
+		wt.pollModeMu.Lock()
+		wt.disarmPollModeGraceLocked()
+		wt.pollModeMu.Unlock()
+
 		// Synchronize cancellation with shared-observation admission. Once this
 		// lock is released, no observation can Add to gitStatusObserveWG.
 		wt.gitStatusObserveMu.Lock()

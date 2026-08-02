@@ -18,6 +18,17 @@ Kandev has several mechanisms that can act without repeated manual setup. Their 
 
 Use workflow events for predictable transitions on existing work. Use a workspace automation when an external signal must create new work. MCP is a tool interface, not a scheduler.
 
+Across Kandev's task, configuration, external, and Office MCP modes, each tool call is validated against that mode's live `tools/list` schema before its handler runs. Missing required fields, wrong types, declared constraint violations, and unknown top-level fields return a tool error without performing the requested action. Nested configuration maps still accept arbitrary keys when their schema defines them as open.
+
+## Quick path
+
+- Use a **workflow event** for predictable transitions on existing tasks.
+- Use a **workspace automation** when a schedule or external signal should create work.
+- Use **task MCP** for tools inside an active agent session.
+- Use **profile MCP** to add servers to an agent profile.
+- Use **external MCP** to expose Kandev tools to third-party clients.
+- Treat credentials delivered through any MCP or executor profile as available to the receiving agent.
+
 ## Workflow events and human gates
 
 Regular workflow entry actions can enable plan mode, reset agent context, or auto-start an agent; auto-start can use the step prompt or a stored prompt override. Turn-start and turn-complete events can move the task, while turn-complete and step-exit actions can disable plan mode. There is no regular standalone **stop agent** or **send prompt** workflow action. Approval/review steps and steps without automatic start remain the supported human gates. Inspect events on both the source and destination step before enabling a move or automatic start; otherwise two steps can form a loop.
@@ -145,6 +156,8 @@ Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent 
 
 Task tools use normal client discovery. When `step_complete_kandev` is required but is not already visible, the agent should search the active tool catalog for its canonical name. Kandev does not request eager loading through client-specific metadata.
 
+`create_task_kandev` advertises `prompt` for instructions delivered to a newly started agent. Older callers may still send `description` when `prompt` is absent, but sending both is an error; the compatibility name is intentionally omitted from the advertised schema.
+
 Task mode currently registers these tool groups:
 
 | Group                               | Available operations                                                                                                                                                                                                                                               |
@@ -176,6 +189,9 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 `step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.
+
+<details>
+<summary>Office MCP and runtime CLI</summary>
 
 ## Office MCP and runtime CLI
 
@@ -231,6 +247,11 @@ $KANDEV_CLI kandev task create \
 
 Project list and create operations are forced to the workspace in the validated Office run token; the agent cannot select another workspace in these commands. Office runs cannot create or administer workspaces. Create additional workspaces through Kandev's user-facing setup and settings surfaces.
 
+</details>
+
+<details>
+<summary>Profile and executor MCP</summary>
+
 ## Profile and executor MCP
 
 An agent profile can add `stdio`, `http`, `sse`, or `streamable_http` servers when that agent supports MCP. The built-in Kandev task server is injected separately and cannot be replaced by a profile entry named `kandev`.
@@ -242,6 +263,11 @@ Stdio normally starts per session and cannot be shared. Network servers can be s
 Use the neutral plug button beside the chat composer to inspect the current session's MCP attachment report. It distinguishes configuration delivered to the agent from a connection observed by Kandev: the built-in task server becomes **Connected** after MCP initialize and **Active** after it serves `tools/list`. A third-party profile server usually remains **Delivered · connection unverified** because it connects directly to the agent rather than through Kandev. Missing observation is not a failure; red appears only for an explicit sanitized error.
 
 On desktop, hover or focus the button for the compact status list. On touch devices, tap its 44px target to open the same list in a bottom drawer. The report is per Kandev session and execution, so simultaneous agents in one task never share a status row. It stores only bounded, sanitized attachment facts: no MCP headers, environment values, tool arguments/results, raw ACP frames, or agent output.
+
+</details>
+
+<details>
+<summary>External MCP</summary>
 
 ## External MCP
 
@@ -266,11 +292,20 @@ The settings page's static **Available tools** preview currently counts 29 and o
 
 In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, GitHub URL, or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 
+`create_task_kandev` accepts task titles up to 60 characters. Use a concise, few-word title and put the implementation context in `description`; longer titles are rejected as validation errors.
+
 External mode has no live Kandev session, so it does not expose `stop_task_kandev` or other task-scoped questions, plans, walkthroughs, sibling-session spawning, targeted session messages, branch operations, or step-completion signals. Some external tools can delete or materially reconfigure data; review the client's tool approvals.
+
+</details>
 
 ### External MCP security boundary
 
-The backend's `/mcp`, `/mcp/sse`, and `/mcp/message` routes currently have no Kandev authentication. They are reachable on every interface to which the backend is bound. Anyone who can reach them can attempt the exposed configuration and task mutations.
+The `/mcp`, `/mcp/sse`, and `/mcp/message` routes are mounted through
+`externalMCPAuthMiddleware`. With authentication disabled, they remain open for
+the current single-user behavior. When authentication is enabled, external
+clients must provide a personal access token; an already-authenticated browser
+session may also pass the same middleware. This is separate from task-mode MCP,
+which runs inside the agentctl session boundary.
 
 - Bind the backend to loopback for a local single-user install.
 - For remote use, place the whole backend behind a VPN, firewall, or authenticated TLS reverse proxy.

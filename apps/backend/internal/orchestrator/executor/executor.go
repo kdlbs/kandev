@@ -649,6 +649,7 @@ type Executor struct {
 	githubCredentialIssuer         GitHubCredentialLeaseIssuer
 	githubCredentialBrokerURL      string
 	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
+	agentctlBinaryPath             string
 
 	// Configuration
 	retryLimit int

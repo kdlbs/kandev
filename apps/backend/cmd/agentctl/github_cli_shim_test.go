@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	osExec "os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -32,6 +34,112 @@ func TestInstallGitHubCLIShimCreatesManagedTools(t *testing.T) {
 		if filepath.Dir(entrypoint) != shimDir {
 			t.Fatalf("entrypoint = %q, want inside %q", entrypoint, shimDir)
 		}
+	}
+}
+
+func TestPrepareGitHubCLIShimPublishesCredentialHelperExecutable(t *testing.T) {
+	t.Setenv("KANDEV_GITHUB_CREDENTIAL_HELPER_PATH", "")
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatalf("resolve test executable: %v", err)
+	}
+	cleanup, err := prepareGitHubCLIShim()
+	if err != nil {
+		t.Fatalf("prepareGitHubCLIShim() error = %v", err)
+	}
+	t.Cleanup(cleanup)
+	if got := os.Getenv("KANDEV_GITHUB_CREDENTIAL_HELPER_PATH"); got != executable {
+		t.Fatalf("credential helper executable = %q, want %q", got, executable)
+	}
+}
+
+func TestInstallGitHubCLIShimCreatesLoginShellEnvironment(t *testing.T) {
+	root := t.TempDir()
+	binary := filepath.Join(root, "agentctl")
+	if err := os.WriteFile(binary, []byte("agentctl"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	shimDir, cleanup, err := installGitHubCLIShim(binary, root)
+	if err != nil {
+		t.Fatalf("installGitHubCLIShim() error = %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	bashEnv := filepath.Join(shimDir, "bash-env.sh")
+	info, err := os.Stat(bashEnv)
+	if err != nil {
+		t.Fatalf("stat managed Bash environment: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o700 {
+		t.Fatalf("Bash environment mode = %o, want 700", got)
+	}
+	content, err := os.ReadFile(bashEnv)
+	if err != nil {
+		t.Fatalf("read managed Bash environment: %v", err)
+	}
+	for _, want := range []string{
+		"KANDEV_GITHUB_CLI_SHIM_DIR",
+		"KANDEV_GITHUB_PARENT_BASH_ENV",
+		"PATH=",
+	} {
+		if !strings.Contains(string(content), want) {
+			t.Fatalf("Bash environment missing %q: %s", want, content)
+		}
+	}
+}
+
+func TestInstallGitHubCLIShimLoginShellRestoresManagedTools(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Bash login-shell behavior is Unix-specific")
+	}
+	root := t.TempDir()
+	binary := filepath.Join(root, "agentctl")
+	if err := os.WriteFile(binary, []byte("agentctl"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	shimDir, cleanup, err := installGitHubCLIShim(binary, root)
+	if err != nil {
+		t.Fatalf("installGitHubCLIShim() error = %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	marker := filepath.Join(t.TempDir(), "parent-bash-hook-ran")
+	parentEnv := filepath.Join(t.TempDir(), "parent-bash-env.sh")
+	if err := os.WriteFile(parentEnv, []byte("#!/bin/sh\nprintf hook-ran > \"$KANDEV_BASH_HOOK_MARKER\"\n"), 0o700); err != nil {
+		t.Fatalf("write parent Bash environment: %v", err)
+	}
+	env := make(map[string]string, len(os.Environ())+5)
+	for _, entry := range os.Environ() {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok && key != "BASH_ENV" && key != "PATH" {
+			env[key] = value
+		}
+	}
+	env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"] = "https://kandev.example/resolve"
+	env["KANDEV_GITHUB_CLI_SHIM_DIR"] = shimDir
+	env["KANDEV_GITHUB_CLI_BASH_ENV"] = filepath.Join(shimDir, "bash-env.sh")
+	env["KANDEV_GITHUB_PARENT_BASH_ENV"] = parentEnv
+	env["KANDEV_BASH_HOOK_MARKER"] = marker
+	env["BASH_ENV"] = env["KANDEV_GITHUB_CLI_BASH_ENV"]
+	env["PATH"] = "/usr/bin:/bin"
+	commandEnv := make([]string, 0, len(env))
+	for key, value := range env {
+		commandEnv = append(commandEnv, key+"="+value)
+	}
+
+	command := osExec.Command("bash", "-lc", "printf 'agentctl=%s\\ngh=%s\\n' \"$(command -v agentctl || true)\" \"$(command -v gh || true)\"")
+	command.Env = commandEnv
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("Bash login shell failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "agentctl="+filepath.Join(shimDir, "agentctl")) ||
+		!strings.Contains(string(output), "gh="+filepath.Join(shimDir, "gh")) {
+		t.Fatalf("managed tools = %q", output)
+	}
+	if hook, err := os.ReadFile(marker); err != nil || string(hook) != "hook-ran" {
+		t.Fatalf("parent Bash hook marker = %q, error = %v", hook, err)
 	}
 }
 

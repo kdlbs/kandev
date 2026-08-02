@@ -58,6 +58,19 @@ describe("NotificationSoundSection", () => {
     await waitFor(() => expect(toggle.getAttribute(DIRTY_ATTRIBUTE)).toBe("false"));
   });
 
+  it("shows the selected preset under its translated name", async () => {
+    setSoundPreferences({ enabled: true, presetId: "ding" });
+    render(
+      <SettingsSaveProvider>
+        <NotificationSoundSection />
+      </SettingsSaveProvider>,
+    );
+
+    // The preset id is the persisted sentinel; only the name is translated.
+    const trigger = await screen.findByRole("combobox", { name: "Notification sound" });
+    expect(trigger.textContent).toContain("Ding");
+  });
+
   it("reports dirtiness so the notifications parent card can highlight", async () => {
     const onDirtyChange = vi.fn();
     render(

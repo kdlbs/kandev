@@ -10,13 +10,14 @@ import { fetchSystemMetricsSettings, updateSystemMetricsSettings } from "@/lib/a
 import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
+import { useTranslation } from "react-i18next";
 
-const METRIC_OPTIONS: Array<{ id: SystemMetricId; label: string }> = [
-  { id: "cpu_percent", label: "CPU %" },
-  { id: "memory_percent", label: "Memory %" },
-  { id: "disk_percent", label: "Disk %" },
-  { id: "cpu_temp", label: "CPU temp" },
-  { id: "io_load", label: "System load (1 min)" },
+const METRIC_OPTIONS: Array<{ id: SystemMetricId; labelKey: string }> = [
+  { id: "cpu_percent", labelKey: "settings:cpu" },
+  { id: "memory_percent", labelKey: "settings:memory" },
+  { id: "disk_percent", labelKey: "settings:disk" },
+  { id: "cpu_temp", labelKey: "settings:cpuTemp" },
+  { id: "io_load", labelKey: "settings:systemLoad1Min" },
 ];
 
 const DEFAULT_METRICS_SETTINGS: SystemMetricsGlobalSettings = {
@@ -41,6 +42,7 @@ export function SystemMetricsSettingsCard({
   isSimplifiedDirty?: boolean;
   onSimplifiedChange: (checked: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const [settings, setSettings] = useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
   const [savedSettings, setSavedSettings] =
     useState<SystemMetricsGlobalSettings>(DEFAULT_METRICS_SETTINGS);
@@ -90,12 +92,11 @@ export function SystemMetricsSettingsCard({
   return (
     <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}>
       <CardHeader>
-        <CardTitle className="text-base">Resource Metrics</CardTitle>
+        <CardTitle className="text-base">{t("settings:resourceMetrics")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <p className="max-w-3xl text-sm text-muted-foreground">
-          Useful when Kandev is self-hosted on a remote server and you want a lightweight view of
-          the machine resources from the global status bar or phone Status drawer.
+          {t("settings:usefulWhenKandevIsSelfHosted")}
         </p>
         <MetricsDisplayToggle
           checked={showInTopbar}
@@ -135,12 +136,13 @@ function SimplifiedMetricsToggle({
   isDirty: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="simplified-system-metrics">Simplified metrics</Label>
+        <Label htmlFor="simplified-system-metrics">{t("settings:simplifiedMetrics")}</Label>
         <p className="text-xs text-muted-foreground">
-          Removes the Host marker and progress bars while retaining metric icons and values.
+          {t("settings:removesTheHostMarkerAndProgress")}
         </p>
       </div>
       <Switch
@@ -162,12 +164,13 @@ function MetricsDisplayToggle({
   isDirty: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="show-system-metrics">Show host metrics in status bar</Label>
+        <Label htmlFor="show-system-metrics">{t("settings:showHostMetricsInStatusBar")}</Label>
         <p className="text-xs text-muted-foreground">
-          Shows Kandev host values only. Collection starts while a client displays them.
+          {t("settings:showsKandevHostValuesOnlyCollection")}
         </p>
       </div>
       <Switch
@@ -195,6 +198,7 @@ function MetricsSamplerControls({
   onChangeSettings: (settings: SystemMetricsGlobalSettings) => void;
   onDraftSettings: (settings: SystemMetricsGlobalSettings) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_180px_180px]">
       <MetricCheckboxes
@@ -204,7 +208,7 @@ function MetricsSamplerControls({
         onToggleMetric={onToggleMetric}
       />
       <div className="space-y-2">
-        <Label htmlFor="metrics-interval">Frequency (seconds)</Label>
+        <Label htmlFor="metrics-interval">{t("settings:frequencySeconds")}</Label>
         <Input
           id="metrics-interval"
           type="number"
@@ -219,7 +223,7 @@ function MetricsSamplerControls({
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="metrics-disk-path">Disk path</Label>
+        <Label htmlFor="metrics-disk-path">{t("settings:diskPath")}</Label>
         <Input
           id="metrics-disk-path"
           value={settings.backend_disk_path}
@@ -246,9 +250,10 @@ function MetricCheckboxes({
   isSaving: boolean;
   onToggleMetric: (metric: SystemMetricId, checked: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <Label>Metrics</Label>
+      <Label>{t("settings:metrics")}</Label>
       <div className="grid gap-2 sm:grid-cols-2">
         {METRIC_OPTIONS.map((metric) => (
           <label key={metric.id} className="flex items-center gap-2 text-sm">
@@ -260,7 +265,7 @@ function MetricCheckboxes({
               disabled={isSaving}
               onCheckedChange={(checked) => onToggleMetric(metric.id, checked === true)}
             />
-            <span>{metric.label}</span>
+            <span>{t(metric.labelKey)}</span>
           </label>
         ))}
       </div>
@@ -279,13 +284,15 @@ function ExecutionMetricsToggle({
   disabled: boolean;
   onCheckedChange: (checked: boolean) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="space-y-1">
-        <Label htmlFor="collect-execution-metrics">Collect execution environment metrics</Label>
+        <Label htmlFor="collect-execution-metrics">
+          {t("settings:collectExecutionEnvironmentMetrics")}
+        </Label>
         <p className="text-xs text-muted-foreground">
-          Makes agentctl values available to plugins and other consumers. The built-in status bar
-          remains host-only.
+          {t("settings:makesAgentctlValuesAvailableToPlugins")}
         </p>
       </div>
       <Switch

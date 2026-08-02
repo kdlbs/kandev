@@ -1,6 +1,8 @@
 package backendapp
 
 import (
+	"errors"
+
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	analyticsrepository "github.com/kandev/kandev/internal/analytics/repository"
 	authservice "github.com/kandev/kandev/internal/auth"
@@ -108,4 +110,34 @@ type Services struct {
 	// PATs, invites). Always non-nil; in disabled mode it only answers
 	// Mode() == ModeDisabled and the middleware injects the synthetic identity.
 	Auth *authservice.Service
+}
+
+type schedulerStopper interface {
+	Stop() error
+}
+
+// schedulingRuntime owns the backend-wide queue and cron loops. Keeping the
+// handles together gives startup-failure cleanup and signal-driven shutdown
+// the same idempotent stop path.
+type schedulingRuntime struct {
+	runs schedulerStopper
+	cron schedulerStopper
+}
+
+func (s *schedulingRuntime) Stop() error {
+	if s == nil {
+		return nil
+	}
+	var errs []error
+	if s.cron != nil {
+		if err := s.cron.Stop(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if s.runs != nil {
+		if err := s.runs.Stop(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
 }

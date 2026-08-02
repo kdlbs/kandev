@@ -25,6 +25,13 @@ The source of truth is the combination of:
 
 An action constant alone is not evidence that an action is registered or emitted. The request catalog below was checked against non-test `RegisterFunc` calls and the gateway's special subscription dispatch, not just the constant list.
 
+## Quick path
+
+1. Prefer the UI, CLI, MCP tools, or documented HTTP routes for supported integrations.
+2. If you need the WebSocket, connect to `/ws` and send one JSON request per frame.
+3. Correlate responses by `id`, refetch after reconnects, and treat notifications as invalidation hints.
+4. Protect the endpoint: it has no client authentication boundary.
+
 ## Security and network boundary
 
 The current `/ws` upgrade handler does **not authenticate clients**. It reads `?token=` or the `Authorization` header but does not validate or use the value; JWT validation is still a code TODO. The default backend host is `0.0.0.0`, so a default process can listen on every interface even though examples use `localhost`.
@@ -245,6 +252,9 @@ websocat ws://127.0.0.1:38429/ws
 ```
 
 `websocat` is a third-party diagnostic dependency, not bundled with Kandev. Remember that an originless tool is accepted only because the current endpoint trusts its network boundary.
+
+<details>
+<summary>Registered actions and emitted notifications</summary>
 
 ## Registered request action catalog
 
@@ -782,6 +792,8 @@ File changes are batched for up to 100 ms and flushed immediately at 50 entries.
 | metrics subscribers | `system.metrics.updated` | Live resource snapshot; collection interest follows subscribers. |
 
 Routing is an efficiency mechanism, not an access-control boundary. The server does not authenticate resource ownership, global messages can contain IDs for other workspaces, and a client can request arbitrary subscription IDs.
+
+</details>
 
 ## Reconnect and troubleshooting
 

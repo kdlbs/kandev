@@ -175,6 +175,67 @@ surface.
   hover/title/tooltip metadata. Tasks with no repository, or only a non-repo
   local folder, should not render a repo chip.
 
+## Internationalization (i18n)
+
+**The migration is in progress, one directory per PR.** The runtime, the gates,
+and Settings → General → Appearance are done; most of the app still holds English
+literals. New user-facing copy must go through `t()` / `<Trans>` wherever you
+write it, even in a directory that has not been migrated yet.
+
+User-facing strings are localized with i18next + react-i18next, keyed as
+`namespace:key`. Add the English text to `src/locales/en/<namespace>.json`, then
+reference it with `t("settings:deleteExecutor")` (`useTranslation()` in
+components, the module-level `t` from `@/lib/i18n` in plain helpers). Use
+`<Trans i18nKey=... values={...}>` only for copy containing markup — and never a
+`t()` call inside its children, which shifts the message's tag indices.
+
+Never translate user/domain data, code identifiers, `data-testid`, or a literal
+that is also compared with `===`, used as a map key, or typed as a string-literal
+union. When a prop is both display copy and logic (`label: "Reviewers" |
+"Assignees"`), split it into a `kind`/`origin` discriminant plus a translated
+label rather than translating in place.
+
+`lib/i18n/provider.tsx` initializes i18next at module load. Do not remove that
+call: react-i18next suspends on an uninitialized instance and there is no
+Suspense boundary above the root, so the app renders a blank page with no error
+of any kind. Unit tests cannot catch it — `vitest.setup.ts` pre-initializes.
+
+Never write a plural ending yourself: use `t(key, { count })` with `_one`/`_other`
+keys. Passing the morpheme as a value (`{ s: n === 1 ? "" : "s" }`) is
+untranslatable — the plural rule ends up at the call site.
+
+Never assign `t()` to a module-level constant. It resolves at import, before a
+locale is active, and never updates on a switch — and the pseudo-locale cannot
+see it, because the text _is_ translated, just frozen. Store the key and resolve
+at render, or make the value a component. `check-module-scope-t.mjs` enforces it.
+
+`pnpm lint` fails on hardcoded UI strings (`i18next/no-literal-string` is an
+**error**), but **only on the `i18nGuardFiles` allowlist** in
+`eslint.i18n.options.mjs` — paths already migrated. That scoping is deliberate:
+a repo-wide error breaks every unrelated PR that adds a label, which is what made
+the first attempt at this migration unmergeable. **When you migrate a directory,
+append it to `i18nGuardFiles` in the same PR** — that is the step that stops it
+drifting back. Never delete an entry to make a build pass. Use
+`pnpm run lint:i18n <path>` to preview the guard on a path that is not on the
+list yet.
+
+Separately, `pnpm run i18n:ratchet` (pre-commit + CI) guards **new code
+everywhere**, regardless of the allowlist: a file you added must be clean outright,
+and a file you modified is judged on the lines you touched. Untouched literals are
+never reported, so it cannot ask you to migrate code you did not write — the same
+contract as `golangci-lint --new-from-rev` for Go.
+
+The rule **only sees literals in JSX** — `confirm()` arguments and copy in plain
+`.ts` helpers are invisible to it — and it **skips anything assigned to a
+SCREAMING_CASE identifier**, so `const ROWS = [{ label: "Disk usage" }]` passes
+silently. A clean lint is not proof a file is done. `pnpm run i18n:check` gates key/catalog
+drift, `<Trans>` tag indices, inline plurals and module-scope `t()`, and the
+**pseudo-locale** (Settings → General → Appearance, dev/e2e) is the completeness
+check — any plain-English text under it was never externalized. The tooling needs
+**Node 24**. Full guide:
+[`docs/i18n.md`](../../docs/i18n.md); spec:
+[`docs/specs/platform/i18n.md`](../../docs/specs/platform/i18n.md).
+
 ## Markdown safety
 
 Any renderer that enables embedded raw HTML must pair `rehype-raw` immediately

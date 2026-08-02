@@ -11,6 +11,7 @@ import { IconCheck, IconCopy, IconLoader2, IconX } from "@tabler/icons-react";
 import { toast } from "sonner";
 import { probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
 import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { SettingsCard } from "@/components/settings/settings-card";
 
 export interface SSHAgentReadinessCardProps {
@@ -374,7 +375,9 @@ function InstallHint({ hint, available }: { hint?: string; available: boolean })
         className="cursor-pointer text-muted-foreground hover:text-foreground"
         aria-label="Copy install hint"
         onClick={() => {
-          void navigator.clipboard.writeText(hint).then(() => toast.success("Install hint copied"));
+          void copyToClipboard(hint).then((success) => {
+            if (success) toast.success("Install hint copied");
+          });
         }}
       >
         <IconCopy className="h-3 w-3" />

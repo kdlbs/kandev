@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -141,6 +142,13 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		taskSvc.SetRemoteBranchLister(githubBranchListerAdapter{svc: githubSvc})
 		taskSvc.SetPRTaskResolver(githubSvc)
 		githubSvc.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		taskSvc.SetWorkspaceDefaultsInitializer(githubSvc)
+		startupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := githubSvc.InitializeFreshWorkspaceDefaults(startupCtx)
+		cancel()
+		if err != nil {
+			log.Warn("GitHub fresh workspace defaults initialization failed", zap.Error(err))
+		}
 	}
 
 	// Initialize Automation service

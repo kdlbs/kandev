@@ -35,10 +35,20 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 		h.logger.Error("failed to list task sessions", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to list task sessions", nil)
 	}
+	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(
+		ctx,
+		h.service,
+		map[string][]*models.TaskSession{taskID: sessions},
+	)
+	if pendingErr != nil {
+		h.logger.Warn("get task session pending actions failed", zap.Error(pendingErr))
+		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	}
 	sessionDTOs := make([]dto.TaskSessionSummaryDTO, 0, len(sessions))
 	for _, session := range sessions {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionDTOs = append(sessionDTOs, summary)
 	}
 	resp := dto.ListTaskSessionSummariesResponse{
@@ -321,6 +331,9 @@ func (h *TaskHandlers) wsUpdateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	})
 	if err != nil {
 		h.logger.Error("failed to update task", zap.Error(err))
+		if isValidationError(err) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to update task", nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, dto.FromTask(task))

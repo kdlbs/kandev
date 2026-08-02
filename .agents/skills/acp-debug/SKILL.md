@@ -72,6 +72,13 @@ apps/backend/bin/acpdbg probe --timeout 45s auggie
 
 For `matrix`, prefer `--timeout 60s` so `npx`-spawned agents have time to cold-start.
 
+For Claude ACP, the generated default workdir is an absolute temporary
+directory and is sent as the ACP `cwd`; no `--workdir` flag is required. If
+you override it, supply an existing absolute directory (for example, run
+`mkdir -p /tmp/kandev-acpdbg-claude` before passing that path to `--workdir`).
+An empty `cwd` can cause Claude to reject `session/new`; confirm the `cwd` in
+the recorded request frame before diagnosing a provider failure.
+
 ### 3. Read the JSONL file
 
 The JSONL schema is:

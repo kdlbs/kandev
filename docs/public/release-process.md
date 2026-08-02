@@ -7,6 +7,13 @@ description: "Run and verify Kandev's version, runtime, desktop, container, npm,
 
 Stable Kandev releases use one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, and Homebrew formula. Publish Stable through the manual **Release** GitHub Actions workflow; do not update its channels independently. The same workflow also owns the scheduled npm-only Nightly path described below.
 
+## Quick path
+
+1. Choose one workflow mode.
+2. Verify `main`, checks, credentials, signing inputs, and affected targets.
+3. Run the release workflow and verify every published channel.
+4. Use backfill only to repair the latest release; publish a new patch for defective code or immutable artifacts.
+
 ## Choose the workflow mode
 
 The workflow has four mutually exclusive operating modes:
@@ -91,6 +98,9 @@ move the tag backward.
 A Nightly run creates no version commit, release PR, Git tag, GitHub Release, changelog update,
 Desktop build/feed, GHCR tag, or Homebrew formula. It never moves npm's `latest` tag.
 
+<details>
+<summary>Signing, verification, and partial-release recovery</summary>
+
 ## Signing and updater behavior
 
 npm uses GitHub OIDC trusted publishers; there is no `NPM_TOKEN` release path. The main `kandev` package and all five `@kdlbs/runtime-*` packages publish provenance attestations. Homebrew requires its repository deploy key.
@@ -169,3 +179,5 @@ not provide a token-based `npm dist-tag add` recovery path. Do not delete or reu
 version.
 
 For implementation detail, inspect `.github/workflows/release.yml`, `.github/workflows/universal-rebuild.yml`, `scripts/release/`, `apps/cli/README_internal.md`, and desktop packaging scripts. Those files are automation source; this page is the contributor operating contract.
+
+</details>

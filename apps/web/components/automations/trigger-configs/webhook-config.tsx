@@ -8,6 +8,7 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import { IconCopy, IconCheck, IconEye, IconEyeOff } from "@tabler/icons-react";
 import { revealWebhookSecret } from "@/lib/api/domains/automation-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 type WebhookConfigProps = {
   automationId: string | null;
@@ -62,9 +63,10 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
   const [samplePayload, setSamplePayload] = useState("");
 
   const copyValue = useCallback(async (value: string, kind: "url" | "secret") => {
-    await navigator.clipboard.writeText(value);
-    setCopied(kind);
-    setTimeout(() => setCopied(null), 2000);
+    if (await copyToClipboard(value)) {
+      setCopied(kind);
+      setTimeout(() => setCopied(null), 2000);
+    }
   }, []);
 
   const detectedKeys = useMemo(() => extractKeys(samplePayload), [samplePayload]);

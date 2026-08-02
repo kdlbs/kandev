@@ -69,6 +69,11 @@ if [[ "${GH_FAIL_COMMENT:-0}" == "1" && "$1" == "api" && "$2" == repos/kdlbs/kan
   exit 1
 fi
 
+if [[ "${GH_FAIL_APPROVAL_RUNS:-0}" == "1" && "$*" == *"repos/kdlbs/kandev/actions/runs?event=pull_request&head_sha=abc123&per_page=100"* ]]; then
+  echo "workflow runs api failed" >&2
+  exit 1
+fi
+
 if [[ "$1" == "repo" && "$2" == "view" ]]; then
   printf '{"owner":{"login":"kdlbs"},"name":"kandev"}\n'
   exit 0
@@ -89,6 +94,41 @@ if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/pulls/comments/111" ]]; then
   "updated_at": "2026-06-01T10:01:00Z"
 }
 JSON
+  exit 0
+fi
+
+if [[ "$*" == *"repos/kdlbs/kandev/actions/runs?event=pull_request&head_sha=abc123&per_page=100"* ]]; then
+  if [[ "${GH_APPROVAL_REQUIRED:-0}" == "1" ]]; then
+    cat <<'JSON'
+{"workflow_runs":[{"id":444,"name":"Backend tests","path":".github/workflows/ci.yml","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"abc123","html_url":"https://github.com/kdlbs/kandev/actions/runs/444","pull_requests":[{"number":123,"head":{"sha":"abc123"}}]},{"id":443,"name":"Stale run","path":".github/workflows/ci.yml","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"old-head","html_url":"https://github.com/kdlbs/kandev/actions/runs/443","pull_requests":[{"number":123,"head":{"sha":"old-head"}}]}]}
+JSON
+  else
+    printf '%s\n' '{"workflow_runs":[]}'
+  fi
+  exit 0
+fi
+
+if [[ "$1" == "api" && "$2" == "repos/kdlbs/kandev/actions/jobs/55150000002/logs" ]]; then
+  log_file="$(mktemp)"
+  {
+    printf '%s\n' 'setup complete'
+    printf '%s\n' 'Test timeout: expected ready state'
+    printf '%s\n' 'stack frame one'
+    printf '%s\n' 'stack frame two'
+    printf '%s\n' 'stack frame three'
+    printf '%s\n' 'stack frame four'
+    printf '%s\n' 'stack frame five'
+    printf '%s\n' 'stack frame six'
+    printf '%s\n' 'unrelated tail line'
+  } >"$log_file"
+  if [[ "${GH_JOB_LOG_FORMAT:-plain}" == "zip" ]]; then
+    base64 -d <<'ZIP'
+UEsDBBQAAAAAALip/lxqPXj2qgAAAKoAAAAHAAAAam9iLmxvZ3NldHVwIGNvbXBsZXRlClRlc3QgdGltZW91dDogZXhwZWN0ZWQgcmVhZHkgc3RhdGUKc3RhY2sgZnJhbWUgb25lCnN0YWNrIGZyYW1lIHR3bwpzdGFjayBmcmFtZSB0aHJlZQpzdGFjayBmcmFtZSBmb3VyCnN0YWNrIGZyYW1lIGZpdmUKc3RhY2sgZnJhbWUgc2l4CnVucmVsYXRlZCB0YWlsIGxpbmUKUEsBAhQDFAAAAAAAuKn+XGo9ePaqAAAAqgAAAAcAAAAAAAAAAAAAAIABAAAAAGpvYi5sb2dQSwUGAAAAAAEAAQA1AAAAzwAAAAAA
+ZIP
+  else
+    cat "$log_file"
+  fi
+  rm -f "$log_file"
   exit 0
 fi
 
@@ -132,6 +172,9 @@ if [[ "$1" == "pr" && "$2" == "view" && "$4" == "--json" ]]; then
   "number": 123,
   "headRefName": "feat/pr-state",
   "headRefOid": "${GH_CHECKS_HEAD:-abc123}",
+  "headRepositoryOwner": { "login": "${GH_HEAD_REPOSITORY_OWNER:-kdlbs}" },
+  "headRepository": { "name": "${GH_HEAD_REPOSITORY_NAME:-kandev}" },
+  "maintainerCanModify": ${GH_MAINTAINER_CAN_MODIFY:-true},
   "isCrossRepository": ${GH_CROSS_REPOSITORY:-false},
   "url": $pr_url,
   "comments": [
@@ -657,6 +700,7 @@ test_snapshot_happy_path() {
 
   assert_jq "pr number" '.pr.number == 123' "$json"
   assert_jq "branch" '.pr.branch == "feat/pr-state"' "$json"
+  assert_jq "head delivery target" '.pr.head_repository_owner == "kdlbs" and .pr.head_repository_name == "kandev" and .pr.head_ref_name == "feat/pr-state" and .pr.head_ref_oid == "abc123" and .pr.maintainer_can_modify == true' "$json"
   assert_jq "since timestamp" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
   assert_jq "checks collapse duplicate workflow attempts" '.checks | length < 10' "$json"
   assert_jq "latest duplicate check uses newest attempt" '[.checks[] | select(.name == "web lint")][0] | .conclusion == "success" and .run_id == "27340000001"' "$json"
@@ -1151,7 +1195,9 @@ test_summary_mode_returns_compact_fixup_state() {
   json="$(<"$tmp/out.json")"
 
   assert_jq "summary keeps pr" '.pr.number == 123' "$json"
+  assert_jq "summary keeps authoritative head delivery target" '.pr.head_repository_owner == "kdlbs" and .pr.head_repository_name == "kandev" and .pr.head_ref_name == "feat/pr-state" and .pr.head_ref_oid == "abc123" and .pr.maintainer_can_modify == true' "$json"
   assert_jq "summary keeps since" '.since.committed_at == "2026-06-01T12:00:00Z"' "$json"
+  assert_jq "summary has no approval-required runs by default" '.approval_required_runs == []' "$json"
   assert_jq "summary failed check count" '.failed_checks | length == 3' "$json"
   assert_jq "summary failed check" '.failed_checks[] | select(.name == "e2e") | .conclusion == "failure" and .run_id == "27340000002"' "$json"
   assert_jq "summary reports failed duplicate over skipped" '.failed_checks[] | select(.name == "opencode-review-fork") | .conclusion == "failure" and .run_id == "27340000007"' "$json"
@@ -1171,6 +1217,66 @@ test_summary_mode_returns_compact_fixup_state() {
   assert_jq "summary omits raw arrays" 'has("checks") | not' "$json"
   assert_jq "summary no errors" '.errors == []' "$json"
   pass "--summary returns compact fixup state"
+}
+
+test_summary_reports_current_head_fork_approval_runs() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_CROSS_REPOSITORY=true GH_APPROVAL_REQUIRED=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary reports only current-head approval run" \
+    '.approval_required_runs | length == 1 and .[0].run_id == "444" and .[0].head_sha == "abc123" and .[0].conclusion == "action_required"' \
+    "$json"
+  pass "--summary reports current-head fork approval runs"
+}
+
+test_summary_reports_approval_run_fetch_failure() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local json
+  GH_CROSS_REPOSITORY=true GH_FAIL_APPROVAL_RUNS=1 PATH="$tmp/bin:$PATH" "$SCRIPT" --summary 123 >"$tmp/out.json"
+  json="$(<"$tmp/out.json")"
+
+  assert_jq "summary reports approval-run fetch failure" \
+    '.approval_required_runs == [] and any(.errors[]; .source == "approval_required_runs" and .message == "workflow runs API failed")' \
+    "$json"
+  pass "--summary reports approval-run fetch failure"
+}
+
+test_job_log_mode_emits_bounded_failure_context() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local output
+  output="$(PATH="$tmp/bin:$PATH" "$SCRIPT" --job-log 55150000002)"
+
+  if ! grep -q 'Test timeout: expected ready state' <<<"$output"; then
+    fail "--job-log emits matching failure context"
+  fi
+  if grep -q 'unrelated tail line' <<<"$output"; then
+    fail "--job-log keeps output bounded"
+  fi
+  pass "--job-log emits bounded failure context"
+}
+
+test_job_log_mode_unpacks_zip_responses() {
+  local tmp
+  make_tmp_dir tmp
+  make_mock_gh "$tmp/bin"
+
+  local output
+  output="$(GH_JOB_LOG_FORMAT=zip PATH="$tmp/bin:$PATH" "$SCRIPT" --job-log 55150000002)"
+  if ! grep -q 'Test timeout: expected ready state' <<<"$output"; then
+    fail "--job-log unpacks zip responses"
+  fi
+  pass "--job-log unpacks zip responses"
 }
 
 test_summary_all_flag_includes_historical_unresolved_threads() {
@@ -1241,6 +1347,13 @@ test_comment_mode_rejects_incompatible_flags() {
 
   if PATH="$tmp/bin:$PATH" "$SCRIPT" --all --comment 111 >"$tmp/out.log" 2>&1; then
     fail "--comment rejects --all"
+  fi
+
+  if PATH="$tmp/bin:$PATH" "$SCRIPT" --comment 111 --job-log 55150000002 >"$tmp/out.log" 2>&1; then
+    fail "--comment rejects --job-log"
+  fi
+  if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
+    fail "--comment --job-log prints usage"
   fi
   if ! grep -q "scripts/pr-state --comment <comment_id>" "$tmp/out.log"; then
     fail "--comment --all prints usage"
@@ -1334,7 +1447,11 @@ test_graphql_failure_records_error_but_keeps_other_data
 test_graphql_pagination_collects_all_threads
 test_all_flag_includes_historical_comments_and_reviews
 test_summary_mode_returns_compact_fixup_state
+test_summary_reports_current_head_fork_approval_runs
+test_summary_reports_approval_run_fetch_failure
 test_summary_all_flag_includes_historical_unresolved_threads
+test_job_log_mode_emits_bounded_failure_context
+test_job_log_mode_unpacks_zip_responses
 test_comment_mode_returns_full_review_comment
 test_comment_mode_reports_fetch_failure
 test_comment_mode_rejects_incompatible_flags

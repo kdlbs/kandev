@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
 )
@@ -265,6 +266,9 @@ func (s *OnboardingService) unimportedFSWorkspaces(ctx context.Context) []FSWork
 // and marks onboarding as finished.
 func (s *OnboardingService) CompleteOnboarding(ctx context.Context, req CompleteRequest) (*CompleteResult, error) {
 	result := &CompleteResult{}
+	if err := taskservice.ValidateTaskTitle(req.TaskTitle); err != nil {
+		return nil, fmt.Errorf("invalid onboarding task title: %w", err)
+	}
 
 	if err := s.createOnboardingWorkspace(ctx, req.WorkspaceName, req.TaskPrefix); err != nil {
 		return nil, fmt.Errorf("create workspace: %w", err)

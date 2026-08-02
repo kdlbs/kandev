@@ -10,6 +10,7 @@ import {
   type SSHLiveStatus,
   type TaskEnvironment,
 } from "@/lib/api/domains/task-environment-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { resolveExecutorEnvironmentStatus, type StatusTone } from "./executor-environment-status";
 
 const TONE_CLASSES: Record<StatusTone, string> = {
@@ -129,9 +130,9 @@ function Field({
             className="cursor-pointer text-muted-foreground hover:text-foreground"
             aria-label={`Copy ${label}`}
             onClick={() => {
-              void navigator.clipboard
-                .writeText(copyValue ?? value)
-                .then(() => toast.success(`${label} copied`));
+              void copyToClipboard(copyValue ?? value).then((success) => {
+                if (success) toast.success(`${label} copied`);
+              });
             }}
           >
             <IconCopy className="h-3 w-3" />

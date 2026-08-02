@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -29,9 +30,15 @@ const (
 	gitCredentialHelper     = `!f() { if [ "$1" = get ]; then printf '%s\n' "username=$KANDEV_REPOCLONE_GITHUB_USERNAME" "password=$KANDEV_REPOCLONE_GITHUB_TOKEN"; fi; }; f`
 	managedWorkspacesDir    = "workspaces"
 	providerCloneDir        = "_providers"
+	maxGitDiagnosticBytes   = 4096
 )
 
-var ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
+var (
+	ErrWorkspaceCredentialUnavailable = errors.New("workspace Git credential is unavailable")
+	ErrRepositoryOwnershipMismatch    = errors.New("managed repository ownership mismatch")
+	gitURLUserInfoPattern             = regexp.MustCompile(`(?i)(https?://)[^/\s@]+@`)
+	gitCredentialPattern              = regexp.MustCompile(`(?i)\b(password|token|secret|authorization)(\s*[:=]\s*)[^\r\n]+`)
+)
 
 // Config holds configuration for the repository cloner.
 type Config struct {
@@ -336,12 +343,41 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 	mu.Lock()
 	defer mu.Unlock()
 
-	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	// `git remote get-url` expands url.*.insteadOf rules before returning the
+	// value. Compare the value stored in the local config instead so a common
+	// HTTPS-to-SSH rewrite does not turn an already-canonical origin into a
+	// needless config write on every launch/resume.
+	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
 	configureGitCommand(cmd, nil)
-	if _, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
-		return fmt.Errorf("set repository origin: %w", err)
+	currentOutput, err := subproc.RunGitCombinedOutput(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("inspect repository origin: %w", formatGitOriginError(repositoryPath, currentOutput, err))
+	}
+	if strings.TrimSpace(string(currentOutput)) == strings.TrimSpace(originURL) {
+		return nil
+	}
+
+	cmd = exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	configureGitCommand(cmd, nil)
+	output, err := subproc.RunGitCombinedOutput(ctx, cmd)
+	if err != nil {
+		return fmt.Errorf("set repository origin: %w", formatGitOriginError(repositoryPath, output, err))
 	}
 	return nil
+}
+
+func formatGitOriginError(repositoryPath string, output []byte, err error) error {
+	diagnostic := redactCloneOutput(string(output), "")
+	if strings.Contains(strings.ToLower(diagnostic), "detected dubious ownership") {
+		return fmt.Errorf(
+			"%w: Git rejected managed checkout %q because its filesystem owner differs from the Kandev service account; ensure that account owns the checkout or reinstall Kandev with the intended account (git: %s)",
+			ErrRepositoryOwnershipMismatch, repositoryPath, diagnostic,
+		)
+	}
+	if diagnostic == "" {
+		return err
+	}
+	return fmt.Errorf("git reported %s: %w", diagnostic, err)
 }
 
 type cloneAuth struct {
@@ -625,10 +661,16 @@ func redactCloneURL(raw string) string {
 }
 
 func redactCloneOutput(output, token string) string {
-	if token == "" {
-		return output
+	redacted := output
+	if token != "" {
+		redacted = strings.ReplaceAll(redacted, token, "[REDACTED]")
 	}
-	return strings.ReplaceAll(output, token, "[REDACTED]")
+	redacted = gitURLUserInfoPattern.ReplaceAllString(redacted, `${1}[REDACTED]@`)
+	redacted = gitCredentialPattern.ReplaceAllString(redacted, `${1}${2}[REDACTED]`)
+	if len(redacted) > maxGitDiagnosticBytes {
+		return redacted[:maxGitDiagnosticBytes]
+	}
+	return redacted
 }
 
 func authToken(auth *cloneAuth) string {

@@ -11,67 +11,77 @@ import { updateUserSettings } from "@/lib/api";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
 import { SettingsCard } from "./settings-card";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { Trans, useTranslation } from "react-i18next";
 
+/**
+ * `value` is the persisted enum the API compares — never translated. The label
+ * and description hold catalog KEYS, resolved at render: a module-scope `t()`
+ * would freeze this copy at the boot locale (see docs/i18n.md).
+ */
 const OPTIONS: Array<{
   value: MCPTaskAgentProfileDefault;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
 }> = [
   {
     value: "current_task",
-    label: "Current task profile",
-    description:
-      "The new task uses the same profile as the task that created it. Choose this when follow-up work needs the same model and agent setup. This may reuse a more expensive profile.",
+    labelKey: "settings:mcpTaskProfileCurrentTask",
+    descriptionKey: "settings:mcpTaskProfileCurrentTaskDescription",
   },
   {
     value: "workspace_default",
-    label: "Workspace default profile",
-    description:
-      "The new task uses its workflow profile when one is set; otherwise it uses the default profile of the workspace receiving the task. Choose this to keep agent-created tasks on your standard workspace model and avoid accidentally reusing an expensive profile.",
+    labelKey: "settings:mcpTaskProfileWorkspaceDefault",
+    descriptionKey: "settings:mcpTaskProfileWorkspaceDefaultDescription",
   },
 ];
 
 function MCPTaskProfileScopeDescription() {
+  const { t } = useTranslation();
   return (
     <CardDescription className="space-y-3">
-      <p>
-        Use this setting when an agent calls a Kandev MCP tool that creates a task. If the call does
-        not choose a profile, Kandev must assign an agent profile to the new task. That profile
-        controls its agent, model, and setup.
-      </p>
+      <p>{t("settings:useThisSettingWhenAnAgent")}</p>
       <div className="space-y-1.5">
         <div className="flex items-center gap-1 text-foreground">
-          <span className="font-medium">Affected Kandev MCP tool</span>
+          <span className="font-medium">{t("settings:affectedKandevMcpTool")}</span>
           <Tooltip>
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label="About affected Kandev MCP tools"
+                aria-label={t("settings:aboutAffectedKandevMcpTools")}
                 className="relative inline-flex size-6 shrink-0 cursor-pointer items-center justify-center text-muted-foreground outline-none after:absolute after:-inset-2.5 hover:text-foreground focus-visible:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <IconInfoCircle className="size-4" aria-hidden="true" />
               </button>
             </TooltipTrigger>
             <TooltipContent side="top" className="max-w-xs text-xs">
-              <code>create_task_kandev</code> creates a separate task.{" "}
-              <code>spawn_session_kandev</code> adds a session to the current task, so it does not
-              use this preference.
+              <Trans i18nKey="settings:mcpAffectedToolsHelp">
+                <code>create_task_kandev</code> creates a separate task.{" "}
+                <code>spawn_session_kandev</code> adds a session to the current task, so it does not
+                use this preference.
+              </Trans>
             </TooltipContent>
           </Tooltip>
         </div>
         <p>
-          <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
-            create_task_kandev
-          </code>{" "}
-          creates new tasks and subtasks. This setting applies only when the call omits{" "}
-          <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">agent_profile_id</code>.
+          <Trans i18nKey="settings:mcpCreateTaskScope">
+            <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
+              create_task_kandev
+            </code>{" "}
+            creates new tasks and subtasks. This setting applies only when the call omits{" "}
+            <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
+              agent_profile_id
+            </code>
+            .
+          </Trans>
         </p>
         <p>
-          <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
-            spawn_session_kandev
-          </code>{" "}
-          and tasks you create yourself are not affected. An explicitly selected profile always
-          wins.
+          <Trans i18nKey="settings:mcpSpawnSessionScope">
+            <code className="rounded-sm bg-muted px-1 py-0.5 text-foreground">
+              spawn_session_kandev
+            </code>{" "}
+            and tasks you create yourself are not affected. An explicitly selected profile always
+            wins.
+          </Trans>
         </p>
       </div>
     </CardDescription>
@@ -79,6 +89,7 @@ function MCPTaskProfileScopeDescription() {
 }
 
 export function MCPTaskAgentProfileDefaultSettings() {
+  const { t } = useTranslation();
   const preference = useAppStore((state) => state.userSettings.mcpTaskAgentProfileDefault);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -116,13 +127,13 @@ export function MCPTaskAgentProfileDefaultSettings() {
     <SettingsCard isDirty={isDirty} data-testid="mcp-task-profile-default-card">
       <CardHeader>
         <CardTitle className="text-base">
-          <h3>Profile for Tasks Created by Agents</h3>
+          <h3>{t("settings:profileForTasksCreatedByAgents")}</h3>
         </CardTitle>
         <MCPTaskProfileScopeDescription />
       </CardHeader>
       <CardContent>
         <RadioGroup
-          aria-label="Profile for tasks created by agents"
+          aria-label={t("settings:profileForTasksCreatedByAgents")}
           value={draft}
           onValueChange={(value) => setDraft(value as MCPTaskAgentProfileDefault)}
           data-settings-dirty={isDirty}
@@ -146,13 +157,13 @@ export function MCPTaskAgentProfileDefaultSettings() {
                 />
                 <span className="min-w-0 space-y-1">
                   <span id={labelId} className="block text-sm font-medium">
-                    {option.label}
+                    {t(option.labelKey)}
                   </span>
                   <span
                     id={descriptionId}
                     className="block whitespace-normal break-words text-xs text-muted-foreground"
                   >
-                    {option.description}
+                    {t(option.descriptionKey)}
                   </span>
                 </span>
               </Label>

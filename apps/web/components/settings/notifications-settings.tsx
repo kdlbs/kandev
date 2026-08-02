@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent } from "react";
 import { IconBell } from "@tabler/icons-react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Separator } from "@kandev/ui/separator";
@@ -36,6 +37,7 @@ function AppriseProviderCardActions({
   onDeleteProvider: (providerId: string) => void;
   onTestProvider: (providerId: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
       <TooltipProvider>
@@ -45,13 +47,13 @@ function AppriseProviderCardActions({
               variant="outline"
               size="icon"
               className="h-8 w-8 cursor-pointer"
-              aria-label={`Send test notification for ${provider.name}`}
+              aria-label={t("settings:sendTestNotificationFor", { name: provider.name })}
               onClick={() => void onTestProvider(provider.id)}
             >
               <IconBell className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Send test notification</TooltipContent>
+          <TooltipContent>{t("settings:sendTestNotification")}</TooltipContent>
         </Tooltip>
       </TooltipProvider>
       <Button
@@ -60,7 +62,7 @@ function AppriseProviderCardActions({
         className="cursor-pointer"
         onClick={() => onOpenForm("edit", provider)}
       >
-        Edit
+        {t("settings:edit")}
       </Button>
       <Button
         variant="outline"
@@ -68,7 +70,7 @@ function AppriseProviderCardActions({
         className="cursor-pointer"
         onClick={() => onDeleteProvider(provider.id)}
       >
-        Remove
+        {t("settings:remove")}
       </Button>
     </div>
   );
@@ -148,6 +150,7 @@ function AppriseProviderList({
               <div className="flex items-center justify-between gap-4">
                 <div className="space-y-1 flex-1">
                   <div className="font-medium">{provider.name}</div>
+                  {/* Product name — never translated (docs/i18n.md "Do not translate"). */}
                   <div className="text-xs text-muted-foreground">Apprise</div>
                 </div>
                 <AppriseProviderCardActions
@@ -206,30 +209,35 @@ function ExternalProvidersSection({
   onTestProvider,
   onTextareaInput,
 }: ExternalProvidersSectionProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div>
-        <div className="text-base font-medium">External Providers</div>
+        <div className="text-base font-medium">{t("settings:externalProviders")}</div>
         <p className="text-sm text-muted-foreground">
-          Configure external providers for remote notifications.
+          {t("settings:externalProvidersDescription")}
         </p>
       </div>
       {!appriseAvailable && (
         <p className="text-sm text-muted-foreground">
-          Apprise is not installed yet. You can add it later to enable remote notifications.{" "}
-          <a
-            className="underline"
-            href="https://github.com/caronc/apprise?tab=readme-ov-file#installation"
-            target="_blank"
-            rel="noreferrer"
-          >
-            View installation instructions
-          </a>
-          .
+          {/* The link is part of the sentence, so the whole notice is one
+              message and the <2> tag addresses the anchor by child index. */}
+          <Trans i18nKey="settings:appriseNotInstalled">
+            Apprise is not installed yet. You can add it later to enable remote notifications.{" "}
+            <a
+              className="underline"
+              href="https://github.com/caronc/apprise?tab=readme-ov-file#installation"
+              target="_blank"
+              rel="noreferrer"
+            >
+              View installation instructions
+            </a>
+            .
+          </Trans>
         </p>
       )}
       {appriseProviders.length === 0 && (
-        <p className="text-sm text-muted-foreground">No Apprise providers configured yet.</p>
+        <p className="text-sm text-muted-foreground">{t("settings:noAppriseProviders")}</p>
       )}
       <AppriseProviderList
         providers={appriseProviders}
@@ -257,7 +265,7 @@ function ExternalProvidersSection({
             onClick={() => onOpenForm("create")}
             disabled={showAppriseForm}
           >
-            Add Apprise Provider
+            {t("settings:addAppriseProvider")}
           </Button>
           {showAppriseForm && appriseFormMode === "create" && (
             <AppriseProviderForm
@@ -305,6 +313,7 @@ function useTableData(state: NotificationsState) {
 }
 
 function useNotificationPageSaveState(state: NotificationsState, soundIsDirty: boolean) {
+  const { t } = useTranslation();
   const providerIsDirty = useIsDirty(state);
   const creatingApprise = state.showAppriseForm && state.appriseFormMode === "create";
   const canSave = !creatingApprise || state.appriseUrls.trim().length > 0;
@@ -331,12 +340,13 @@ function useNotificationPageSaveState(state: NotificationsState, soundIsDirty: b
     providerIsDirty,
     cardIsDirty: providerIsDirty || soundIsDirty,
     canSave,
-    invalidReason: canSave ? undefined : "At least one Apprise service URL is required.",
+    invalidReason: canSave ? undefined : t("settings:appriseUrlRequired"),
     revision,
   };
 }
 
 export function NotificationsSettings() {
+  const { t } = useTranslation();
   const state = useNotificationsState();
   const { notificationPermission, refreshPermission } = useNotificationPermission();
   const saveRequest = useSaveRequest(state);
@@ -359,8 +369,8 @@ export function NotificationsSettings() {
   const appriseProviders = providers.filter((provider) => provider.type === "apprise");
   return (
     <SettingsPageTemplate
-      title="Notifications"
-      description="Configure providers and choose which events should alert you."
+      title={t("settings:notifications")}
+      description={t("settings:notificationsDescription")}
       isDirty={saveState.providerIsDirty}
       cardIsDirty={saveState.cardIsDirty}
       saveStatus={saveRequest.status}
@@ -402,9 +412,9 @@ export function NotificationsSettings() {
       <Separator className="my-4" />
       <div className="space-y-4">
         <div>
-          <div className="text-base font-medium">Notification Events</div>
+          <div className="text-base font-medium">{t("settings:notificationEvents")}</div>
           <p className="text-sm text-muted-foreground">
-            Select which providers should receive each notification type.
+            {t("settings:notificationEventsDescription")}
           </p>
         </div>
         {tableProviders.length > 0 && (
@@ -450,24 +460,25 @@ function AppriseProviderForm({
   formIsDirty = nameIsDirty || urlsIsDirty,
   showSubmit = true,
 }: AppriseProviderFormProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="rounded-lg border border-dashed border-muted p-4 space-y-3"
       data-settings-dirty={formIsDirty}
       data-settings-dirty-level="container"
     >
-      <div className="text-base font-medium">Apprise Provider</div>
+      <div className="text-base font-medium">{t("settings:appriseProvider")}</div>
       <Input
         value={name}
         onChange={(event) => onNameChange(event.target.value)}
-        placeholder="Provider name"
+        placeholder={t("settings:providerName")}
         data-settings-dirty={nameIsDirty}
       />
       <Textarea
         value={urls}
         onChange={(event) => onUrlsChange(event.target.value)}
         onInput={onInput}
-        placeholder="Service URL(s)"
+        placeholder={t("settings:appriseServiceUrls")}
         rows={1}
         className="min-h-0 h-auto"
         data-settings-dirty={urlsIsDirty}
@@ -475,11 +486,11 @@ function AppriseProviderForm({
       <div className="flex items-center gap-2">
         {showSubmit && (
           <Button className="cursor-pointer" onClick={onSubmit}>
-            {mode === "create" ? "Add provider" : "Done"}
+            {mode === "create" ? t("settings:addProvider") : t("settings:done")}
           </Button>
         )}
         <Button variant="ghost" className="cursor-pointer" onClick={onCancel}>
-          Cancel
+          {t("settings:cancel")}
         </Button>
       </div>
     </div>

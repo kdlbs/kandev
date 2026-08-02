@@ -79,6 +79,102 @@ func TestSetOriginURL(t *testing.T) {
 	}
 }
 
+func TestSetOriginURLSkipsWriteWhenOriginAlreadyMatches(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	const origin = "https://github.com/acme/widgets.git"
+	runGit(t, repoPath, "remote", "add", "origin", origin)
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(repoPath, ".git", "config.lock")) })
+
+	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
+	if err := cloner.SetOriginURL(context.Background(), repoPath, origin); err != nil {
+		t.Fatalf("SetOriginURL() with an already-matching origin = %v, want no-op success", err)
+	}
+}
+
+func TestSetOriginURLComparesStoredOriginBeforeInsteadOfExpansion(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	const origin = "https://github.com/acme/widgets.git"
+	runGit(t, repoPath, "remote", "add", "origin", origin)
+	runGit(t, repoPath, "config", "--local", "url.git@github.com:.insteadOf", "https://github.com/")
+	if got := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin")); got != "git@github.com:acme/widgets.git" {
+		t.Fatalf("expanded origin = %q, want SSH URL", got)
+	}
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(repoPath, ".git", "config.lock")) })
+
+	cloner := NewCloner(Config{}, ProtocolHTTPS, t.TempDir(), logger.Default())
+	if err := cloner.SetOriginURL(context.Background(), repoPath, origin); err != nil {
+		t.Fatalf("SetOriginURL() with insteadOf rewrite = %v, want no-op success", err)
+	}
+}
+
+func TestSetOriginURLIncludesBoundedGitDiagnostic(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+
+	repoPath := t.TempDir()
+	runGit(t, repoPath, "init", "--quiet")
+	runGit(t, repoPath, "remote", "add", "origin", "https://github.com/acme/widgets.git")
+	if err := os.WriteFile(filepath.Join(repoPath, ".git", "config.lock"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Remove(filepath.Join(repoPath, ".git", "config.lock")) })
+
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+	err := cloner.SetOriginURL(context.Background(), repoPath, "git@github.com:acme/widgets.git")
+	if err == nil || !strings.Contains(err.Error(), "could not lock config file") {
+		t.Fatalf("SetOriginURL() error = %v, want Git lock diagnostic", err)
+	}
+	if strings.TrimSpace(err.Error()) == "set repository origin: exit status 128" {
+		t.Fatalf("SetOriginURL() discarded Git diagnostic: %v", err)
+	}
+}
+
+func TestSetOriginURLClassifiesDubiousOwnership(t *testing.T) {
+	binDir := t.TempDir()
+	gitPath := filepath.Join(binDir, "git")
+	if err := os.WriteFile(gitPath, []byte("#!/bin/sh\nprintf '%s\\n' 'fatal: detected dubious ownership in repository at /var/lib/kandev/repos/acme/widgets' >&2\nexit 128\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	cloner := NewCloner(Config{}, ProtocolSSH, t.TempDir(), logger.Default())
+	err := cloner.SetOriginURL(context.Background(), "/var/lib/kandev/repos/acme/widgets", "git@github.com:acme/widgets.git")
+	if err == nil || !errors.Is(err, ErrRepositoryOwnershipMismatch) {
+		t.Fatalf("SetOriginURL() error = %v, want ownership mismatch", err)
+	}
+	if !strings.Contains(err.Error(), "service account") || strings.Contains(err.Error(), "safe.directory") {
+		t.Fatalf("ownership diagnostic = %v, want service-account guidance without safe.directory workaround", err)
+	}
+}
+
+func TestRedactCloneOutputRedactsCredentialsAndBoundsOutput(t *testing.T) {
+	output := "fatal: https://alice:secret@example.com/acme/widgets.git password=another-secret Authorization: Bearer synthetic-secret " + strings.Repeat("x", maxGitDiagnosticBytes+100)
+	redacted := redactCloneOutput(output, "another-secret")
+	if strings.Contains(redacted, "secret") || strings.Contains(redacted, "another-secret") {
+		t.Fatalf("redactCloneOutput() leaked credential: %q", redacted)
+	}
+	if len(redacted) > maxGitDiagnosticBytes {
+		t.Fatalf("redactCloneOutput() length = %d, want <= %d", len(redacted), maxGitDiagnosticBytes)
+	}
+}
+
 func TestSetOriginURLSerializesConcurrentUpdates(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not available")

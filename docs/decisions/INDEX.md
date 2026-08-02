@@ -94,3 +94,9 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |
 | 2026-07-31-npm-nightly-release-channel | [Publish deterministic npm-only nightlies](2026-07-31-npm-nightly-release-channel.md) | accepted | workflow, backend, frontend, cli | 2026-07-31 |
 | 2026-07-31-isolate-manual-pr-review-content | [Isolate Manual PR Review Content](2026-07-31-isolate-manual-pr-review-content.md) | accepted | infra, workflow, security | 2026-07-31 |
+| 2026-07-31-system-service-user-continuity | [Preserve System Service Identity Across Reinstallation](2026-07-31-system-service-user-continuity.md) | accepted | backend, cli, security, operations | 2026-07-31 |
+| 2026-08-01-repository-task-executor-defaults | [Resolve Task Executor Policy Before Last-Used Profile](2026-08-01-repository-task-executor-defaults.md) | accepted | frontend | 2026-08-01 |
+| 2026-08-01-validate-mcp-tool-arguments | [Validate MCP Tool Arguments at the Shared Server Boundary](2026-08-01-validate-mcp-tool-arguments.md) | accepted | backend, protocol | 2026-08-01 |
+| 2026-08-01-global-run-scheduler-ownership | [Separate Global Run Dispatch from Office Maintenance](2026-08-01-global-run-scheduler-ownership.md) | accepted | backend, workflow | 2026-08-01 |
+| 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
+| 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |

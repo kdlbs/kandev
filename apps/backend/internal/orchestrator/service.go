@@ -769,6 +769,12 @@ func (s *Service) SetGitHubCredentialBroker(issuer executor.GitHubCredentialLeas
 	s.executor.SetGitHubCredentialBroker(issuer, endpoint)
 }
 
+// SetAgentctlBinaryPath configures the host agentctl executable used by
+// managed Git during Local and Worktree preparation.
+func (s *Service) SetAgentctlBinaryPath(path string) {
+	s.executor.SetAgentctlBinaryPath(path)
+}
+
 // SetTaskGitCredentialPolicyResolver configures non-secret workspace policy lookup.
 func (s *Service) SetTaskGitCredentialPolicyResolver(resolver executor.TaskGitCredentialPolicyResolver) {
 	s.executor.SetTaskGitCredentialPolicyResolver(resolver)

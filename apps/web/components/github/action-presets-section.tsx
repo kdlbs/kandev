@@ -24,22 +24,33 @@ import {
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
-const ACTION_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
-  {
-    key: "url",
-    description: "URL of the PR or issue",
-    example: "https://github.com/org/repo/pull/42",
-    executor_types: [],
-  },
-  {
-    key: "title",
-    description: "Title of the PR or issue",
-    example: "Fix login page crash",
-    executor_types: [],
-  },
-];
+// A function, not a const: `description` is copy, and a module-scope `t()` call
+// would freeze at the boot locale (see docs/i18n.md). `key` is the substitution
+// token and `example` is sample GitHub data — neither is translated.
+function actionPromptPlaceholders(t: TFunction): ScriptPlaceholder[] {
+  return [
+    {
+      key: "url",
+      description: t("github:placeholderActionUrl"),
+      example: "https://github.com/org/repo/pull/42",
+      executor_types: [],
+    },
+    {
+      key: "title",
+      description: t("github:placeholderActionTitle"),
+      example: "Fix login page crash",
+      executor_types: [],
+    },
+  ];
+}
 
+// `label` is PERSISTED to workspace settings as part of `GitHubActionPreset` and
+// is immediately editable in the row below, so it must stay locale-neutral: a
+// preset seeded in one locale and saved unedited would keep that locale's text
+// forever. Same contract as DEFAULT_PR_PRESETS in my-github/action-presets.ts.
 function newPreset(): GitHubActionPreset {
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -59,11 +70,12 @@ function PresetIconSelect({
   isDirty: boolean;
   onChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger
         className="!h-8 py-0.5 text-sm cursor-pointer"
-        aria-label="Icon"
+        aria-label={t("github:icon")}
         data-settings-dirty={isDirty}
       >
         <SelectValue>
@@ -77,7 +89,7 @@ function PresetIconSelect({
             <SelectItem key={choice.key} value={choice.key} className="cursor-pointer">
               <span className="flex items-center gap-2">
                 <ChoiceIcon className="h-3.5 w-3.5" />
-                {choice.label}
+                {t(choice.labelKey)}
               </span>
             </SelectItem>
           );
@@ -102,6 +114,7 @@ function PresetRow({
   onPatch: (patch: Partial<GitHubActionPreset>) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="rounded-md border"
@@ -110,7 +123,7 @@ function PresetRow({
     >
       <div className="flex items-end gap-2 p-2">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-muted-foreground">Icon</span>
+          <span className="text-[10px] text-muted-foreground">{t("github:icon")}</span>
           <PresetIconSelect
             value={preset.icon}
             isDirty={preset.icon !== baseline?.icon}
@@ -118,22 +131,22 @@ function PresetRow({
           />
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-muted-foreground">Label</span>
+          <span className="text-[10px] text-muted-foreground">{t("github:label")}</span>
           <Input
             className="h-8 w-40"
             value={preset.label}
             data-settings-dirty={preset.label !== baseline?.label}
-            placeholder="Label"
+            placeholder={t("github:label")}
             onChange={(e) => onPatch({ label: e.target.value })}
           />
         </div>
         <div className="flex flex-col gap-0.5 flex-1">
-          <span className="text-[10px] text-muted-foreground">Hint</span>
+          <span className="text-[10px] text-muted-foreground">{t("github:hint")}</span>
           <Input
             className="h-8"
             value={preset.hint}
             data-settings-dirty={preset.hint !== baseline?.hint}
-            placeholder="Hint (optional)"
+            placeholder={t("github:hintOptional")}
             onChange={(e) => onPatch({ hint: e.target.value })}
           />
         </div>
@@ -143,42 +156,64 @@ function PresetRow({
           className="h-8 cursor-pointer text-xs"
           onClick={onToggle}
         >
-          {expanded ? "Hide prompt" : "Edit prompt"}
+          {expanded ? t("github:hidePrompt") : t("github:editPrompt")}
         </Button>
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 cursor-pointer text-destructive"
           onClick={onRemove}
-          aria-label="Remove"
+          aria-label={t("github:remove")}
         >
           <IconTrash className="h-3.5 w-3.5" />
         </Button>
       </div>
-      {expanded && (
-        <div className="px-2 pb-2 space-y-1">
-          <div
-            className="rounded-md border overflow-hidden"
-            data-settings-dirty={preset.prompt_template !== baseline?.prompt_template}
-            data-settings-dirty-level="container"
-          >
-            <ScriptEditor
-              value={preset.prompt_template}
-              onChange={(v) => onPatch({ prompt_template: v })}
-              language="markdown"
-              height={computeEditorHeight(preset.prompt_template)}
-              lineNumbers="off"
-              placeholders={ACTION_PROMPT_PLACEHOLDERS}
-            />
-          </div>
-          <p className="text-[11px] text-muted-foreground/60">
-            Type {"{{"} to see available placeholders.{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code> and{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code> are
-            substituted when the action runs.
-          </p>
-        </div>
-      )}
+      {expanded && <PresetPromptEditor preset={preset} baseline={baseline} onPatch={onPatch} />}
+    </div>
+  );
+}
+
+// Split out of PresetRow to keep that component under the 100-line lint cap.
+function PresetPromptEditor({
+  preset,
+  baseline,
+  onPatch,
+}: {
+  preset: GitHubActionPreset;
+  baseline?: GitHubActionPreset;
+  onPatch: (patch: Partial<GitHubActionPreset>) => void;
+}) {
+  const { t } = useTranslation();
+  const placeholders = useMemo(() => actionPromptPlaceholders(t), [t]);
+  return (
+    <div className="px-2 pb-2 space-y-1">
+      <div
+        className="rounded-md border overflow-hidden"
+        data-settings-dirty={preset.prompt_template !== baseline?.prompt_template}
+        data-settings-dirty-level="container"
+      >
+        <ScriptEditor
+          value={preset.prompt_template}
+          onChange={(v) => onPatch({ prompt_template: v })}
+          language="markdown"
+          height={computeEditorHeight(preset.prompt_template)}
+          lineNumbers="off"
+          placeholders={placeholders}
+        />
+      </div>
+      <p className="text-[11px] text-muted-foreground/60">
+        {/* The three `{{…}}` tokens are passed as values, never written into the
+            catalog, where i18next would interpolate them away. */}
+        <Trans
+          i18nKey="github:actionPromptPlaceholderHelp"
+          values={{ token: "{{", url: "{{url}}", title: "{{title}}" }}
+        >
+          Type {"{{token}}"} to see available placeholders.{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code> and{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code> are
+          substituted when the action runs.
+        </Trans>
+      </p>
     </div>
   );
 }
@@ -315,6 +350,7 @@ function usePresetDrafts(workspaceId: string): {
 }
 
 export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const {
     prDraft,
@@ -332,26 +368,26 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
   const handleSave = useCallback(async () => {
     try {
       await save();
-      toast({ description: "Quick actions saved", variant: "success" });
+      toast({ description: t("github:quickActionsSaved"), variant: "success" });
     } catch {
-      toast({ description: "Failed to save quick actions", variant: "error" });
+      toast({ description: t("github:failedToSaveQuickActions"), variant: "error" });
       throw new Error("Failed to save quick actions");
     }
-  }, [save, toast]);
+  }, [save, t, toast]);
   useSettingsSaveContributor({
     id: `github-action-presets:${workspaceId}`,
     revision: JSON.stringify([prDraft, issueDraft]),
     isDirty: dirty,
     canSave: !loading,
-    invalidReason: loading ? "Quick actions are still loading." : undefined,
+    invalidReason: loading ? t("github:quickActionsAreStillLoading") : undefined,
     save: handleSave,
     discard,
   });
 
   return (
     <SettingsSection
-      title="Quick actions"
-      description="Prompts shown on /github when starting a task from a PR or issue."
+      title={t("github:quickActions")}
+      description={t("github:promptsShownOnGithubWhenStarting", { route: "/github" })}
       action={
         <div className="flex gap-2">
           <Button
@@ -362,7 +398,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
-            Reset
+            {t("common:reset")}
           </Button>
         </div>
       }
@@ -373,10 +409,10 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
             <Tabs defaultValue="pr">
               <TabsList>
                 <TabsTrigger value="pr" className="cursor-pointer">
-                  Pull requests
+                  {t("github:pullRequests")}
                 </TabsTrigger>
                 <TabsTrigger value="issue" className="cursor-pointer">
-                  Issues
+                  {t("github:issues")}
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="pr">
@@ -384,7 +420,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
                   presets={prDraft}
                   baseline={prBaseline}
                   onChange={setPrDraft}
-                  addLabel="Add PR action"
+                  addLabel={t("github:addPrAction")}
                 />
               </TabsContent>
               <TabsContent value="issue">
@@ -392,7 +428,7 @@ export function ActionPresetsSection({ workspaceId }: { workspaceId: string }) {
                   presets={issueDraft}
                   baseline={issueBaseline}
                   onChange={setIssueDraft}
-                  addLabel="Add issue action"
+                  addLabel={t("github:addIssueAction")}
                 />
               </TabsContent>
             </Tabs>

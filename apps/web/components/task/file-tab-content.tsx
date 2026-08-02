@@ -6,6 +6,7 @@ import { FileImageViewer } from "./file-image-viewer";
 import { FileBinaryViewer } from "./file-binary-viewer";
 import type { OpenFileTab } from "@/lib/types/backend";
 import { getFileCategory, isMarkdownFile } from "@/lib/utils/file-types";
+import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { FileViewerExternalLink } from "./file-viewer-header";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
 
@@ -26,7 +27,11 @@ export function FileTabContent({
   onToggleMarkdownPreview,
 }: {
   tab: OpenFileTab;
-  activeSession: { worktree_path?: string | null; repository_id?: string | null } | null;
+  activeSession: {
+    workspace_path?: string | null;
+    worktree_path?: string | null;
+    repository_id?: string | null;
+  } | null;
   activeSessionId: string | null;
   taskId?: string | null;
   isSaving: boolean;
@@ -36,6 +41,7 @@ export function FileTabContent({
   onToggleMarkdownPreview?: () => void;
 }) {
   const category = resolveTabCategory(tab);
+  const workspacePath = getSessionWorkspacePath(activeSession);
   const externalLink = (
     <FileViewerExternalLink
       path={tab.path}
@@ -52,14 +58,14 @@ export function FileTabContent({
         <FileImageViewer
           path={tab.path}
           content={tab.content}
-          worktreePath={activeSession?.worktree_path ?? undefined}
+          worktreePath={workspacePath}
           headerActions={externalLink}
         />
       )}
       {category === "binary" && (
         <FileBinaryViewer
           path={tab.path}
-          worktreePath={activeSession?.worktree_path ?? undefined}
+          worktreePath={workspacePath}
           headerActions={externalLink}
         />
       )}
@@ -73,7 +79,7 @@ export function FileTabContent({
           sessionId={activeSessionId || undefined}
           taskId={taskId}
           repositoryId={activeSession?.repository_id ?? undefined}
-          worktreePath={activeSession?.worktree_path ?? undefined}
+          worktreePath={workspacePath}
           repo={tab.repo}
           enableComments={!!activeSessionId}
           markdownPreview={isMarkdownFile(tab.path) ? tab.markdownPreview : false}

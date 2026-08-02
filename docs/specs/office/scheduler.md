@@ -10,9 +10,22 @@ owner: cfl
 
 Kandev's base task scheduler is reactive: tasks enter the queue only when a user explicitly starts them or sends a prompt. Office adds autonomous agent operation, which requires the system to wake agents on its own when events happen (assignments, comments, blocker resolutions, approvals), on a schedule (routines), and on heartbeat ticks (periodic coordinator checks). Without an autonomous wakeup pipeline, every interaction needs a human to initiate it, and the cost / reliability story (idle skips, rate-limit retries, staleness, recovery) has nowhere to live.
 
-The office scheduler is the single seam for all autonomous wakeups: a SQLite-persisted wakeup queue with coalescing and idempotency, a claim/dispatch loop that creates one-shot agent runs, a routines table that drives all periodic and webhook-triggered wakes, plus the reliability primitives (rate-limit retry, idle skip, staleness check, recovery sweep) that keep the system honest at long uptime.
+Office supplies autonomous run producers and Office-specific maintenance. The persisted `runs` queue and its single backend-wide consumer are shared workflow infrastructure, not one scheduler per Office workspace. The shared ownership, scoping, and shutdown contract is defined by [queued run scheduling](../tasks/run-scheduling.md) and [ADR-2026-08-01-global-run-scheduler-ownership](../../decisions/2026-08-01-global-run-scheduler-ownership.md).
 
 ## What
+
+### Shared scheduler boundary
+
+- One shared runs scheduler processes persisted work for every workspace.
+- Office event subscribers and unstarted-task recovery act only on tasks whose
+  project/workflow identity makes `Task.IsFromOffice` true. A runner on an
+  ordinary Kanban task is not sufficient.
+- Explicit workflow `queue_run` actions remain available to every workflow
+  style and are not filtered by Office identity.
+- Office recovery is maintenance, not part of every five-second queue drain.
+  When no workspace has adopted Office, it skips the task scan.
+- The shared runs scheduler and cron loop stop and join before database cleanup
+  during graceful shutdown.
 
 ### Wakeup queue
 
@@ -32,7 +45,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 | `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{agent_profile_id, run_id, error}` |
 | `self` | Agent self-wake via tool call | `{reason, payload?}` |
 | `user` | User mention / explicit wake from the UI | `{user_id, context?}` |
-| `task_assigned` | Task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
+| `task_assigned` | An authoritative Office task's `assignee_agent_instance_id` is set or changed, including a newly-created task/subtask that already has a runner | `{task_id}` |
 | `task_blockers_resolved` | All blocking tasks of an assigned task reach `done` | `{task_id, resolved_blocker_ids}` |
 | `task_children_completed` | All child tasks of an assigned task reach terminal state | `{task_id}` |
 | `approval_resolved` | An approval requested by this agent is approved/rejected | `{approval_id, status, decision_note}` |
@@ -226,9 +239,9 @@ Log fields gain `source: "rate_limit_parsed"` vs `source: "backoff"`, plus `pars
 
 **Default backoff for non-rate-limit retries**: 4 attempts at `[2m, 10m, 30m, 2h]` with 25% jitter. After `MaxRetryCount` (4) failures, `escalateFailure` is called - the wakeup is marked `failed`, an `agent.error` inbox item is created, and the coordinator receives an `agent_error` wakeup.
 
-### Recovery sweep (unstarted tasks)
+### Recovery sweep (unstarted Office tasks)
 
-The scheduler tick is extended with a recovery sweep that runs once per tick after the wakeup drain. It finds assigned `TODO` tasks with no prior queued or running wakeup and dispatches them as `task_assigned` wakeups.
+Office maintenance performs a recovery sweep separately from the shared queue-drain tick. It finds authoritative Office `TODO` tasks created inside the workspace recovery lookback window and dispatches them as `task_assigned` runs only when no queued, claimed, or finished run exists for the task. The task-creation timestamp is bounded by the lookback; matching run rows are not, so a task that already started is never reclassified as unstarted merely because its prior run is old. Failed and cancelled rows do not block recovery. Assignment on an ordinary Kanban task does not imply autonomy.
 
 Selection:
 
@@ -236,12 +249,18 @@ Selection:
 SELECT t.id FROM tasks t
 WHERE t.state = 'TODO'
   AND t.assignee_agent_instance_id IS NOT NULL
+  AND (
+    COALESCE(t.project_id, '') != ''
+    OR t.workflow_id = (
+      SELECT w.office_workflow_id FROM workspaces w WHERE w.id = t.workspace_id
+    )
+  )
   AND t.archived_at IS NULL
   AND t.created_at >= NOW() - INTERVAL '<lookback_hours> hours'
   AND NOT EXISTS (
-      SELECT 1 FROM wakeup_requests w
-      WHERE w.payload->>'task_id' = t.id
-        AND w.status IN ('queued', 'claimed', 'finished')
+      SELECT 1 FROM runs r
+      WHERE r.payload->>'task_id' = t.id
+        AND r.status IN ('queued', 'claimed', 'finished')
   )
 ```
 
@@ -382,7 +401,7 @@ Before launching an agent session, the scheduler checks all applicable budget po
 
 ### Integration with existing scheduler
 
-The base `scheduler.Scheduler` and `queue.TaskQueue` continue to handle user-initiated task execution unchanged. The wakeup queue is a parallel path: same scheduler tick loop, different queue, different processing logic. Both paths converge at the lifecycle manager - the same `LaunchAgent()` / `StartAgentProcess()` calls regardless of whether the session was user-initiated or wakeup-initiated.
+User-initiated task execution continues through the orchestrator directly. Engine-emitted work uses the single shared `runs` scheduler across all workspaces. Office contributes event-driven producers and maintenance handlers to that shared path; it does not own a per-workspace scheduler. Both paths converge at the agent runtime.
 
 ## Data model
 
@@ -625,6 +644,7 @@ A formal per-route authorization model (workspace membership, admin role, RBAC o
 |---|---|
 | SQLite write failure during enqueue | Source caller surfaces error; idempotency-key collision is silent (treated as already-enqueued). |
 | Claim query returns 0 rows | Another process won the claim or no eligible wakeup; tick exits cleanly. |
+| Office is enabled with no Office workflow/project | Office recovery skips its task scan; ordinary Kanban assignments are not launched. |
 | Agent paused / stopped at claim | Wakeup marked `finished` with no action; not retried. |
 | Task referenced by payload is missing | Staleness check cancels with `task_not_found`; activity logged. |
 | Task assignee changed before claim | Cancelled with `assignee_changed`. |
@@ -640,12 +660,13 @@ A formal per-route authorization model (workspace membership, admin role, RBAC o
 | Coordinator's pre-installed routine fails to install at onboarding | Logged + warned; coordinator's agent detail UI shows "no scheduled wake-ups" empty state. User can install one manually. |
 | Routine cron tick missed (scheduler down) | `enqueue_missed_with_cap` (default): fire missed ticks up to cap=25 with "missed N ticks" in next prompt context. `skip_missed`: fire current tick only. |
 | Webhook signature verification fails | Trigger rejected with 401; no routine run created. |
+| Graceful shutdown begins | Queue and cron loops cancel and join before repositories and SQLite close; no scheduler logs `database is closed`. |
 
 ## Persistence guarantees
 
 Survives a kandev process restart: all `agent_wakeup_requests` rows including `queued`, `claimed` (re-claimed on restart), and `scheduled_retry_at`; all `office_routines`, `office_routine_triggers` (with `next_run_at` advanced), `office_routine_runs` history; `agent_continuation_summaries` (last-good); `runs` rows including `result_json`, `assembled_prompt`, `summary_injected` snapshots.
 
-Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The recovery sweep's idempotency is via the `NOT EXISTS` check on `wakeup_requests` plus the dispatched wakeup's `idempotency_key`.
+Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The unstarted-task recovery sweep suppresses duplicates with its `NOT EXISTS` check on `runs`: any queued, claimed, or finished run of any age blocks redispatch, while failed and cancelled runs do not.
 
 Retention: idempotency-key dedup window 24 hours; summary cap 8 KB per row; routine run history retained for inspection (no automatic prune in scope here); catch-up cap (default 25) drops missed routine ticks beyond it (not recorded individually).
 
@@ -653,7 +674,10 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 
 ## Scenarios
 
-- **GIVEN** a task is assigned to a worker agent instance, **WHEN** the assignment is saved, **THEN** a `task_assigned` wakeup is queued for that agent. The scheduler claims it, creates a session, and the agent starts working on the task.
+- **GIVEN** an authoritative Office task is assigned to a worker agent instance, **WHEN** the assignment is saved, **THEN** a `task_assigned` wakeup is queued for that agent. The scheduler claims it, creates a session, and the agent starts working on the task.
+- **GIVEN** Office mode is enabled but a workspace contains only Kanban workflows, **WHEN** a Kanban task with a runner remains in `TODO`, **THEN** Office subscribers and recovery do not queue a `task_assigned` run for it.
+
+- **GIVEN** Kandev is shutting down while the shared runs scheduler or cron loop is active, **WHEN** graceful shutdown reaches database cleanup, **THEN** those loops have already stopped and joined and no `sql: database is closed` scheduler error is emitted.
 
 - **GIVEN** a worker agent is currently running a session (at capacity), **WHEN** a `comment` wakeup arrives for the same agent, **THEN** the wakeup stays in `queued` status. When the current session completes, the next scheduler tick picks up the wakeup and the agent processes the comment.
 
@@ -689,7 +713,7 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 
 - **GIVEN** a wakeup for task T fails and a retry is scheduled 10 minutes out, **WHEN** task T is reassigned (or cancelled) before the retry fires, **THEN** the retry is cancelled at promotion time with reason `retry_stale_assignee` (or `retry_task_cancelled`), execution locks are cleared, and a `wakeup_retry_cancelled` activity entry is logged. A PATCH reassign on the API cancels pending retries for the previous assignee immediately.
 
-- **GIVEN** a task in `TODO` state assigned to agent A has no queued or finished wakeup and was created within the lookback window, **WHEN** the recovery sweep runs, **THEN** a `task_assigned` wakeup is dispatched and a `recovery_dispatch` activity entry is logged. Tasks that already have a queued/finished wakeup, or that fall outside `recovery_lookback_hours`, are skipped.
+- **GIVEN** an authoritative Office task in `TODO` state assigned to agent A has no queued, claimed, or finished run and was created within the lookback window, **WHEN** the recovery sweep runs, **THEN** a `task_assigned` run is dispatched and a `recovery_dispatch` activity entry is logged. Ordinary Kanban tasks, tasks with a queued, claimed, or finished run of any age, and tasks created outside `recovery_lookback_hours` are skipped.
 
 - **GIVEN** a wakeup for a task that has reached `DONE` state, **WHEN** the staleness check runs at claim time, **THEN** the wakeup is cancelled with reason `task_terminal` and the agent is not launched.
 

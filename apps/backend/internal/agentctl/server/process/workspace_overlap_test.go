@@ -228,10 +228,21 @@ func TestUpdateMu_PreventsConcurrentUpdates(t *testing.T) {
 	t.Logf("TryLock acquired by %d/%d goroutines (others correctly skipped)", total, goroutines)
 }
 
-// TestGetGitStatusHash_ExcludesUntrackedFiles verifies that getGitStatusHash uses
+// snapshotIndexHash reads a poll snapshot and returns its index hash, failing
+// the test if the underlying git read errored.
+func snapshotIndexHash(t *testing.T, wt *WorkspaceTracker, ctx context.Context) string {
+	t.Helper()
+	snap, err := wt.readGitPollSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("readGitPollSnapshot failed: %v", err)
+	}
+	return snap.indexHash
+}
+
+// TestGitPollSnapshot_ExcludesUntrackedFiles verifies that the poll snapshot uses
 // --untracked-files=no, so untracked files don't appear in the hash. This prevents
 // the expensive directory traversal that --untracked-files=all performs.
-func TestGetGitStatusHash_ExcludesUntrackedFiles(t *testing.T) {
+func TestGitPollSnapshot_ExcludesUntrackedFiles(t *testing.T) {
 	isolateTestGitEnv(t)
 
 	repoDir, cleanup := setupTestRepo(t)
@@ -242,29 +253,29 @@ func TestGetGitStatusHash_ExcludesUntrackedFiles(t *testing.T) {
 	ctx := context.Background()
 
 	// Get baseline hash with no changes
-	baseHash := wt.getGitStatusHash(ctx)
+	baseHash := snapshotIndexHash(t, wt, ctx)
 	if baseHash == "" {
 		t.Fatal("expected non-empty hash for clean repo")
 	}
 
 	// Create an untracked file — hash should NOT change (--untracked-files=no)
 	writeFile(t, repoDir, "untracked.txt", "untracked content")
-	untrackedHash := wt.getGitStatusHash(ctx)
+	untrackedHash := snapshotIndexHash(t, wt, ctx)
 	if untrackedHash != baseHash {
 		t.Errorf("hash changed after adding untracked file; expected --untracked-files=no to exclude it\n  before: %s\n  after:  %s", baseHash, untrackedHash)
 	}
 
 	// Stage the file — hash SHOULD change (staged files show as A, not ??)
 	runGit(t, repoDir, "add", "untracked.txt")
-	stagedHash := wt.getGitStatusHash(ctx)
+	stagedHash := snapshotIndexHash(t, wt, ctx)
 	if stagedHash == baseHash {
 		t.Error("hash did not change after staging a file; expected staging to be detected")
 	}
 }
 
-// TestGetGitStatusHash_DetectsModifiedFiles verifies that getGitStatusHash still
+// TestGitPollSnapshot_DetectsModifiedFiles verifies that the poll snapshot still
 // detects tracked file modifications even with --untracked-files=no.
-func TestGetGitStatusHash_DetectsModifiedFiles(t *testing.T) {
+func TestGitPollSnapshot_DetectsModifiedFiles(t *testing.T) {
 	isolateTestGitEnv(t)
 
 	repoDir, cleanup := setupTestRepo(t)
@@ -274,13 +285,88 @@ func TestGetGitStatusHash_DetectsModifiedFiles(t *testing.T) {
 	wt := NewWorkspaceTracker(repoDir, log)
 	ctx := context.Background()
 
-	baseHash := wt.getGitStatusHash(ctx)
+	baseHash := snapshotIndexHash(t, wt, ctx)
 
 	// Modify a tracked file — hash should change
 	writeFile(t, repoDir, "README.md", "# Modified")
-	modifiedHash := wt.getGitStatusHash(ctx)
+	modifiedHash := snapshotIndexHash(t, wt, ctx)
 	if modifiedHash == baseHash {
 		t.Error("hash did not change after modifying tracked file")
+	}
+}
+
+// TestGitPollSnapshot_ReadsHeadAndBranch verifies the two values that used to
+// come from separate rev-parse / symbolic-ref spawns are now parsed out of the
+// porcelain v2 branch headers, including the detached-HEAD sentinel.
+func TestGitPollSnapshot_ReadsHeadAndBranch(t *testing.T) {
+	isolateTestGitEnv(t)
+
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+
+	log := newTestLogger(t)
+	wt := NewWorkspaceTracker(repoDir, log)
+	ctx := context.Background()
+
+	snap, err := wt.readGitPollSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("readGitPollSnapshot failed: %v", err)
+	}
+	if len(snap.headSHA) != 40 {
+		t.Errorf("expected a 40-char HEAD SHA, got %q", snap.headSHA)
+	}
+	if snap.branch == "" {
+		t.Error("expected a branch name on a freshly initialized repo")
+	}
+
+	// Detaching HEAD must clear the branch, not report "(detached)".
+	runGit(t, repoDir, "checkout", "--detach")
+	detached, err := wt.readGitPollSnapshot(ctx)
+	if err != nil {
+		t.Fatalf("readGitPollSnapshot failed after detach: %v", err)
+	}
+	if detached.branch != "" {
+		t.Errorf("expected empty branch in detached HEAD state, got %q", detached.branch)
+	}
+	if detached.headSHA != snap.headSHA {
+		t.Errorf("HEAD changed across detach: %q -> %q", snap.headSHA, detached.headSHA)
+	}
+}
+
+// TestParseGitPollSnapshot_Sentinels covers the header parsing without needing a
+// repository in each of the states git can report.
+func TestParseGitPollSnapshot_Sentinels(t *testing.T) {
+	unborn := parseGitPollSnapshot([]byte("# branch.oid (initial)\n# branch.head main\n"))
+	if unborn.headSHA != "" {
+		t.Errorf("expected empty HEAD for an unborn branch, got %q", unborn.headSHA)
+	}
+	if unborn.branch != "main" {
+		t.Errorf("expected branch %q, got %q", "main", unborn.branch)
+	}
+
+	// branch.ab moves on fetch without the index changing; it must not leak
+	// into the hash.
+	withAB := parseGitPollSnapshot([]byte("# branch.oid abc\n# branch.head main\n# branch.ab +0 -0\n"))
+	withoutAB := parseGitPollSnapshot([]byte("# branch.oid abc\n# branch.head main\n# branch.ab +3 -1\n"))
+	if withAB.indexHash != withoutAB.indexHash {
+		t.Error("index hash changed with branch.ab; headers must be excluded from the hash")
+	}
+
+	// --no-ahead-behind makes git print "+? -?" instead of real counts. It must
+	// parse like any other header and leave the hash alone, so that dropping the
+	// flag (and paying for the revision walk again) stays a deliberate act.
+	unknownAB := parseGitPollSnapshot([]byte("# branch.oid abc\n# branch.head main\n# branch.ab +? -?\n"))
+	if unknownAB.indexHash != withAB.indexHash {
+		t.Error("index hash changed with an unknown branch.ab; the header must be ignored")
+	}
+	if unknownAB.headSHA != "abc" || unknownAB.branch != "main" {
+		t.Errorf("unknown branch.ab disturbed the other headers: head=%q branch=%q", unknownAB.headSHA, unknownAB.branch)
+	}
+
+	// Entry lines must drive the hash.
+	entry := parseGitPollSnapshot([]byte("# branch.oid abc\n# branch.head main\n1 .M N... 100644 100644 100644 aaa bbb file.txt\n"))
+	if entry.indexHash == withAB.indexHash {
+		t.Error("index hash did not change when an entry line was present")
 	}
 }
 

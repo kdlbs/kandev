@@ -68,6 +68,36 @@ When you hit a limit: extract a helper function, custom hook, or sub-component. 
 
 Every code change must include tests for new or changed logic. Backend: `*_test.go` files alongside the source. Frontend: `*.test.ts` files for utility functions, hooks, API clients, and store slices. Exceptions: config files, generated code, React component markup. Use `/tdd` for test-driven development.
 
+### Internationalization
+
+The web UI is localized with i18next (`namespace:key`). **All new user-facing copy
+must go through `t()` / `<Trans>`** — never a hardcoded literal — regardless of
+which directory you are in.
+
+This is enforced, not just requested. Two ratchets, both of which only tighten:
+
+- **New code, everywhere** — `pnpm run i18n:ratchet` (pre-commit + CI) fails on a
+  hardcoded string in a file you added, or on a line you changed, regardless of
+  directory. Untouched lines are never judged, so you are never asked to migrate
+  code you did not write.
+- **Migrated paths, whole file** — `i18next/no-literal-string` is a lint error for
+  the paths in `i18nGuardFiles` (`apps/web/eslint.i18n.options.mjs`). The
+  migration of existing strings proceeds **one directory per PR**: when you
+  migrate one, append it to that list in the same PR. Never remove an entry to
+  make a build pass — a check rejects that.
+
+Three rules that cause silent, hard-to-find bugs when broken: never translate a
+string compared with `===` (type-to-confirm tokens become impossible to type);
+never call `t()` at module scope (it freezes at the boot locale and the
+pseudo-locale cannot detect it); never pass an English plural ending as a value —
+use `count` with `_one`/`_other`. `pnpm run i18n:check` enforces the last two.
+
+A clean lint is not proof a file is done. The rule only sees literals in JSX, and
+it **skips anything assigned to a SCREAMING_CASE identifier** — so a
+`const ROWS = [{ label: "Disk usage" }]` config table passes silently. Review
+those by eye. The pseudo-locale (Settings → General → Appearance, dev/e2e builds)
+is the completeness check. Full guide: [`docs/i18n.md`](docs/i18n.md).
+
 ### Knowledge
 - **Public docs:** Website-ready user documentation lives in `docs/public/**`. Use `/docs-maintainer` when a change affects CLI commands, config keys, install/deploy flows, workflows, executors, public APIs, screenshots, or user-facing terminology.
 - **Specs:** Feature specs live in `docs/specs/<slug>/spec.md` — the durable "what & why" of a feature, written before coding. Use `/spec` to write or update a spec. See `docs/specs/INDEX.md`.

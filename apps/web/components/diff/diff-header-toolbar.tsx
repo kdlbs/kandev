@@ -19,6 +19,7 @@ import type { FileDiffMetadata } from "@pierre/diffs";
 import { ExternalVcsFileLink } from "@/components/editors/external-vcs-file-link";
 import type { ViewMode } from "@/hooks/use-global-view-mode";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 const iconBtn = "h-6 w-6 p-0 cursor-pointer opacity-60 hover:opacity-100";
 
@@ -201,7 +202,7 @@ export function useDiffHeaderToolbar(opts: DiffHeaderToolbarOptions) {
         <DiffHeaderToolbarButtons
           resolvedPath={resolvedPath}
           isMarkdownFile={checkIsMarkdown(resolvedPath)}
-          onCopyDiff={() => navigator.clipboard.writeText(diff || "")}
+          onCopyDiff={() => void copyToClipboard(diff || "")}
           wordWrap={wordWrap}
           onToggleWordWrap={onToggleWordWrap}
           viewMode={viewMode}

@@ -237,6 +237,9 @@ type TaskSessionDTO struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// WorkspacePath is the effective task root used by Files and chat links;
+	// WorktreePath remains the flattened primary repository path.
+	WorkspacePath string `json:"workspace_path,omitempty"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for
 	// backward compatibility.
@@ -262,8 +265,11 @@ type TaskSessionDTO struct {
 	// background may remain present after the foreground turn settles.
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
-	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                   `json:"active_subagent_count"`
+	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// PendingAction is the compact per-session projection used when the
+	// session transcript is not loaded in the client.
+	PendingAction       *string `json:"pending_action,omitempty"`
+	ActiveSubagentCount int     `json:"active_subagent_count"`
 	// LastReadMessageID is the session's Slack-style read cursor — the id of
 	// the newest message the frontend has marked as read. Used by the
 	// transcript to position the unread ("New") divider.
@@ -290,6 +296,9 @@ type TaskSessionSummaryDTO struct {
 	WorktreeID        string `json:"worktree_id,omitempty"`
 	WorktreePath      string `json:"worktree_path,omitempty"`
 	WorktreeBranch    string `json:"worktree_branch,omitempty"`
+	// WorkspacePath is the effective task root used by Files and chat links;
+	// WorktreePath remains the flattened primary repository path.
+	WorkspacePath string `json:"workspace_path,omitempty"`
 	// Worktrees lists all session worktrees (one per repo on multi-repo tasks);
 	// the flattened Worktree* fields above carry only the first for
 	// backward compatibility.
@@ -306,9 +315,12 @@ type TaskSessionSummaryDTO struct {
 	TaskEnvironmentID string                        `json:"task_environment_id,omitempty"`
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
-	ForegroundActivity  v1.ForegroundActivity `json:"foreground_activity,omitempty"`
-	ActiveSubagentCount int                   `json:"active_subagent_count"`
-	LastReadMessageID   string                `json:"last_read_message_id,omitempty"`
+	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// PendingAction is the compact per-session projection used when the
+	// session transcript is not loaded in the client.
+	PendingAction       *string `json:"pending_action"`
+	ActiveSubagentCount int     `json:"active_subagent_count"`
+	LastReadMessageID   string  `json:"last_read_message_id,omitempty"`
 	// CommandCount is the number of tool_call messages on this session,
 	// surfaced inline in the timeline entry header ("ran N commands").
 	// Populated by ListTaskSessions; defaults to 0 for callers that don't
@@ -728,6 +740,7 @@ func FromTaskSessionSummary(session *models.TaskSession) TaskSessionSummaryDTO {
 		RepositoryID:      session.RepositoryID,
 		BaseBranch:        session.BaseBranch,
 		BaseCommitSHA:     session.BaseCommitSHA,
+		WorkspacePath:     session.WorkspacePath,
 		State:             session.State,
 		ErrorMessage:      session.ErrorMessage,
 		Metadata:          session.Metadata,
@@ -763,6 +776,7 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 		RepositoryID:         session.RepositoryID,
 		BaseBranch:           session.BaseBranch,
 		BaseCommitSHA:        session.BaseCommitSHA,
+		WorkspacePath:        session.WorkspacePath,
 		State:                session.State,
 		ErrorMessage:         session.ErrorMessage,
 		Metadata:             session.Metadata,

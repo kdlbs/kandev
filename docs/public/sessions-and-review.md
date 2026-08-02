@@ -5,9 +5,13 @@ description: "Run named parallel agent sessions, inspect changes, review diffs, 
 
 # Sessions and Review
 
-A session is one agent conversation on a task. A task can have several named sessions, but they all work in the same task environment and see the same repositories and branch state. Use extra sessions to split investigation, implementation, testing, or review. Give concurrent writers explicit file ownership because their edits are not isolated from one another.
+A session is one agent conversation on a task. Use it to direct work, inspect changes, and give precise feedback before you merge or ship. Concurrent sessions share the same task environment, so give each writer explicit file ownership.
 
-The workbench combines agent chat with files, terminals, changes, the task plan, walkthroughs, and pull-request state. Treat those surfaces—not an agent's final message—as the evidence that work is complete.
+## Quick path
+
+1. Start a session with a scoped prompt.
+2. Watch chat and tool activity; answer clarification or permission requests.
+3. Inspect the diff, run required checks, and send focused feedback until the change is ready.
 
 ## Start a parallel session
 
@@ -61,6 +65,9 @@ Stopping a turn does not itself run the next queued message. Expand the queue an
 
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
+<details>
+<summary>Let agents coordinate sessions</summary>
+
 ## Let agents coordinate sessions
 
 Task MCP gives an agent three session-coordination operations:
@@ -81,6 +88,8 @@ The default pending-message limit is 10 per session. Operators can change it wit
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
 Messages show peer attribution, and Kandev gives the receiving agent hidden reply instructions. The receiver can still decline the request. A full task UUID is sufficient for cross-workspace messaging, so treat task IDs as sensitive routing identifiers when untrusted agents share one deployment. See [Coordination](coordination.md) and [Automation and MCP](automation-and-mcp.md).
+
+</details>
 
 ## Use the workbench
 
@@ -108,7 +117,19 @@ All panels for a task point at the same task environment. In a multi-repository 
 
 Structured shell-command activity keeps the command, working directory, status, and output size in the chat row. Expand **Output** to fetch the transcript; Kandev continues refreshing an open, running command and stops when it reaches a terminal state. The disclosure separates standard output and errors, reports truncation and the exit code when known, and offers **Retry** when the transcript request fails. Historical command transcripts are loaded only when opened, which keeps long conversations responsive without discarding the stored output.
 
-The ring in the chat-input toolbar shows the active session's context-window use when the agent reports a trustworthy window size. Open it to see used and total tokens. For a supported Codex or Claude Code subscription session, the same popover also fetches the account plan and rate-limit windows; opening it again requests fresh provider data, subject to a short server-side refresh clamp. Kandev hides the ring instead of presenting impossible data when reported use exceeds the reported window, and agents without usage support show no subscription rows.
+The ring in the chat-input toolbar shows the active session's context-window use
+when the agent reports a trustworthy window size. Open it to see used and total
+tokens; it focuses on the active session's context window. For account-wide
+provider usage, install the [Provider Usage
+plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
+provider pill to the session top bar and can add a compact display to the global
+status bar. The optional status-bar display requires **App status bar** to be
+enabled under **Settings > System > Feature Toggles**; enable it and restart
+Kandev for the change to take effect. The session top-bar pill remains available
+on its own, while enabling App status bar also adds the global status-bar and
+phone Status drawer display. Configure the plugin under **Settings > Plugins >
+Provider Usage**. Kandev hides the context ring rather than presenting
+impossible data when reported use exceeds the reported window.
 
 ## Inspect changes
 
@@ -195,6 +216,9 @@ GitHub has the complete in-app PR review path. A linked PR detail panel shows ch
 
 GitLab has a provider-specific linked-MR panel. It shows overview and branch state, approvals and pipeline rollup, files, commits, reviewers, assignees, labels, and threaded discussions. It can add selected feedback to agent context, reply or resolve discussions, approve or unapprove, update people and labels, toggle MR notifications, merge, refresh, and unlink. GitLab permissions and project policy remain authoritative. See [Integrations](integrations.md#gitlab) for linking and watch limits.
 
+<details>
+<summary>GitHub pull-request automation</summary>
+
 ### GitHub PR automation
 
 The PR panel has two action controls:
@@ -209,6 +233,13 @@ Open **Review follow-up** for three notification controls:
 
 Lifecycle messages only report the observed event and canonical PR URL; the task workflow and agent context decide what to do next. The repair prompt comes from the built-in `ci-auto-fix` saved prompt and can be overridden for the task. These controls currently operate on GitHub-linked PRs, require the GitHub integration and repository permissions, and do not bypass provider policy. Azure PR creation returns a URL but does not supply the same linked checks, review, or automation panel. See [Integrations](integrations.md).
 
+</details>
+
+> **Confidentiality:** redaction is heuristic, a secret Gist is accessible to anyone with its URL, and the snapshot is rendered through a third-party service. Inspect the preview and do not share material that must remain private.
+
+<details>
+<summary>Share a session externally</summary>
+
 ## Share a session
 
 For an eligible structured-chat session, right-click its tab and select **Share**. Sharing is disabled only while the session is `CREATED` or `STARTING`; `RUNNING`, `IDLE`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED` sessions can be shared. A running snapshot can become stale immediately.
@@ -218,6 +249,8 @@ Kandev creates a preview, applies heuristic redaction, and publishes the snapsho
 Inspect the full preview before publishing. Redaction covers common API-key patterns, environment-style secrets, command arguments, and absolute workspace paths, but it cannot recognize every credential or proprietary value. A secret Gist is unlisted, not access-controlled: anyone with the URL can view it. Do not share material that must remain confidential.
 
 Use the same dialog to revoke a share. Revocation deletes the Gist and records it as revoked in Kandev.
+
+</details>
 
 ## Completion checklist
 

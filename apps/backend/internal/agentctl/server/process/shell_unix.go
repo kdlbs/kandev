@@ -40,5 +40,13 @@ func resolveShellPath(value string) string {
 // string through the system shell.
 // On Unix: sh -lc "command"
 func shellExecArgs(command string) (prog string, args []string) {
-	return "sh", []string{"-lc", command}
+	return "sh", []string{"-lc", managedGitHubPathRestore + command}
 }
+
+const managedGitHubPathRestore = `if [ -n "${KANDEV_GITHUB_CREDENTIAL_BROKER_URL:-}" ] && [ -n "${KANDEV_GITHUB_CLI_SHIM_DIR:-}" ]; then
+  case ":${PATH:-}:" in
+    *:"${KANDEV_GITHUB_CLI_SHIM_DIR}":*) ;;
+    *) PATH="${KANDEV_GITHUB_CLI_SHIM_DIR}:${PATH:-}"; export PATH ;;
+  esac
+fi
+`

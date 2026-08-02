@@ -172,11 +172,6 @@ export type DiffUpdatePayload = {
   }>;
 };
 
-export type SystemErrorPayload = {
-  message: string;
-  code?: string;
-};
-
 export type UpdateAvailablePayload = {
   version: string;
   url?: string;
@@ -320,6 +315,8 @@ export type TaskSessionAgentctlPayload = {
   worktree_id?: string;
   worktree_path?: string;
   worktree_branch?: string;
+  /** Effective task workspace root when the agentctl payload carries it. */
+  workspace_path?: string;
   /** Task root that contains every per-repo worktree as a sibling subdir.
    *  Set only when the event signals a sibling worktree addition (multi-branch
    *  add_branch flow) — the frontend repoints the file browser to it instead of
@@ -508,7 +505,6 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "terminal.output": BackendMessage<"terminal.output", TerminalOutputPayload>;
     "diff.update": BackendMessage<"diff.update", DiffUpdatePayload>;
     "session.git.event": BackendMessage<"session.git.event", GitEventPayload>;
-    "system.error": BackendMessage<"system.error", SystemErrorPayload>;
     "system.job.update": BackendMessage<"system.job.update", import("./system").SystemJob>;
     "system.metrics.updated": BackendMessage<"system.metrics.updated", SystemMetricsSnapshot>;
     "system.update_available": BackendMessage<"system.update_available", UpdateAvailablePayload>;

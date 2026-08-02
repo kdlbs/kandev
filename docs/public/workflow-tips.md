@@ -13,6 +13,13 @@ Workflow prompts run with the selected executor's filesystem, credentials, and n
 
 > Workflow definitions can be copied between workspaces with [Workflow Import / Export](workflow-import-export.md), or reconciled from a repository with [Workflow Sync](workflow-sync.md).
 
+## Quick path
+
+1. Start with **Kanban** for ordinary task tracking.
+2. Choose **Plan & Build** or **PR Review** when the workflow itself should guide the agent.
+3. Add automatic starts only when the executor, profile, and prompt are ready.
+4. Keep a human **Review** or **Do nothing** gate before risky changes ship.
+
 ## Built-in Kanban templates
 
 The template prompts are product behavior, not merely sample text. Review them before using a template in a repository with strict Git, test, or deployment rules. Kandev currently presents these five Kanban templates.
@@ -111,6 +118,9 @@ Pull candidates are selected by board position, then priority, queue time, creat
 
 ## Events and actions
 
+<details>
+<summary>Events and action details</summary>
+
 The standard Kanban editor exposes these events:
 
 | Event | When it runs | Editor actions |
@@ -124,7 +134,14 @@ The portable format also recognizes `set_session_mode`, `clear_decisions`, `queu
 
 Keep one transition action per event. A “next” action on the last step or “previous” on the first has nowhere to go and leaves the task in place. WIP rejection, a missing target step, a failed agent launch, or missing credentials can also prevent the intended progression; inspect the task/session error and backend logs before changing the workflow.
 
+</details>
+
 ## Safe authoring pattern
+
+> **Safety:** Requiring `step_complete_kandev` can leave a step waiting indefinitely if the agent cannot call it. Export before large edits; workflow deletion is permanent and may require task migration or archival.
+
+<details>
+<summary>Safe authoring details</summary>
 
 1. Start with manual transitions and verify prompts in a disposable task.
 2. Add `auto_start_agent` only to steps that always have an effective agent profile.
@@ -133,7 +150,12 @@ Keep one transition action per event. A “next” action on the last step or �
 5. Add WIP limits before pull rules, then test a full target and a vacated slot.
 6. Export the workflow before a large edit. Workflow deletion is permanent; when it contains tasks, the UI asks you to migrate them or archive them.
 
+</details>
+
 ## Saved prompt references in step prompts
+
+<details>
+<summary>Saved prompt reference details</summary>
 
 A step's Prompt field accepts `@name` references to [saved prompts](developer-tools.md#saved-prompts) (**Settings > Prompts**), the same way task chat does. Type `@` and select a prompt, or type the name directly.
 
@@ -143,11 +165,18 @@ A step's Prompt field accepts `@name` references to [saved prompts](developer-to
 
 The same `@name` syntax and resolution apply to a GitHub Review Watch's prompt field. See [Integrations](integrations.md#configure-and-use-the-workspace).
 
+</details>
+
 ## Repository instructions and multiple repositories
+
+<details>
+<summary>Repository instruction details</summary>
 
 Step prompts are combined with the selected agent and the checked-out repository. Keep repository-specific instructions such as `AGENTS.md`, `CLAUDE.md`, skills, test commands, and MCP configuration in that repository. Kandev does not make one repository's agent rules automatically authoritative for another.
 
 A task may contain several repositories, but a workflow step is not bound to one repository. The agent session receives the task workspace and its repository set. Prompts should name the intended repository when the phase is repository-specific, and Git operations must be scoped per repository. See [Git Operations](git-operations.md).
+
+</details>
 
 ## Troubleshooting
 

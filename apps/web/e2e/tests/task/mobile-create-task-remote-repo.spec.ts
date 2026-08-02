@@ -2,6 +2,11 @@ import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 
+function expectedRemoteTitle(title: string): string {
+  const characters = Array.from(title);
+  return characters.length <= 60 ? title : `${characters.slice(0, 59).join("")}…`;
+}
+
 async function openRemotePicker(testPage: Page): Promise<void> {
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
@@ -142,12 +147,17 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await expectNoDocumentHorizontalOverflow(testPage);
   });
 
-  test("pastes a GitHub issue URL without clipping the picker", async ({ testPage, apiClient }) => {
+  test("pastes a GitHub issue URL without clipping the picker", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
     await apiClient.mockGitHubAddBranches("issue-owner", "issue-repo", [{ name: "main" }]);
     await apiClient.mockGitHubAddIssues([
       {
         number: 1456,
-        title: "Fix remote repo picker clipping",
+        title:
+          "Fix remote repo picker clipping while preserving a concise task title for the mobile flow",
         body: "The picker overlaps the dialog footer.",
         state: "open",
         author_login: "mock-user",
@@ -163,10 +173,25 @@ test.describe("Create task Remote repo picker on mobile", () => {
     await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
     await pasteInput.press("Enter");
 
-    await expect(testPage.getByTestId("task-title-input")).toHaveValue(
-      "Issue #1456: Fix remote repo picker clipping",
+    const titleInput = testPage.getByTestId("task-title-input");
+    await expect(titleInput).toHaveValue(
+      expectedRemoteTitle(
+        "Issue #1456: Fix remote repo picker clipping while preserving a concise task title for the mobile flow",
+      ),
       { timeout: 10_000 },
     );
+    await expect(titleInput).not.toHaveAttribute("maxlength");
+
+    await prCapture.screenshot("mobile-task-title-limit", {
+      caption: "Mobile remote issue task title truncated to the 60-character limit",
+    });
+
+    await titleInput.fill("x".repeat(80));
+    await expect(titleInput).toHaveValue("x".repeat(60));
+
+    const emojiTitle = "😀".repeat(60);
+    await titleInput.fill(emojiTitle);
+    await expect(titleInput).toHaveValue(emojiTitle);
   });
 
   test("selects a GitLab repository from the unified provider picker", async ({

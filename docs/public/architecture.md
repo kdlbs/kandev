@@ -7,6 +7,13 @@ description: "Understand Kandev's process, code, runtime, persistence, event, pr
 
 Kandev is a server-first development workbench. A Go backend owns durable product state and orchestration. The browser UI is a Vite-built React SPA. Agent processes run behind an `agentctl` sidecar in local, worktree, container, or remote task environments.
 
+## Read this page in order
+
+1. Start with the process diagram.
+2. Follow backend ownership and task runtime to find the code that owns a behavior.
+3. Use the protocol and event sections for cross-process contracts.
+4. Check trust boundaries before changing credentials, executors, providers, or MCP.
+
 ```mermaid
 flowchart LR
     UI["Browser or Tauri window"] -->|HTTP + WebSocket| BE["Go backend"]

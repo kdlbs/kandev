@@ -9,6 +9,13 @@ This inventory describes the current `main` branch. A capability counts as shipp
 
 Released builds can lag this page. Check **Settings > System > About** or `kandev --version` and compare the matching GitHub tag when behavior differs.
 
+## How to use this page
+
+- Start with **Supported** for the normal product path.
+- Read **Dependency-bound** and **Limited** before choosing a provider, executor, or platform.
+- Treat **Experimental**, **In progress**, and **Internal** as non-contract surfaces.
+- Verify the running version and a small representative workflow before trusting a boundary.
+
 ## Status meanings
 
 | Status | Meaning |
@@ -19,6 +26,9 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Experimental | Intentionally unstable or based on a fragile/nonstandard integration contract. |
 | In progress | Source, schema, tests, a flag, or a stub exists, but there is no supported production workflow yet. |
 | Internal | Development, test, diagnostic, or implementation support rather than an end-user feature. |
+
+<details>
+<summary>Tasks, workflows, and coordination</summary>
 
 ## Tasks, workflows, and coordination
 
@@ -41,6 +51,11 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | GitHub-backed workflow sync | Dependency-bound | Requires GitHub access. Synced workflows are read-only in Kandev and guarded updates can need local agent/executor mapping. |
 | Coordinator-led teams, participants/quorum, arbitrary task trees, routines, budgets, and heartbeats | In progress | These belong to Office. Office is disabled in the production profile and remains an evolving, feature-flagged autonomy layer. |
 
+</details>
+
+<details>
+<summary>Sessions, review, and developer tools</summary>
+
 ## Sessions, review, and developer tools
 
 | Capability | Status | Current boundary |
@@ -59,6 +74,11 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Language servers | Limited | Current built-in mapping covers TypeScript/JavaScript, Go, Rust, and Python. Auto-start/installation default off, and subprocesses run on the backend host rather than inside Docker, SSH, or Sprites runtimes. |
 | Integrated shell terminals | Dependency-bound | Create, reopen, rename, and terminate are shipped. Shell settings affect new terminals, and executor/task-environment availability controls where the PTY runs. |
 | Prompts, keyboard shortcuts, notifications, appearance, and task actions | Supported | These are normal settings surfaces. Browser notification permission, custom command validity, and local shell/editor availability still apply to their effects. |
+
+</details>
+
+<details>
+<summary>Agents, executors, integrations, and automation</summary>
 
 ## Agents, executors, integrations, and automation
 
@@ -84,6 +104,11 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | GitHub push and CI automation triggers | In progress | Trigger types and UI labels exist as coming-soon/stub paths; they are not working production triggers. GitHub's separate opt-in PR CI-fix automation is shipped. |
 | Automation Run mode | Limited | Creates a hidden ephemeral task and starts immediately. It cannot require user input. Automatic worktree/branch reaping applies only when a Worktree runtime ID is present; other executors follow their own lifecycle. |
 
+</details>
+
+<details>
+<summary>MCP, clients, and operation</summary>
+
 ## MCP, clients, and operation
 
 | Capability | Status | Current boundary |
@@ -103,6 +128,8 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Office mode | In progress | Production defaults `KANDEV_FEATURES_OFFICE=false`; development and E2E enable it for implementation/testing. Its routes, agents, labels, documents, dependencies, routines, skills, routing, costs, and approvals may change between releases. |
 | Plugin system | Supported | The plugin system ships in the base product with no feature flag: install/manage plugins, spawn plugin backends, and load native UI bundles. Loaded plugin code runs with backend privileges, so install only plugins you trust; manifest schema, capabilities, and host API may still change between releases. |
 | Mock providers and E2E-only routes | Internal | They are selected only by development/test runtime profiles and must not be exposed as product integrations. |
+
+</details>
 
 ## Publication boundary
 

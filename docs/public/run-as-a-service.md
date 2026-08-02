@@ -15,6 +15,13 @@ remain Stable-only.
 
 > **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
+## Quick path
+
+1. Install Kandev persistently with the [CLI](cli.md#install).
+2. Choose a user service for one workstation or `--system` for boot-time service operation.
+3. Install, check `status`, and inspect `logs`.
+4. Keep the listener private or protect it with TLS, authentication, and an access proxy.
+
 ## Choose a service mode
 
 | | User service (default) | System service (`--system`) |
@@ -24,7 +31,7 @@ remain Stable-only.
 | Linux unit | `~/.config/systemd/user/kandev.service` | `/etc/systemd/system/kandev.service` |
 | macOS plist | `~/Library/LaunchAgents/com.kdlbs.kandev.plist` | `/Library/LaunchDaemons/com.kdlbs.kandev.plist` |
 | Default Kandev home | The installer process's `KANDEV_HOME_DIR` when set; otherwise `~/.kandev` | `/var/lib/kandev` |
-| Process user | Current user | `$SUDO_USER` when installed through `sudo` from a non-root account; otherwise the current user |
+| Process user | Current user | Existing Kandev-managed unit/plist account on reinstall; otherwise non-root `$SUDO_USER` when installed through `sudo`. A root login must choose `--run-as` explicitly. |
 | Best fit | Personal workstation; single-user Linux host with lingering enabled | Boot-time service independent of a login session |
 
 On Linux, an enabled user service starts at boot only if that user's systemd manager runs at boot. Enable lingering once if that is the desired lifecycle:
@@ -55,16 +62,30 @@ curl --fail http://127.0.0.1:43127/health
 
 ### System service
 
-The native installer does not create or change ownership of the system service home. Create it for the account that will run the service before installing. The following invocation through `sudo` makes that account the invoking user:
+The native installer does not create or change ownership of the system service home. Create it for the account that will run the service before installing. Select that account explicitly with `--run-as`:
 
 ```bash
 KANDEV_BIN="$(command -v kandev)"
 sudo install -d -o "$USER" -g "$(id -gn)" /var/lib/kandev /var/lib/kandev/logs
-sudo "$KANDEV_BIN" service install --system
+sudo "$KANDEV_BIN" service install --system --run-as "$USER"
 sudo "$KANDEV_BIN" service status --system
 ```
 
-Apply the same ownership rule to a custom `--home-dir`. Root access is also required to write the system unit/plist and control the system service manager. If installation is run from a root login, rather than via `sudo` from the intended account, the service runs as root; prefer an explicit, non-root service account.
+Apply the same ownership rule to a custom `--home-dir`. Root access is also required to write the system unit/plist and control the system service manager. A root login must pass an explicit non-root account when that is the intended service identity.
+
+The installer preserves the account from an existing Kandev-managed systemd unit or launchd plist
+when you reinstall after an upgrade. It does not infer a new account from the shell that happens
+to run the update. On a first install from a root login, supply the account explicitly:
+
+```bash
+sudo kandev service install --system --run-as brewuser --home-dir /var/lib/kandev
+```
+
+Use `--run-as root` only when a root service is intentional. `--run-as` is valid only with
+`service install --system`; it cannot change a user service. Kandev checks that the system home
+already exists, is not a symlink, and is owned by the selected account before replacing or
+restarting the service. Missing or mismatched ownership fails with guidance; Kandev does not
+recursively chown the data tree or add a broad Git `safe.directory` exception.
 
 ## Bind safely
 
@@ -88,7 +109,7 @@ Then open `http://127.0.0.1:38429` locally. For shared access, terminate TLS and
 ## Commands and flags
 
 ```text
-kandev service install [--system] [--port <port>] [--home-dir <path>] [--no-boot-start]
+kandev service install [--system] [--run-as <user>] [--port <port>] [--home-dir <path>] [--no-boot-start]
 kandev service uninstall [--system]
 kandev service start|stop|restart|status [--system]
 kandev service logs [-f] [--system]
@@ -96,6 +117,9 @@ kandev service config [--system]
 ```
 
 - `--system` selects the system manager and paths shown above.
+- `--run-as <user>` is valid only for `service install --system`. Reinstalling without it preserves
+  the account in the existing Kandev-managed unit/plist; on a first root-shell install it is
+  required, including `--run-as root` when root is intentional.
 - `--home-dir <path>` records `KANDEV_HOME_DIR` in the unit. For a user service with no flag, the installer first honors its own `KANDEV_HOME_DIR` environment, then falls back to `~/.kandev`; system mode defaults to `/var/lib/kandev`.
 - On Linux, `--no-boot-start` starts the service now without enabling the unit, but it does not disable a unit that was already enabled. Disable it explicitly when necessary. On macOS the generated plist has `RunAtLoad=false` but also `KeepAlive=true`; the installer stores it in launchd's normal discovery path, bootstraps and enables it, then kick-starts it. That combination does not provide a dependable “never start at login/boot” guarantee; manage future loading explicitly with launchd if that distinction matters.
 - `-f` or `--follow` follows logs.
@@ -215,6 +239,11 @@ sudo "$KANDEV_BIN" service restart --system
 sudo "$KANDEV_BIN" service status --system
 ```
 
+When reinstalling an existing system service, omit `--run-as` to preserve its recorded account, or
+provide it only for an intentional account migration. Before an intentional migration, reconcile
+the owner of `/var/lib/kandev` (or the custom home) yourself; the installer refuses to rewrite a
+service whose data owner does not match the selected account.
+
 Reinstalling an already active Linux unit performs `enable --now`, which does not guarantee a restart of that running process. The explicit `restart` is required to load the new executable. Back up persistent state before upgrades; see [SQLite backups](operations.md#sqlite-backups) or the PostgreSQL procedure under [Restore and recovery](operations.md#restore-and-recovery).
 
 ## Run a source checkout as a service
@@ -257,6 +286,22 @@ sudo namei -l /var/lib/kandev
 ```
 
 Stop the service before correcting ownership, and grant access only to the intended service account.
+
+### Git reports dubious ownership or origin setup exits with status 128
+
+This means the Kandev service account and a managed checkout have different filesystem owners. It
+is common after an upgrade if the service was reinstalled from a root login while the existing
+checkout remained owned by the previous account. Check both sides before changing anything:
+
+```bash
+sudo systemctl cat kandev.service
+sudo namei -l /var/lib/kandev/repos
+sudo find /var/lib/kandev/repos -maxdepth 3 -type d -name .git -print
+```
+
+Reinstall without `--run-as` to preserve the existing service account, or deliberately reconcile the
+home and checkout ownership before using an explicit `--run-as`. Do not fix this with
+`safe.directory=*`; that hides the identity mismatch and weakens Git's ownership protection.
 
 ### Port 38429 is not the logged URL
 

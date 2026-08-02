@@ -27,6 +27,13 @@ Two more example plugins go deeper on specific surfaces:
   the host store, and opens kandev's real create-task dialog
   (`host.ui.TaskCreateDialog`) prefilled from a pull request.
 
+## Quick path
+
+1. Start from the plugin template.
+2. Implement the backend and manifest first.
+3. Add native UI, webhooks, or Host API capabilities only when needed.
+4. Run focused tests, package the plugin, and install it locally.
+
 ## Prerequisites
 
 - Go (matching the version in `apps/backend/go.mod`).
@@ -120,6 +127,11 @@ so validate the HTTP method and the upstream provider's signature before any
 side effect.
 
 ## The Host API
+
+> **Auth capability:** Only assert email addresses the identity provider verified as owned by the subject. An unverified or user-controlled email claim can take over an account; grant this capability only to trusted plugins.
+
+<details>
+<summary>Host API and native UI details</summary>
 
 A plugin calls back into kandev through the injected `Host`:
 
@@ -437,7 +449,12 @@ const handle = host.openModal({
 handle.close();
 ```
 
+</details>
+
 ## Named slots
+
+<details>
+<summary>Named slot details</summary>
 
 `registerComponent(slot, Component)` injects a component into a host-defined
 slot. The host renders every plugin's component for that slot (each isolated
@@ -683,6 +700,8 @@ combo conflicts with a core kandev shortcut, the core shortcut always wins —
 the plugin handler is skipped for that combo — and the conflict is surfaced
 in that same settings page so the user can rebind it.
 
+</details>
+
 ## Three integration patterns
 
 Both example repos are full, working plugins — read them rather than
@@ -711,6 +730,9 @@ copy-pasting fragments:
    reading `workspaceId`/`workflowId`/`steps` from the live host store.
 
 ## Packaging
+
+<details>
+<summary>Packaging, publishing, and iteration</summary>
 
 A plugin ships as `<id>-<version>.tar.gz`:
 
@@ -821,3 +843,5 @@ Publishing](plugins-marketplace.md#publishing-a-plugin).
   it for you.
 
 Related: [Plugins](plugins.md), [Plugin manifest reference](plugins-manifest.md).
+
+</details>

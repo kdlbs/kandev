@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 // noopActivity implements shared.ActivityLogger for tests.
@@ -324,6 +325,39 @@ func TestDispatch_HeavyRoutine_CreatesTaskInRoutineWorkflow(t *testing.T) {
 	}
 	if !strings.Contains(tc.captured.title, "Daily review") {
 		t.Errorf("task title %q missing template prefix", tc.captured.title)
+	}
+}
+
+func TestDispatch_HeavyRoutine_TruncatesRenderedTitle(t *testing.T) {
+	svc := newTestRoutineService(t)
+	ctx := context.Background()
+	longName := strings.Repeat("x", taskservice.TaskTitleMaxLength+10)
+	routine := &models.Routine{
+		WorkspaceID:            "ws-1",
+		Name:                   "Long title",
+		TaskTemplate:           `{"title":"{{name}}","description":"Details: {{name}}"}`,
+		AssigneeAgentProfileID: "agent-1",
+		Status:                 "active",
+		ConcurrencyPolicy:      "always_create",
+		Variables:              `{"name":{"default":"short"}}`,
+	}
+	if err := svc.CreateRoutine(ctx, routine); err != nil {
+		t.Fatalf("create routine: %v", err)
+	}
+
+	wf := &fakeWorkflowEnsurer{}
+	tc := &fakeTaskCreator{}
+	svc.SetWorkflowEnsurer(wf)
+	svc.SetTaskCreator(tc)
+	if _, err := svc.FireManual(ctx, routine.ID, map[string]string{"name": longName}); err != nil {
+		t.Fatalf("fire manual: %v", err)
+	}
+
+	if gotLen := len([]rune(tc.captured.title)); gotLen != taskservice.TaskTitleMaxLength {
+		t.Fatalf("captured title rune length = %d, want %d", gotLen, taskservice.TaskTitleMaxLength)
+	}
+	if !strings.Contains(tc.captured.description, longName) {
+		t.Fatalf("description = %q, want full rendered value", tc.captured.description)
 	}
 }
 

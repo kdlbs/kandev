@@ -100,6 +100,16 @@ func TestIsTransientUploadError(t *testing.T) {
 	require.False(t, isTransientUploadError(errors.New("upload failed: HTTP 400")))
 }
 
+func TestBuildSpriteEnvPublishesManagedGitCredentialHelperBeforeAgentctlStartup(t *testing.T) {
+	exec := &SpritesExecutor{}
+	got := exec.buildSpriteEnv(map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+	})
+	want := "KANDEV_GITHUB_CREDENTIAL_HELPER_PATH=/usr/local/bin/agentctl"
+	require.Contains(t, got, want)
+}
+
 func TestSpriteCreateInstanceRequestCarriesRefreshedEnvironment(t *testing.T) {
 	req := &ExecutorCreateRequest{
 		InstanceID: "instance-1",

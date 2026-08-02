@@ -8,7 +8,8 @@ const state = {
         id: "session-1",
         task_id: "task-1",
         repository_id: "primary-repo",
-        worktree_path: "/tmp/task",
+        workspace_path: "/tmp/task-root",
+        worktree_path: "/tmp/task-root/kandev",
       },
     },
   },
@@ -33,11 +34,39 @@ vi.mock("../markdown-preview-content", () => ({
   MarkdownPreviewContent: () => <span data-testid="markdown-preview" />,
 }));
 vi.mock("../file-image-viewer", () => ({ FileImageViewer: () => null }));
-vi.mock("../file-binary-viewer", () => ({ FileBinaryViewer: () => null }));
+vi.mock("../file-binary-viewer", () => ({
+  FileBinaryViewer: ({ worktreePath }: { worktreePath?: string }) => (
+    <span data-testid="binary-viewer" data-worktree-path={worktreePath} />
+  ),
+}));
 
 import { MobileFileViewerPanel } from "./mobile-file-viewer-panel";
 
 afterEach(cleanup);
+
+describe("MobileFileViewerPanel workspace path", () => {
+  it("uses the effective workspace path for binary file viewers", () => {
+    render(
+      <MobileFileViewerPanel
+        file={{
+          path: "dist/archive.zip",
+          name: "archive.zip",
+          content: "",
+          originalContent: "",
+          originalHash: "hash",
+          isDirty: false,
+          isBinary: true,
+        }}
+        sessionId="session-1"
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("binary-viewer").getAttribute("data-worktree-path")).toBe(
+      "/tmp/task-root",
+    );
+  });
+});
 
 describe("MobileFileViewerPanel external file action", () => {
   it("renders a touch-sized action scoped to the open file's repository", () => {

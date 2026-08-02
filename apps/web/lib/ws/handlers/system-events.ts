@@ -4,9 +4,6 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 export function registerSystemEventsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
-    "system.error": () => {
-      // TODO: surface as toast/notification once UI is ready.
-    },
     "system.job.update": (message) => {
       // The WS payload is the full SystemJob row published by the backend
       // jobs tracker (see internal/system/jobs). Upsert by id so the

@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 
 export type ContextMenuState = {
   x: number;
@@ -48,7 +49,7 @@ export function DiffViewerContextMenu({
           role="menuitem"
           className={itemCls}
           onClick={() => {
-            navigator.clipboard.writeText(contextMenu.lineContent);
+            void copyToClipboard(contextMenu.lineContent);
             onClose();
           }}
         >

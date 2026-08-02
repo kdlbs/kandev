@@ -18,6 +18,13 @@ suites in the same checkout; wait for a running command to finish before
 starting another. Capture targeted failure evidence instead of repeatedly
 rerunning a broad suite.
 
+If the execution relay terminates an otherwise healthy long-running check,
+rerun that check **once** in one named, monitored `tmux` session with an exit
+sentinel. Do not run a parallel retry. Record the log path and result, then
+close the session after collecting the sentinel. If that retry fails or its
+result cannot be recovered, return the evidence as a blocked or failed
+verification report.
+
 - If verify passes cleanly: report success.
 - If verify fails: fix the reported cause in the same conversation, rerun the
   relevant targeted checks, commit if needed, and restart verification.
@@ -148,6 +155,10 @@ For source, test, type, or lint failures, stop after capturing targeted failure
 evidence. Report the command, quiet-log path and relevant lines, likely files,
 and a concise remediation recommendation. Fix only after the failure is
 understood, then rerun the selected checks.
+
+When the evidence points to a test-owned resource release/reacquisition race
+(for example, loopback-port rebinding), report a deterministic-test remediation
+packet. Do not retry indefinitely and do not edit the test in the verify role.
 
 If formatting changes files after commit, review and report the formatter diff,
 invalidate the hook receipt and verified-commit state, then continue only to

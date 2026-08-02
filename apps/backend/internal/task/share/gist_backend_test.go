@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/i18n"
 )
 
 type recordingGitHubResolver struct {
@@ -53,7 +54,7 @@ func TestGistBackend_Upload_CreatesSecretGistWithExpectedFiles(t *testing.T) {
 	mock := github.NewMockClient()
 	b := NewGistBackend(mock)
 
-	id, url, err := b.Upload(context.Background(), "workspace-1", sampleSnapshot())
+	id, url, err := b.Upload(context.Background(), "workspace-1", sampleSnapshot(), "en")
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestGistBackend_Upload_RejectsOversizedSnapshot(t *testing.T) {
 	big := strings.Repeat("x", GistMaxBytes+1)
 	snap.Messages = []Message{{Role: "user", Blocks: []Block{{Kind: "text", Text: big}}}}
 
-	_, _, err := b.Upload(context.Background(), "workspace-1", snap)
+	_, _, err := b.Upload(context.Background(), "workspace-1", snap, "en")
 	if err == nil {
 		t.Fatal("expected ErrSnapshotTooLarge, got nil")
 	}
@@ -122,7 +123,7 @@ func TestGistBackend_Delete_Success(t *testing.T) {
 	t.Parallel()
 	mock := github.NewMockClient()
 	b := NewGistBackend(mock)
-	id, _, err := b.Upload(context.Background(), "workspace-1", sampleSnapshot())
+	id, _, err := b.Upload(context.Background(), "workspace-1", sampleSnapshot(), "en")
 	if err != nil {
 		t.Fatalf("upload: %v", err)
 	}
@@ -157,11 +158,11 @@ func TestGistBackend_ResolvesOwningWorkspaceForEveryOperation(t *testing.T) {
 		"workspace-2": second,
 	}}
 	backend := NewWorkspaceGistBackend(resolver)
-	firstID, _, err := backend.Upload(context.Background(), "workspace-1", sampleSnapshot())
+	firstID, _, err := backend.Upload(context.Background(), "workspace-1", sampleSnapshot(), "en")
 	if err != nil {
 		t.Fatalf("workspace-1 upload: %v", err)
 	}
-	if _, _, err := backend.Upload(context.Background(), "workspace-2", sampleSnapshot()); err != nil {
+	if _, _, err := backend.Upload(context.Background(), "workspace-2", sampleSnapshot(), "en"); err != nil {
 		t.Fatalf("workspace-2 upload: %v", err)
 	}
 	if err := backend.Delete(context.Background(), "workspace-1", firstID); err != nil {
@@ -180,7 +181,39 @@ func TestGistBackend_FailsClosedWhenResolverReturnsNoClient(t *testing.T) {
 		clients:  map[string]github.Client{},
 		allowNil: true,
 	})
-	if _, _, err := backend.Upload(context.Background(), "workspace-1", sampleSnapshot()); err == nil {
+	if _, _, err := backend.Upload(context.Background(), "workspace-1", sampleSnapshot(), "en"); err == nil {
 		t.Fatal("expected upload to fail when the workspace resolver returns no client")
+	}
+}
+
+func TestGistDescription_LocalizedInBothForms(t *testing.T) {
+	t.Parallel()
+	titled := &Snapshot{Task: TaskMeta{Title: "Fixture"}}
+	for _, tc := range []struct {
+		name string
+		snap *Snapshot
+		key  string
+	}{
+		{"titled", titled, "share.gistDescription"},
+		{"untitled", &Snapshot{}, "share.gistDescriptionUntitled"},
+		{"nil snapshot", nil, "share.gistDescriptionUntitled"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			en := gistDescription(tc.snap, "en")
+			pseudo := gistDescription(tc.snap, "pseudo")
+			if en == pseudo {
+				t.Fatalf("description %q is identical in both locales — it is hardcoded", en)
+			}
+			if !strings.Contains(pseudo, i18n.T("pseudo", tc.key)) &&
+				!strings.HasPrefix(pseudo, strings.TrimSuffix(i18n.T("pseudo", tc.key), "{{title}}")) {
+				t.Fatalf("pseudo description %q does not come from key %q", pseudo, tc.key)
+			}
+		})
+	}
+	// The task title is data, not copy: it must survive verbatim.
+	if got := gistDescription(titled, "pseudo"); !strings.Contains(got, "Fixture") {
+		t.Fatalf("pseudo description %q dropped or transliterated the task title", got)
 	}
 }

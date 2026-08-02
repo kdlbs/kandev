@@ -2,6 +2,62 @@
 
 All notable changes to Kandev.
 
+## 0.84.1 - 2026-08-02
+
+### Features
+
+- localize Settings → Integrations → GitHub watches and defaults ([#2158](https://github.com/kdlbs/kandev/pull/2158))
+- localize Settings → Integrations → GitHub connection and auth ([#2155](https://github.com/kdlbs/kandev/pull/2155))
+
+### Bug Fixes
+
+- guard browser APIs in insecure contexts ([#2157](https://github.com/kdlbs/kandev/pull/2157))
+- default new workspaces to host GitHub access ([#2156](https://github.com/kdlbs/kandev/pull/2156))
+
+## 0.84.0 - 2026-08-02
+
+### Features
+
+- localize Settings → General → Sprites and Layouts ([#2153](https://github.com/kdlbs/kandev/pull/2153))
+- localize shared-task artifacts in the creator's locale ([#2147](https://github.com/kdlbs/kandev/pull/2147))
+- localize Settings → General → Editors ([#2146](https://github.com/kdlbs/kandev/pull/2146))
+- localize Settings > General > Notifications
+- localize Settings → General → Secrets ([#2144](https://github.com/kdlbs/kandev/pull/2144))
+- ratchet new code to require t()/<Trans> everywhere ([#2105](https://github.com/kdlbs/kandev/pull/2105))
+- add scoped i18n foundation with one migrated page ([#2097](https://github.com/kdlbs/kandev/pull/2097))
+- enforce task title length limit ([#2134](https://github.com/kdlbs/kandev/pull/2134))
+- collapse linked PRs into submenu in task add-panel menu ([#2111](https://github.com/kdlbs/kandev/pull/2111)) by @ClemDNL
+- add last task startup preference ([#2102](https://github.com/kdlbs/kandev/pull/2102))
+
+### Bug Fixes
+
+- preserve managed GitHub tools across login shells ([#2141](https://github.com/kdlbs/kandev/pull/2141))
+- keep repository tasks on worktree defaults ([#2136](https://github.com/kdlbs/kandev/pull/2136))
+- prevent scheduler database access during shutdown ([#2135](https://github.com/kdlbs/kandev/pull/2135))
+- hide false session question indicator ([#2132](https://github.com/kdlbs/kandev/pull/2132))
+- validate MCP tool arguments ([#2123](https://github.com/kdlbs/kandev/pull/2123)) ([#2128](https://github.com/kdlbs/kandev/pull/2128))
+- stabilize task dialog rendering in WebKit ([#2129](https://github.com/kdlbs/kandev/pull/2129))
+- resolve chat file links from task workspace root ([#2127](https://github.com/kdlbs/kandev/pull/2127))
+- preserve integration provider auth errors ([#2119](https://github.com/kdlbs/kandev/pull/2119))
+- preserve service identity and resume credentials ([#2121](https://github.com/kdlbs/kandev/pull/2121))
+- handle same-version agent runtime updates ([#2120](https://github.com/kdlbs/kandev/pull/2120))
+- remove mobile repository switcher ([#2101](https://github.com/kdlbs/kandev/pull/2101))
+- prevent GitHub settings refresh flash ([#2118](https://github.com/kdlbs/kandev/pull/2118))
+- retry transient sprites errors ([#2116](https://github.com/kdlbs/kandev/pull/2116))
+
+### Performance
+
+- collapse the git poll tick into a single spawn ([#2133](https://github.com/kdlbs/kandev/pull/2133)) by @JnManso
+
+### Refactoring
+
+- localize Settings → General → Terminal ([#2143](https://github.com/kdlbs/kandev/pull/2143))
+
+### Documentation
+
+- simplify public documentation for scanning ([#2139](https://github.com/kdlbs/kandev/pull/2139))
+- clarify subscription usage surfaces ([#2122](https://github.com/kdlbs/kandev/pull/2122))
+
 ## 0.83.0 - 2026-07-31
 
 ### Features

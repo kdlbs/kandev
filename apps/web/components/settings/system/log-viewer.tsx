@@ -9,6 +9,7 @@ import { IconCopy, IconDownload, IconFileText, IconRefresh } from "@tabler/icons
 import { useLogFiles } from "@/hooks/domains/system/use-log-files";
 import { useLogTail } from "@/hooks/domains/system/use-log-tail";
 import { buildLogDownloadUrl } from "@/lib/api/domains/system-api";
+import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
 import { ActionButtonContent } from "./action-button-content";
@@ -177,10 +178,9 @@ export function LogViewer() {
 
   const onCopy = () =>
     void copyFeedback.run(async () => {
-      if (typeof navigator === "undefined" || !navigator.clipboard) {
-        throw new Error("Clipboard API not available");
+      if (!(await copyToClipboard(tail.join("\n") + "\n"))) {
+        throw new Error("Clipboard copy failed");
       }
-      await navigator.clipboard.writeText(tail.join("\n") + "\n");
     });
 
   const current = files.find((f) => f.current);

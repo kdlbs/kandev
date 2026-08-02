@@ -17,6 +17,7 @@ import { PromptSection } from "./prompt-section";
 import { RequiredFieldLabel } from "./required-field-label";
 import { TriggersSection } from "./triggers-section";
 import { WebhookCreatedDialog } from "./webhook-created-dialog";
+import { clampTaskTitleInput } from "@/lib/task-title";
 
 type UpdateField = <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 
@@ -163,7 +164,9 @@ export function ThenSection({
           <Input
             value={form.taskTitleTemplate}
             data-settings-dirty={isAutomationFieldDirty(form, savedForm, "taskTitleTemplate")}
-            onChange={(event) => updateField("taskTitleTemplate", event.target.value)}
+            onChange={(event) =>
+              updateField("taskTitleTemplate", clampTaskTitleInput(event.target.value))
+            }
             placeholder={defaultTaskTitle || "[Auto] automation name"}
           />
           <p className="text-xs text-muted-foreground">

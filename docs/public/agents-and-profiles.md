@@ -5,9 +5,16 @@ description: "Install agent CLIs and create profiles for models, modes, flags, s
 
 # Agents and Profiles
 
-An **agent** is Kandev's integration with a coding-agent CLI. A **profile** is a reusable launch configuration for that agent. Profiles let the same installed CLI run with different models, modes, credentials, flags, or trust levels.
+An **agent** is Kandev's integration with a coding-agent CLI. A **profile** is its reusable launch configuration. Create separate profiles when model, credentials, or permissions need different trust boundaries.
 
-Agent authentication is separate from repository credentials and from credentials saved under an integration. Installing a CLI does not sign it in, and connecting GitHub does not let an agent call its model provider.
+Agent authentication is separate from repository and integration credentials.
+
+## Quick path
+
+1. Rescan or install the agent on the host running Kandev.
+2. Authenticate it as the same operating-system user.
+3. Create a profile and verify model, mode, permissions, environment, and executor compatibility.
+4. Use the advanced sections only when you need passthrough, MCP, or custom launch behavior.
 
 ## Install or detect an agent
 
@@ -26,43 +33,32 @@ The status shown on this page is authoritative for the current host. A CLI that 
 
 ### Update a managed agent runtime
 
-Installed Claude, Codex, OpenCode, Copilot, and Gemini cards provide an update
-icon. Kandev invokes these managed npm runtimes without an
-exact version or `latest` tag during ordinary launches, so npm can reuse its
-best-effort execution cache. The version reported by the agent is the
-authoritative current version; Kandev does not infer it from the application
-release.
+The update icon is available on managed Claude, Codex, OpenCode, Copilot, and
+Gemini agent cards. It updates the runtime on the Kandev host.
 
-Select the update icon to deliberately check npm and refresh the managed
-runtime on the Kandev host. Before anything changes, the update dialog shows
-the current and upstream target versions, the exact command Kandev will run,
-and how the update affects sessions. Select **Approve update** to start it.
-The dialog streams progress and stdout/stderr until the update finishes; those
-details do not appear on the agent card and are cleared when you restart the
-page. After the package update, Kandev automatically starts a fresh ACP
-capability probe. A successful probe replaces the advertised models, modes,
+1. Select the update icon.
+2. Review the current version, target version, and command.
+3. Select **Approve update**. If the update fails, select **Retry update**.
+4. Wait for the capability refresh to finish.
+
+Kandev disables approval when the versions already match or the version check
+is incomplete. A successful refresh updates the advertised models, modes,
 configuration options, commands, and runtime version without a page reload.
 
-The action changes later host probes and sessions only. It does not restart an
-active session, update a separately configured passthrough or authentication
-helper, or update remote executors and running containers. Those environments
-resolve their own unversioned runtime when they launch.
+- Active sessions keep running; later probes and launches use the refreshed runtime.
+- Passthrough agents, authentication helpers, remote executors, and running containers are unchanged.
+- If the update or refresh fails, Kandev keeps the previous capability catalogue and shows the error. Authenticate the host agent, then retry.
 
-If registry lookup or package execution fails, Kandev keeps the previous
-capability catalogue and shows the captured failure in the dialog. If the
-package updates but the follow-up probe requires authentication, the dialog
-reports the update plus the refresh error; authenticate the host agent and
-refresh again. Update job history is short-lived and does not survive a backend
-restart, and npm cache contents are not a durable Kandev installation record.
-When the first managed package update fails, Kandev removes only that
-package's extracted npm execution tree and retries the same update once; a
-repair or second failure is reported as failed and does not retry indefinitely.
+<details>
+<summary>Add a custom terminal agent</summary>
 
 ### Add a custom terminal agent
 
 Use **Settings > Agents > Add TUI Agent** for a CLI that Kandev does not register. Enter a display name, command, and optional model label. `{{model}}` in the command is replaced by the selected model value, then the entire command is split on whitespace with Go's `strings.Fields`.
 
 That parser is not a shell and is not quote-aware: quotes and backslashes do not preserve a path or model containing spaces as one argument. Custom TUI agents always use terminal passthrough. They do not gain ACP features such as structured permission prompts, model discovery, modes, or session configuration merely by being added. Test the exact resulting argument split before assigning it to work.
+
+</details>
 
 ## Create and configure a profile
 
@@ -87,7 +83,41 @@ Model, mode, command, and configuration choices are probed from the locally inst
 
 Use the profile refresh control after installing, authenticating, or upgrading an agent. A manual refresh updates both the advertised models, modes, and commands and the visible capability status, so an old failure banner does not remain authoritative after the local CLI recovers.
 
-**Settings > Agents** shows **Subscription Usage** only when a supported host agent is signed in through a subscription plan. The current section covers Codex and Claude Code, reports the provider's plan and rate-limit windows, and can be refreshed on demand. It is an operational signal from the installed CLI, not a billing ledger or a guarantee that the next request will be accepted; provider availability, account policy, and concurrent usage still apply.
+<details>
+<summary>Office agent quota and provider usage</summary>
+
+### Monitor Office agent quota
+
+> [!EXPERIMENTAL]
+> Office mode is feature-flagged and disabled in the production profile by
+> default. Enable **Office mode** under **Settings > System > Feature Toggles**
+> and restart Kandev to try it; its routes and agent surfaces are still in
+> progress. For stable host-CLI installation and profile configuration, use
+> **Settings > Agents**.
+
+When [Office mode](feature-status.md) is enabled, open **Office > Agents** and
+select an Office agent to see its **Subscription Quota** on the overview; the
+Office dashboard also summarizes the highest utilization across subscription
+agents. These cards appear only for supported subscription agents with provider
+credentials.
+
+For account-wide provider usage across supported providers, install the
+[Provider Usage plugin](https://github.com/kdlbs/kandev-plugin-provider-usage).
+It adds a provider pill to the session top bar and can add a compact display to
+the global status bar. The optional status-bar display requires **App status
+bar** to be enabled under **Settings > System > Feature Toggles**; enable it
+and restart Kandev for the change to take effect. If it remains disabled, the
+session top-bar pill remains available; enabling it also adds the global
+status-bar and phone Status drawer display. Configure the plugin under
+**Settings > Plugins > Provider Usage**. These usage surfaces are operational
+signals, not a billing ledger or a guarantee that the next request will be
+accepted; provider availability, account policy, and concurrent usage still
+apply.
+
+</details>
+
+<details>
+<summary>CLI flags and ACP command prefixes</summary>
 
 ### CLI flags
 
@@ -102,6 +132,8 @@ Some older profiles contain compatibility fields such as Auggie's `allow_indexin
 **Command prefix** is available for ACP launches, not terminal-passthrough launches. Kandev parses the prefix into structured argv rather than running a shell: quote a path containing spaces, for example `"/opt/launchers/safe wrapper" --`. The resulting argv is prefixed to the agent command, so shell features such as pipes, redirects, variable expansion, and command substitution are not evaluated.
 
 The prefix must contain a nonempty first argv element that is not flag-like. Malformed quotes, a trailing escape, an empty launcher, or a prefix beginning with `-` is rejected when you save or preview it. If an older persisted profile contains an invalid prefix, Kandev fails the launch rather than silently running the agent without its configured launcher. Check the command preview after changing a prefix.
+
+</details>
 
 ## Environment variables and secrets
 
@@ -136,6 +168,11 @@ ACP sessions can expose typed messages, tool updates, permission requests, model
 
 Passthrough preserves the CLI's native PTY interface. It is useful when the native terminal has features that ACP does not expose, but Kandev cannot manufacture structured capabilities that are absent. Custom TUI profiles are locked to passthrough. Profile-specific MCP injection also varies by CLI; verify the command preview and the MCP section before depending on it.
 
+> **MCP credential exposure:** MCP headers and environment values are stored in profile configuration. Codex may place them in process arguments, and Cursor or Pi may leave them in project files after teardown. Use short-lived, narrowly scoped credentials and review persisted files.
+
+<details>
+<summary>Configure external MCP servers</summary>
+
 ## Add external MCP servers to a profile
 
 When an agent advertises MCP support, open its profile's **MCP** section. The editor accepts either a servers map or an object containing `mcpServers`.
@@ -155,6 +192,8 @@ MCP JSON, including `headers` and server `env`, is stored as profile configurati
 Passthrough injection adds CLI-specific exposure. Codex encodes MCP environment values and HTTP headers into `-c` process arguments, which another local user may read through process inspection. Cursor and Pi write project-local `.cursor/mcp.json` or `.pi/mcp.json`; when either file already exists, Kandev merges its entries and deliberately does not remove them at teardown because it does not own the user's file. Review and remove persisted entries or credentials yourself.
 
 Kandev does not validate a server-name syntax centrally, so blank or unusual names can fail or be transformed differently by each CLI. A missing command/URL, unsupported or denied transport, or server-name policy denial skips that server with a warning. Configuring `shared` mode for a stdio server is different: it aborts profile MCP resolution with an error. Review launch/session logs when an expected tool is missing.
+
+</details>
 
 ## Delete profiles and custom agents
 

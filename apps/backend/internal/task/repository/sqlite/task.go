@@ -117,6 +117,14 @@ func isFromOfficeProjection(alias string) string {
 	)`
 }
 
+// IsFromOfficePredicate returns the shared SQL predicate for authoritative
+// Office-task identity. Callers that query tasks outside this repository must
+// use this expression so project-linked tasks and canonical Office-workflow
+// tasks are classified consistently with models.Task.IsFromOffice.
+func IsFromOfficePredicate(alias string) string {
+	return isFromOfficeProjection(alias)
+}
+
 // excludeConfigModePredicate delegates to the shared dialect helper (also
 // used by internal/analytics/repository/sqlite's CodeStats read, so both
 // cover the same office config-mode exclusion).

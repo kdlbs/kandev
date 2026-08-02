@@ -13,6 +13,13 @@ Kandev has three distinct configuration surfaces:
 
 This page is the startup-configuration reference. Executor-specific fields are covered in [Executors](./executors.md), and deployment examples are in [Docker](./docker.md), [Kubernetes](./k8s.md), and [Run as a service](./run-as-a-service.md).
 
+## Quick path
+
+1. Use the built-in profile defaults for a first run.
+2. Add `config.yaml` only for stable operator-wide settings.
+3. Use environment variables for deployment-specific overrides and secrets.
+4. Use the web UI for persistent product settings, agents, executors, and workflows.
+
 ## Load order and lifecycle
 
 At backend startup, later sources override earlier ones:
@@ -40,6 +47,9 @@ Some common camelCase keys have explicit compatibility aliases. Use the document
 ## Complete backend reference
 
 ### Root and server
+
+<details>
+<summary>Complete backend startup reference</summary>
 
 | YAML key | Environment variable | Default | Current behavior |
 |---|---|---|---|
@@ -287,6 +297,8 @@ features:
 ```
 
 Copying this entire file is unnecessary and can freeze old defaults in a deployment. Keep only deliberate overrides. On Windows, do not copy the Unix Docker host/path literals from this example.
+
+</details>
 
 ## Runtime feature toggles
 

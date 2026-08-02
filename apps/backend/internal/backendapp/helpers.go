@@ -49,6 +49,7 @@ import (
 	"github.com/kandev/kandev/internal/gitlab"
 	"github.com/kandev/kandev/internal/health"
 	"github.com/kandev/kandev/internal/health/oslimits"
+	"github.com/kandev/kandev/internal/i18n"
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
@@ -64,6 +65,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/plugins"
 	pluginstore "github.com/kandev/kandev/internal/plugins/store"
+	"github.com/kandev/kandev/internal/profiles"
 	promptcontroller "github.com/kandev/kandev/internal/prompts/controller"
 	prompthandlers "github.com/kandev/kandev/internal/prompts/handlers"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -706,18 +708,26 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 	}
 }
 
-func webRuntimeConfig(debug bool) webapp.RuntimeConfig {
+// webRuntimeConfig builds the SPA's runtime block. `req` supplies the active
+// locale (from the kandev_locale cookie) so the shell can set <html lang> and the
+// client can activate the right catalog before first paint.
+func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:     "/api/v1",
 		WebSocketPath: "/ws",
 		Debug:         debug,
+		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
+		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
+		// this from its own build mode.
+		NonProduction: profiles.DetectEnvironment() != profiles.EnvProd,
+		Locale:        i18n.FromRequest(req),
 	}
 }
 
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
 	payload := webapp.NewBootPayload(
 		route,
-		webRuntimeConfig(p.devMode),
+		webRuntimeConfig(p.devMode, req),
 		bootInitialState(ctx, req, p, route),
 	)
 	payload.RouteData = bootRouteData(ctx, req, p, route)
@@ -1519,11 +1529,12 @@ func externalMCPAuthMiddleware(authSvc *auth.Service) gin.HandlerFunc {
 func runGracefulShutdown(
 	server *http.Server,
 	listeners *serverListeners,
+	scheduling *schedulingRuntime,
 	orchestratorSvc *orchestrator.Service,
 	lifecycleMgr *lifecycle.Manager,
 	runCleanups func(),
 	log *logger.Logger,
-) {
+) []error {
 	start := time.Now()
 	var shutdownErrs []error
 	log.Info("Graceful shutdown started",
@@ -1533,7 +1544,9 @@ func runGracefulShutdown(
 
 	// Stop the background bind-retry loop before Shutdown so no new listener
 	// can be created after the server begins closing its listeners.
-	listeners.Stop()
+	if listeners != nil {
+		listeners.Stop()
+	}
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), httpShutdownTimeout)
 	defer shutdownCancel()
@@ -1543,9 +1556,16 @@ func runGracefulShutdown(
 		log.Error("HTTP server shutdown error", zap.Error(err))
 	}
 
-	if err := orchestratorSvc.Stop(); err != nil {
+	if err := scheduling.Stop(); err != nil {
 		shutdownErrs = append(shutdownErrs, err)
-		log.Error("Orchestrator stop error", zap.Error(err))
+		log.Error("Scheduler stop error", zap.Error(err))
+	}
+
+	if orchestratorSvc != nil {
+		if err := orchestratorSvc.Stop(); err != nil {
+			shutdownErrs = append(shutdownErrs, err)
+			log.Error("Orchestrator stop error", zap.Error(err))
+		}
 	}
 
 	if err := stopLifecycleManager(lifecycleMgr, log); err != nil {
@@ -1565,6 +1585,7 @@ func runGracefulShutdown(
 		zap.Duration("duration", time.Since(start)),
 		zap.Int("error_count", len(shutdownErrs)))
 	_ = log.Sync()
+	return shutdownErrs
 }
 
 // stopLifecycleManager gracefully stops all agents and the lifecycle manager.

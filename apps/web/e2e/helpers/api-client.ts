@@ -1759,6 +1759,7 @@ export class ApiClient {
       state: string;
       started_at: string;
       task_environment_id?: string;
+      workspace_path?: string;
       worktree_path?: string;
       worktree_branch?: string;
       worktrees?: Array<{ repository_id?: string; worktree_path?: string }>;

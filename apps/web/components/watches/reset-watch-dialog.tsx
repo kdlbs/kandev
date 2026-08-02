@@ -12,6 +12,8 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Button } from "@kandev/ui/button";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 // previewLoader fetches the count of tasks that would be deleted. The
 // dialog calls it once when it opens; the result is cached for the
@@ -50,6 +52,7 @@ export function ResetWatchDialog({
   onConfirm,
   requirePreviewSuccess = false,
 }: ResetWatchDialogProps) {
+  const { t } = useTranslation();
   const [count, setCount] = useState<number | null>(null);
   const [previewError, setPreviewError] = useState(false);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -88,6 +91,7 @@ export function ResetWatchDialog({
   }, [open, previewLoader, previewAttempt]);
 
   const description = renderDescription({
+    t,
     previewLoading,
     previewError,
     count,
@@ -100,7 +104,9 @@ export function ResetWatchDialog({
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent data-testid="reset-watch-dialog">
         <AlertDialogHeader>
-          <AlertDialogTitle>Reset {integrationLabel}?</AlertDialogTitle>
+          <AlertDialogTitle>
+            {t("common:resetWatchTitle", { label: integrationLabel })}
+          </AlertDialogTitle>
           <AlertDialogDescription data-testid="reset-watch-dialog-description">
             {description}
           </AlertDialogDescription>
@@ -113,11 +119,11 @@ export function ResetWatchDialog({
               className="cursor-pointer"
               onClick={() => setPreviewAttempt((attempt) => attempt + 1)}
             >
-              Retry preview
+              {t("common:retryPreview")}
             </Button>
           )}
           <AlertDialogCancel className="cursor-pointer" disabled={confirming}>
-            Cancel
+            {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
             data-testid="reset-watch-dialog-confirm"
@@ -136,7 +142,7 @@ export function ResetWatchDialog({
             }}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {confirming ? "Resetting…" : "Reset"}
+            {confirming ? t("common:resetting") : t("common:reset")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -207,30 +213,29 @@ export function useWatchResetController<TWatch extends { id: string }>(opts: {
 }
 
 function renderDescription({
+  t,
   previewLoading,
   previewError,
   count,
   requirePreviewSuccess,
 }: {
+  t: TFunction;
   previewLoading: boolean;
   previewError: boolean;
   count: number | null;
   requirePreviewSuccess: boolean;
 }): string {
-  const tail =
-    " The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.";
-  if (previewLoading) return "Checking how many tasks would be deleted…";
+  // Each branch is a whole sentence in the catalog rather than a stem plus a
+  // shared tail: concatenating translated fragments fixes English word order.
+  if (previewLoading) return t("common:resetWatchChecking");
   if (previewError) {
     return requirePreviewSuccess
-      ? "Could not load the affected task count. Retry the preview before resetting this watch."
-      : "This will delete every task previously created by the watch, including archived tasks." +
-          tail;
+      ? t("common:resetWatchPreviewFailedRequired")
+      : t("common:resetWatchDeleteAllTasks");
   }
-  if (count === 0) {
-    return (
-      "No tasks were created by this watch yet — only the polling state will be cleared." + tail
-    );
-  }
-  const plural = count === 1 ? "task" : "tasks";
-  return `This will delete ${count} ${plural} previously created by the watch, including archived ${plural}.${tail}`;
+  if (count === 0) return t("common:resetWatchNoTasks");
+  // `count` is still null on the first render, before the effect flips
+  // previewLoading — without this guard that renders "delete 0 tasks".
+  if (count === null) return t("common:resetWatchChecking");
+  return t("common:resetWatchDeleteTasks", { count });
 }

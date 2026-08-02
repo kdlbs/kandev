@@ -126,6 +126,19 @@ type Manager struct {
 	// per-field repoTrackersMu still allows concurrent subscribe/unsubscribe
 	// readers while a rescan is in flight.
 	rescanMu sync.Mutex
+	// workspacePollMode is the most recent mode the gateway pushed for this
+	// workspace. Trackers created after that point — rescan, rebind or
+	// reconcile adding a repository to a workspace that is already focused —
+	// inherit it, because no further push arrives unless the session's own
+	// mode changes.
+	//
+	// Guarded by repoTrackersMu rather than a mutex of its own: the mode and
+	// the tracker set have to move together. A separate lock let a tracker read
+	// the mode, then get registered after a concurrent push had already
+	// snapshotted the set — adopting a stale mode with its grace timer disarmed,
+	// with nothing left to correct it.
+	workspacePollMode    PollMode
+	workspacePollModeSet bool
 	// workspaceTrackersBySubpath caches per-subpath trackers for multi-repo
 	// task roots. Key is the cleaned subpath (relative to cfg.WorkDir). The
 	// root tracker lives in workspaceTracker above.
@@ -729,6 +742,41 @@ func (m *Manager) RepoSubpaths() []string {
 	return out
 }
 
+// newTrackerForRepo builds a per-repo tracker that inherits the workspace's
+// current poll mode. Used for every tracker created after launch — rescan and
+// lazy subpath creation — because the gateway only pushes on a session mode
+// transition: a repository added to a workspace that is already focused would
+// otherwise sit at its construction default and be demoted by the grace timer
+// 60s later, while the user is looking at it.
+func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
+	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+}
+
+// applyWorkspacePollModeLocked gives newly built trackers the last mode the
+// gateway pushed, if it ever pushed one. SetPollMode also disarms a tracker's
+// grace demotion, which is correct: the gateway has spoken for this workspace,
+// so the fallback must not override it. With no prior push the trackers keep
+// their construction default and the grace timer stays in charge.
+//
+// Callers must hold repoTrackersMu for writing, and must call this in the same
+// critical section that publishes the trackers. Reading the mode and
+// registering the tracker have to be one step: otherwise a SetWorkspacePollMode
+// running in between stores a new mode and fans it out to a tracker set that
+// does not include this one yet, so the tracker adopts the stale mode — and
+// because SetPollMode marks it as pushed and disarms the grace timer, nothing
+// ever corrects it. It would poll at the wrong cadence for the life of the
+// process, which is the exact failure the grace timer exists to prevent.
+func (m *Manager) applyWorkspacePollModeLocked(trackers ...*WorkspaceTracker) {
+	if !m.workspacePollModeSet {
+		return
+	}
+	for _, t := range trackers {
+		if t != nil {
+			t.SetPollMode(m.workspacePollMode)
+		}
+	}
+}
+
 // SetWorkspacePollMode propagates a poll-mode change to the root tracker and
 // every per-repo tracker, then forces a RefreshGitStatus on each non-paused
 // tracker so a fresh snapshot reaches every subscriber. Without the refresh,
@@ -737,18 +785,50 @@ func (m *Manager) RepoSubpaths() []string {
 // after a focus event, since the agent's initial pushes happen at boot and
 // no replay path exists for clients that subscribe later.
 func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
-	root, trackers := m.snapshotTrackers()
-	root.SetPollMode(mode)
+	// Reject before storing, not just before applying. Every tracker already
+	// ignores an invalid mode, so an invalid push is harmless to the trackers
+	// that exist — but recording it would overwrite the last valid one, and
+	// trackers created afterwards inherit what is stored. A single malformed
+	// push would leave every later tracker on its construction default, and
+	// applyWorkspacePollModeLocked could not tell that apart from a workspace
+	// the gateway has genuinely never spoken for.
+	if !mode.IsValid() {
+		m.logger.Warn("ignoring invalid workspace poll mode", zap.String("mode", string(mode)))
+		return
+	}
+
+	// Storing the mode and fanning it out happen under one write lock, the same
+	// one the rescan paths hold while they publish new trackers. That ordering
+	// is what makes the two safe against each other: a tracker is either already
+	// registered and gets this push, or it is registered afterwards and reads
+	// this mode when it does. Anything in between would leave it on a stale mode
+	// with its grace timer disarmed — see applyWorkspacePollModeLocked.
+	//
+	// SetPollMode is a mutex update plus a non-blocking wake-up, so holding the
+	// lock across the fan-out costs nothing. RefreshGitStatus is the slow part
+	// and stays outside, in the goroutine below.
+	m.repoTrackersMu.Lock()
+	m.workspacePollMode = mode
+	m.workspacePollModeSet = true
+	root := m.workspaceTracker
+	trackers := make([]*WorkspaceTracker, len(m.repoTrackers))
+	copy(trackers, m.repoTrackers)
+	if root != nil {
+		root.SetPollMode(mode)
+	}
 	for _, t := range trackers {
 		t.SetPollMode(mode)
 	}
+	m.repoTrackersMu.Unlock()
 	if mode == PollModePaused {
 		return
 	}
 	// Refresh in background — RefreshGitStatus blocks on git commands which
 	// can take seconds on large repos; the HTTP caller shouldn't wait.
 	go func() {
-		root.RefreshGitStatus(ctx)
+		if root != nil {
+			root.RefreshGitStatus(ctx)
+		}
 		for _, t := range trackers {
 			t.RefreshGitStatus(ctx)
 		}
