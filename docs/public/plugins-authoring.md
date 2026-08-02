@@ -331,22 +331,41 @@ the broker connection may not exist during construction.
 
 ```yaml
 capabilities:
+  events: ["task.created", "task.state_changed"]
   state: true
 ```
 
 ```go
+import (
+  "context"
+  "errors"
+)
+
 type plugin struct{ pluginsdk.UnimplementedPlugin }
 
 func (p *plugin) OnEvent(ctx context.Context, event *pluginsdk.Event) error {
+  if event == nil || event.EventID == "" { return errors.New("event ID is required") }
   host := p.Host()
-  if host == nil { return nil }
+  if host == nil { return errors.New("plugin host unavailable") }
   value, found, err := host.GetState(ctx, "instance", "", "events")
   if err != nil { return err }
+  if !found { value = map[string]any{} }
+  processed, _ := value["processed_event_ids"].(map[string]any)
+  if processed == nil { processed = map[string]any{} }
+  if _, seen := processed[event.EventID]; seen { return nil }
   count := 0.0
   if found { count, _ = value["count"].(float64) }
-  return host.SetState(ctx, "instance", "", "events", map[string]any{"count": count + 1})
+  processed[event.EventID] = true
+  value["processed_event_ids"] = processed
+  value["count"] = count + 1
+  return host.SetState(ctx, "instance", "", "events", value)
 }
 ```
+
+The durable EventID claims make retries no-ops. Delivery is sequential per
+plugin, while Host state itself has no transaction primitive; keep the claim
+and counter in one state update and bound or prune old claims in a long-lived
+plugin.
 
 ### 3. Task panel with task-scoped Host state
 
@@ -426,7 +445,8 @@ capabilities:
 
 ```go
 func (p *plugin) OnEvent(ctx context.Context, event *pluginsdk.Event) error {
-  if alreadyProcessed(event.EventID) { return nil }
+  // Apply the durable EventID claim pattern from the Host-state recipe before
+  // performing side effects.
   if event.EventType == "task.created" { return p.handleTask(ctx, event.Payload) }
   return nil
 }
@@ -444,7 +464,7 @@ when a card is selected.
 ```js
 registry.registerComponent("main-top-bar", ({ slotProps }) => {
   const state = host.store.getState();
-  const count = state.tasks && state.tasks.length || 0;
+  const count = state.kanban && state.kanban.tasks ? state.kanban.tasks.length : 0;
   return host.jsx("span", { title: "View: " + (slotProps && slotProps.currentPage) }, count + " tasks");
 });
 ```
@@ -470,6 +490,11 @@ then runs the monorepo plugin-pack command. If using a custom Makefile, the
 equivalent is:
 
 ```bash
+rm -rf .build/stage
+mkdir -p .build/stage/server
+cp manifest.yaml .build/stage/manifest.yaml
+if [ -d ui ]; then cp -R ui .build/stage/ui; fi
+if [ -d assets ]; then cp -R assets .build/stage/assets; fi
 go build -o .build/stage/server/plugin-$(go env GOOS)-$(go env GOARCH) ./server
 go run github.com/kandev/kandev/cmd/plugin-pack \
   -dir .build/stage \

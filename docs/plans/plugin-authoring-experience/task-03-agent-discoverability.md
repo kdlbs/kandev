@@ -27,8 +27,8 @@ rg -n "docs/public/plugins-authoring.md|PLUGIN-API.md|apps/web/lib/plugins/types
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 make -C apps/backend e2e-plugin-package
-cd apps/backend && go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk
-cd apps && pnpm --filter @kandev/web test -- lib/plugins/host-api.test.ts lib/plugins/host.test.ts lib/plugins/registry.test.ts lib/ws/plugin-bridge.test.ts
+(cd apps/backend && go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk)
+(cd apps && pnpm --filter @kandev/web test -- lib/plugins/host-api.test.ts lib/plugins/host.test.ts lib/plugins/registry.test.ts lib/ws/plugin-bridge.test.ts)
 git diff --check
 ```
 

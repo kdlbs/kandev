@@ -22,9 +22,9 @@ spec: "../../specs/plugins/authoring-experience.md"
 ## Verification
 
 ```sh
-cd apps/backend && go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk
+(cd apps/backend && go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk)
 make -C apps/backend e2e-plugin-package
-cd apps && pnpm --filter @kandev/web test -- lib/plugins/host-api.test.ts lib/plugins/host.test.ts lib/plugins/registry.test.ts lib/ws/plugin-bridge.test.ts
+(cd apps && pnpm --filter @kandev/web test -- lib/plugins/host-api.test.ts lib/plugins/host.test.ts lib/plugins/registry.test.ts lib/ws/plugin-bridge.test.ts)
 node scripts/validate-public-docs.mjs
 ```
 
@@ -40,6 +40,6 @@ node scripts/validate-public-docs.mjs
 
 - Reconciled `api_write` task/message writes, root-relative UI paths, mounted
   slots, fixture comments, and example documentation against current source.
-- `go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk` — 167 passed in 5 packages.
+- `(cd apps/backend && go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk)` — 167 passed in 5 packages.
 - `make -C apps/backend e2e-plugin-package` — produced the linux-amd64 fixture archive.
-- Frontend focused plugin tests passed with 50 tests across 4 files.
+- Frontend-focused plugin tests passed with 50 tests across 4 files.

@@ -117,7 +117,7 @@ Wave 3:
 
 - `node --test scripts/validate-public-docs.test.mjs` — 58 passed.
 - `node scripts/validate-public-docs.mjs` — validated 41 published docs pages.
-- `go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk` — 167 passed in 5 packages.
+- `(cd apps/backend && go test ./cmd/plugin-pack ./cmd/plugin-fixture ./internal/plugins/manifest ./internal/plugins/pkgtar ./pkg/pluginsdk)` — 167 passed in 5 packages.
 - `make -C apps/backend e2e-plugin-package` — produced `.build/kandev-plugin-e2e-1.0.0.tar.gz` for linux-amd64.
-- `pnpm --filter @kandev/web test -- lib/plugins/host-api.test.ts lib/plugins/host.test.ts lib/plugins/registry.test.ts lib/ws/plugin-bridge.test.ts` — 4 files and 50 tests passed. Happy-DOM emitted expected external-stylesheet warnings.
+- `(cd apps && pnpm --filter @kandev/web test -- lib/plugins/host-api.test.ts lib/plugins/host.test.ts lib/plugins/registry.test.ts lib/ws/plugin-bridge.test.ts)` — 4 files and 50 tests passed. Happy-DOM emitted expected external-stylesheet warnings.
 - `git diff --check` — passed.
