@@ -28,10 +28,10 @@ spec: "../../specs/ui/sidebar-diff-stat-priority.md"
 - **Verification:**
   ```bash
   cd apps && pnpm install --frozen-lockfile
-  cd apps && pnpm --filter @kandev/web test -- components/task/task-item.test.tsx
-  cd apps/web && pnpm e2e:run tests/task/sidebar-diff-stats.spec.ts
-  cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts
-  cd apps/web && pnpm run typecheck
+  pnpm --filter @kandev/web test -- components/task/task-item.test.tsx
+  pnpm --filter @kandev/web e2e:run -- tests/task/sidebar-diff-stats.spec.ts
+  pnpm --filter @kandev/web e2e:run -- --project mobile-chrome tests/task/mobile-sidebar-task-actions.spec.ts
+  pnpm --filter @kandev/web run typecheck
   ```
 - **Output contract:** Report the changed files, exact tests and results, blockers and risks, then
   update this task and `plan.md` status in the same conversation.
@@ -49,6 +49,10 @@ spec: "../../specs/ui/sidebar-diff-stat-priority.md"
   — passed, 8/8 tests, including the diff/action non-overlap check.
 - `rtk pnpm run typecheck` — passed.
 - `rtk git diff --check` — passed.
+- Fixup commit `8c0f56c0b` added the named action-focus scope, restored no-stats row-focus
+  disclosure, and added the context-menu-open unit assertion; the targeted unit suite passed
+  30/30, desktop E2E passed 1/1 after a production rebuild, mobile E2E passed 8/8, and web
+  typecheck passed.
 - `rtk pnpm e2e:run --no-build tests/task/sidebar-diff-stats-capture.spec.ts` — passed, 1 desktop
   screenshot capture test.
 - `rtk pnpm e2e:run --no-build --project mobile-chrome

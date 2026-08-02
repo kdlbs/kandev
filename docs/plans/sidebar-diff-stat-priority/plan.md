@@ -18,9 +18,11 @@ mobile drawer's side-by-side controls unchanged.
 ### Shared sidebar task row
 
 - Update `apps/web/components/task/task-item.tsx` so `DiffStatsRight` no longer hides totals for
-  row-level `group-focus-within`; it should hide only for an open menu and fine-pointer hover.
-- Update `TaskMenuButton` so row-level focus does not make the ellipsis visible. Preserve a
-  keyboard-focus selector on the button/control so Tab users can reveal and use the trigger.
+  row-level `group-focus-within`; it should hide for an open menu, fine-pointer hover, or the
+  named `group-focus-within/actions` state while the action trigger itself owns focus.
+- Update `TaskMenuButton` so row-level focus does not make the ellipsis visible on rows with diff
+  stats. Preserve a keyboard-focus selector on the button/control so Tab users can reveal and use
+  the trigger, while rows without diff stats retain their existing row-focus disclosure.
 - Keep the existing context-menu `menuOpen` and deletion behavior intact: an open menu remains
   associated with a visible trigger, while the normal idle state restores the totals.
 - Do not alter the mobile classes or `apps/web/app/globals.css` overrides that intentionally show
@@ -65,7 +67,7 @@ control and no overlap.
 ## Verification Results
 
 - `rtk pnpm --filter @kandev/web test -- components/task/task-item.test.tsx` — final run passed,
-  1 file / 28 tests. The initial RED run passed 27 tests and failed the new visibility assertion
+  1 file / 30 tests. The initial RED run passed 27 tests and failed the new visibility assertion
   against the old `group-focus-within` classes.
 - `rtk pnpm e2e:run tests/task/sidebar-diff-stats.spec.ts` — the first production-build run
   reached the new active-row assertion but failed because the test pointer was still hovering the
@@ -76,6 +78,10 @@ control and no overlap.
   — passed, 8 tests; the existing mobile diff/action geometry remains green.
 - `rtk pnpm run typecheck` — passed with `tsc --noEmit` and no diagnostics.
 - `rtk git diff --check` — passed.
+- Fixup commit `8c0f56c0b` added scoped action-focus behavior, restored no-stats row-focus
+  disclosure, and added the context-menu-open unit assertion; the targeted unit suite passed
+  30/30, desktop E2E passed 1/1 after a production rebuild, mobile E2E passed 8/8, and web
+  typecheck passed.
 - `rtk pnpm e2e:run --no-build tests/task/sidebar-diff-stats-capture.spec.ts` — passed, 1
   desktop capture test; produced fresh idle and hover PNGs.
 - `rtk pnpm e2e:run --no-build --project mobile-chrome
