@@ -273,4 +273,27 @@ export const i18nGuardFiles = [
   "components/github/pr-stats.tsx",
   "components/integrations/workspace-scoped-section.tsx",
   "components/watches/reset-watch-dialog.tsx",
+  // Settings → Integrations → GitHub, watches and My-GitHub defaults: the review
+  // and issue watch dialogs and tables, the prompt field, and the quick-action /
+  // default-query sections. With these the page is fully migrated.
+  //
+  // The three `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them; the entries record that they are migrated, and only the pseudo-locale
+  // can prove it stays that way.
+  "components/github/action-presets-section.tsx",
+  "components/github/default-queries-section.tsx",
+  "components/github/issue-watch-dialog.tsx",
+  "components/github/issue-watch-placeholders.ts",
+  "components/github/issue-watch-table.tsx",
+  "components/github/review-watch-dialog.tsx",
+  "components/github/review-watch-placeholders.ts",
+  "components/github/review-watch-prompt-field.tsx",
+  "components/github/review-watch-table.tsx",
+  // Shared with the My GitHub page (`app/github`) and the automations trigger
+  // config, neither of which is migrated. Per-file guard, so they are
+  // unaffected.
+  "components/github/my-github/action-presets.ts",
+  "components/github/my-github/search-bar.tsx",
+  "components/github/my-github/use-default-query-presets.ts",
+  "components/github/repo-filter-selector.tsx",
 ];
