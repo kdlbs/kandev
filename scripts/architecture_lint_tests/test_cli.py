@@ -70,3 +70,13 @@ class CliTest(ArchitectureFixture):
         self.assertTrue((REPO_ROOT / "scripts/lint-architecture.py").is_file())
         self.assertTrue((REPO_ROOT / ".github/workflows/architecture-lint.yml").is_file())
         self.assertTrue((REPO_ROOT / "docs/architecture-lint.md").is_file())
+
+    def test_workflow_fetches_full_history_for_push_baseline_comparisons(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/architecture-lint.yml").read_text(encoding="utf-8")
+        self.assertIn("fetch-depth: 0", workflow)
+
+    def test_push_runs_are_not_cancelled_before_baseline_comparison(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/architecture-lint.yml").read_text(encoding="utf-8")
+        self.assertIn("github.event_name == 'pull_request'", workflow)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", workflow)
+        self.assertIn("github.sha", workflow)

@@ -270,6 +270,30 @@ You may still list the column in the `CREATE TABLE` so fresh DBs get it inline, 
 
 Built-in prompt content refreshes are seed-data migrations, not schema migrations. Match only known historical content hashes after applying the same normalization as the embedded prompt loader, require `created_at == updated_at` to preserve user edits, and use a conditional update over the original row values to avoid racing concurrent edits. Keep these refreshes with prompt seeding rather than `runMigrations()`.
 
+## Internationalization
+
+`internal/i18n` covers only what Go renders **directly to a browser**: the
+SPA-unavailable error pages and the shared-task artifacts (`share.html`, gist
+README, gist description). Everything else stays English by design — the ~1,100
+`http.Error` / `gin.H{"error": …}` strings are diagnostics the SPA maps onto its
+own translated copy, and log lines, agent/ACP output, and CLI output are not
+display copy.
+
+- `i18n.T(locale, key)` / `i18n.Tf(locale, key, vars)` for lookup; `Tf`
+  interpolates `{{name}}` and applies the catalog's i18next-compatible plural
+  selection (`key_one` / `key_other`).
+- `i18n.FromRequest(r)` at the HTTP boundary. Shared-task output resolves its
+  locale once when created and threads it explicitly through the artifact
+  builders; it is not request context or package state. See ADR
+  `2026-08-01-share-artifact-locale.md`.
+- Catalogs are embedded JSON (`internal/i18n/locales/<locale>.json`). `pseudo` is
+  **generated** — run `pnpm run i18n:pseudo` from `apps/web`, which writes both
+  the frontend and backend catalogs. A per-package test fails if an `en` key is
+  missing from `pseudo`.
+- **For new user-facing output, prefer returning a stable error code** the
+  frontend translates. Reach for `i18n.T` only when Go itself writes the bytes a
+  user reads.
+
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):

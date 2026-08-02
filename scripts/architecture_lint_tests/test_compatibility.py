@@ -57,3 +57,34 @@ class CompatibilityLedgerTest(ArchitectureFixture):
         result = self.run_cli("--all")
 
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_semver_accepts_prerelease_and_build_metadata(self) -> None:
+        marker = "// compat: semver"
+        self.write("apps/backend/internal/example/compat.go", f"package example\n{marker}\n")
+        entry = self.valid_ledger_entry(marker=marker)
+        entry.pop("introduced_on")
+        entry["introduced_version"] = "1.2.3-alpha+build.7"
+        entry.pop("target_removal_date")
+        entry["target_removal_version"] = "2.0.0"
+        self.write_ledger([entry])
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_semver_rejects_leading_zero_and_empty_identifiers(self) -> None:
+        marker = "// compat: semver"
+        self.write("apps/backend/internal/example/compat.go", f"package example\n{marker}\n")
+        for invalid in ("01.2.3", "1.2.3-..", "1.2.3-alpha..1"):
+            with self.subTest(invalid=invalid):
+                entry = self.valid_ledger_entry(marker=marker)
+                entry.pop("introduced_on")
+                entry["introduced_version"] = invalid
+                self.write_ledger([entry])
+                self.track_all()
+
+                result = self.run_cli("--all")
+
+                self.assertEqual(result.returncode, 1)
+                self.assertIn("invalid introduced_version", result.stdout)

@@ -40,3 +40,37 @@ class FrontendRootStateCastTest(ArchitectureFixture):
         self.assertEqual(result.returncode, 1)
         self.assert_diagnostic_location(result, path, 1)
         self.assertIn("as unknown as", result.stdout)
+
+    def test_template_interpolations_are_scanned_but_template_text_is_ignored(self) -> None:
+        path = "apps/web/lib/state/store.ts"
+        self.write(
+            path,
+            "const text = `literal state as any ${state as any} ${state as unknown as RootState}`;\n",
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout.count(ROOT_STATE_RULE), 2)
+
+    def test_duplicate_violation_lines_get_distinct_occurrences(self) -> None:
+        path = "apps/web/lib/state/store.ts"
+        marker = "const unsafe = state as any;"
+        self.write(path, f"{marker}\n{marker}\n")
+        self.write_baseline(
+            root_state=[
+                {
+                    "escape": "as any",
+                    "marker": marker,
+                    "occurrence": 1,
+                    "path": path,
+                }
+            ]
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assert_diagnostic_location(result, path, 2)
