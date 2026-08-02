@@ -10,6 +10,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@kandev/ui/dialog";
+import { useTranslation } from "react-i18next";
 
 export const githubAppPermissions: Record<string, "read" | "write"> = {
   actions: "read",
@@ -41,24 +42,23 @@ export function GitHubAppPolicyDialog({
   permissions?: Record<string, "read" | "write">;
   events?: string[];
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog>
       <DialogTrigger asChild>
         <Button variant="outline" className="h-11 cursor-pointer">
           <IconShieldCheck className="mr-2 h-4 w-4" />
-          Review permissions
+          {t("github:reviewPermissions")}
         </Button>
       </DialogTrigger>
       <DialogContent className="flex max-h-[80dvh] flex-col overflow-hidden sm:max-w-lg">
         <DialogHeader className="shrink-0">
-          <DialogTitle>Required GitHub App policy</DialogTitle>
-          <DialogDescription>
-            An imported App must have at least these repository permissions and subscribed events.
-          </DialogDescription>
+          <DialogTitle>{t("github:requiredGithubAppPolicy")}</DialogTitle>
+          <DialogDescription>{t("github:anImportedAppMustHaveAt")}</DialogDescription>
         </DialogHeader>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain">
           <section>
-            <h3 className="mb-2 text-sm font-medium">Repository permissions</h3>
+            <h3 className="mb-2 text-sm font-medium">{t("github:repositoryPermissions")}</h3>
             <div className="divide-y rounded-md border">
               {Object.entries(permissions)
                 .sort(([left], [right]) => left.localeCompare(right))
@@ -74,7 +74,7 @@ export function GitHubAppPolicyDialog({
             </div>
           </section>
           <section>
-            <h3 className="mb-2 text-sm font-medium">Subscribed events</h3>
+            <h3 className="mb-2 text-sm font-medium">{t("github:subscribedEvents")}</h3>
             <div className="divide-y rounded-md border">
               {events.map((event) => (
                 <div key={event} className="flex min-h-11 items-center px-3 text-sm">

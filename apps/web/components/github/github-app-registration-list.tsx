@@ -4,6 +4,7 @@ import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { GitHubAppRegistrationCatalogItem } from "@/lib/types/github";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 export function GitHubAppRegistrationList({
   registrations,
@@ -14,10 +15,11 @@ export function GitHubAppRegistrationList({
   value: string;
   onChange: (registrationId: string) => void;
 }) {
+  const { t } = useTranslation();
   if (!registrations.length) {
     return (
       <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-        No GitHub Apps are registered yet. Add an existing App or create one below.
+        {t("github:noGithubAppsAreRegisteredYet")}
       </div>
     );
   }
@@ -44,28 +46,29 @@ export function GitHubAppRegistrationList({
                 {registration.visibility}
               </Badge>
               {registration.status === "invalid" && (
-                <Badge variant="destructive">Needs attention</Badge>
+                <Badge variant="destructive">{t("github:needsAttention")}</Badge>
               )}
               {registration.selected && (
                 <Badge variant="secondary">
-                  <IconCheck className="mr-1 h-3 w-3" /> In use
+                  <IconCheck className="mr-1 h-3 w-3" /> {t("github:inUse")}
                 </Badge>
               )}
             </span>
             <span className="block break-words text-xs font-normal text-muted-foreground">
               {registration.owner_login}/{registration.slug} ·{" "}
-              {registration.source === "managed" ? "Created by Kandev" : "Imported"}
+              {registration.source === "managed"
+                ? t("github:createdByKandev")
+                : t("github:imported")}
             </span>
             {registration.shared && (
               <span className="flex items-start gap-1.5 text-xs font-normal leading-5 text-amber-600 dark:text-amber-400">
                 <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                Used by {registration.workspace_binding_count} workspaces. Editing or deleting it
-                affects all of them.
+                {t("github:usedByWorkspaces", { count: registration.workspace_binding_count })}
               </span>
             )}
             {registration.status === "invalid" && (
               <span className="block text-xs font-normal leading-5 text-destructive">
-                {registration.last_error || "The stored App credentials are unavailable."}
+                {registration.last_error || t("github:theStoredAppCredentialsAreUnavailable")}
               </span>
             )}
           </span>

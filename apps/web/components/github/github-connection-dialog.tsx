@@ -24,15 +24,13 @@ import type { TaskGitCredentialsState } from "@/hooks/domains/github/use-task-gi
 import type { GitHubStatus } from "@/lib/types/github";
 import type { GitHubAutomationMethod } from "./github-auth-method-list";
 import { GitHubConnectionSettingsForm } from "./github-connection-settings-form";
+import { useTranslation } from "react-i18next";
 
 function methodForStatus(status: GitHubStatus): GitHubAutomationMethod {
   if (status.automation?.source === "github_app_installation") return "app";
   if (status.automation?.source === "gh_cli") return "cli";
   return "pat";
 }
-
-const description =
-  "This workspace uses one credential for repository sync, watches, background jobs, and managed agent GitHub access. Executor profile credentials can still take precedence.";
 
 export function GitHubConnectionDialog({
   status,
@@ -45,6 +43,7 @@ export function GitHubConnectionDialog({
   onSaved: () => void;
   taskAccess: TaskGitCredentialsState;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [method, setMethod] = useState<GitHubAutomationMethod>(() => methodForStatus(status));
   const { isMobile } = useResponsiveBreakpoint();
@@ -68,7 +67,7 @@ export function GitHubConnectionDialog({
   const trigger = (
     <Button variant={connected ? "outline" : "default"} className="h-11 cursor-pointer">
       <IconPlug className="mr-2 h-4 w-4" />
-      {connected ? "Change connection" : "Connect GitHub"}
+      {connected ? t("github:changeConnection") : t("github:connectGithub")}
     </Button>
   );
   const body = (
@@ -94,8 +93,10 @@ export function GitHubConnectionDialog({
           className="h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] max-h-[calc(100dvh-16px-env(safe-area-inset-bottom,0px))] overflow-hidden"
         >
           <DrawerHeader className="shrink-0 border-b text-left">
-            <DrawerTitle>{connected ? "Change GitHub connection" : "Connect GitHub"}</DrawerTitle>
-            <DrawerDescription>{description}</DrawerDescription>
+            <DrawerTitle>
+              {connected ? t("github:changeGithubConnection") : t("github:connectGithub")}
+            </DrawerTitle>
+            <DrawerDescription>{t("github:thisWorkspaceUsesOneCredentialFor")}</DrawerDescription>
           </DrawerHeader>
           {body}
         </DrawerContent>
@@ -111,8 +112,10 @@ export function GitHubConnectionDialog({
         className="flex max-h-[85dvh] flex-col overflow-hidden sm:max-w-4xl"
       >
         <DialogHeader className="shrink-0">
-          <DialogTitle>{connected ? "Change GitHub connection" : "Connect GitHub"}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
+          <DialogTitle>
+            {connected ? t("github:changeGithubConnection") : t("github:connectGithub")}
+          </DialogTitle>
+          <DialogDescription>{t("github:thisWorkspaceUsesOneCredentialFor")}</DialogDescription>
         </DialogHeader>
         {body}
       </DialogContent>

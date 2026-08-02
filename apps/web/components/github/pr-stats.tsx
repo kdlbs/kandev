@@ -12,6 +12,7 @@ import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { fetchGitHubStats } from "@/lib/api/domains/github-api";
 import type { PRStats } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 type StatCardProps = {
   icon: React.ReactNode;
@@ -82,36 +83,37 @@ function usePRStats(workspaceId: string | null) {
 }
 
 function StatsGrid({ stats }: { stats: PRStats }) {
+  const { t } = useTranslation();
   return (
     <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
       <StatCard
         icon={<IconGitPullRequest className="h-5 w-5" />}
-        label="PRs Created"
+        label={t("github:prsCreated")}
         value={stats.total_prs_created}
       />
       <StatCard
         icon={<IconEye className="h-5 w-5" />}
-        label="PRs Reviewed"
+        label={t("github:prsReviewed")}
         value={stats.total_prs_reviewed}
       />
       <StatCard
         icon={<IconMessage className="h-5 w-5" />}
-        label="Comments"
+        label={t("github:comments")}
         value={stats.total_comments}
       />
       <StatCard
         icon={<IconCheck className="h-5 w-5" />}
-        label="CI Pass Rate"
+        label={t("github:ciPassRate")}
         value={formatPercent(stats.ci_pass_rate)}
       />
       <StatCard
         icon={<IconCheck className="h-5 w-5" />}
-        label="Approval Rate"
+        label={t("github:approvalRate")}
         value={formatPercent(stats.approval_rate)}
       />
       <StatCard
         icon={<IconClock className="h-5 w-5" />}
-        label="Avg Time to Merge"
+        label={t("github:avgTimeToMerge")}
         value={formatHours(stats.avg_time_to_merge_hours)}
       />
     </div>
@@ -119,12 +121,13 @@ function StatsGrid({ stats }: { stats: PRStats }) {
 }
 
 function PRsByDayChart({ prsByDay }: { prsByDay: PRStats["prs_by_day"] }) {
+  const { t } = useTranslation();
   if (!prsByDay || prsByDay.length === 0) return null;
   const maxCount = Math.max(...prsByDay.map((d) => d.count), 1);
   return (
     <Card>
       <CardContent className="p-4">
-        <h4 className="text-sm font-medium mb-3">PRs by Day</h4>
+        <h4 className="text-sm font-medium mb-3">{t("github:prsByDay")}</h4>
         <div className="flex items-end gap-1 h-24">
           {prsByDay.map((day) => {
             const height = Math.max((day.count / maxCount) * 100, 4);
@@ -133,7 +136,7 @@ function PRsByDayChart({ prsByDay }: { prsByDay: PRStats["prs_by_day"] }) {
                 key={day.date}
                 className="flex-1 bg-primary/20 hover:bg-primary/40 rounded-t transition-colors"
                 style={{ height: `${height}%` }}
-                title={`${day.date}: ${day.count} PRs`}
+                title={t("github:prsOnDay", { date: day.date, count: day.count })}
               />
             );
           })}
@@ -150,6 +153,7 @@ function PRsByDayChart({ prsByDay }: { prsByDay: PRStats["prs_by_day"] }) {
 }
 
 export function PRStatsPanel({ workspaceId }: { workspaceId: string | null }) {
+  const { t } = useTranslation();
   const { stats, loading } = usePRStats(workspaceId);
 
   if (loading) {
@@ -162,7 +166,9 @@ export function PRStatsPanel({ workspaceId }: { workspaceId: string | null }) {
 
   if (!stats) {
     return (
-      <p className="text-sm text-muted-foreground text-center py-4">No stats available yet.</p>
+      <p className="text-sm text-muted-foreground text-center py-4">
+        {t("github:noStatsAvailableYet")}
+      </p>
     );
   }
 
