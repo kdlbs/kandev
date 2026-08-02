@@ -310,6 +310,7 @@ async function createMissingSteps(
       name: step.name,
       position: step.position,
       color: step.color,
+      cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     });
     mappings.set(step.id, created.id);
   }

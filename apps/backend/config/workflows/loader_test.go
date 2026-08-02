@@ -42,13 +42,20 @@ func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
 		t.Fatal("simple template not found")
 	}
 	want := map[string]bool{"Backlog": true, "In Progress": true, "Review": false, "Done": false}
+	seen := make(map[string]bool, len(want))
 	for _, step := range simple.Steps {
 		wantValue, ok := want[step.Name]
 		if !ok {
 			continue
 		}
+		seen[step.Name] = true
 		if got := boolFieldForTest(t, step, "CancelTriggersTurnComplete"); got != wantValue {
 			t.Errorf("simple template step %q cancel trigger = %t, want %t", step.Name, got, wantValue)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("simple template step %q not found", name)
 		}
 	}
 }

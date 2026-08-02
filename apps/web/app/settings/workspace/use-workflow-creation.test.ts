@@ -8,7 +8,14 @@ const template = {
   id: "template-1",
   name: "Template",
   description: "Template description",
-  default_steps: [{ name: "Template Step", position: 0, color: "bg-blue-500" }],
+  default_steps: [
+    {
+      name: "Template Step",
+      position: 0,
+      color: "bg-blue-500",
+      cancel_triggers_turn_complete: true,
+    },
+  ],
 } as WorkflowTemplate;
 
 function renderCreationHook(workflowTemplates: WorkflowTemplate[] = []) {
@@ -102,6 +109,7 @@ describe("useWorkflowCreation", () => {
     expect(result.current.initialStepsByWorkflowId.get(workflow.id)?.[0]).toMatchObject({
       name: "Template Step",
       color: "bg-blue-500",
+      cancel_triggers_turn_complete: true,
     });
   });
 });

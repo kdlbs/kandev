@@ -38,6 +38,26 @@ func TestProcessOnTurnComplete(t *testing.T) {
 		}
 	})
 
+	t.Run("missing step returns false", func(t *testing.T) {
+		repo := setupTestRepo(t)
+		seedSession(t, repo, "t1", "s1", "missing-step")
+
+		// The workflow getter can return (nil, nil) for an unknown step. The
+		// legacy completion path must fail closed instead of dereferencing nil.
+		svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+		task, err := repo.GetTask(ctx, "t1")
+		if err != nil {
+			t.Fatalf("get task: %v", err)
+		}
+		session, err := repo.GetTaskSession(ctx, "s1")
+		if err != nil {
+			t.Fatalf("get session: %v", err)
+		}
+		if got := svc.processOnTurnComplete(ctx, task, session); got {
+			t.Fatal("expected false when workflow step lookup returns nil")
+		}
+	})
+
 	t.Run("no actions returns false", func(t *testing.T) {
 		repo := setupTestRepo(t)
 		seedSession(t, repo, "t1", "s1", "step1")

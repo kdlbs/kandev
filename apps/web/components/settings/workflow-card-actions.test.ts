@@ -378,6 +378,43 @@ describe("persistWorkflowDraft", () => {
   });
 });
 
+describe("persistWorkflowDraft cancellation policy", () => {
+  it("forwards cancellation policy when creating a missing template step", async () => {
+    const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
+    const drafts = [
+      {
+        ...step(CLIENT_STEP_ONE, "Todo", 0, true),
+        workflow_id: draftWorkflow.id,
+        cancel_triggers_turn_complete: true,
+      },
+    ] as WorkflowStep[];
+    vi.mocked(createWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: "wf-created",
+    } as Workflow);
+    vi.mocked(updateWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: "wf-created",
+    } as Workflow);
+    vi.mocked(createWorkflowStepAction).mockResolvedValueOnce(
+      step(SERVER_STEP_ONE, "Todo", 0, true),
+    );
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: drafts,
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(createWorkflowStepAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cancel_triggers_turn_complete: true,
+      }),
+    );
+  });
+});
+
 describe("useWorkflowDeleteHandlers", () => {
   it("refuses to open the delete-workflow dialog when readOnly", async () => {
     const wfDel = {

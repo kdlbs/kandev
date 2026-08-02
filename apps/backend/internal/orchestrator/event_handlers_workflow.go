@@ -102,7 +102,7 @@ func (s *Service) loadLegacyTurnCompletionStep(
 		return nil, false
 	}
 	currentStep, err := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
-	if err != nil {
+	if err != nil || currentStep == nil {
 		s.logger.Warn("failed to get workflow step for transition",
 			zap.String("workflow_step_id", task.WorkflowStepID),
 			zap.Error(err))

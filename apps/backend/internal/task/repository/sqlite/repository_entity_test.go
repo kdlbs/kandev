@@ -488,3 +488,39 @@ func TestRunMigrations_Idempotent(t *testing.T) {
 		t.Fatalf("third runMigrations call returned error: %v", err)
 	}
 }
+
+func TestRunnerProjectionWorkflowStepColumnsReplayMigration(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	if _, err := repo.db.Exec(`INSERT INTO workflow_steps (id, workflow_id, name, position) VALUES ('legacy-projection-step', 'legacy-workflow', 'Legacy', 0)`); err != nil {
+		t.Fatalf("seed legacy workflow step: %v", err)
+	}
+
+	for _, column := range []string{"auto_advance_requires_signal", "cancel_triggers_turn_complete"} {
+		if _, err := repo.db.Exec(`ALTER TABLE workflow_steps DROP COLUMN ` + column); err != nil {
+			t.Fatalf("drop legacy workflow_steps.%s: %v", column, err)
+		}
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("runMigrations on legacy workflow_steps schema: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay runMigrations: %v", err)
+	}
+
+	for _, column := range []string{"auto_advance_requires_signal", "cancel_triggers_turn_complete"} {
+		var count int
+		if err := repo.db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('workflow_steps') WHERE name = ?`, column).Scan(&count); err != nil {
+			t.Fatalf("inspect workflow_steps.%s: %v", column, err)
+		}
+		if count != 1 {
+			t.Fatalf("workflow_steps.%s column count = %d, want 1", column, count)
+		}
+	}
+	var autoAdvance, cancelComplete int
+	if err := repo.db.QueryRow(`SELECT auto_advance_requires_signal, cancel_triggers_turn_complete FROM workflow_steps WHERE id = 'legacy-projection-step'`).Scan(&autoAdvance, &cancelComplete); err != nil {
+		t.Fatalf("read migrated workflow step: %v", err)
+	}
+	if autoAdvance != 0 || cancelComplete != 0 {
+		t.Fatalf("legacy workflow step defaults = (%d, %d), want (0, 0)", autoAdvance, cancelComplete)
+	}
+}

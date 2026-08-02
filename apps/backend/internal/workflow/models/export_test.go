@@ -2,12 +2,14 @@ package models
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildWorkflowExport(t *testing.T) {
@@ -451,6 +453,25 @@ func TestCancelTriggersTurnCompleteExport(t *testing.T) {
 		t.Fatal("StepPortable is missing CancelTriggersTurnComplete")
 	}
 	assert.True(t, exportedField.Bool())
+}
+
+func TestCancelTriggersTurnCompleteYAMLExportIncludesFalse(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-yaml-cancel", Name: "YAML cancellation"}
+	export := BuildWorkflowExport(
+		[]*taskmodels.Workflow{wf},
+		map[string][]*WorkflowStep{"wf-yaml-cancel": {
+			{ID: "s1", Name: "Todo", Position: 0},
+		}},
+		nil,
+	)
+
+	encoded, err := yaml.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal workflow export: %v", err)
+	}
+	if got := string(encoded); !strings.Contains(got, "cancel_triggers_turn_complete: false") {
+		t.Fatalf("YAML export omitted false cancellation policy:\n%s", got)
+	}
 }
 
 func TestPullFromStepPositionToID(t *testing.T) {

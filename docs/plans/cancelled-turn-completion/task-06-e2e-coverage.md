@@ -61,7 +61,7 @@ Report desktop/mobile scenarios and discovered test counts, files changed, exact
 
 Added managed Playwright coverage:
 
-- Desktop enabled/disabled scenarios seed a delayed real turn, click the existing Cancel action, verify the cancellation settles, and assert advance-versus-stay plus a single surviving task session.
+- Desktop enabled/disabled scenarios seed a real turn with a delayed response, click the existing Cancel action, verify the cancellation settles, and assert advance-versus-stay plus a single surviving task session.
 - Mobile coverage enables the setting through the workflow editor with `.tap()`, verifies persistence after reload, measures the actual `min-h-11` associated label, cancels a delayed turn by touch, verifies the destination, and asserts no document horizontal overflow.
 - The E2E API helper accepts `cancel_triggers_turn_complete` updates and the workflow settings page exposes a touch-aware policy helper/save path.
 
