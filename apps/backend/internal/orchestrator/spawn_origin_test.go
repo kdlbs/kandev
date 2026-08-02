@@ -82,7 +82,7 @@ func TestApplyLaunchPromptContext_PassthroughAddsPendingTitleInstructionOnlyWhen
 		includeTaskTitleTool: true,
 	})
 	assert.Contains(t, withTitle, "set_task_title_kandev")
-	assert.Contains(t, withTitle, "targeting about 3 words")
+	assert.Contains(t, withTitle, "targeting about 6 words")
 	assert.Contains(t, withTitle, "review the diff please")
 	assert.NotContains(t, withTitle, sysprompt.TagStart)
 

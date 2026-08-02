@@ -279,7 +279,9 @@ func TestServerModeTaskTitlePending_RegistersTitleToolOnlyForPendingTaskMode(t *
 	titleTool, ok := pending.mcpServer.ListTools()["set_task_title_kandev"]
 	require.True(t, ok, "pending task mode must register set_task_title_kandev")
 	assert.Contains(t, titleTool.Tool.Description, "first action")
-	assert.Contains(t, titleTool.Tool.Description, "3 words")
+	assert.Contains(t, titleTool.Tool.Description, "6 words")
+	assert.Contains(t, titleTool.Tool.Description, "sentence case")
+	assert.Contains(t, titleTool.Tool.Description, "Improve task title casing")
 
 	ordinary := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	assert.NotContains(t, ordinary.mcpServer.ListTools(), "set_task_title_kandev")

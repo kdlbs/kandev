@@ -1027,10 +1027,12 @@ Call this as your first action in the session, before planning, inspecting files
 or doing any other work. The task currently has a provisional title derived from
 the prompt; call this tool even when that provisional title looks usable.
 
-Use a concise title targeting about 3 words (no more than 6 words when practical).
+Use a concise title targeting about 6 words.
 Write a short noun phrase, not a sentence or a progress update. Your title should
-summarize the requested outcome and will replace the provisional title.`),
-			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short task title targeting about 3 words; use no more than 6 words when practical.")),
+summarize the requested outcome and will replace the provisional title. Use sentence case:
+capitalize only the first word and proper nouns (for example, "Improve task title casing", not
+"Improve Task Title Casing").`),
+			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short sentence-case task title targeting about 6 words.")),
 		),
 		s.wrapHandler("set_task_title_kandev", s.setTaskTitleHandler()),
 	)
