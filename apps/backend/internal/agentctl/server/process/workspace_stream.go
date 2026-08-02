@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -55,7 +56,7 @@ func (wt *WorkspaceTracker) AttachWorkspaceStreamSubscriber(sub types.WorkspaceS
 	// Use the tracker's cancellable context (not context.Background) so
 	// Stop() can kill an in-flight `git status` here without waiting it out.
 	if wt.updateMu.TryLock() {
-		if status, err := wt.getGitStatus(wt.cancelCtx); err == nil {
+		if status, err := wt.getGitStatusClass(wt.cancelCtx, subproc.GitInteractive); err == nil {
 			wt.mu.Lock()
 			wt.currentStatus = status
 			wt.mu.Unlock()

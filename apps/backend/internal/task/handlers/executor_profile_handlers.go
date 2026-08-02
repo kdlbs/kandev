@@ -3,7 +3,6 @@ package handlers
 import (
 	"context"
 	"net/http"
-	"os/exec"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/remoteauth"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
@@ -137,8 +137,9 @@ func firstNonEmptyGitConfig(key string) string {
 }
 
 func runGitConfig(args ...string) string {
-	cmd := exec.Command("git", args...)
-	out, err := cmd.Output()
+	ctx := context.Background()
+	cmd := subproc.NewGitCommand(ctx, args...)
+	out, err := subproc.RunGitOutputClass(ctx, subproc.GitInteractive, cmd)
 	if err != nil {
 		return ""
 	}

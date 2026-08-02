@@ -7,12 +7,12 @@ import (
 	"io/fs"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/gitref"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 type RepositoryDiscoveryConfig struct {
@@ -695,9 +695,9 @@ func isHexCommitSHA(s string) bool {
 // keep only the target since that's what's currently in the working tree.
 // Returns an empty slice for a clean working tree.
 func readGitDirtyFiles(ctx context.Context, repoPath string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain=v1", "-z")
+	cmd := subproc.NewGitCommand(ctx, "status", "--porcelain=v1", "-z")
 	cmd.Dir = repoPath
-	out, err := cmd.Output()
+	out, err := subproc.RunGitOutputClass(ctx, subproc.GitInteractive, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("git status: %w", err)
 	}

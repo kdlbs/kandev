@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -18,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
@@ -1512,20 +1512,20 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 	}
 
 	// Initialize git repository
-	cmd := exec.CommandContext(ctx, "git", "init")
+	cmd := subproc.NewGitCommand(ctx, "init")
 	cmd.Dir = workspacePath
-	if output, err := cmd.CombinedOutput(); err != nil {
+	if output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		return fmt.Errorf("git init failed: %w (output: %s)", err, string(output))
 	}
 
 	// Configure git user (required for initial commit)
-	configName := exec.CommandContext(ctx, "git", "config", "user.name", "Kandev Quick Chat")
+	configName := subproc.NewGitCommand(ctx, "config", "user.name", "Kandev Quick Chat")
 	configName.Dir = workspacePath
-	_ = configName.Run() // Ignore error - might already be configured globally
+	_ = subproc.RunGitClass(ctx, subproc.GitLifecycle, configName) // Ignore error - might already be configured globally
 
-	configEmail := exec.CommandContext(ctx, "git", "config", "user.email", "quickchat@kandev.local")
+	configEmail := subproc.NewGitCommand(ctx, "config", "user.email", "quickchat@kandev.local")
 	configEmail.Dir = workspacePath
-	_ = configEmail.Run() // Ignore error - might already be configured globally
+	_ = subproc.RunGitClass(ctx, subproc.GitLifecycle, configEmail) // Ignore error - might already be configured globally
 
 	// Create initial commit with empty .gitkeep file
 	gitkeepPath := filepath.Join(workspacePath, ".gitkeep")
@@ -1533,15 +1533,15 @@ func (m *Manager) initGitRepo(ctx context.Context, workspacePath string) error {
 		return fmt.Errorf("failed to create .gitkeep: %w", err)
 	}
 
-	addCmd := exec.CommandContext(ctx, "git", "add", ".gitkeep")
+	addCmd := subproc.NewGitCommand(ctx, "add", ".gitkeep")
 	addCmd.Dir = workspacePath
-	if output, err := addCmd.CombinedOutput(); err != nil {
+	if output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, addCmd); err != nil {
 		return fmt.Errorf("git add failed: %w (output: %s)", err, string(output))
 	}
 
-	commitCmd := exec.CommandContext(ctx, "git", "commit", "-m", "Initial commit")
+	commitCmd := subproc.NewGitCommand(ctx, "commit", "-m", "Initial commit")
 	commitCmd.Dir = workspacePath
-	if output, err := commitCmd.CombinedOutput(); err != nil {
+	if output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, commitCmd); err != nil {
 		return fmt.Errorf("git commit failed: %w (output: %s)", err, string(output))
 	}
 

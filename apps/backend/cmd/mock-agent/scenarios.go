@@ -4,11 +4,12 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // Predefined e2e test scenarios with fixed timing for deterministic test assertions.
@@ -482,13 +483,13 @@ func scenarioPushCurrentBranch(e *emitter) {
 		e.text("push-current-branch: getwd failed: " + err.Error())
 		return
 	}
-	branchNameOut, err := exec.Command("git", "-C", wd, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	branchNameOut, err := runGitOutput(wd, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		e.text("push-current-branch: resolve branch name failed: " + err.Error())
 		return
 	}
 	branchName := strings.TrimSpace(string(branchNameOut))
-	headSHAOut, err := exec.Command("git", "-C", wd, "rev-parse", "HEAD").Output()
+	headSHAOut, err := runGitOutput(wd, "rev-parse", "HEAD")
 	if err != nil {
 		e.text("push-current-branch: resolve HEAD sha failed: " + err.Error())
 		return
@@ -1076,6 +1077,11 @@ func scenarioSymlinkFileSetup(e *emitter) {
 	e.text("symlink-file-setup complete")
 }
 
+func runGitOutput(wd string, args ...string) ([]byte, error) {
+	cmd := subproc.NewGitCommand(context.Background(), append([]string{"-C", wd}, args...)...)
+	return subproc.RunGitOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+}
+
 // makeGitRunner returns a function that runs git commands in the given directory.
 func makeGitRunner(wd string) func(args ...string) error {
 	gitEnv := append(os.Environ(),
@@ -1085,13 +1091,13 @@ func makeGitRunner(wd string) func(args ...string) error {
 		"GIT_COMMITTER_EMAIL=mock@test.local",
 	)
 	return func(args ...string) error {
-		cmd := exec.Command("git", append([]string{
+		cmd := subproc.NewGitCommand(context.Background(), append([]string{
 			"-c", "commit.gpgsign=false",
 			"-c", "tag.gpgsign=false",
 		}, args...)...)
 		cmd.Dir = wd
 		cmd.Env = gitEnv
-		out, cmdErr := cmd.CombinedOutput()
+		out, cmdErr := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
 		if cmdErr != nil {
 			_, _ = fmt.Fprintf(logOutput, "mock-agent: git %v failed: %v\nOutput: %s\n", args, cmdErr, out)
 		}

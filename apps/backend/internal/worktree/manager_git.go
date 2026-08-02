@@ -45,7 +45,7 @@ func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bo
 	// contention. With this ordering the 10s timer starts the moment
 	// git is about to run, so we get an accurate "could not tell" only
 	// when the inspect itself is the slow part.
-	release, err := subproc.Git().Acquire(ctx)
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
 	if err != nil {
 		m.logger.Warn("branchExists bounded by context",
 			zap.String("repository_path", repoPath),
@@ -120,7 +120,7 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 	// Same Acquire-then-build-execCtx ordering as branchExists.
-	release, err := subproc.Git().Acquire(ctx)
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
 	if err != nil {
 		return ""
 	}
@@ -289,7 +289,7 @@ func (m *Manager) pullCurrentBranchOrFallback(
 func (m *Manager) runGitCombinedAfterAcquire(
 	ctx context.Context, execTimeout time.Duration, repoPath string, args ...string,
 ) ([]byte, error, error) {
-	release, err := subproc.Git().Acquire(ctx)
+	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
 	if err != nil {
 		return nil, err, ctx.Err()
 	}

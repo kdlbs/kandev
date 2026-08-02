@@ -1,7 +1,6 @@
 package process
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -80,7 +79,7 @@ func (wt *WorkspaceTracker) monitorLoop(ctx context.Context) {
 	// stuck waiting for the first tick. Skipped only in fully-paused initial
 	// state? No: even paused workspaces benefit from a one-time scan so
 	// transitioning to slow/fast later finds a populated cache.
-	wt.updateGitStatus(ctx)
+	wt.updateGitStatusClass(ctx, subproc.GitBackground)
 	wt.updateFiles(ctx)
 
 	// Cache the last known state (ignore error on initial fetch)
@@ -230,28 +229,21 @@ func (wt *WorkspaceTracker) getWorkspaceState(ctx context.Context) (workspaceSta
 		}
 	}
 
-	// Create a timeout context for git commands to prevent hanging
-	gitCtx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
-	defer cancel()
-
 	// git diff-files shows changed files with their blob hashes.
 	// However, the output doesn't change when an already-dirty file is modified
 	// again because the index blob hash stays constant and the worktree hash
 	// is always shown as 0000000 (not computed). To detect subsequent changes
 	// to dirty files, we also include the mtime of each dirty file.
-	cmd := wt.pollingGitCommand(gitCtx, "diff-files", "--name-only")
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	out, err := subproc.RunGitOutput(gitCtx, cmd)
+	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "diff-files", "--name-only")
 	if err != nil {
 		return state, fmt.Errorf("git diff-files in %s: %w (stderr: %s)",
-			wt.workDir, err, strings.TrimSpace(stderrBuf.String()))
+			wt.workDir, err, stderr)
 	}
 	state.diffFilesID = wt.buildDirtyFilesID(string(out))
 
 	// Check untracked files - git diff-files doesn't include them
 	// Use git ls-files to get untracked files, then check their mtimes
-	untrackedID, err := wt.getUntrackedFilesID(gitCtx)
+	untrackedID, err := wt.getUntrackedFilesID(ctx)
 	if err != nil {
 		return state, err
 	}
@@ -292,13 +284,10 @@ func (wt *WorkspaceTracker) buildDirtyFilesID(diffFilesOutput string) string {
 // Returns an error if the git command fails (e.g., timeout, index lock).
 func (wt *WorkspaceTracker) getUntrackedFilesID(ctx context.Context) (string, error) {
 	// Get list of untracked files (excluding ignored)
-	cmd := wt.pollingGitCommand(ctx, "ls-files", "--others", "--exclude-standard")
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-	out, err := subproc.RunGitOutput(ctx, cmd)
+	out, stderr, err := wt.runPollingGitOutputWithStderr(ctx, "ls-files", "--others", "--exclude-standard")
 	if err != nil {
 		return "", fmt.Errorf("git ls-files in %s: %w (stderr: %s)",
-			wt.workDir, err, strings.TrimSpace(stderrBuf.String()))
+			wt.workDir, err, stderr)
 	}
 	if len(out) == 0 {
 		return "", nil // No untracked files is not an error

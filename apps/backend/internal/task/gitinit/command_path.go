@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // CommandContext creates a Git initialization command for platforms without inherited fd support.
 func CommandContext(ctx context.Context, targetPath string, _ *os.File) (*exec.Cmd, error) {
-	command := exec.CommandContext(ctx, "git", "init", "--initial-branch=main")
+	command := subproc.NewGitCommand(ctx, "init", "--initial-branch=main")
 	command.Dir = targetPath
 	return command, nil
 }

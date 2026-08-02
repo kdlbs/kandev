@@ -4,7 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"os/exec"
+	"errors"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -139,9 +139,23 @@ func (wt *WorkspaceTracker) gitPollTick(ctx context.Context, consecutiveFailures
 //
 // Returns true if pollGitChanges should exit.
 func (wt *WorkspaceTracker) handleGitPollFailure(ctx context.Context, consecutiveFailures *int, cause error) bool {
-	probeCmd := exec.CommandContext(ctx, "git", "rev-parse", "--git-dir")
-	probeCmd.Dir = wt.workDir
-	if probeErr := subproc.RunGit(ctx, probeCmd); probeErr == nil {
+	if errors.Is(cause, subproc.ErrAdmissionCanceled) {
+		wt.logger.Debug("git poll admission canceled; preserving tracker liveness",
+			zap.String("workDir", wt.workDir),
+			zap.Error(cause))
+		*consecutiveFailures = 0
+		return false
+	}
+
+	probeErr := wt.runPollingGit(ctx, "rev-parse", "--git-dir")
+	if errors.Is(probeErr, subproc.ErrAdmissionCanceled) {
+		wt.logger.Debug("git poll health probe admission canceled; preserving tracker liveness",
+			zap.String("workDir", wt.workDir),
+			zap.Error(probeErr))
+		*consecutiveFailures = 0
+		return false
+	}
+	if probeErr == nil {
 		// The repository is fine, so the snapshot read failed for some other
 		// reason (per-command timeout under load, a concurrent index.lock
 		// holder). Same as before: only probe failures count against the
@@ -523,14 +537,12 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 
 	// Try integration branch candidates first (origin/main, origin/master, main, master)
 	// This ensures we get the branch-off point from the main development line.
-	// Routed through subproc.RunGit so each rev-parse counts against the global
+	// Routed through the background admission helpers so each rev-parse counts against the global
 	// git semaphore — handleBranchSwitch can invoke this on every detected
 	// branch change, so an unthrottled burst here was the exact pattern the
 	// throttle is meant to prevent on CrowdStrike-instrumented macOS.
 	for _, candidate := range []string{"origin/main", "origin/master", "main", "master"} {
-		checkCmd := exec.CommandContext(ctx, "git", "rev-parse", "--verify", candidate)
-		checkCmd.Dir = wt.workDir
-		if err := subproc.RunGit(ctx, checkCmd); err == nil {
+		if err := wt.runPollingGit(ctx, "rev-parse", "--verify", candidate); err == nil {
 			baseBranch = candidate
 			break
 		}
@@ -538,9 +550,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 
 	// Fall back to upstream tracking branch if no integration branch exists
 	if baseBranch == "" {
-		upstreamCmd := exec.CommandContext(ctx, "git", "rev-parse", "--abbrev-ref", branch+"@{upstream}")
-		upstreamCmd.Dir = wt.workDir
-		upstreamOut, err := subproc.RunGitOutput(ctx, upstreamCmd)
+		upstreamOut, err := wt.runPollingGitOutput(ctx, "rev-parse", "--abbrev-ref", branch+"@{upstream}")
 		if err == nil && len(upstreamOut) > 0 {
 			baseBranch = strings.TrimSpace(string(upstreamOut))
 		}
@@ -549,9 +559,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 	// Calculate merge-base if we found a base branch
 	// Use the sampled head SHA instead of live HEAD to avoid race conditions
 	if baseBranch != "" && head != "" {
-		mergeBaseCmd := exec.CommandContext(ctx, "git", "merge-base", baseBranch, head)
-		mergeBaseCmd.Dir = wt.workDir
-		if mergeBaseOut, err := subproc.RunGitOutput(ctx, mergeBaseCmd); err == nil {
+		if mergeBaseOut, err := wt.runPollingGitOutput(ctx, "merge-base", baseBranch, head); err == nil {
 			return strings.TrimSpace(string(mergeBaseOut))
 		}
 	}
@@ -561,9 +569,7 @@ func (wt *WorkspaceTracker) getBaseCommitForBranch(ctx context.Context, branch, 
 
 // isAncestor checks if commit1 is an ancestor of commit2
 func (wt *WorkspaceTracker) isAncestor(ctx context.Context, commit1, commit2 string) bool {
-	cmd := exec.CommandContext(ctx, "git", "merge-base", "--is-ancestor", commit1, commit2)
-	cmd.Dir = wt.workDir
-	err := subproc.RunGit(ctx, cmd)
+	err := wt.runPollingGit(ctx, "merge-base", "--is-ancestor", commit1, commit2)
 	// Exit code 0 means commit1 IS an ancestor of commit2
 	// Exit code 1 means commit1 is NOT an ancestor of commit2
 	return err == nil
@@ -574,9 +580,7 @@ func (wt *WorkspaceTracker) isAncestor(ctx context.Context, commit1, commit2 str
 // as opposed to commits made locally in the session.
 func (wt *WorkspaceTracker) isOnRemote(ctx context.Context, commitSHA string) bool {
 	// Use git branch -r --contains to check if commit is on any remote branch
-	cmd := exec.CommandContext(ctx, "git", "branch", "-r", "--contains", commitSHA)
-	cmd.Dir = wt.workDir
-	out, err := subproc.RunGitOutput(ctx, cmd)
+	out, err := wt.runPollingGitOutput(ctx, "branch", "-r", "--contains", commitSHA)
 	if err != nil {
 		// If the command fails, assume it's not on remote (safer default)
 		return false

@@ -15,7 +15,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -25,6 +24,7 @@ import (
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/agents"
@@ -142,11 +142,13 @@ func configureGitRemoteHandler(repo *sqliterepo.Repository, log *logger.Logger) 
 			return
 		}
 		args := []string{"-C", repository.LocalPath, "remote", "add", "origin", trustedRemoteURL}
-		if getErr := exec.CommandContext(c.Request.Context(), "git", "-C", repository.LocalPath,
-			"remote", "get-url", "origin").Run(); getErr == nil {
+		getCmd := subproc.NewGitCommand(c.Request.Context(), "-C", repository.LocalPath,
+			"remote", "get-url", "origin")
+		if getErr := subproc.RunGitClass(c.Request.Context(), subproc.GitLifecycle, getCmd); getErr == nil {
 			args = []string{"-C", repository.LocalPath, "remote", "set-url", "origin", trustedRemoteURL}
 		}
-		if output, runErr := exec.CommandContext(c.Request.Context(), "git", args...).CombinedOutput(); runErr != nil {
+		setCmd := subproc.NewGitCommand(c.Request.Context(), args...)
+		if output, runErr := subproc.RunGitCombinedOutputClass(c.Request.Context(), subproc.GitLifecycle, setCmd); runErr != nil {
 			log.Error("test harness: configure git remote failed", zap.Error(runErr))
 			errJSON(c, http.StatusInternalServerError, strings.TrimSpace(string(output)))
 			return
@@ -161,7 +163,8 @@ func configureGitRemoteHandler(repo *sqliterepo.Repository, log *logger.Logger) 
 }
 
 func removeGitRemote(ctx context.Context, repositoryPath string) {
-	_ = exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "remove", "origin").Run()
+	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "remote", "remove", "origin")
+	_ = subproc.RunGitClass(ctx, subproc.GitLifecycle, cmd)
 	for _, envKey := range []string{"KANDEV_E2E_GITLAB_PUSH_FILE", "KANDEV_E2E_GITLAB_PUSH_RECORD_FILE"} {
 		if path := os.Getenv(envKey); path != "" {
 			_ = os.Remove(path)

@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os/exec"
 	"regexp"
 	"strings"
+
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // gitRefRe accepts the conservative subset of git ref names we expose to user
@@ -147,8 +148,8 @@ func discardLocalChanges(ctx context.Context, repoPath string) error {
 }
 
 func runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = dir
-	out, err := cmd.CombinedOutput()
+	out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitInteractive, cmd)
 	return strings.TrimSpace(string(out)), err
 }

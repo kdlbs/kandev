@@ -8,11 +8,11 @@ import (
 	"regexp"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 )
@@ -1099,25 +1099,26 @@ func (s *Server) collectCumulativeDiffForRepo(ctx context.Context, sub string) p
 // work, a task with a dozen repositories could exceed the gateway's 60s budget
 // and the caller would see a timeout instead of a slow answer.
 //
-// Concurrency is bounded so a single request cannot occupy the whole shared git
-// budget. The process-wide throttle in common/subproc caps subprocesses at 12 by
-// default, and it is shared with background workspace polling — an unbounded
-// fan-out over a dozen repositories takes all of it, which is what pushed the
-// pollers into their own command timeouts.
-//
-// maxGitFanout is a judgement call rather than a derived number: subproc exposes
-// no public accessor for its cap, and the admission design being discussed in
-// #2150 is where the real answer belongs. Until then this leaves headroom for
-// polling while still parallelising the common case.
-const maxGitFanout = 8
+// Concurrency is bounded by the process-wide Git admission capacity shared with
+// background polling and lifecycle work. The admission controller remains the
+// authority on active subprocesses; this limit only bounds goroutines and queued
+// repository work created by one request.
 
 func fanOutRepos[T any](ctx context.Context, subpaths []string, collect func(context.Context, string) T) []T {
 	results := make([]T, len(subpaths))
-	group, groupCtx := errgroup.WithContext(ctx)
-	group.SetLimit(maxGitFanout)
+	var group errgroup.Group
+	limit := len(subpaths)
+	if capacity := subproc.GitCapacity(); capacity > 0 && capacity < limit {
+		limit = capacity
+	}
+	group.SetLimit(limit)
 	for i, sub := range subpaths {
 		group.Go(func() error {
-			results[i] = collect(groupCtx, sub)
+			// collect owns the per-repository result and never returns an
+			// errgroup error. Preserve the caller's context identity here so
+			// request cancellation and context-aware singleflight observers see
+			// the original request boundary rather than an internal wrapper.
+			results[i] = collect(ctx, sub)
 			return nil
 		})
 	}
@@ -1248,15 +1249,10 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
-	var wg sync.WaitGroup
-	for i, sub := range subpaths {
-		wg.Add(1)
-		go func(i int, sub string) {
-			defer wg.Done()
-			result.Repos[i] = s.collectStatusForRepo(ctx, sub, fresh)
-		}(i, sub)
-	}
-	wg.Wait()
+	outcomes := fanOutRepos(ctx, subpaths, func(ctx context.Context, sub string) PerRepoGitStatus {
+		return s.collectStatusForRepo(ctx, sub, fresh)
+	})
+	copy(result.Repos, outcomes)
 	c.JSON(http.StatusOK, result)
 }
 

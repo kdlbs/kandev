@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -176,11 +176,11 @@ func hashLocator(locator string) string {
 }
 
 func runGit(dir string, args ...string) error {
-	cmd := exec.Command("git", args...)
+	cmd := subproc.NewGitCommand(context.Background(), args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
-	out, err := cmd.CombinedOutput()
+	out, err := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
 	if err != nil {
 		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
 	}
