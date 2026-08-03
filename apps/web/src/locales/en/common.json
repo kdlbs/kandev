@@ -56,14 +56,14 @@
   "prompts": "Prompts",
   "requestFailed": "Request failed",
   "reset": "Reset",
-  "resetWatchChecking": "Checking how many tasks would be deleted…",
+  "resetWatchChecking": "Checking how many tasks would be deleted\u2026",
   "resetWatchDeleteAllTasks": "This will delete every task previously created by the watch, including archived tasks. The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.",
   "resetWatchDeleteTasks_one": "This will delete {{count}} task previously created by the watch, including archived tasks. The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.",
   "resetWatchDeleteTasks_other": "This will delete {{count}} tasks previously created by the watch, including archived tasks. The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.",
-  "resetWatchNoTasks": "No tasks were created by this watch yet — only the polling state will be cleared. The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.",
+  "resetWatchNoTasks": "No tasks were created by this watch yet \u2014 only the polling state will be cleared. The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.",
   "resetWatchPreviewFailedRequired": "Could not load the affected task count. Retry the preview before resetting this watch.",
   "resetWatchTitle": "Reset {{label}}?",
-  "resetting": "Resetting…",
+  "resetting": "Resetting\u2026",
   "retryPreview": "Retry preview",
   "settings": "Settings",
   "shell": "Shell",
@@ -72,5 +72,8 @@
   "system": "System",
   "title": "Title",
   "workspace": "Workspace",
-  "workspaces": "Workspaces"
+  "workspaces": "Workspaces",
+  "activeSubagents_one": "{{count}} subagent running",
+  "activeSubagents_other": "{{count}} subagents running",
+  "openFullPage": "Open full page"
 }

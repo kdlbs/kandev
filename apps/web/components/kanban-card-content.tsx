@@ -9,6 +9,7 @@ import {
   IconDots,
   IconLoader2,
   IconSubtask,
+  IconUsersGroup,
 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -30,6 +31,7 @@ import {
   shouldUsePermissionTaskIcon,
   shouldUseQuestionTaskIcon,
 } from "@/lib/ui/state-icons";
+import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
@@ -277,6 +279,51 @@ export function renderTaskStatusIcon(
   );
 }
 
+// The board's only window into a fan-out. `activeSubagentCount` is derived from
+// the live registry (never a mutable counter) and summed across a task's
+// sessions, so it needs no local reconciliation: at zero there is nothing live
+// and the chip is absent.
+export function renderSubagentCountChip(task: Task) {
+  const count = task.activeSubagentCount ?? 0;
+  if (count <= 0) return null;
+  const label = t("common:activeSubagents", { count });
+  return (
+    <span
+      data-testid="task-subagent-count"
+      title={label}
+      aria-label={label}
+      className="flex items-center gap-0.5 text-muted-foreground font-mono text-[10px]"
+    >
+      <IconUsersGroup className="h-3.5 w-3.5" aria-hidden="true" />
+      {count}
+    </span>
+  );
+}
+
+function OpenFullPageButton({
+  task,
+  onOpenFullPage,
+}: {
+  task: Task;
+  onOpenFullPage: (task: Task) => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
+      onClick={(event) => {
+        event.stopPropagation();
+        onOpenFullPage(task);
+      }}
+      onPointerDown={(event) => event.stopPropagation()}
+      aria-label={t("common:openFullPage")}
+      title={t("common:openFullPage")}
+    >
+      <IconArrowsMaximize className="h-4 w-4" />
+    </button>
+  );
+}
+
 function KanbanCardActions({
   task,
   showMaximizeButton,
@@ -355,21 +402,10 @@ function KanbanCardActions({
 
   return (
     <div className="flex items-center gap-2">
+      {renderSubagentCountChip(task)}
       {statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
-        <button
-          type="button"
-          className="text-muted-foreground hover:text-foreground hover:bg-accent rounded-sm p-1 -m-1 transition-colors cursor-pointer"
-          onClick={(event) => {
-            event.stopPropagation();
-            onOpenFullPage(task);
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
-          aria-label="Open full page"
-          title="Open full page"
-        >
-          <IconArrowsMaximize className="h-4 w-4" />
-        </button>
+        <OpenFullPageButton task={task} onOpenFullPage={onOpenFullPage} />
       )}
       <KanbanCardMenu
         task={task}

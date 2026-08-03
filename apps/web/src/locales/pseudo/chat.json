@@ -11,5 +11,7 @@
   "providerQuotaModel": "Ḿōďēĺ: {{model}}",
   "providerQuotaReset": "Ćàƥàćĩţŷ ŕēśēţś {{resetAt}}.",
   "providerQuotaResetUnknown": "Ţŕŷ àĝàĩń ŵĥēń ţĥē ƥŕōvĩďēŕ ḿàķēś ćàƥàćĩţŷ àvàĩĺàƀĺē.",
-  "providerQuotaProviderFallback": "Ƥŕōvĩďēŕ"
+  "providerQuotaProviderFallback": "Ƥŕōvĩďēŕ",
+  "turnGroupToolCalls_one": "ţōōĺ ćàĺĺ",
+  "turnGroupToolCalls_other": "ţōōĺ ćàĺĺś"
 }

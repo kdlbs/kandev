@@ -4,6 +4,7 @@ import { useState, useCallback, memo, useMemo } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import type { Message } from "@/lib/types/http";
 import type { TurnGroup } from "@/hooks/use-processed-messages";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
@@ -26,19 +27,6 @@ type TurnGroupMessageProps = {
   onScrollToMessage?: (messageId: string) => void;
 };
 
-function countMessageTypes(messages: Message[]): { toolCalls: number; subagents: number } {
-  let toolCalls = 0;
-  let subagents = 0;
-  for (const msg of messages) {
-    const metadata = msg.metadata as ToolCallMetadata | undefined;
-    if (metadata?.normalized?.kind === "subagent_task") {
-      subagents++;
-    } else {
-      toolCalls++;
-    }
-  }
-  return { toolCalls, subagents };
-}
 
 function getActiveGroupDescription(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
@@ -52,11 +40,12 @@ function getActiveGroupDescription(messages: Message[]): string {
   return "Working...";
 }
 
+// The count badge beside this label renders `messages.length`, so the label has
+// to agree with that same number. Subagents are hoisted out of turn groups
+// (`isSubagentMessage` in use-processed-messages), so a group is tool calls and
+// nothing else.
 function getCompletedGroupDescription(messages: Message[]): string {
-  const { toolCalls, subagents } = countMessageTypes(messages);
-  if (subagents === 0) return `tool call${toolCalls !== 1 ? "s" : ""}`;
-  if (toolCalls === 0) return `subagent${subagents !== 1 ? "s" : ""}`;
-  return `tool call${toolCalls !== 1 ? "s" : ""}, ${subagents} subagent${subagents !== 1 ? "s" : ""}`;
+  return t("chat:turnGroupToolCalls", { count: messages.length });
 }
 
 function getGroupDescription(messages: Message[], isActive: boolean): string {
