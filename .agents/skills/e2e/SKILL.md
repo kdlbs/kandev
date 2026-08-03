@@ -490,7 +490,7 @@ A test that flakes under parallel/sharded load is one of two things — decide w
 - **Scope Radix and responsive locators to the active instance.** Tooltips may use `instant-open`, `delayed-open`, or `open`; use `[data-slot="tooltip-content"]:not([data-state="closed"])`, then scope to the visible portal/popover/container and active ancestor. Hidden mounts can make global locators match the wrong instance; do not use `.first()` to hide duplicates.
 - **Use page object methods** like `clickSessionChatTab()` (stable `data-testid`) instead of `sessionTabByText("1")` (fragile text match) for session tabs.
 - **Dropdown menus can detach** from the DOM when React re-renders the parent (e.g., WS events updating the sidebar). The `openSidebarMenuAndClick()` helper in `session-page.ts` retries the full open-click sequence on detachment — use this pattern for similar interactions.
-- **Sidebar/context-menu editing.** Use a separate non-active task as the edit subject and assert route stability after save/cancel across shared desktop/mobile/tablet menus; do not use the active task as the navigation oracle.
+- **Sidebar/context-menu editing.** For actions targeting a non-active item, create/select a separate navigation task, assert its initial URL/task ID, act on the target row, then assert the URL/task ID is unchanged and persistence survives reload; cover shared desktop/mobile/tablet menus.
 
 ## TDD workflow
 
