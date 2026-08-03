@@ -42,6 +42,7 @@ type Runner struct {
 	tmpDir string // non-empty if we allocated the workdir ourselves
 
 	cmd    *exec.Cmd
+	tree   processTree
 	stdin  io.WriteCloser
 	stdout io.ReadCloser
 	framer *Framer
@@ -102,7 +103,7 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 		"workdir": workdir,
 	})
 
-	cmd, stdin, stdout, stderr, err := startChild(ctx, cfg, workdir)
+	cmd, tree, stdin, stdout, stderr, err := startChild(ctx, cfg, workdir)
 	if err != nil {
 		_ = rec.Meta("close", map[string]any{"reason": err.Error()})
 		_ = rec.Close()
@@ -117,6 +118,7 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 		cfg:     cfg,
 		tmpDir:  tmpDir,
 		cmd:     cmd,
+		tree:    tree,
 		stdin:   stdin,
 		stdout:  stdout,
 		framer:  NewFramer(stdin, stdout),
@@ -138,26 +140,27 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 }
 
 // startChild spawns the subprocess and returns its stdio pipes.
-func startChild(ctx context.Context, cfg RunConfig, workdir string) (*exec.Cmd, io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
+func startChild(ctx context.Context, cfg RunConfig, workdir string) (*exec.Cmd, processTree, io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
 	//nolint:gosec // the command comes from the agent registry or the user's --exec flag; both are trusted inputs
 	cmd := exec.CommandContext(ctx, cfg.Command[0], cfg.Command[1:]...)
 	cmd.Dir = workdir
+	configureProcessTree(cmd)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("stdin pipe: %w", err)
+		return nil, processTree{}, nil, nil, nil, fmt.Errorf("stdin pipe: %w", err)
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("stdout pipe: %w", err)
+		return nil, processTree{}, nil, nil, nil, fmt.Errorf("stdout pipe: %w", err)
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("stderr pipe: %w", err)
+		return nil, processTree{}, nil, nil, nil, fmt.Errorf("stderr pipe: %w", err)
 	}
 	if err := cmd.Start(); err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("start %s: %w", cfg.Command[0], err)
+		return nil, processTree{}, nil, nil, nil, fmt.Errorf("start %s: %w", cfg.Command[0], err)
 	}
-	return cmd, stdin, stdout, stderr, nil
+	return cmd, captureProcessTree(cmd), stdin, stdout, stderr, nil
 }
 
 // Path returns the JSONL file path the runner is writing to.
@@ -270,7 +273,11 @@ func (r *Runner) Close(reason string) {
 		case err := <-done:
 			waitErr = err
 		case <-time.After(5 * time.Second):
-			_ = r.cmd.Process.Kill()
+			// Kill the whole tree, not just the direct child. Agents spawned
+			// through `npx` leave grandchildren holding the inherited stdout
+			// handle; with those alive the read loop never sees EOF and the
+			// readLoopWG.Wait below blocks forever, so --timeout never lands.
+			r.tree.kill(r.cmd)
 			waitErr = <-done
 			if reason == "" {
 				reason = "killed after timeout"
