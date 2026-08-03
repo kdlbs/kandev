@@ -68,8 +68,10 @@ Report the red/green evidence, changed files, exact command results, blockers, r
 Completed.
 
 - Red: preset/profile expectations, conditional removal, insertion, configured-placement, and storage tests failed against the embedded PR default and parameter-only sync.
-- Green: focused Vitest suite passed (`92` tests across presets, profiles, merger, review sync, and local storage); the corrected review-sync file passed independently (`20` tests).
+- Green: focused Vitest suite passed (`101` tests across presets, profiles, merger, review sync, GitHub review loading, and local storage); the corrected review-sync file passed independently (`20` tests).
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps && pnpm --filter @kandev/web lint` passed with zero warnings.
 - `cd apps/web && pnpm run i18n:check` passed.
 - `git diff --check` passed.
+- PR review fixup passed `29` focused tests covering terminal retry failure loading and required
+  conditional-panel options.

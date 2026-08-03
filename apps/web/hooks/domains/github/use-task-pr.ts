@@ -136,7 +136,12 @@ export function useTaskPR(taskId: string | null) {
         retryRef.current = 0;
       })
       .catch(() => {
-        // Ignore - sync may fail if no watch exists
+        if (requestRef.current !== requestId) return;
+        // Keep transient failures pending while retries remain, then settle the
+        // loading state so review-panel cleanup cannot be blocked forever.
+        if (retryRef.current >= SYNC_MAX_RETRIES) {
+          setLoadedTaskId(requestedTaskId);
+        }
       });
   }, [taskId, setTaskPR]);
 

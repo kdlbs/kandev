@@ -15,6 +15,15 @@ const RIGHT_GROUP_ID = "group-right-top";
 const SESSION_PANEL_ID = "session:session-a";
 const PR_KEY = "kandev/kandev/42";
 
+const DEFAULT_OPTIONS: ConditionalReviewPanelOptions = {
+  sessionId: "session-a",
+  centerGroupId: CENTER_GROUP_ID,
+  reviewsLoaded: true,
+  isRestoringLayout: false,
+  isMaximized: false,
+  wasOffered: false,
+};
+
 const syncWithOptions = (
   api: DockviewApi,
   next: ReturnType<typeof resolveCanonicalReviewParams>,
@@ -189,7 +198,9 @@ describe("syncCanonicalReviewPanel placement", () => {
   it("leaves a layout without PR Details structurally untouched", () => {
     const { api, updateParameters, addPanel } = makeApi();
 
-    expect(syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([githubPR], []))).toBe(false);
+    expect(
+      syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([], []), DEFAULT_OPTIONS),
+    ).toBe(false);
     expect(updateParameters).not.toHaveBeenCalled();
     expect(addPanel).not.toHaveBeenCalled();
     expect(api.removePanel).not.toHaveBeenCalled();
@@ -286,14 +297,18 @@ describe("syncCanonicalReviewPanel lifecycle", () => {
   it("closes a conditionally added panel when review data disappears", () => {
     const { api, close } = makeApi({ params: { autoAddedForReview: true } });
 
-    expect(syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([], []))).toBe(true);
+    expect(
+      syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([], []), DEFAULT_OPTIONS),
+    ).toBe(true);
     expect(close).toHaveBeenCalledOnce();
   });
 
   it("closes an explicitly configured panel when review data disappears", () => {
     const { api, close, updateParameters } = makeApi({ params: { provider: "github" } });
 
-    expect(syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([], []))).toBe(true);
+    expect(
+      syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([], []), DEFAULT_OPTIONS),
+    ).toBe(true);
     expect(close).toHaveBeenCalledOnce();
     expect(updateParameters).not.toHaveBeenCalled();
   });
@@ -302,7 +317,9 @@ describe("syncCanonicalReviewPanel lifecycle", () => {
     const params: Record<string, unknown> = { provider: "gitlab", mrKey: "old/mr" };
     const { api, updateParameters } = makeApi({ params, groupId: "custom-review-group" });
 
-    expect(syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([githubPR], []))).toBe(true);
+    expect(
+      syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([githubPR], []), DEFAULT_OPTIONS),
+    ).toBe(true);
     expect(updateParameters).toHaveBeenCalledWith({
       provider: "github",
       prKey: PR_KEY,

@@ -142,9 +142,9 @@ function addConditionalReviewPanel(
 function syncExistingReviewPanel(
   panel: NonNullable<ReturnType<DockviewApi["getPanel"]>>,
   next: CanonicalReviewParams,
-  options?: ConditionalReviewPanelOptions,
+  options: ConditionalReviewPanelOptions,
 ): boolean {
-  if (next.provider && options) markPRPanelOffered(options.sessionId);
+  if (next.provider) markPRPanelOffered(options.sessionId);
   if (hasSameReviewParams(panel.params, next)) return false;
   panel.api.updateParameters(next);
   return true;
@@ -153,21 +153,21 @@ function syncExistingReviewPanel(
 function resolveReviewPanelAction(
   panel: ReturnType<DockviewApi["getPanel"]>,
   next: CanonicalReviewParams,
-  options?: ConditionalReviewPanelOptions,
+  options: ConditionalReviewPanelOptions,
 ): ConditionalReviewPanelAction {
   return resolveConditionalReviewPanelAction({
     hasReview: !!next.provider,
     panelExists: !!panel,
-    reviewsLoaded: options?.reviewsLoaded ?? true,
-    isRestoringLayout: options?.isRestoringLayout ?? false,
-    isMaximized: options?.isMaximized ?? false,
-    wasOffered: options?.wasOffered ?? false,
+    reviewsLoaded: options.reviewsLoaded,
+    isRestoringLayout: options.isRestoringLayout,
+    isMaximized: options.isMaximized,
+    wasOffered: options.wasOffered,
   });
 }
 
 /**
- * Synchronize the canonical PR Details panel and, when options are supplied,
- * manage the conditional panel shown for a linked review.
+ * Synchronize the canonical PR Details panel and manage the conditional panel
+ * shown for a linked review.
  *
  * Review association owns panel existence. A custom Default layout can still
  * provide the group and tab index used when a linked review makes it visible.
@@ -175,7 +175,7 @@ function resolveReviewPanelAction(
 export function syncCanonicalReviewPanel(
   api: DockviewApi,
   next: CanonicalReviewParams,
-  options?: ConditionalReviewPanelOptions,
+  options: ConditionalReviewPanelOptions,
 ): boolean {
   const panel = api.getPanel("pr-detail");
   const action = resolveReviewPanelAction(panel, next, options);
@@ -185,7 +185,7 @@ export function syncCanonicalReviewPanel(
     return true;
   }
 
-  if (action === "add" && options) {
+  if (action === "add") {
     addConditionalReviewPanel(api, next, options);
     return true;
   }

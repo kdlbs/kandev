@@ -60,7 +60,7 @@ No backend, API, persistence-schema, mobile task-layout, or feature-flag changes
 
 Completed.
 
-- Focused Vitest suite: passed, `92` tests; corrected review synchronizer file passed `20` tests after lint cleanup.
+- Focused Vitest suite: passed, `101` tests; corrected review synchronizer file passed `20` tests after lint cleanup.
 - Web typecheck: passed.
 - Web lint: passed with zero warnings.
 - Web i18n consistency checks: passed.
@@ -68,6 +68,9 @@ Completed.
 - Mobile Chromium E2E: Layouts settings `2` passed.
 - Public docs validators: `58` tests passed; `41` published pages validated.
 - `git diff --check`: passed.
+- PR review fixup: terminal GitHub sync failures settle the review loading state only after the
+  six-retry budget is exhausted, and conditional panel synchronization requires complete options;
+  focused hook and panel tests passed (`29` tests).
 
 ## Implementation Waves And Parallel Candidates
 
