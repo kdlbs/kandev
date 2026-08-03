@@ -8,6 +8,7 @@ type DroppedMessage = {
 type PromptDropController = {
   dropPrompt: (prompt: string) => void;
   droppedCount: () => number;
+  recoveryResponseCount: () => number;
 };
 
 type MessageAddResponseDropController = {
@@ -84,10 +85,37 @@ function filterServerFrame(
 export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<PromptDropController> {
   let promptToDrop: string | null = null;
   const dropped: DroppedMessage[] = [];
+  const recoveryRequestIDs = new Set<string>();
+  let recoveryResponses = 0;
 
   await page.routeWebSocket(/\/ws$/, (ws) => {
     const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      for (const frame of parseJSONFrames(message)) {
+        if (
+          promptToDrop !== null &&
+          frame.type === "request" &&
+          frame.action === "message.list" &&
+          typeof frame.id === "string"
+        ) {
+          recoveryRequestIDs.add(frame.id);
+        }
+      }
+      server.send(message);
+    });
     server.onMessage((message) => {
+      for (const frame of parseJSONFrames(message)) {
+        if (
+          frame.type === "response" &&
+          frame.action === "message.list" &&
+          typeof frame.id === "string" &&
+          recoveryRequestIDs.delete(frame.id)
+        ) {
+          if (promptToDrop !== null && JSON.stringify(frame).includes(promptToDrop)) {
+            recoveryResponses += 1;
+          }
+        }
+      }
       const filtered = filterServerFrame(message, promptToDrop, dropped);
       if (filtered !== null) ws.send(filtered);
     });
@@ -97,8 +125,11 @@ export async function routeMainWebSocketWithPromptDrop(page: Page): Promise<Prom
     dropPrompt: (prompt: string) => {
       promptToDrop = prompt;
       dropped.length = 0;
+      recoveryRequestIDs.clear();
+      recoveryResponses = 0;
     },
     droppedCount: () => dropped.length,
+    recoveryResponseCount: () => recoveryResponses,
   };
 }
 

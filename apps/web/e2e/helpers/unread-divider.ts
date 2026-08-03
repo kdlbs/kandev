@@ -2,6 +2,7 @@ import { type Locator } from "@playwright/test";
 import type { ApiClient } from "./api-client";
 import type { SeedData } from "../fixtures/test-base";
 import { multiMessageScript } from "./seed-session-messages";
+import { waitForSessionDone } from "./session";
 
 /** True only when element is actually scrolled into container's visible
  *  viewport. Unlike Playwright's toBeVisible(), which only checks CSS
@@ -54,6 +55,8 @@ export async function seedScrollTestConversation(
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
   const sessionId = task.session_id;
+
+  await waitForSessionDone(apiClient, task.id, sessionId, "initial unread-divider conversation");
 
   await apiClient.seedAgentMessages(sessionId, 40, "before cursor");
   const beforeCursor = await apiClient.listSessionMessages(sessionId);
