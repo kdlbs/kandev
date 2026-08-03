@@ -18,6 +18,10 @@ import {
  * default label is pinned here rather than left to lint alone.
  */
 describe("HelpTip aria-label", () => {
+  // `cleanup()` is load-bearing, not redundant: vitest.config.ts does not set
+  // `globals: true`, so `afterEach` is not on globalThis and RTL never
+  // auto-registers its own cleanup. Without this, the two renders below collide
+  // on `[data-testid="tip"]`.
   afterEach(async () => {
     cleanup();
     await i18n.changeLanguage("en");
@@ -36,7 +40,10 @@ describe("HelpTip aria-label", () => {
     expect(label).toMatch(/[À-ɏ]/);
   });
 
-  it("lets a caller override the label, still through the catalog", () => {
+  // `ariaLabel` short-circuits the default (`ariaLabel ?? t(...)`), so the
+  // override is whatever the caller passes — every call site in this surface
+  // passes an already-translated string.
+  it("lets a caller supply a pre-translated label override", () => {
     render(<HelpTip text="body" testId="tip" ariaLabel="Custom label" />);
     expect(screen.getByTestId("tip").getAttribute("aria-label")).toBe("Custom label");
   });
