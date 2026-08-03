@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AddTUIAgentDialog } from "./add-tui-agent-dialog";
 
 afterEach(cleanup);
@@ -54,5 +54,19 @@ describe("AddTUIAgentDialog", () => {
 
     expect(screen.getByText("Command is required")).toBeTruthy();
     expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  // A non-Error rejection has no `.message`, so the handler falls back to the
+  // catalog string. Nothing else exercises that branch.
+  it("surfaces the translated fallback when onSubmit rejects with a non-Error", async () => {
+    const onSubmit = vi.fn().mockRejectedValue("boom");
+    renderDialog(onSubmit);
+
+    fireEvent.change(screen.getByLabelText("Display Name"), { target: { value: "superclaude" } });
+    fireEvent.change(screen.getByLabelText("Command"), { target: { value: "superclaude" } });
+    fireEvent.click(screen.getByText("Create"));
+
+    await waitFor(() => expect(screen.getByText("Failed to create agent")).toBeTruthy());
+    expect(onSubmit).toHaveBeenCalledOnce();
   });
 });

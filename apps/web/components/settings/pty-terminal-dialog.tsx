@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+// The WebSocket error handler runs outside React, so it uses the module-level
+// `t`, which resolves at call time. Components in this file use the hook.
+import { t as translate } from "@/lib/i18n";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -147,7 +150,7 @@ function openSessionWebSocket(
   ws.binaryType = "arraybuffer";
   ws.onmessage = makeWsMessageHandler(term, setters);
   ws.onerror = () => {
-    setters.setError("Connection error");
+    setters.setError(translate("agents:ptyConnectionError"));
     setters.setStatus("error");
   };
   if (initialInput) {

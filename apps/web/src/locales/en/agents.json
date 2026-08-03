@@ -141,6 +141,7 @@
   "profileNotFound": "Profile not found.",
   "profileSettings": "Profile settings",
   "profileStartModelSettings": "Profile start model settings",
+  "ptyConnectionError": "Connection error",
   "promptTokenHint": "<0>{{token}}</0> will be replaced with your task description or follow-up message.",
   "refresh": "Refresh",
   "refreshCapabilitiesTooltip": "Refresh agent capabilities (models + modes)",

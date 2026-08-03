@@ -474,10 +474,13 @@ export const i18nGuardFiles = [
   // profile page under the pseudo-locale.
   //
   // `agent-save-helpers.ts`, `use-profile-mcp-config.ts`,
-  // `use-agent-profile-settings.ts` and `use-agent-update-dialog-state.ts` hold
-  // no JSX, so `mode: "jsx-only"` never inspects them; the glob records that they
-  // are migrated (the first two carry MCP parse errors that reach a toast) and
-  // only the pseudo-locale can prove it stays that way.
+  // `use-agent-profile-settings.ts`, `use-agent-update-dialog-state.ts` and
+  // `agent-profile-page-state.ts` hold no JSX, so `mode: "jsx-only"` never
+  // inspects them; the entries record that they are migrated (the first two
+  // carry MCP parse errors and the last the profile save/delete toasts, all of
+  // which reach the user) and only the pseudo-locale can prove it stays that
+  // way. Same for the WebSocket error in `pty-terminal-dialog.tsx`, which is
+  // set from a non-JSX handler.
   //
   // Deliberately left in English, each an identifier the user must read or type
   // verbatim, all interpolated as values so the pseudo-locale cannot turn them
@@ -496,6 +499,7 @@ export const i18nGuardFiles = [
   "components/settings/add-tui-agent-dialog.tsx",
   "components/settings/agent-login-dialog.tsx",
   "components/settings/agent-profile-delete-dialog.tsx",
+  "components/settings/agent-profile-page-state.ts",
   "components/settings/agent-profile-page.tsx",
   "components/settings/agent-runtime-update-control.tsx",
   "components/settings/cli-flags-field.tsx",
