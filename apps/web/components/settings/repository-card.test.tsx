@@ -1,11 +1,20 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/lib/i18n";
 import { RepositoryCard } from "./repository-card";
 import { SettingsSaveProvider } from "./settings-save-provider";
 import { ToastProvider } from "@/components/toast-provider";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 
-afterEach(cleanup);
+const CLOSE_EDITOR_LABEL = "Close repository editor";
+
+// Restoring the locale is load-bearing: `changeLanguage` mutates the shared
+// instance `vitest.setup.ts` initializes, so leaving it on pseudo would leak
+// into every test that runs after this file.
+afterEach(async () => {
+  cleanup();
+  await i18n.changeLanguage("en");
+});
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
 
@@ -55,7 +64,7 @@ function script(id: string): RepositoryScript {
   } as RepositoryScript;
 }
 
-function renderCard(repo: RepositoryWithScripts) {
+function renderCard(repo: RepositoryWithScripts, autoOpen = false) {
   return render(
     <ToastProvider>
       <SettingsSaveProvider>
@@ -64,6 +73,7 @@ function renderCard(repo: RepositoryWithScripts) {
           savedRepository={repo}
           isRepositoryDirty={false}
           areScriptsDirty={false}
+          autoOpen={autoOpen}
           onUpdate={vi.fn()}
           onAddScript={vi.fn()}
           onUpdateScript={vi.fn()}
@@ -140,5 +150,33 @@ describe("RepositoryCard preview", () => {
     expect(screen.getByText("cleanup script")).toBeTruthy();
     expect(screen.getByText("dev script")).toBeTruthy();
     expect(screen.queryByText("No custom scripts")).toBeNull();
+  });
+});
+
+/**
+ * The editor's close control is icon-only, so its `aria-label` is the only copy
+ * a screen-reader user gets from it. Attribute copy has no second check — the
+ * pseudo-locale oracle walks text nodes, so reverting this to an English literal
+ * leaves nothing visible (`docs/i18n.md`, "It cannot see copy that is not a text
+ * node"). The locale-switch assertion catches the two shapes lint cannot: a
+ * hardcoded literal, and a `t()` frozen at module scope.
+ */
+describe("RepositoryCard editor close control", () => {
+  it("labels the close control for screen readers", () => {
+    renderCard(repository(), true);
+
+    expect(screen.getByRole("button", { name: CLOSE_EDITOR_LABEL })).toBeTruthy();
+  });
+
+  it("resolves the close label through the catalog on a locale switch", async () => {
+    const { container } = renderCard(repository(), true);
+    const close = container.querySelector(`[aria-label="${CLOSE_EDITOR_LABEL}"]`);
+    expect(close).toBeTruthy();
+
+    await i18n.changeLanguage("pseudo");
+
+    expect(container.querySelector(`[aria-label="${CLOSE_EDITOR_LABEL}"]`)).toBeNull();
+    const label = close?.getAttribute("aria-label") ?? "";
+    expect(label.length).toBeGreaterThan(0);
   });
 });

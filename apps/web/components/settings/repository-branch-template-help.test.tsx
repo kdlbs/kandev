@@ -1,8 +1,17 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
+import { i18n } from "@/lib/i18n";
 import { RepositoryBranchTemplateHelp } from "./repository-branch-template-help";
 
-afterEach(cleanup);
+const TRIGGER_LABEL = "Branch template placeholders";
+
+// Restoring the locale is load-bearing: `changeLanguage` mutates the shared
+// instance `vitest.setup.ts` initializes, so leaving it on pseudo would leak
+// into every test that runs after this file.
+afterEach(async () => {
+  cleanup();
+  await i18n.changeLanguage("en");
+});
 
 /**
  * The six placeholder tokens are substituted by exact string match in
@@ -16,14 +25,32 @@ function openHelp() {
   render(<RepositoryBranchTemplateHelp />);
   // HoverCard content is only mounted while open; the trigger is a button, so
   // focus is enough in happy-dom.
-  screen.getByRole("button", { name: "Branch template placeholders" }).focus();
+  screen.getByRole("button", { name: TRIGGER_LABEL }).focus();
 }
 
+/**
+ * The trigger is icon-only, so its `aria-label` is the ONLY copy a screen-reader
+ * user gets from it — and attribute copy has no second check. The pseudo-locale
+ * oracle walks text nodes (`docs/i18n.md`, "It cannot see copy that is not a
+ * text node"), so reverting this to an English literal leaves no trace on
+ * screen. The locale-switch assertion below covers the two failures lint cannot:
+ * a hardcoded literal, and a `t()` frozen at module scope. Both render the same
+ * English forever; only a switch tells them apart.
+ */
 describe("RepositoryBranchTemplateHelp", () => {
   it("labels the trigger for screen readers", () => {
     render(<RepositoryBranchTemplateHelp />);
 
-    expect(screen.getByRole("button", { name: "Branch template placeholders" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: TRIGGER_LABEL })).toBeTruthy();
+  });
+
+  it("resolves the trigger label through the catalog on a locale switch", async () => {
+    render(<RepositoryBranchTemplateHelp />);
+    await i18n.changeLanguage("pseudo");
+
+    const label = screen.getByRole("button").getAttribute("aria-label") ?? "";
+    expect(label).not.toBe(TRIGGER_LABEL);
+    expect(label.length).toBeGreaterThan(0);
   });
 
   it("pairs each untranslated token with its description and example", async () => {
