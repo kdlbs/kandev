@@ -165,8 +165,9 @@ authorized.
 - Calling a generic localized validator formatter could expose rejected values;
   inspect only the typed `required` error's missing schema names.
 - Keep existing non-`required` error text stable to avoid broadening this fix.
-- Do not alter the walkthrough schema, persistence, rendering, MCP transport,
-  authorization, or retry behavior.
+- Do not alter the walkthrough schema, persistence schema, unrelated
+  persistence behavior, rendering, MCP transport, authorization, or retry
+  behavior.
 - Task context receives only the walkthrough contract needed for reliable calls;
   this work does not mirror all registered tool schemas into that prompt.
 - Exact offending ACP frames were not available, so this repair hardens both
