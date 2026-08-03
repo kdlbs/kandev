@@ -46,6 +46,20 @@ test.describe("mobile: cancelled turn completion", () => {
     const labelBox = await tappableLabel.boundingBox();
     expect(labelBox).not.toBeNull();
     expect(labelBox!.height).toBeGreaterThanOrEqual(44);
+    const signalRow = card.getByTestId(`${workflow.workingStepId}-require-signal-row`);
+    const cancelRow = card.getByTestId(`${workflow.workingStepId}-cancel-completion-row`);
+    const helpTip = card.getByTestId(`${workflow.workingStepId}-cancel-completion-help`);
+    const [signalRowBox, cancelRowBox, helpBox] = await Promise.all([
+      signalRow.boundingBox(),
+      cancelRow.boundingBox(),
+      helpTip.boundingBox(),
+    ]);
+    expect(signalRowBox).not.toBeNull();
+    expect(cancelRowBox).not.toBeNull();
+    expect(helpBox).not.toBeNull();
+    expect(cancelRowBox!.height).toBeCloseTo(signalRowBox!.height, 1);
+    expect(helpBox!.x - (labelBox!.x + labelBox!.width)).toBeGreaterThanOrEqual(0);
+    expect(helpBox!.x - (labelBox!.x + labelBox!.width)).toBeLessThanOrEqual(12);
     await settings.saveChanges(true);
 
     await settings.goto(seedData.workspaceId);

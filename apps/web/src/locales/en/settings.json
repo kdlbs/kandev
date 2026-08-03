@@ -279,6 +279,7 @@
   "runCompletionActionsWhenTurnCancelled": "Run completion actions when a turn is cancelled",
   "runCompletionActionsWhenTurnCancelledHelp": "Applies only when a user explicitly cancels a turn. The destination step’s on-enter actions may immediately start another agent turn.",
   "runningSprites": "Running Sprites",
+  "waitForAgentCompletionSignal": "Wait for agent completion signal",
   "sameShortcutAs": "Same shortcut as: {{shortcuts}}",
   "saveAndLeave": "Save and leave",
   "saveChanges": "Save changes",

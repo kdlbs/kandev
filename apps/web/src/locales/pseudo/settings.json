@@ -279,6 +279,7 @@
   "runCompletionActionsWhenTurnCancelled": "Ŕũń ćōḿƥĺēţĩōń àćţĩōńś ŵĥēń à ţũŕń ĩś ćàńćēĺĺēď",
   "runCompletionActionsWhenTurnCancelledHelp": "Àƥƥĺĩēś ōńĺŷ ŵĥēń à ũśēŕ ēxƥĺĩćĩţĺŷ ćàńćēĺś à ţũŕń. Ŧĥē ďēśţĩńàţĩōń śţēƥ’ś ōń-ēńţēŕ àćţĩōńś ḿàŷ ĩḿḿēďĩàţēĺŷ śţàŕţ àńōţĥēŕ àĝēńţ ţũŕń.",
   "runningSprites": "Ŕũńńĩńĝ Śƥŕĩţēś",
+  "waitForAgentCompletionSignal": "Ŵàĩţ ƒōŕ àĝēńţ ćōḿƥĺēţĩōń śĩĝńàĺ",
   "sameShortcutAs": "Śàḿē śĥōŕţćũţ àś: {{shortcuts}}",
   "saveAndLeave": "Śàvē àńď ĺēàvē",
   "saveChanges": "Śàvē ćĥàńĝēś",

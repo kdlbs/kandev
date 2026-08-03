@@ -461,6 +461,7 @@ export function ExplicitCompletionToggle({
   onUpdate,
   readOnly,
 }: ExplicitCompletionToggleProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2 pt-1" data-testid={`${step.id}-require-signal-row`}>
       <Checkbox
@@ -478,8 +479,11 @@ export function ExplicitCompletionToggle({
           (item) => item.auto_advance_requires_signal ?? false,
         )}
       />
-      <Label htmlFor={`${step.id}-require-signal`} className="text-sm">
-        Wait for agent completion signal
+      <Label
+        htmlFor={`${step.id}-require-signal`}
+        className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm md:min-h-0"
+      >
+        {t("settings:waitForAgentCompletionSignal")}
       </Label>
       <HelpTip text="Only auto-advance once the agent calls step_complete_kandev. Otherwise turn-end is treated as completion." />
     </div>
@@ -515,7 +519,7 @@ export function CancelCompletionToggle({
       <Label
         htmlFor={`${step.id}-cancel-completion`}
         data-testid={`${step.id}-cancel-completion-label`}
-        className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center text-sm"
+        className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm md:min-h-0"
       >
         {t("settings:runCompletionActionsWhenTurnCancelled")}
       </Label>
