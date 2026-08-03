@@ -4387,17 +4387,17 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// durable, while the per-session guard still excludes a late agent.ready
 	// event from observing a successor turn and transitioning a second time.
 	if session != nil && cancelTurnCompletionEligible {
-		s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
+		s.processOnTurnCompleteViaEngineWithCause(operationCtx, session.TaskID, session, turnCompletionCauseUserCancellation)
 		// Disabled/no-transition outcomes and successful nonterminal transitions
 		// both reconcile the source task to REVIEW after session and turn
 		// settlement. The guarded state write is a no-op for terminal tasks or a
 		// destination that has already restarted work.
-		s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
+		s.reconcileCancelledTaskReview(operationCtx, session.TaskID, session.ID)
 	} else if session != nil {
 		// Preserve the existing review reconciliation for cancellations that
 		// are not eligible to run workflow completion (already waiting or a
 		// terminal/ineligible session).
-		s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
+		s.reconcileCancelledTaskReview(operationCtx, session.TaskID, session.ID)
 	}
 
 	// Release the cancel/interrupt guard now that this session's cancel is

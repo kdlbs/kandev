@@ -1043,7 +1043,7 @@ func TestReconcileCancelledTurn_DoesNotCloseTurnWhenSessionStateWriteFails(t *te
 	assert.NotNil(t, activeTurn, "a failed session-state write must not close the active turn")
 }
 
-func TestCancelAgent_DoesNotTransitionWhenSessionStateWriteFails(t *testing.T) {
+func TestCancelAgent_SurvivesCallerCancellationAfterAdmission(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-session-write"
 	sessionID := "session-cancel-session-write"
@@ -1057,13 +1057,13 @@ func TestCancelAgent_DoesNotTransitionWhenSessionStateWriteFails(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
 
 	err := svc.CancelAgent(ctx, sessionID)
-	require.Error(t, err)
+	require.NoError(t, err)
 	task, err := repo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
-	assert.Equal(t, "step1", task.WorkflowStepID)
+	assert.Equal(t, "step2", task.WorkflowStepID)
 	session, err := repo.GetTaskSession(context.Background(), sessionID)
 	require.NoError(t, err)
-	assert.Equal(t, models.TaskSessionStateRunning, session.State)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
 }
 
 func TestCancelAgent_TerminalTransitionSkipsIntermediateReview(t *testing.T) {
