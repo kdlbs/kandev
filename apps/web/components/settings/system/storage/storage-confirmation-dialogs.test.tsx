@@ -76,22 +76,36 @@ describe("storage confirmation dialogs", () => {
  * phrase, which must stay verbatim for `confirmation !== phrase` to be
  * satisfiable. These four dialogs carry the page's destructive actions, so they
  * are the ones worth pinning.
+ *
+ * Accessibility copy is scanned too. A screen-reader-only string is exactly the
+ * kind that survives a migration untranslated, because nothing on screen looks
+ * wrong — and the input's `aria-label` is the only place the confirmation phrase
+ * is announced.
  */
 describe("storage confirmation dialogs under the pseudo-locale", () => {
   const ACCENTED = /[À-ɏ]/;
   const WORDLIKE = /[A-Za-z]{4,}/;
+  /** Attributes that carry copy, mirroring the eslint guard's include list. */
+  const COPY_ATTRIBUTES = ["aria-label", "aria-description", "title", "placeholder", "alt"];
 
-  /** Visible text in the open dialog that is neither accented nor a value. */
+  /** Text and accessibility copy in the open dialog that is not accented. */
   function unlocalizedText(): string[] {
     const dialog = document.querySelector("[role=alertdialog]");
     if (!dialog) throw new Error("dialog did not render");
     const leftovers = new Set<string>();
+    const consider = (value: string | null | undefined) => {
+      const text = (value ?? "").trim();
+      if (text && WORDLIKE.test(text) && !ACCENTED.test(text)) leftovers.add(text);
+    };
+
     const walker = document.createTreeWalker(dialog, NodeFilter.SHOW_TEXT);
     let node = walker.nextNode();
     while (node) {
-      const text = (node.textContent ?? "").trim();
-      if (text && WORDLIKE.test(text) && !ACCENTED.test(text)) leftovers.add(text);
+      consider(node.textContent);
       node = walker.nextNode();
+    }
+    for (const element of [dialog, ...dialog.querySelectorAll("*")]) {
+      for (const attribute of COPY_ATTRIBUTES) consider(element.getAttribute(attribute));
     }
     return [...leftovers];
   }
@@ -121,6 +135,12 @@ describe("storage confirmation dialogs under the pseudo-locale", () => {
     ],
   ])("leaves only the %s phrase un-accented", (phrase, element) => {
     render(element);
+    // The phrase appears twice — in the sentence and in the input's aria-label —
+    // and both must be the raw token, so the deduped set is exactly one entry.
     expect(unlocalizedText()).toEqual([phrase]);
+    const input = screen.getByRole("textbox");
+    const label = input.getAttribute("aria-label") ?? "";
+    expect(label).toContain(phrase);
+    expect(label.replace(phrase, "")).toMatch(ACCENTED);
   });
 });

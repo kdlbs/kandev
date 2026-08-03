@@ -11,7 +11,12 @@ vi.mock("@/hooks/domains/system/use-system-jobs", () => ({
   useSystemJobs: () => [],
 }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // Unconditional, so a failing assertion inside a fake-timer test cannot leak
+  // frozen time into the rest of the worker.
+  vi.useRealTimers();
+});
 
 const QUARANTINED_AT = "2026-07-23T12:00:00Z";
 const DELETE_AFTER = "2026-08-23T12:00:00Z";
@@ -131,7 +136,42 @@ describe("StorageQuarantineCard", () => {
     expect(screen.getByText(/eligible now · 1 protected$/).textContent).toContain(
       "0 eligible now · 1 protected",
     );
-    vi.useRealTimers();
+  });
+});
+
+describe("StorageQuarantineCard resource types and schedule copy", () => {
+  // `resource_type` is a wire enum that used to reach the badge as
+  // `replace("_", " ")`. Both mapped values and the fallback for a value a newer
+  // backend might add need covering — the fallback is unreachable through the
+  // TypeScript union, so it is only exercised by casting past it.
+  it("labels every quarantined resource type, falling back to the raw token", () => {
+    const entry = (id: string, resourceType: string): StorageQuarantineEntry =>
+      ({
+        id,
+        resource_type: resourceType,
+        original_path: `/var/${id}`,
+        quarantine_path: `/var/trash/${id}`,
+        size_bytes: 1024 ** 3,
+        state: "quarantined",
+        quarantined_at: QUARANTINED_AT,
+        delete_after: DELETE_AFTER,
+        last_error: "",
+        metadata: {},
+      }) as unknown as StorageQuarantineEntry;
+
+    renderCard({
+      entries: [
+        entry("workspace-1", "task_workspace"),
+        entry("cache-1", "go_cache"),
+        entry("future-1", "object_store"),
+      ],
+    });
+
+    expect(screen.getByTestId("storage-quarantine-workspace-1").textContent).toContain(
+      "task workspace",
+    );
+    expect(screen.getByTestId("storage-quarantine-cache-1").textContent).toContain("go cache");
+    expect(screen.getByTestId("storage-quarantine-future-1").textContent).toContain("object store");
   });
 
   it("agrees the schedule copy with the interval", () => {

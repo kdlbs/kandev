@@ -38,6 +38,7 @@ const testIds = {
   dockerImagesUnused: "storage-docker-unused-images-hours",
 };
 const ADOPTION_PATH_TEST_ID = "storage-go-cache-adopt-path";
+const ADOPT_BUTTON_TEST_ID = "storage-go-cache-adopt";
 
 afterEach(cleanup);
 
@@ -213,7 +214,7 @@ describe("StoragePolicyCard interactions", () => {
       "storage-quarantine-retention",
       testIds.goCacheMax,
       "storage-go-cache-adopt-path",
-      "storage-go-cache-adopt",
+      ADOPT_BUTTON_TEST_ID,
       "storage-docker-dedicated",
       "storage-docker-build-cache",
       testIds.dockerBuildCacheKeep,
@@ -304,5 +305,53 @@ describe("StoragePolicyCard interactions", () => {
       expect(screen.getByText(heading)).toBeTruthy();
     }
     expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(16);
+  });
+});
+
+// The adoption button picks one of three reasons and the managed-cache row
+// interpolates a path. Both are now catalog lookups rather than literals, so a
+// missing key or a renamed placeholder degrades to a raw key or a dropped path
+// rather than failing anything else.
+describe("Go cache section copy", () => {
+  const enabledGoCache = { ...settings, go_cache: { ...settings.go_cache, enabled: true } };
+
+  /**
+   * The reason renders inside a Radix tooltip, which jsdom will not open from a
+   * synthetic mouse event — focus the wrapper span the disabled button sits in,
+   * as apps/web/CLAUDE.md prescribes for this shape.
+   */
+  async function adoptionDisabledReason(): Promise<string> {
+    const trigger = screen.getByTestId(ADOPT_BUTTON_TEST_ID).parentElement;
+    if (!trigger) throw new Error("adopt button has no tooltip trigger");
+    fireEvent.focus(trigger);
+    const tooltip = await screen.findAllByRole("tooltip");
+    return tooltip[0]?.textContent ?? "";
+  }
+
+  it("explains each reason adoption is unavailable", async () => {
+    renderCard(true, vi.fn(), enabledGoCache, enabledGoCache);
+    expect(await adoptionDisabledReason()).toBe("Wait for the current storage action to finish.");
+
+    cleanup();
+    renderCard();
+    expect(await adoptionDisabledReason()).toBe("Enable the managed Go cache first.");
+
+    cleanup();
+    renderCard(false, vi.fn(), enabledGoCache, enabledGoCache);
+    expect(await adoptionDisabledReason()).toBe("Enter an absolute cache path first.");
+
+    // A whitespace-only path is still no path.
+    fireEvent.change(screen.getByTestId(ADOPTION_PATH_TEST_ID), { target: { value: "   " } });
+    expect(await adoptionDisabledReason()).toBe("Enter an absolute cache path first.");
+
+    fireEvent.change(screen.getByTestId(ADOPTION_PATH_TEST_ID), { target: { value: "/tmp/go" } });
+    expect((screen.getByTestId(ADOPT_BUTTON_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("interpolates the managed cache path rather than concatenating it", () => {
+    renderCard();
+    expect(
+      screen.getByText(`New host-local executions use ${capabilities.managed_go_cache_path}.`),
+    ).toBeTruthy();
   });
 });
