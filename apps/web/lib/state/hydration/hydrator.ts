@@ -181,7 +181,8 @@ function hydrateSessionRuntime(
   const mergeBySession = (key: keyof AppState & keyof HydrationState): void => {
     const source = state[key] as { bySessionId?: Record<string, unknown> } | undefined;
     if (!source) return;
-    const target = draft[key] as { bySessionId: Record<string, unknown> };
+    const target = draft[key] as { bySessionId?: Record<string, unknown> } | undefined;
+    if (!target?.bySessionId) return;
     mergeSessionMap(target.bySessionId, source.bySessionId, activeSessionId, forceMergeSessionId);
   };
 

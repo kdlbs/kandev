@@ -5,6 +5,7 @@ import { hydrateState, hydrateUI } from "./hydrator";
 import { defaultUIState } from "@/lib/state/slices/ui/ui-slice";
 import { defaultState, mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
 function makeDraft(): AppState {
   // hydrateUI only touches UI-slice fields; an empty object cast satisfies
@@ -350,9 +351,15 @@ describe("hydrateState — sidebar views from user settings", () => {
 describe("hydrateState — session runtime model state", () => {
   const sessionId = "session-1";
   const modelId = "claude-opus-4-8";
+  const liveModelId = "live-model";
 
-  it("hydrates sessionModels for the force-merged session so the selector survives resume", () => {
+  it("force-merges sessionModels over live state so the selector survives resume", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionModels.bySessionId[sessionId] = {
+        currentModelId: liveModelId,
+        models: [{ modelId: liveModelId, name: "Live" }],
+        configOptions: [],
+      };
       hydrateState(
         draft,
         {
@@ -366,7 +373,7 @@ describe("hydrateState — session runtime model state", () => {
             },
           },
         } as unknown as Partial<AppState>,
-        { forceMergeSessionId: sessionId },
+        { activeSessionId: sessionId, forceMergeSessionId: sessionId },
       );
     });
 
@@ -377,30 +384,40 @@ describe("hydrateState — session runtime model state", () => {
     });
   });
 
-  it("hydrates sessionMcpStatus for the force-merged session", () => {
+  it("force-merges sessionMcpStatus over live state", () => {
+    const bootHistory: MCPAttachmentHistory = {
+      version: 1,
+      current: {
+        attachment_attempt_id: "attempt-boot",
+        started_at: "2026-06-11T00:00:00.000Z",
+        servers: [{ name: "fs", status: "connected" }],
+      },
+    };
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionMcpStatus.bySessionId[sessionId] = {
+        version: 1,
+        current: {
+          attachment_attempt_id: "attempt-live",
+          started_at: "2026-06-10T00:00:00.000Z",
+          servers: [{ name: "stale", status: "failed" }],
+        },
+      };
       hydrateState(
         draft,
         {
-          sessionMcpStatus: {
-            bySessionId: {
-              [sessionId]: { servers: [{ name: "fs", status: "connected" }] },
-            },
-          },
+          sessionMcpStatus: { bySessionId: { [sessionId]: bootHistory } },
         } as unknown as Partial<AppState>,
-        { forceMergeSessionId: sessionId },
+        { activeSessionId: sessionId, forceMergeSessionId: sessionId },
       );
     });
 
-    expect(result.sessionMcpStatus.bySessionId[sessionId]).toEqual({
-      servers: [{ name: "fs", status: "connected" }],
-    });
+    expect(result.sessionMcpStatus.bySessionId[sessionId]).toEqual(bootHistory);
   });
 
   it("does not overwrite live model state for the active (non-force-merged) session", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
       draft.sessionModels.bySessionId["active-session"] = {
-        currentModelId: "live-model",
+        currentModelId: liveModelId,
         models: [],
         configOptions: [],
       };
@@ -421,7 +438,7 @@ describe("hydrateState — session runtime model state", () => {
       );
     });
 
-    expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe("live-model");
+    expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe(liveModelId);
   });
 });
 
