@@ -136,17 +136,18 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // NOT YET: "settings — integrations github", "… gitlab", "… jira",
   // "… linear", "… sentry". Each page's
   // own copy is fully migrated (verified by running this oracle against it —
-  // every string the integration owns renders accented), but the route expands
-  // the Workspaces > Integrations branch of the settings nav, and
-  // `workspaces-group.tsx` / `settings-tree.tsx` are not migrated: "Workspaces",
-  // "Integrations", "Automations", "Executors", "Voice Mode", "Utility Agents",
-  // "External MCP", "Plugins", "System" and "Toggle theme" all still render plain
-  // English there. The /settings/general/* screens above pass because their
-  // expanded branch is `general-group.tsx`, which is migrated. Add these entries
-  // in the PR that migrates the settings nav — allowlisting those nav labels here
-  // would hide real misses instead.
+  // every string the integration owns renders accented).
   //
-  // Two shared components rendered by all five pages are also still English and
+  // The settings-nav half of this blocker is now GONE: `settings-tree.tsx`,
+  // `workspaces-group.tsx`, `executors-group.tsx`, `account-group.tsx` and
+  // `theme-toggle.tsx` are migrated, so "Workspaces", "Integrations",
+  // "Automations", "Executors", "Voice Mode", "Utility Agents", "External MCP",
+  // "Plugins" and "Toggle theme" render accented on every screen. Only "System"
+  // is left, from `sections/settings/system-group.tsx`, which the System-routes
+  // migration owns.
+  //
+  // What still blocks these five entries is the shared integration chrome, not
+  // the nav. Two components rendered by all five pages are still English and
   // would have to be migrated (or allowlisted, which is worse) first:
   // `components/integrations/drafted-integration-enabled-control.tsx`
   // ("Enabled"/"Disabled") and `components/watcher-repository-fields.tsx`
@@ -159,13 +160,14 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
   // "Close" label — both shared, both out of scope for a per-integration PR.
   //
-  // NOT YET, for the same reason: "settings — workspace workflows"
+  // NOT YET: "settings — workspace workflows"
   // (`/settings/workspace/:id/workflows`). The workflow editor's own copy is
   // fully migrated and was verified with this oracle against a live instance,
-  // but the route expands the same un-migrated Workspaces branch of the settings
-  // nav. It also renders the workspace's own name and its workflow/step names,
-  // which are user data — so the entry needs the nav migrated first, not an
-  // allowlist.
+  // and the Workspaces branch of the nav it expands is now migrated too. What
+  // remains is that the route renders the workspace's own name and its
+  // workflow/step names — user data, on the same footing as the fixture's
+  // "E2E Workspace". Adding the entry needs `findUnlocalizedText` to stop
+  // treating user data as eligible, not an allowlist entry per fixture name.
 ];
 
 /**
