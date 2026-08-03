@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useMemo, useRef } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { IconCopy, IconCheck, IconTerminal2 } from "@tabler/icons-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
@@ -19,6 +20,11 @@ type CommandPreviewCardProps = {
   envVars?: ProfileEnvVar[];
   secrets?: { id: string; name: string }[];
 };
+
+// The placeholder the backend substitutes into the launch command. A token the
+// user reads verbatim in the preview, so it is interpolated as a value rather
+// than written into the catalog.
+const PROMPT_TOKEN = "{prompt}";
 
 /**
  * POSIX-style single-quote escaping: wrap in single quotes and escape
@@ -65,9 +71,10 @@ function CommandPreviewError({ error }: { error: string }) {
 }
 
 function CommandPreviewEmpty() {
+  const { t } = useTranslation();
   return (
     <div className="rounded-md border border-muted p-4">
-      <p className="text-sm text-muted-foreground">No command preview available.</p>
+      <p className="text-sm text-muted-foreground">{t("agents:noCommandPreview")}</p>
     </div>
   );
 }
@@ -79,6 +86,7 @@ type CommandPreviewContentProps = {
 };
 
 function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPreviewContentProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const displayCommand = `${envPrefix}${preview.command_string ?? ""}`;
 
@@ -102,7 +110,7 @@ function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPr
           size="sm"
           className="absolute right-2 top-2"
           onClick={handleCopy}
-          title="Copy to clipboard"
+          title={t("agents:copyToClipboard")}
         >
           {copied ? (
             <IconCheck className="h-4 w-4 text-green-500" />
@@ -114,8 +122,10 @@ function CommandPreviewContent({ preview, cliPassthrough, envPrefix }: CommandPr
 
       {!cliPassthrough && (
         <p className="text-xs text-muted-foreground">
-          <code className="rounded bg-muted px-1 py-0.5">{"{prompt}"}</code> will be replaced with
-          your task description or follow-up message.
+          <Trans i18nKey="agents:promptTokenHint" values={{ token: PROMPT_TOKEN }}>
+            <code className="rounded bg-muted px-1 py-0.5">{PROMPT_TOKEN}</code> will be replaced
+            with your task description or follow-up message.
+          </Trans>
         </p>
       )}
     </>
@@ -132,6 +142,7 @@ export function CommandPreviewCard({
   envVars,
   secrets,
 }: CommandPreviewCardProps) {
+  const { t } = useTranslation();
   const envPrefix = useMemo(() => buildEnvPrefix(envVars, secrets), [envVars, secrets]);
   const [preview, setPreview] = useState<CommandPreviewResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -166,7 +177,7 @@ export function CommandPreviewCard({
         setError(null);
       } catch (err) {
         if (requestId !== latestRequestId.current) return;
-        setError(err instanceof Error ? err.message : "Failed to load command preview");
+        setError(err instanceof Error ? err.message : t("agents:failedToLoadCommandPreview"));
         setPreview(null);
       } finally {
         if (requestId === latestRequestId.current) setLoading(false);
@@ -182,13 +193,11 @@ export function CommandPreviewCard({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <IconTerminal2 className="h-5 w-5" />
-          <span>Command Preview</span>
+          <span>{t("agents:commandPreview")}</span>
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-xs text-muted-foreground">
-          The CLI command that will be executed based on the current settings.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("agents:commandPreviewHelp")}</p>
 
         {loading && <CommandPreviewLoading />}
         {error && <CommandPreviewError error={error} />}

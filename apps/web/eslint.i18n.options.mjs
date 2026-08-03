@@ -454,4 +454,66 @@ export const i18nGuardFiles = [
   // values so the pseudo-locale cannot turn them into dead pointers.
   "app/settings/integrations/slack/**/*.{ts,tsx}",
   "components/slack/**/*.{ts,tsx}",
+  // Settings → Agents: the agents list, the per-agent setup page, the agent
+  // profile editor, and the `/settings/agent/:id` redirect. The whole
+  // `app/settings/agents` tree is migrated, plus the agent half of
+  // `components/settings` — the loose `agent-*` / profile / CLI-flag files those
+  // three routes render, and the shared model picker and PTY dialog they reach.
+  //
+  // Deliberately absent, each reached only from a different surface:
+  // `components/settings/model-combobox.tsx` (the task-side CLI profile editor
+  // and Utility Agents), `components/settings/agent-card.tsx` (Office), and
+  // `components/settings/inference-agent-status.tsx` (Utility Agents). The
+  // string counter listed all three for this route; walking the import closure
+  // of the four pages shows none of them is in it.
+  //
+  // Also absent: `components/settings/profile-edit/**` (`env-vars-card.tsx` and
+  // `profile-env-vars-section.tsx`). The profile editor does render the env-vars
+  // card, but that directory is the *executor* profile tree and belongs to the
+  // sibling migration; its strings are the only plain English left on the agent
+  // profile page under the pseudo-locale.
+  //
+  // `agent-save-helpers.ts`, `use-profile-mcp-config.ts`,
+  // `use-agent-profile-settings.ts` and `use-agent-update-dialog-state.ts` hold
+  // no JSX, so `mode: "jsx-only"` never inspects them; the glob records that they
+  // are migrated (the first two carry MCP parse errors that reach a toast) and
+  // only the pseudo-locale can prove it stays that way.
+  //
+  // Deliberately left in English, each an identifier the user must read or type
+  // verbatim, all interpolated as values so the pseudo-locale cannot turn them
+  // into dead pointers: the `{prompt}` and `{{model}}` substitution tokens, the
+  // `--my-flag` / `greywall --` / `/init` / `superclaude` examples, the
+  // `mcpServers` JSON key, the MCP server product names (`Playwright MCP`,
+  // `Chrome DevTools MCP`, `Context7 MCP`, `GitHub MCP`) and the Kandev MCP tool
+  // list, and the whole of the assembled command preview. Wire values stay wire
+  // values: the install/update job `status` unions, the capability-probe
+  // `status`, the routing `tier`, the permission `apply_method`, the watcher
+  // `kind`, and every model/mode `id` — only their labels are copy, and those
+  // travel as catalog keys and resolve at render.
+  "app/settings/agent/**/*.{ts,tsx}",
+  "app/settings/agents/**/*.{ts,tsx}",
+  "components/app-sidebar/sections/settings/agents-group.tsx",
+  "components/settings/add-tui-agent-dialog.tsx",
+  "components/settings/agent-login-dialog.tsx",
+  "components/settings/agent-profile-delete-dialog.tsx",
+  "components/settings/agent-profile-page.tsx",
+  "components/settings/agent-runtime-update-control.tsx",
+  "components/settings/cli-flags-field.tsx",
+  "components/settings/command-prefix-field.tsx",
+  "components/settings/install-agent-card.tsx",
+  "components/settings/installed-agent-card.tsx",
+  "components/settings/mode-combobox.tsx",
+  "components/settings/profile-capability-helpers.tsx",
+  "components/settings/profile-form-fields.tsx",
+  "components/settings/profile-status-panels.tsx",
+  "components/settings/use-agent-update-dialog-state.ts",
+  // Shared with surfaces that are not migrated. The guard is per-file, so the
+  // task-side CLI profile editor, the onboarding dialog, Utility Agents, the
+  // chat model selector and the session tabs are all unaffected.
+  // `host-shell-dialog.tsx` is also opened from a chat action message;
+  // `pty-terminal-dialog.tsx` is reached only through it and the agent login
+  // dialog, both of which are migrated here.
+  "components/model-config-selector.tsx",
+  "components/settings/host-shell-dialog.tsx",
+  "components/settings/pty-terminal-dialog.tsx",
 ];

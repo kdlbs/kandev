@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import { startAgentLogin } from "@/lib/api";
 import { PtyTerminalDialog, type StartPtySession } from "@/components/settings/pty-terminal-dialog";
 
@@ -30,6 +31,7 @@ export function AgentLoginDialog({
   command,
   onLoginSuccess,
 }: Props) {
+  const { t } = useTranslation();
   const startSession: StartPtySession = useCallback(
     (size, options) => startAgentLogin(agentName, size, options),
     [agentName],
@@ -39,7 +41,7 @@ export function AgentLoginDialog({
     <PtyTerminalDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={`Sign in: ${agentName}`}
+      title={t("agents:signInToAgent", { name: agentName })}
       description={description}
       command={command}
       testIdPrefix="agent-login"

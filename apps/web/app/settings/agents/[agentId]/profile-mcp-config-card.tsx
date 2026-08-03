@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
@@ -7,6 +8,10 @@ import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
+// `validateDraftServers` runs outside React (from an onChange handler and from
+// the parent's draft state), so it uses the module-level `t`, which resolves at
+// call time. Components in this file use the `useTranslation()` hook.
+import { t as translate } from "@/lib/i18n";
 import { useProfileMcpConfig } from "./use-profile-mcp-config";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 
@@ -69,8 +74,24 @@ const POPULAR_SERVERS: Record<string, Record<string, unknown>> = {
   },
 };
 
-const KANDEV_TOOLS_DESCRIPTION =
-  "Tools: list_workspaces, list_boards, list_workflow_steps, list_tasks, create_task, update_task";
+// Tool names and MCP-server product names are identifiers, not copy: they are
+// interpolated as values so the pseudo-locale cannot turn them into something
+// the user cannot type or look up.
+const KANDEV_MCP_NAME = "Kandev MCP";
+
+const KANDEV_TOOL_NAMES =
+  "list_workspaces, list_boards, list_workflow_steps, list_tasks, create_task, update_task";
+
+const POPULAR_SERVER_NAMES: Record<string, string> = {
+  playwright: "Playwright MCP",
+  "chrome-devtools": "Chrome DevTools MCP",
+  context7: "Context7 MCP",
+  github: "GitHub MCP",
+};
+
+// The JSON key the editor validates against. Interpolated into the error
+// messages below rather than written into the catalog.
+const MCP_SERVERS_KEY = "mcpServers";
 
 type PopularServerButtonProps = {
   label: string;
@@ -129,16 +150,16 @@ function validateDraftServers(value: string): string | null {
   try {
     const parsed = JSON.parse(value);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return "MCP servers config must be a JSON object";
+      return translate("agents:mcpConfigMustBeJsonObject");
     }
-    if ("mcpServers" in parsed) {
+    if (MCP_SERVERS_KEY in parsed) {
       const nested = (parsed as { mcpServers?: unknown }).mcpServers;
       if (!nested || typeof nested !== "object" || Array.isArray(nested)) {
-        return "mcpServers must be a JSON object";
+        return translate("agents:mcpKeyMustBeJsonObject", { key: MCP_SERVERS_KEY });
       }
     }
   } catch {
-    return "Invalid JSON";
+    return translate("agents:invalidJson");
   }
   return null;
 }
@@ -150,10 +171,11 @@ function PassthroughMcpInjectionHint({
   cliPassthrough?: boolean;
   mcpInjection?: string;
 }) {
+  const { t } = useTranslation();
   if (!cliPassthrough || !mcpInjection) return null;
   return (
     <p className="text-xs text-muted-foreground">
-      In CLI passthrough mode, kandev injects these MCP servers via {mcpInjection}.
+      {t("agents:mcpPassthroughInjectionHint", { mechanism: mcpInjection })}
     </p>
   );
 }
@@ -183,6 +205,7 @@ function McpServersEditor({
   onDraftStateChange,
   handleMcpServersChange,
 }: McpServersEditorProps) {
+  const { t } = useTranslation();
   const handleApplyServer = (label: string) => {
     applyPopularServerToJson(
       currentServers,
@@ -201,7 +224,7 @@ function McpServersEditor({
 
   return (
     <div className="space-y-2">
-      <Label htmlFor={`mcp-servers-${profileId}`}>MCP servers (JSON)</Label>
+      <Label htmlFor={`mcp-servers-${profileId}`}>{t("agents:mcpServersJson")}</Label>
       <Textarea
         id={`mcp-servers-${profileId}`}
         className="min-h-[200px] font-mono text-xs"
@@ -217,43 +240,32 @@ function McpServersEditor({
         data-settings-dirty={isDirty}
         data-testid={`mcp-servers-${profileId}`}
       />
-      <p className="text-xs text-muted-foreground">
-        MCP definitions are stored in the database and resolved per executor at runtime. This does
-        not override your local agent config.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("agents:mcpServersHelp")}</p>
       <PassthroughMcpInjectionHint cliPassthrough={cliPassthrough} mcpInjection={mcpInjection} />
-      <p className="text-xs font-medium text-muted-foreground">Built-in</p>
+      <p className="text-xs font-medium text-muted-foreground">{t("agents:builtIn")}</p>
       <div className="flex flex-wrap gap-2 mb-2">
         <Tooltip>
           <TooltipTrigger asChild>
             <span className="text-xs rounded-full border border-primary/50 bg-primary/10 px-2 py-1 text-primary">
-              ✓ Kandev MCP
+              {t("agents:kandevMcpChip", { name: KANDEV_MCP_NAME })}
             </span>
           </TooltipTrigger>
           <TooltipContent side="bottom" className="max-w-[320px] text-xs">
-            <p className="font-medium mb-1">Automatically available</p>
-            <p>{KANDEV_TOOLS_DESCRIPTION}</p>
+            <p className="font-medium mb-1">{t("agents:automaticallyAvailable")}</p>
+            <p>{t("agents:kandevMcpTools", { tools: KANDEV_TOOL_NAMES })}</p>
           </TooltipContent>
         </Tooltip>
       </div>
-      <p className="text-xs font-medium text-muted-foreground">Popular servers</p>
+      <p className="text-xs font-medium text-muted-foreground">{t("agents:popularServers")}</p>
       <div className="flex flex-wrap gap-2">
-        <PopularServerButton
-          label="playwright"
-          displayName="Playwright MCP"
-          onApply={handleApplyServer}
-        />
-        <PopularServerButton
-          label="chrome-devtools"
-          displayName="Chrome DevTools MCP"
-          onApply={handleApplyServer}
-        />
-        <PopularServerButton
-          label="context7"
-          displayName="Context7 MCP"
-          onApply={handleApplyServer}
-        />
-        <PopularServerButton label="github" displayName="GitHub MCP" onApply={handleApplyServer} />
+        {Object.keys(POPULAR_SERVERS).map((label) => (
+          <PopularServerButton
+            key={label}
+            label={label}
+            displayName={POPULAR_SERVER_NAMES[label] ?? label}
+            onApply={handleApplyServer}
+          />
+        ))}
       </div>
       {currentError && <p className="text-sm text-destructive">{currentError}</p>}
     </div>
@@ -320,6 +332,7 @@ function McpEnableToggle({
   onDraftStateChange,
   setMcpEnabled,
 }: McpEnableToggleProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex items-center justify-between rounded-md border p-3"
@@ -328,10 +341,8 @@ function McpEnableToggle({
       data-testid="mcp-enabled-row"
     >
       <div className="space-y-1">
-        <Label>Enable MCP</Label>
-        <p className="text-xs text-muted-foreground">
-          Allow this profile to use MCP servers during sessions.
-        </p>
+        <Label>{t("agents:enableMcp")}</Label>
+        <p className="text-xs text-muted-foreground">{t("agents:enableMcpDescription")}</p>
       </div>
       <Switch
         checked={currentEnabled}
@@ -357,12 +368,11 @@ function McpProfileHint({
   isDraft: boolean;
   isEditableProfile: boolean;
 }) {
+  const { t } = useTranslation();
   if (isEditableProfile) return null;
   return (
     <p className="text-xs text-muted-foreground">
-      {isDraft
-        ? "MCP config will be applied after the profile is saved."
-        : "Save this profile to configure MCP servers."}
+      {isDraft ? t("agents:mcpDraftHint") : t("agents:mcpSaveProfileHint")}
     </p>
   );
 }
@@ -377,6 +387,7 @@ export function ProfileMcpConfigCard({
   onDraftStateChange,
   onToastError,
 }: ProfileMcpConfigCardProps) {
+  const { t } = useTranslation();
   const {
     mcpEnabled,
     mcpServers,
@@ -416,7 +427,7 @@ export function ProfileMcpConfigCard({
   return (
     <SettingsCard isDirty={state.currentDirty}>
       <CardHeader>
-        <CardTitle>MCP Configuration</CardTitle>
+        <CardTitle>{t("agents:mcpConfiguration")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <McpProfileHint isDraft={state.isDraft} isEditableProfile={state.isEditableProfile} />

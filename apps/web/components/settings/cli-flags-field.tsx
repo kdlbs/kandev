@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -18,6 +19,9 @@ import { SettingsCard } from "@/components/settings/settings-card";
  * have to think about quoting, and re-concatenate on save. Description
  * is preserved through the round-trip but no longer shown in the UI.
  */
+// An example flag name — code the user types verbatim, never translated.
+const FLAG_PLACEHOLDER = "--my-flag";
+
 type CustomFlagRow = {
   flag: string;
   value: string;
@@ -208,6 +212,7 @@ function CuratedFlagsSection({
   onToggle: (setting: CuratedSetting, enabled: boolean) => void;
   compact: boolean;
 }) {
+  const { t } = useTranslation();
   const labelCls = compact ? "text-xs" : undefined;
   const switchSize = compact ? ("sm" as const) : ("default" as const);
   return (
@@ -231,7 +236,11 @@ function CuratedFlagsSection({
               checked={enabled}
               onCheckedChange={(checked) => onToggle(setting, checked)}
               data-testid={`cli-flag-curated-enabled-${setting.key}`}
-              aria-label={`${enabled ? "Disable" : "Enable"} ${setting.label}`}
+              aria-label={
+                enabled
+                  ? t("agents:disableSetting", { name: setting.label })
+                  : t("agents:enableSetting", { name: setting.label })
+              }
             />
           </div>
         );
@@ -251,11 +260,12 @@ function CustomFlagsSection({
   onRemove: (index: number) => void;
   onAdd: (next: CLIFlag) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       {customFlags.length === 0 ? (
         <p className="text-xs italic text-muted-foreground" data-testid="cli-flags-empty">
-          No CLI flags configured. Add one below.
+          {t("agents:noCliFlagsConfigured")}
         </p>
       ) : (
         <ul className="space-y-2" data-testid="cli-flags-list">
@@ -286,6 +296,7 @@ function CLIFlagRow({
   onUpdateRow: (index: number, next: CLIFlag) => void;
   onRemove: (index: number) => void;
 }) {
+  const { t } = useTranslation();
   const row = flagToRow(flag);
   const update = (patch: Partial<CustomFlagRow>) => {
     onUpdateRow(index, rowToFlag({ ...row, ...patch }));
@@ -295,14 +306,14 @@ function CLIFlagRow({
       <Input
         value={row.flag}
         onChange={(e) => update({ flag: e.target.value })}
-        placeholder="--my-flag"
+        placeholder={FLAG_PLACEHOLDER}
         className="flex-[2] font-mono text-xs"
         data-testid={`cli-flag-flag-${index}`}
       />
       <Input
         value={row.value}
         onChange={(e) => update({ value: e.target.value })}
-        placeholder="value (optional)"
+        placeholder={t("agents:valueOptional")}
         className="flex-[3] font-mono text-xs"
         data-testid={`cli-flag-value-${index}`}
       />
@@ -310,7 +321,11 @@ function CLIFlagRow({
         checked={row.enabled}
         onCheckedChange={(checked) => update({ enabled: checked })}
         data-testid={`cli-flag-enabled-${index}`}
-        aria-label={`${row.enabled ? "Disable" : "Enable"} ${row.flag}`}
+        aria-label={
+          row.enabled
+            ? t("agents:disableSetting", { name: row.flag })
+            : t("agents:enableSetting", { name: row.flag })
+        }
       />
       <Button
         type="button"
@@ -319,7 +334,7 @@ function CLIFlagRow({
         onClick={() => onRemove(index)}
         className="h-8 w-8 shrink-0 cursor-pointer"
         data-testid={`cli-flag-remove-${index}`}
-        aria-label={`Remove ${row.flag || "flag"}`}
+        aria-label={t("agents:removeCliFlag", { name: row.flag || t("agents:flag") })}
       >
         <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
       </Button>
@@ -328,6 +343,7 @@ function CLIFlagRow({
 }
 
 function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
+  const { t } = useTranslation();
   const uid = useId();
   const flagId = `${uid}-flag`;
   const valueId = `${uid}-value`;
@@ -350,13 +366,13 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
       <div className="flex-[2] space-y-1">
         <Label className="text-xs" htmlFor={flagId}>
-          Flag
+          {t("agents:flag")}
         </Label>
         <Input
           id={flagId}
           value={newFlag}
           onChange={(e) => setNewFlag(e.target.value)}
-          placeholder="--my-flag"
+          placeholder={FLAG_PLACEHOLDER}
           className="font-mono text-xs"
           data-testid="cli-flag-new-flag-input"
           onKeyDown={onEnter}
@@ -364,13 +380,13 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
       </div>
       <div className="flex-[3] space-y-1">
         <Label className="text-xs" htmlFor={valueId}>
-          Value (optional)
+          {t("agents:valueOptionalLabel")}
         </Label>
         <Input
           id={valueId}
           value={newValue}
           onChange={(e) => setNewValue(e.target.value)}
-          placeholder="value"
+          placeholder={t("agents:valuePlaceholder")}
           className="font-mono text-xs"
           data-testid="cli-flag-new-value-input"
           onKeyDown={onEnter}
@@ -386,7 +402,7 @@ function CLIFlagsAddForm({ onAdd }: { onAdd: (next: CLIFlag) => void }) {
         data-testid="cli-flag-add-button"
       >
         <IconPlus className="h-3.5 w-3.5 mr-1" />
-        Add
+        {t("agents:add")}
       </Button>
     </div>
   );
@@ -411,6 +427,7 @@ export function CustomCLIFlagsCard({
   onChange,
   permissionSettings,
 }: CustomCLIFlagsCardProps) {
+  const { t } = useTranslation();
   const curatedFlagTexts = useMemo(
     () => new Set(extractCuratedSettings(permissionSettings).map((s) => s.flag)),
     [permissionSettings],
@@ -437,14 +454,15 @@ export function CustomCLIFlagsCard({
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle>Agent CLI flags</CardTitle>
-            <CardDescription>
-              Flags passed to the agent CLI on launch. Only enabled entries are applied.
-            </CardDescription>
+            <CardTitle>{t("agents:agentCliFlags")}</CardTitle>
+            <CardDescription>{t("agents:agentCliFlagsDescription")}</CardDescription>
           </div>
           {customFlags.length > 0 && (
             <span className="text-[10px] text-muted-foreground" data-testid="cli-flags-count">
-              {enabledCount} of {customFlags.length} enabled
+              {t("agents:cliFlagsEnabledCount", {
+                count: customFlags.length,
+                enabled: enabledCount,
+              })}
             </span>
           )}
         </div>

@@ -76,4 +76,24 @@ describe("CommandPrefixField", () => {
     fireEvent.change(screen.getByTestId("command-prefix-input"), { target: { value: "" } });
     expect(onChange).toHaveBeenCalledWith({ command_prefix: "" });
   });
+
+  // The help text is a <Trans>: its <0> index addresses the JSX children
+  // positionally, so a prettier reflow can silently reassemble the sentence
+  // into fragments without failing anything.
+  it("renders the help text as one sentence with the example launcher intact", () => {
+    render(
+      <CommandPrefixField profile={formData()} baselineProfile={formData()} onChange={vi.fn()} />,
+    );
+
+    const help = screen.getByText(
+      (_content, element) =>
+        element?.tagName === "P" &&
+        element.textContent ===
+          "Tokens prepended to the agent launch command, so it runs under a sandbox launcher " +
+            "(e.g. greywall --). The value is shell-tokenised. Leave empty to run the agent " +
+            "directly. Applies to ACP sessions only \u2014 it has no effect when the profile " +
+            "uses TUI passthrough.",
+    );
+    expect(help.querySelector("code")?.textContent).toBe(PREFIX);
+  });
 });
