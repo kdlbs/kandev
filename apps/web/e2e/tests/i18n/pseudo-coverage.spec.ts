@@ -27,6 +27,24 @@ import { test, expect } from "../../fixtures/test-base";
  * directory lands and the env guard comes off.
  *
  *   KANDEV_I18N_COVERAGE=1 pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *
+ * BOTH passes walk `document.body`, deliberately, and NOT the page's `<main>`.
+ * Scoping to the page under test is the obvious reading of what each test claims,
+ * and it was tried and rejected on one fact: `@kandev/ui` builds Dialog,
+ * AlertDialog, DropdownMenu, Tooltip and Select on Radix `Portal`, which mounts
+ * to `document.body`. Every dialog, menu and tooltip in the app therefore renders
+ * OUTSIDE `<main>`, so a scoped walk would stop checking the surfaces densest in
+ * copy — and would do it silently, reporting clean. Trading a visible annoyance
+ * for an invisible blind spot is the wrong direction for an oracle whose whole
+ * purpose is the strings nothing else can see.
+ *
+ * The cost of body-wide is that a screen can fail for chrome it does not own.
+ * That cost is now small — migrating the sidebar, settings nav and status bar
+ * (#2214) took the baseline from 28 findings to 5 — and it buys the one thing
+ * nothing else has: copy that belongs to no directory, like `@kandev/ui`'s
+ * hardcoded breadcrumb landmark and sonner's toast-container label, is visible
+ * only because the walk is body-wide. The fix for chrome noise is migrating
+ * chrome, not narrowing the oracle.
  */
 
 const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
@@ -67,6 +85,13 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
     // default-action button once, which rendered a raw English "Default" until
     // `getDefaultActionState` was fixed to resolve it through the catalog.
     //
+    // It fails in the OTHER direction too, and has: these entries duplicate
+    // strings that live in `lib/layout/layout-profiles.ts`, with nothing keeping
+    // the two in sync. #2198 changed the Default profile's description and this
+    // list kept the old wording, so it manufactured a phantom finding for every
+    // run between `cc6eb4dd5` and this commit. Re-check these against
+    // `BUILT_IN_LAYOUT_PROFILES` whenever a built-in name or description moves.
+    //
     // Both groups are display strings that are also PERSISTED, so translating
     // them in place would write locale-dependent values into a user's saved
     // layouts and leave them there after a locale switch:
@@ -82,7 +107,7 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
       "Plan Mode",
       "Preview Mode",
       "VS Code",
-      "Agent with Files, Changes, PR Details, and Terminal",
+      "Agent with Files, Changes, and Terminal",
       "Agent and Plan side by side",
       "Agent and Browser side by side",
       "Agent and VS Code side by side",
@@ -256,9 +281,27 @@ async function findUnlocalizedCopy(
       const wordlike = /[A-Za-z]{4,}/;
       const accented = /[À-ɏ]/;
 
+      // User data is never copy, and a workspace's name is user data on the same
+      // footing as a task title. Derived from the boot payload rather than
+      // listed, because listing it fixes one instance and leaves every other
+      // one broken: `E2E Workspace` is only the fixture's name, and a developer
+      // running this against their own instance would have hit the identical
+      // false positive under a different string.
+      const workspaceNames = (() => {
+        const payload = (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown })
+          .__KANDEV_BOOT_PAYLOAD__;
+        const state = (payload as { initialState?: { workspaces?: { items?: unknown } } })
+          ?.initialState;
+        const items = state?.workspaces?.items;
+        if (!Array.isArray(items)) return [];
+        return items
+          .map((item) => (item as { name?: unknown })?.name)
+          .filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+      })();
+
       // Longest first: stripping "VS Code" before "Agent and VS Code side by
       // side" would leave "side by side" behind and report it as a leftover.
-      const tokens = [...allowedList].sort((a, b) => b.length - a.length);
+      const tokens = [...allowedList, ...workspaceNames].sort((a, b) => b.length - a.length);
 
       /** Still word-like ASCII once allowlisted tokens are removed. */
       const hasUnmigratedAscii = (text: string) => {
@@ -271,6 +314,19 @@ async function findUnlocalizedCopy(
       /** The text pass's rule, unchanged: any accented character clears a node. */
       const looksUnlocalized = (text: string) => !accented.test(text) && hasUnmigratedAscii(text);
 
+      // The text pass drops zero-size nodes because nothing is on screen to read.
+      // That test is WRONG for an attribute: a visually hidden control with an
+      // `aria-label` is precisely the case this pass exists to catch, and every
+      // `sr-only` node measures as good as zero. What actually disqualifies a
+      // label is the element not being rendered at all — `display: none`,
+      // `visibility: hidden`, or a skipped `content-visibility` subtree — because
+      // then no user receives it, sighted or not. `checkVisibility` asks that
+      // directly; deliberately WITHOUT `opacityProperty`, since an opacity-0
+      // element is still in the accessibility tree.
+      const isRendered = (el: Element) =>
+        typeof el.checkVisibility !== "function" ||
+        el.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true });
+
       const collectText = () => {
         const found = new Set<string>();
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -281,9 +337,17 @@ async function findUnlocalizedCopy(
 
           const el = node.parentElement;
           if (!el || skipTags.has(el.tagName)) continue;
-          // Ignore hidden nodes — not user-visible copy.
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 && rect.height === 0) continue;
+          // Same rendered-or-not test the attribute pass uses, rather than the
+          // zero-size rect this used to apply. The rect check kept `sr-only`
+          // text ONLY because that utility measures 1px rather than 0 — so
+          // whether screen-reader-only copy was checked came down to a CSS
+          // implementation detail, and changing `.sr-only` to `clip` at 0×0
+          // would have silently dropped it. It IS copy, and a deliberately
+          // in-scope kind: `theme-toggle.tsx`'s "Toggle theme" reached a user
+          // only this way. `checkVisibility` keeps it for the right reason —
+          // the element renders and is in the accessibility tree — while
+          // correctly dropping `visibility: hidden`, which the rect check kept.
+          if (!isRendered(el)) continue;
 
           found.add(text.slice(0, 120));
         }
@@ -299,19 +363,6 @@ async function findUnlocalizedCopy(
         const role = el.getAttribute("role");
         return role ? `${tag}[role=${role}]` : tag;
       };
-
-      // The text pass drops zero-size nodes because nothing is on screen to read.
-      // That test is WRONG for an attribute: a visually hidden control with an
-      // `aria-label` is precisely the case this pass exists to catch, and every
-      // `sr-only` node measures as good as zero. What actually disqualifies a
-      // label is the element not being rendered at all — `display: none`,
-      // `visibility: hidden`, or a skipped `content-visibility` subtree — because
-      // then no user receives it, sighted or not. `checkVisibility` asks that
-      // directly; deliberately WITHOUT `opacityProperty`, since an opacity-0
-      // element is still in the accessibility tree.
-      const isRendered = (el: Element) =>
-        typeof el.checkVisibility !== "function" ||
-        el.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true });
 
       const seen = new Map<string, { label: string; count: number }>();
       // The positive control. An attribute that HAS been migrated renders as
