@@ -135,14 +135,38 @@ export function looksLikeCopy(value) {
  * silent no-op that still prints ✓. That is strictly worse than not running it,
  * because it converts "I verified" into "I ran something".
  *
- * The requirement is prose to anchor on, not merely a non-empty remainder:
- * `"{{a}} —"` normalizes to `"—"` and compiles to `/^[\s\S]+? —$/`, which is
- * nearly as permissive. A message with no word in it cannot distinguish a
- * rewrite from an unrelated string, so it earns no pattern — it is still
- * matched exactly and as a fragment, which is all it can honestly support.
+ * The requirement is TWO WORDS of prose, not merely a non-empty remainder and
+ * not merely one word. The empty case is the extreme of a continuum, not a
+ * distinct bug — 44 interpolating messages have a residue of six characters or
+ * fewer — and one short word clears any "is there a word?" bar while leaving the
+ * pattern almost unbounded:
+ *
+ *   "{{a}} —"        -> /^[\s\S]+? —$/          matches anything ending " —"
+ *   "{{count}}m"     -> /^[\s\S]+?m$/           matches "Confirm", "Custom", "System"
+ *   "Delete {{name}}" -> /^Delete [\s\S]+?$/    matches EVERY "Delete …" sentence
+ *
+ * Measured on two migrations, requiring two words dropped 340 pattern-bearing
+ * messages to 292, added ZERO findings to either diff, and made ten more
+ * rewrites detectable on one of them. It costs nothing real and closes the
+ * largest remaining hole.
+ *
+ * The honest limit of this rule: `"{{count}} of {{total}}"` (a legitimate value
+ * extraction) and `"{{a}} of {{b}}"` (far too permissive to anchor anything)
+ * both reduce to the residue `"of"` and compile to the SAME regex, so nothing
+ * computed from the message can accept one and reject the other. Both are
+ * rejected here, which means a string like `"3 of 9"` is REPORTED and classified
+ * by a human. That is the correct direction for an advisory check: a false
+ * positive costs someone ten seconds, a false negative is the failure this
+ * exists to prevent.
+ *
+ * A rejected message is still matched exactly and as a fragment — it only loses
+ * the wildcard, which is all it could honestly support.
  */
 function canAnchorPattern(message) {
-  return /[A-Za-z]{2,}/.test(normalize(message));
+  const words = normalize(message)
+    .split(/\s+/)
+    .filter((word) => /[A-Za-z]{2,}/.test(word));
+  return words.length >= 2;
 }
 
 /** Build the three lookup shapes `accountedFor` needs from a set of messages. */

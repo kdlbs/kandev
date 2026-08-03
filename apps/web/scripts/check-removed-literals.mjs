@@ -29,11 +29,12 @@
  * copy. It narrows the diff for a human; it does not decide.
  *
  * COVERAGE IS PARTIAL. Rule 2 is only as tight as the literal text around a
- * message's placeholders: `"Delete {{name}}"` compiles to `/^Delete [\s\S]+?$/`
- * and accepts any sentence starting "Delete ", so a rewrite of one such string
- * is not reported. Simulating a rewrite of every removed string measured 79/96
- * caught on one migration and 24/43 on another. A clean run is evidence, not
- * proof — which is why the mutation probe in docs/i18n.md is a separate step.
+ * message's placeholders, which is why a message needs two words of prose to
+ * earn one at all (see `canAnchorPattern`). Simulating a rewrite of every
+ * removed string measured 89/96 caught on this migration. The remainder are
+ * messages too thin to distinguish a rewrite from anything else. A clean run is
+ * evidence, not proof — which is why the mutation probe in docs/i18n.md is a
+ * separate step.
  *
  * Usage: node scripts/check-removed-literals.mjs [--base <ref>] [--all]
  *

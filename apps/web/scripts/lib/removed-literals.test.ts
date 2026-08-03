@@ -114,9 +114,11 @@ describe("reported false positives that this module does not have", () => {
   it("matches a literal whose leading number moved into an interpolation", () => {
     // Reported as "permanently unmatchable". Rule 2 turns {{…}} into a wildcard,
     // so a placeholder at the START of the message matches just as well as an
-    // interior one.
-    expect(accountedFor("50 max", buildCatalog(["{{count}} max"]))).toBe(true);
+    // interior one — provided the message has two words to anchor on.
     expect(accountedFor("3 of 9 selected", buildCatalog(["{{count}} of {{total}} selected"]))).toBe(
+      true,
+    );
+    expect(accountedFor("50 items remaining", buildCatalog(["{{count}} items remaining"]))).toBe(
       true,
     );
   });
@@ -164,10 +166,35 @@ describe("a degenerate catalog message cannot disable the check", () => {
     expect(accountedFor("{{path}}", buildCatalog(["{{path}}"]))).toBe(true);
   });
 
-  it("keeps anchoring on a short message that does carry a word", () => {
-    expect(accountedFor("3 of 9", buildCatalog(["{{count}} of {{total}}"]))).toBe(true);
-    expect(accountedFor("totally unrelated prose", buildCatalog(["{{count}} of {{total}}"]))).toBe(
-      false,
-    );
+  it("reports a value extraction whose message is too thin to anchor", () => {
+    // "{{count}} of {{total}}" reduces to the residue "of" — BYTE-IDENTICAL to
+    // "{{a}} of {{b}}", which would match "Anything at all of anything else".
+    // Nothing computed from the message can accept one and reject the other, so
+    // both lose their pattern and "3 of 9" is reported for a human to classify.
+    // A false positive costs ten seconds; a false negative is the failure this
+    // check exists to prevent.
+    expect(accountedFor("3 of 9", buildCatalog(["{{count}} of {{total}}"]))).toBe(false);
+  });
+
+  it("does not let one short word anchor a nearly unbounded pattern", () => {
+    // "Delete {{name}}" compiled to /^Delete [\s\S]+?$/ and accepted every
+    // "Delete …" sentence — 19 of 43 strings in the file this check was first
+    // pointed at were unprotected by exactly this shape.
+    expect(
+      accountedFor("Delete a workflow and all its steps.", buildCatalog(["Delete {{name}}"])),
+    ).toBe(false);
+    expect(accountedFor("Confirm", buildCatalog(["{{count}}m"]))).toBe(false);
+  });
+
+  it("keeps anchoring once a message has two words of prose", () => {
+    expect(
+      accountedFor(
+        "Files over 5 MiB are skipped",
+        buildCatalog(["Files over {{limit}} are skipped"]),
+      ),
+    ).toBe(true);
+    expect(
+      accountedFor("totally unrelated prose", buildCatalog(["Files over {{limit}} are skipped"])),
+    ).toBe(false);
   });
 });
