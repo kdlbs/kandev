@@ -13,6 +13,16 @@ vi.mock("./message-list-native", async () => {
 
 import { MessageList } from "./message-list";
 
+const emptyMessageListProps: MessageListProps = {
+  items: [],
+  messages: [],
+  permissionsByToolCallId: new Map(),
+  childrenByParentToolCallId: new Map(),
+  sessionId: null,
+  messagesLoading: false,
+  isWorking: false,
+};
+
 afterEach(() => {
   cleanup();
   window.history.replaceState({}, "", "/");
@@ -23,8 +33,8 @@ describe("MessageList", () => {
   it("keeps the transcript on the native renderer when the old Virtuoso override is requested", () => {
     window.history.replaceState({}, "", "/t/session-a?renderer=virtuoso");
 
-    render(<MessageList {...({} as unknown as MessageListProps)} />);
+    render(<MessageList {...emptyMessageListProps} />);
 
-    expect(screen.getByTestId("native-message-list")).toBeTruthy();
+    expect(screen.queryByTestId("native-message-list")).not.toBeNull();
   });
 });

@@ -4,11 +4,11 @@ created: 2026-04-28
 owner: cfl
 ---
 
-# Comment Markdown Rendering and Virtual Scrolling
+# Comment Markdown Rendering
 
 ## Why
 
-Task comments render as plain text with `whitespace-pre-wrap`. Agent responses routinely include markdown — code blocks, headers, bold text, lists — which renders as raw punctuation instead of formatted output. Long threads also mount every comment to the DOM, causing visible lag on tasks with many turns.
+Task comments render as plain text with `whitespace-pre-wrap`. Agent responses routinely include markdown — code blocks, headers, bold text, lists — which renders as raw punctuation instead of formatted output.
 
 ## What
 
@@ -29,7 +29,6 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - **GIVEN** a comment containing the text `see KAN-42 for context`, **WHEN** rendered, **THEN** `KAN-42` is a clickable link navigating to `/office/tasks/KAN-42`.
 - **GIVEN** a comment containing `https://example.com`, **WHEN** rendered, **THEN** the URL is a clickable hyperlink.
 - **GIVEN** a comment contains a markdown link to `/root/.kandev/tasks/example/kandev/.github/workflows/build.yml:12`, **WHEN** the user clicks it while the active worktree is `/root/.kandev/tasks/example/kandev`, **THEN** the in-app editor opens `.github/workflows/build.yml` instead of navigating to that absolute URL.
-- **GIVEN** a thread with 200 comments, **WHEN** the user opens the issue, **THEN** fewer than 30 comment nodes are in the DOM at any time.
 - **GIVEN** the user has scrolled up to read earlier comments and a new comment arrives, **WHEN** the comment is appended, **THEN** the scroll position does not move.
 - **GIVEN** the user is at the bottom of the thread and a new comment arrives, **WHEN** the comment is appended, **THEN** the viewport auto-scrolls to show the new comment.
 

@@ -4,7 +4,7 @@
     "web": {
       "playwright": {
         "config": ["e2e/playwright.config.ts"],
-        "entry": ["e2e/**/*.spec.ts", "e2e/**/*.test.ts", "e2e/global-setup.ts"]
+        "entry": ["e2e/**/*.@(spec|test).?(c|m)[jt]s?(x)", "e2e/global-setup.ts"]
       }
     }
   }

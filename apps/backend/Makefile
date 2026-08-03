@@ -40,6 +40,7 @@ ifeq ($(OS)$(MSYSTEM),Windows_NT)
   # "already exists" failure is tolerated; on Unix the prefix is a no-op.
   MKDIR = cmd /c mkdir
   CGO_PREFIX = set CGO_ENABLED=1&
+  DEADCODE_ENV = set GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)&
   # Cross-compile prefixes for agentctl helpers bundled with the host build.
   # cmd has no Unix env-var-prefix syntax; `set X=Y&` chains `set` and the next
   # command in the same shell.
@@ -69,6 +70,7 @@ else
   RMDIR = rm -rf
   MKDIR = mkdir -p
   CGO_PREFIX = CGO_ENABLED=1
+  DEADCODE_ENV = GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN)
   GO_LINUX_AMD64 = CGO_ENABLED=0 GOOS=linux GOARCH=amd64
   GO_LINUX_ARM64 = CGO_ENABLED=0 GOOS=linux GOARCH=arm64
   GO_DARWIN_ARM64 = CGO_ENABLED=0 GOOS=darwin GOARCH=arm64
@@ -346,10 +348,13 @@ lint:
 	@echo "Running linter..."
 	golangci-lint run ./...
 
-## Report unreachable functions in the production Go program.
+## Report unreachable functions in the host production Go program.
+# deadcode results are specific to one GOOS/GOARCH/build-tag configuration.
+# This target intentionally audits the host configuration only; verify every
+# supported target that could reach a finding before removing reported code.
 deadcode:
-	@echo "Scanning for unreachable Go functions..."
-	GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
+	@echo "Scanning for unreachable Go functions (host configuration only; verify other targets before deleting findings; toolchain=$(DEADCODE_GO_TOOLCHAIN), override with DEADCODE_GO_TOOLCHAIN=go1.XY.Z)..."
+	$(DEADCODE_ENV) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
 
 ## Format code
 fmt:
