@@ -933,4 +933,149 @@ export const i18nGuardFiles = [
   "components/settings/repository-custom-scripts.tsx",
   "components/settings/repository-delete-dialog.tsx",
   "components/settings/unsaved-indicator.tsx",
+  // Settings → External MCP, Prompts, Voice Mode and Utility Agents, plus the
+  // two Changelog cards. Four small routes in one entry group because none of
+  // them owns enough copy to be worth its own migration, and they share the
+  // `settings` namespace: two of the four already had their page title there
+  // (`settings:voiceMode`, `settings:utilityAgents`) and the other two in
+  // `common` (`common:externalMcp`, `common:prompts`), all of which are reused
+  // rather than twinned — `SEGMENT_LABEL_KEYS` in `settings-layout-client.tsx`
+  // renders the same words as the breadcrumb on these very routes.
+  //
+  // `lib/settings/external-mcp-tools.ts` is the load-bearing entry: a `.ts`
+  // catalog of 7 groups and 29 tools that `mode: "jsx-only"` never inspects, so
+  // its 43 strings were invisible to every previous sweep. Titles and
+  // descriptions now travel as `titleKey` / `descriptionKey` and resolve at
+  // render; the tool `name`s stay literal because they are the protocol
+  // identifiers an external agent calls. Two unit tests pin the keys to the
+  // catalog, because nothing else can.
+  //
+  // Three more shapes here held copy no lint rule could see, all now migrated:
+  // `buildEngineOptions` in `voice-mode-settings.tsx` (a plain builder
+  // returning label/description object literals), `noteForStatus` in
+  // `inference-agent-status.tsx` (a non-JSX switch over the probe status), and
+  // the `placeholder = "Select a model"` parameter default in
+  // `model-combobox.tsx`, which had to move into the component body — a
+  // parameter list is evaluated before `useTranslation()` is in scope.
+  //
+  // `model-combobox.tsx` and `inference-agent-status.tsx` were listed for the
+  // Settings → Agents migration and correctly left there, being absent from
+  // that route's import closure. They belong here: the combobox is reached from
+  // Utility Agents and from the task-side CLI profile editor
+  // (`components/agent/cli-profile-editor.tsx`, not yet migrated — the guard is
+  // per-file, so that surface is unaffected), and the status note only from
+  // Utility Agents. `mode-combobox.tsx`, `pty-terminal-dialog.tsx` and
+  // `changelog-list.tsx` are already listed above and were left alone.
+  //
+  // Five files here are DEAD TWINS — see "an existing key is not automatically
+  // the right key" in docs/i18n.md, which is the shape that silently rewrote
+  // English on a shipping System page. None of these had drifted, because none
+  // of them holds any copy at all, but the next migration should not have to
+  // rediscover which ones are live:
+  //
+  //   - `app/settings/prompts/page.tsx` and `app/settings/voice-mode/page.tsx`
+  //     are unreferenced. `SETTINGS_ROUTES` in `src/settings-routes.tsx` renders
+  //     `<PromptsSettings />` and `<VoiceModeSettings />` directly, so the SSR
+  //     prefetch in those pages never runs. `external-mcp` and `utility-agents`
+  //     go through their page, and are live.
+  //   - `app/settings/changelog/page.tsx` is likewise unreferenced; the route
+  //     table has its own `SettingsRedirect` to `/settings/system/updates`.
+  //   - `changelog-settings.tsx` and `changelog-notification-card.tsx` are
+  //     migrated but unreachable: nothing imports `ChangelogSettings`, and it is
+  //     the only importer of `ChangelogNotificationCard`. The pseudo-locale
+  //     therefore cannot verify either from any route — they were read by eye.
+  //
+  // That makes the whole changelog surface — the release-history list and the
+  // topbar-notification card — currently unreachable, which is worth stating
+  // plainly because it is easy to get wrong. `/settings/system/updates` renders
+  // `renderUpdatesRoute` from the route table, which mounts `UpdatesCard` and
+  // nothing else; it has never mounted `ChangelogList`. The
+  // `app/settings/system/updates/page.tsx` that did was itself a dead twin, and
+  // #2219 deleted it along with the other eight. So `changelog-list.tsx`, which
+  // #2202 allowlisted as part of that route, has no live consumer either. It is
+  // left listed here — an allowlist entry on unreachable code costs nothing and
+  // removing one is the thing this file must never do.
+  //
+  // Deleting the five is a correctness change, not tidiness, and belongs in its
+  // own PR rather than inside a copy-only migration.
+  //
+  // `use-inference-agents.ts` and `utility-dirty.ts` hold no JSX and no copy;
+  // the entries record that the review happened. `external-mcp-snippets.ts` is
+  // absent rather than noted: it is JSON/TOML config and CLI commands end to
+  // end, with no prose at all.
+  //
+  // Deliberately left in English, none of it copy:
+  //   - Every MCP tool `name` (`create_task_kandev`, …), the `parent_id`
+  //     request field, and the `open, in_progress, complete, blocked,
+  //     cancelled` task-state enum. The last two are interpolated as values so
+  //     the pseudo-locale cannot turn them into dead pointers.
+  //   - The agent product names and config paths in `SNIPPET_CARDS`
+  //     (`Claude Code`, `~/.claude.json`, `~/.codex/config.toml`, …) and the
+  //     whole of every generated snippet. All interpolated as values.
+  //   - The `{{` prompt-template sigil and the `@name` chat mention token —
+  //     both typed verbatim by the user, both interpolated.
+  //   - Wire values: the voice `engine` / `mode` / `whisper_web_model` unions
+  //     and the BCP-47 `language` tags, the `InferenceAgentStatus` probe
+  //     states, the `USE_DEFAULT` sentinel, and every agent/model id. Only
+  //     their labels are copy, and those travel as catalog keys.
+  //   - `~40 MB` / `~75 MB` / `~240 MB` in `WHISPER_MODELS`: download sizes in
+  //     binary units, not prose — the same call `storage-units.ts` made.
+  //   - Utility agent `name`, `description` and `prompt`, and custom prompt
+  //     `name` / `content`. The builtins' text is authored by the backend and
+  //     the rest is user data; a prompt body is also sent to the agent verbatim.
+  //   - `new Error("Voice settings require VoiceDraftProvider")`, a programming
+  //     error that can only fire in a broken render tree.
+  //
+  // Every key added here was audited against all 15 en catalogs for English that
+  // already exists under another key. Twelve matched. Ten are the established
+  // per-namespace pattern the repo already runs on — `Refresh`, `Add`,
+  // `Actions`, `Copied`, `Copy to clipboard`, `Tasks`, `Model`, `No default`,
+  // `Not configured` each already exist in two to eight namespaces, because a
+  // namespace is the unit a translator works in. Two needed a decision, both
+  // because they appear in `OWNED_BY_ANOTHER_NAMESPACE` in
+  // `settings-nav-copy.test.ts` and both because the nav renders the same word
+  // on the same screen:
+  //
+  //   - `externalMcpGroupAgents` = "Agents" vs `common:agents`
+  //   - `externalMcpGroupExecutors` = "Executors" vs `common:executors`
+  //
+  // These are kept separate, and that guard does not fire on them because it
+  // scans `sidebar.json` only. The rule it encodes is that a nav label and the
+  // page title of the destination it links to must share one key — same words,
+  // same destination. These are not that: they are headings for MCP tool
+  // categories mirroring the backend's grouping in
+  // `apps/backend/internal/mcp/server`, not the settings routes. Reusing
+  // `common:agents` would couple the tool catalog to the nav, so renaming the
+  // Agents settings route would silently retitle a group of MCP tools.
+  //
+  // `promptDeleteDescription` also duplicates `thisWillPermanentlyRemoveSecret`
+  // inside this namespace, sentence and tag index alike. Kept separate because
+  // that key is named for the secrets dialog it belongs to; folding the prompts
+  // dialog into it would leave a key whose name contradicts half its callers.
+  //
+  // Still English and NOT ours: `CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label`
+  // ("Voice Input") from `lib/keyboard/shortcut-overrides.ts`, interpolated into
+  // the migrated `settings:voiceShortcutTitle` frame. It is the shared keyboard
+  // registry, owned by whoever migrates `lib/keyboard`; under the pseudo-locale
+  // it reads as an English word inside accented copy, which is the oracle's
+  // known weak spot rather than a miss here.
+  "app/settings/changelog/**/*.{ts,tsx}",
+  "app/settings/external-mcp/**/*.{ts,tsx}",
+  "app/settings/prompts/**/*.{ts,tsx}",
+  "app/settings/utility-agents/**/*.{ts,tsx}",
+  "app/settings/voice-mode/**/*.{ts,tsx}",
+  "components/settings/changelog-notification-card.tsx",
+  "components/settings/changelog-settings.tsx",
+  "components/settings/config-chat-agent-section.tsx",
+  "components/settings/external-mcp-settings.tsx",
+  "components/settings/inference-agent-status.tsx",
+  "components/settings/model-combobox.tsx",
+  "components/settings/prompts-settings.tsx",
+  "components/settings/use-inference-agents.ts",
+  "components/settings/utility-agent-dialog.tsx",
+  "components/settings/utility-agents-section.tsx",
+  "components/settings/utility-dirty.ts",
+  "components/settings/utility-sections.tsx",
+  "components/settings/voice-mode-settings.tsx",
+  "lib/settings/external-mcp-tools.ts",
 ];

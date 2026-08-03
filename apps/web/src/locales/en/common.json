@@ -3,6 +3,7 @@
   "agents": "Agents",
   "automations": "Automations",
   "cancel": "Cancel",
+  "changelog": "Changelog",
   "commandAgentsSettings": "Agents Settings",
   "commandAgentsSettingsKeywords": "agents, agent settings, agent profiles, installed agents, claude",
   "commandConfigChatKeywords": "config chat, config mode, configure kandev, workflow configuration, mcp configuration",

@@ -185,6 +185,35 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
   // "Close" label — both shared, both out of scope for a per-integration PR.
   //
+  // NOT YET: "settings — external mcp", "… prompts", "… voice mode",
+  // "… utility agents". All four pages' own copy is fully migrated and was
+  // verified by running this oracle against each of them — every string those
+  // routes own renders accented, including the 43 in the MCP tool catalog
+  // (`lib/settings/external-mcp-tools.ts`), which is a `.ts` module no lint rule
+  // inspects. The collapsed tools preview, the utility agent dialog and the
+  // inference status note were scanned separately, since this spec only sees
+  // what a route renders on load.
+  //
+  // #2214 migrated the settings nav, which was the original blocker, and these
+  // four now come back clean of it. What still stops them being entries here is
+  // copy none of them owns:
+  //   - `aria-label="breadcrumb"` from `@kandev/ui`'s Breadcrumb primitive, and
+  //     Sonner's `Notifications alt+T` toast-region label. Both are the shared-UI
+  //     case docs/i18n.md describes: they need a strings-provider seam in the
+  //     package, not a per-route fix.
+  //   - `Configuration Chat` from `components/config-chat/`, not yet migrated.
+  // Allowlisting either here would hide misses belonging to whoever owns them,
+  // which is the failure this list's own comment warns about. The workspace
+  // names these routes also surfaced are no longer among them: #2220 derives
+  // them from the boot payload and makes them ineligible, which is the right
+  // fix — they are user data, and listing them by value would have fixed the
+  // fixture and left every developer's own instance broken.
+  //
+  // Each route also renders data that is correctly English and would need an
+  // `allow` entry: the built-in prompts' names and bodies and the built-in
+  // utility agents' names and descriptions (both backend-authored), the agent
+  // product names and config paths on External MCP, and `Ctrl+Shift+M`.
+  //
   // NOT YET: "settings — workspace workflows"
   // (`/settings/workspace/:id/workflows`). The workflow editor's own copy is
   // fully migrated and was verified with this oracle against a live instance,
