@@ -273,32 +273,15 @@ Built-in prompt content refreshes are seed-data migrations, not schema migration
 
 ## Internationalization
 
-`internal/i18n` covers only Go-rendered browser copy: SPA-unavailable pages and
-shared-task artifacts (`share.html`, gist README, gist description). Diagnostics,
-logs, agent/ACP output, and CLI output remain English by design.
-
-- `i18n.T(locale, key)` / `i18n.Tf(locale, key, vars)` for lookup; `Tf`
-  interpolates `{{name}}` and applies the catalog's i18next-compatible plural
-  selection (`key_one` / `key_other`).
-- `i18n.FromRequest(r)` at the HTTP boundary. Shared-task output resolves its
-  locale once when created and threads it explicitly through the artifact
-  builders; it is not request context or package state. See ADR
-  `2026-08-01-share-artifact-locale.md`.
-- Catalogs are embedded JSON (`internal/i18n/locales/<locale>.json`). `pseudo` is
-  **generated** — run `pnpm run i18n:pseudo` from `apps/web`, which writes both
-  the frontend and backend catalogs. A per-package test fails if an `en` key is
-  missing from `pseudo`.
-- **For new user-facing output, prefer returning a stable error code** the
-  frontend translates. Reach for `i18n.T` only when Go itself writes the bytes a
-  user reads.
+`internal/i18n` renders only browser-facing copy: SPA-unavailable pages and shared-task artifacts. Diagnostics, logs, agent/ACP output, and CLI output remain English.
+Use `i18n.T`/`i18n.Tf` with explicit locale threading (including interpolation/plurals); resolve artifact locale at creation. Catalogs are embedded in `internal/i18n/locales/`; regenerate `pseudo` with `pnpm run i18n:pseudo`.
+Prefer stable error codes for new output so the frontend translates it. See `docs/i18n.md` and ADR `2026-08-01-share-artifact-locale.md`.
 
 ## Code-quality limits
 
 Enforced by `apps/backend/.golangci.yml` (errors on new code only):
-- Functions: ≤80 lines, ≤50 statements
-- Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
-- Nesting depth: ≤5 · Naked returns only in functions ≤30 lines
-- No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences)
+- Functions: ≤80 lines, ≤50 statements · Cyclomatic complexity: ≤15 · Cognitive complexity: ≤30
+- Nesting depth: ≤5 · Naked returns only in functions ≤30 lines · No duplicated blocks (≥150 tokens) · Repeated strings → constants (≥3 occurrences)
 
 When you hit a limit, extract a helper function. Prefer composition over growing a single function.
 
