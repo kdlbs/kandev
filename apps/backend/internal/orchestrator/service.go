@@ -574,9 +574,10 @@ type Service struct {
 	cancelInFlightMu sync.Mutex
 	// cancelInFlight holds one *cancelInFlightGuard per session with an
 	// active reference — an in-progress or waiting claim from CancelAgent
-	// (the user cancel button — TryLock, dedup impatient retries), the
-	// natural turn-completion/boot-ready drain decision in handleAgentReady
-	// / handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it),
+	// (the user cancel button, with duplicate calls joined by a separate
+	// operation registry), the natural turn-completion/boot-ready drain
+	// decision in handleAgentReady / handleAgentBootReady (blocking while an
+	// active cancellation marker yields),
 	// or QueueAndInterruptForPeerMessage (blocking Lock — must wait rather
 	// than work around a busy lock with an unguarded insert; see its doc
 	// comment), or an agent stream handler persisting output (blocking Lock so
@@ -605,6 +606,18 @@ type Service struct {
 	// sends happen after releasing it so one slow bus cannot delay other sessions.
 	cancelOperationsMu sync.Mutex
 	cancelOperations   map[string]*cancellationOperationState
+	// cancelOperationDone closes when the last cancellation intent for a
+	// session finishes. Consumers that already hold a per-session guard may
+	// temporarily release it, wait on this channel, and reacquire it without
+	// spinning or blocking the cancellation owner from its post-wait cleanup.
+	cancelOperationDone map[string]chan struct{}
+	// userCancelOperations owns explicit user-cancel requests separately from
+	// the broader cancellation-intent counter above. An owner keeps its entry
+	// while the lifecycle manager waits for terminal stream frames, so duplicate
+	// requests can join even while the shared per-session mutex is temporarily
+	// unlocked for those frames to drain.
+	userCancelOperationsMu sync.Mutex
+	userCancelOperations   map[string]*userCancelOperation
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
@@ -1247,6 +1260,19 @@ func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessio
 // their best-effort behavior; cancellation uses this checked variant because
 // workflow completion must not run while the cancelled turn is still open.
 func (s *Service) completeTurnForTaskSessionChecked(ctx context.Context, taskID, sessionID string) error {
+	return s.completeTurnForTaskSessionCheckedOwned(ctx, taskID, sessionID, "")
+}
+
+// completeTurnForTaskSessionCheckedOwned is the cancellation-specific form of
+// turn settlement. When expectedTurnID is non-empty, it closes only that turn
+// and fails closed if a different turn is active. This prevents a late cancel
+// response from sweeping a successor turn that started after the cancelled
+// turn's terminal frames were delivered.
+func (s *Service) completeTurnForTaskSessionCheckedOwned(ctx context.Context, taskID, sessionID, expectedTurnID string) error {
+	if err := s.verifyExpectedTurnOwnership(ctx, sessionID, expectedTurnID); err != nil {
+		return err
+	}
+
 	// Foreground ownership ends with the turn, but detached background work can
 	// outlive it. Preserve those registrations for accounting; full cleanup
 	// belongs to execution/session teardown paths.
@@ -1256,6 +1282,56 @@ func (s *Service) completeTurnForTaskSessionChecked(ctx context.Context, taskID,
 		return nil
 	}
 
+	if expectedTurnID != "" {
+		return s.completeExpectedTurn(ctx, sessionID, expectedTurnID)
+	}
+
+	return s.completeAllTurns(ctx, sessionID)
+}
+
+func (s *Service) verifyExpectedTurnOwnership(ctx context.Context, sessionID, expectedTurnID string) error {
+	if s.turnService == nil || expectedTurnID == "" {
+		return nil
+	}
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("look up captured active turn: %w", err)
+	}
+	if turn != nil && turn.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, turn.ID)
+	}
+	return nil
+}
+
+func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedTurnID string) error {
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("look up captured active turn: %w", err)
+	}
+	if turn == nil {
+		return nil
+	}
+	if turn.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, turn.ID)
+	}
+	if err := s.turnService.CompleteTurn(ctx, expectedTurnID); err != nil {
+		return fmt.Errorf("complete captured turn %s: %w", expectedTurnID, err)
+	}
+	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify captured turn closure: %w", err)
+	}
+	if active == nil {
+		s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
+		return nil
+	}
+	if active.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, active.ID)
+	}
+	return fmt.Errorf("captured cancelled turn %s remains open", expectedTurnID)
+}
+
+func (s *Service) completeAllTurns(ctx context.Context, sessionID string) error {
 	s.activeTurns.Delete(sessionID)
 
 	const maxIterations = 16

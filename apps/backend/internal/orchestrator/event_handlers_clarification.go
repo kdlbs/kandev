@@ -283,9 +283,24 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 	// a concurrent interrupt/drain still backs off exactly as an inline retry
 	// would have.
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
-	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
 
 	// Coordinator stop may have won while this recovery waited for the shared
 	// guard. Re-read inside the critical section and never revive a terminal
@@ -304,7 +319,7 @@ func (s *Service) retryClarificationAfterCancel(ctx context.Context, data clarif
 		return false
 	}
 
-	if err := s.cancelAgentSilent(ctx, data.TaskID, data.SessionID); err != nil {
+	if err := s.cancelAgentSilentWithGuard(ctx, data.TaskID, data.SessionID, unlockGuard, relockGuard); err != nil {
 		s.logger.Warn("cancel failed (agent likely dead), force-transitioning session state",
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
@@ -441,10 +456,25 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 	// this clarification-timeout cancel, or it can race a concurrent parent
 	// interrupt (or another drain) for the same session.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
 	lock.Lock()
-	defer lock.Unlock()
-	if err := s.cancelAgentSilent(writeCtx, session.TaskID, sessionID); err != nil {
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
+	if err := s.cancelAgentSilentWithGuard(writeCtx, session.TaskID, sessionID, unlockGuard, relockGuard); err != nil {
 		return detached, err
 	}
 	return detached, nil
@@ -457,6 +487,20 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 // (agent crashed mid-turn). In that case, skip the cancel signal but still reconcile the
 // session's state so clarification recovery can proceed with a fresh prompt.
 func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID string) error {
+	return s.cancelAgentSilentWithGuard(ctx, taskID, sessionID, nil, nil)
+}
+
+// cancelAgentSilentWithGuard performs the blocking lifecycle cancel while the
+// caller's per-session guard is temporarily unlocked. The cancellation intent
+// marker remains active for the whole operation, so ready/boot-ready and
+// duplicate cancellation paths cannot claim the session during the wait.
+func (s *Service) cancelAgentSilentWithGuard(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	unlockGuard func(),
+	relockGuard func(),
+) error {
 	endCancel := s.beginCancelInFlight(sessionID)
 	defer endCancel()
 
@@ -464,11 +508,20 @@ func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID strin
 		s.logger.Debug("skipping silent clarification cancel because agent manager is not configured",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID))
-	} else if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
-		if !errors.Is(err, lifecycle.ErrNoExecutionForSession) && !errors.Is(err, lifecycle.ErrCancelEscalated) {
-			return fmt.Errorf("cancel agent: %w", err)
+	} else {
+		if unlockGuard != nil {
+			unlockGuard()
 		}
-		s.logSilentCancelReconciled(taskID, sessionID, err)
+		cancelErr := s.agentManager.CancelAgent(ctx, sessionID)
+		if relockGuard != nil {
+			relockGuard()
+		}
+		if cancelErr != nil {
+			if !errors.Is(cancelErr, lifecycle.ErrNoExecutionForSession) && !errors.Is(cancelErr, lifecycle.ErrCancelEscalated) {
+				return fmt.Errorf("cancel agent: %w", cancelErr)
+			}
+			s.logSilentCancelReconciled(taskID, sessionID, cancelErr)
+		}
 	}
 	s.updateTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, nil)
 	s.completeTurnForSession(ctx, sessionID)

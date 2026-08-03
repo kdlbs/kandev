@@ -235,6 +235,11 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	}
 
 	if s.isCancelInFlight(data.SessionID) {
+		// A boot-ready event that arrives while cancellation is waiting must
+		// not revive the session in the cancellation window. The cancellation
+		// owner will reconcile the session after the lifecycle wait; dropping
+		// this stale boot signal also avoids blocking a handler on a marker that
+		// is intentionally held until that reconciliation is complete.
 		s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
@@ -392,7 +397,26 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	defer func() {
+		if guardLocked {
+			lock.Unlock()
+		}
+	}()
+	for s.isCancelInFlight(data.SessionID) {
+		// The cancellation owner temporarily releases this mutex while the
+		// lifecycle manager waits for terminal stream frames. Do not complete
+		// the still-running turn in that window, but also do not discard this
+		// ready event: if cancellation fails, it is the event that must finish
+		// the unchanged turn and drain its queue.
+		lock.Unlock()
+		guardLocked = false
+		if err := s.waitForCancelInFlight(ctx, data.SessionID); err != nil {
+			return
+		}
+		lock.Lock()
+		guardLocked = true
+	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
 	// clarification recovery, or another drain) may have already resolved

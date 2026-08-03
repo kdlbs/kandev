@@ -21,6 +21,9 @@ func isScriptMode(cmd string) bool {
 func executeScript(e *emitter, fullPrompt, cmd string) {
 	lines := strings.Split(cmd, "\n")
 	for _, line := range lines {
+		if e.ctx != nil && e.ctx.Err() != nil {
+			return
+		}
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
@@ -47,7 +50,7 @@ func executeCommand(e *emitter, fullPrompt, line string) {
 
 	case strings.HasPrefix(line, "e2e:delay("):
 		ms := extractIntArg(line, "e2e:delay(")
-		fixedDelay(ms)
+		waitForDelay(e.ctx, ms)
 
 	case strings.HasPrefix(line, "e2e:mcp:"):
 		executeMCPCommand(e, fullPrompt, line)

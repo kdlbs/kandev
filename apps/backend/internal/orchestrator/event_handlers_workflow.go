@@ -1423,6 +1423,11 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isCancelInFlight(sessionID) {
+		s.logger.Debug("skipping drain while cancellation is in progress",
+			zap.String("session_id", sessionID))
+		return false
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -1450,7 +1455,7 @@ func (s *Service) drainQueuedMessageForPromptableSession(ctx context.Context, se
 // Service.dispatchingQueued field doc comment for the double-dispatch
 // window this closes.
 func (s *Service) drainQueuedMessageForPromptableSessionLocked(ctx context.Context, sessionID string) bool {
-	if s.messageQueue == nil || s.isQueuedDispatchInFlight(sessionID) {
+	if s.messageQueue == nil || s.isCancelInFlight(sessionID) || s.isQueuedDispatchInFlight(sessionID) {
 		return false
 	}
 	queuedMsg, ok := s.messageQueue.ReserveQueued(ctx, sessionID)

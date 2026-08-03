@@ -31,9 +31,10 @@ var mcpServers map[string]mcpServerDef
 
 // mockAgent implements the acp.Agent interface for the mock agent.
 type mockAgent struct {
-	conn            *acp.AgentSideConnection
+	conn            sessionUpdater
 	model           string
 	sessions        map[acp.SessionId]bool
+	promptCancels   map[acp.SessionId]context.CancelFunc
 	sessionConfig   map[acp.SessionId][]acp.SessionConfigOption
 	commandsEmitted map[acp.SessionId]bool
 	nextSessionID   uint64
@@ -68,6 +69,7 @@ func main() {
 	ag := &mockAgent{
 		model:           model,
 		sessions:        make(map[acp.SessionId]bool),
+		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
 		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
 		commandsEmitted: make(map[acp.SessionId]bool),
 	}
@@ -237,21 +239,48 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 
 // Prompt processes a user message and streams responses via SessionUpdate.
 func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
-	a.emitAvailableCommandsOnce(ctx, req.SessionId)
+	promptCtx, cancelPrompt := context.WithCancel(ctx)
+	a.mu.Lock()
+	if a.promptCancels == nil {
+		a.promptCancels = make(map[acp.SessionId]context.CancelFunc)
+	}
+	a.promptCancels[req.SessionId] = cancelPrompt
+	a.mu.Unlock()
+	defer func() {
+		cancelPrompt()
+		a.mu.Lock()
+		if current := a.promptCancels[req.SessionId]; current != nil {
+			delete(a.promptCancels, req.SessionId)
+		}
+		a.mu.Unlock()
+	}()
+
+	a.emitAvailableCommandsOnce(promptCtx, req.SessionId)
 	prompt := extractPromptText(req.Prompt)
 	// The /overloaded scenario must surface a real prompt-time ACP *error*
 	// (a JSON-RPC error response), which handlePrompt's emitter cannot do —
 	// so intercept it here and return the error from Prompt directly.
-	if resp, err, handled := a.handleOverloaded(ctx, req.SessionId, prompt); handled {
+	if resp, err, handled := a.handleOverloaded(promptCtx, req.SessionId, prompt); handled {
 		return resp, err
 	}
-	e := &emitter{ctx: ctx, conn: a.conn, sid: req.SessionId}
+	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
 	handlePrompt(e, prompt, a.model)
+	if promptCtx.Err() != nil {
+		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 }
 
 // Cancel handles session cancellation.
-func (a *mockAgent) Cancel(_ context.Context, _ acp.CancelNotification) error { return nil }
+func (a *mockAgent) Cancel(_ context.Context, req acp.CancelNotification) error {
+	a.mu.Lock()
+	cancelPrompt := a.promptCancels[req.SessionId]
+	a.mu.Unlock()
+	if cancelPrompt != nil {
+		cancelPrompt()
+	}
+	return nil
+}
 
 // Authenticate handles auth requests (no-op for mock).
 func (a *mockAgent) Authenticate(_ context.Context, _ acp.AuthenticateRequest) (acp.AuthenticateResponse, error) {

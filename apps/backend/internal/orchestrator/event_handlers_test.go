@@ -285,6 +285,7 @@ type mockAgentManager struct {
 	// supplied context has been cancelled. It lets cancellation tests verify
 	// that accepted work uses a detached context.
 	cancelAgentContextErr error
+	cancelAgentFunc       func(context.Context, string) error
 	// cancelAgentErr, when set, is returned by CancelAgent instead of nil —
 	// lets tests exercise callers that must react to a genuine cancel
 	// failure (as opposed to the tolerated ErrNoExecutionForSession /
@@ -403,7 +404,7 @@ func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}
 	return result, err
 }
-func (m *mockAgentManager) CancelAgent(ctx context.Context, _ string) error {
+func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {
 		select {
@@ -416,6 +417,9 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, _ string) error {
 	}
 	if m.cancelAgentContextErr != nil && ctx.Err() != nil {
 		return m.cancelAgentContextErr
+	}
+	if m.cancelAgentFunc != nil {
+		return m.cancelAgentFunc(ctx, sessionID)
 	}
 	return m.cancelAgentErr
 }

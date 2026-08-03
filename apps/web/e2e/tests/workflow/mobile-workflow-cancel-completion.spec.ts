@@ -4,6 +4,43 @@ import { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
+const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
+
+async function expectCancelToSettlePromptly(session: SessionPage) {
+  const startedAt = Date.now();
+  await expect(session.cancelAgentButton()).not.toBeVisible({
+    timeout: CANCEL_SETTLE_TIMEOUT_MS,
+  });
+  await expect(session.idleInput()).toBeVisible({
+    timeout: CANCEL_SETTLE_TIMEOUT_MS,
+  });
+  expect(Date.now() - startedAt).toBeLessThan(CANCEL_SETTLE_TIMEOUT_MS);
+}
+
+async function tapCancelButton(session: SessionPage) {
+  const button = session.cancelAgentButton();
+  await expect(button).toBeVisible();
+  await expect(button).toBeEnabled();
+  await expect(button).toBeInViewport();
+  // Mobile Chromium can finish a compositor/hydration frame after the
+  // locator is visible. Retry the touch dispatch until the synchronous React
+  // cancelling state is observable; the two-second responsiveness assertion
+  // starts only after that state proves the request was accepted.
+  await expect(async () => {
+    await button.scrollIntoViewIfNeeded();
+    await button.tap();
+    await expect
+      .poll(
+        async () => {
+          if ((await button.count()) === 0) return true;
+          return button.isDisabled();
+        },
+        { timeout: 1_000 },
+      )
+      .toBe(true);
+  }).toPass({ timeout: 6_000, intervals: [100, 250, 500] });
+}
+
 async function seedMobileCancellationWorkflow(apiClient: ApiClient, workspaceId: string) {
   const workflow = await apiClient.createWorkflow(workspaceId, "Mobile Cancel Completion");
   const inbox = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0, {
@@ -12,7 +49,8 @@ async function seedMobileCancellationWorkflow(apiClient: ApiClient, workspaceId:
   const working = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
   const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
   await apiClient.updateWorkflowStep(working.id, {
-    prompt: 'e2e:delay(8000)\ne2e:message("mobile cancelled turn marker")\n{{task_prompt}}',
+    prompt:
+      'e2e:message("mobile cancelable turn started")\ne2e:delay(8000)\ne2e:message("mobile cancelled turn marker")\n{{task_prompt}}',
     events: {
       on_enter: [{ type: "auto_start_agent" }],
       on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
@@ -98,10 +136,13 @@ test.describe("mobile: cancelled turn completion", () => {
       })
       .toBe(workflow.workingStepId);
     await expect(session.cancelAgentButton()).toBeVisible({ timeout: 30_000 });
+    await expect(
+      session.activeChat().getByText("mobile cancelable turn started", { exact: false }),
+    ).toBeVisible({ timeout: 15_000 });
 
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
-    await session.cancelAgentButton().tap();
-    await expect(session.cancelAgentButton()).not.toBeVisible({ timeout: 30_000 });
+    await tapCancelButton(session);
+    await expectCancelToSettlePromptly(session);
     await expect
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
         timeout: 30_000,

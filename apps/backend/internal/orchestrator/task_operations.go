@@ -3930,7 +3930,21 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	defer func() {
+		if guardLocked {
+			lock.Unlock()
+		}
+	}()
+	for s.isCancelInFlight(sessionID) {
+		lock.Unlock()
+		guardLocked = false
+		if err := s.waitForCancelInFlight(ctx, sessionID); err != nil {
+			return false, err
+		}
+		lock.Lock()
+		guardLocked = true
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -3952,6 +3966,11 @@ func (s *Service) DrainQueuedMessage(ctx context.Context, sessionID string) (boo
 type cancelInFlightGuard struct {
 	mu   sync.Mutex
 	refs int
+}
+
+type userCancelOperation struct {
+	done chan struct{}
+	err  error
 }
 
 // acquireCancelInFlightGuard returns the shared per-session mutex guarding
@@ -4013,6 +4032,12 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 		state = &cancellationOperationState{}
 		s.cancelOperations[sessionID] = state
 	}
+	if s.cancelOperationDone == nil {
+		s.cancelOperationDone = make(map[string]chan struct{})
+	}
+	if state.count == 0 {
+		s.cancelOperationDone[sessionID] = make(chan struct{})
+	}
 	state.count++
 	startDrain := false
 	if state.count == 1 {
@@ -4033,6 +4058,10 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 			if state != nil && state.count > 0 {
 				state.count--
 				if state.count == 0 {
+					if done := s.cancelOperationDone[sessionID]; done != nil {
+						close(done)
+					}
+					delete(s.cancelOperationDone, sessionID)
 					state.revision++
 					startDrain = s.enqueueCancellationPendingLocked(sessionID, state, false)
 				}
@@ -4162,6 +4191,82 @@ func (s *Service) isCancelInFlight(sessionID string) bool {
 	return state != nil && state.count > 0
 }
 
+// waitForCancelInFlight blocks until all cancellation intents for sessionID
+// have finished. Callers that hold the per-session guard must release it
+// before waiting; the cancellation owner may need that mutex for terminal
+// stream persistence and final reconciliation.
+func (s *Service) waitForCancelInFlight(ctx context.Context, sessionID string) error {
+	for {
+		s.cancelOperationsMu.Lock()
+		count := 0
+		if state := s.cancelOperations[sessionID]; state != nil {
+			count = state.count
+		}
+		done := s.cancelOperationDone[sessionID]
+		s.cancelOperationsMu.Unlock()
+		if count == 0 {
+			return nil
+		}
+		if done == nil {
+			// Defensive fallback for services constructed by older tests or
+			// partially initialized state; do not spin while a marker exists.
+			timer := time.NewTimer(5 * time.Millisecond)
+			select {
+			case <-timer.C:
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return ctx.Err()
+			}
+			continue
+		}
+		select {
+		case <-done:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// claimUserCancelOperation makes the first explicit user cancellation for a
+// session its owner. Later requests join the same operation and observe its
+// result, even while the owner temporarily releases cancelInFlightGuard for
+// terminal stream callbacks to drain.
+func (s *Service) claimUserCancelOperation(sessionID string) (*userCancelOperation, bool) {
+	s.userCancelOperationsMu.Lock()
+	defer s.userCancelOperationsMu.Unlock()
+	if operation, ok := s.userCancelOperations[sessionID]; ok {
+		return operation, false
+	}
+	if s.userCancelOperations == nil {
+		s.userCancelOperations = make(map[string]*userCancelOperation)
+	}
+	operation := &userCancelOperation{done: make(chan struct{})}
+	s.userCancelOperations[sessionID] = operation
+	return operation, true
+}
+
+func (s *Service) finishUserCancelOperation(sessionID string, operation *userCancelOperation, err error) {
+	s.userCancelOperationsMu.Lock()
+	defer s.userCancelOperationsMu.Unlock()
+	if current, ok := s.userCancelOperations[sessionID]; !ok || current != operation {
+		return
+	}
+	operation.err = err
+	delete(s.userCancelOperations, sessionID)
+	close(operation.done)
+}
+
+func (operation *userCancelOperation) wait(ctx context.Context) error {
+	select {
+	case <-operation.done:
+		return operation.err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 // reconcileCancelledTurn durably settles the cancelled session and its turn.
 // A user cancellation may trigger workflow completion only after both pieces
 // of bookkeeping have been confirmed from their authoritative stores. The
@@ -4175,11 +4280,32 @@ func (s *Service) reconcileCancelledTurn(
 	session *models.TaskSession,
 	requireWaiting bool,
 ) (*models.TaskSession, error) {
+	return s.reconcileCancelledTurnOwned(ctx, taskID, sessionID, session, requireWaiting, "")
+}
+
+// reconcileCancelledTurnOwned settles cancellation bookkeeping for the turn
+// captured by the caller. An expected turn ID makes every authoritative check
+// fail closed when a successor turn has appeared, rather than allowing the
+// generic cleanup sweep to close unrelated work.
+func (s *Service) reconcileCancelledTurnOwned(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	session *models.TaskSession,
+	requireWaiting bool,
+	expectedTurnID string,
+) (*models.TaskSession, error) {
+	if err := s.verifyCapturedCancelledTurn(ctx, sessionID, expectedTurnID); err != nil {
+		return nil, err
+	}
 	authoritativeSession, err := s.reconcileCancelledSessionState(ctx, taskID, session, requireWaiting)
 	if err != nil {
 		return nil, err
 	}
-	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
+	if err := s.verifyCapturedCancelledTurn(ctx, sessionID, expectedTurnID); err != nil {
+		return nil, err
+	}
+	if err := s.completeTurnForTaskSessionCheckedOwned(ctx, taskID, sessionID, expectedTurnID); err != nil {
 		return nil, fmt.Errorf("settle cancelled turn: %w", err)
 	}
 
@@ -4189,11 +4315,25 @@ func (s *Service) reconcileCancelledTurn(
 	if err := validateCancelledSessionState(session.ID, authoritativeSession, requireWaiting); err != nil {
 		return nil, err
 	}
-	if err := s.verifyCancelledTurnClosed(ctx, sessionID); err != nil {
+	if err := s.verifyCancelledTurnClosedOwned(ctx, sessionID, expectedTurnID); err != nil {
 		return nil, err
 	}
 
 	return authoritativeSession, nil
+}
+
+func (s *Service) verifyCapturedCancelledTurn(ctx context.Context, sessionID, expectedTurnID string) error {
+	if s.turnService == nil || expectedTurnID == "" {
+		return nil
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("inspect captured cancelled turn: %w", err)
+	}
+	if activeTurn != nil && activeTurn.ID != expectedTurnID {
+		return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, activeTurn.ID)
+	}
+	return nil
 }
 
 func (s *Service) reconcileCancelledSessionState(
@@ -4263,6 +4403,10 @@ func validateCancelledSessionState(
 }
 
 func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID string) error {
+	return s.verifyCancelledTurnClosedOwned(ctx, sessionID, "")
+}
+
+func (s *Service) verifyCancelledTurnClosedOwned(ctx context.Context, sessionID, expectedTurnID string) error {
 	if s.turnService == nil {
 		return nil
 	}
@@ -4271,6 +4415,9 @@ func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID strin
 		return fmt.Errorf("verify cancelled turn closure: %w", err)
 	}
 	if activeTurn != nil {
+		if expectedTurnID != "" && activeTurn.ID != expectedTurnID {
+			return fmt.Errorf("captured cancelled turn %s was superseded by active turn %s", expectedTurnID, activeTurn.ID)
+		}
 		return fmt.Errorf("cancelled turn %s remains open", activeTurn.ID)
 	}
 	return nil
@@ -4284,10 +4431,24 @@ func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID strin
 // DB state (transitions to WAITING_FOR_INPUT, records the cancel message, completes the
 // turn) so the user can unstick a session whose agent subprocess crashed. Other errors
 // still fail the cancel.
-func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
+type cancelAgentPreparation struct {
+	session            *models.TaskSession
+	completionEligible bool
+	capturedTurnID     string
+	cancelTurnID       string
+}
+
+func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error) {
 	if err := s.authorizeSession(ctx, sessionID); err != nil {
 		return err
 	}
+	operation, owner := s.claimUserCancelOperation(sessionID)
+	if !owner {
+		return operation.wait(ctx)
+	}
+	defer func() {
+		s.finishUserCancelOperation(sessionID, operation, err)
+	}()
 
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 	endCancel := s.beginCancelInFlight(sessionID)
@@ -4297,152 +4458,176 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// not leave the session stuck in RUNNING after the agent has been interrupted.
 	operationCtx := context.WithoutCancel(ctx)
 
-	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
-	// disable, so impatient users click it multiple times while the agent is
-	// still tearing down the turn (e.g. unwinding a Claude Monitor tool can take
-	// several seconds). Without this guard each click produces a duplicate
-	// "Turn cancelled by user" message and races on turn cleanup — the second
-	// call's getActiveTurnID lazily starts a phantom turn after the first call
-	// already closed the real one.
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	defer release()
-	if !lock.TryLock() {
-		s.logger.Debug("cancel already in flight; skipping duplicate",
-			zap.String("session_id", sessionID))
-		return nil
-	}
-	unlocked := false
+	lock.Lock()
+	guardLocked := true
 	unlockGuard := func() {
-		if !unlocked {
-			unlocked = true
+		if guardLocked {
 			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
 		}
 	}
 	defer unlockGuard()
 
-	// Fetch session for state updates and message creation
-	session, err := s.repo.GetTaskSession(operationCtx, sessionID)
+	prepared, err := s.prepareCancelAgent(operationCtx, sessionID)
+	if err != nil {
+		return err
+	}
+	if err := s.cancelAgentWhileUnlocked(operationCtx, sessionID, unlockGuard, relockGuard); err != nil {
+		return err
+	}
+	if err := s.finishCancelledAgentTurn(operationCtx, sessionID, prepared); err != nil {
+		return err
+	}
+
+	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
+	return nil
+}
+
+func (s *Service) prepareCancelAgent(ctx context.Context, sessionID string) (cancelAgentPreparation, error) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to get session for cancel",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
-	cancelTurnCompletionEligible := false
-	if session != nil {
-		switch session.State {
-		case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
-			cancelTurnCompletionEligible = true
-		case models.TaskSessionStateWaitingForInput:
-			// A previous cancellation may have settled the session before a
-			// transient turn-close failure. Keep that retry eligible only while
-			// an active turn is still present; a settled second cancel must not
-			// re-run the source step's completion actions.
-			activeTurnID, turnErr := s.peekActiveTurnID(operationCtx, sessionID)
-			if turnErr != nil {
-				return fmt.Errorf("inspect active turn before cancel retry: %w", turnErr)
-			}
-			cancelTurnCompletionEligible = activeTurnID != ""
-		}
+	completionEligible, err := s.cancelTurnCompletionEligible(ctx, session, sessionID)
+	if err != nil {
+		return cancelAgentPreparation{}, err
 	}
 
-	// Capture the active turn before cancelling so the cancel message attaches
-	// to the turn the user was actually cancelling. If we waited until after
-	// agentManager.CancelAgent, the agent's complete event could have already
-	// closed the turn, and getActiveTurnID would lazily create a phantom turn
-	// just to host the cancel message.
-	cancelTurnID := s.getActiveTurnID(sessionID)
-
-	// The agent manager routes the cancel to the right signal: ACP cancel for
-	// regular sessions, Ctrl-C via PTY stdin for passthrough sessions. Service
-	// stays protocol-agnostic; the seam is in lifecycle.Manager.CancelAgentBySessionID.
-	if err := s.agentManager.CancelAgent(operationCtx, sessionID); err != nil {
-		switch {
-		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
-			// The session was live but there is no execution to cancel — the agent process
-			// crashed, exited, or never re-registered after a backend restart. Log at error
-			// level so operators notice the stuck state; we still reconcile DB state below
-			// so the UI unsticks.
-			s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		case errors.Is(err, lifecycle.ErrCancelEscalated):
-			// The agent accepted the ACP cancel but never published a completion event.
-			// The lifecycle manager already unblocked the in-flight prompt and marked the
-			// execution ready; reconcile DB state below so the UI unsticks.
-			s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		default:
-			return fmt.Errorf("cancel agent: %w", err)
+	capturedTurnID := ""
+	if s.turnService != nil {
+		capturedTurnID, err = s.peekActiveTurnID(ctx, sessionID)
+		if err != nil {
+			return cancelAgentPreparation{}, fmt.Errorf("inspect active turn before cancel: %w", err)
 		}
 	}
+	cancelTurnID := capturedTurnID
+	if cancelTurnID == "" {
+		cancelTurnID = s.getActiveTurnID(sessionID)
+	}
+	return cancelAgentPreparation{
+		session:            session,
+		completionEligible: completionEligible,
+		capturedTurnID:     capturedTurnID,
+		cancelTurnID:       cancelTurnID,
+	}, nil
+}
 
-	// Transition the session to WAITING_FOR_INPUT and close every open turn.
-	// Both writes are checked against their authoritative stores before any
-	// workflow completion is evaluated; a failure leaves the task on its
-	// current step so a retry can reconcile it safely.
+func (s *Service) cancelTurnCompletionEligible(ctx context.Context, session *models.TaskSession, sessionID string) (bool, error) {
+	if session == nil {
+		return false, nil
+	}
+	switch session.State {
+	case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+		return true, nil
+	case models.TaskSessionStateWaitingForInput:
+		activeTurnID, err := s.peekActiveTurnID(ctx, sessionID)
+		if err != nil {
+			return false, fmt.Errorf("inspect active turn before cancel retry: %w", err)
+		}
+		return activeTurnID != "", nil
+	default:
+		return false, nil
+	}
+}
+
+func (s *Service) cancelAgentWhileUnlocked(ctx context.Context, sessionID string, unlockGuard, relockGuard func()) error {
+	// The lifecycle manager waits for the in-flight prompt to consume terminal
+	// stream frames delivered through the same per-session guard. Keep the
+	// operation marker and guard registry reference active, but release only the
+	// mutex around that blocking wait.
+	unlockGuard()
+	cancelErr := s.agentManager.CancelAgent(ctx, sessionID)
+	relockGuard()
+	if cancelErr == nil {
+		return nil
+	}
+	switch {
+	case errors.Is(cancelErr, lifecycle.ErrNoExecutionForSession):
+		// A crashed or unregistered process still needs DB reconciliation so the
+		// session does not remain stuck.
+		s.logger.Error("agent process appears to have crashed: no live execution for session on cancel",
+			zap.String("session_id", sessionID),
+			zap.Error(cancelErr))
+	case errors.Is(cancelErr, lifecycle.ErrCancelEscalated):
+		// The lifecycle manager already unblocked the prompt and marked the
+		// execution ready; reconcile the session state below.
+		s.logger.Warn("agent did not acknowledge cancel; reconciling session state",
+			zap.String("session_id", sessionID),
+			zap.Error(cancelErr))
+	default:
+		return fmt.Errorf("cancel agent: %w", cancelErr)
+	}
+	return nil
+}
+
+func (s *Service) finishCancelledAgentTurn(ctx context.Context, sessionID string, prepared cancelAgentPreparation) error {
+	session := prepared.session
 	if session != nil {
-		reconciled, err := s.reconcileCancelledTurn(operationCtx, session.TaskID, sessionID, session, cancelTurnCompletionEligible)
+		reconciled, err := s.reconcileCancelledTurnOwned(
+			ctx,
+			session.TaskID,
+			sessionID,
+			session,
+			prepared.completionEligible,
+			prepared.capturedTurnID,
+		)
 		if err != nil {
 			return fmt.Errorf("reconcile cancelled turn: %w", err)
 		}
 		if reconciled != nil {
 			session = reconciled
 		}
-	} else if _, err := s.reconcileCancelledTurn(operationCtx, "", sessionID, nil, false); err != nil {
+	} else if _, err := s.reconcileCancelledTurnOwned(ctx, "", sessionID, nil, false, prepared.capturedTurnID); err != nil {
 		return fmt.Errorf("reconcile cancelled turn: %w", err)
 	}
 
-	// Record cancellation in the message history
-	if s.messageCreator != nil && session != nil {
-		metadata := map[string]interface{}{
-			"cancelled": true,
-			"variant":   "warning",
-		}
-		if err := s.messageCreator.CreateSessionMessage(
-			operationCtx,
-			session.TaskID,
-			"Turn cancelled by user",
-			sessionID,
-			string(v1.MessageTypeStatus),
-			cancelTurnID,
-			metadata,
-			false,
-		); err != nil {
-			s.logger.Warn("failed to create cancel message",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-		}
-	}
-
-	// A configured explicit user cancellation is a human completion decision.
-	// Evaluate it only after the cancellation message and turn settlement are
-	// durable, while the per-session guard still excludes a late agent.ready
-	// event from observing a successor turn and transitioning a second time.
-	if session != nil && cancelTurnCompletionEligible {
-		s.processOnTurnCompleteViaEngineWithCause(operationCtx, session.TaskID, session, turnCompletionCauseUserCancellation)
-		// Disabled/no-transition outcomes and successful nonterminal transitions
-		// both reconcile the source task to REVIEW after session and turn
-		// settlement. The guarded state write is a no-op for terminal tasks or a
-		// destination that has already restarted work.
-		s.reconcileCancelledTaskReview(operationCtx, session.TaskID, session.ID)
-	} else if session != nil {
-		// Preserve the existing review reconciliation for cancellations that
-		// are not eligible to run workflow completion (already waiting or a
-		// terminal/ineligible session).
-		s.reconcileCancelledTaskReview(operationCtx, session.TaskID, session.ID)
-	}
-
-	// Release the cancel/interrupt guard now that this session's cancel is
-	// fully resolved. Do not drain here: a user cancellation must not itself
-	// start the next queued message. Both unlockGuard and release are
-	// idempotent, so the deferred calls above become safe no-op error-path
-	// safety nets once this fires.
-	unlockGuard()
-	release()
-
-	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
+	s.recordCancelledAgentMessage(ctx, session, sessionID, prepared.cancelTurnID)
+	s.reconcileCancelledAgentWorkflow(ctx, session, prepared.completionEligible)
 	return nil
+}
+
+func (s *Service) recordCancelledAgentMessage(ctx context.Context, session *models.TaskSession, sessionID, cancelTurnID string) {
+	if s.messageCreator == nil || session == nil {
+		return
+	}
+	metadata := map[string]interface{}{
+		"cancelled": true,
+		"variant":   "warning",
+	}
+	if err := s.messageCreator.CreateSessionMessage(
+		ctx,
+		session.TaskID,
+		"Turn cancelled by user",
+		sessionID,
+		string(v1.MessageTypeStatus),
+		cancelTurnID,
+		metadata,
+		false,
+	); err != nil {
+		s.logger.Warn("failed to create cancel message",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+func (s *Service) reconcileCancelledAgentWorkflow(ctx context.Context, session *models.TaskSession, completionEligible bool) {
+	if session == nil {
+		return
+	}
+	if completionEligible {
+		s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
+	}
+	s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
 }
 
 func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sessionID string) {
@@ -4535,8 +4720,15 @@ func (s *Service) takeIfPromptableLocked(ctx context.Context, taskID, sessionID,
 // signal from the parent, not a user action, so unlike the cancel button it
 // must not write a visible "Turn cancelled" message and must not move the
 // task to REVIEW (writeTaskReviewStateOnCancel).
-func (s *Service) cancelAndTakeForPeerMessage(ctx context.Context, taskID, sessionID, entryID string) (bool, error) {
-	if cancelErr := s.cancelAgentSilent(ctx, taskID, sessionID); cancelErr != nil {
+func (s *Service) cancelAndTakeForPeerMessage(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	entryID string,
+	unlockGuard func(),
+	relockGuard func(),
+) (bool, error) {
+	if cancelErr := s.cancelAgentSilentWithGuard(ctx, taskID, sessionID, unlockGuard, relockGuard); cancelErr != nil {
 		// A genuine (non-tolerated — cancelAgentSilent already swallows "no
 		// active execution") cancel failure leaves session state untouched
 		// by this call: cancelAgentSilent returns before reaching its own
@@ -4644,15 +4836,43 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 	}
 
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
 
 	queued, err := s.messageQueue.QueueMessageWithMetadata(ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByAgent, false, nil, metadata)
 	if err != nil {
 		return nil, false, err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
+	if s.isCancelInFlight(sessionID) {
+		s.logger.Debug("leaving peer message queued while cancellation is in progress",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("queue_id", queued.ID))
+		unlockGuard()
+		if waitErr := s.waitForCancelInFlight(ctx, sessionID); waitErr != nil {
+			relockGuard()
+			return queued, false, waitErr
+		}
+		relockGuard()
+		return queued, false, nil
+	}
 
 	if s.turnService != nil {
 		turnNow, turnNowErr := s.peekActiveTurnID(ctx, sessionID)
@@ -4668,7 +4888,7 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 		}
 	}
 
-	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID)
+	dispatched, err := s.cancelAndTakeForPeerMessage(ctx, taskID, sessionID, queued.ID, unlockGuard, relockGuard)
 	return queued, dispatched, err
 }
 

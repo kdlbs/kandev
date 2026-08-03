@@ -1145,13 +1145,151 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 	assert.Equal(t, "step1", task.WorkflowStepID)
 }
 
+func TestCancelAgent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancel-stream-drain", "session-cancel-stream-drain", models.TaskSessionStateRunning)
+
+	streamDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		go func() {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+				TaskID:    "task-cancel-stream-drain",
+				SessionID: sessionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+				},
+			})
+			close(streamDone)
+		}()
+
+		select {
+		case <-streamDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := svc.CancelAgent(ctx, "session-cancel-stream-drain")
+	require.NoError(t, err)
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the acknowledgement stream callback")
+	}
+}
+
+func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-silent-stream-drain", "session-silent-stream-drain", models.TaskSessionStateRunning)
+
+	streamDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		go func() {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+				TaskID:    "task-silent-stream-drain",
+				SessionID: sessionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+				},
+			})
+			close(streamDone)
+		}()
+
+		select {
+		case <-streamDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	lock, release := svc.acquireCancelInFlightGuard("session-silent-stream-drain")
+	lock.Lock()
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := svc.cancelAgentSilentWithGuard(
+		ctx,
+		"task-silent-stream-drain",
+		"session-silent-stream-drain",
+		unlockGuard,
+		relockGuard,
+	)
+	require.NoError(t, err)
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the acknowledgement stream callback")
+	}
+}
+
+func TestCancelAgent_DoesNotReconcileSuccessorTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancel-successor", "session-cancel-successor", models.TaskSessionStateRunning)
+
+	var svc *Service
+	var successor *models.Turn
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		var err error
+		successor, err = svc.turnService.StartTurn(ctx, sessionID)
+		return err
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	captured, err := svc.turnService.StartTurn(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+
+	err = svc.CancelAgent(ctx, "session-cancel-successor")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "superseded")
+	require.NotNil(t, successor)
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, successor.ID, active.ID)
+	assert.NotEqual(t, captured.ID, active.ID)
+	session, err := repo.GetTaskSession(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
+}
+
 // TestCancelAgent_DeduplicatesConcurrentCalls covers the impatient-user case:
 // the UI's cancel button has no in-flight disable, so users click it multiple
 // times while the agent is still tearing down a slow turn (e.g. a Claude
 // Monitor tool). Without dedupe each click reaches the lifecycle layer and
 // emits its own "Turn cancelled by user" message; phantom turns are also
 // lazily started to host those messages. We assert that only one cancel makes
-// it through to agentManager.CancelAgent while one is already in flight.
+// it through to agentManager.CancelAgent while the other callers join its
+// result.
 func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{
@@ -1175,23 +1313,29 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	// don't depend on real subprocess timing.
 	<-agentMgr.cancelAgentEntered
 
-	// Fire several duplicates while the first is still parked. Each must be
-	// short-circuited by the dedupe guard and return immediately.
+	// Fire several duplicates while the first is still parked. Each joins the
+	// owner operation and waits for its result rather than invoking the manager.
 	const duplicates = 5
+	duplicateDone := make(chan error, duplicates)
 	for i := 0; i < duplicates; i++ {
-		if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
-			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
-		}
+		go func() {
+			duplicateDone <- svc.CancelAgent(context.Background(), "session1")
+		}()
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 agentManager.CancelAgent call while first is in flight, got %d", got)
 	}
 
-	// Release the first call. After it returns, the guard clears and a fresh
-	// cancel is allowed through.
+	// Release the first call. The owner and all joiners observe the same result;
+	// after the operation clears, a fresh cancel is allowed through.
 	close(agentMgr.cancelAgentBlock)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first CancelAgent returned error: %v", err)
+	}
+	for i := 0; i < duplicates; i++ {
+		if err := <-duplicateDone; err != nil {
+			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
+		}
 	}
 
 	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
@@ -2702,7 +2846,7 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 	}
 	select {
 	case <-readyDone:
-		t.Fatal("handleAgentReady returned before CancelAgent released the guard — it must block, not work around it")
+		t.Fatal("handleAgentReady returned before CancelAgent released the cancellation marker")
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -2714,11 +2858,10 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 		t.Fatal("timed out waiting for CancelAgent to finish")
 	}
 	require.NoError(t, cancelErr)
-
 	select {
 	case <-readyDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for handleAgentReady to finish once the guard was released")
+		t.Fatal("timed out waiting for handleAgentReady after CancelAgent finished")
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")

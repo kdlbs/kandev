@@ -11,6 +11,19 @@ type CancellationWorkflow = {
   doneStepId: string;
 };
 
+const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
+
+async function expectCancelToSettlePromptly(session: SessionPage) {
+  const startedAt = Date.now();
+  await expect(session.cancelAgentButton()).not.toBeVisible({
+    timeout: CANCEL_SETTLE_TIMEOUT_MS,
+  });
+  await expect(session.idleInput()).toBeVisible({
+    timeout: CANCEL_SETTLE_TIMEOUT_MS,
+  });
+  expect(Date.now() - startedAt).toBeLessThan(CANCEL_SETTLE_TIMEOUT_MS);
+}
+
 async function createCancellationWorkflow(
   apiClient: ApiClient,
   workspaceId: string,
@@ -25,7 +38,8 @@ async function createCancellationWorkflow(
   const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
 
   await apiClient.updateWorkflowStep(working.id, {
-    prompt: 'e2e:delay(8000)\ne2e:message("cancelled turn marker")\n{{task_prompt}}',
+    prompt:
+      'e2e:message("cancelable turn started")\ne2e:delay(8000)\ne2e:message("cancelled turn marker")\n{{task_prompt}}',
     events: {
       on_enter: [{ type: "auto_start_agent" }],
       on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
@@ -65,6 +79,11 @@ async function startWorkingTurn(
   });
   await expect(session.agentStatus()).toBeVisible({ timeout: 30_000 });
   await expect(session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+  await expect(
+    session.activeChat().getByText("cancelable turn started", { exact: false }),
+  ).toBeVisible({
+    timeout: 15_000,
+  });
   return { task, session };
 }
 
@@ -92,7 +111,7 @@ e2eTest.describe("Cancelled turn completion", () => {
       expect(sessionsBeforeCancel.sessions).toHaveLength(1);
 
       await session.cancelAgentButton().click();
-      await expect(session.cancelAgentButton()).not.toBeVisible({ timeout: 30_000 });
+      await expectCancelToSettlePromptly(session);
       await expect(session.stepperStep("Done")).toHaveAttribute("aria-current", "step", {
         timeout: 30_000,
       });
@@ -123,8 +142,7 @@ e2eTest.describe("Cancelled turn completion", () => {
       expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
 
       await session.cancelAgentButton().click();
-      await expect(session.cancelAgentButton()).not.toBeVisible({ timeout: 30_000 });
-      await expect(session.idleInput()).toBeVisible({ timeout: 30_000 });
+      await expectCancelToSettlePromptly(session);
       await expect(session.stepperStep("Working")).toHaveAttribute("aria-current", "step");
 
       expect((await apiClient.getTask(task.id)).workflow_step_id).toBe(workflow.workingStepId);
