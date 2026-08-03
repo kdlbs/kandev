@@ -102,9 +102,17 @@ describe("Configuration Chat English copy", () => {
     expect(t("common:commandConfigurationChat")).toBe("commandConfigurationChat");
   });
 
-  it("keeps the toast region label distinct from the settings page name", () => {
-    // Same English today; different owners. If one is ever reworded the other
-    // must not follow, which is why they are two keys.
+  it("gives the toast region the same English as the settings page name, from its own key", () => {
+    // Note this asserts EQUALITY, and a failure is not necessarily a bug.
+    //
+    // The two are separate keys with different owners: `settings:notifications`
+    // is the settings PAGE name (per SEGMENT_LABEL_KEYS), while
+    // `common:toastRegionLabel` names the global toast region a screen reader
+    // announces. They happen to render the same word today.
+    //
+    // So a red here means only "they have diverged". Decide which one you meant
+    // to reword, change that one, and update this expectation — do NOT make the
+    // other follow, which is the coupling the two keys exist to prevent.
     expect(t("common:toastRegionLabel")).toBe(t("settings:notifications"));
   });
 });
