@@ -507,6 +507,58 @@ test.describe("Mobile kanban view", () => {
     await expect(dialog.getByRole("button", { name: "View system status" })).toBeVisible();
   });
 
+  test("restores the selected workflow step after opening a task", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Mobile Restore Column Workflow",
+    );
+    const todoStep = await apiClient.createWorkflowStep(workflow.id, "Todo", 0, {
+      is_start_step: true,
+    });
+    const planStep = await apiClient.createWorkflowStep(workflow.id, "Plan", 1);
+    await apiClient.createTask(seedData.workspaceId, "Restore Column Todo Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: todoStep.id,
+    });
+    const planTask = await apiClient.createTask(seedData.workspaceId, "Restore Column Plan Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: planStep.id,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await expect(mobile.boardNavigator).toContainText("Mobile Restore Column Workflow");
+    await prCapture.startRecording("mobile-kanban-column-restore-after");
+    await mobile.boardNavigator.click();
+    await expect(testPage.getByTestId("mobile-board-navigator-drawer")).toBeVisible();
+    await testPage.getByTestId("column-tab-1").click();
+    await expect(testPage.getByTestId("mobile-board-navigator-drawer")).not.toBeVisible();
+    await expect(mobile.boardNavigator).toContainText("Plan");
+    await expect(mobile.taskCardByTitle("Restore Column Plan Task")).toBeInViewport();
+
+    await mobile.taskCard(planTask.id).click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${planTask.id}`));
+
+    await testPage.getByRole("link", { name: "Task overview" }).click();
+    await expect(mobile.mobileKanbanLayout()).toBeVisible();
+    await expect(mobile.boardNavigator).toContainText("Plan");
+    await expect(mobile.taskCardByTitle("Restore Column Plan Task")).toBeInViewport();
+    await expect(mobile.taskCardByTitle("Restore Column Todo Task")).not.toBeInViewport();
+    await prCapture.stopRecording({
+      caption: "After: returning from a task keeps the Plan column selected",
+    });
+  });
+
   test("step drawer allows switching between workflow steps", async ({
     testPage,
     apiClient,

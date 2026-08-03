@@ -81,7 +81,7 @@ export const defaultUIState: UISliceState = {
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   connection: { status: "disconnected", error: null, issueSeverity: "none" },
-  mobileKanban: { activeColumnIndex: 0, isMenuOpen: false, isSearchOpen: false },
+  mobileKanban: { activeStepIdByWorkflowId: {}, isMenuOpen: false, isSearchOpen: false },
   mobileSession: {
     activePanelBySessionId: {},
     reviewMRKeyBySessionId: {},
@@ -168,9 +168,9 @@ function buildPreviewActions(set: ImmerSet) {
 /** Builds the mobile Kanban view's column-index, menu, and search-open actions. */
 function buildMobileActions(set: ImmerSet) {
   return {
-    setMobileKanbanColumnIndex: (index: number) =>
+    setMobileKanbanActiveStep: (workflowId: string, stepId: string) =>
       set((draft) => {
-        draft.mobileKanban.activeColumnIndex = index;
+        draft.mobileKanban.activeStepIdByWorkflowId[workflowId] = stepId;
       }),
     setMobileKanbanMenuOpen: (open: boolean) =>
       set((draft) => {

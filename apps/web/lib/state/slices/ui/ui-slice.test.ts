@@ -71,6 +71,20 @@ describe("mobile merge request review selection", () => {
   });
 });
 
+describe("mobile kanban active step", () => {
+  it("stores the selected step id per workflow without clobbering others", () => {
+    const store = makeStore();
+    store.getState().setMobileKanbanActiveStep("wf-a", "plan");
+    store.getState().setMobileKanbanActiveStep("wf-b", "review");
+    store.getState().setMobileKanbanActiveStep("wf-a", "done");
+
+    expect(store.getState().mobileKanban.activeStepIdByWorkflowId).toEqual({
+      "wf-a": "done",
+      "wf-b": "review",
+    });
+  });
+});
+
 describe("toggleSubtaskCollapsed", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
