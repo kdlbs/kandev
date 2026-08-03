@@ -106,7 +106,11 @@ func TestRunGitOutput_PollingVariantReleasesThrottleOnTimeout(t *testing.T) {
 
 func TestWorkspaceGitAdmissionWaitDoesNotConsumeTimeout(t *testing.T) {
 	prev := gitCommandTimeout
-	gitCommandTimeout = 100 * time.Millisecond
+	// The execution budget must comfortably exceed a cold shell-shim start
+	// (slow on macOS), or the freshly-admitted command is SIGKILLed before it
+	// can print. The hold below is still longer than this budget, so the test
+	// still proves the queued command gets a fresh budget after admission.
+	gitCommandTimeout = 2 * time.Second
 	t.Cleanup(func() { gitCommandTimeout = prev })
 
 	restoreCap := subproc.Git().SetCapForTest(1)
@@ -132,8 +136,8 @@ func TestWorkspaceGitAdmissionWaitDoesNotConsumeTimeout(t *testing.T) {
 	}()
 	waitForAnyGitWaiter(t, 1)
 	// Hold the slot longer than the execution timeout. The queued command
-	// should still receive a fresh 100ms execution budget after release.
-	timer := time.NewTimer(150 * time.Millisecond)
+	// should still receive a fresh execution budget after release.
+	timer := time.NewTimer(2500 * time.Millisecond)
 	<-timer.C
 	hold()
 
@@ -142,7 +146,7 @@ func TestWorkspaceGitAdmissionWaitDoesNotConsumeTimeout(t *testing.T) {
 		if result.err != nil || string(result.out) != "ok" {
 			t.Fatalf("result = (%q, %v), want fast command after queued admission", result.out, result.err)
 		}
-	case <-time.After(time.Second):
+	case <-time.After(3 * time.Second):
 		t.Fatal("queued git command did not complete")
 	}
 }

@@ -19,6 +19,16 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+// canonicalTempDir resolves symlinks so macOS /var temp roots pass owned-root guards.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	return d
+}
+
 // stubRescanner records calls so the materializer test can assert that the
 // agentctl rescan was triggered with the expected work_dir (task root) and
 // that the frontend-visible "worktree materialized" event also fired.
@@ -198,7 +208,7 @@ func TestBranchMaterializer_SecondBranchKeepsTaskRootPromoted(t *testing.T) {
 func setupMaterializerScenario(t *testing.T) (repoPath, taskRoot, primaryPath string) {
 	t.Helper()
 
-	tmp := t.TempDir()
+	tmp := canonicalTempDir(t)
 	bareDir := filepath.Join(tmp, "origin.git")
 	runGit(t, tmp, "init", "--bare", "-b", "main", bareDir)
 

@@ -153,7 +153,7 @@ func TestRefreshRepositoryBranches_SavedRepositoryOutsideDiscoveryRoots(t *testi
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
-		ID: "outside-repo", WorkspaceID: "ws-1", Name: "outside", SourceType: sourceTypeLocal, LocalPath: repoPath,
+		ID: "outside-repo", WorkspaceID: "ws-1", Name: "outside", SourceType: sourceTypeLocal, LocalPath: canonicalRepoTestPath(t, repoPath),
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}

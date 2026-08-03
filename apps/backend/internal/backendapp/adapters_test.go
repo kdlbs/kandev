@@ -223,7 +223,7 @@ func TestResolveForReviewRedetectsStoredMasterAfterClonePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
-	basePath := t.TempDir()
+	basePath := canonicalTempDir(t)
 	cloner := repoclone.NewCloner(
 		repoclone.Config{BasePath: basePath}, repoclone.ProtocolHTTPS, "", newTestLogger(),
 	)
