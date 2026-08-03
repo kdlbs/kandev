@@ -16,6 +16,8 @@ launcher and native runtime packages users install in production.
 
 - Kandev publishes an npm nightly from `main` at 12:00 UTC when `main` contains commits after the
   latest stable release and that exact commit has not already been published.
+- Maintainers can run the same Nightly path manually from `main`. A manual Nightly dry run performs
+  metadata and registry preflight only, with no platform builds or npm writes.
 - A nightly for stable `X.Y.Z` and commit `abcdef123456...` has version
   `X.Y.(Z+1)-nightly.shaabcdef123456`.
 - The 12-hex abbreviation is an accepted compactness trade-off. Before an existing version can
@@ -106,6 +108,9 @@ the installation.
 - A failed channel save keeps the draft dirty and surfaces that save failure instead of retaining a
   stale manual-check error or retry countdown.
 - A scheduled run with no commits after the stable tag exits successfully without building.
+- A manual Nightly dispatch from a ref other than `main` fails before resolving metadata.
+- Manual Nightly rejects the Stable-only desktop-validation and backfill modes. The workflow's
+  required bump selector is ignored for Nightly, while `dry_run` remains supported.
 - A scheduled retry for an already-published commit exits successfully only when the main package
   and `nightly` tag agree.
 - Before building, the workflow resolves the commit prefix in the current `nightly` tag. A rerun
@@ -146,6 +151,14 @@ the installation.
 - **GIVEN** stable `0.82.0` and `main` commit `abc123def456...`, **WHEN** the nightly schedule runs,
   **THEN** all six packages publish as `0.82.1-nightly.shaabc123def456` under `nightly` and
   `kandev@latest` is unchanged.
+- **GIVEN** an eligible `main` commit, **WHEN** a maintainer manually dispatches the Nightly
+  channel, **THEN** the same metadata, shared builds, safeguards, and npm publication run as the
+  schedule.
+- **GIVEN** a manual Nightly with `dry_run=true`, **WHEN** its preflight resolves an eligible
+  target, **THEN** the run reports that exact version and commit without building bundles or
+  changing npm.
+- **GIVEN** a manual Nightly dispatched from a non-`main` ref or combined with desktop validation
+  or backfill, **WHEN** validation runs, **THEN** it fails with an actionable input error.
 - **GIVEN** `main` points at the latest stable tag's commit, **WHEN** the nightly schedule runs,
   **THEN** it exits successfully without a platform build or npm publication.
 - **GIVEN** the highest Stable Git tag is newer than npm `latest`, **WHEN** Nightly prepares or

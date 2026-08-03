@@ -43,8 +43,16 @@ on:
     - cron: "0 12 * * *"
   workflow_dispatch:
     inputs:
+      channel:
+        description: "Release channel"
+        required: true
+        type: choice
+        default: stable
+        options:
+          - stable
+          - nightly
       bump:
-        description: "Version bump"
+        description: "Stable only: version bump"
         required: true
         type: choice
         default: minor
@@ -53,15 +61,15 @@ on:
           - minor
           - major
       dry_run:
-        description: "Dry run (no PR, tag, npm publish, or tap update)"
+        description: "Validate selected channel without publishing"
         type: boolean
         default: false
       desktop_validation_only:
-        description: "Build desktop artifacts only (no PR, tag, publish, npm, or tap update)"
+        description: "Stable only: build desktop artifacts without publishing"
         type: boolean
         default: false
       backfill_tag:
-        description: "Existing release tag to rebuild/publish (for recovery; leave empty for normal release)"
+        description: "Stable only: existing release tag to rebuild/publish"
         required: false
         default: ""
         type: string
@@ -81,7 +89,7 @@ permissions:
 jobs:
   prepare:
     name: Prepare release (bump version, PR, tag)
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' }}
     runs-on: ubuntu-latest
     environment: ${{ (!inputs.dry_run && !inputs.desktop_validation_only && inputs.backfill_tag == '') && 'release' || 'release-validation' }}
     permissions:
@@ -586,7 +594,11 @@ jobs:
 
   nightly-prepare:
     name: Prepare npm nightly metadata
-    if: ${{ github.event_name == 'schedule' }}
+    if: >-
+      ${{
+        github.event_name == 'schedule' ||
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly')
+      }}
     runs-on: ubuntu-latest
     outputs:
       should_publish: ${{ steps.metadata.outputs.should_publish }}
@@ -608,6 +620,29 @@ jobs:
           node-version: "24"
           registry-url: "https://registry.npmjs.org"
 
+      - name: Validate manual Nightly request
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          CURRENT_REF: ${{ github.ref }}
+          DESKTOP_VALIDATION_ONLY: ${{ inputs.desktop_validation_only }}
+          BACKFILL_TAG: ${{ inputs.backfill_tag }}
+          BUMP: ${{ inputs.bump }}
+        run: |
+          set -euo pipefail
+          if [ "$CURRENT_REF" != "refs/heads/main" ]; then
+            echo "Manual Nightlies must be dispatched from refs/heads/main (got $CURRENT_REF)." >&2
+            exit 1
+          fi
+          if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then
+            echo "desktop_validation_only cannot be combined with channel=nightly." >&2
+            exit 1
+          fi
+          if [ -n "$BACKFILL_TAG" ]; then
+            echo "backfill_tag cannot be combined with channel=nightly." >&2
+            exit 1
+          fi
+          echo "::notice::The Stable-only bump input ($BUMP) is ignored for Nightly."
+
       - name: Resolve nightly metadata
         id: metadata
         run: |
@@ -615,19 +650,33 @@ jobs:
             --scheduled-sha "${{ github.sha }}" \
             --output "$GITHUB_OUTPUT"
 
+      - name: Nightly dry-run summary
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run }}
+        env:
+          SHOULD_PUBLISH: ${{ steps.metadata.outputs.should_publish }}
+          VERSION: ${{ steps.metadata.outputs.version }}
+          REF: ${{ steps.metadata.outputs.ref }}
+        run: |
+          if [ "$SHOULD_PUBLISH" = "true" ]; then
+            echo "DRY RUN: Would publish $VERSION from $REF under npm's nightly dist-tag."
+          else
+            echo "DRY RUN: Nightly preflight found no eligible publication."
+          fi
+          echo "DRY RUN: No bundles were built and npm was not changed."
+
   build-web:
     name: Build web SPA
     needs: [prepare, nightly-prepare]
     if: >-
       ${{ !cancelled() && (
-        (github.event_name == 'workflow_dispatch' && needs.prepare.result == 'success' && !inputs.dry_run) ||
-        (github.event_name == 'schedule' && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.prepare.result == 'success' && !inputs.dry_run) ||
+        ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
       ) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ github.event_name == 'schedule' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
+          ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
           persist-credentials: false
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5
         with:
@@ -641,7 +690,7 @@ jobs:
         run: pnpm -C apps install --frozen-lockfile
       - name: Build web (Vite)
         env:
-          KANDEV_VERSION: ${{ github.event_name == 'schedule' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
+          KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
           VITE_KANDEV_API_PORT: ""
           VITE_KANDEV_DEBUG: ""
         run: pnpm -C apps --filter @kandev/web build
@@ -656,8 +705,8 @@ jobs:
     needs: [prepare, nightly-prepare, build-web]
     if: >-
       ${{ !cancelled() && needs.build-web.result == 'success' && (
-        (github.event_name == 'workflow_dispatch' && needs.prepare.result == 'success' && !inputs.dry_run) ||
-        (github.event_name == 'schedule' && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
+        (github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && needs.prepare.result == 'success' && !inputs.dry_run) ||
+        ((github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true')
       ) }}
     strategy:
       matrix:
@@ -691,7 +740,7 @@ jobs:
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          ref: ${{ github.event_name == 'schedule' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
+          ref: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref }}
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
@@ -720,7 +769,7 @@ jobs:
       - name: Build backend binaries
         env:
           CC: ${{ matrix.cc || '' }}
-          KANDEV_VERSION: ${{ github.event_name == 'schedule' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
+          KANDEV_VERSION: ${{ needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag }}
         run: |
           test -f apps/backend/internal/webapp/embedded/generated/index.html
           cd apps/backend
@@ -774,7 +823,7 @@ jobs:
   build-desktop:
     name: Build desktop app (${{ matrix.platform }})
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run }}
     strategy:
       matrix:
         include:
@@ -1320,7 +1369,7 @@ jobs:
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1391,7 +1440,7 @@ jobs:
   docker-arm64:
     name: Build & push container image (arm64)
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1450,7 +1499,7 @@ jobs:
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1504,7 +1553,7 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1556,7 +1605,7 @@ jobs:
   docker-universal-arm64:
     name: Build & push universal image (arm64)
     needs: [prepare, docker-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1607,7 +1656,7 @@ jobs:
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1664,7 +1713,7 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release
@@ -1814,7 +1863,7 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1850,7 +1899,13 @@ jobs:
   publish-npm-nightly:
     name: Publish npm nightly packages
     needs: [nightly-prepare, build-bundles]
-    if: ${{ !cancelled() && github.event_name == 'schedule' && needs.nightly-prepare.result == 'success' && needs.nightly-prepare.outputs.should_publish == 'true' && needs.build-bundles.result == 'success' }}
+    if: >-
+      ${{ !cancelled() &&
+        (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly' && !inputs.dry_run)) &&
+        needs.nightly-prepare.result == 'success' &&
+        needs.nightly-prepare.outputs.should_publish == 'true' &&
+        needs.build-bundles.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1898,7 +1953,7 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

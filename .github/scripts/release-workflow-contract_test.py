@@ -56,12 +56,33 @@ def job_condition(name: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
-    def test_nightly_runs_at_noon_utc_and_delegates_metadata_resolution(self) -> None:
+    def test_nightly_runs_on_schedule_or_manual_channel_and_delegates_metadata_resolution(
+        self,
+    ) -> None:
         self.assertIn('schedule:\n    - cron: "0 12 * * *"', WORKFLOW)
+        self.assertRegex(
+            WORKFLOW,
+            r"(?ms)      channel:\n"
+            r"        description: \"Release channel\"\n"
+            r"        required: true\n"
+            r"        type: choice\n"
+            r"        default: stable\n"
+            r"        options:\n"
+            r"          - stable\n"
+            r"          - nightly",
+        )
 
         nightly = job_block("nightly-prepare")
-        self.assertIn("if: ${{ github.event_name == 'schedule' }}", nightly)
+        self.assertIn("github.event_name == 'schedule'", nightly)
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.channel == 'nightly'",
+            nightly,
+        )
         self.assertIn("ref: ${{ github.sha }}", nightly)
+        validation = step_block("Validate manual Nightly request")
+        self.assertIn("refs/heads/main", validation)
+        self.assertIn("DESKTOP_VALIDATION_ONLY", validation)
+        self.assertIn("BACKFILL_TAG", validation)
         metadata = step_block("Resolve nightly metadata")
         self.assertIn("id: metadata", metadata)
         self.assertIn("bash scripts/release/nightly-release.sh prepare", metadata)
@@ -72,6 +93,30 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             "nightly_tags_at_start: ${{ steps.metadata.outputs.nightly_tags_at_start }}",
             nightly,
         )
+
+    def test_manual_nightly_dry_run_stops_after_preflight(self) -> None:
+        summary = step_block("Nightly dry-run summary")
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.dry_run", summary)
+        self.assertIn("steps.metadata.outputs.should_publish", summary)
+        self.assertIn("steps.metadata.outputs.version", summary)
+
+        for name in ("build-web", "build-bundles", "publish-npm-nightly"):
+            condition = job_condition(name)
+            self.assertIn("inputs.channel == 'nightly'", condition)
+            self.assertIn("!inputs.dry_run", condition)
+
+        for name in ("build-web", "build-bundles"):
+            block = job_block(name)
+            self.assertIn(
+                "needs.nightly-prepare.result == 'success' && "
+                "needs.nightly-prepare.outputs.ref || needs.prepare.outputs.ref",
+                block,
+            )
+            self.assertIn(
+                "needs.nightly-prepare.result == 'success' && "
+                "needs.nightly-prepare.outputs.tag || needs.prepare.outputs.tag",
+                block,
+            )
 
     def test_nightly_package_inventory_remains_shared(self) -> None:
         for package in (
@@ -92,6 +137,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn("needs: [prepare, nightly-prepare", block)
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
             self.assertIn("github.event_name == 'schedule'", block)
+            self.assertIn("inputs.channel == 'nightly'", block)
             self.assertIn("needs.nightly-prepare.outputs.should_publish == 'true'", block)
 
         for name in (
@@ -109,6 +155,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         ):
             block = job_block(name)
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
+            self.assertIn("inputs.channel == 'stable'", block)
             self.assertNotIn("github.event_name == 'schedule'", block)
 
     def test_nightly_publish_uses_exact_sha_local_assets_and_release_serialization(self) -> None:

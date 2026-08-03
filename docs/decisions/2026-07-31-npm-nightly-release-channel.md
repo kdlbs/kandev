@@ -28,11 +28,18 @@ collision fails closed for maintainer resolution rather than silently treating a
 as published.
 
 The existing release workflow owns both stable and nightly npm publication because npm allows one
-trusted publisher per package and validates the workflow filename. Scheduled nightlies publish all
-five runtime packages before the launcher with `npm publish --tag nightly`; stable `latest` tags
-remain untouched. The publisher and scheduled preflight load one shared package inventory. Nightly
-jobs do not enter the Git tag, GitHub Release, Desktop, container, or Homebrew graph. Stable and
-Nightly workflow runs share one non-cancelling concurrency group from start through publication.
+trusted publisher per package and validates the workflow filename. Its manual dispatch defaults to
+Stable but also permits a Nightly run from `main`; the scheduled and manual Nightly paths use the
+same metadata, build, and publish jobs. Manual Nightly dry runs execute the real metadata and
+registry preflight, then stop before builds or npm writes. The workflow's required Stable bump
+selector is ignored for Nightly, while Stable-only desktop validation and backfill inputs are
+rejected instead of silently changing the requested operation.
+
+Nightlies publish all five runtime packages before the launcher with
+`npm publish --tag nightly`; stable `latest` tags remain untouched. The publisher and Nightly
+preflight load one shared package inventory. Nightly jobs do not enter the Git tag, GitHub Release,
+Desktop, container, or Homebrew graph. Stable and Nightly workflow runs share one non-cancelling
+concurrency group from start through publication.
 This release-wide lock is required because Stable pushes its Git tag before its npm publish job is
 ready; locking only the two npm jobs leaves a window where Nightly can derive from the previous npm
 baseline. Before building and again before publishing, Nightly requires the highest stable Git tag
@@ -61,9 +68,11 @@ runtime-first/main-last order and tag-consistency checks are required.
 
 npm accumulates immutable nightly versions. Homebrew and Desktop users do not receive channel
 parity in this iteration. The release workflow must explicitly gate every stable-only job when
-handling scheduled events. A manual Stable release can wait for an in-flight Nightly workflow;
-Nightlies also wait behind a Stable run, including any release-environment approval. Queued
-Nightlies whose scheduled commit was superseded by the completed Stable release skip.
+handling Nightly events. The shared dispatch form still displays Stable-only inputs for a manual
+Nightly, so validation and input descriptions must keep their meaning explicit. A manual Stable
+release can wait for an in-flight Nightly workflow; Nightlies also wait behind a Stable run,
+including any release-environment approval. Queued Nightlies whose selected commit was superseded
+by the completed Stable release skip.
 
 ## Alternatives Considered
 
@@ -73,8 +82,9 @@ Nightlies whose scheduled commit was superseded by the completed Stable release 
   `sha` is a small explicit validity guard.
 - **Full 40-hex SHA:** eliminates abbreviation collisions but makes every user-visible package
   version substantially longer; the shorter identity plus fail-closed ambiguity check is preferred.
-- **Separate nightly workflow:** cleaner YAML isolation, but it conflicts with npm's single trusted
-  publisher configuration for the existing six packages.
+- **Separate scheduled or manual Nightly workflow:** cleaner YAML isolation, but it conflicts with
+  npm's single trusted publisher configuration for the existing six packages and would duplicate
+  the Nightly safety state machine.
 - **Serialize only npm publish jobs:** permits more build overlap, but Stable creates its tag before
   its npm job enters that lock, allowing Nightly to derive from a stale npm baseline.
 - **GitHub prereleases:** would duplicate stable release artifacts and feeds when npm is the only

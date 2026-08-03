@@ -23,11 +23,12 @@ optional dependencies, publishes runtimes first, and publishes the launcher last
 
 ### Workflow
 
-`.github/workflows/release.yml` gains cron `0 12 * * *`, a read-only nightly metadata job, shared
-web/runtime builds, and an OIDC npm publish job. All stable-only jobs are gated to
-`workflow_dispatch`; non-cancelling concurrency serializes complete Stable and Nightly runs so a
-pending Stable tag cannot race npm, and Nightly rechecks the stable Git/npm baseline plus the
-starting `nightly` tag before publication.
+`.github/workflows/release.yml` gains cron `0 12 * * *`, a Stable/Nightly manual channel selector,
+a read-only nightly metadata job, shared web/runtime builds, and an OIDC npm publish job. Manual
+Nightly runs are limited to `main`; their dry-run mode performs preflight without building or
+publishing. All stable-only jobs require the Stable channel. Non-cancelling concurrency serializes
+complete Stable and Nightly runs so a pending Stable tag cannot race npm, and Nightly rechecks the
+stable Git/npm baseline plus the starting `nightly` tag before publication.
 
 ## Backend
 

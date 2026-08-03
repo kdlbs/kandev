@@ -5,7 +5,7 @@ description: "Run and verify Kandev's version, runtime, desktop, container, npm,
 
 # Release Process
 
-Stable Kandev releases use one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, and Homebrew formula. Publish Stable through the manual **Release** GitHub Actions workflow; do not update its channels independently. The same workflow also owns the scheduled npm-only Nightly path described below.
+Stable Kandev releases use one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, and Homebrew formula. Publish Stable through the manual **Release** GitHub Actions workflow; do not update its channels independently. The same workflow also owns scheduled and manual npm-only Nightlies.
 
 ## Quick path
 
@@ -16,20 +16,26 @@ Stable Kandev releases use one semantic version across the Git tag, native runti
 
 ## Choose the workflow mode
 
-The workflow has four mutually exclusive operating modes:
+Select `channel=stable` (the default) or `channel=nightly`, then choose a compatible mode:
 
-| Mode | Inputs | Result |
+| Channel and mode | Inputs | Result |
 |---|---|---|
-| Normal release | `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes |
-| Dry run | `dry_run=true` | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication |
-| Desktop validation | `desktop_validation_only=true` | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, or Homebrew publication |
-| Backfill | `backfill_tag=vX.Y.Z` | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag |
+| Stable normal release | `channel=stable`; `bump=patch`, `minor`, or `major` | Creates and merges a release PR, tags its merge, builds, and publishes |
+| Stable dry run | `channel=stable`; `dry_run=true` | Computes the next version and exercises CLI package/lock plus changelog generation in the runner; no PR, tag, artifact build, or publication |
+| Stable desktop validation | `channel=stable`; `desktop_validation_only=true` | Builds web, five runtime bundles, and five desktop targets from the selected commit; no PR, tag, GitHub release, GHCR, npm, or Homebrew publication |
+| Stable backfill | `channel=stable`; `backfill_tag=vX.Y.Z` | Rebuilds and repairs channels for the latest existing release tag without creating a version or tag |
+| Nightly publication | `channel=nightly` | Runs Nightly preflight, builds the shared web/runtime artifacts when eligible, and publishes all six npm packages under `nightly` |
+| Nightly dry run | `channel=nightly`; `dry_run=true` | Runs the real Nightly metadata and registry preflight and reports its target; no artifact build or npm write |
 
-`dry_run` and desktop validation are not release candidates. Backfill cannot be combined with either and accepts only the latest exact SemVer tag after version manifests are checked for agreement.
+Manual Nightly must be dispatched from the `main` ref. GitHub's shared form requires a `bump`
+selection, but Nightly ignores it. Leave `desktop_validation_only=false` and `backfill_tag` empty;
+the workflow rejects those Stable-only inputs for Nightly. `dry_run` and desktop validation are not
+release candidates. Stable backfill cannot be combined with either and accepts only the latest
+exact SemVer tag after version manifests are checked for agreement.
 
 ## Before dispatch
 
-1. Open the **Release** workflow and explicitly select the `main` ref. Normal mode creates its release branch from the selected ref.
+1. Open the **Release** workflow and explicitly select the `main` ref. Normal Stable mode creates its release branch from that ref; manual Nightly refuses any other ref.
 2. Confirm required checks are green on `main` and no release or release PR is active.
 3. Confirm merged PR titles/commits use the conventional categories consumed by `cliff.toml`. The workflow generates `CHANGELOG.md` and release notes.
 4. Verify platform-sensitive launcher, agentctl, container, and desktop changes on affected targets.
@@ -73,13 +79,17 @@ GHCR images are built before the GitHub Release. npm and Homebrew start only aft
 
 Base image tags include `X.Y.Z`, `vX.Y.Z`, `sha-*`, and `latest`. Universal tags include `X.Y.Z-universal`, `vX.Y.Z-universal`, and the floating `universal`. The weekly universal rebuild updates only floating/dated weekly tags, never a version-specific release tag.
 
-## Scheduled npm Nightly flow
+## npm Nightly flow
 
 The same workflow runs on cron `0 12 * * *`. This means GitHub schedules it for 12:00 UTC; it may
-start later when Actions is delayed. The metadata job checks out the exact scheduled `main` commit,
-resolves `kandev@latest`, and verifies its matching Stable Git tag. The Stable tag must be an
-ancestor of the scheduled commit; a scheduled commit superseded by that Stable tag skips, while
-divergent history fails for operator review.
+start later when Actions is delayed. A maintainer can trigger the same path from the Actions UI by
+selecting the `main` ref and `channel=nightly`. Set `dry_run=true` to run only metadata and registry
+preflight; an eligible dry run reports the exact target without building bundles or changing npm.
+
+The metadata job checks out the exact scheduled or manually selected `main` commit, resolves
+`kandev@latest`, and verifies its matching Stable Git tag. The Stable tag must be an ancestor of
+that commit; a commit superseded by that Stable tag skips, while divergent history fails for
+operator review.
 
 For stable `X.Y.Z` and commit `abcdef123456...`, the version is
 `X.Y.(Z+1)-nightly.shaabcdef123456`. The run exits successfully without building when `main` is
@@ -90,7 +100,7 @@ rerun is superseded instead of moving the tag backward; divergent or unresolvabl
 for operator review.
 
 An eligible run builds the shared web application and all five native runtime archives from the
-exact scheduled SHA. It publishes the five `@kdlbs/runtime-*` packages before the `kandev`
+exact selected SHA. It publishes the five `@kdlbs/runtime-*` packages before the `kandev`
 launcher, all at the same immutable version with provenance under npm's `nightly` dist-tag. Stable
 and Nightly workflow runs share non-cancelling release-wide concurrency. This covers Stable tag
 creation through npm publication, preventing Nightly from using the previous npm baseline while a

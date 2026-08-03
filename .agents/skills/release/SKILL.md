@@ -29,7 +29,7 @@ tag, GitHub Release, Homebrew formula, Desktop feed/build, or container tag.
 
 Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a maintainer from the GitHub Actions UI:
 
-1. Maintainer clicks "Run workflow" → picks `bump` (patch/minor/major) → optional `dry_run` or `desktop_validation_only`.
+1. Maintainer clicks "Run workflow" → keeps `channel=stable` → picks `bump` (patch/minor/major) → optional `dry_run` or `desktop_validation_only`.
 2. `prepare` job bumps version + regenerates CHANGELOG, opens release PR, squash-merges, tags `vX.Y.Z`.
 3. `build-web` + `build-cli` + `build-bundles` (5 platforms) build the release artifacts.
 4. `publish-release` creates the GitHub release with platform tarballs + sha256 + auto-generated notes.
@@ -38,7 +38,7 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 
 Stable has no local release driver; the entire Stable flow runs in GHA. The Nightly metadata and
 publication revalidation state machine lives in `scripts/release/nightly-release.sh`, which GHA
-invokes for scheduled runs.
+invokes for scheduled and manual Nightly runs.
 
 The same workflow schedules npm Nightly with cron `0 12 * * *`. It skips before building when
 `main` has no commit after the latest Stable tag, the exact commit is already published, or a same
@@ -47,6 +47,11 @@ bundle and five native runtime archives, then publish runtimes first and `kandev
 provenance. Stable and Nightly workflow runs share one non-cancelling release-wide concurrency
 slot. Before publishing, Nightly rechecks the stable Git/npm baseline and the previously observed
 `nightly` tag; a pending Stable tag or moved value safely suppresses stale publication.
+
+Maintainers may run that same Nightly path from the Actions UI with the `main` ref and
+`channel=nightly`. `dry_run=true` retains the real metadata and registry preflight but skips shared
+builds and all npm writes. The shared form's required `bump` value is ignored for Nightly;
+`desktop_validation_only` and `backfill_tag` are Stable-only and rejected when combined with it.
 
 Validate Nightly automation changes with:
 
