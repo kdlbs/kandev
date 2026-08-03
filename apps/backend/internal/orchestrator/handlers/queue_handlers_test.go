@@ -19,9 +19,12 @@ import (
 )
 
 // mockEventBus is a no-op event bus for handler tests.
-type mockEventBus struct{}
+type mockEventBus struct {
+	published int
+}
 
 func (m *mockEventBus) Publish(_ context.Context, _ string, _ *bus.Event) error {
+	m.published++
 	return nil
 }
 func (m *mockEventBus) Subscribe(_ string, _ bus.EventHandler) (bus.Subscription, error) {
@@ -35,6 +38,30 @@ func (m *mockEventBus) Request(_ context.Context, _ string, _ *bus.Event, _ time
 }
 func (m *mockEventBus) Close()            {}
 func (m *mockEventBus) IsConnected() bool { return true }
+
+type allowQueueAccess struct{}
+
+func (allowQueueAccess) AuthorizeSessionAccess(context.Context, string) error { return nil }
+func (allowQueueAccess) AuthorizeTaskSessionAccess(context.Context, string, string) error {
+	return nil
+}
+
+type fakeQueueAccessAuthorizer struct {
+	sessionErr   error
+	pairErr      error
+	sessionCalls int
+	pairCalls    int
+}
+
+func (f *fakeQueueAccessAuthorizer) AuthorizeSessionAccess(context.Context, string) error {
+	f.sessionCalls++
+	return f.sessionErr
+}
+
+func (f *fakeQueueAccessAuthorizer) AuthorizeTaskSessionAccess(context.Context, string, string) error {
+	f.pairCalls++
+	return f.pairErr
+}
 
 type mockQueueDrainer struct {
 	calls     int
@@ -81,7 +108,7 @@ func setupQueueHandlersWithDrainer(t *testing.T, drainer QueueDrainer) (*QueueHa
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, drainer, allowQueueAccess{}), svc
 }
 
 func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.SubmissionValidator) (*QueueHandlers, *messagequeue.Service) {
@@ -93,7 +120,7 @@ func setupQueueHandlersWithValidator(t *testing.T, validator entityrefs.Submissi
 	})
 	require.NoError(t, err)
 	svc := messagequeue.NewServiceMemory(log)
-	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, validator), svc
+	return NewQueueHandlers(svc, &mockEventBus{}, log, nil, allowQueueAccess{}, validator), svc
 }
 
 func createTestMessage(t *testing.T, action string, payload interface{}) *ws.Message {
@@ -113,6 +140,87 @@ func parseError(t *testing.T, response *ws.Message) ws.ErrorPayload {
 	var errorPayload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(response.Payload, &errorPayload))
 	return errorPayload
+}
+
+func TestQueueHandlersDenyUnauthorizedSessionActions(t *testing.T) {
+	tests := []struct {
+		name   string
+		action string
+		call   func(*QueueHandlers, context.Context, *ws.Message) (*ws.Message, error)
+		body   func(string) map[string]interface{}
+	}{
+		{name: "clear", action: ws.ActionMessageQueueCancel, call: (*QueueHandlers).wsCancelAll, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "get", action: ws.ActionMessageQueueGet, call: (*QueueHandlers).wsGetQueueStatus, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "update", action: ws.ActionMessageQueueUpdate, call: (*QueueHandlers).wsUpdateMessage, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "entry_id": id, "content": "changed"}
+		}},
+		{name: "drain", action: ws.ActionMessageQueueDrain, call: (*QueueHandlers).wsDrainQueue, body: func(string) map[string]interface{} { return map[string]interface{}{"session_id": "s"} }},
+		{name: "remove", action: ws.ActionMessageQueueRemove, call: (*QueueHandlers).wsRemoveEntry, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "entry_id": id}
+		}},
+		{name: "merge", action: ws.ActionMessageQueueMerge, call: (*QueueHandlers).wsMergeIntoAbove, body: func(id string) map[string]interface{} {
+			return map[string]interface{}{"session_id": "s", "entry_id": id}
+		}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+			require.NoError(t, err)
+			svc := messagequeue.NewServiceMemory(log)
+			_, err = svc.QueueMessage(context.Background(), "s", "t", "first", "", messagequeue.QueuedByUser, false, nil)
+			require.NoError(t, err)
+			second, err := svc.QueueMessage(context.Background(), "s", "t", "second", "", messagequeue.QueuedByUser, false, nil)
+			require.NoError(t, err)
+			access := &fakeQueueAccessAuthorizer{sessionErr: errors.New("secret denial")}
+			events := &mockEventBus{}
+			drainer := &mockQueueDrainer{drained: true}
+			handlers := NewQueueHandlers(svc, events, log, drainer, access)
+
+			response, err := tc.call(handlers, context.Background(), createTestMessage(t, tc.action, tc.body(second.ID)))
+			require.NoError(t, err)
+			assert.Equal(t, ws.MessageTypeError, response.Type)
+			assert.Equal(t, ws.ErrorCodeNotFound, parseError(t, response).Code)
+			assert.NotContains(t, string(response.Payload), "secret denial")
+			assert.Equal(t, 1, access.sessionCalls)
+			assert.Equal(t, 0, access.pairCalls)
+			assert.Equal(t, 0, events.published)
+			assert.Equal(t, 0, drainer.calls)
+			assert.Equal(t, 2, svc.GetStatus(context.Background(), "s").Count)
+		})
+	}
+}
+
+func TestQueueHandlersDenyUnauthorizedTaskSessionPairActions(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		action string
+		call   func(*QueueHandlers, context.Context, *ws.Message) (*ws.Message, error)
+	}{
+		{name: "add", action: ws.ActionMessageQueueAdd, call: (*QueueHandlers).wsQueueMessage},
+		{name: "append", action: ws.ActionMessageQueueAppend, call: (*QueueHandlers).wsAppendToQueue},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+			require.NoError(t, err)
+			svc := messagequeue.NewServiceMemory(log)
+			access := &fakeQueueAccessAuthorizer{pairErr: errors.New("secret denial")}
+			events := &mockEventBus{}
+			handlers := NewQueueHandlers(svc, events, log, nil, access)
+
+			response, err := tc.call(handlers, context.Background(), createTestMessage(t, tc.action, map[string]interface{}{
+				"session_id": "s", "task_id": "other-task", "content": "secret",
+			}))
+			require.NoError(t, err)
+			assert.Equal(t, ws.MessageTypeError, response.Type)
+			assert.Equal(t, ws.ErrorCodeNotFound, parseError(t, response).Code)
+			assert.NotContains(t, string(response.Payload), "secret denial")
+			assert.Equal(t, 0, access.sessionCalls)
+			assert.Equal(t, 1, access.pairCalls)
+			assert.Equal(t, 0, events.published)
+			assert.Equal(t, 0, svc.GetStatus(context.Background(), "s").Count)
+		})
+	}
 }
 
 func TestWsQueueMessage(t *testing.T) {
@@ -729,7 +837,7 @@ func TestWsRemoveEntry(t *testing.T) {
 		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
 	})
 
-	t.Run("returns entry_not_found for agent-authored entries", func(t *testing.T) {
+	t.Run("removes agent-authored entries", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
@@ -742,15 +850,13 @@ func TestWsRemoveEntry(t *testing.T) {
 				"entry_id":   queued.ID,
 			}))
 		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeError, response.Type)
-		assert.Equal(t, "entry_not_found", parseError(t, response).Code)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 
 		status := svc.GetStatus(ctx, "s")
-		assert.Equal(t, 1, status.Count)
-		assert.Equal(t, "agent prompt", status.Entries[0].Content)
+		assert.Equal(t, 0, status.Count)
 	})
 
-	t.Run("returns entry_not_found for workflow-authored entries", func(t *testing.T) {
+	t.Run("removes workflow-authored entries", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
@@ -766,11 +872,10 @@ func TestWsRemoveEntry(t *testing.T) {
 				"entry_id":   queued.ID,
 			}))
 		require.NoError(t, err)
-		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
 
 		status := svc.GetStatus(ctx, "s")
-		require.Equal(t, 1, status.Count)
-		assert.Equal(t, "lifecycle prompt", status.Entries[0].Content)
+		assert.Equal(t, 0, status.Count)
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

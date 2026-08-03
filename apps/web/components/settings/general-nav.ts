@@ -5,6 +5,7 @@ import {
   IconCommand,
   IconCode,
   IconLayoutDashboard,
+  IconMessage,
   IconPalette,
   IconTerminal2,
 } from "@tabler/icons-react";
@@ -59,6 +60,12 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
     labelKey: "settings:taskActions",
     descriptionKey: "settings:mcpTaskDefaultsAndArchiveSafeguards",
     icon: IconArchive,
+  },
+  {
+    href: "/settings/general/message-queue",
+    labelKey: "system:messageQueueTitle",
+    descriptionKey: "system:messageQueueDescription",
+    icon: IconMessage,
   },
 ];
 

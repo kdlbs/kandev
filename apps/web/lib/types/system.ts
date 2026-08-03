@@ -181,6 +181,22 @@ export interface SystemMetricsSettingsResponse {
   settings: SystemMetricsGlobalSettings;
 }
 
+export interface MessageQueueSettingsValue {
+  max_per_session: number;
+}
+
+export type MessageQueueSettingsSource = "default" | "setting" | "environment";
+
+export interface MessageQueueEffectiveSettings extends MessageQueueSettingsValue {
+  source: MessageQueueSettingsSource;
+  locked: boolean;
+}
+
+export interface MessageQueueSettingsResponse {
+  settings: MessageQueueSettingsValue;
+  effective: MessageQueueEffectiveSettings;
+}
+
 export interface SystemMetricSample {
   id: SystemMetricId | string;
   label: string;

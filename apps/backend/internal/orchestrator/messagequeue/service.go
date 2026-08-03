@@ -13,6 +13,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"go.uber.org/zap"
@@ -21,7 +22,7 @@ import (
 // Service manages queued messages for sessions, backed by Repository.
 type Service struct {
 	repo          Repository
-	maxPerSession int
+	maxPerSession atomic.Int64
 	logger        *logger.Logger
 }
 
@@ -29,11 +30,12 @@ type Service struct {
 // is the per-session cap (entries beyond this return ErrQueueFull on insert);
 // pass 0 to disable the cap.
 func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service {
-	return &Service{
-		repo:          repo,
-		maxPerSession: maxPerSession,
-		logger:        log.WithFields(zap.String("component", "message-queue")),
+	service := &Service{
+		repo:   repo,
+		logger: log.WithFields(zap.String("component", "message-queue")),
 	}
+	service.SetMaxPerSession(maxPerSession)
+	return service
 }
 
 // NewServiceMemory returns a Service backed by an in-memory repository.
@@ -43,7 +45,16 @@ func NewServiceMemory(log *logger.Logger) *Service {
 }
 
 // MaxPerSession returns the configured per-session cap.
-func (s *Service) MaxPerSession() int { return s.maxPerSession }
+func (s *Service) MaxPerSession() int { return int(s.maxPerSession.Load()) }
+
+// SetMaxPerSession applies a new admission cap without pruning existing rows.
+// Non-positive values disable the cap.
+func (s *Service) SetMaxPerSession(maxPerSession int) {
+	if maxPerSession < 0 {
+		maxPerSession = 0
+	}
+	s.maxPerSession.Store(int64(maxPerSession))
+}
 
 // QueueMessage appends a new entry to the session's FIFO queue. Returns
 // ErrQueueFull when the cap is exceeded.
@@ -66,11 +77,12 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	if err := s.repo.Insert(ctx, msg, s.maxPerSession); err != nil {
+	maxPerSession := s.MaxPerSession()
+	if err := s.repo.Insert(ctx, msg, maxPerSession); err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.logger.Info("queue full",
 				zap.String("session_id", sessionID),
-				zap.Int("max", s.maxPerSession))
+				zap.Int("max", maxPerSession))
 		}
 		return nil, err
 	}
@@ -92,7 +104,7 @@ func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 	}
 	restored := *msg
 	restored.Metadata = copyMessageMetadata(msg.Metadata, 0)
-	if err := s.repo.Restore(ctx, &restored, s.maxPerSession); err != nil {
+	if err := s.repo.Restore(ctx, &restored, 0); err != nil {
 		return nil, err
 	}
 	s.logger.Info("message restored at original queue position",
@@ -120,12 +132,13 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	queued, replaced, err := s.repo.InsertOrReplaceByCoalesceKey(ctx, msg, coalesceKey, s.maxPerSession, allowInsert)
+	maxPerSession := s.MaxPerSession()
+	queued, replaced, err := s.repo.InsertOrReplaceByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
 	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.logger.Info("queue full",
 				zap.String("session_id", sessionID),
-				zap.Int("max", s.maxPerSession))
+				zap.Int("max", maxPerSession))
 		}
 		return nil, false, err
 	}
@@ -175,7 +188,11 @@ func (s *Service) queueLifecycleMessageWithCoalesceKey(ctx context.Context, sess
 	metadataCopy[MetadataLifecycleDurable] = true
 	metadataCopy[MetadataLifecycleGeneration] = generation
 	msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: content, Model: model, PlanMode: planMode, Attachments: attachments, Metadata: metadataCopy, QueuedBy: userID}
-	queued, replaced, err := s.repo.InsertOrReplaceLifecycleByCoalesceKey(ctx, msg, coalesceKey, s.maxPerSession, allowInsert)
+	maxPerSession := s.MaxPerSession()
+	if isRetry {
+		maxPerSession = 0
+	}
+	queued, replaced, err := s.repo.InsertOrReplaceLifecycleByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
 	if errors.Is(err, ErrTaskInactive) || errors.Is(err, ErrLifecycleCancelled) {
 		return nil, false, false, nil
 	}
@@ -273,7 +290,8 @@ func copyMessageMetadata(metadata map[string]interface{}, extraCapacity int) map
 // queued_by matches userID. Otherwise inserts a new entry. Returns
 // ErrQueueFull when an insert would exceed the cap.
 func (s *Service) AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment) (*QueuedMessage, bool, error) {
-	msg, appended, err := s.repo.AppendOrInsertTail(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil, s.maxPerSession)
+	maxPerSession := s.MaxPerSession()
+	msg, appended, err := s.repo.AppendOrInsertTail(ctx, sessionID, taskID, content, model, userID, planMode, attachments, nil, maxPerSession)
 	if err != nil {
 		return nil, false, err
 	}
@@ -396,12 +414,13 @@ func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) 
 
 // GetStatus returns the full pending list and capacity info for a session.
 func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus {
+	maxPerSession := s.MaxPerSession()
 	entries, err := s.repo.ListBySession(ctx, sessionID)
 	if err != nil {
 		s.logger.Error("list queued failed",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: s.maxPerSession}
+		return &QueueStatus{Entries: []QueuedMessage{}, Count: 0, Max: maxPerSession}
 	}
 	pending := make([]QueuedMessage, 0, len(entries))
 	for _, entry := range entries {
@@ -415,7 +434,7 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 	return &QueueStatus{
 		Entries: pending,
 		Count:   len(pending),
-		Max:     s.maxPerSession,
+		Max:     maxPerSession,
 	}
 }
 

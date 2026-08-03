@@ -60,6 +60,14 @@ kandev service logs -f
 
 Add `--system` to both commands for a system service.
 
+## Message queue capacity
+
+Open **Settings > General > Message Queue** to set the install-wide number of pending messages allowed in each session. The default is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
+
+`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved setting. A valid environment value makes the UI field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+
+To recover capacity in one session, expand its queue chip in the task workbench. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. Displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
+
 ## State and storage
 
 `KANDEV_HOME_DIR` relocates the Kandev home. Its default is `~/.kandev`; the derived data directory is always `<home>/data`.

@@ -58,6 +58,7 @@ const SEGMENT_LABEL_KEYS: Record<string, string> = {
   integrations: "common:integrations",
   "keyboard-shortcuts": "settings:keyboardShortcuts",
   layouts: "settings:layouts",
+  "message-queue": "system:messageQueueTitle",
   new: "settings:new",
   notifications: "settings:notifications",
   plugins: "common:plugins",

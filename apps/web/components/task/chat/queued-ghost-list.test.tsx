@@ -42,6 +42,8 @@ const CHIP_ID = "queue-chip";
 const PANEL_ID = "queued-ghost-list";
 const QUEUED_BY_USER = "user";
 const MERGE_BUTTON_ID = "queue-entry-merge";
+const EDIT_BUTTON_ID = "queue-entry-edit";
+const REMOVE_BUTTON_ID = "queue-entry-remove";
 
 function entry(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
   return {
@@ -223,6 +225,26 @@ describe("QueueAffordance", () => {
   });
 });
 
+describe("QueueAffordance positions", () => {
+  it("compacts displayed positions when persisted queue positions contain gaps", () => {
+    const initialEntries = [
+      entry({ id: "q-1", position: 1 }),
+      entry({ id: "q-2", position: 2 }),
+      entry({ id: "q-3", position: 3 }),
+    ];
+    useQueueMock.mockReturnValue(queueState(initialEntries));
+    const { rerender } = render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    useQueueMock.mockReturnValue(queueState([initialEntries[0], initialEntries[2]]));
+    rerender(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    expect(screen.getByLabelText("Position #1")).toBeTruthy();
+    expect(screen.getByLabelText("Position #2")).toBeTruthy();
+    expect(screen.queryByLabelText("Position #3")).toBeNull();
+  });
+});
+
 describe("QueueAffordance Escape handling", () => {
   it("collapses an open panel without reaching an outer dialog", () => {
     useQueueMock.mockReturnValue(queueState([entry()]));
@@ -280,26 +302,42 @@ describe("QueueAffordance — renderStatusBar prop", () => {
   });
 });
 
-describe("QueueAffordance — workflow entries", () => {
-  it("workflow queued entries are read-only", () => {
-    useQueueMock.mockReturnValue(
-      queueState([
-        entry({
-          queued_by: "workflow",
-          metadata: {
-            workflow_message: true,
-            workflow_step_name: "Review",
-          },
-        }),
-      ]),
-    );
+describe("QueueAffordance — provenance actions", () => {
+  it("offers Remove for every visible origin and Edit only for user rows", () => {
+    const state = queueState([
+      entry({ id: "q-user", queued_by: "user" }),
+      entry({ id: "q-agent", queued_by: "agent" }),
+      entry({
+        id: "q-workflow",
+        queued_by: "workflow",
+        metadata: { workflow_message: true, workflow_step_name: "Review" },
+      }),
+      entry({ id: "q-server", queued_by: "server" }),
+    ]);
+    useQueueMock.mockReturnValue(state);
     render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
 
     fireEvent.click(screen.getByTestId(CHIP_ID));
 
     expect(screen.getByTestId("workflow-message-badge").textContent).toContain("Review");
-    expect(screen.queryByTitle("Edit queued message")).toBeNull();
-    expect(screen.queryByTitle("Remove queued message")).toBeNull();
+    expect(screen.getAllByTestId(REMOVE_BUTTON_ID)).toHaveLength(4);
+    expect(screen.getAllByTestId(EDIT_BUTTON_ID)).toHaveLength(1);
+
+    fireEvent.click(screen.getAllByTestId(REMOVE_BUTTON_ID)[1]);
+    expect(state.removeEntry).toHaveBeenCalledWith("q-agent");
+  });
+
+  it("keeps one queue scroll owner and touch-sizes clear and close controls", () => {
+    useQueueMock.mockReturnValue(queueState([entry()]));
+    render(<QueueAffordance sessionId={SESSION_ID}>{CHILD}</QueueAffordance>);
+
+    fireEvent.click(screen.getByTestId(CHIP_ID));
+
+    const panel = screen.getByTestId(PANEL_ID);
+    expect(panel.querySelectorAll(".overflow-y-auto")).toHaveLength(1);
+    for (const testId of ["queue-clear-all", "queue-close"]) {
+      expect(screen.getByTestId(testId).className).toContain("[@media(pointer:coarse)]:h-11");
+    }
   });
 });
 

@@ -70,7 +70,6 @@ A new **System** group is added to the existing settings sidebar (`apps/web/comp
 9. **About** — `/settings/system/about`
    - Version, build commit, build timestamp, Go runtime version, Node runtime version, OS/arch.
    - Links: GitHub repo, documentation, license, "Report an issue".
-
 ### Sidebar badge
 
 The **System** group header (and the **Status** child entry) show a numeric badge equal to `count(health.issues where severity != info) + (updateAvailable ? 1 : 0)`. The badge is sourced from the existing `useSystemHealth` hook plus the new updates hook; no new WS topic is required for v1.
@@ -102,6 +101,8 @@ POST   /api/v1/system/improve-kandev/bundle/lease - owner-verified 24h task-cont
 GET    /api/v1/system/updates                     - { current, latest, latestCheckedAt, releaseUrl, install, applySupported }
 POST   /api/v1/system/updates/check               - force GitHub re-poll; rate-limited 30s
 POST   /api/v1/system/updates/apply               - queue service-only self-update; body { confirm: "UPDATE" }
+GET    /api/v1/system/message-queue/settings       - configured/effective queue limit and source
+PATCH  /api/v1/system/message-queue/settings       - save and live-apply admin queue limit
 ```
 
 Storage endpoints are defined separately in [Storage Maintenance](storage-maintenance.md).
@@ -165,6 +166,10 @@ The page reads the JSON statically; no backend endpoint is needed.
 - **GIVEN** the user clicks **Check now** twice within 30 seconds, **WHEN** the second click fires, **THEN** the endpoint returns `429 Too Many Requests` and the UI shows "Already checked, try again in <N>s".
 - **GIVEN** retained backend logs and a connected browser with local console history, **WHEN** the user downloads diagnostics from `/settings/system/logs`, **THEN** one ZIP contains separate backend/frontend directories and a manifest describing both captures.
 - **GIVEN** the user opens `/settings/system/licenses` while offline, **WHEN** the page renders, **THEN** every dependency's license text is available locally (no network calls).
+- **GIVEN** no queue-limit environment variable is set, **WHEN** an admin saves
+  a new limit on `/settings/general/message-queue`, **THEN** later queue
+  admissions use it immediately without deleting existing messages or
+  requiring a restart.
 
 ## Data model
 
@@ -191,7 +196,13 @@ Each transition publishes `system.job.update` with `{ jobId, kind, state, messag
 
 ## Permissions
 
-All System endpoints require the same "logged-in install user" check as the existing `/api/v1/settings/*` endpoints — there is no admin tier in v1. Factory reset and restore endpoints additionally validate the `confirm` body field server-side as a defence-in-depth check against accidental fetches.
+All System endpoints require the same logged-in install-user check as the
+existing settings endpoints. Install-wide destructive or configuration
+mutations are admin-only; authentication-disabled installs use the existing
+synthetic admin. Factory reset and restore additionally validate the `confirm`
+body field server-side as a defence-in-depth check against accidental fetches.
+The Message Queue settings GET is readable by members, while its PATCH is
+admin-only.
 
 ## Failure modes
 

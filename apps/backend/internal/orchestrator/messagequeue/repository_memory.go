@@ -421,7 +421,7 @@ func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID stri
 		if m.ID != entryID {
 			continue
 		}
-		if IsReservedQueuedBy(m.QueuedBy) {
+		if m.IsReservedInFlight() {
 			return ErrEntryNotFound
 		}
 		r.entries[sessionID] = append(list[:i], list[i+1:]...)
@@ -441,7 +441,7 @@ func (r *memoryRepository) DeleteAllBySession(_ context.Context, sessionID strin
 	kept := list[:0]
 	removed := 0
 	for _, msg := range list {
-		if IsReservedQueuedBy(msg.QueuedBy) {
+		if msg.IsReservedInFlight() {
 			kept = append(kept, msg)
 			continue
 		}

@@ -102,3 +102,32 @@ func TestPostgresRepository_MergeIntoAbove_ReferenceOverflow(t *testing.T) {
 		t.Errorf("count after rejected overflow merge = %d, want 2", count)
 	}
 }
+
+func TestPostgresRepository_CancellationIncludesAllOriginsAndPreservesReservation(t *testing.T) {
+	repo := newTestPostgresRepo(t)
+	ctx := context.Background()
+
+	reservedEntry := insertDurableLifecycleEntry(t, repo, "s1")
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil || reserved == nil {
+		t.Fatalf("reserve lifecycle entry: msg=%+v err=%v", reserved, err)
+	}
+	for _, queuedBy := range []string{QueuedByUser, QueuedByAgent, QueuedByWorkflow, QueuedByServer} {
+		if err := repo.Insert(ctx, &QueuedMessage{
+			SessionID: "s1", TaskID: "t1", Content: queuedBy, QueuedBy: queuedBy,
+		}, 0); err != nil {
+			t.Fatalf("insert %s entry: %v", queuedBy, err)
+		}
+	}
+
+	removed, err := repo.DeleteAllBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("clear queue: %v", err)
+	}
+	if removed != 4 {
+		t.Fatalf("removed = %d, want 4", removed)
+	}
+	if err := repo.AcknowledgeByID(ctx, "s1", reservedEntry.ID); err != nil {
+		t.Fatalf("reserved entry did not survive clear: %v", err)
+	}
+}
