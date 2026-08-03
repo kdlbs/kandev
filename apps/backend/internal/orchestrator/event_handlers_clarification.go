@@ -510,21 +510,42 @@ func (s *Service) PauseForClarificationInput(ctx context.Context, sessionID stri
 // (agent crashed mid-turn). In that case, skip the cancel signal but still reconcile the
 // session's state so clarification recovery can proceed with a fresh prompt.
 func (s *Service) cancelAgentSilent(ctx context.Context, taskID, sessionID string) error {
+	_, err := s.cancelAgentSilentAction(ctx, taskID, sessionID, nil)
+	return err
+}
+
+func (s *Service) cancelAgentSilentAction(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+) (bool, error) {
 	if s.repo == nil {
-		return errors.New("cancel agent silently: repository is not configured")
+		return false, errors.New("cancel agent silently: repository is not configured")
 	}
-	operation, owner := s.claimCancellation(sessionID, cancellationKindSilent)
+	var registeredAction func(context.Context, *cancelOperation) (bool, error)
+	if action != nil {
+		registeredAction = func(actionCtx context.Context, _ *cancelOperation) (bool, error) {
+			return action(actionCtx)
+		}
+	}
+	operation, owner, registered := s.claimCancellationWithAction(sessionID, cancellationKindSilent, registeredAction)
 	if owner {
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
 	}
-	return operation.wait(ctx)
+	if err := operation.wait(ctx); err != nil {
+		return false, err
+	}
+	if registered == nil {
+		return false, nil
+	}
+	return registered.wait(ctx)
 }
 
 func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sessionID string, operation *cancelOperation) {
 	operationCtx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), cancellationOperationTTL)
 	defer cancel()
 	err := s.runSilentCancellationOwned(operationCtx, taskID, sessionID, operation)
-	s.finishCancellation(sessionID, operation, err)
+	s.finishCancellationWithActions(operationCtx, sessionID, operation, err)
 }
 
 func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessionID string, operation *cancelOperation) error {
@@ -610,11 +631,23 @@ func (s *Service) cancelAgentSilentWithGuard(
 	unlockGuard func(),
 	relockGuard func(),
 ) error {
+	_, err := s.cancelAgentSilentWithGuardAction(ctx, taskID, sessionID, unlockGuard, relockGuard, nil)
+	return err
+}
+
+func (s *Service) cancelAgentSilentWithGuardAction(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	unlockGuard func(),
+	relockGuard func(),
+	action func(context.Context) (bool, error),
+) (bool, error) {
 	if unlockGuard != nil {
 		unlockGuard()
 		defer relockGuard()
 	}
-	return s.cancelAgentSilent(ctx, taskID, sessionID)
+	return s.cancelAgentSilentAction(ctx, taskID, sessionID, action)
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {
