@@ -46,7 +46,7 @@ test.describe("mobile: session stream overload isolation", () => {
       agent_profile_id: seedData.agentProfileId,
       executor_profile_id: seedData.worktreeExecutorProfileId,
       workflow_step_id: seedData.startStepId,
-      prompt: reasoningBurstPrompt(),
+      prompt: 'e2e:message("noisy-ready")',
     });
     const noisySessionId = launched.session_id;
 
@@ -56,6 +56,26 @@ test.describe("mobile: session stream overload isolation", () => {
     await noisyPage.goto(`/t/${noisyTask.id}`);
     const noisySession = new SessionPage(noisyPage);
     await noisySession.waitForLoad();
+    const noisyPill = noisyPage.getByTestId("mobile-sessions-pill");
+    await expect(noisyPill).toBeVisible({ timeout: 30_000 });
+    await noisyPill.tap();
+    const noisyRow = noisyPage.getByTestId(`mobile-session-row-${noisySessionId}`);
+    await expect(noisyRow).toBeVisible({ timeout: 30_000 });
+    await noisyRow.tap();
+    await noisySession.waitForLoad();
+    await noisySession.waitForChatIdle({ timeout: 60_000 });
+    await expect
+      .poll(
+        () =>
+          noisyCapture.frames.some(
+            (frame) =>
+              frame.direction === "sent" &&
+              frame.action === "session.subscribe" &&
+              frame.sessionId === noisySessionId,
+          ),
+        { message: "noisy mobile page must subscribe before the burst", timeout: 10_000 },
+      )
+      .toBe(true);
 
     const pill = testPage.getByTestId("mobile-sessions-pill");
     await expect(pill).toBeVisible({ timeout: 30_000 });
@@ -65,6 +85,22 @@ test.describe("mobile: session stream overload isolation", () => {
     await quietRow.tap();
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 60_000 });
+    await expect
+      .poll(
+        () =>
+          capture.frames.some(
+            (frame) =>
+              frame.direction === "sent" &&
+              frame.action === "session.subscribe" &&
+              frame.sessionId === quietSession.session_id,
+          ),
+        { message: "quiet mobile page must subscribe before the burst", timeout: 10_000 },
+      )
+      .toBe(true);
+
+    noisyCapture.frames.length = 0;
+    capture.frames.length = 0;
+    await noisySession.sendMessageViaButton(reasoningBurstPrompt());
     await session.sendMessageViaButton("mobile-quiet-followup");
     await session.expectChatResponseVisible("mobile-quiet-followup", 0, { timeout: 60_000 });
 
