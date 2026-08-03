@@ -22,6 +22,7 @@ import type {
   StorageQuarantineEntry,
   StorageQuarantinePurgeScope,
   StorageSettingsResponse,
+  UpdatesChannel,
 } from "@/lib/types/system";
 
 const SYSTEM_BASE = "/api/v1/system";
@@ -217,14 +218,33 @@ export function checkUpdates(options?: ApiRequestOptions): Promise<UpdatesRespon
   });
 }
 
+export function saveUpdatesChannel(
+  channel: UpdatesChannel,
+  options?: ApiRequestOptions,
+): Promise<UpdatesResponse> {
+  return fetchJson<UpdatesResponse>(`${SYSTEM_BASE}/updates/channel`, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PATCH",
+      body: JSON.stringify({ channel }),
+    },
+  });
+}
+
 export function applyUpdate(
-  confirm = "UPDATE",
+  confirm: string,
+  targetVersion: string,
   options?: ApiRequestOptions,
 ): Promise<JobAcceptResponse> {
   return fetchJson<JobAcceptResponse>(`${SYSTEM_BASE}/updates/apply`, {
     ...options,
     // Spread caller init first so the required method/body can't be overridden.
-    init: { ...(options?.init ?? {}), method: "POST", body: JSON.stringify({ confirm }) },
+    init: {
+      ...(options?.init ?? {}),
+      method: "POST",
+      body: JSON.stringify({ confirm, target_version: targetVersion }),
+    },
   });
 }
 

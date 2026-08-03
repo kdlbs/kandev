@@ -1,5 +1,7 @@
 "use client";
 
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@kandev/ui/badge";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconCheck, IconAlertTriangle } from "@tabler/icons-react";
@@ -34,16 +36,21 @@ function badgeVariant(state: SystemJob["state"]): "destructive" | "secondary" | 
   return "outline";
 }
 
-function stateLabel(state: SystemJob["state"]): string {
+/**
+ * `state` is a wire enum, so it travels as the key and only the label is copy.
+ * The `default` branch echoes the raw token so a state from a newer backend
+ * still renders something rather than blank.
+ */
+function stateLabel(state: SystemJob["state"], t: TFunction): string {
   switch (state) {
     case "queued":
-      return "Queued";
+      return t("system:jobStateQueued");
     case "running":
-      return "Running";
+      return t("system:jobStateRunning");
     case "succeeded":
-      return "Done";
+      return t("system:jobStateDone");
     case "failed":
-      return "Failed";
+      return t("system:jobStateFailed");
     default:
       return state;
   }
@@ -55,6 +62,7 @@ export function JobProgressIndicator({
   successLabel,
   testId,
 }: JobProgressIndicatorProps) {
+  const { t } = useTranslation();
   const pinnedJob = useSystemJob(jobId);
   const jobs = useSystemJobs(kind);
   const job = jobId ? (pinnedJob ?? pickJob(jobs, jobId)) : pickJob(jobs);
@@ -75,7 +83,7 @@ export function JobProgressIndicator({
       {isSuccess && <IconCheck className="size-3.5 text-emerald-500" />}
       {isFailed && <IconAlertTriangle className="size-3.5 text-red-500" />}
       <Badge variant={badgeVariant(job.state)} className="text-[10px]">
-        {isSuccess && successLabel ? successLabel : stateLabel(job.state)}
+        {isSuccess && successLabel ? successLabel : stateLabel(job.state, t)}
       </Badge>
       {job.message && <span className="truncate max-w-[24rem]">{job.message}</span>}
     </div>

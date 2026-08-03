@@ -21,6 +21,14 @@ import (
 func (e *Executor) Stop(ctx context.Context, sessionID string, reason string, force bool) error {
 	session, err := e.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
+		// A genuinely missing session row means the runtime this stop would
+		// target is gone; normalize to the public not-found sentinel so durable
+		// cleanup can treat a confirmed-dead local runtime as already stopped.
+		// An unrelated store error is NOT reclassified — it stays a plain
+		// ErrExecutionNotFound so a transient failure remains retryable.
+		if errors.Is(err, models.ErrTaskSessionNotFound) {
+			return fmt.Errorf("%w: %w: %w", ErrExecutionNotFound, runtimeapi.ErrNotFound, err)
+		}
 		return ErrExecutionNotFound
 	}
 	return e.stopWithSession(ctx, session, reason, force)

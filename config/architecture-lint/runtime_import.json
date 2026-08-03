@@ -1,0 +1,262 @@
+{
+  "version": 1,
+  "rule": "ARCH-RUNTIME-IMPORT",
+  "entries": [
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/controller/controller.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/agent/handlers/git_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/git_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/passthrough_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/port_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/review_change_source.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/shell_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/vscode_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/agent/handlers/workspace_file_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/agent/handlers/workspace_file_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/agent/hostutility/manager.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/backendapp/adapters.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/adapters.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/backendapp/agentctl.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl/launcher",
+      "path": "apps/backend/internal/backendapp/agentctl.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/backendapp/agents.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/agents.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/boot_state.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/branch_materializer.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/gateway.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/backendapp/helpers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/helpers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/backendapp/main.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/main.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill",
+      "path": "apps/backend/internal/backendapp/main.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/metrics_provider.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/orchestrator.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/storage_inventory.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/storage_maintenance.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/workspace_source_materializer.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/worktree.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/lsp_handler.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/port_proxy.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/port_tunnel.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/setup.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/terminal_handler.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/terminal_sessions.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/gateway/websocket/vscode_proxy.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle/skill",
+      "path": "apps/backend/internal/office/skills/runtime_adapter.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/event_handlers_agent.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/event_handlers_clarification.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/event_handlers_git.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/event_handlers_prepare.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/event_handlers_stall.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/event_handlers_streaming.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/orchestrator/executor/executor.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/executor/executor.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/executor/executor_environment_reuse.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/executor/executor_execute.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/executor/executor_interaction.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/executor/executor_resume.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/executor/executor_state.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/orchestrator/task_operations.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/task_operations.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/orchestrator/watcher/watcher.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/ssh/handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/task/handlers/executor_profile_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/task/handlers/message_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/agentctl",
+      "path": "apps/backend/internal/task/handlers/process_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/task/handlers/process_handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/task/service/service_turns.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/utility/handlers/handlers.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/backendapp/diagnostic_acp_exporter.go"
+    },
+    {
+      "import": "github.com/kandev/kandev/internal/agent/runtime/lifecycle",
+      "path": "apps/backend/internal/mcp/handlers/diagnostic_bundle.go"
+    }
+  ]
+}

@@ -177,6 +177,15 @@ function hydrateSessionRuntime(
   activeSessionId: string | null,
   forceMergeSessionId: string | null,
 ): void {
+  // Merge a `{ bySessionId }`-shaped slice, protecting the active session.
+  const mergeBySession = (key: keyof AppState & keyof HydrationState): void => {
+    const source = state[key] as { bySessionId?: Record<string, unknown> } | undefined;
+    if (!source) return;
+    const target = draft[key] as { bySessionId?: Record<string, unknown> } | undefined;
+    if (!target?.bySessionId) return;
+    mergeSessionMap(target.bySessionId, source.bySessionId, activeSessionId, forceMergeSessionId);
+  };
+
   if (state.terminal) deepMerge(draft.terminal, state.terminal);
   if (state.shell) {
     mergeSessionMap(
@@ -201,26 +210,14 @@ function hydrateSessionRuntime(
       forceMergeSessionId,
     );
   }
-  if (state.contextWindow) {
-    mergeSessionMap(
-      draft.contextWindow.bySessionId,
-      state.contextWindow?.bySessionId,
-      activeSessionId,
-      forceMergeSessionId,
-    );
-  }
+  mergeBySession("contextWindow");
   if (state.environmentIdBySessionId) {
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
+  mergeBySession("sessionModels");
+  mergeBySession("sessionMcpStatus");
   if (state.agents) deepMerge(draft.agents, state.agents);
-  if (state.prepareProgress) {
-    mergeSessionMap(
-      draft.prepareProgress.bySessionId,
-      state.prepareProgress?.bySessionId,
-      activeSessionId,
-      forceMergeSessionId,
-    );
-  }
+  mergeBySession("prepareProgress");
 }
 
 /** Hydrate UI slices without overwriting active connection state. */

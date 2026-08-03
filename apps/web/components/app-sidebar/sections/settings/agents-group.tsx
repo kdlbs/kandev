@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { IconRobot } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { useAppStore } from "@/components/state-provider";
@@ -15,12 +16,13 @@ type AgentsGroupProps = {
 };
 
 export function AgentsGroup({ pathname, expanded, onToggle }: AgentsGroupProps) {
+  const { t } = useTranslation();
   const agents = useAppStore((s) => s.settingsAgents.items);
   useAvailableAgents();
 
   return (
     <SettingsGroup
-      label="Agents"
+      label={t("common:agents")}
       icon={IconRobot}
       href={ROOT_HREF}
       isActive={pathname === ROOT_HREF}

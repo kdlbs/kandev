@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -206,6 +207,32 @@ func (c *ControlClient) Health(ctx context.Context) error {
 		return fmt.Errorf("health check failed: %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// SubprocessAdmission returns the agentctl process's current Git admission
+// state. It is used by the backend debug export to correlate host and agentctl
+// pressure without exposing control-server internals directly.
+func (c *ControlClient) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v1/debug/subprocess-admission", nil)
+	if err != nil {
+		return subproc.Snapshot{}, err
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return subproc.Snapshot{}, fmt.Errorf("failed to get subprocess admission: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return subproc.Snapshot{}, fmt.Errorf("failed to get subprocess admission: status %d", resp.StatusCode)
+	}
+
+	var snapshot subproc.Snapshot
+	if err := json.NewDecoder(resp.Body).Decode(&snapshot); err != nil {
+		return subproc.Snapshot{}, fmt.Errorf("failed to decode subprocess admission: %w", err)
+	}
+	return snapshot, nil
 }
 
 // CreateInstance creates a new agent instance.

@@ -219,6 +219,7 @@ func stepMatchesDefinition(existing, desired *models.WorkflowStep) bool {
 		existing.WIPLimit == desired.WIPLimit &&
 		existing.PullFromStepID == desired.PullFromStepID &&
 		existing.AutoAdvanceRequiresSignal == desired.AutoAdvanceRequiresSignal &&
+		existing.CancelTriggersTurnComplete == desired.CancelTriggersTurnComplete &&
 		eventsEqual(existing.Events, desired.Events)
 }
 

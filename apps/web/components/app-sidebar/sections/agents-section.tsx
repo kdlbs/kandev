@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
 import { IconPlus, IconRobot, IconSitemap } from "@tabler/icons-react";
@@ -47,6 +48,7 @@ function isCurrentWorkspaceResponse(
 }
 
 function AgentsSectionHeaderAction({ router }: { router: { push: (path: string) => void } }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-0.5">
       <Tooltip>
@@ -56,14 +58,14 @@ function AgentsSectionHeaderAction({ router }: { router: { push: (path: string) 
             variant="ghost"
             size="icon"
             className="h-5 w-5 cursor-pointer"
-            aria-label="Agent topology"
+            aria-label={t("sidebar:agentTopology")}
           >
             <Link href="/office/workspace/org">
               <IconSitemap className="h-3 w-3 text-muted-foreground/60" />
             </Link>
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Agent topology</TooltipContent>
+        <TooltipContent>{t("sidebar:agentTopology")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -71,19 +73,20 @@ function AgentsSectionHeaderAction({ router }: { router: { push: (path: string) 
             variant="ghost"
             size="icon"
             className="h-5 w-5 cursor-pointer"
-            aria-label="Add agent"
+            aria-label={t("sidebar:addAgent")}
             onClick={() => router.push("/office/agents")}
           >
             <IconPlus className="h-3 w-3 text-muted-foreground/60" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Add agent</TooltipContent>
+        <TooltipContent>{t("sidebar:addAgent")}</TooltipContent>
       </Tooltip>
     </div>
   );
 }
 
 export function AgentsSection({ collapsed }: AgentsSectionProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const inOffice = useInOffice();
   const store = useAppStoreApi();
@@ -149,7 +152,7 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
   return (
     <AppSidebarSection
       id={APP_SIDEBAR_SECTION_IDS.agents}
-      label="Agents"
+      label={t("common:agents")}
       collapsed={collapsed}
       icon={IconRobot}
       headerAction={<AgentsSectionHeaderAction router={router} />}
@@ -157,7 +160,7 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
       defaultExpanded
     >
       {visibleAgents.length === 0 ? (
-        <p className="px-3 py-2 text-xs text-muted-foreground">No agents yet</p>
+        <p className="px-3 py-2 text-xs text-muted-foreground">{t("sidebar:noAgentsYet")}</p>
       ) : (
         visibleAgents.map((agent) => <AgentRow key={agent.id} agent={agent} />)
       )}
@@ -166,6 +169,7 @@ export function AgentsSection({ collapsed }: AgentsSectionProps) {
 }
 
 function AgentRow({ agent }: { agent: AgentProfile }) {
+  const { t } = useTranslation();
   const pathname = usePathname();
   const href = `/office/agents/${agent.id}`;
   const isActive = pathname === href;
@@ -196,12 +200,12 @@ function AgentRow({ agent }: { agent: AgentProfile }) {
           title={agent.pauseReason}
           className="rounded-full bg-red-500/15 text-red-600 dark:text-red-400 px-1.5 py-0.5 text-[10px] font-medium"
         >
-          paused
+          {t("sidebar:pausedBadge")}
         </span>
       ) : null}
       {!isAutoPaused && errorCount > 0 ? (
         <span className="rounded-full bg-red-500/15 text-red-600 dark:text-red-400 px-1.5 py-0.5 text-[10px] font-medium">
-          {errorCount} error{errorCount === 1 ? "" : "s"}
+          {t("sidebar:runErrors", { count: errorCount })}
         </span>
       ) : null}
       {liveCount > 0 && <LiveAgentIndicator count={liveCount} />}

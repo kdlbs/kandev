@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ReactNode } from "react";
+import { Trans } from "react-i18next";
 import ReactMarkdown from "react-markdown";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -20,6 +21,7 @@ import {
   type RemoteAuthMethod,
 } from "@/lib/api/domains/settings-api";
 import type { SecretListItem } from "@/lib/types/http-secrets";
+import { useTranslation } from "react-i18next";
 
 type AuthChoice = "files" | "env" | "none";
 export type { GitIdentityMode, GitIdentityState } from "./git-identity-fields";
@@ -72,6 +74,7 @@ export function RemoteCredentialsCard({
   onGitUserEmailChange,
   localGitIdentity,
 }: RemoteCredentialsCardProps) {
+  const { t } = useTranslation();
   const [authSpecs, setAuthSpecs] = useState<RemoteAuthSpec[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -99,10 +102,8 @@ export function RemoteCredentialsCard({
   return (
     <SettingsCard isDirty={isDirty}>
       <CardHeader>
-        <CardTitle>Remote Credentials</CardTitle>
-        <CardDescription>
-          Configure authentication for tools and agents in the remote environment.
-        </CardDescription>
+        <CardTitle>{t("executors:remoteCredentials")}</CardTitle>
+        <CardDescription>{t("executors:configureAuthenticationForToolsAndAgents")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {authSpecs.length > 0 || isRemote ? (
@@ -142,7 +143,9 @@ export function RemoteCredentialsCard({
             })}
           </Accordion>
         ) : (
-          <p className="text-sm text-muted-foreground">No transferable credentials found.</p>
+          <p className="text-sm text-muted-foreground">
+            {t("executors:noTransferableCredentialsFound")}
+          </p>
         )}
       </CardContent>
     </SettingsCard>
@@ -150,15 +153,16 @@ export function RemoteCredentialsCard({
 }
 
 function RemoteCredentialsLoading({ isDirty }: { isDirty: boolean }) {
+  const { t } = useTranslation();
   return (
     <SettingsCard isDirty={isDirty}>
       <CardHeader>
-        <CardTitle>Remote Credentials</CardTitle>
+        <CardTitle>{t("executors:remoteCredentials")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <IconLoader2 className="h-4 w-4 animate-spin" />
-          Loading...
+          {t("executors:loading")}
         </div>
       </CardContent>
     </SettingsCard>
@@ -309,6 +313,7 @@ function EnvOnlySection({
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 }) {
+  const { t } = useTranslation();
   return (
     <>
       {envMethod.setup_hint && (
@@ -321,7 +326,7 @@ function EnvOnlySection({
         onSecretIdChange={onSecretIdChange}
         secrets={secrets}
         label={envMethod.env_var}
-        placeholder="Select or create a secret..."
+        placeholder={t("executors:selectOrCreateASecret")}
         isDirty={secretId !== baselineSecretId}
       />
     </>
@@ -341,19 +346,21 @@ function FileOption({
   filesAvailable: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   const filesLabel = method.source_files?.join(", ") ?? "";
   return (
     <AuthOptionButton
       selected={isSelected}
       isDirty={isDirty}
       onSelect={onSelect}
-      label={method.label ?? "Copy auth files"}
+      label={method.label ?? t("executors:copyAuthFiles")}
     >
       <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium">{method.label ?? "Copy auth files"}</span>
+        <span className="text-sm font-medium">{method.label ?? t("executors:copyAuthFiles")}</span>
         <span className="text-xs text-muted-foreground">
-          {filesLabel}
-          {!filesAvailable && " — files not found on this machine"}
+          {filesAvailable
+            ? filesLabel
+            : t("executors:authFilesNotFoundOnThisMachine", { files: filesLabel })}
         </span>
       </div>
     </AuthOptionButton>
@@ -379,19 +386,22 @@ function EnvOption({
   secrets: SecretListItem[];
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div>
       <AuthOptionButton
         selected={isSelected}
         isDirty={isDirty}
         onSelect={onSelect}
-        label="Provide secret"
+        label={t("executors:provideSecret")}
       >
         <div className="flex flex-col gap-0.5">
-          <span className="text-sm font-medium">Provide secret</span>
+          <span className="text-sm font-medium">{t("executors:provideSecret")}</span>
           <span className="text-xs text-muted-foreground">
-            Set <code className="text-[11px] bg-muted px-1 rounded">{method.env_var}</code> via a
-            stored secret
+            <Trans i18nKey="executors:setEnvVarViaStoredSecret" values={{ envVar: method.env_var }}>
+              Set <code className="text-[11px] bg-muted px-1 rounded">{method.env_var}</code> via a
+              stored secret
+            </Trans>
           </span>
           {method.setup_hint && (
             <div className="markdown-body text-xs text-muted-foreground [&_p]:m-0">
@@ -406,7 +416,7 @@ function EnvOption({
             secretId={secretId}
             onSecretIdChange={onSecretIdChange}
             secrets={secrets}
-            placeholder="Select or create a secret..."
+            placeholder={t("executors:selectOrCreateASecret")}
             isDirty={secretId !== baselineSecretId}
           />
         </div>
@@ -436,8 +446,9 @@ function AuthChoiceRadio({
   onSecretIdChange: (id: string | null) => void;
   secrets: SecretListItem[];
 }) {
+  const { t } = useTranslation();
   return (
-    <div role="radiogroup" aria-label="Remote auth method" className="grid gap-0">
+    <div role="radiogroup" aria-label={t("executors:remoteAuthMethod")} className="grid gap-0">
       {fileMethod && (
         <FileOption
           method={fileMethod}
@@ -506,23 +517,24 @@ function setMethodSelected(selectedIds: Set<string>, methodId: string, selected:
 }
 
 function AuthStatusBadge({ choice, hasSecret }: { choice: AuthChoice; hasSecret: boolean }) {
+  const { t } = useTranslation();
   if (choice === "env" && hasSecret) {
     return (
       <Badge variant="default" className="bg-green-600 text-[10px] px-1.5 py-0">
-        Configured
+        {t("executors:configured")}
       </Badge>
     );
   }
   if (choice === "files") {
     return (
       <Badge variant="default" className="bg-green-600 text-[10px] px-1.5 py-0">
-        Files Selected
+        {t("executors:filesSelected")}
       </Badge>
     );
   }
   return (
     <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
-      Not Configured
+      {t("executors:notConfigured")}
     </Badge>
   );
 }

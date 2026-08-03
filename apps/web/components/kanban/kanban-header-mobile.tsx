@@ -10,7 +10,7 @@ import { MobileMenuSheet } from "./mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { useAppStore } from "@/components/state-provider";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
+import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { workspaceHomeHref } from "@/components/app-sidebar/app-sidebar-workspace-navigation";
 import { cn } from "@/lib/utils";
@@ -61,7 +61,7 @@ function MobileHeaderActions({
   setMenuOpen: (open: boolean) => void;
 }) {
   const { issueSeverity } = useAppStatusDrawer();
-  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
+  const issueDetails = useConnectionIssueCopy(issueSeverity);
 
   return (
     <>

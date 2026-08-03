@@ -5,6 +5,7 @@ import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const PR_NUMBER = 702;
 
 type DockviewSnapshot = {
   panelIds: string[];
@@ -89,6 +90,38 @@ async function openTask(page: Page, taskId: string): Promise<SessionPage> {
   await session.waitForLoad();
   await session.waitForDockviewReady();
   return session;
+}
+
+async function seedAndLinkMockPR(apiClient: ApiClient, taskId: string): Promise<void> {
+  await apiClient.mockGitHubReset();
+  await apiClient.mockGitHubSetUser("test-user");
+  await apiClient.mockGitHubAddPRs([
+    {
+      number: PR_NUMBER,
+      title: "Configured review placement",
+      state: "open",
+      head_branch: "feat/configured-review-placement",
+      base_branch: "main",
+      author_login: "test-user",
+      repo_owner: "testorg",
+      repo_name: "testrepo",
+      additions: 4,
+      deletions: 1,
+    },
+  ]);
+  await apiClient.mockGitHubAssociateTaskPR({
+    task_id: taskId,
+    owner: "testorg",
+    repo: "testrepo",
+    pr_number: PR_NUMBER,
+    pr_url: `https://github.com/testorg/testrepo/pull/${PR_NUMBER}`,
+    pr_title: "Configured review placement",
+    head_branch: "feat/configured-review-placement",
+    base_branch: "main",
+    author_login: "test-user",
+    additions: 4,
+    deletions: 1,
+  });
 }
 
 async function dockviewSnapshot(page: Page): Promise<DockviewSnapshot> {
@@ -213,10 +246,12 @@ test.describe("Task layout profile defaults", () => {
     test.setTimeout(120_000);
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toHaveCount(0);
+    await layouts.addPanel("PR Details");
     await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toBeVisible();
     await layouts.selectPanel("PR Details");
     await prCapture.screenshot("default-pr-details-agent-group", {
-      caption: "Default layout puts PR Details beside Agent in the center pane",
+      caption: "The layout editor adds PR Details beside Agent in the center pane",
     });
 
     await layouts.actions.getByRole("button", { name: "Move tab to split" }).click();
@@ -230,7 +265,16 @@ test.describe("Task layout profile defaults", () => {
     expect(JSON.stringify(saved.layout)).toContain("pr-detail");
 
     const task = await createTaskWithSession(apiClient, seedData, "Moved PR Details Layout Task");
-    await openTask(testPage, task.id);
+    const session = await openTask(testPage, task.id);
+    await expect
+      .poll(() => dockviewSnapshot(testPage), { timeout: 15_000 })
+      .toMatchObject({
+        prDetailsGroupId: null,
+        rightGroupOrder: ["files", "changes"],
+      });
+
+    await seedAndLinkMockPR(apiClient, task.id);
+    await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
     await expect
       .poll(() => dockviewSnapshot(testPage), { timeout: 15_000 })
       .toMatchObject({

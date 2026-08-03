@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   IconAlertCircle,
   IconLoader2,
@@ -21,6 +23,7 @@ import { HostShellDialog } from "@/components/settings/host-shell-dialog";
  * users don't mistake the in-flight probe for a failed install.
  */
 export function ProbingPanel() {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="profile-probing-panel"
@@ -28,21 +31,22 @@ export function ProbingPanel() {
       className="flex items-center gap-3 rounded-md border border-muted bg-muted/40 p-3"
     >
       <IconLoader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-      <p className="text-sm text-muted-foreground">
-        Probing agent capabilities… this usually takes a few seconds.
-      </p>
+      <p className="text-sm text-muted-foreground">{t("agents:probingCapabilities")}</p>
     </div>
   );
 }
 
-function noAuthHint({ isAuth, canLogin }: { isAuth: boolean; canLogin: boolean }): React.ReactNode {
+function noAuthHint(
+  t: TFunction,
+  { isAuth, canLogin }: { isAuth: boolean; canLogin: boolean },
+): React.ReactNode {
   if (!isAuth) {
-    return "Install the agent CLI, then click Refresh.";
+    return t("agents:noAuthHintNotInstalled");
   }
   if (canLogin) {
-    return "Click Open terminal to sign in, then refresh.";
+    return t("agents:noAuthHintLogin");
   }
-  return "Click Open terminal to launch a shell, run the agent's sign-in command, then refresh.";
+  return t("agents:noAuthHintShell");
 }
 
 function NoAuthActions({
@@ -56,6 +60,7 @@ function NoAuthActions({
   onRefresh: () => Promise<void>;
   isLoading: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex shrink-0 items-center gap-2">
       {showTerminal && (
@@ -68,7 +73,7 @@ function NoAuthActions({
           data-testid="profile-no-auth-open-terminal"
         >
           <IconTerminal2 className="mr-2 h-4 w-4" />
-          Open terminal
+          {t("agents:openTerminal")}
         </Button>
       )}
       <Button
@@ -81,7 +86,7 @@ function NoAuthActions({
         data-testid="profile-no-auth-refresh"
       >
         <IconRefresh className={`mr-2 h-4 w-4 ${isLoading ? "animate-spin" : ""}`} />
-        Refresh
+        {t("agents:refresh")}
       </Button>
     </div>
   );
@@ -102,9 +107,10 @@ export function NoAuthPanel({
   error: string | null;
   rawError: string | null;
 }) {
+  const { t } = useTranslation();
   const isAuth = status === "auth_required";
   const Icon = isAuth ? IconLock : IconPackageOff;
-  const title = isAuth ? "No auth - login required" : "Not installed";
+  const title = isAuth ? t("agents:noAuthLoginRequired") : t("agents:notInstalled");
   const detail = error || rawError;
   const [loginOpen, setLoginOpen] = useState(false);
   const [shellOpen, setShellOpen] = useState(false);
@@ -118,7 +124,7 @@ export function NoAuthPanel({
   )?.login_command;
   const canLogin = isAuth && Boolean(loginCommand);
   const showTerminal = isAuth;
-  const hint = noAuthHint({ isAuth, canLogin });
+  const hint = noAuthHint(t, { isAuth, canLogin });
   const handleOpenTerminal = () => {
     if (canLogin) setLoginOpen(true);
     else setShellOpen(true);
@@ -143,7 +149,7 @@ export function NoAuthPanel({
                   data-testid="profile-no-auth-details"
                 >
                   <IconAlertCircle className="h-3 w-3" />
-                  details
+                  {t("agents:details")}
                 </button>
               </TooltipTrigger>
               <TooltipContent className="max-w-md">

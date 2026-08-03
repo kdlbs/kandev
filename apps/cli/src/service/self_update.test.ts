@@ -48,6 +48,17 @@ describe("planSelfUpdate", () => {
     ]);
   });
 
+  it("installs an exact npm nightly prerelease target", () => {
+    const nightly = intent("npm");
+    nightly.target_tag = "v0.82.1-nightly.shaabc123def456";
+    nightly.target_version = "0.82.1-nightly.shaabc123def456";
+
+    expect(planSelfUpdate(nightly, { platform: "linux" })[0]).toEqual({
+      command: "npm",
+      args: ["install", "-g", "--prefix", "/usr", "kandev@0.82.1-nightly.shaabc123def456"],
+    });
+  });
+
   it("keeps npm updates inside the original global prefix", () => {
     const npm = intent("npm");
     npm.install.cli_entry = "/tmp/kandev-test/npm-global/lib/node_modules/kandev/bin/cli.js";
@@ -93,6 +104,26 @@ describe("planSelfUpdate", () => {
       args: [
         "-y",
         "kandev@1.2.3",
+        "service",
+        "install",
+        "--home-dir",
+        "/home/alice/.kandev",
+        "--port",
+        "38429",
+      ],
+    });
+  });
+
+  it("reinstalls an exact npx nightly prerelease target", () => {
+    const nightly = intent("npx");
+    nightly.target_tag = "v0.82.1-nightly.shaabc123def456";
+    nightly.target_version = "0.82.1-nightly.shaabc123def456";
+
+    expect(planSelfUpdate(nightly, { platform: "linux" })[0]).toEqual({
+      command: "npx",
+      args: [
+        "-y",
+        "kandev@0.82.1-nightly.shaabc123def456",
         "service",
         "install",
         "--home-dir",

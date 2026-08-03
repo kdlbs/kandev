@@ -81,13 +81,13 @@ export const defaultUIState: UISliceState = {
   rightPanel: { activeTabBySessionId: {} },
   diffs: { files: [] },
   connection: { status: "disconnected", error: null, issueSeverity: "none" },
-  mobileKanban: { activeColumnIndex: 0, isMenuOpen: false, isSearchOpen: false },
+  mobileKanban: { activeStepIdByWorkflowId: {}, isMenuOpen: false, isSearchOpen: false },
   mobileSession: {
     activePanelBySessionId: {},
     reviewMRKeyBySessionId: {},
     isTaskSwitcherOpen: false,
   },
-  chatInput: { planModeBySessionId: {} },
+  chatInput: { planModeBySessionId: {}, cancellingBySessionId: {} },
   transcriptAutoScroll: {
     enabledBySessionId: {},
     scrollTopBySessionId: {},
@@ -168,9 +168,9 @@ function buildPreviewActions(set: ImmerSet) {
 /** Builds the mobile Kanban view's column-index, menu, and search-open actions. */
 function buildMobileActions(set: ImmerSet) {
   return {
-    setMobileKanbanColumnIndex: (index: number) =>
+    setMobileKanbanActiveStep: (workflowId: string, stepId: string) =>
       set((draft) => {
-        draft.mobileKanban.activeColumnIndex = index;
+        draft.mobileKanban.activeStepIdByWorkflowId[workflowId] = stepId;
       }),
     setMobileKanbanMenuOpen: (open: boolean) =>
       set((draft) => {
@@ -463,6 +463,14 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
+    }),
+  setCancelTurnPending: (sessionId, pending) =>
+    set((draft) => {
+      if (pending) {
+        draft.chatInput.cancellingBySessionId[sessionId] = true;
+      } else {
+        delete draft.chatInput.cancellingBySessionId[sessionId];
+      }
     }),
   setTranscriptAutoScrollEnabled: (sessionId, enabled) =>
     set((draft) => {

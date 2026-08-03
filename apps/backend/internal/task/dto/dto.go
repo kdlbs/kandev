@@ -272,6 +272,13 @@ type TaskSessionDTO struct {
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// CancellationPending mirrors the orchestrator's runtime cancellation
+	// projection. It is always serialized so false clears stale client state.
+	CancellationPending bool `json:"cancellation_pending"`
+	// CancellationRevision identifies the process-local cancellation transition
+	// generation that produced CancellationPending. It is always serialized so
+	// clients can reject delayed snapshots from older generations.
+	CancellationRevision uint64 `json:"cancellation_revision"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action,omitempty"`
@@ -322,6 +329,12 @@ type TaskSessionSummaryDTO struct {
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// CancellationPending mirrors the runtime cancellation projection and is
+	// always serialized so false clears stale client state.
+	CancellationPending bool `json:"cancellation_pending"`
+	// CancellationRevision identifies the process-local cancellation transition
+	// generation represented by CancellationPending.
+	CancellationRevision uint64 `json:"cancellation_revision"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action"`
@@ -817,6 +830,19 @@ type ForegroundActivityProvider interface {
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 
+// CancellationPendingProvider surfaces the orchestrator's runtime cancellation
+// projection without coupling task serialization to the orchestrator package.
+type CancellationPendingProvider interface {
+	CancellationPending(sessionID string) bool
+}
+
+// CancellationPendingSnapshotProvider is the atomic form of the cancellation
+// projection used by serialization boundaries that need ordering identity.
+// Implementations must read the boolean and revision from one critical section.
+type CancellationPendingSnapshotProvider interface {
+	CancellationPendingSnapshot(sessionID string) (pending bool, revision uint64)
+}
+
 type ActiveSubagentCountProvider interface {
 	ActiveSubagentCount(sessionID string) int
 }
@@ -872,9 +898,11 @@ type WorkflowStepDTO struct {
 	PullFromStepID        string         `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
-	StageType string    `json:"stage_type,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	StageType                  string    `json:"stage_type,omitempty"`
+	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
+	CreatedAt                  time.Time `json:"created_at"`
+	UpdatedAt                  time.Time `json:"updated_at"`
 }
 
 // StepEventsDTO represents step events for API responses

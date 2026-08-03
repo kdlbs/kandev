@@ -44,6 +44,24 @@ function makeSidebarView(id: string, name: string): SidebarView {
   };
 }
 
+describe("cancel-turn progress", () => {
+  it("tracks pending cancellation independently per session and clears one entry", () => {
+    const store = makeStore();
+
+    store.getState().setCancelTurnPending("session-a", true);
+    expect(store.getState().chatInput.cancellingBySessionId).toEqual({ "session-a": true });
+    expect(store.getState().chatInput.cancellingBySessionId["session-b"]).toBeUndefined();
+
+    store.getState().setCancelTurnPending("session-b", true);
+    store.getState().setCancelTurnPending("session-a", false);
+
+    expect(store.getState().chatInput.cancellingBySessionId).toEqual({ "session-b": true });
+
+    store.getState().setCancelTurnPending("session-b", false);
+    expect(store.getState().chatInput.cancellingBySessionId).toEqual({});
+  });
+});
+
 describe("migrateView", () => {
   it("retains all supported boolean filter dimensions", () => {
     const view = makeSidebarView("view-a", "View A");
@@ -68,6 +86,20 @@ describe("mobile merge request review selection", () => {
     store.getState().setMobileSessionReview("session-1", null);
     expect(store.getState().mobileSession.activePanelBySessionId["session-1"]).toBe("chat");
     expect(store.getState().mobileSession.reviewMRKeyBySessionId["session-1"]).toBeUndefined();
+  });
+});
+
+describe("mobile kanban active step", () => {
+  it("stores the selected step id per workflow without clobbering others", () => {
+    const store = makeStore();
+    store.getState().setMobileKanbanActiveStep("wf-a", "plan");
+    store.getState().setMobileKanbanActiveStep("wf-b", "review");
+    store.getState().setMobileKanbanActiveStep("wf-a", "done");
+
+    expect(store.getState().mobileKanban.activeStepIdByWorkflowId).toEqual({
+      "wf-a": "done",
+      "wf-b": "review",
+    });
   });
 });
 

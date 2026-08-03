@@ -104,6 +104,9 @@ func provideOrchestrator(
 		orchestratorSvc.SetTaskGitCredentialPolicyResolver(githubExecutorCredentialPolicyAdapter{service: githubSvc})
 	}
 	taskSvc.SetExecutionStopper(orchestratorSvc)
+	// Runtime-aware liveness lets durable cleanup treat a not-found stop for a
+	// confirmed-dead local runtime as already stopped instead of retrying forever.
+	taskSvc.SetRowLivenessProber(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
 	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())

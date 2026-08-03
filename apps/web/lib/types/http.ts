@@ -100,6 +100,8 @@ export type StepDefinition = {
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
   agent_profile_id?: AgentProfileId;
+  auto_advance_requires_signal?: boolean;
+  cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
 };
@@ -133,6 +135,11 @@ export type WorkflowStep = {
    * legacy "any turn-end advances" behaviour.
    */
   auto_advance_requires_signal?: boolean;
+  /**
+   * When true, an explicit user cancellation runs this step's normal
+   * on_turn_complete actions after the cancelled turn settles.
+   */
+  cancel_triggers_turn_complete?: boolean;
   created_at: string;
   updated_at: string;
 };
@@ -429,6 +436,10 @@ export type TaskSession = ActiveSubagentCountFields & {
   worktrees?: TaskSessionWorktree[];
   task_environment_id?: string;
   state: TaskSessionState;
+  /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
+  cancellation_pending?: boolean;
+  /** Process-local cancellation transition generation used to reject stale snapshots. */
+  cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   /** Compact pending-input projection used when this session's messages are unloaded. */

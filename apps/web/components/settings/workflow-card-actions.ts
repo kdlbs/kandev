@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import { generateUUID } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 import { useToast } from "@/components/toast-provider";
 import { useSerializedMutationQueue } from "./use-serialized-mutation-queue";
 import type { WorkflowMutationGuardController } from "./workflow-mutation-guard";
@@ -21,8 +22,11 @@ import {
   bulkMoveTasks,
 } from "@/app/actions/workspaces";
 
-const FALLBACK_ERROR_MESSAGE = "Request failed";
 const TEMP_WORKFLOW_PREFIX = "temp-workflow-";
+
+function fallbackErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : t("common:requestFailed");
+}
 
 type WorkflowStepActionsParams = {
   workflow: Workflow;
@@ -71,6 +75,10 @@ function openStepDeleteDialog({
   setStepDeleteOpen(true);
 }
 
+// Seeded default for a brand-new step. Both fields are PERSISTED verbatim —
+// `name` becomes the step's stored name and `color` its Tailwind class — so
+// neither is translated; translating the name would write a localized string
+// into the database.
 const NEW_STEP_DEFAULTS = { name: "New Step", color: "bg-slate-500" } as const;
 
 function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
@@ -87,11 +95,7 @@ function createDraftStep(workflow: Workflow, position: number): WorkflowStep {
 
 function useWorkflowStepMutationQueue(toast: WorkflowStepActionsParams["toast"]) {
   return useSerializedMutationQueue((errorTitle, error) => {
-    toast({
-      title: errorTitle,
-      description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
-      variant: "error",
-    });
+    toast({ title: errorTitle, description: fallbackErrorMessage(error), variant: "error" });
   });
 }
 
@@ -132,8 +136,8 @@ function createRemoveWorkflowStepHandler(
           ({ task_count: taskCount } = await getStepTaskCount(stepId));
         } catch (error) {
           toast({
-            title: "Failed to check workflow step tasks",
-            description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+            title: t("workflows:failedToCheckWorkflowStepTasks"),
+            description: fallbackErrorMessage(error),
             variant: "error",
           });
           return;
@@ -310,6 +314,7 @@ async function createMissingSteps(
       name: step.name,
       position: step.position,
       color: step.color,
+      cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     });
     mappings.set(step.id, created.id);
   }
@@ -393,6 +398,7 @@ function stepUpdatePayload(step: WorkflowStep): Partial<WorkflowStep> {
     auto_archive_after_hours: step.auto_archive_after_hours ?? 0,
     agent_profile_id: step.agent_profile_id ?? "",
     auto_advance_requires_signal: step.auto_advance_requires_signal ?? false,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete ?? false,
     wip_limit: step.wip_limit ?? 0,
     pull_from_step_id: step.pull_from_step_id ?? "",
   };
@@ -474,8 +480,8 @@ export function useWorkflowDeleteHandlers({
       wfDel.setDeleteOpen(true);
     } catch (error) {
       toast({
-        title: "Failed to check workflow tasks",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+        title: t("workflows:failedToCheckWorkflowTasks"),
+        description: fallbackErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -492,8 +498,8 @@ export function useWorkflowDeleteHandlers({
       wfDel.setDeleteOpen(false);
     } catch (error) {
       toast({
-        title: "Failed to delete workflow",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+        title: t("workflows:failedToDeleteWorkflow"),
+        description: fallbackErrorMessage(error),
         variant: "error",
       });
     }
@@ -513,8 +519,8 @@ export function useWorkflowDeleteHandlers({
       wfDel.setDeleteOpen(false);
     } catch (error) {
       toast({
-        title: "Failed to migrate tasks",
-        description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+        title: t("workflows:failedToMigrateTasks"),
+        description: fallbackErrorMessage(error),
         variant: "error",
       });
     } finally {
@@ -587,14 +593,14 @@ export function useStepDeleteHandlers({
         target_step_id: stepDel.targetStepForMigration,
       });
       await deleteWorkflowStepAction(stepDel.stepToDelete!);
-    }, "Failed to migrate tasks");
+    }, t("workflows:failedToMigrateTasks"));
   };
 
   const handleDeleteStepAndTasks = async () => {
     if (!stepDel.stepToDelete) return;
     await runStepDelete(
       () => deleteWorkflowStepAction(stepDel.stepToDelete!),
-      "Failed to delete step",
+      t("workflows:failedToDeleteStep"),
     );
   };
 
@@ -620,8 +626,8 @@ export async function handleExportWorkflow({
     setExportOpen(true);
   } catch (error) {
     toast({
-      title: "Failed to export workflow",
-      description: error instanceof Error ? error.message : FALLBACK_ERROR_MESSAGE,
+      title: t("workflows:failedToExportWorkflow"),
+      description: fallbackErrorMessage(error),
       variant: "error",
     });
   }

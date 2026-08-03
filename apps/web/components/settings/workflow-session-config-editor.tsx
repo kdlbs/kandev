@@ -78,11 +78,11 @@ export function SessionConfigToggle({
         data-testid={`${step.id}-override-original-session`}
       />
       <Label htmlFor={`${step.id}-override-original-session`} className="text-sm">
-        {t("settings:overrideOriginalSessionOptions")}
+        {t("workflows:overrideOriginalSessionOptions")}
       </Label>
       <HelpTip
         testId={`${step.id}-override-original-session-help`}
-        text={t("settings:overrideOriginalSessionOptionsHelp")}
+        text={t("workflows:overrideOriginalSessionOptionsHelp")}
       />
     </div>
   );
@@ -202,7 +202,7 @@ function SessionConfigBody({
     <>
       {step.agent_profile_id && action && (
         <p className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-200">
-          {t("settings:sessionConfigFixedProfileWarning")}
+          {t("workflows:sessionConfigFixedProfileWarning")}
         </p>
       )}
       {!action && warnings.length > 0 && !step.agent_profile_id && (
@@ -297,7 +297,7 @@ function SessionConfigRuleList({
         />
       ))}
       {rules.length === 0 && (
-        <p className="text-xs text-muted-foreground">{t("settings:sessionConfigEmptyRules")}</p>
+        <p className="text-xs text-muted-foreground">{t("workflows:sessionConfigEmptyRules")}</p>
       )}
     </div>
   );
@@ -323,13 +323,13 @@ function SessionConfigOptionsHeader({
       <div className="flex min-w-0 items-start gap-2">
         <div className="min-w-0">
           <Label className="text-sm font-medium">
-            {t("settings:configureOriginalSessionOptions")}
+            {t("workflows:configureOriginalSessionOptions")}
           </Label>
           <p className="text-xs text-muted-foreground">
-            {t("settings:configureOriginalSessionOptionsDescription")}
+            {t("workflows:configureOriginalSessionOptionsDescription")}
           </p>
         </div>
-        <HelpTip text={t("settings:sessionConfigRulesHelp")} />
+        <HelpTip text={t("workflows:sessionConfigRulesHelp")} />
       </div>
       {!readOnly && !step.agent_profile_id && (
         <Button
@@ -342,7 +342,7 @@ function SessionConfigOptionsHeader({
           data-testid={`${step.id}-add-session-config-rule`}
         >
           <IconPlus className="mr-1.5 h-4 w-4" />
-          {t("settings:addCondition")}
+          {t("workflows:addCondition")}
         </Button>
       )}
     </div>

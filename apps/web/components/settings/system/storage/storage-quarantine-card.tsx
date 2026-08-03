@@ -5,7 +5,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconRestore, IconTrash } from "@tabler/icons-react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
 import { JobProgressIndicator } from "../job-progress-indicator";
 import { PermanentDeleteDialog, QuarantinePurgeDialog } from "./storage-confirmation-dialogs";
@@ -21,6 +21,28 @@ import {
 } from "./storage-quarantine";
 
 const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * `resource_type` is a wire enum. It used to be rendered as
+ * `replace("_", " ")`, which is English-shaped by accident; each value now
+ * resolves through the catalog and falls back to the raw token so an unknown
+ * type from a newer backend still shows something.
+ */
+const RESOURCE_TYPE_LABEL_KEYS: Record<StorageQuarantineEntry["resource_type"], string> = {
+  task_workspace: "system:storageResourceTypeTaskWorkspace",
+  go_cache: "system:storageResourceTypeGoCache",
+};
+
+function resourceTypeLabel(
+  t: (key: string) => string,
+  resourceType: StorageQuarantineEntry["resource_type"],
+): string {
+  const key = RESOURCE_TYPE_LABEL_KEYS[resourceType];
+  // `replaceAll`, not `replace`: the original single-pattern call only reached
+  // the first underscore, so a future `some_new_resource_type` would have
+  // rendered as "some new_resource_type".
+  return key ? t(key) : resourceType.replaceAll("_", " ");
+}
 
 type Props = {
   entries: StorageQuarantineEntry[];
@@ -50,32 +72,34 @@ function QuarantineEntryRow({
   onRestore: (id: string) => Promise<void>;
   onDelete: (entry: StorageQuarantineEntry) => void;
 }) {
+  const { t } = useTranslation();
   const eligible = isQuarantineEligible(entry, now);
+  const deadline = formatQuarantineDeadline(entry);
   return (
     <div className="min-w-0 rounded-lg border p-3" data-testid={`storage-quarantine-${entry.id}`}>
       <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 space-y-1">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{entry.resource_type.replace("_", " ")}</Badge>
+            <Badge variant="outline">{resourceTypeLabel(t, entry.resource_type)}</Badge>
             <span className="text-xs text-muted-foreground">
               {formatGigabytes(entry.size_bytes)}
             </span>
           </div>
+          {/* Both paths are API data and are never routed through the catalog. */}
           <p className="break-all font-mono text-xs">{entry.original_path}</p>
           <p className="break-all text-[11px] text-muted-foreground">
-            Trash: {entry.quarantine_path}
+            {t("system:storageTrashPath", { path: entry.quarantine_path })}
           </p>
           {entry.last_error && (
             <p className="break-words text-xs text-red-500">{entry.last_error}</p>
           )}
           <p className="text-xs text-muted-foreground">
             {eligible ? (
-              <span className="text-emerald-600">Eligible now</span>
+              <span className="text-emerald-600">{t("system:storageEligibleNow")}</span>
             ) : (
-              <>
-                Protected until{" "}
-                <time dateTime={entry.delete_after}>{formatQuarantineDeadline(entry)}</time>
-              </>
+              <Trans i18nKey="system:storageProtectedUntil" values={{ deadline }}>
+                Protected until <time dateTime={entry.delete_after}>{deadline}</time>
+              </Trans>
             )}
           </p>
         </div>
@@ -86,18 +110,18 @@ function QuarantineEntryRow({
             onClick={() => void onRestore(entry.id)}
             data-testid={`storage-quarantine-${entry.id}-restore`}
           >
-            <IconRestore className="size-4" /> Restore
+            <IconRestore className="size-4" /> {t("system:storageRestore")}
           </StorageActionButton>
           <StorageActionButton
             variant="destructive"
             disabledReason={
               disabledReason ??
-              (eligible ? undefined : `Retention ends ${formatQuarantineDeadline(entry)}.`)
+              (eligible ? undefined : t("system:storageRetentionEnds", { deadline }))
             }
             onClick={() => onDelete(entry)}
             data-testid={`storage-quarantine-${entry.id}-delete`}
           >
-            <IconTrash className="size-4" /> Delete
+            <IconTrash className="size-4" /> {t("system:storageDelete")}
           </StorageActionButton>
         </div>
       </div>
@@ -131,17 +155,15 @@ function QuarantineHeader({
     <CardHeader>
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <CardTitle className="flex items-center gap-1 text-base">
-          Quarantine
-          <StorageSettingHelp label="Quarantine">
-            Quarantine is Kandev's recoverable holding area. Orphan task workspaces and rotated Go
-            caches are moved here before deletion. You can restore an item during its retention
-            period; after the deadline, a later maintenance run may permanently delete it.
+          {t("system:storageQuarantineHeading")}
+          <StorageSettingHelp label={t("system:storageQuarantineHeading")}>
+            {t("system:storageQuarantineHelp")}
           </StorageSettingHelp>
         </CardTitle>
         <JobProgressIndicator
           kind="storage-quarantine-delete"
           jobId={deleteJobId}
-          successLabel="Deletion complete"
+          successLabel={t("system:storageDeletionComplete")}
           testId="storage-delete-job"
         />
       </div>
@@ -152,12 +174,12 @@ function QuarantineHeader({
           disabled={counts.eligible === 0 || entries.length === 0}
           disabledReason={
             bulkDisabledReason ??
-            (counts.eligible === 0 ? "No quarantine entries are eligible yet." : undefined)
+            (counts.eligible === 0 ? t("system:storageNoEligibleEntries") : undefined)
           }
           onClick={() => onPurge("eligible")}
           data-testid="storage-quarantine-clear-eligible"
         >
-          Clear eligible
+          {t("system:storageClearEligible")}
         </StorageActionButton>
         <StorageActionButton
           variant="destructive"
@@ -167,23 +189,23 @@ function QuarantineHeader({
           onClick={() => onPurge("all")}
           data-testid="storage-quarantine-force-clear"
         >
-          Force clear all
+          {t("system:storageForceClearAll")}
         </StorageActionButton>
       </div>
       <CardDescription>
-        Cleanup moves recoverable data here first instead of deleting it immediately. Restore an
-        item if you still need it, or delete it permanently when you are certain. {counts.eligible}{" "}
-        eligible now · {counts.protected} protected
+        {t("system:storageQuarantineCardDescription")}{" "}
+        {t("system:storageQuarantineEligibleCount", { count: counts.eligible })} ·{" "}
+        {t("system:storageQuarantineProtectedCount", { count: counts.protected })}
       </CardDescription>
       {showTotal && (
         <p className="text-xs font-medium" data-testid="storage-quarantine-total">
-          {t("settings:storageQuarantineTotal", { size: formatGigabytes(totalBytes) })}
+          {t("system:storageQuarantineTotal", { size: formatGigabytes(totalBytes) })}
         </p>
       )}
       <p className="text-xs text-muted-foreground" data-testid="storage-quarantine-schedule-copy">
         {schedulingEnabled
-          ? `Eligible entries are removed by the first successful maintenance run after their deadline (every ${checkIntervalHours} hours when the idle gate allows it).`
-          : "Automatic quarantine cleanup is off. Run maintenance manually or use a quarantine action when you are ready."}
+          ? t("system:storageQuarantineScheduleOn", { count: checkIntervalHours })
+          : t("system:storageQuarantineScheduleOff")}
       </p>
     </CardHeader>
   );
@@ -211,19 +233,19 @@ function QuarantineContent({
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner className="size-4" data-testid="storage-quarantine-spinner" />
-        {t("settings:storageQuarantineLoading")}
+        {t("system:storageQuarantineLoading")}
       </div>
     );
   }
   if (error) {
     return (
       <p className="break-words text-sm text-destructive" data-testid="storage-quarantine-error">
-        {t("settings:storageSectionUnavailable")}: {error}
+        {t("system:storageSectionUnavailable")}: {error}
       </p>
     );
   }
   if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("settings:storageQuarantineEmpty")}</p>;
+    return <p className="text-sm text-muted-foreground">{t("system:storageQuarantineEmpty")}</p>;
   }
   return entries.map((entry) => (
     <QuarantineEntryRow
@@ -251,6 +273,7 @@ export function StorageQuarantineCard({
   onClearEligible,
   onForceClearAll,
 }: Props) {
+  const { t } = useTranslation();
   const [deleteEntry, setDeleteEntry] = useState<StorageQuarantineEntry | null>(null);
   const [purgeScope, setPurgeScope] = useState<StorageQuarantinePurgeScope | null>(null);
   const [now, setNow] = useState(() => new Date());
@@ -268,7 +291,7 @@ export function StorageQuarantineCard({
   const counts = quarantineCounts(entries, now);
   const totalBytes = quarantineTotalBytes(entries);
   const bulkDisabledReason =
-    disabledReason ?? (deleteJobActive ? "A quarantine cleanup is still running." : undefined);
+    disabledReason ?? (deleteJobActive ? t("system:storageQuarantineCleanupRunning") : undefined);
   return (
     <Card className="min-w-0" data-testid="storage-quarantine-card">
       <QuarantineHeader

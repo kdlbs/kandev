@@ -2,12 +2,14 @@ package store
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
+	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/prompts/models"
 )
@@ -33,6 +35,52 @@ func createTestRepo(t *testing.T) (*sqliteRepository, func()) {
 		}
 	}
 	return repo, cleanup
+}
+
+func createUnseededPromptDB(t *testing.T) *sqlx.DB {
+	t.Helper()
+	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("failed to open sqlite db: %v", err)
+	}
+	sqlxDB := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() {
+		if err := sqlxDB.Close(); err != nil {
+			t.Errorf("failed to close sqlite db: %v", err)
+		}
+	})
+	if _, err := sqlxDB.Exec(`
+		CREATE TABLE custom_prompts (
+			id TEXT PRIMARY KEY,
+			name TEXT NOT NULL UNIQUE,
+			content TEXT NOT NULL,
+			builtin INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL
+		);
+	`); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	return sqlxDB
+}
+
+func seedStoredWalkthroughPrompt(t *testing.T, sqlxDB *sqlx.DB, content string, createdAt, updatedAt time.Time) {
+	t.Helper()
+	if _, err := sqlxDB.Exec(
+		`INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at) VALUES (?, ?, ?, 1, ?, ?)`,
+		"builtin-changes-walkthrough", "changes-walkthrough", content, createdAt, updatedAt,
+	); err != nil {
+		t.Fatalf("seed stored walkthrough prompt: %v", err)
+	}
+}
+
+func readPromptFixture(t *testing.T, name string) string {
+	t.Helper()
+	content, err := os.ReadFile(filepath.Join("testdata", name))
+	if err != nil {
+		t.Fatalf("read prompt fixture: %v", err)
+	}
+	return string(content)
 }
 
 func TestSQLiteRepository_CRUD(t *testing.T) {
@@ -220,5 +268,69 @@ func TestSQLiteRepository_BuiltinSeedIgnoresUserPromptNameConflict(t *testing.T)
 	}
 	if got.ID != "user-walkthrough" || got.Builtin {
 		t.Fatalf("expected user prompt to remain canonical, got %+v", got)
+	}
+}
+
+func TestSQLiteRepository_RefreshesUnmodifiedLegacyChangesWalkthroughPrompt(t *testing.T) {
+	for _, fixture := range []string{
+		"changes-walkthrough-v1.md",
+		"changes-walkthrough-v2.md",
+	} {
+		t.Run(fixture, func(t *testing.T) {
+			sqlxDB := createUnseededPromptDB(t)
+			legacyContent := strings.TrimSpace(readPromptFixture(t, fixture))
+			now := time.Now().UTC()
+			seedStoredWalkthroughPrompt(t, sqlxDB, legacyContent, now, now)
+
+			repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+			if err != nil {
+				t.Fatalf("initialize repository: %v", err)
+			}
+			got, err := repo.GetPromptByName(context.Background(), "changes-walkthrough")
+			if err != nil {
+				t.Fatalf("get refreshed prompt: %v", err)
+			}
+			if got.Content != promptcfg.Get("changes-walkthrough") {
+				t.Fatalf("stored legacy prompt was not refreshed")
+			}
+		})
+	}
+}
+
+func TestSQLiteRepository_PreservesEditedLegacyChangesWalkthroughPrompt(t *testing.T) {
+	sqlxDB := createUnseededPromptDB(t)
+	legacyContent := readPromptFixture(t, "changes-walkthrough-v2.md")
+	createdAt := time.Now().UTC().Add(-time.Hour)
+	seedStoredWalkthroughPrompt(t, sqlxDB, legacyContent, createdAt, createdAt.Add(time.Minute))
+
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("initialize repository: %v", err)
+	}
+	got, err := repo.GetPromptByName(context.Background(), "changes-walkthrough")
+	if err != nil {
+		t.Fatalf("get edited prompt: %v", err)
+	}
+	if got.Content != legacyContent {
+		t.Fatalf("user-edited built-in prompt was overwritten")
+	}
+}
+
+func TestSQLiteRepository_PreservesUntouchedUnrecognizedChangesWalkthroughPrompt(t *testing.T) {
+	sqlxDB := createUnseededPromptDB(t)
+	customContent := "this is not a recognized legacy revision"
+	now := time.Now().UTC()
+	seedStoredWalkthroughPrompt(t, sqlxDB, customContent, now, now)
+
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("initialize repository: %v", err)
+	}
+	got, err := repo.GetPromptByName(context.Background(), "changes-walkthrough")
+	if err != nil {
+		t.Fatalf("get unrecognized prompt: %v", err)
+	}
+	if got.Content != customContent {
+		t.Fatalf("unrecognized untouched content was overwritten")
 	}
 }

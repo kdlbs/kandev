@@ -347,9 +347,9 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 	// value. Compare the value stored in the local config instead so a common
 	// HTTPS-to-SSH rewrite does not turn an already-canonical origin into a
 	// needless config write on every launch/resume.
-	cmd := exec.CommandContext(ctx, "git", "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
+	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "config", "--local", "--get", "remote.origin.url")
 	configureGitCommand(cmd, nil)
-	currentOutput, err := subproc.RunGitCombinedOutput(ctx, cmd)
+	currentOutput, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
 	if err != nil {
 		return fmt.Errorf("inspect repository origin: %w", formatGitOriginError(repositoryPath, currentOutput, err))
 	}
@@ -357,9 +357,9 @@ func (c *Cloner) SetOriginURL(ctx context.Context, repositoryPath, originURL str
 		return nil
 	}
 
-	cmd = exec.CommandContext(ctx, "git", "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
+	cmd = subproc.NewGitCommand(ctx, "-C", repositoryPath, "remote", "set-url", "origin", "--", originURL)
 	configureGitCommand(cmd, nil)
-	output, err := subproc.RunGitCombinedOutput(ctx, cmd)
+	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
 	if err != nil {
 		return fmt.Errorf("set repository origin: %w", formatGitOriginError(repositoryPath, output, err))
 	}
@@ -493,11 +493,11 @@ func (c *Cloner) ensureClonedWithBasicAuth(
 
 func (c *Cloner) fetch(ctx context.Context, repoPath string, auth *cloneAuth) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := exec.CommandContext(
-		ctx, "git", "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
+	cmd := subproc.NewGitCommand(
+		ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
 	)
 	configureGitCommand(cmd, auth)
-	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		c.logger.Warn("git fetch failed (non-fatal)",
 			zap.String("path", repoPath), zap.String("output", redactCloneOutput(string(out), authToken(auth))), zap.Error(err))
 	}
@@ -508,11 +508,11 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 		return fmt.Errorf("create parent directory: %w", err)
 	}
 	c.logger.Info("cloning repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
-	cmd := exec.CommandContext(
-		ctx, "git", "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
+	cmd := subproc.NewGitCommand(
+		ctx, "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
 	)
 	configureGitCommand(cmd, auth)
-	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", redactCloneOutput(string(out), authToken(auth)), err)
 	}
 	return nil
@@ -520,11 +520,11 @@ func (c *Cloner) clone(ctx context.Context, cloneURL, targetPath string, auth *c
 
 func (c *Cloner) fetchWithHTTPHeader(ctx context.Context, repoPath, authURL, header string) {
 	c.logger.Debug("repository already cloned, fetching", zap.String("path", repoPath))
-	cmd := exec.CommandContext(
-		ctx, "git", "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
+	cmd := subproc.NewGitCommand(
+		ctx, "-C", repoPath, "fetch", "--all", "--prune", "--force", gitNoTags,
 	)
 	configureHTTPHeaderCommand(cmd, authURL, header)
-	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		c.logger.Warn("authenticated git fetch failed (non-fatal)",
 			zap.String("path", repoPath), zap.String("output", string(out)), zap.Error(err))
 	}
@@ -535,11 +535,11 @@ func (c *Cloner) cloneWithHTTPHeader(ctx context.Context, cloneURL, targetPath, 
 		return fmt.Errorf("create parent directory: %w", err)
 	}
 	c.logger.Info("cloning authenticated repository", zap.String("url", redactCloneURL(cloneURL)), zap.String("target", targetPath))
-	cmd := exec.CommandContext(
-		ctx, "git", "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
+	cmd := subproc.NewGitCommand(
+		ctx, "clone", "--filter=blob:none", gitNoTags, "--", cloneURL, targetPath,
 	)
 	configureHTTPHeaderCommand(cmd, cloneURL, header)
-	if out, err := subproc.RunGitCombinedOutput(ctx, cmd); err != nil {
+	if out, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd); err != nil {
 		return fmt.Errorf("git clone failed: %s: %w", string(out), err)
 	}
 	return nil

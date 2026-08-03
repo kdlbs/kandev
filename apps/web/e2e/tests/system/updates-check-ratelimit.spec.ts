@@ -17,6 +17,10 @@ test.describe("System Updates — rate-limited check", () => {
           latest_url: "",
           latest_checked_at: new Date().toISOString(),
           update_available: false,
+          channel: "stable",
+          channel_editable: false,
+          channel_unsupported_reason:
+            "Nightly updates require a Kandev-managed npm or npx user service.",
         }),
       });
     });

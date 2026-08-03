@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,7 +55,7 @@ func TestService_ApplyQueuesSelfUpdateJobAndWritesIntent(t *testing.T) {
 		}),
 	)
 
-	jobID, err := svc.Apply(context.Background(), "UPDATE")
+	jobID, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1")
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -75,6 +77,125 @@ func TestService_ApplyQueuesSelfUpdateJobAndWritesIntent(t *testing.T) {
 	if intent.Install.Port != 38429 {
 		t.Fatalf("Port=%d want 38429", intent.Install.Port)
 	}
+}
+
+func TestService_ApplyUsesCachedExactNightlyTarget(t *testing.T) {
+	homeDir := configureManagedNPMInstall(t)
+	pool := newTestPool(t)
+	const packageVersion = "1.2.4-nightly.shaabc123def456"
+	const targetTag = "v" + packageVersion
+	if err := persistence.WriteLatestNightlyVersion(
+		pool.Writer(),
+		targetTag,
+		"https://example/cached-nightly",
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	store := &memorySettingsStore{value: []byte(ChannelNightly), present: true}
+	tracker := jobs.NewTracker(nil, logger.Default())
+	var gotReq applyRequest
+	svc := NewService(
+		pool,
+		"v1.2.3",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(store),
+		WithJobs(tracker),
+		WithApplyRunner(func(_ context.Context, req applyRequest) (map[string]interface{}, error) {
+			gotReq = req
+			return map[string]interface{}{"status": "started"}, nil
+		}),
+	)
+	var resolutions atomic.Int32
+	svc.SetNightlyFetcher(func(context.Context) (string, string, error) {
+		resolutions.Add(1)
+		return "v1.2.5-nightly.shafedcba654321", "https://example/new-nightly", nil
+	})
+
+	jobID, err := svc.Apply(context.Background(), "UPDATE", targetTag)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	waitForJobState(t, tracker, jobID, jobs.StateSucceeded)
+	if gotReq.Intent.TargetTag != targetTag || gotReq.Intent.TargetVersion != packageVersion {
+		t.Fatalf(
+			"intent target tag=%q version=%q want tag=%q version=%q",
+			gotReq.Intent.TargetTag,
+			gotReq.Intent.TargetVersion,
+			targetTag,
+			packageVersion,
+		)
+	}
+	if got := resolutions.Load(); got != 0 {
+		t.Fatalf("nightly resolutions=%d want 0", got)
+	}
+}
+
+func TestService_ApplyRejectsChangedCachedTarget(t *testing.T) {
+	homeDir := configureManagedNPMInstall(t)
+	pool := newTestPool(t)
+	const cachedTarget = "v1.2.5-nightly.shafedcba654321"
+	if err := persistence.WriteLatestNightlyVersion(
+		pool.Writer(),
+		cachedTarget,
+		"https://example/new-nightly",
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(
+		pool,
+		"v1.2.3",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(&memorySettingsStore{value: []byte(ChannelNightly), present: true}),
+		WithJobs(jobs.NewTracker(nil, logger.Default())),
+	)
+
+	_, err := svc.Apply(context.Background(), "UPDATE", "v1.2.4-nightly.shaabc123def456")
+	if !errors.Is(err, ErrUpdateTargetChanged) {
+		t.Fatalf("Apply error=%v want ErrUpdateTargetChanged", err)
+	}
+}
+
+func TestService_ApplyRejectsConcurrentNightlyWhileFirstApplyIsRunning(t *testing.T) {
+	homeDir := configureManagedNPMInstall(t)
+	pool := newTestPool(t)
+	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(closeRelease)
+	svc := NewService(
+		pool,
+		"v1.2.3",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(&memorySettingsStore{value: []byte(ChannelNightly), present: true}),
+		WithJobs(jobs.NewTracker(nil, logger.Default())),
+		WithApplyRunner(func(_ context.Context, _ applyRequest) (map[string]interface{}, error) {
+			<-release
+			return map[string]interface{}{"status": "started"}, nil
+		}),
+	)
+	const target = "v1.2.4-nightly.shaabc123def456"
+	if err := persistence.WriteLatestNightlyVersion(
+		pool.Writer(),
+		target,
+		"https://example/nightly",
+		time.Now().UTC(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Apply(context.Background(), "UPDATE", target); err != nil {
+		t.Fatalf("first Apply: %v", err)
+	}
+	if _, err := svc.Apply(context.Background(), "UPDATE", target); !errors.Is(err, ErrApplyInProgress) {
+		t.Fatalf("second Apply error=%v want ErrApplyInProgress", err)
+	}
+	closeRelease()
 }
 
 func TestWriteApplyIntentPreservesNativeNoBootStart(t *testing.T) {
@@ -128,7 +249,7 @@ func TestService_ApplyRejectsUnsupportedInstall(t *testing.T) {
 	}
 	svc := NewService(pool, "v1.0.0", nil, logger.Default(), WithJobs(jobs.NewTracker(nil, logger.Default())))
 
-	_, err := svc.Apply(context.Background(), "UPDATE")
+	_, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1")
 	if !errors.Is(err, ErrApplyUnsupported) {
 		t.Fatalf("err=%v want ErrApplyUnsupported", err)
 	}
@@ -159,6 +280,8 @@ func TestService_ApplyRejectsConcurrentSelfUpdate(t *testing.T) {
 	// Block the first helper so its job stays running while the second apply is
 	// attempted, making the in-flight guard deterministic.
 	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	t.Cleanup(closeRelease)
 	svc := NewService(pool, "v1.0.0", nil, logger.Default(),
 		WithHomeDir(homeDir),
 		WithJobs(jobs.NewTracker(nil, logger.Default())),
@@ -168,13 +291,13 @@ func TestService_ApplyRejectsConcurrentSelfUpdate(t *testing.T) {
 		}),
 	)
 
-	if _, err := svc.Apply(context.Background(), "UPDATE"); err != nil {
+	if _, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1"); err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
-	if _, err := svc.Apply(context.Background(), "UPDATE"); !errors.Is(err, ErrApplyInProgress) {
+	if _, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1"); !errors.Is(err, ErrApplyInProgress) {
 		t.Fatalf("second Apply err=%v want ErrApplyInProgress", err)
 	}
-	close(release)
+	closeRelease()
 }
 
 func TestService_ApplyGuardExpiresAfterTTL(t *testing.T) {
@@ -211,23 +334,23 @@ func TestService_ApplyGuardExpiresAfterTTL(t *testing.T) {
 	clock := time.Now()
 	svc.now = func() time.Time { return clock }
 
-	if _, err := svc.Apply(context.Background(), "UPDATE"); err != nil {
+	if _, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1"); err != nil {
 		t.Fatalf("first Apply: %v", err)
 	}
 	// Within the TTL a second apply is still refused.
-	if _, err := svc.Apply(context.Background(), "UPDATE"); !errors.Is(err, ErrApplyInProgress) {
+	if _, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1"); !errors.Is(err, ErrApplyInProgress) {
 		t.Fatalf("within TTL err=%v want ErrApplyInProgress", err)
 	}
 	// Past the TTL the guard expires (helper assumed dead) and a retry succeeds.
 	clock = clock.Add(applyGuardTTL + time.Second)
-	if _, err := svc.Apply(context.Background(), "UPDATE"); err != nil {
+	if _, err := svc.Apply(context.Background(), "UPDATE", "v1.0.1"); err != nil {
 		t.Fatalf("after TTL Apply: %v", err)
 	}
 }
 
 func TestService_ApplyRejectsWrongConfirm(t *testing.T) {
 	svc := NewService(newTestPool(t), "v1.0.0", nil, logger.Default())
-	_, err := svc.Apply(context.Background(), "NOPE")
+	_, err := svc.Apply(context.Background(), "NOPE", "v1.0.1")
 	if !errors.Is(err, ErrApplyConfirm) {
 		t.Fatalf("err=%v want ErrApplyConfirm", err)
 	}

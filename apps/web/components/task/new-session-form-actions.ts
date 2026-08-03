@@ -2,13 +2,13 @@ import { useCallback, type RefObject } from "react";
 import { launchSession } from "@/lib/services/session-launch-service";
 import { buildStartRequest } from "@/lib/services/session-launch-helpers";
 import { toMessageAttachments } from "@/components/task-create-dialog-helpers";
-import type { FileAttachment } from "./chat/file-attachment";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
 import { applySummarizeSessionResult, type SummaryToastFn } from "./session-context-summary";
 
 type SessionContextChangeOpts = {
-  promptRef: RefObject<HTMLTextAreaElement | null>;
+  promptRef: RefObject<TaskFormInputsHandle | null>;
   initialPrompt: string | null;
   summarize: (sessionId: string) => Promise<SummarizeSessionResult>;
   toast: SummaryToastFn;
@@ -23,10 +23,10 @@ export function useSessionContextChange(opts: SessionContextChangeOpts) {
       if (!value) return;
       setContextValue(value);
       if (value === "copy_prompt" && initialPrompt && promptRef.current) {
-        promptRef.current.value = initialPrompt;
+        promptRef.current.setValue(initialPrompt);
         setHasPrompt(true);
       } else if (value === "blank" && promptRef.current) {
-        promptRef.current.value = "";
+        promptRef.current.setValue("");
         setHasPrompt(false);
       } else if (value.startsWith("summarize:")) {
         const sessionId = value.slice("summarize:".length);
@@ -47,14 +47,13 @@ export function useSessionLaunchSubmit({
   initialPrompt,
   agentProfiles,
   groupId,
-  attachments,
   onClose,
   toast,
   setActiveSession,
   activateSession,
   setIsCreating,
 }: {
-  promptRef: RefObject<HTMLTextAreaElement | null>;
+  promptRef: RefObject<TaskFormInputsHandle | null>;
   taskId: string;
   selectedProfileId: string;
   executorId: string;
@@ -62,7 +61,6 @@ export function useSessionLaunchSubmit({
   initialPrompt: string | null;
   agentProfiles: AgentProfileOption[];
   groupId?: string;
-  attachments: FileAttachment[];
   onClose: () => void;
   toast: SummaryToastFn;
   setActiveSession: (taskId: string, sessionId: string) => void;
@@ -78,7 +76,7 @@ export function useSessionLaunchSubmit({
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      const typed = promptRef.current?.value?.trim() ?? "";
+      const typed = promptRef.current?.getValue().trim() ?? "";
       const prompt =
         contextValue === "copy_prompt" && !typed && initialPrompt ? initialPrompt : typed;
       if (!prompt) return;
@@ -87,7 +85,7 @@ export function useSessionLaunchSubmit({
         const { request } = buildStartRequest(taskId, selectedProfileId, {
           executorId,
           prompt,
-          attachments: toMessageAttachments(attachments),
+          attachments: toMessageAttachments(promptRef.current?.getAttachments() ?? []),
         });
         const response = await launchSession(request);
         if (!response.session_id) {
@@ -124,7 +122,6 @@ export function useSessionLaunchSubmit({
       onClose,
       toast,
       setActiveSession,
-      attachments,
       activateSession,
       setIsCreating,
     ],

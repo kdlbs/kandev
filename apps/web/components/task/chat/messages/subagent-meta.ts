@@ -33,7 +33,10 @@ function formatTools(count: number): string {
  * are skipped when zero; tool_use_count is shown even at zero since "0 tools"
  * is meaningful for a completed subagent.
  */
-export function subagentMetaChips(payload: SubagentTaskPayload | undefined): SubagentMetaChip[] {
+export function subagentMetaChips(
+  payload: SubagentTaskPayload | undefined,
+  childCount?: number,
+): SubagentMetaChip[] {
   if (!payload) return [];
 
   const chips: SubagentMetaChip[] = [];
@@ -50,7 +53,16 @@ export function subagentMetaChips(payload: SubagentTaskPayload | undefined): Sub
   if (typeof payload.total_tokens === "number" && payload.total_tokens > 0) {
     chips.push({ label: "tokens", value: formatTokens(payload.total_tokens) });
   }
-  if (typeof payload.tool_use_count === "number") {
+  // The header already states the child count ("10 tool calls"), so a chip
+  // repeating the same number is noise. A divergence is not: it means the agent
+  // reported more tool uses than it streamed, which is worth seeing. The header
+  // renders no count at all when nothing streamed, so a zero child count can
+  // never be the duplicate — and "0 tools" is exactly the case the chip is for.
+  const headerStatesCount = typeof childCount === "number" && childCount > 0;
+  if (
+    typeof payload.tool_use_count === "number" &&
+    !(headerStatesCount && payload.tool_use_count === childCount)
+  ) {
     chips.push({ label: "tools", value: formatTools(payload.tool_use_count) });
   }
   if (payload.model) {

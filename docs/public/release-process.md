@@ -71,6 +71,20 @@ GHCR images are built before the GitHub Release. npm and Homebrew start only aft
 
 Base image tags include `X.Y.Z`, `vX.Y.Z`, `sha-*`, and `latest`. Universal tags include `X.Y.Z-universal`, `vX.Y.Z-universal`, and the floating `universal`. The weekly universal rebuild updates only floating/dated weekly tags, never a version-specific release tag.
 
+## npm Nightly channel
+
+npm also offers an opt-in `nightly` prerelease for users who want to test recent changes from
+`main`. Stable remains the default `latest` channel.
+
+For stable `X.Y.Z` and commit `abcdef123456...`, the corresponding Nightly version is
+`X.Y.(Z+1)-nightly.shaabcdef123456`. The `kandev` launcher and all five platform runtime packages
+share that immutable version, so an installed build identifies its source commit.
+
+Nightlies are best-effort daily snapshots. A new one appears only when `main` has changed since the
+latest Stable release, so some days may have no new Nightly. A Nightly never moves npm's `latest`
+tag and does not publish a Git tag, GitHub Release, Homebrew formula, Desktop updater build or feed,
+or container tag. See [CLI installation](cli.md#npm-nightly) to try Nightly or return to Stable.
+
 <details>
 <summary>Signing, verification, and partial-release recovery</summary>
 

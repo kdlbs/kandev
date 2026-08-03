@@ -119,6 +119,31 @@ describe("AgentProfileDeleteConflictDialog", () => {
     expect(screen.queryByText(/Delete Anyway/)).toBeNull();
   });
 
+  // The watcher `kind` is the wire enum and its label is a catalog key, so a
+  // renamed key or a dropped entry must fail here rather than silently render
+  // the raw enum value to the user.
+  it("resolves every known watcher kind to its label, and echoes an unknown one", () => {
+    renderConflictDialog({
+      activeSessions: [],
+      watchers: [
+        { id: "w1", kind: "linear", label: "team ENG" },
+        { id: "w2", kind: "jira", label: "project = ENG" },
+        { id: "w3", kind: "github_issue", label: "kdlbs/kandev" },
+        { id: "w4", kind: "github_review", label: "kdlbs/kandev PRs" },
+        // A kind the frontend does not know yet — the raw value is echoed
+        // rather than rendering an empty label.
+        { id: "w5", kind: "sentry" as never, label: "proj/backend" },
+      ],
+      routingTiers: [],
+    });
+
+    expect(screen.getByText(/Linear:/)).toBeTruthy();
+    expect(screen.getByText(/Jira:/)).toBeTruthy();
+    expect(screen.getByText(/GitHub Issues:/)).toBeTruthy();
+    expect(screen.getByText(/GitHub PR Reviews:/)).toBeTruthy();
+    expect(screen.getByText(/sentry:/)).toBeTruthy();
+  });
+
   it("does not render the dialog when conflict is null", () => {
     renderConflictDialog(null);
 

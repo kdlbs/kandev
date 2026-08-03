@@ -1,6 +1,7 @@
 import Link from "@/components/routing/app-link";
 import { forwardRef } from "react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { IconArrowLeft, IconHome } from "@tabler/icons-react";
 import {
   Breadcrumb,
@@ -92,6 +93,7 @@ function TopbarBreadcrumb({
   icon?: ReactNode;
   showPhoneHome: boolean;
 }) {
+  const { t } = useTranslation();
   // The Home prefix is redundant on desktop, where the AppSidebar always shows
   // a Home nav item. Only render the back link when a page sets a non-root
   // backHref (e.g. a true ancestor route within a section).
@@ -101,7 +103,7 @@ function TopbarBreadcrumb({
   // users with no way back. Keep the home crumb phone-only.
   const showHomeCrumb = !showBackLink && showPhoneHome;
   return (
-    <Breadcrumb className="relative z-10 min-w-0">
+    <Breadcrumb className="relative z-10 min-w-0" aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="flex-nowrap text-sm">
         {showBackLink && (
           <>

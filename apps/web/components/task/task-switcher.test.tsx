@@ -41,6 +41,9 @@ function grouped(): GroupedSidebarList {
   };
 }
 
+const TEST_WORKFLOW_ID = "workflow-1";
+const DETACH_MENU_LABEL = "Detach from parent";
+
 function renderSwitcher(collapsedSubtaskParentIds: string[] = []) {
   return render(
     <Providers>
@@ -151,13 +154,13 @@ describe("TaskSwitcher — workflow completion icons", () => {
       item("Turn finished", undefined, {
         state: "REVIEW",
         sessionState: "COMPLETED",
-        workflowId: "workflow-1",
+        workflowId: TEST_WORKFLOW_ID,
         workflowStepId: "step-middle",
       }),
       item("Workflow complete", undefined, {
         state: "REVIEW",
         sessionState: "COMPLETED",
-        workflowId: "workflow-1",
+        workflowId: TEST_WORKFLOW_ID,
         workflowStepId: finalStepId,
       }),
       item("Missing workflow metadata", undefined, {
@@ -174,7 +177,7 @@ describe("TaskSwitcher — workflow completion icons", () => {
             subTasksByParentId: new Map(),
           }}
           stepsByWorkflowId={{
-            "workflow-1": [
+            [TEST_WORKFLOW_ID]: [
               { id: "step-start", title: "Start" },
               { id: "step-middle", title: "Middle" },
               { id: finalStepId, title: "Done" },
@@ -247,9 +250,33 @@ describe("TaskSwitcher — detach menu", () => {
     );
 
     fireEvent.contextMenu(screen.getByText(CHILD.title));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Detach from parent" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: DETACH_MENU_LABEL }));
 
     expect(onDetachTask).toHaveBeenCalledWith(CHILD.id);
+  });
+
+  it("clears a lone selected task before detaching it", () => {
+    const calls: string[] = [];
+    const onClearSelection = vi.fn(() => calls.push("clear"));
+    const onDetachTask = vi.fn(() => calls.push("detach"));
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onDetachTask={onDetachTask}
+          onClearSelection={onClearSelection}
+          selectedTaskIds={new Set([CHILD.id])}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(CHILD.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: DETACH_MENU_LABEL }));
+
+    expect(calls).toEqual(["clear", "detach"]);
   });
 
   it("omits detach for root and multi-selection menus", () => {
@@ -266,7 +293,7 @@ describe("TaskSwitcher — detach menu", () => {
     );
 
     fireEvent.contextMenu(screen.getByText(ROOT.title));
-    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: DETACH_MENU_LABEL })).toBeNull();
 
     rerender(
       <Providers>
@@ -281,7 +308,7 @@ describe("TaskSwitcher — detach menu", () => {
       </Providers>,
     );
     fireEvent.contextMenu(screen.getByText(CHILD.title));
-    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: DETACH_MENU_LABEL })).toBeNull();
   });
 });
 
@@ -304,6 +331,105 @@ describe("TaskSwitcher — create subtask menu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Create Subtask" }));
 
     expect(onCreateSubtask).toHaveBeenCalledWith(CHILD.id, CHILD.title);
+  });
+});
+
+describe("TaskSwitcher — edit menu", () => {
+  it("passes the clicked task to the edit action", () => {
+    const editableTask = item("Editable task", undefined, {
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    const onEditTask = vi.fn();
+
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [editableTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(editableTask.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+
+    expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
+
+  it("omits edit for archived rows and multi-selection menus", () => {
+    const archivedTask = item("Archived task", undefined, {
+      isArchived: true,
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    const editableTask = item("Editable task", undefined, {
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    const onEditTask = vi.fn();
+    const { rerender } = render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [archivedTask, editableTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(archivedTask.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+
+    rerender(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [archivedTask, editableTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+          selectedTaskIds={new Set([editableTask.id, archivedTask.id])}
+        />
+      </Providers>,
+    );
+    fireEvent.contextMenu(screen.getByText(editableTask.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+  });
+
+  it("omits edit when a task lacks workflow metadata", () => {
+    const task = item("No workflow task");
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [task] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={vi.fn()}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(task.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
 });
 

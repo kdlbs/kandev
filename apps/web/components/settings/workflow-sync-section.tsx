@@ -1,6 +1,7 @@
 "use client";
 
 import { IconBrandGithub } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { WorkflowSyncDialog } from "@/components/settings/workflow-sync-dialog";
@@ -12,6 +13,7 @@ import { useWorkflowSync } from "@/hooks/domains/settings/use-workflow-sync";
 // with the caller so button and section can sit in different parts of the
 // layout.
 export function WorkflowSyncButton({ onClick }: { onClick: () => void }) {
+  const { t } = useTranslation();
   return (
     <Button
       type="button"
@@ -22,7 +24,7 @@ export function WorkflowSyncButton({ onClick }: { onClick: () => void }) {
       data-testid="workflow-sync-open"
     >
       <IconBrandGithub className="h-4 w-4 mr-2" />
-      GitHub Sync
+      {t("workflows:githubSync")}
     </Button>
   );
 }

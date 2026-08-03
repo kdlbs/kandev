@@ -13,13 +13,15 @@ import { createExecutorAction } from "@/app/actions/executors";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore } from "@/components/state-provider";
 import type { Executor } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 const EXECUTOR_TYPES = ["local_docker", "remote_docker"] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
 
 export default function ExecutorCreatePage() {
+  const { t } = useTranslation();
   return (
-    <Suspense fallback={<div className="p-4">Loading...</div>}>
+    <Suspense fallback={<div className="p-4">{t("executors:loading")}</div>}>
       <ExecutorCreatePageContent />
     </Suspense>
   );
@@ -42,22 +44,23 @@ function RemoteDockerFields({
   gitToken,
   onGitTokenChange,
 }: RemoteDockerFieldsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="space-y-2">
-        <Label htmlFor="docker-tls-verify">TLS verify</Label>
+        <Label htmlFor="docker-tls-verify">{t("executors:tlsVerify")}</Label>
         <Select value={dockerTlsVerify} onValueChange={onDockerTlsVerifyChange}>
           <SelectTrigger id="docker-tls-verify">
-            <SelectValue placeholder="Default (no TLS)" />
+            <SelectValue placeholder={t("executors:defaultNoTls")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="1">Enabled</SelectItem>
-            <SelectItem value="0">Disabled</SelectItem>
+            <SelectItem value="1">{t("executors:enabled")}</SelectItem>
+            <SelectItem value="0">{t("executors:disabled")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="docker-cert-path">TLS certificate path</Label>
+        <Label htmlFor="docker-cert-path">{t("executors:tlsCertificatePath")}</Label>
         <Input
           id="docker-cert-path"
           value={dockerCertPath}
@@ -65,11 +68,11 @@ function RemoteDockerFields({
           placeholder="/path/to/certs"
         />
         <p className="text-xs text-muted-foreground">
-          Path to TLS certificates for the Docker host.
+          {t("executors:pathToTlsCertificatesForThe")}
         </p>
       </div>
       <div className="space-y-2">
-        <Label htmlFor="git-token">Git token (optional)</Label>
+        <Label htmlFor="git-token">{t("executors:gitTokenOptional")}</Label>
         <Input
           id="git-token"
           type="password"
@@ -78,8 +81,7 @@ function RemoteDockerFields({
           placeholder="ghp_..."
         />
         <p className="text-xs text-muted-foreground">
-          Personal access token for cloning repositories inside the container. Auto-detected from
-          host environment if not set.
+          {t("executors:personalAccessTokenForCloningRepositories")}
         </p>
       </div>
     </>
@@ -115,35 +117,38 @@ function ExecutorFormCard({
   onDockerCertPathChange,
   onGitTokenChange,
 }: ExecutorFormCardProps) {
+  const { t } = useTranslation();
   const isRemoteDocker = type === "remote_docker";
   return (
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {isRemoteDocker ? <IconCloud className="h-4 w-4" /> : <IconServer className="h-4 w-4" />}
-          {isRemoteDocker ? "Remote Docker Executor" : "Local Docker Executor"}
+          {isRemoteDocker
+            ? t("executors:remoteDockerExecutor")
+            : t("executors:localDockerExecutor")}
         </CardTitle>
         <CardDescription>
           {isRemoteDocker
-            ? "Connects to a remote Docker host. The repository will be cloned inside the container."
-            : "Uses the local Docker daemon on this machine."}
+            ? t("executors:connectsToARemoteDockerHost")
+            : t("executors:usesTheLocalDockerDaemonOn")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="executor-type">Executor type</Label>
+          <Label htmlFor="executor-type">{t("executors:executorType")}</Label>
           <Select value={type} onValueChange={(value) => onTypeChange(value as ExecutorType)}>
             <SelectTrigger id="executor-type">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="local_docker">Local Docker</SelectItem>
-              <SelectItem value="remote_docker">Remote Docker</SelectItem>
+              <SelectItem value="local_docker">{t("executors:localDocker")}</SelectItem>
+              <SelectItem value="remote_docker">{t("executors:remoteDocker")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="executor-name">Executor name</Label>
+          <Label htmlFor="executor-name">{t("executors:executorName")}</Label>
           <Input
             id="executor-name"
             value={name}
@@ -151,7 +156,7 @@ function ExecutorFormCard({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="docker-host">Docker host</Label>
+          <Label htmlFor="docker-host">{t("executors:dockerHost")}</Label>
           <Input
             id="docker-host"
             value={dockerHost}
@@ -164,8 +169,8 @@ function ExecutorFormCard({
           />
           <p className="text-xs text-muted-foreground">
             {isRemoteDocker
-              ? "The remote Docker host URL (tcp://, ssh://)."
-              : "Repositories will be mounted as volumes at runtime."}
+              ? t("executors:theRemoteDockerHostUrlTcp")
+              : t("executors:repositoriesWillBeMountedAsVolumes")}
           </p>
         </div>
         {isRemoteDocker && (
@@ -200,6 +205,7 @@ function buildExecutorConfig(
 }
 
 function ExecutorCreatePageContent() {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const initialType = searchParams.get("type");
@@ -207,6 +213,11 @@ function ExecutorCreatePageContent() {
     if (EXECUTOR_TYPES.includes(initialType as ExecutorType)) return initialType as ExecutorType;
     return "local_docker";
   });
+  // The seeded executor *name* is PERSISTED user data, not copy: it is sent as
+  // `payload.name`, stored, and rendered afterwards on surfaces this PR does not
+  // own. Translating it would make an executor's stored name depend on the
+  // locale it happened to be created in. The Select labels beside it are copy
+  // and do go through `t()`.
   const [name, setName] = useState(() =>
     initialType === "remote_docker" ? "Remote Docker" : "Local Docker",
   );
@@ -256,9 +267,9 @@ function ExecutorCreatePageContent() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold">Create Executor</h2>
+        <h2 className="text-2xl font-bold">{t("executors:createExecutor")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Choose an executor type to run environments on your infrastructure.
+          {t("executors:chooseAnExecutorTypeToRun")}
         </p>
       </div>
       <Separator />
@@ -278,10 +289,10 @@ function ExecutorCreatePageContent() {
       />
       <div className="flex items-center justify-end gap-2">
         <Button variant="outline" onClick={() => router.push("/settings/executors")}>
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button onClick={handleCreate} disabled={isCreating}>
-          {isCreating ? "Creating..." : "Create Executor"}
+          {isCreating ? t("executors:creating") : t("executors:createExecutor")}
         </Button>
       </div>
     </div>

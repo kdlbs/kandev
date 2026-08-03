@@ -18,6 +18,8 @@ type BackendTemplateStep = {
   events?: StepEvents;
   is_start_step?: boolean;
   show_in_command_panel?: boolean;
+  auto_advance_requires_signal?: boolean;
+  cancel_triggers_turn_complete?: boolean;
   wip_limit?: number;
   pull_from_step_id?: string | null;
 };
@@ -38,6 +40,8 @@ export const normalizeWorkflowTemplate = (template: BackendWorkflowTemplate): Wo
     events: step.events,
     is_start_step: step.is_start_step,
     show_in_command_panel: step.show_in_command_panel,
+    auto_advance_requires_signal: step.auto_advance_requires_signal,
+    cancel_triggers_turn_complete: step.cancel_triggers_turn_complete,
     wip_limit: step.wip_limit,
     pull_from_step_id: step.pull_from_step_id ?? null,
   }));
@@ -89,6 +93,7 @@ export async function createWorkflowStep(
     color?: string;
     prompt?: string;
     events?: StepEvents;
+    cancel_triggers_turn_complete?: boolean;
     wip_limit?: number;
     pull_from_step_id?: string | null;
   },

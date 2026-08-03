@@ -101,11 +101,44 @@ function syncPrepareProgress(draft: any, session: TaskSession) {
   if (prepareState) draft.prepareProgress.bySessionId[session.id] = prepareState;
 }
 
+/** Merge the runtime cancellation projection using its process-local revision. */
+function mergeCancellationProjection(
+  existing: TaskSession,
+  incoming: TaskSession,
+): Pick<TaskSession, "cancellation_pending" | "cancellation_revision"> {
+  const incomingRevision = incoming.cancellation_revision;
+  const existingRevision = existing.cancellation_revision;
+  const incomingIsCurrent =
+    incomingRevision !== undefined &&
+    (existingRevision === undefined || incomingRevision >= existingRevision);
+
+  if (incomingIsCurrent) {
+    return {
+      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
+      cancellation_revision: incomingRevision,
+    };
+  }
+
+  if (incomingRevision === undefined && existingRevision === undefined) {
+    return {
+      cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
+      cancellation_revision: existingRevision,
+    };
+  }
+
+  return {
+    cancellation_pending: existing.cancellation_pending,
+    cancellation_revision: existingRevision,
+  };
+}
+
 /** Merge an incoming session update with an existing session, preserving nullable fields. */
 function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSession {
+  const cancellation = mergeCancellationProjection(existing, incoming);
   return {
     ...existing,
     ...incoming,
+    ...cancellation,
     agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
     worktree_path: incoming.worktree_path ?? existing.worktree_path,

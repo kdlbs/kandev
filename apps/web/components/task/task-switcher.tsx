@@ -58,6 +58,7 @@ type TaskSwitcherProps = {
   collapsedSubtaskParentIds?: string[];
   onToggleSubtasks?: (parentTaskId: string) => void;
   onSelectTask: (taskId: string) => void;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -144,6 +145,7 @@ type TaskRowProps = {
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -169,26 +171,6 @@ type TaskRowProps = {
   onBulkMove?: (taskIds: string[], targetWorkflowId: string, targetStepId: string) => void;
   onClearSelection?: () => void;
   isMixedWorkflowSelection?: boolean;
-};
-
-function taskLinkHandlerProps(props: Pick<TaskRowProps, keyof TaskLinkHandlerProps>) {
-  return {
-    onLinkPullRequest: props.onLinkPullRequest,
-    onLinkIssue: props.onLinkIssue,
-    onLinkMergeRequest: props.onLinkMergeRequest,
-    onLinkJiraTicket: props.onLinkJiraTicket,
-    onLinkLinearIssue: props.onLinkLinearIssue,
-    onLinkSentryIssue: props.onLinkSentryIssue,
-  };
-}
-
-type TaskLinkHandlerProps = {
-  onLinkPullRequest?: TaskLinkHandler;
-  onLinkIssue?: TaskLinkHandler;
-  onLinkMergeRequest?: TaskLinkHandler;
-  onLinkJiraTicket?: TaskLinkHandler;
-  onLinkLinearIssue?: TaskLinkHandler;
-  onLinkSentryIssue?: TaskLinkHandler;
 };
 
 function TaskRow({
@@ -231,12 +213,12 @@ function TaskRow({
       workflows={workflows}
       stepsByWorkflowId={stepsByWorkflowId}
       steps={taskSteps}
+      {...props}
       onRenameTask={onRenameTask}
       onArchiveTask={onArchiveTask}
       onCreateSubtask={onCreateSubtask}
       onDeleteTask={onDeleteTask}
       onDetachTask={onDetachTask}
-      {...taskLinkHandlerProps(props)}
       onMoveToStep={onMoveToStep}
       onTogglePin={onTogglePin}
       isPinned={isPinned}
@@ -409,6 +391,7 @@ type GroupSectionProps = {
   onToggleSubtasks?: (parentTaskId: string) => void;
   showHeader: boolean;
   onSelectTask: (taskId: string) => void;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -451,6 +434,7 @@ function GroupSection({
   onToggleSubtasks,
   showHeader,
   onSelectTask,
+  onEditTask,
   onRenameTask,
   onArchiveTask,
   onCreateSubtask,
@@ -491,6 +475,7 @@ function GroupSection({
       activeTaskId,
       selectedTaskId,
       onSelectTask,
+      onEditTask,
       onRenameTask,
       onArchiveTask,
       onCreateSubtask,
@@ -538,6 +523,7 @@ function GroupSection({
   );
 }
 
+// eslint-disable-next-line max-lines-per-function -- assembles the shared recursive task-tree props.
 export const TaskSwitcher = memo(function TaskSwitcher({
   grouped,
   workflows,
@@ -549,6 +535,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
   collapsedSubtaskParentIds,
   onToggleSubtasks,
   onSelectTask,
+  onEditTask,
   onRenameTask,
   onArchiveTask,
   onCreateSubtask,
@@ -607,6 +594,7 @@ export const TaskSwitcher = memo(function TaskSwitcher({
           onToggleSubtasks={onToggleSubtasks}
           showHeader={showHeaders}
           onSelectTask={onSelectTask}
+          onEditTask={onEditTask}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onCreateSubtask={onCreateSubtask}

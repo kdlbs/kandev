@@ -12,14 +12,24 @@ import {
   AlertDialogTitle,
 } from "@kandev/ui/alert-dialog";
 import { Input } from "@kandev/ui/input";
+import { Trans, useTranslation } from "react-i18next";
 import type { StorageQuarantineEntry, StorageQuarantinePurgeScope } from "@/lib/types/system";
+
+/**
+ * `phrase` is a sentinel, never copy: the user must type it verbatim and the
+ * confirm button gates on `confirmation !== props.phrase`. Translating one of
+ * these would make the dialog impossible to satisfy in that locale — so the
+ * union stays English and travels as an interpolated value everywhere it is
+ * shown (see docs/i18n.md, "Do not translate").
+ */
+type ConfirmationPhrase = "DEDICATED" | "ADOPT" | "DELETE" | "DELETE ELIGIBLE" | "DELETE ALL NOW";
 
 type ConfirmationDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
-  phrase: "DEDICATED" | "ADOPT" | "DELETE" | "DELETE ELIGIBLE" | "DELETE ALL NOW";
+  phrase: ConfirmationPhrase;
   actionLabel: string;
   actionTestId: string;
   destructive?: boolean;
@@ -27,6 +37,7 @@ type ConfirmationDialogProps = {
 };
 
 function ConfirmationDialog(props: ConfirmationDialogProps) {
+  const { t } = useTranslation();
   const [confirmation, setConfirmation] = useState("");
   useEffect(() => {
     if (!props.open) setConfirmation("");
@@ -37,18 +48,23 @@ function ConfirmationDialog(props: ConfirmationDialogProps) {
         <AlertDialogHeader>
           <AlertDialogTitle>{props.title}</AlertDialogTitle>
           <AlertDialogDescription className="text-left">
-            {props.description} Type <strong>{props.phrase}</strong> to continue.
+            {props.description}{" "}
+            <Trans i18nKey="system:storageTypeToConfirm" values={{ phrase: props.phrase }}>
+              Type <strong>{props.phrase}</strong> to continue.
+            </Trans>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <Input
           value={confirmation}
           onChange={(event) => setConfirmation(event.target.value)}
           className="h-11"
-          aria-label={`Type ${props.phrase} to confirm`}
+          aria-label={t("system:storageTypeToConfirmAria", { phrase: props.phrase })}
           data-testid={`${props.actionTestId}-confirmation`}
         />
         <AlertDialogFooter>
-          <AlertDialogCancel className="min-h-11 cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="min-h-11 cursor-pointer">
+            {t("common:cancel")}
+          </AlertDialogCancel>
           <AlertDialogAction
             variant={props.destructive ? "destructive" : "default"}
             disabled={confirmation !== props.phrase}
@@ -67,13 +83,14 @@ function ConfirmationDialog(props: ConfirmationDialogProps) {
 export function DedicatedDockerDialog(
   props: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm">,
 ) {
+  const { t } = useTranslation();
   return (
     <ConfirmationDialog
       {...props}
-      title="Use this dedicated Docker daemon"
-      description="Build-cache and unused-image cleanup affect the entire configured daemon, including resources created outside Kandev. Only acknowledge a daemon dedicated to this installation."
+      title={t("system:storageDedicatedDialogTitle")}
+      description={t("system:storageDedicatedDialogDescription")}
       phrase="DEDICATED"
-      actionLabel="Acknowledge daemon"
+      actionLabel={t("system:storageAcknowledgeDaemon")}
       actionTestId="storage-docker-confirm"
     />
   );
@@ -83,13 +100,17 @@ export function ExternalGoCacheDialog({
   path,
   ...props
 }: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm"> & { path: string }) {
+  const { t } = useTranslation();
   return (
     <ConfirmationDialog
       {...props}
-      title="Adopt an external Go build cache"
-      description={`Kandev will be allowed to rotate and quarantine the existing cache at ${path || "the selected path"}. This path must be absolute and on the same filesystem as Kandev trash.`}
+      title={t("system:storageAdoptDialogTitle")}
+      description={t("system:storageAdoptDialogDescription", {
+        // A filesystem path the user typed — interpolated, never translated.
+        path: path || t("system:storageAdoptDialogFallbackPath"),
+      })}
       phrase="ADOPT"
-      actionLabel="Adopt cache"
+      actionLabel={t("system:storageAdoptCache")}
       actionTestId="storage-go-cache-adopt-confirm"
     />
   );
@@ -101,13 +122,17 @@ export function PermanentDeleteDialog({
 }: Pick<ConfirmationDialogProps, "open" | "onOpenChange" | "onConfirm"> & {
   entry: StorageQuarantineEntry | null;
 }) {
+  const { t } = useTranslation();
   return (
     <ConfirmationDialog
       {...props}
-      title="Permanently delete quarantined data"
-      description={`This cannot be undone. Kandev will permanently remove ${entry?.quarantine_path ?? "the selected quarantine entry"}.`}
+      title={t("system:storageDeleteDialogTitle")}
+      description={t("system:storageDeleteDialogDescription", {
+        // The quarantine path comes from the API — interpolated, never translated.
+        path: entry?.quarantine_path ?? t("system:storageDeleteDialogFallbackPath"),
+      })}
       phrase="DELETE"
-      actionLabel="Delete permanently"
+      actionLabel={t("system:storageDeletePermanently")}
       actionTestId="storage-quarantine-delete-confirm"
       destructive
     />
@@ -124,18 +149,22 @@ export function QuarantinePurgeDialog({
   eligibleCount: number;
   protectedCount: number;
 }) {
+  const { t } = useTranslation();
   const eligible = scope === "eligible";
+  // Two independent counts cannot share one `count`, so this is two plural
+  // messages joined — not one message with a hand-written English `s`.
+  const eligibleDescription = `${t("system:storagePurgeEligibleCount", { count: eligibleCount })} ${t("system:storagePurgeProtectedCount", { count: protectedCount })}`;
   return (
     <ConfirmationDialog
       {...props}
-      title={eligible ? "Clear eligible quarantine" : "Force clear all quarantine"}
-      description={
+      title={
         eligible
-          ? `This will permanently remove ${eligibleCount} eligible item${eligibleCount === 1 ? "" : "s"}. ${protectedCount} protected item${protectedCount === 1 ? " remains" : "s remain"} until ${protectedCount === 1 ? "its" : "their"} retention deadline${protectedCount === 1 ? "" : "s"}.`
-          : "This attempts to permanently remove every quarantined item immediately and cannot be undone for entries that succeed. Failed entries may remain visible and retryable."
+          ? t("system:storageClearEligibleDialogTitle")
+          : t("system:storageForceClearDialogTitle")
       }
+      description={eligible ? eligibleDescription : t("system:storageForceClearDescription")}
       phrase={eligible ? "DELETE ELIGIBLE" : "DELETE ALL NOW"}
-      actionLabel={eligible ? "Clear eligible" : "Force clear all"}
+      actionLabel={eligible ? t("system:storageClearEligible") : t("system:storageForceClearAll")}
       actionTestId={
         eligible
           ? "storage-quarantine-clear-eligible-confirm"

@@ -303,6 +303,36 @@ func TestApplySyncedWorkflows_RemapsStepEventPositions(t *testing.T) {
 	assert.Equal(t, steps[1].ID, steps[0].Events.OnTurnComplete[0].Config["step_id"])
 }
 
+func TestApplySyncedWorkflows_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	svc, _, _ := setupSyncService(t)
+	ctx := context.Background()
+	first := models.WorkflowPortable{
+		Name: "Cancel Flow",
+		Steps: []models.StepPortable{
+			{Name: "Work", Position: 0, IsStartStep: true, CancelTriggersTurnComplete: true},
+			{Name: "Review", Position: 1},
+		},
+	}
+	result, err := svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{{Path: "flows/cancel.yml", Export: exportOf(first)}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Cancel Flow"}, result.Created)
+
+	steps, err := svc.ListStepsByWorkflow(ctx, "imported-Cancel Flow")
+	require.NoError(t, err)
+	require.Len(t, steps, 2)
+	assert.True(t, steps[0].CancelTriggersTurnComplete)
+
+	updated := first
+	updated.Steps = append([]models.StepPortable(nil), first.Steps...)
+	updated.Steps[0].CancelTriggersTurnComplete = false
+	result, err = svc.ApplySyncedWorkflows(ctx, "ws-1", []SyncFileExport{{Path: "flows/cancel.yml", Export: exportOf(updated)}})
+	require.NoError(t, err)
+	require.Equal(t, []string{"Cancel Flow"}, result.Updated)
+	steps, err = svc.ListStepsByWorkflow(ctx, "imported-Cancel Flow")
+	require.NoError(t, err)
+	assert.False(t, steps[0].CancelTriggersTurnComplete)
+}
+
 func TestApplySyncedWorkflows_SecondApplyIsNoOp(t *testing.T) {
 	svc, _, _ := setupSyncService(t)
 	ctx := context.Background()

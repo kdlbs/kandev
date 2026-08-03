@@ -40,6 +40,7 @@ import {
 } from "@/components/settings/sprites-settings";
 import { ScriptCard } from "@/components/settings/profile-edit/script-card";
 import type { Executor, ExecutorProfile, ProfileEnvVar } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type EnvVarRow = {
   key: string;
@@ -76,6 +77,7 @@ export default function ProfileDetailPage({
   executorId: string;
   profileId: string;
 }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const executor = useAppStore(
     (state) => state.executors.items.find((e: Executor) => e.id === executorId) ?? null,
@@ -86,12 +88,12 @@ export default function ProfileDetailPage({
     return (
       <Card>
         <CardContent className="py-12 text-center">
-          <p className="text-muted-foreground">Profile not found</p>
+          <p className="text-muted-foreground">{t("executors:profileNotFound")}</p>
           <Button
             className="mt-4 cursor-pointer"
             onClick={() => router.push(`/settings/executor/${executorId}`)}
           >
-            Back to Executor
+            {t("executors:backToExecutor")}
           </Button>
         </CardContent>
       </Card>
@@ -110,15 +112,16 @@ function ProfileDetailsCard({
   baselineName: string;
   onNameChange: (v: string) => void;
 }) {
+  const { t } = useTranslation();
   const isDirty = name.trim() !== baselineName.trim();
   return (
     <SettingsCard isDirty={isDirty}>
       <CardHeader>
-        <CardTitle>Profile Details</CardTitle>
+        <CardTitle>{t("executors:profileDetails")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="profile-name">Name</Label>
+          <Label htmlFor="profile-name">{t("executors:name")}</Label>
           <Input
             id="profile-name"
             value={name}
@@ -146,6 +149,7 @@ function EnvVarRow({
   onRemove: (index: number) => void;
   baselineRow?: EnvVarRow;
 }) {
+  const { t } = useTranslation();
   const isDirty = !baselineRow || JSON.stringify(row) !== JSON.stringify(baselineRow);
   return (
     <div
@@ -168,8 +172,8 @@ function EnvVarRow({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="value">Value</SelectItem>
-          <SelectItem value="secret">Secret</SelectItem>
+          <SelectItem value="value">{t("executors:value")}</SelectItem>
+          <SelectItem value="secret">{t("executors:secret")}</SelectItem>
         </SelectContent>
       </Select>
       {row.mode === "value" ? (
@@ -186,7 +190,7 @@ function EnvVarRow({
             className="flex-[3] text-xs"
             data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
           >
-            <SelectValue placeholder="Select secret..." />
+            <SelectValue placeholder={t("executors:selectSecret")} />
           </SelectTrigger>
           <SelectContent>
             {secrets.map((s) => (
@@ -225,6 +229,7 @@ function EnvVarsCard({
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
 }) {
+  const { t } = useTranslation();
   const isDirty =
     JSON.stringify(rowsToEnvVars(rows)) !== JSON.stringify(rowsToEnvVars(baselineRows));
   return (
@@ -232,10 +237,9 @@ function EnvVarsCard({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Environment Variables</CardTitle>
+            <CardTitle>{t("executors:environmentVariables")}</CardTitle>
             <CardDescription>
-              Injected into the execution environment. Variables can reference secrets for sensitive
-              values.
+              {t("executors:injectedIntoTheExecutionEnvironmentVariables")}
             </CardDescription>
           </div>
           <Button
@@ -246,13 +250,15 @@ function EnvVarsCard({
             className="cursor-pointer"
           >
             <IconPlus className="h-3.5 w-3.5 mr-1" />
-            Add
+            {t("executors:add")}
           </Button>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {rows.length === 0 && (
-          <p className="text-sm text-muted-foreground">No environment variables configured.</p>
+          <p className="text-sm text-muted-foreground">
+            {t("executors:noEnvironmentVariablesConfigured")}
+          </p>
         )}
         {rows.map((row, idx) => (
           <EnvVarRow
@@ -277,19 +283,20 @@ function ProfileActions({
   executorId: string;
   onRequestDelete: () => void;
 }) {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onRequestDelete} className="cursor-pointer">
         <IconTrash className="h-4 w-4 mr-1" />
-        Delete Profile
+        {t("executors:deleteProfile")}
       </Button>
       <Button
         variant="outline"
         onClick={() => router.push(`/settings/executor/${executorId}`)}
         className="cursor-pointer"
       >
-        Cancel
+        {t("common:cancel")}
       </Button>
     </div>
   );
@@ -306,21 +313,20 @@ function DeleteProfileDialog({
   onDelete: () => void;
   deleting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Profile</DialogTitle>
-          <DialogDescription>
-            Are you sure you want to delete this profile? This action cannot be undone.
-          </DialogDescription>
+          <DialogTitle>{t("executors:deleteProfile")}</DialogTitle>
+          <DialogDescription>{t("executors:areYouSureYouWantTo")}</DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button variant="destructive" onClick={onDelete} disabled={deleting}>
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -329,6 +335,7 @@ function DeleteProfileDialog({
 }
 
 function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
+  const { t } = useTranslation();
   const router = useRouter();
   const { toast } = useToast();
   const executors = useAppStore((state) => state.executors.items);
@@ -350,14 +357,18 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
       try {
         const updated = await updateExecutorProfile(executor.id, profile.id, data);
         setSaveStatus("success");
-        toast({ title: "Profile saved", variant: "success" });
+        toast({ title: t("executors:profileSaved"), variant: "success" });
         setExecutors(upsertExecutorProfile(executors, executor, updated));
         window.setTimeout(() => setSaveStatus("idle"), 1500);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Failed to save profile";
+        const message = err instanceof Error ? err.message : t("executors:failedToSaveProfile");
         setError(message);
         setSaveStatus("error");
-        toast({ title: "Failed to save profile", description: message, variant: "error" });
+        toast({
+          title: t("executors:failedToSaveProfile"),
+          description: message,
+          variant: "error",
+        });
         throw err;
       }
     },
@@ -386,6 +397,7 @@ function useProfilePersistence(executor: Executor, profile: ExecutorProfile) {
 }
 
 function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
+  const { t } = useTranslation();
   const [name, setName] = useState(profile.name);
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
@@ -419,9 +431,12 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
     setEnvVarRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: val } : row)));
   }, []);
 
+  // `{{` is the editor's placeholder-completion trigger, not an interpolation
+  // token, so it is interpolated as a value rather than written into the
+  // catalog — i18next would otherwise try to resolve it.
   const prepareDesc = isRemote
-    ? "Runs inside the execution environment before the agent starts. Type {{ to see available placeholders."
-    : "Runs on the host machine before the agent starts.";
+    ? t("executors:prepareScriptDescriptionRemote", { trigger: "{{" })
+    : t("executors:prepareScriptDescriptionLocal");
 
   return {
     name,
@@ -442,8 +457,31 @@ function useProfileFormState(executor: Executor, profile: ExecutorProfile) {
   };
 }
 
-function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
+function ProfileEditHeader({ executor, profileName }: { executor: Executor; profileName: string }) {
+  const { t } = useTranslation();
   const router = useRouter();
+  return (
+    <div className="flex items-start justify-between flex-wrap gap-3">
+      <div>
+        <h2 className="text-2xl font-bold">{profileName}</h2>
+        <p className="text-sm text-muted-foreground mt-1">
+          {t("executors:profileForExecutor", { name: executor.name })}
+        </p>
+      </div>
+      <Button
+        variant="outline"
+        size="sm"
+        className="cursor-pointer"
+        onClick={() => router.push(`/settings/executor/${executor.id}`)}
+      >
+        {t("executors:backToExecutor")}
+      </Button>
+    </div>
+  );
+}
+
+function ProfileEditForm({ executor, profile }: { executor: Executor; profile: ExecutorProfile }) {
+  const { t } = useTranslation();
   const { items: secrets } = useSecrets();
   const persistence = useProfilePersistence(executor, profile);
   const form = useProfileFormState(executor, profile);
@@ -465,27 +503,14 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
     revision: saveRevision,
     isDirty: saveRevision !== savedRevision,
     canSave: Boolean(form.name.trim()),
-    invalidReason: form.name.trim() ? undefined : "Profile name is required.",
+    invalidReason: form.name.trim() ? undefined : t("executors:profileNameIsRequired"),
     save: handleSave,
     discard: () => undefined,
   });
 
   return (
     <div className="space-y-8">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h2 className="text-2xl font-bold">{profile.name}</h2>
-          <p className="text-sm text-muted-foreground mt-1">Profile for {executor.name}</p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          className="cursor-pointer"
-          onClick={() => router.push(`/settings/executor/${executor.id}`)}
-        >
-          Back to Executor
-        </Button>
-      </div>
+      <ProfileEditHeader executor={executor} profileName={profile.name} />
       <Separator />
       <ProfileDetailsCard
         name={form.name}
@@ -507,7 +532,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
         onRemove={form.removeEnvVar}
       />
       <ScriptCard
-        title="Prepare Script"
+        title={t("executors:prepareScript")}
         description={form.prepareDesc}
         value={form.prepareScript}
         baselineValue={profile.prepare_script ?? ""}
@@ -518,8 +543,8 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
       {form.isRemote && (
         <ScriptCard
-          title="Cleanup Script"
-          description="Runs after the agent session ends for cleanup tasks."
+          title={t("executors:cleanupScript")}
+          description={t("executors:runsAfterTheAgentSessionEnds")}
           value={form.cleanupScript}
           baselineValue={profile.cleanup_script ?? ""}
           onChange={form.setCleanupScript}

@@ -130,6 +130,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	}
 
 	g, gctx := errgroup.WithContext(startCtx)
+	g.SetLimit(maxConcurrentBootstraps)
 	for _, ag := range targets {
 		ag := ag
 		g.Go(func() error {
@@ -519,6 +520,18 @@ func (m *Manager) dropStaleInstance(ctx context.Context, agentType string, inst 
 // quickly. Without this bound the only ceiling is the 5-minute HTTP client
 // timeout on the agentctl call.
 const probeTimeout = 60 * time.Second
+
+// maxConcurrentBootstraps caps how many agents are warmed and probed at once at
+// boot. Unbounded, every ACP-capable agent starts together, and each spawns its
+// runtime through `npx -y <package>`, which installs the package when missing.
+// On a cold npm cache they starve each other: measured on Windows with five
+// installed agents, every probe hit the 60s probeTimeout and none succeeded,
+// while the same five capped at two produced two usable results.
+//
+// With a warm cache the cap makes no measurable difference, so this is not a
+// speed-up — it stops a cold sweep from failing wholesale and leaving the
+// capability cache empty for every agent.
+const maxConcurrentBootstraps = 2
 
 // probe runs an ACP probe against the given instance and translates the result
 // into an AgentCapabilities record suitable for the cache.

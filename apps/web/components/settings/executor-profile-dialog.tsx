@@ -14,6 +14,7 @@ import { Label } from "@kandev/ui/label";
 import { Button } from "@kandev/ui/button";
 import { createExecutorProfile } from "@/lib/api/domains/settings-api";
 import type { ExecutorProfile } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 type ExecutorProfileDialogProps = {
   open: boolean;
@@ -28,6 +29,7 @@ export function ExecutorProfileDialog({
   executorId,
   onSaved,
 }: ExecutorProfileDialogProps) {
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -50,7 +52,7 @@ export function ExecutorProfileDialog({
       onOpenChange(false);
       onSaved?.(created);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create profile");
+      setError(err instanceof Error ? err.message : t("executors:failedToCreateProfile"));
     } finally {
       setSaving(false);
     }
@@ -60,21 +62,18 @@ export function ExecutorProfileDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>New Profile</DialogTitle>
-          <DialogDescription>
-            Create a new profile for this executor. You can configure scripts and environment
-            variables on the profile page.
-          </DialogDescription>
+          <DialogTitle>{t("executors:newProfile")}</DialogTitle>
+          <DialogDescription>{t("executors:createANewProfileForThis")}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="profile-name">Name</Label>
+            <Label htmlFor="profile-name">{t("executors:name")}</Label>
             <Input
               id="profile-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Production, Development"
+              placeholder={t("executors:eGProductionDevelopment")}
               autoFocus
             />
           </div>
@@ -83,10 +82,10 @@ export function ExecutorProfileDialog({
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={!name.trim() || saving} className="cursor-pointer">
-            {saving ? "Creating..." : "Create Profile"}
+            {saving ? t("executors:creating") : t("executors:createProfile")}
           </Button>
         </DialogFooter>
       </DialogContent>

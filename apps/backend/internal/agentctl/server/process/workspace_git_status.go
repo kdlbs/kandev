@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -28,7 +29,11 @@ var safeBranchRefPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._/-]*$`)
 // cancelled, so callers that must not lose the event they're reacting to
 // (see tryUpdateGitStatus) know a retry is needed.
 func (wt *WorkspaceTracker) updateGitStatus(ctx context.Context) bool {
-	status, err := wt.getGitStatus(ctx)
+	return wt.updateGitStatusClass(ctx, gitWorkClass(ctx))
+}
+
+func (wt *WorkspaceTracker) updateGitStatusClass(ctx context.Context, class subproc.GitWorkClass) bool {
+	status, err := wt.getGitStatusClass(ctx, class)
 	if err != nil {
 		wt.logger.Warn("updateGitStatus: getGitStatus failed", zap.Error(err))
 		return false
@@ -59,7 +64,7 @@ func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) bool {
 		return false
 	}
 	defer wt.updateMu.Unlock()
-	return wt.updateGitStatus(ctx)
+	return wt.updateGitStatusClass(ctx, subproc.GitBackground)
 }
 
 // RefreshGitStatus forces a git status refresh and notifies subscribers.
@@ -68,7 +73,7 @@ func (wt *WorkspaceTracker) tryUpdateGitStatus(ctx context.Context) bool {
 func (wt *WorkspaceTracker) RefreshGitStatus(ctx context.Context) {
 	wt.updateMu.Lock()
 	defer wt.updateMu.Unlock()
-	wt.updateGitStatus(ctx)
+	wt.updateGitStatusClass(ctx, subproc.GitInteractive)
 }
 
 // GetCurrentGitStatus returns the current cached git status. If no status has
@@ -84,7 +89,7 @@ func (wt *WorkspaceTracker) GetCurrentGitStatus(ctx context.Context) (types.GitS
 // fresh=true.
 func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types.GitStatusUpdate, error) {
 	if fresh {
-		return wt.getGitStatus(ctx)
+		return wt.getGitStatusClass(ctx, subproc.GitInteractive)
 	}
 
 	wt.mu.RLock()
@@ -92,7 +97,7 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 	wt.mu.RUnlock()
 
 	if status.Timestamp.IsZero() {
-		return wt.getGitStatus(ctx)
+		return wt.getGitStatusClass(ctx, subproc.GitInteractive)
 	}
 
 	return status, nil
@@ -102,11 +107,19 @@ func (wt *WorkspaceTracker) GetGitStatus(ctx context.Context, fresh bool) (types
 // computation is owned by the tracker rather than the first caller, while each
 // waiter can still return promptly when its own context is canceled.
 func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUpdate, error) {
+	return wt.getGitStatusClass(ctx, gitWorkClass(ctx))
+}
+
+func (wt *WorkspaceTracker) getGitStatusClass(ctx context.Context, class subproc.GitWorkClass) (types.GitStatusUpdate, error) {
 	if err := ctx.Err(); err != nil {
 		return types.GitStatusUpdate{}, err
 	}
 
-	resultCh := wt.gitStatusGroup.DoChan("live", func() (interface{}, error) {
+	// Observations are coalesced only within the same admission class. A
+	// background poll already in flight must not capture a fresh interactive
+	// request and make its Git commands run on the background queue.
+	key := "live:" + string(class)
+	resultCh := wt.gitStatusGroup.DoChan(key, func() (interface{}, error) {
 		sharedCtx, finish, err := wt.beginGitStatusObservation()
 		if err != nil {
 			return types.GitStatusUpdate{}, err
@@ -117,7 +130,7 @@ func (wt *WorkspaceTracker) getGitStatus(ctx context.Context) (types.GitStatusUp
 		if observer == nil {
 			observer = wt.computeGitStatus
 		}
-		status, err := observer(sharedCtx)
+		status, err := observer(withGitWorkClass(sharedCtx, class))
 		if err != nil {
 			return types.GitStatusUpdate{}, err
 		}
@@ -561,10 +574,16 @@ func carryRemoteAheadBehind(update *types.GitStatusUpdate, prior types.GitStatus
 
 // parseGitStatusOutput runs git status --porcelain and populates the file lists and map.
 func (wt *WorkspaceTracker) parseGitStatusOutput(ctx context.Context, update *types.GitStatusUpdate) error {
-	// --untracked-files=all shows all files in untracked directories, not just the directory name.
-	// GIT_OPTIONAL_LOCKS=0 (via runPollingGitOutput) prevents the background poll loop from
-	// taking .git/index.lock, which would race with concurrent user-initiated git operations.
-	statusOut, err := wt.runPollingGitOutput(ctx, "status", "--porcelain", "--untracked-files=all")
+	// --untracked-files=all shows all files in untracked directories, not just
+	// the directory name. GIT_OPTIONAL_LOCKS=0 prevents the status read from
+	// taking .git/index.lock, while the carried observation class keeps fresh
+	// user requests interactive.
+	statusOut, err := wt.runGitOutputClass(
+		ctx,
+		gitWorkClass(ctx),
+		true,
+		"status", "--porcelain", "--untracked-files=all",
+	)
 	if err != nil {
 		return err
 	}

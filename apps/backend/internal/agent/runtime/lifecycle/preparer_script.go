@@ -1,9 +1,7 @@
 package lifecycle
 
 import (
-	"bytes"
 	"context"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -11,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
 
@@ -94,13 +93,12 @@ func defaultPreparerSetupScript(req *EnvPrepareRequest) string {
 }
 
 func getGitRemoteURL(repoPath string) (string, error) {
-	cmd := exec.Command("git", "-C", repoPath, "remote", "get-url", "origin")
-	var out bytes.Buffer
-	cmd.Stdout = &out
-	if err := cmd.Run(); err != nil {
+	cmd := subproc.NewGitCommand(context.Background(), "-C", repoPath, "remote", "get-url", "origin")
+	out, err := subproc.RunGitOutputClass(context.Background(), subproc.GitLifecycle, cmd)
+	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(out.String()), nil
+	return strings.TrimSpace(string(out)), nil
 }
 
 // runSetupScriptStep executes the resolved setup script as a named prepare step,

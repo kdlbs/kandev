@@ -15,6 +15,13 @@ test.describe("mobile: pause queue recovery", () => {
   }) => {
     test.setTimeout(90_000);
 
+    // This spec covers pause/resume queue semantics, not workflow completion.
+    // Opt out explicitly because the Kanban template enables cancellation
+    // completion by default.
+    await apiClient.updateWorkflowStep(seedData.startStepId, {
+      cancel_triggers_turn_complete: false,
+    });
+
     const session = await seedIdleSession(
       testPage,
       apiClient,

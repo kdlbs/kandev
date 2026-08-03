@@ -321,13 +321,14 @@ export type AppState = KanbanSlice & {
   setConnectionIssueSeverity: (
     severity: import("@/lib/types/connection").ConnectionIssueSeverity,
   ) => void;
-  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setCancelTurnPending: UIA["setCancelTurnPending"];
   setTranscriptAutoScrollEnabled: UIA["setTranscriptAutoScrollEnabled"];
   setTranscriptScrollTop: UIA["setTranscriptScrollTop"];
   setTranscriptVirtuosoState: UIA["setTranscriptVirtuosoState"];

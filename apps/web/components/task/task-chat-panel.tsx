@@ -265,6 +265,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // The anchored bar is a desktop-only, opt-in affordance; mobile always
   // falls back to the scroll button.
   const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);
   const showScrollButton =
@@ -370,6 +371,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
           onLastPromptEdgeChange={setLastPromptEdge}
           firstMessageId={firstMessageId}
           onFirstMessageHiddenChange={setIsFirstMessageHidden}
+          anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
           stickyPromptBar={
             showAnchoredBar && lastPromptMessage ? (
               <AnchoredLastPromptBar
@@ -377,6 +379,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
                 isVisible={anchoredBarVisible}
                 onScrollUp={scrollToLastPrompt}
                 showScrollToLastPrompt={showScrollToLastPrompt}
+                onHeightChange={setAnchoredBarHeight}
               />
             ) : undefined
           }

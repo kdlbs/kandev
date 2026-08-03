@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   IconCheck,
   IconChevronDown,
@@ -30,6 +31,7 @@ import {
 import { EXTERNAL_MCP_TOOL_GROUPS, countExternalMcpTools } from "@/lib/settings/external-mcp-tools";
 
 export function ExternalMcpSettings() {
+  const { t } = useTranslation();
   const baseUrl = useMemo(() => getBackendConfig().apiBaseUrl.replace(/\/$/, ""), []);
   const streamableUrl = `${baseUrl}/mcp`;
   const sseUrl = `${baseUrl}/mcp/sse`;
@@ -47,13 +49,15 @@ export function ExternalMcpSettings() {
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold">External MCP</h2>
+        <h2 className="text-2xl font-bold">{t("common:externalMcp")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Use this if you want to manage Kandev from coding agents that run <strong>outside</strong>{" "}
-          Kandev (e.g. Claude Code, Cursor, or Codex on your host), or from{" "}
-          <strong>passthrough agents</strong> running inside Kandev. <br />
-          Agents launched inside Kandev in their normal mode already have the Kandev MCP wired in
-          automatically, no setup needed.
+          <Trans i18nKey="settings:externalMcpIntro">
+            Use this if you want to manage Kandev from coding agents that run{" "}
+            <strong>outside</strong> Kandev (e.g. Claude Code, Cursor, or Codex on your host), or
+            from <strong>passthrough agents</strong> running inside Kandev.
+          </Trans>{" "}
+          <br />
+          {t("settings:externalMcpIntroPassthrough")}
         </p>
       </div>
 
@@ -63,30 +67,28 @@ export function ExternalMcpSettings() {
 
       <SettingsSection
         icon={<IconPlugConnected className="h-5 w-5" />}
-        title="Endpoints"
-        description="Available on the same host and port as Kandev. Use localhost for same-machine agents, or the reachable Kandev URL for LAN, VPN, and reverse-proxy clients."
+        title={t("settings:externalMcpEndpoints")}
+        description={t("settings:externalMcpEndpointsDescription")}
       >
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Streamable HTTP</CardTitle>
+            <CardTitle className="text-base">{t("settings:externalMcpStreamableHttp")}</CardTitle>
           </CardHeader>
           <CardContent>
             <UrlRow url={streamableUrl} copied={copied} onCopy={handleCopy} />
             <p className="text-xs text-muted-foreground mt-2">
-              Recommended for Claude Code, Cursor, and Codex.
+              {t("settings:externalMcpStreamableHttpHint")}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Server-Sent Events (SSE)</CardTitle>
+            <CardTitle className="text-base">{t("settings:externalMcpSse")}</CardTitle>
           </CardHeader>
           <CardContent>
             <UrlRow url={sseUrl} copied={copied} onCopy={handleCopy} />
-            <p className="text-xs text-muted-foreground mt-2">
-              Compatibility transport for older MCP clients.
-            </p>
+            <p className="text-xs text-muted-foreground mt-2">{t("settings:externalMcpSseHint")}</p>
           </CardContent>
         </Card>
       </SettingsSection>
@@ -99,6 +101,7 @@ export function ExternalMcpSettings() {
 }
 
 function ToolsPreview() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const total = countExternalMcpTools();
   return (
@@ -110,10 +113,14 @@ function ToolsPreview() {
         >
           <IconTools className="h-4 w-4 text-muted-foreground shrink-0" />
           <div className="flex-1 min-w-0">
-            <p className="text-sm font-medium">Available tools</p>
+            <p className="text-sm font-medium">{t("settings:externalMcpAvailableTools")}</p>
             <p className="text-xs text-muted-foreground">
-              {total} tools across {EXTERNAL_MCP_TOOL_GROUPS.length} categories &mdash; expand to
-              preview what external agents can do.
+              {t("settings:externalMcpToolsSummary", {
+                tools: t("settings:externalMcpToolCount", { count: total }),
+                categories: t("settings:externalMcpCategoryCount", {
+                  count: EXTERNAL_MCP_TOOL_GROUPS.length,
+                }),
+              })}
             </p>
           </div>
           <IconChevronDown
@@ -125,18 +132,20 @@ function ToolsPreview() {
       </CollapsibleTrigger>
       <CollapsibleContent className="px-4 pb-4 pt-1 space-y-4">
         {EXTERNAL_MCP_TOOL_GROUPS.map((group) => (
-          <div key={group.title} className="space-y-1.5">
+          <div key={group.titleKey} className="space-y-1.5">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                {group.title}
+                {t(group.titleKey)}
               </p>
-              <p className="text-xs text-muted-foreground">{group.description}</p>
+              <p className="text-xs text-muted-foreground">{t(group.descriptionKey)}</p>
             </div>
             <ul className="space-y-1">
               {group.tools.map((tool) => (
                 <li key={tool.name} className="flex gap-2 text-xs">
                   <code className="font-mono text-foreground shrink-0">{tool.name}</code>
-                  <span className="text-muted-foreground">&mdash; {tool.description}</span>
+                  <span className="text-muted-foreground">
+                    &mdash; {t(tool.descriptionKey, tool.descriptionValues)}
+                  </span>
                 </li>
               ))}
             </ul>
@@ -147,6 +156,58 @@ function ToolsPreview() {
   );
 }
 
+/**
+ * One card per external agent. `title` is a product name and every `path` is a
+ * config filename the user must find on disk, so both stay English in every
+ * locale — the surrounding sentence is the only copy, and it interpolates them
+ * so the pseudo-locale cannot turn them into dead pointers.
+ */
+const SNIPPET_CARDS: Array<{
+  title: string;
+  build: (streamableUrl: string) => string;
+  /** Rendered through `externalMcpConfigPath*`; omitted when `subtitleKey` is set. */
+  path?: string;
+  /** Overrides the derived subtitle when the path sentence needs its own message. */
+  subtitleKey?: string;
+  subtitleValues?: Record<string, string>;
+  buildCli?: (streamableUrl: string) => string;
+  /** File the one-liner writes to, as the user would recognise it. */
+  cliTarget?: string;
+}> = [
+  {
+    title: "Claude Code",
+    path: "~/.claude.json",
+    build: buildClaudeCodeConfig,
+    buildCli: buildClaudeCodeCliCommand,
+    cliTarget: "~/.claude.json",
+  },
+  { title: "Cursor", path: "~/.cursor/mcp.json", build: buildCursorConfig },
+  {
+    title: "Codex",
+    path: "~/.codex/config.toml",
+    build: buildCodexConfig,
+    buildCli: buildCodexCliCommand,
+    cliTarget: "~/.codex/config.toml",
+  },
+  {
+    title: "Auggie CLI",
+    path: "~/.augment/settings.json",
+    build: buildAuggieConfig,
+    buildCli: buildAuggieCliCommand,
+    cliTarget: "settings.json",
+  },
+  {
+    title: "OpenCode",
+    subtitleKey: "settings:externalMcpOpenCodePaths",
+    subtitleValues: {
+      projectPath: "opencode.json",
+      globalPath: "~/.config/opencode/opencode.json",
+    },
+    build: buildOpenCodeConfig,
+  },
+  { title: "GitHub Copilot CLI", path: "~/.copilot/mcp-config.json", build: buildCopilotCliConfig },
+];
+
 function SnippetsSection({
   streamableUrl,
   copied,
@@ -156,60 +217,39 @@ function SnippetsSection({
   copied: string | null;
   onCopy: (text: string) => void;
 }) {
+  const { t } = useTranslation();
+  const subtitleFor = (card: (typeof SNIPPET_CARDS)[number]) => {
+    if (card.subtitleKey) return t(card.subtitleKey, card.subtitleValues);
+    // A bare path is the whole subtitle here, and a path is not copy — render it
+    // directly rather than through a catalog message whose entire value is
+    // `{{path}}`. Such a message says nothing a translator can act on, and it
+    // is a shape worth avoiding generally: anything that compiles a message
+    // into a match pattern has to special-case it, since a placeholder-only
+    // message otherwise matches every string.
+    if (!card.buildCli) return card.path ?? "";
+    return t("settings:externalMcpConfigPathOrCli", { path: card.path });
+  };
+
   return (
     <SettingsSection
       icon={<IconCode className="h-5 w-5" />}
-      title="Configuration snippets"
-      description="Paste these into your agent's global MCP configuration."
+      title={t("settings:externalMcpSnippets")}
+      description={t("settings:externalMcpSnippetsDescription")}
     >
-      <SnippetCard
-        title="Claude Code"
-        subtitle="~/.claude.json — or run the CLI command below"
-        snippet={buildClaudeCodeConfig(streamableUrl)}
-        copied={copied}
-        onCopy={onCopy}
-        extraSnippet={buildClaudeCodeCliCommand(streamableUrl)}
-        extraSnippetLabel="One-liner (writes to ~/.claude.json)"
-      />
-      <SnippetCard
-        title="Cursor"
-        subtitle="~/.cursor/mcp.json"
-        snippet={buildCursorConfig(streamableUrl)}
-        copied={copied}
-        onCopy={onCopy}
-      />
-      <SnippetCard
-        title="Codex"
-        subtitle="~/.codex/config.toml — or run the CLI command below"
-        snippet={buildCodexConfig(streamableUrl)}
-        copied={copied}
-        onCopy={onCopy}
-        extraSnippet={buildCodexCliCommand(streamableUrl)}
-        extraSnippetLabel="One-liner (writes to ~/.codex/config.toml)"
-      />
-      <SnippetCard
-        title="Auggie CLI"
-        subtitle="~/.augment/settings.json — or run the CLI command below"
-        snippet={buildAuggieConfig(streamableUrl)}
-        copied={copied}
-        onCopy={onCopy}
-        extraSnippet={buildAuggieCliCommand(streamableUrl)}
-        extraSnippetLabel="One-liner (writes to settings.json)"
-      />
-      <SnippetCard
-        title="OpenCode"
-        subtitle="opencode.json (project) or ~/.config/opencode/opencode.json (global)"
-        snippet={buildOpenCodeConfig(streamableUrl)}
-        copied={copied}
-        onCopy={onCopy}
-      />
-      <SnippetCard
-        title="GitHub Copilot CLI"
-        subtitle="~/.copilot/mcp-config.json"
-        snippet={buildCopilotCliConfig(streamableUrl)}
-        copied={copied}
-        onCopy={onCopy}
-      />
+      {SNIPPET_CARDS.map((card) => (
+        <SnippetCard
+          key={card.title}
+          title={card.title}
+          subtitle={subtitleFor(card)}
+          snippet={card.build(streamableUrl)}
+          copied={copied}
+          onCopy={onCopy}
+          extraSnippet={card.buildCli?.(streamableUrl)}
+          extraSnippetLabel={
+            card.cliTarget ? t("settings:externalMcpOneLiner", { path: card.cliTarget }) : undefined
+          }
+        />
+      ))}
     </SettingsSection>
   );
 }
@@ -223,6 +263,7 @@ function UrlRow({
   copied: string | null;
   onCopy: (text: string) => void;
 }) {
+  const { t } = useTranslation();
   const isCopied = copied === url;
   return (
     <div className="flex items-center gap-1 rounded-md bg-muted px-2 py-1.5 font-mono text-xs">
@@ -231,7 +272,7 @@ function UrlRow({
         variant="ghost"
         size="sm"
         className="h-7 w-7 p-0 cursor-pointer shrink-0"
-        aria-label={isCopied ? "Copied" : "Copy URL"}
+        aria-label={isCopied ? t("settings:externalMcpCopied") : t("settings:externalMcpCopyUrl")}
         onClick={() => onCopy(url)}
       >
         {isCopied ? (
@@ -291,6 +332,7 @@ function SnippetBlock({
   copied: string | null;
   onCopy: (text: string) => void;
 }) {
+  const { t } = useTranslation();
   const isCopied = copied === snippet;
   return (
     <div className="relative">
@@ -302,7 +344,7 @@ function SnippetBlock({
         size="sm"
         className="absolute right-2 top-2 cursor-pointer"
         onClick={() => onCopy(snippet)}
-        title="Copy to clipboard"
+        title={t("settings:externalMcpCopyToClipboard")}
       >
         {isCopied ? (
           <IconCheck className="h-4 w-4 text-green-500" />

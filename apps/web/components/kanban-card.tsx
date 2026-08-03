@@ -64,6 +64,8 @@ export interface Task {
    * affordance on the card status icon.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /** Live subagents summed across this task's sessions; drives the count chip. */
+  activeSubagentCount?: number;
   reviewStatus?: "pending" | "approved" | "changes_requested" | "rejected" | null;
   primaryExecutorId?: string | null;
   primaryExecutorType?: string | null;

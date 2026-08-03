@@ -17,7 +17,12 @@ import type {
 import { arePermissionsDirty, permissionsToProfilePatch } from "@/lib/agent-permissions";
 import { areCLIFlagsEqual } from "@/lib/cli-flags";
 import { areConfigOptionsEqual } from "@/lib/config-options";
+import { t } from "@/lib/i18n";
 import type { ProfileFormData } from "@/components/settings/profile-form-fields";
+
+// The JSON key the MCP editor validates against — an identifier, interpolated
+// into the parse error rather than written into the catalog.
+const MCP_SERVERS_KEY = "mcpServers";
 
 /**
  * Translates a ProfileFormData patch (snake_case form keys) into a
@@ -82,12 +87,12 @@ export const parseProfileMcpServers = (raw: string): Record<string, McpServerDef
   if (!raw.trim()) return {};
   const parsed = JSON.parse(raw) as unknown;
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("MCP servers config must be a JSON object");
+    throw new Error(t("agents:mcpConfigMustBeJsonObject"));
   }
-  if ("mcpServers" in parsed) {
+  if (MCP_SERVERS_KEY in parsed) {
     const nested = (parsed as { mcpServers?: unknown }).mcpServers;
     if (!nested || typeof nested !== "object" || Array.isArray(nested)) {
-      throw new Error("mcpServers must be a JSON object");
+      throw new Error(t("agents:mcpKeyMustBeJsonObject", { key: MCP_SERVERS_KEY }));
     }
     return nested as Record<string, McpServerDef>;
   }

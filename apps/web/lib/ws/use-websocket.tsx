@@ -45,13 +45,14 @@ export function useWebSocket(store: StoreApi<AppState>, url: string) {
     client.connect();
     setWebSocketClient(client);
 
-    const handlers = registerWsHandlers(store);
-    const unsubscribers = Object.entries(handlers).map(([type, handler]) =>
-      client.on(type as keyof typeof handlers, handler as never),
+    const registration = registerWsHandlers(store);
+    const unsubscribers = Object.entries(registration.handlers).map(([type, handler]) =>
+      client.on(type as keyof typeof registration.handlers, handler as never),
     );
 
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe());
+      registration.dispose();
       connectionIssueMonitor.dispose();
       client.disconnect();
       setWebSocketClient(null);

@@ -12,6 +12,12 @@ import {
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { ApiError } from "@/lib/api/client";
+// The module-level `t`, not `useTranslation`: every string below is produced
+// inside an imperative callback (a toast, a refresh error), so resolving at call
+// time is both correct and keeps `t` out of the callbacks' dependency arrays —
+// a `t` dep on `useTerminalJobRefresh` would re-issue its network reload on a
+// locale switch. Never call it at module scope; that would freeze the boot locale.
+import { t } from "@/lib/i18n";
 import {
   adoptStorageGoCache,
   analyzeStorage,
@@ -126,7 +132,7 @@ function useStorageActionRunner() {
       } catch (requestError) {
         const message = messageFromError(requestError);
         setError(message);
-        toast({ title: "Storage action failed", description: message, variant: "error" });
+        toast({ title: t("system:storageActionFailed"), description: message, variant: "error" });
         if (rethrow) throw requestError;
       } finally {
         setPendingActions((current) => current.filter(({ id }) => id !== pendingActionId));
@@ -152,7 +158,7 @@ function useStoragePolicyActions(
         async () => {
           await saveStorageSettings(settings, confirmation);
           await reload(["policy"]);
-          toast({ title: "Storage policy saved", variant: "success" });
+          toast({ title: t("system:storageToastPolicySaved"), variant: "success" });
         },
         true,
       );
@@ -166,7 +172,7 @@ function useStoragePolicyActions(
       return perform("adopt", async () => {
         const response = await adoptStorageGoCache(path);
         setPolicy(response);
-        toast({ title: "Go build cache adopted", variant: "success" });
+        toast({ title: t("system:storageToastCacheAdopted"), variant: "success" });
       });
     },
     [clearBusy, perform, setPolicy, toast],
@@ -187,7 +193,7 @@ function useStorageDeleteAction(
       return perform("delete", async () => {
         const accepted = await deleteStorageQuarantine(id);
         setDeleteJobId(accepted.job_id);
-        toast({ title: "Permanent deletion started", variant: "success" });
+        toast({ title: t("system:storageToastDeletionStarted"), variant: "success" });
       });
     },
     [clearBusy, perform, setDeleteJobId, toast],
@@ -209,8 +215,8 @@ function useStorageBulkDeleteAction(
         toast({
           title:
             scope === "eligible"
-              ? "Eligible quarantine cleanup started"
-              : "Forced quarantine cleanup started",
+              ? t("system:storageToastEligiblePurgeStarted")
+              : t("system:storageToastForcedPurgeStarted"),
           variant: "success",
         });
       });
@@ -237,7 +243,7 @@ function useStorageActions(reload: Reload, setPolicy: (policy: StoragePolicyResp
     return perform("analyze", async () => {
       const accepted = await analyzeStorage();
       setAnalysisJobId(accepted.job_id);
-      toast({ title: "Storage analysis started", variant: "success" });
+      toast({ title: t("system:storageToastAnalysisStarted"), variant: "success" });
     });
   }, [clearBusy, perform, toast]);
 
@@ -249,7 +255,7 @@ function useStorageActions(reload: Reload, setPolicy: (policy: StoragePolicyResp
         try {
           const accepted = await runStorageMaintenance(resources);
           setCleanupJobId(accepted.job_id);
-          toast({ title: "Storage maintenance started", variant: "success" });
+          toast({ title: t("system:storageToastMaintenanceStarted"), variant: "success" });
         } catch (error) {
           const nextBusy = busyStateFromError(error, resources);
           if (nextBusy) {
@@ -271,7 +277,7 @@ function useStorageActions(reload: Reload, setPolicy: (policy: StoragePolicyResp
       try {
         const accepted = await runStorageMaintenance(resources, true);
         setCleanupJobId(accepted.job_id);
-        toast({ title: "Storage maintenance started", variant: "success" });
+        toast({ title: t("system:storageToastMaintenanceStarted"), variant: "success" });
       } catch (error) {
         const nextBusy = busyStateFromError(error, resources);
         if (nextBusy) {
@@ -289,7 +295,7 @@ function useStorageActions(reload: Reload, setPolicy: (policy: StoragePolicyResp
       return perform("restore", async () => {
         await restoreStorageQuarantine(id);
         await reload(["quarantine"]);
-        toast({ title: "Quarantined resource restored", variant: "success" });
+        toast({ title: t("system:storageToastQuarantineRestored"), variant: "success" });
       });
     },
     [clearBusy, perform, reload, toast],
@@ -333,7 +339,9 @@ function useTerminalJobRefresh(reload: Reload, setError: SetStorageError, job?: 
         setError((current) => (current === resolvedError ? null : current));
       } catch (requestError) {
         if (cancelled) return;
-        refreshError = `Refresh storage data: ${messageFromError(requestError)}`;
+        refreshError = t("system:storageRefreshFailed", {
+          message: messageFromError(requestError),
+        });
         setError(refreshError);
         attempts += 1;
         if (attempts >= MAX_TERMINAL_REFRESH_ATTEMPTS) return;

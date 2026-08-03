@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { FormEvent } from "react";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import type { FileAttachment } from "./chat/file-attachment";
 
 const mockLaunchSession = vi.fn();
@@ -53,6 +54,19 @@ const MESSAGE_ATTACHMENTS = ["message-attachment"];
 const SUMMARY_ACTION = "summarize:session-1";
 const SUMMARY_SESSION_ID = "session-1";
 
+function createPromptRef(value: string, attachments: FileAttachment[] = []) {
+  let currentValue = value;
+  return {
+    current: {
+      getValue: () => currentValue,
+      setValue: (next: string) => {
+        currentValue = next;
+      },
+      getAttachments: () => attachments,
+    } satisfies TaskFormInputsHandle,
+  };
+}
+
 // eslint-disable-next-line max-lines-per-function
 describe("useSessionContextChange", () => {
   beforeEach(() => {
@@ -60,7 +74,7 @@ describe("useSessionContextChange", () => {
   });
 
   it("copies the initial prompt when copy_prompt is selected", async () => {
-    const promptRef = { current: { value: "original" } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("original");
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
     const { result } = renderHook(() =>
@@ -78,14 +92,14 @@ describe("useSessionContextChange", () => {
       await result.current("copy_prompt");
     });
 
-    expect(promptRef.current.value).toBe("starter");
+    expect(promptRef.current?.getValue()).toBe("starter");
     expect(setContextValue).toHaveBeenCalledWith("copy_prompt");
     expect(setHasPrompt).toHaveBeenCalledWith(true);
     expect(mockToast).not.toHaveBeenCalled();
   });
 
   it("clears the prompt for blank", async () => {
-    const promptRef = { current: { value: "original" } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("original");
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
     const { result } = renderHook(() =>
@@ -103,13 +117,13 @@ describe("useSessionContextChange", () => {
       await result.current("blank");
     });
 
-    expect(promptRef.current.value).toBe("");
+    expect(promptRef.current?.getValue()).toBe("");
     expect(setContextValue).toHaveBeenCalledWith("blank");
     expect(setHasPrompt).toHaveBeenCalledWith(false);
   });
 
   it("summarizes sessions into prompt text", async () => {
-    const promptRef = { current: { value: "stale prompt" } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("stale prompt");
     const summarize = vi.fn().mockResolvedValue({ summary: "summary text" });
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
@@ -129,13 +143,13 @@ describe("useSessionContextChange", () => {
     });
 
     expect(summarize).toHaveBeenCalledWith(SUMMARY_SESSION_ID);
-    expect(promptRef.current.value).toBe("summary text");
+    expect(promptRef.current?.getValue()).toBe("summary text");
     expect(setHasPrompt).toHaveBeenCalledWith(true);
     expect(mockToast).not.toHaveBeenCalled();
   });
 
   it("handles summarize failures by clearing context and showing toast", async () => {
-    const promptRef = { current: { value: "" } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("");
     const summarize = vi.fn().mockResolvedValue({ summary: null, error: "connection refused" });
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
@@ -160,12 +174,12 @@ describe("useSessionContextChange", () => {
       description: "connection refused",
       variant: "error",
     });
-    expect(promptRef.current.value).toBe("");
+    expect(promptRef.current?.getValue()).toBe("");
     expect(setHasPrompt).toHaveBeenCalledWith(false);
   });
 
   it("does not toast when summarize succeeds after prompt ref unmounts", async () => {
-    const promptRef = { current: null as HTMLTextAreaElement | null };
+    const promptRef = { current: null as TaskFormInputsHandle | null };
     const summarize = vi.fn().mockResolvedValue({ summary: "summary text" });
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
@@ -191,7 +205,7 @@ describe("useSessionContextChange", () => {
   });
 
   it("sanitizes unsafe characters from summarize result before setting prompt", async () => {
-    const promptRef = { current: { value: "" } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("");
     const summarize = vi.fn().mockResolvedValue({ summary: "line1\r\n<unsafe>\nline2" });
     const setContextValue = vi.fn();
     const setHasPrompt = vi.fn();
@@ -210,7 +224,7 @@ describe("useSessionContextChange", () => {
       await result.current(SUMMARY_ACTION);
     });
 
-    expect(promptRef.current.value).toBe("line1\n unsafe \nline2");
+    expect(promptRef.current?.getValue()).toBe("line1\n unsafe \nline2");
     expect(setHasPrompt).toHaveBeenCalledWith(true);
   });
 });
@@ -231,7 +245,7 @@ describe("useSessionLaunchSubmit", () => {
   });
 
   it("creates a session and activates it with the typed prompt", async () => {
-    const promptRef = { current: { value: "  hello " } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("  hello ", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
     const mockActivateSession = vi.fn();
     const mockSetIsCreating = vi.fn();
@@ -246,7 +260,6 @@ describe("useSessionLaunchSubmit", () => {
         contextValue: "blank",
         initialPrompt: null,
         agentProfiles: [AGENT_PROFILE_A],
-        attachments: [ATTACHMENT],
         groupId: GROUP_ID,
         onClose: mockOnClose,
         toast: mockToast,
@@ -286,7 +299,7 @@ describe("useSessionLaunchSubmit", () => {
   });
 
   it("uses initial prompt when context is copy_prompt and user did not type anything", async () => {
-    const promptRef = { current: { value: "   " } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("   ", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
     const mockActivateSession = vi.fn();
     const mockSetIsCreating = vi.fn();
@@ -301,7 +314,6 @@ describe("useSessionLaunchSubmit", () => {
         contextValue: "copy_prompt",
         initialPrompt: SEED_PROMPT,
         agentProfiles: [AGENT_PROFILE_A],
-        attachments: [ATTACHMENT],
         onClose: mockOnClose,
         toast: mockToast,
         setActiveSession: mockSetActiveSession,
@@ -333,7 +345,7 @@ describe("useSessionLaunchSubmit", () => {
   });
 
   it("does not call launch when prompt is empty", async () => {
-    const promptRef = { current: { value: "   " } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("   ", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
     const mockActivateSession = vi.fn();
     const mockSetIsCreating = vi.fn();
@@ -348,7 +360,6 @@ describe("useSessionLaunchSubmit", () => {
         contextValue: "blank",
         initialPrompt: null,
         agentProfiles: [AGENT_PROFILE_A],
-        attachments: [ATTACHMENT],
         onClose: mockOnClose,
         toast: mockToast,
         setActiveSession: mockSetActiveSession,
@@ -372,7 +383,7 @@ describe("useSessionLaunchSubmit", () => {
 
   it("shows a toast when launching fails", async () => {
     mockLaunchSession.mockRejectedValueOnce(new Error("launch failed"));
-    const promptRef = { current: { value: "hello" } as unknown as HTMLTextAreaElement };
+    const promptRef = createPromptRef("hello", [ATTACHMENT]);
     const mockSetActiveSession = vi.fn();
     const mockActivateSession = vi.fn();
     const mockSetIsCreating = vi.fn();
@@ -387,7 +398,6 @@ describe("useSessionLaunchSubmit", () => {
         contextValue: "blank",
         initialPrompt: null,
         agentProfiles: [AGENT_PROFILE_A],
-        attachments: [ATTACHMENT],
         onClose: mockOnClose,
         toast: mockToast,
         setActiveSession: mockSetActiveSession,

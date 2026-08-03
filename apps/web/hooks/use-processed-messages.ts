@@ -419,6 +419,15 @@ export function collapseTodoSnapshotsPerTurn(messages: Message[]): Message[] {
   });
 }
 
+/** A subagent is another agent's turn, not a tool the agent used, so it never
+ *  collapses into a turn group. Grouping one hid whole review waves behind a
+ *  "4 tool calls, 2 subagents" row far up the transcript; hoisting it keeps the
+ *  wave legible at rest while the surrounding tool calls still collapse. */
+export function isSubagentMessage(message: Message): boolean {
+  const metadata = message.metadata as ToolCallMetadata | undefined;
+  return metadata?.normalized?.kind === "subagent_task";
+}
+
 function groupActivityMessages(allMessages: Message[]): RenderItem[] {
   const items: RenderItem[] = [];
   let currentGroup: Message[] = [];
@@ -440,7 +449,8 @@ function groupActivityMessages(allMessages: Message[]): RenderItem[] {
   };
 
   for (const message of allMessages) {
-    const isActivity = message.type && ACTIVITY_MESSAGE_TYPES.has(message.type);
+    const isActivity =
+      message.type && ACTIVITY_MESSAGE_TYPES.has(message.type) && !isSubagentMessage(message);
     const messageTurnId = message.turn_id ?? null;
     if (isActivity && messageTurnId) {
       if (currentGroup.length > 0 && currentTurnId === messageTurnId) {

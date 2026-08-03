@@ -3,11 +3,12 @@ import { Badge } from "@kandev/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { useTranslation } from "react-i18next";
+import { formatDateTime } from "@/lib/i18n/formats";
 import type { StorageMaintenanceRun } from "@/lib/types/system";
 
 function dateLabel(value: string): string {
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? value : parsed.toLocaleString();
+  return Number.isNaN(parsed.getTime()) ? value : formatDateTime(parsed);
 }
 
 export function StorageRunHistory({
@@ -19,11 +20,12 @@ export function StorageRunHistory({
   loading?: boolean;
   error?: string | null;
 }) {
+  const { t } = useTranslation();
   const content = <StorageRunHistoryContent runs={runs} loading={loading} error={error} />;
   return (
     <Card className="min-w-0" data-testid="storage-run-history">
       <CardHeader>
-        <CardTitle className="text-base">Maintenance history</CardTitle>
+        <CardTitle className="text-base">{t("system:storageMaintenanceHistory")}</CardTitle>
       </CardHeader>
       <CardContent>{content}</CardContent>
     </Card>
@@ -44,19 +46,19 @@ function StorageRunHistoryContent({
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner className="size-4" data-testid="storage-run-history-spinner" />
-        {t("settings:storageHistoryLoading")}
+        {t("system:storageHistoryLoading")}
       </div>
     );
   }
   if (error) {
     return (
       <p className="break-words text-sm text-destructive" data-testid="storage-run-history-error">
-        {t("settings:storageSectionUnavailable")}: {error}
+        {t("system:storageSectionUnavailable")}: {error}
       </p>
     );
   }
   if (runs.length === 0) {
-    return <p className="text-sm text-muted-foreground">{t("settings:storageHistoryEmpty")}</p>;
+    return <p className="text-sm text-muted-foreground">{t("system:storageHistoryEmpty")}</p>;
   }
   return (
     <Accordion type="multiple">

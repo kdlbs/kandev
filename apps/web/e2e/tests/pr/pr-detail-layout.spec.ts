@@ -111,7 +111,7 @@ function sessionTabWrapper(page: Page, sessionId: string) {
 }
 
 test.describe("PR Details layout panel", () => {
-  test("keeps the Default panel beside Agent and syncs linked review content", async ({
+  test("adds linked review content beside Agent without changing focus", async ({
     testPage,
     apiClient,
     seedData,
@@ -121,24 +121,24 @@ test.describe("PR Details layout panel", () => {
     const task = await createTaskWithSession(apiClient, seedData, "PR Details default layout");
     const session = await openTask(testPage, task.id);
 
+    await expect(session.prDetailTab()).toHaveCount(0);
+    await expect
+      .poll(() => readReviewLayout(testPage), { timeout: 15_000 })
+      .toMatchObject({ canonicalGroupId: null, rightTopOrder: ["files", "changes"] });
+
+    await linkPR(apiClient, task.id);
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
+    await expect(session.prDetailTab()).toBeVisible({ timeout: 15_000 });
+    await expect(sessionTabWrapper(testPage, task.session_id!)).toHaveClass(/dv-active-tab/);
     await expect
       .poll(() => readReviewLayout(testPage), { timeout: 15_000 })
       .toMatchObject({
         canonicalGroupId: "group-center",
-        rightTopOrder: ["files", "changes"],
+        canonicalPRKey: `testorg/testrepo/${PR_NUMBER}`,
+        keyedPanelIds: [],
       });
 
-    await expect(session.prDetailTab()).toBeVisible();
     await session.prDetailTab().click();
-    await expect(testPage.getByText("No pull request linked to this session.")).toBeVisible();
-
-    await linkPR(apiClient, task.id);
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await expect
-      .poll(() => readReviewLayout(testPage), { timeout: 15_000 })
-      .toMatchObject({ canonicalPRKey: `testorg/testrepo/${PR_NUMBER}`, keyedPanelIds: [] });
-
-    await session.prTopbarButton().click();
     await expect(session.prDetailPanel()).toBeVisible();
     await expect.poll(() => readReviewLayout(testPage)).toMatchObject({ keyedPanelIds: [] });
   });
@@ -153,8 +153,12 @@ test.describe("PR Details layout panel", () => {
     const task = await createTaskWithSession(apiClient, seedData, "Removed PR Details layout");
     const session = await openTask(testPage, task.id);
 
+    await expect(session.prDetailTab()).toHaveCount(0);
+
+    await linkPR(apiClient, task.id);
+    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
     const panelTab = session.prDetailTab();
-    await expect(panelTab).toBeVisible();
+    await expect(panelTab).toBeVisible({ timeout: 15_000 });
     await panelTab.hover();
     await panelTab.locator(".dv-default-tab-action").click();
     await expect(panelTab).not.toBeVisible();
@@ -166,8 +170,6 @@ test.describe("PR Details layout panel", () => {
       });
 
     await linkPR(apiClient, task.id);
-    await expect(session.prTopbarButton()).toBeVisible({ timeout: 15_000 });
-    await testPage.waitForTimeout(500);
     await expect
       .poll(() => readReviewLayout(testPage))
       .toMatchObject({

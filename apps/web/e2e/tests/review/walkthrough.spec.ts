@@ -355,13 +355,18 @@ test.describe("Code walkthrough", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     await seedWalkthroughTask(testPage, apiClient, seedData, "walkthrough-basic", "5-step tour");
     const card = await openWalkthrough(testPage);
 
+    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
     await card.getByRole("textbox").fill("Why does this line exist?");
     await expect(card.getByRole("button", { name: "Add" })).toBeEnabled();
     await expect(card.getByRole("button", { name: "Run" })).toBeEnabled();
+    await prCapture.screenshot("desktop-walkthrough-feedback-controls", {
+      caption: "Desktop walkthrough keeps Add and Run without an inert Cancel action",
+    });
     await card.getByRole("button", { name: "Run" }).click();
     await expect(card.getByRole("textbox")).toHaveValue("");
   });

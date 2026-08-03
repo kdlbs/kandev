@@ -70,4 +70,49 @@ describe("CommandPreviewCard", () => {
       expect(screen.queryByText("agent --stale")).not.toBeTruthy();
     });
   });
+
+  // The `{prompt}` hint is a <Trans>: its <0> index addresses the JSX children
+  // positionally, so a prettier reflow can silently reassemble the sentence
+  // into fragments without failing anything. Assert the whole reconstructed
+  // sentence, and that the token itself is never translated or re-interpolated.
+  it("renders the {prompt} hint as one sentence with the token intact", async () => {
+    previewAgentCommandActionMock.mockImplementation(async () => response("agent run {prompt}"));
+
+    render(
+      <CommandPreviewCard
+        agentName="claude"
+        model="claude-sonnet-4-5"
+        permissionSettings={{}}
+        cliPassthrough={false}
+        cliFlags={[]}
+        commandPrefix=""
+      />,
+    );
+
+    const hint = await screen.findByText(
+      (_content, element) =>
+        element?.tagName === "P" &&
+        element.textContent ===
+          "{prompt} will be replaced with your task description or follow-up message.",
+    );
+    expect(hint.querySelector("code")?.textContent).toBe("{prompt}");
+  });
+
+  it("omits the {prompt} hint in CLI passthrough mode", async () => {
+    previewAgentCommandActionMock.mockImplementation(async () => response("agent"));
+
+    render(
+      <CommandPreviewCard
+        agentName="claude"
+        model="claude-sonnet-4-5"
+        permissionSettings={{}}
+        cliPassthrough
+        cliFlags={[]}
+        commandPrefix=""
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("agent")).toBeTruthy());
+    expect(screen.queryByText(/will be replaced with your task description/)).toBeNull();
+  });
 });

@@ -88,6 +88,7 @@ export function useTaskPR(taskId: string | null) {
   // Bumped on each reconnect transition so the retry-polling effect below
   // tears down and recreates its interval (see that effect's dependency list).
   const [reconnectGeneration, setReconnectGeneration] = useState(0);
+  const [loadedTaskId, setLoadedTaskId] = useState<string | null>(null);
   // Monotonic counter incremented before each WS request, snapshotted in
   // the .then() closure. Mirrors useWorkspacePRs above. Without this, a
   // stale response from a previous taskId can land after the user
@@ -127,6 +128,7 @@ export function useTaskPR(taskId: string | null) {
           retryRef.current = SYNC_MAX_RETRIES;
         }
         const list = normalizeSyncResponse(result);
+        setLoadedTaskId(requestedTaskId);
         if (list.length === 0) return;
         for (const pr of list) {
           if (pr.task_id) setTaskPR(requestedTaskId, pr);
@@ -134,7 +136,12 @@ export function useTaskPR(taskId: string | null) {
         retryRef.current = 0;
       })
       .catch(() => {
-        // Ignore - sync may fail if no watch exists
+        if (requestRef.current !== requestId) return;
+        // Keep transient failures pending while retries remain, then settle the
+        // loading state so review-panel cleanup cannot be blocked forever.
+        if (retryRef.current >= SYNC_MAX_RETRIES) {
+          setLoadedTaskId(requestedTaskId);
+        }
       });
   }, [taskId, setTaskPR]);
 
@@ -154,6 +161,7 @@ export function useTaskPR(taskId: string | null) {
     retryRef.current = 0;
     permanentRef.current = false;
     requestRef.current++;
+    setLoadedTaskId(null);
   }, [taskId]);
 
   // Sync once when the task becomes active (freshness check).
@@ -209,11 +217,18 @@ export function useTaskPR(taskId: string | null) {
     setReconnectGeneration((g) => g + 1);
   }, [taskId, connectionStatus, refresh]);
 
-  return { pr, prs: prs ?? [], refresh, unlink } as {
+  return {
+    pr,
+    prs: prs ?? [],
+    refresh,
+    unlink,
+    loaded: loadedTaskId === taskId || prs !== null,
+  } as {
     pr: TaskPR | null;
     prs: TaskPR[];
     refresh: () => void;
     unlink: (associationId: string) => Promise<void>;
+    loaded: boolean;
   };
 }
 

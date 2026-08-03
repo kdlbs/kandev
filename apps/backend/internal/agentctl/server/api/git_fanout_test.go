@@ -18,13 +18,14 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/config"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // TestFanOutReposRunsConcurrently proves parallelism without measuring how long
-// anything takes. Every collect call blocks on a gate that opens only once
-// maxGitFanout of them have arrived, so serial execution cannot pass: the first
-// would wait on the gate forever and the rest would never start. The timeout is
-// a failure detector rather than a threshold, so machine speed does not enter
+// anything takes. Every collect call blocks on a gate that opens only after all
+// repositories have arrived, so serial execution cannot pass: the first would
+// wait on the gate forever and the rest would never start. The timeout is a
+// failure detector rather than a threshold, so machine speed does not enter
 // into it.
 //
 // The gate is plain channels rather than the git shim in
@@ -67,12 +68,13 @@ func TestFanOutReposRunsConcurrently(t *testing.T) {
 	}
 }
 
-// TestFanOutReposRespectsLimit pins the bound. With more repositories than
-// maxGitFanout, the group must admit exactly maxGitFanout at once — enough to
-// parallelise, never enough for one request to take the whole shared git
-// budget from the background pollers.
+// TestFanOutReposRespectsCapacity pins the bound to the configured process-wide
+// Git capacity rather than a private handler constant.
 func TestFanOutReposRespectsLimit(t *testing.T) {
-	subpaths := make([]string, maxGitFanout+4)
+	const capacity = 3
+	restore := subproc.Git().SetCapForTest(capacity)
+	t.Cleanup(restore)
+	subpaths := make([]string, capacity+4)
 	for i := range subpaths {
 		subpaths[i] = fmt.Sprintf("repo%d", i)
 	}
@@ -98,18 +100,18 @@ func TestFanOutReposRespectsLimit(t *testing.T) {
 		})
 	}()
 
-	// Reading exactly maxGitFanout admissions blocks until the group is full,
+	// Reading exactly the configured capacity blocks until the group is full,
 	// which is the parallelism half. It cannot over-read: the rest are held
 	// behind SetLimit until we release these.
-	for i := 0; i < maxGitFanout; i++ {
+	for i := 0; i < capacity; i++ {
 		select {
 		case <-admitted:
 		case <-time.After(10 * time.Second):
-			t.Fatalf("only %d of %d workers were admitted; the group is not parallel", i, maxGitFanout)
+			t.Fatalf("only %d of %d workers were admitted; the group is not parallel", i, capacity)
 		}
 	}
-	if got := atomic.LoadInt64(&peak); got > maxGitFanout {
-		t.Fatalf("peak concurrency = %d, want at most %d", got, maxGitFanout)
+	if got := atomic.LoadInt64(&peak); got > capacity {
+		t.Fatalf("peak concurrency = %d, want at most %d", got, capacity)
 	}
 
 	close(release)
@@ -121,8 +123,8 @@ func TestFanOutReposRespectsLimit(t *testing.T) {
 	case <-time.After(20 * time.Second):
 		t.Fatal("fan-out did not drain after the gate opened")
 	}
-	if got := atomic.LoadInt64(&peak); got != maxGitFanout {
-		t.Errorf("peak concurrency = %d, want exactly %d", got, maxGitFanout)
+	if got := atomic.LoadInt64(&peak); got != capacity {
+		t.Errorf("peak concurrency = %d, want exactly %d", got, capacity)
 	}
 }
 

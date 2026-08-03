@@ -68,6 +68,7 @@ function StorageActions({
   controller: ReturnType<typeof useStorageMaintenance>;
   disabledReason?: string;
 }) {
+  const { t } = useTranslation();
   const analysisActive =
     controller.analysisJob?.state === "queued" || controller.analysisJob?.state === "running";
   const cleanupActive =
@@ -75,11 +76,8 @@ function StorageActions({
   return (
     <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 sm:max-w-xl">
-        <p className="text-sm font-medium">Reclaim disk space safely</p>
-        <p className="text-xs text-muted-foreground">
-          Analyze for a read-only snapshot, or run the enabled cleanup rules when you want to
-          recover space immediately.
-        </p>
+        <p className="text-sm font-medium">{t("system:storageActionsTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("system:storageActionsDescription")}</p>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <div data-testid="storage-analyze-control">
@@ -87,7 +85,7 @@ function StorageActions({
             variant="outline"
             className="w-full sm:w-44"
             disabledReason={
-              disabledReason ?? (analysisActive ? "Storage analysis is still running." : undefined)
+              disabledReason ?? (analysisActive ? t("system:storageAnalysisRunning") : undefined)
             }
             onClick={() => void controller.analyze()}
             data-testid="storage-analyze"
@@ -95,10 +93,10 @@ function StorageActions({
           >
             <StorageJobButtonContent
               job={controller.analysisJob}
-              idleLabel="Analyze"
-              activeLabel="Analyzing..."
-              successLabel="Analysis complete"
-              failedLabel="Analysis failed"
+              idleLabel={t("system:storageAnalyze")}
+              activeLabel={t("system:storageAnalyzing")}
+              successLabel={t("system:storageAnalysisComplete")}
+              failedLabel={t("system:storageAnalysisFailed")}
               idleIcon={<IconRefresh className="size-4" />}
             />
           </StorageActionButton>
@@ -107,7 +105,7 @@ function StorageActions({
           <StorageActionButton
             className="w-full sm:w-44"
             disabledReason={
-              disabledReason ?? (cleanupActive ? "Storage cleanup is still running." : undefined)
+              disabledReason ?? (cleanupActive ? t("system:storageCleanupRunning") : undefined)
             }
             onClick={() => void controller.runNow()}
             data-testid="storage-run-now"
@@ -115,10 +113,10 @@ function StorageActions({
           >
             <StorageJobButtonContent
               job={controller.cleanupJob}
-              idleLabel="Run now"
-              activeLabel="Cleaning..."
-              successLabel="Cleanup complete"
-              failedLabel="Cleanup failed"
+              idleLabel={t("system:storageRunNow")}
+              activeLabel={t("system:storageCleaning")}
+              successLabel={t("system:storageCleanupComplete")}
+              failedLabel={t("system:storageCleanupFailed")}
               idleIcon={<IconPlayerPlay className="size-4" />}
             />
           </StorageActionButton>
@@ -133,6 +131,7 @@ function StorageActionFeedback({
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
 }) {
+  const { t } = useTranslation();
   if (controller.busy) {
     return (
       <StorageBusyFeedback busy={controller.busy} onRunAnyway={() => void controller.runAnyway()} />
@@ -142,7 +141,7 @@ function StorageActionFeedback({
   return (
     <Alert variant="destructive" data-testid="storage-error">
       <IconAlertTriangle className="size-4" />
-      <AlertTitle>Storage action failed</AlertTitle>
+      <AlertTitle>{t("system:storageActionFailed")}</AlertTitle>
       <AlertDescription className="break-words">{controller.error}</AlertDescription>
     </Alert>
   );
@@ -155,27 +154,29 @@ function StorageBusyFeedback({
   busy: StorageBusyState;
   onRunAnyway: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Alert variant="destructive" data-testid="storage-busy">
       <IconAlertTriangle className="size-4" />
-      <AlertTitle>Storage cleanup found active Kandev work</AlertTitle>
+      <AlertTitle>{t("system:storageBusyTitle")}</AlertTitle>
       <AlertDescription className="break-words">
-        <p>Cleanup may disrupt the following work:</p>
+        <p>{t("system:storageBusyIntro")}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
+          {/* Resource labels are rendered by the API, not the catalog. */}
           {busy.resources.map((resource) => (
             <li key={resource.kind}>{resource.label}</li>
           ))}
         </ul>
         {busy.forceAvailable && (
           <>
-            <p className="mt-3">Running cleanup anyway may disrupt this active work.</p>
+            <p className="mt-3">{t("system:storageBusyForceHint")}</p>
             <StorageActionButton
               variant="outline"
               className="mt-3 w-full sm:w-auto"
               onClick={onRunAnyway}
               data-testid="storage-run-anyway"
             >
-              <IconPlayerPlay className="size-4" /> Run anyway
+              <IconPlayerPlay className="size-4" /> {t("system:storageRunAnyway")}
             </StorageActionButton>
           </>
         )}
@@ -197,8 +198,8 @@ function policyBlockedReason(
   action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
   loading: boolean,
 ) {
-  if (action === "adopt") return t("settings:storageAdoptionPending");
-  if (loading) return t("settings:storagePolicyLoadingBlock");
+  if (action === "adopt") return t("system:storageAdoptionPending");
+  if (loading) return t("system:storagePolicyLoadingBlock");
   return undefined;
 }
 
@@ -206,7 +207,7 @@ function storageActionDisabledReason(
   t: (key: string) => string,
   action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
 ) {
-  if (action) return t("settings:storageActionPending");
+  if (action) return t("system:storageActionPending");
   return undefined;
 }
 
@@ -265,7 +266,7 @@ function StoragePolicyState({ loading, error }: { loading: boolean; error?: stri
     <Card data-testid="storage-policy-state">
       <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
         {loading && <Spinner className="size-4" data-testid="storage-policy-spinner" />}
-        <span>{loading ? t("settings:loading") : t("settings:storageSectionUnavailable")}</span>
+        <span>{loading ? t("settings:loading") : t("system:storageSectionUnavailable")}</span>
         {error && <span className="break-words text-destructive">{error}</span>}
       </CardContent>
     </Card>

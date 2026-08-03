@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -583,8 +583,8 @@ func repositoryCloneURL(repo *models.Repository) string {
 	if repo.LocalPath == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "-C", repo.LocalPath, "remote", "get-url", "origin")
-	out, err := cmd.Output()
+	cmd := subproc.NewGitCommand(context.Background(), "-C", repo.LocalPath, "remote", "get-url", "origin")
+	out, err := subproc.RunGitOutputClass(context.Background(), subproc.GitLifecycle, cmd)
 	if err != nil {
 		return ""
 	}

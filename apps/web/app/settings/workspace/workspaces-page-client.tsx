@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { IconFolder, IconPlus, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -34,29 +35,30 @@ function AddWorkspaceForm({
   isLoading,
   status,
 }: AddWorkspaceFormProps) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardContent className="pt-6">
         <form onSubmit={onSubmit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="workspace-name">Workspace Name</Label>
+            <Label htmlFor="workspace-name">{t("workspaces:workspaceName")}</Label>
             <Input
               id="workspace-name"
               value={newWorkspaceName}
               onChange={(e) => onNameChange(e.target.value)}
-              placeholder="My Workspace"
+              placeholder={t("workspaces:workspaceNamePlaceholder")}
               required
               autoFocus
             />
           </div>
           <div className="flex gap-2 justify-end">
             <Button type="button" variant="outline" onClick={onCancel}>
-              Cancel
+              {t("common:cancel")}
             </Button>
             <div className="flex items-center gap-2">
               <RequestIndicator status={status} />
               <Button type="submit" disabled={isLoading}>
-                Add Workspace
+                {t("workspaces:addWorkspace")}
               </Button>
             </div>
           </div>
@@ -67,6 +69,7 @@ function AddWorkspaceForm({
 }
 
 function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
+  const { t } = useTranslation();
   return (
     <Link href={`/settings/workspace/${workspace.id}`}>
       <Card className="hover:bg-accent transition-colors cursor-pointer">
@@ -79,7 +82,7 @@ function WorkspaceListItem({ workspace }: { workspace: Workspace }) {
               <div className="flex-1 min-w-0">
                 <h4 className="font-medium">{workspace.name}</h4>
                 <div className="flex items-center gap-3 text-xs text-muted-foreground mt-1">
-                  <span>Workflows managed in this workspace</span>
+                  <span>{t("workspaces:workflowsManagedInThisWorkspace")}</span>
                 </div>
               </div>
             </div>
@@ -98,6 +101,7 @@ export function WorkspacesPageClient() {
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const createRequest = useRequest(createWorkspaceAction);
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const handleAddWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,8 +136,8 @@ export function WorkspacesPageClient() {
       setIsAdding(false);
     } catch (error) {
       toast({
-        title: "Failed to create workspace",
-        description: error instanceof Error ? error.message : "Request failed",
+        title: t("workspaces:failedToCreateWorkspace"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
     }
@@ -143,12 +147,14 @@ export function WorkspacesPageClient() {
     <div className="space-y-8">
       <div className="flex items-start justify-between">
         <div>
-          <h2 className="text-2xl font-bold">Workspaces</h2>
-          <p className="text-sm text-muted-foreground mt-1">Manage your workspaces and workflows</p>
+          <h2 className="text-2xl font-bold">{t("common:workspaces")}</h2>
+          <p className="text-sm text-muted-foreground mt-1">
+            {t("workspaces:manageYourWorkspacesAndWorkflows")}
+          </p>
         </div>
         <Button size="sm" onClick={() => setIsAdding(true)}>
           <IconPlus className="h-4 w-4 mr-2" />
-          Add Workspace
+          {t("workspaces:addWorkspace")}
         </Button>
       </div>
 
@@ -175,7 +181,7 @@ export function WorkspacesPageClient() {
             <Card>
               <CardContent className="py-8 text-center">
                 <p className="text-sm text-muted-foreground">
-                  No workspaces configured. Add your first workspace to get started.
+                  {t("workspaces:noWorkspacesConfigured")}
                 </p>
               </CardContent>
             </Card>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { RefObject } from "react";
+import type { FormEvent, RefObject } from "react";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -9,7 +9,8 @@ import { useToast } from "@/components/toast-provider";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { addSessionPanel } from "@/lib/state/dockview-panel-actions";
 
-import { AgentSelector } from "@/components/task-create-dialog-selectors";
+import { AgentSelector, TaskFormInputs } from "@/components/task-create-dialog-selectors";
+import type { TaskFormInputsHandle } from "@/components/task-create-dialog-types";
 import { useAgentProfileOptions } from "@/components/task-create-dialog-options";
 import { useSummarizeSession } from "@/hooks/use-summarize-session";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
@@ -22,16 +23,13 @@ import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { buildHandoffInitialState, type HandoffPreset } from "./handoff-types";
 import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
-import {
-  EnvironmentBadges,
-  ContextSelect,
-  useDialogAttachments,
-  toContextItems,
-} from "./session-dialog-shared";
-import { SessionPromptField } from "./new-session-form-prompt";
+import { PromptResultRecovery } from "@/components/prompt-result-recovery";
+import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
 
 export type { HandoffPreset } from "./handoff-types";
+
+const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 type NewSessionDialogProps = {
   open: boolean;
@@ -168,33 +166,27 @@ function useHandoffAutoSummarize(
 }
 
 export function useSessionPromptController(
-  promptRef: RefObject<HTMLTextAreaElement | null>,
-  promptValue: string,
-  setPromptValue: (value: string) => void,
-  setHasPrompt: (value: boolean) => void,
+  promptRef: RefObject<TaskFormInputsHandle | null>,
   taskId: string,
 ) {
   const { toast } = useToast();
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({ sessionId: null });
-  const latestPromptValueRef = useRef(promptValue);
-  latestPromptValueRef.current = promptValue;
+  const latestPromptValueRef = useRef("");
   const promptResultDelivery = usePromptResultDelivery({
     scopeKey: `new-session:${taskId}`,
-    getCurrent: () => latestPromptValueRef.current,
+    getCurrent: () => promptRef.current?.getValue() ?? latestPromptValueRef.current,
     apply: (value) => {
-      if (!promptRef.current) {
-        return false;
-      }
-
-      setPromptValue(value);
-      setHasPrompt(value.trim().length > 0);
+      const promptInput = promptRef.current;
+      if (!promptInput) return false;
+      promptInput.setValue(value);
       return true;
     },
   });
 
   const handleEnhancePrompt = useCallback(async () => {
-    const current = latestPromptValueRef.current;
+    const current = promptRef.current?.getValue() ?? "";
     if (!current.trim()) return;
+    latestPromptValueRef.current = current;
     const generation = promptResultDelivery.captureScope();
 
     await enhancePrompt(current, (enhanced) => {
@@ -205,7 +197,7 @@ export function useSessionPromptController(
 
       return delivered;
     });
-  }, [enhancePrompt, promptResultDelivery, toast]);
+  }, [enhancePrompt, promptRef, promptResultDelivery, toast]);
 
   return {
     handleEnhancePrompt,
@@ -216,14 +208,9 @@ export function useSessionPromptController(
   };
 }
 
-function shouldDisableSubmit(
-  isCreating: boolean,
-  isSummarizing: boolean,
-  hasPrompt: boolean,
-  hasProfiles: boolean,
-) {
-  const isBusy = Number(isCreating) + Number(isSummarizing);
-  const submitPenalty = Number(hasPrompt === false) + Number(hasProfiles === false) + isBusy;
+function shouldDisableSubmit(isBusy: boolean, hasPrompt: boolean, hasProfiles: boolean) {
+  const submitPenalty =
+    Number(hasPrompt === false) + Number(hasProfiles === false) + Number(isBusy);
   return submitPenalty > 0;
 }
 
@@ -366,47 +353,9 @@ function NewSessionForm({
   );
   const [hasPrompt, setHasPrompt] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-  const [promptValue, setPromptValue] = useState("");
-  const latestPromptValueRef = useRef(promptValue);
-  latestPromptValueRef.current = promptValue;
-  const controlledPromptRef = useMemo<RefObject<HTMLTextAreaElement | null>>(
-    () => ({
-      get current() {
-        if (!promptRef.current) {
-          return null;
-        }
-
-        return {
-          get value() {
-            return latestPromptValueRef.current;
-          },
-          set value(value: string) {
-            setPromptValue(value);
-          },
-        } as HTMLTextAreaElement;
-      },
-    }),
-    [],
-  );
+  const promptRef = useRef<TaskFormInputsHandle | null>(null);
   const busySignal = Number(isCreating) + Number(isSummarizing);
   const isBusyState = busySignal > 0;
-  const {
-    attachments,
-    isDragging,
-    fileInputRef,
-    handleRemoveAttachment,
-    handlePaste,
-    handleDragOver,
-    handleDragLeave,
-    handleDrop,
-    handleAttachClick,
-    handleFileInputChange,
-  } = useDialogAttachments(isBusyState);
-  const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment),
-    [attachments, handleRemoveAttachment],
-  );
   const sessionOptions = useSessionOptions(taskId);
   const isUtilityConfigured = useIsUtilityConfigured();
   const profileSelection = useSessionProfileSelection({
@@ -417,9 +366,9 @@ function NewSessionForm({
     setSelectedProfileId,
   });
   const { handleEnhancePrompt, isEnhancingPrompt, pendingResult, applyPending, copyPending } =
-    useSessionPromptController(promptRef, promptValue, setPromptValue, setHasPrompt, taskId);
+    useSessionPromptController(promptRef, taskId);
   const handleContextChange = useSessionContextChange({
-    promptRef: controlledPromptRef,
+    promptRef,
     initialPrompt,
     summarize,
     toast,
@@ -429,7 +378,7 @@ function NewSessionForm({
   useHandoffAutoSummarize(handoff, handoffInitial?.contextValue ?? "blank", handleContextChange);
 
   const handleSubmit = useSessionLaunchSubmit({
-    promptRef: controlledPromptRef,
+    promptRef,
     taskId,
     selectedProfileId,
     executorId,
@@ -437,7 +386,6 @@ function NewSessionForm({
     initialPrompt,
     agentProfiles,
     groupId,
-    attachments,
     onClose,
     toast,
     setActiveSession,
@@ -445,8 +393,7 @@ function NewSessionForm({
     setIsCreating,
   });
   const isSubmitDisabled = shouldDisableSubmit(
-    isCreating,
-    isSummarizing,
+    isBusyState,
     hasPrompt,
     profileSelection.hasProfiles,
   );
@@ -472,33 +419,37 @@ function NewSessionForm({
         sessionOptions={sessionOptions}
         isSummarizing={isSummarizing}
       />
-      <SessionPromptField
-        promptRef={promptRef}
-        promptValue={promptValue}
-        contextItems={contextItems}
-        isBusy={isBusyState}
-        isDragging={isDragging}
-        isSummarizing={isSummarizing}
-        hasPrompt={hasPrompt}
-        hasProfiles={profileSelection.hasProfiles}
-        isUtilityConfigured={isUtilityConfigured}
-        isEnhancingPrompt={isEnhancingPrompt}
-        pendingResult={pendingResult}
-        fileInputRef={fileInputRef}
-        onPromptChange={(value) => {
-          setPromptValue(value);
-          setHasPrompt(value.trim().length > 0);
+      <TaskFormInputs
+        isSessionMode
+        autoFocus
+        initialDescription=""
+        onDescriptionChange={setHasPrompt}
+        onKeyDown={(event) => {
+          if (
+            event.key === "Enter" &&
+            (event.metaKey || event.ctrlKey) &&
+            !isBusyState &&
+            hasPrompt &&
+            profileSelection.hasProfiles
+          ) {
+            event.preventDefault();
+            void handleSubmit(event as unknown as FormEvent);
+          }
         }}
-        onPaste={handlePaste}
-        onSubmit={handleSubmit}
-        onAttachClick={handleAttachClick}
+        descriptionValueRef={promptRef}
+        disabled={isBusyState}
         onEnhancePrompt={handleEnhancePrompt}
-        onApplyPending={applyPending}
-        onCopyPending={copyPending}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onDrop={handleDrop}
-        onFileInputChange={handleFileInputChange}
+        isEnhancingPrompt={isEnhancingPrompt}
+        isUtilityConfigured={isUtilityConfigured}
+        onVoiceAutoSend={() => {
+          if (isBusyState || !profileSelection.hasProfiles) return;
+          void handleSubmit(VOICE_SUBMIT_EVENT);
+        }}
+      />
+      <PromptResultRecovery
+        pendingResult={pendingResult}
+        onApply={applyPending}
+        onCopy={copyPending}
       />
       <DialogFooter>
         <Button

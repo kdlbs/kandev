@@ -38,7 +38,8 @@ export type ConnectionState = {
 };
 
 export type MobileKanbanState = {
-  activeColumnIndex: number;
+  /** Last selected workflow step id, keyed by workflow id (phone board). */
+  activeStepIdByWorkflowId: Record<string, string>;
   isMenuOpen: boolean;
   isSearchOpen: boolean;
 };
@@ -53,6 +54,8 @@ export type MobileSessionState = {
 
 export type ChatInputState = {
   planModeBySessionId: Record<string, boolean>;
+  /** True while a session's agent.cancel request is awaiting settlement. */
+  cancellingBySessionId: Record<string, boolean>;
 };
 
 export type TranscriptAutoScrollState = {
@@ -215,13 +218,14 @@ export type UISliceActions = {
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setConnectionIssueSeverity: (severity: ConnectionIssueSeverity) => void;
-  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
   setTranscriptVirtuosoState: (sessionId: string, state: StateSnapshot) => void;

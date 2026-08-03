@@ -6,11 +6,13 @@ import { AnchoredLastPromptBar } from "./anchored-last-prompt-bar";
 const BAR_TESTID = "anchored-last-prompt-bar";
 const EXPAND_TESTID = "anchored-last-prompt-expand";
 const TEXT_TESTID = "anchored-last-prompt-text";
+const CONTENT_TESTID = "anchored-last-prompt-content";
 const SHORT_TEXT = "fix the bug";
 const LONG_TEXT =
   "Please refactor the authentication module to support OAuth as well as the existing session cookie flow, and add tests.";
 const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");
 const originalScrollHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight");
+const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "offsetHeight");
 
 function renderBar(
   overrides: Partial<Parameters<typeof AnchoredLastPromptBar>[0]> = {},
@@ -41,13 +43,21 @@ function setPromptMeasurements(clientHeight: number, scrollHeight: number) {
   });
 }
 
+function setContentHeight(offsetHeight: number) {
+  Object.defineProperty(HTMLElement.prototype, "offsetHeight", {
+    configurable: true,
+    get: () => offsetHeight,
+  });
+}
+
 function restorePromptMeasurements() {
   restoreMeasurement("clientHeight", originalClientHeight);
   restoreMeasurement("scrollHeight", originalScrollHeight);
+  restoreMeasurement("offsetHeight", originalOffsetHeight);
 }
 
 function restoreMeasurement(
-  property: "clientHeight" | "scrollHeight",
+  property: "clientHeight" | "scrollHeight" | "offsetHeight",
   descriptor: PropertyDescriptor | undefined,
 ) {
   if (descriptor) {
@@ -201,5 +211,28 @@ describe("AnchoredLastPromptBar controls", () => {
     );
 
     expect(screen.queryByRole("button", { name: /scroll to last prompt/i })).toBeNull();
+  });
+});
+
+describe("AnchoredLastPromptBar height reporting", () => {
+  it("reports the pinned content's rendered height on mount, independent of open/closed state", () => {
+    setContentHeight(76);
+    const onHeightChange = vi.fn();
+
+    renderBar({ isVisible: false, onHeightChange });
+
+    expect(onHeightChange).toHaveBeenCalledWith(76);
+    screen.getByTestId(CONTENT_TESTID);
+  });
+
+  it("reports zero height on unmount so a removed bar stops reserving scroll space", () => {
+    setContentHeight(76);
+    const onHeightChange = vi.fn();
+    const { unmount } = renderBar({ onHeightChange });
+    onHeightChange.mockClear();
+
+    unmount();
+
+    expect(onHeightChange).toHaveBeenCalledWith(0);
   });
 });

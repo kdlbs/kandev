@@ -103,5 +103,32 @@ test.describe("Task sidebar diff stats", () => {
 
     // Diff badge is rendered as "+N -N" inside a font-mono span.
     await expect(alphaRow.getByText(/\+\d+\s+-\d+/)).toBeVisible({ timeout: 30_000 });
+
+    // The active row keeps its diff totals visible after the row receives focus.
+    // Only fine-pointer hover should swap them for the actions trigger.
+    await alphaRow.click();
+    await expect.poll(() => testPage.url(), { timeout: 10_000 }).toContain(taskAlpha.id);
+
+    const activeAlphaRow = betaSession.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Diff Alpha" });
+    const activeDiffStats = activeAlphaRow.getByTestId("sidebar-task-diff-stats");
+    const activeActions = activeAlphaRow.getByRole("button", { name: "Task actions" });
+    const activeActionContainer = activeActions.locator("..");
+
+    await testPage.mouse.move(0, 0);
+    await expect
+      .poll(() => activeDiffStats.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("1");
+    await expect
+      .poll(() => activeActionContainer.evaluate((element) => getComputedStyle(element).opacity))
+      .toBe("0");
+
+    await activeAlphaRow.hover();
+    await expect(activeActionContainer).toHaveCSS("opacity", "1");
+    await expect(activeDiffStats).toHaveCSS("opacity", "0");
+
+    await activeActions.click();
+    await expect(testPage.getByRole("menuitem", { name: "Archive", exact: true })).toBeVisible();
   });
 });

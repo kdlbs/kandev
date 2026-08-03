@@ -28,7 +28,7 @@ export const BUILT_IN_LAYOUT_PROFILES: readonly BuiltInLayoutProfileDescriptor[]
   {
     id: "default",
     name: "Default",
-    description: "Agent with Files, Changes, PR Details, and Terminal",
+    description: "Agent with Files, Changes, and Terminal",
   },
   {
     id: "plan",

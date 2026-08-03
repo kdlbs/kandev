@@ -1,3 +1,5 @@
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import {
@@ -28,12 +30,17 @@ type WorkflowDeleteDialogProps = {
   hasUnsavedChanges: boolean;
 };
 
-function workflowDeleteDescription(taskCount: number | null, hasUnsavedChanges: boolean): string {
+function workflowDeleteDescription(
+  t: TFunction,
+  taskCount: number | null,
+  hasUnsavedChanges: boolean,
+): string {
   const hasTasks = taskCount !== null && taskCount > 0;
   const base = hasTasks
-    ? `This workflow has ${taskCount} task${taskCount === 1 ? "" : "s"}. Choose where to migrate them, or delete the workflow and archive the tasks.`
-    : "This will permanently delete the workflow and all its steps.";
-  return `${base}${hasUnsavedChanges ? " Unsaved workflow changes will be discarded." : ""}`;
+    ? t("workflows:deleteWorkflowWithTasks", { count: taskCount })
+    : t("workflows:deleteWorkflowNoTasks");
+  if (!hasUnsavedChanges) return base;
+  return `${base} ${t("workflows:unsavedWorkflowChangesDiscarded")}`;
 }
 
 export function WorkflowDeleteDialog({
@@ -52,23 +59,24 @@ export function WorkflowDeleteDialog({
   onMigrateAndDelete,
   hasUnsavedChanges,
 }: WorkflowDeleteDialogProps) {
+  const { t } = useTranslation();
   const hasTasks = workflowTaskCount !== null && workflowTaskCount > 0;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete workflow</DialogTitle>
+          <DialogTitle>{t("workflows:deleteWorkflowDialogTitle")}</DialogTitle>
           <DialogDescription>
-            {workflowDeleteDescription(workflowTaskCount, hasUnsavedChanges)}
+            {workflowDeleteDescription(t, workflowTaskCount, hasUnsavedChanges)}
           </DialogDescription>
         </DialogHeader>
         {hasTasks && otherWorkflows.length > 0 && (
           <div className="space-y-3 py-2">
             <div className="space-y-2">
-              <Label>Target Workflow</Label>
+              <Label>{t("workflows:targetWorkflow")}</Label>
               <Select value={targetWorkflowId} onValueChange={setTargetWorkflowId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select workflow" />
+                  <SelectValue placeholder={t("workflows:selectWorkflow")} />
                 </SelectTrigger>
                 <SelectContent>
                   {otherWorkflows.map((w) => (
@@ -81,10 +89,10 @@ export function WorkflowDeleteDialog({
             </div>
             {targetWorkflowSteps.length > 0 && (
               <div className="space-y-2">
-                <Label>Target Step</Label>
+                <Label>{t("workflows:targetStep")}</Label>
                 <Select value={targetStepId} onValueChange={setTargetStepId}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Select step" />
+                    <SelectValue placeholder={t("workflows:selectStep")} />
                   </SelectTrigger>
                   <SelectContent>
                     {targetWorkflowSteps.map((s) => (
@@ -105,7 +113,7 @@ export function WorkflowDeleteDialog({
             onClick={() => onOpenChange(false)}
             className="cursor-pointer"
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           {hasTasks && otherWorkflows.length > 0 && (
             <Button
@@ -114,7 +122,7 @@ export function WorkflowDeleteDialog({
               disabled={!targetWorkflowId || !targetStepId || migrateLoading || deleteLoading}
               className="cursor-pointer"
             >
-              {migrateLoading ? "Migrating..." : "Migrate & Delete"}
+              {migrateLoading ? t("workflows:migrating") : t("workflows:migrateAndDelete")}
             </Button>
           )}
           <Button
@@ -124,7 +132,7 @@ export function WorkflowDeleteDialog({
             disabled={deleteLoading || migrateLoading}
             className="cursor-pointer"
           >
-            {hasTasks ? "Delete & Archive Tasks" : "Delete Workflow"}
+            {hasTasks ? t("workflows:deleteAndArchiveTasks") : t("workflows:deleteWorkflow")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -148,16 +156,18 @@ type StepDeleteDialogProps = {
 };
 
 function stepDeleteDescription(
+  t: TFunction,
   stepName: string,
   stepTaskCount: number | null,
   hasMigrationTarget: boolean,
 ) {
-  if (!stepTaskCount) return `This will permanently delete the ${stepName} workflow step.`;
-  const taskLabel = `${stepTaskCount} task${stepTaskCount === 1 ? "" : "s"}`;
+  // `stepName` is user data (steps are renamed freely), so it always travels as
+  // an interpolated value and never as part of the message.
+  if (!stepTaskCount) return t("workflows:deleteStepNoTasks", { stepName });
   if (hasMigrationTarget) {
-    return `${stepName} has ${taskLabel}. Choose where to migrate them, or delete the step and its tasks.`;
+    return t("workflows:deleteStepWithMigration", { stepName, count: stepTaskCount });
   }
-  return `Deleting ${stepName} will also affect its ${taskLabel}.`;
+  return t("workflows:deleteStepAffectsTasks", { stepName, count: stepTaskCount });
 }
 
 export function StepDeleteDialog({
@@ -174,24 +184,30 @@ export function StepDeleteDialog({
   onDeleteAndTasks,
   hasUnsavedChanges,
 }: StepDeleteDialogProps) {
+  const { t } = useTranslation();
   const hasTasks = stepTaskCount !== null && stepTaskCount > 0;
-  const description = stepDeleteDescription(stepName, stepTaskCount, stepsForMigration.length > 0);
+  const baseDescription = stepDeleteDescription(
+    t,
+    stepName,
+    stepTaskCount,
+    stepsForMigration.length > 0,
+  );
+  const description = hasUnsavedChanges
+    ? `${baseDescription} ${t("workflows:unsavedStepChangesDiscarded")}`
+    : baseDescription;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete step</DialogTitle>
-          <DialogDescription>
-            {description}
-            {hasUnsavedChanges ? " Unsaved step changes will be discarded." : ""}
-          </DialogDescription>
+          <DialogTitle>{t("workflows:deleteStepDialogTitle")}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
         {stepsForMigration.length > 0 && (
           <div className="space-y-2 py-2">
-            <Label>Target Step</Label>
+            <Label>{t("workflows:targetStep")}</Label>
             <Select value={targetStep} onValueChange={setTargetStep} disabled={loading || pending}>
               <SelectTrigger>
-                <SelectValue placeholder="Select step" />
+                <SelectValue placeholder={t("workflows:selectStep")} />
               </SelectTrigger>
               <SelectContent>
                 {stepsForMigration.map((s) => (
@@ -205,7 +221,7 @@ export function StepDeleteDialog({
         )}
         {pending && !loading && (
           <p className="text-sm text-muted-foreground" role="status">
-            Waiting for the failed change to be retried.
+            {t("workflows:waitingForRetry")}
           </p>
         )}
         <DialogFooter>
@@ -215,7 +231,7 @@ export function StepDeleteDialog({
             onClick={() => onOpenChange(false)}
             className="cursor-pointer"
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           {stepsForMigration.length > 0 && (
             <Button
@@ -224,7 +240,7 @@ export function StepDeleteDialog({
               disabled={!targetStep || loading || pending}
               className="cursor-pointer"
             >
-              {loading ? "Migrating..." : "Migrate & Delete Step"}
+              {loading ? t("workflows:migrating") : t("workflows:migrateAndDeleteStep")}
             </Button>
           )}
           <Button
@@ -234,7 +250,7 @@ export function StepDeleteDialog({
             disabled={loading || pending}
             className="cursor-pointer"
           >
-            {hasTasks ? "Delete Step & Tasks" : "Delete Step"}
+            {hasTasks ? t("workflows:deleteStepAndTasks") : t("workflows:deleteStep")}
           </Button>
         </DialogFooter>
       </DialogContent>

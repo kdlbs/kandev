@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func TestUnquoteGitPath(t *testing.T) {
@@ -219,6 +220,29 @@ func TestGetGitStatus_FreshBypassesStaleCache(t *testing.T) {
 	}
 	if _, ok := afterFresh.Files["tracked.txt"]; !ok {
 		t.Errorf("fresh=true must not overwrite the cache; expected stale entry to remain, got Files=%v", mapKeys(afterFresh.Files))
+	}
+}
+
+func TestGetGitStatusFreshUsesInteractiveAdmissionForEveryCommand(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	defer cleanup()
+	wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+	t.Cleanup(wt.Stop)
+
+	before := subproc.AdmissionSnapshot()
+	if _, err := wt.GetGitStatus(context.Background(), true); err != nil {
+		t.Fatalf("fresh GetGitStatus failed: %v", err)
+	}
+	after := subproc.AdmissionSnapshot()
+	interactive := after.Classes[string(subproc.GitInteractive)].AcquireTotal -
+		before.Classes[string(subproc.GitInteractive)].AcquireTotal
+	background := after.Classes[string(subproc.GitBackground)].AcquireTotal -
+		before.Classes[string(subproc.GitBackground)].AcquireTotal
+	if interactive == 0 {
+		t.Fatal("fresh status did not admit any interactive Git commands")
+	}
+	if background != 0 {
+		t.Fatalf("fresh status admitted %d background Git commands, want 0", background)
 	}
 }
 

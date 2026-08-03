@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/task/gitinit"
 	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
@@ -204,7 +205,7 @@ func initializeGitRepository(ctx context.Context, targetPath string, targetDirec
 	if err != nil {
 		return err
 	}
-	output, err := command.CombinedOutput()
+	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, command)
 	if err != nil {
 		return fmt.Errorf("%w: %s", err, strings.TrimSpace(string(output)))
 	}

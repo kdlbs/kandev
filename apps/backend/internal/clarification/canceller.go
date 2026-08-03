@@ -190,6 +190,7 @@ func (c *Canceller) publishMessageUpdated(ctx context.Context, msg *taskmodels.M
 		"type":           msgType,
 		"requests_input": msg.RequestsInput,
 		"created_at":     msg.CreatedAt.Format(time.RFC3339),
+		"updated_at":     msg.UpdatedAt.Format(time.RFC3339Nano),
 		"metadata":       msg.Metadata,
 	}
 

@@ -1,5 +1,7 @@
 "use client";
 
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -17,11 +19,13 @@ import type {
   WatcherReference,
 } from "@/lib/types/agent-profile-errors";
 
-const WATCHER_KIND_LABELS: Record<WatcherReference["kind"], string> = {
-  linear: "Linear",
-  jira: "Jira",
-  github_issue: "GitHub Issues",
-  github_review: "GitHub PR Reviews",
+// The watcher `kind` values are the wire enum and are never translated; only
+// their labels are copy, so they travel as catalog keys and resolve at render.
+const WATCHER_KIND_LABEL_KEYS: Record<WatcherReference["kind"], string> = {
+  linear: "agents:watcherKindLinear",
+  jira: "agents:watcherKindJira",
+  github_issue: "agents:watcherKindGithubIssue",
+  github_review: "agents:watcherKindGithubReview",
 };
 
 type AgentProfileDeleteConfirmDialogProps = {
@@ -35,22 +39,23 @@ export function AgentProfileDeleteConfirmDialog({
   onOpenChange,
   onConfirm,
 }: AgentProfileDeleteConfirmDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete agent profile?</AlertDialogTitle>
+          <AlertDialogTitle>{t("agents:deleteAgentProfileTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently delete this profile. This action cannot be undone.
+            {t("agents:deleteAgentProfileDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             onClick={onConfirm}
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            Delete
+            {t("agents:delete")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -78,6 +83,7 @@ export function AgentProfileDeleteConflictDialog({
   onOpenChange,
   onConfirm,
 }: AgentProfileDeleteConflictDialogProps) {
+  const { t } = useTranslation();
   const tasks = conflict?.activeSessions.filter((s) => !s.is_ephemeral) ?? [];
   const quickChats = conflict?.activeSessions.filter((s) => s.is_ephemeral) ?? [];
   const watchers = conflict?.watchers ?? [];
@@ -92,16 +98,22 @@ export function AgentProfileDeleteConflictDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>
-            {hasHardBlockers ? "Cannot delete agent profile" : "Delete agent profile?"}
+            {hasHardBlockers
+              ? t("agents:cannotDeleteAgentProfile")
+              : t("agents:deleteAgentProfileTitle")}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
-              <p>This profile is currently in use. Deleting it will affect the following:</p>
-              <SessionConflictSection title="Tasks:" sessions={tasks} fallback="Untitled task" />
+              <p>{t("agents:profileInUseIntro")}</p>
               <SessionConflictSection
-                title="Quick Chats:"
+                title={t("agents:conflictTasksTitle")}
+                sessions={tasks}
+                fallback={t("agents:untitledTask")}
+              />
+              <SessionConflictSection
+                title={t("agents:conflictQuickChatsTitle")}
                 sessions={quickChats}
-                fallback="Untitled quick chat"
+                fallback={t("agents:untitledQuickChat")}
               />
               <WatcherConflictSection watchersByKind={watchersByKind} />
               <RoutingTierConflictSection
@@ -110,26 +122,21 @@ export function AgentProfileDeleteConflictDialog({
                 providerLabels={new Map(providers.map((p) => [p.id, p.name]))}
               />
               {hasHardBlockers ? (
-                <p className="mt-2">
-                  Change these workspace tier mappings before deleting this profile.
-                </p>
+                <p className="mt-2">{t("agents:changeTierMappingsFirst")}</p>
               ) : (
-                <p className="mt-2">
-                  These sessions will no longer be able to use this profile and the listed watchers
-                  will be disabled. This action cannot be undone.
-                </p>
+                <p className="mt-2">{t("agents:deleteAnywayConsequences")}</p>
               )}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           {hasHardBlockers ? null : (
             <AlertDialogAction
               onClick={onConfirm}
               className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete Anyway
+              {t("agents:deleteAnyway")}
             </AlertDialogAction>
           )}
         </AlertDialogFooter>
@@ -167,16 +174,17 @@ function WatcherConflictSection({
 }: {
   watchersByKind: Record<string, WatcherReference[]>;
 }) {
+  const { t } = useTranslation();
   const entries = Object.entries(watchersByKind);
   if (entries.length === 0) return null;
   return (
     <div className="mt-2">
-      <p className="font-medium text-sm">Watchers (will be disabled):</p>
+      <p className="font-medium text-sm">{t("agents:conflictWatchersTitle")}</p>
       <ul className="list-disc list-inside mt-1 space-y-0.5">
         {entries.map(([kind, items]) => (
           <li key={kind} className="text-sm">
             <span className="font-medium">
-              {WATCHER_KIND_LABELS[kind as WatcherReference["kind"]] ?? kind}:
+              {watcherKindLabel(t, kind as WatcherReference["kind"])}:
             </span>{" "}
             {items.map((w) => w.label || w.id).join(", ")}
           </li>
@@ -195,16 +203,24 @@ function RoutingTierConflictSection({
   workspaceLabels: Map<string, string>;
   providerLabels: Map<string, string>;
 }) {
+  const { t } = useTranslation();
   if (routingTiers.length === 0) return null;
   return (
     <div className="mt-2">
-      <p className="font-medium text-sm">Workspace tier mappings:</p>
+      <p className="font-medium text-sm">{t("agents:conflictTierMappingsTitle")}</p>
       <ul className="list-disc list-inside mt-1 space-y-0.5">
         {routingTiers.map((ref) => (
           <li key={`${ref.workspace_id}-${ref.provider_id}-${ref.tier}`} className="text-sm">
-            <span className="font-medium">{formatRoutingTier(ref.tier)}</span> tier in{" "}
-            {formatLookupLabel(workspaceLabels, ref.workspace_id)} for{" "}
-            {formatLookupLabel(providerLabels, ref.provider_id)}
+            <Trans
+              i18nKey="agents:conflictTierMappingRow"
+              values={{
+                tier: formatRoutingTier(ref.tier),
+                workspace: formatLookupLabel(workspaceLabels, ref.workspace_id),
+                provider: formatLookupLabel(providerLabels, ref.provider_id),
+              }}
+            >
+              <span className="font-medium" />
+            </Trans>
           </li>
         ))}
       </ul>
@@ -212,6 +228,19 @@ function RoutingTierConflictSection({
   );
 }
 
+/**
+ * The watcher `kind` is the wire enum; only its label is copy. An unknown kind
+ * echoes the raw value rather than inventing one.
+ */
+function watcherKindLabel(t: TFunction, kind: WatcherReference["kind"]): string {
+  const key = WATCHER_KIND_LABEL_KEYS[kind];
+  return key ? t(key) : kind;
+}
+
+/**
+ * `tier` is a routing wire value (`fast`, `heavy`, …), not copy — it is
+ * title-cased for display and never translated.
+ */
 function formatRoutingTier(tier: string): string {
   return tier.charAt(0).toUpperCase() + tier.slice(1);
 }

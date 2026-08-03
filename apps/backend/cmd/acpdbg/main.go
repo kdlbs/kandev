@@ -70,12 +70,15 @@ func usage() {
 
 Usage:
   acpdbg list
-  acpdbg probe <agent> [flags]
+  acpdbg probe [flags] <agent>
   acpdbg probe --exec "<cmd> [args...]" [flags]
-  acpdbg mcp-probe <agent> [flags]
-  acpdbg prompt <agent> --prompt TEXT [--model M] [--mode M] [flags]
-  acpdbg session-load <agent> --session-id ID [--prompt TEXT] [flags]
+  acpdbg mcp-probe [flags] <agent>
+  acpdbg prompt --prompt TEXT [--model M] [--mode M] [flags] <agent>
+  acpdbg session-load --session-id ID [--prompt TEXT] [flags] <agent>
   acpdbg matrix [flags]
+
+Flags must precede the agent name: parsing uses the standard library flag
+package, which stops at the first non-flag argument.
 
 Shared flags:
   --out DIR        output directory for JSONL (default ./acp-debug/)

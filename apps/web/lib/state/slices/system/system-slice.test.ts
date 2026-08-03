@@ -73,6 +73,9 @@ const UPDATES: UpdatesResponse = {
   latest_url: "https://github.com/kdlbs/kandev/releases/1.2.4",
   latest_checked_at: TS,
   update_available: true,
+  channel: "stable",
+  channel_editable: true,
+  channel_unsupported_reason: "",
 };
 
 const JOB: SystemJob = {

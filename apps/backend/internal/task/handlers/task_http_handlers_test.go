@@ -1597,8 +1597,8 @@ func (r *freshBranchIdentityRepository) CreateTaskRepository(_ context.Context, 
 
 func TestCommitFreshBranchUsesPersistedTaskRepositoryIdentity(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	realRepoPath := initHandlerGitRepository(t, filepath.Join(t.TempDir(), "real"))
-	decoyRepoPath := initHandlerGitRepository(t, filepath.Join(t.TempDir(), "decoy"))
+	realRepoPath := initHandlerGitRepository(t, filepath.Join(canonicalTempDir(t), "real"))
+	decoyRepoPath := initHandlerGitRepository(t, filepath.Join(canonicalTempDir(t), "decoy"))
 	repo := &freshBranchIdentityRepository{
 		task: &models.Task{ID: "task-1", WorkspaceID: "ws-1"},
 		taskRepos: []*models.TaskRepository{{
@@ -1665,6 +1665,16 @@ func TestCommitFreshBranchRollsBackTaskWhenPersistedRepositoriesCannotBeLoaded(t
 	if !repo.deletedTask {
 		t.Fatal("created task was not rolled back")
 	}
+}
+
+// canonicalTempDir returns t.TempDir() with symlinks resolved, matching how production canonicalizes local paths.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	return resolved
 }
 
 func initHandlerGitRepository(t *testing.T, path string) string {

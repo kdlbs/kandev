@@ -139,7 +139,7 @@ function SelectionCommentTrigger({
   return createPortal(
     <div
       className={cn(
-        "pointer-events-auto z-[60] rounded-lg border border-border/50 bg-popover p-1 shadow-lg",
+        "pointer-events-auto z-40 rounded-lg border border-border/50 bg-popover p-1 shadow-lg",
         portalContainer ? "absolute" : "fixed",
       )}
       style={{

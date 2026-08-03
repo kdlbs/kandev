@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
+import { t as translate } from "@/lib/i18n";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -75,7 +77,8 @@ function useWorkflowSteps(
           setSavedWorkflowSteps(res.steps ?? []);
         }
       } catch {
-        if (!cancelled) toast({ title: "Failed to load workflow steps", variant: "error" });
+        if (!cancelled)
+          toast({ title: translate("workflows:failedToLoadWorkflowSteps"), variant: "error" });
       } finally {
         if (!cancelled) setWorkflowLoading(false);
       }
@@ -243,19 +246,20 @@ function WorkflowCardBody({
   stepActions,
   readOnly,
 }: WorkflowCardBodyProps) {
+  const { t } = useTranslation();
   const healthyProfiles = useHealthyAgentProfiles(workflow.agent_profile_id);
 
   return (
     <>
-      <Label>Workflow details</Label>
+      <Label>{t("workflows:workflowDetails")}</Label>
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-2">
         <div className="flex-1 space-y-1.5">
           <Label className="flex items-center gap-2">
-            <span>Workflow Name</span>
+            <span>{t("workflows:workflowName")}</span>
             {readOnly && <WorkflowSyncedBadge sourcePath={workflow.source_path} />}
             {readOnly && (
               <span className="text-xs text-muted-foreground">
-                Read-only — managed by workflow sync
+                {t("workflows:readOnlyManagedBySync")}
               </span>
             )}
           </Label>
@@ -268,8 +272,8 @@ function WorkflowCardBody({
         </div>
         <div className="w-full space-y-1.5 sm:w-[240px] sm:shrink-0">
           <Label className="flex items-center gap-1">
-            <span>Agent Profile</span>
-            <HelpTip text="Default agent profile for tasks in this workflow. When set, the agent selector is locked in the task creation dialog." />
+            <span>{t("workflows:agentProfile")}</span>
+            <HelpTip text={t("workflows:agentProfileHelp")} />
           </Label>
           <Select
             value={workflow.agent_profile_id || "none"}
@@ -287,11 +291,11 @@ function WorkflowCardBody({
                 "agent_profile_id",
               )}
             >
-              <SelectValue placeholder="None (use task default)" />
+              <SelectValue placeholder={t("workflows:noneUseTaskDefault")} />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none" className="cursor-pointer">
-                None (use task default)
+                {t("workflows:noneUseTaskDefault")}
               </SelectItem>
               {healthyProfiles.map((p) => (
                 <SelectItem key={p.id} value={p.id} className="cursor-pointer">
@@ -303,9 +307,9 @@ function WorkflowCardBody({
         </div>
       </div>
       <div className="space-y-2">
-        <Label>Workflow Steps</Label>
+        <Label>{t("workflows:workflowSteps")}</Label>
         {workflowLoading ? (
-          <div className="text-sm text-muted-foreground">Loading workflow steps...</div>
+          <div className="text-sm text-muted-foreground">{t("workflows:loadingWorkflowSteps")}</div>
         ) : (
           <WorkflowPipelineEditor
             steps={workflowSteps}
@@ -338,6 +342,7 @@ function WorkflowCardDialogs({
   hasUnsavedChanges,
   mutationGuard,
 }: WorkflowCardDialogsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <WorkflowDeleteDialog
@@ -359,7 +364,7 @@ function WorkflowCardDialogs({
       <WorkflowExportDialog
         open={exportOpen}
         onOpenChange={setExportOpen}
-        title="Export Workflow"
+        title={t("workflows:exportWorkflowTitle")}
         content={exportYaml}
       />
       <StepDeleteDialog
@@ -475,6 +480,7 @@ function useWorkflowCardState(props: WorkflowCardProps) {
 }
 
 export function WorkflowCard(props: WorkflowCardProps) {
+  const { t } = useTranslation();
   const { workflow, savedWorkflow, otherWorkflows = [], onUpdateWorkflow } = props;
   const s = useWorkflowCardState(props);
   const visibleSavedSteps = savedWorkflow ? s.savedWorkflowSteps : [];
@@ -529,7 +535,8 @@ export function WorkflowCard(props: WorkflowCardProps) {
         exportYaml={s.exportYaml}
         stepDel={s.stepDel}
         stepToDeleteName={
-          s.workflowSteps.find((step) => step.id === s.stepDel.stepToDelete)?.name ?? "selected"
+          s.workflowSteps.find((step) => step.id === s.stepDel.stepToDelete)?.name ??
+          t("workflows:selectedStepFallback")
         }
         stepsForStepMigration={s.stepsForStepMigration}
         stepDeleteHandlers={s.stepDeleteHandlers}

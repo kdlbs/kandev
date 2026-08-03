@@ -151,18 +151,27 @@ func TestCanceller_NoMessagesToUpdate(t *testing.T) {
 func TestCanceller_PublishesMessageUpdatedEvent(t *testing.T) {
 	msgs := map[string][]*taskmodels.Message{}
 	c, _, eventBus := newTestCanceller(t, msgs)
+	updatedAt := time.Date(2026, time.August, 2, 20, 0, 0, 123456789, time.UTC)
 
 	pendingID, _ := c.store.CreateRequest(&Request{SessionID: "s1"})
 	msgs[pendingID] = []*taskmodels.Message{{
 		ID:            "m1",
 		TaskSessionID: "s1",
 		Metadata:      map[string]any{"status": "pending"},
+		UpdatedAt:     updatedAt,
 	}}
 
 	c.DetachSessionAndNotify(context.Background(), "s1")
 
 	if len(eventBus.events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(eventBus.events))
+	}
+	data, ok := eventBus.events[0].Data.(map[string]any)
+	if !ok {
+		t.Fatalf("expected map event data, got %T", eventBus.events[0].Data)
+	}
+	if got := data["updated_at"]; got != updatedAt.Format(time.RFC3339Nano) {
+		t.Errorf("expected updated_at %q, got %#v", updatedAt.Format(time.RFC3339Nano), got)
 	}
 }
 

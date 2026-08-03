@@ -327,7 +327,7 @@ function DiffStatsRight({ diffStats, menuOpen }: { diffStats: DiffStats; menuOpe
         "mobile-task-diff-stats shrink-0 self-center font-mono text-[11px] transition-opacity duration-100",
         menuOpen
           ? "opacity-0"
-          : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within:opacity-0",
+          : "[@media(hover:hover)]:group-hover:opacity-0 group-focus-within/actions:opacity-0",
       )}
     >
       <span className="text-emerald-500">+{diffStats.additions}</span>{" "}
@@ -523,14 +523,14 @@ export const TaskItem = memo(function TaskItem({
         agentErrorMessage={agentErrorMessage}
       />
       {hasDiffStats ? (
-        <div className="mobile-task-actions-with-stats relative shrink-0 self-center flex items-center">
+        <div className="mobile-task-actions-with-stats group/actions relative shrink-0 self-center flex items-center">
           <DiffStatsRight diffStats={diffStats!} menuOpen={effectiveMenuOpen} />
           <div className="mobile-task-actions-slot absolute inset-0 flex items-center justify-end">
             <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
           </div>
         </div>
       ) : (
-        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} />
+        <TaskMenuButton visible={effectiveMenuOpen} expanded={menuOpen} rowFocus />
       )}
       {showSubtaskToggle && (
         <SubtaskToggle
@@ -610,7 +610,15 @@ function SubtaskToggle({
   );
 }
 
-function TaskMenuButton({ visible, expanded }: { visible: boolean; expanded: boolean }) {
+function TaskMenuButton({
+  visible,
+  expanded,
+  rowFocus = false,
+}: {
+  visible: boolean;
+  expanded: boolean;
+  rowFocus?: boolean;
+}) {
   return (
     <div
       className={cn(
@@ -618,7 +626,12 @@ function TaskMenuButton({ visible, expanded }: { visible: boolean; expanded: boo
         !visible && "[@media(hover:none)]:hidden",
         visible
           ? "opacity-100"
-          : "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto",
+          : cn(
+              "opacity-0 pointer-events-none [@media(hover:hover)]:group-hover:opacity-100 [@media(hover:hover)]:group-hover:pointer-events-auto",
+              rowFocus
+                ? "group-focus-within:opacity-100 group-focus-within:pointer-events-auto"
+                : "focus-within:opacity-100 focus-within:pointer-events-auto",
+            ),
       )}
     >
       <button

@@ -81,6 +81,25 @@ func TestFromWorkflowStep_PreservesWIPFields(t *testing.T) {
 	}
 }
 
+func TestFromWorkflowStep_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	got := FromWorkflowStep(&wfmodels.WorkflowStep{
+		ID:                         "step-cancel",
+		WorkflowID:                 "wf-1",
+		CancelTriggersTurnComplete: true,
+	})
+	payload, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal workflow step DTO: %v", err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(payload, &fields); err != nil {
+		t.Fatalf("decode workflow step DTO: %v", err)
+	}
+	if gotValue, ok := fields["cancel_triggers_turn_complete"].(bool); !ok || !gotValue {
+		t.Fatalf("cancel trigger DTO field = %#v, want true", fields["cancel_triggers_turn_complete"])
+	}
+}
+
 func TestFromTaskSession_IncludesAllWorktrees(t *testing.T) {
 	session := &models.TaskSession{
 		ID:            "session-1",

@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type MutableRefObject,
 } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { useAppStore } from "@/components/state-provider";
 import { useCommandPanelOpen } from "@/lib/commands/command-registry";
@@ -416,12 +417,17 @@ function useSwitcherActions({
 }
 
 function useRecentTaskSwitcherCommand(shortcut: KeyboardShortcut, openSwitcher: () => void) {
+  // `group` is the command palette's Map key AND its rendered heading, so it has
+  // to be translated in lockstep with every other producer or the heading splits
+  // in two under a non-English locale. `label`/`keywords` below stay English:
+  // they belong to the components/task migration, not this one.
+  const { t } = useTranslation();
   const commands = useMemo(
     () => [
       {
         id: "open-recent-task-switcher",
         label: "Open Recent Task Switcher",
-        group: "Navigation",
+        group: t("common:commandGroupNavigation"),
         shortcut,
         keywords: [
           "recent",
@@ -435,7 +441,7 @@ function useRecentTaskSwitcherCommand(shortcut: KeyboardShortcut, openSwitcher: 
         action: openSwitcher,
       },
     ],
-    [openSwitcher, shortcut],
+    [openSwitcher, shortcut, t],
   );
   useRegisterCommands(commands);
 }

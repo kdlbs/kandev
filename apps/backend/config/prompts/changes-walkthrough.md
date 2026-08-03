@@ -1,5 +1,10 @@
 Please create an agent-authored walkthrough of the current changes using `show_walkthrough_kandev`.
 
+Required tool shape:
+- `steps` is an ordered array.
+- Every step requires `file` (repository-relative path), `line` (positive 1-based integer), and `text` (markdown explanation).
+- Optional step fields are `repo`, `title`, and `line_end`.
+
 Walkthrough requirements:
 - Inspect the changed files yourself instead of relying on UI-provided paths or diff context.
 - If this is a PR task or PR review task, compare the PR head against the PR base branch.

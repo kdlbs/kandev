@@ -17,6 +17,7 @@ import {
   createWorkflowDraftSaveProgress,
   persistWorkflowDraft,
   useWorkflowStepActions,
+  areStepDraftsEqual,
 } from "./workflow-card-actions";
 
 vi.mock("@/app/actions/workspaces", () => ({
@@ -172,6 +173,16 @@ describe("useWorkflowStepActions", () => {
       id: expect.stringMatching(/^temp-step-[0-9a-f-]{36}$/),
       name: "New Step",
     });
+  });
+});
+
+describe("workflow step cancel completion policy", () => {
+  it("treats a persisted policy change as a dirty draft", () => {
+    const saved = step("step-1", "Todo", 0, true);
+    const draft = { ...saved, cancel_triggers_turn_complete: true } as WorkflowStep;
+
+    expect(areStepDraftsEqual(saved, draft)).toBe(false);
+    expect(areStepDraftsEqual(draft, { ...draft })).toBe(true);
   });
 });
 
@@ -363,6 +374,43 @@ describe("persistWorkflowDraft", () => {
     expect(updateWorkflowStepAction).toHaveBeenCalledWith(
       SERVER_STEP_TWO,
       expect.objectContaining({ pull_from_step_id: SERVER_STEP_ONE }),
+    );
+  });
+});
+
+describe("persistWorkflowDraft cancellation policy", () => {
+  it("forwards cancellation policy when creating a missing template step", async () => {
+    const draftWorkflow = { ...workflow, id: CLIENT_WORKFLOW_ID } as Workflow;
+    const drafts = [
+      {
+        ...step(CLIENT_STEP_ONE, "Todo", 0, true),
+        workflow_id: draftWorkflow.id,
+        cancel_triggers_turn_complete: true,
+      },
+    ] as WorkflowStep[];
+    vi.mocked(createWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: "wf-created",
+    } as Workflow);
+    vi.mocked(updateWorkflowAction).mockResolvedValue({
+      ...workflow,
+      id: "wf-created",
+    } as Workflow);
+    vi.mocked(createWorkflowStepAction).mockResolvedValueOnce(
+      step(SERVER_STEP_ONE, "Todo", 0, true),
+    );
+
+    await persistWorkflowDraft({
+      workflow: draftWorkflow,
+      draftSteps: drafts,
+      savedSteps: [],
+      progress: createWorkflowDraftSaveProgress(),
+    });
+
+    expect(createWorkflowStepAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cancel_triggers_turn_complete: true,
+      }),
     );
   });
 });

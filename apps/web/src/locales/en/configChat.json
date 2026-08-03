@@ -1,0 +1,21 @@
+{
+  "agentProfileHeading": "Configuration agent profile",
+  "agentProfileHelp": "Choose the agent with access to configuration tools. This becomes the workspace default.",
+  "closePanel": "Close configuration chat",
+  "dialogDescription": "Ask an agent to manage workflows, agent profiles, and MCP configuration.",
+  "noAgentProfiles": "No agent profiles are available. Create one in Agent settings first.",
+  "openInQuickChat": "Open in Quick Chat",
+  "profileUnavailable": "The selected agent profile is not available yet. Try again shortly.",
+  "promptHeading": "What would you like to configure?",
+  "promptPlaceholder": "Ask anything about your configuration...",
+  "startChat": "Start chat",
+  "startChatAria": "Start configuration chat",
+  "startingChat": "Starting chat...",
+  "suggestionAddReviewStep": "Add a 'Code Review' step to my workflow",
+  "suggestionCreateProfile": "Create a new agent profile with auto-approve enabled",
+  "suggestionShowWorkflow": "Show me the current workflow configuration",
+  "suggestionUpdateMcp": "Update the MCP servers for the default agent profile",
+  "tagline": "Configure Kandev with natural language",
+  "tryAsking": "Try asking",
+  "unknownError": "Unknown error"
+}

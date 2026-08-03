@@ -1,6 +1,6 @@
 // Package updates implements the kandev background updates poller and the
-// HTTP surface for the System -> Updates page. It polls GitHub Releases every
-// 6 hours, persists the latest tag in the kandev_meta key/value table, and
+// HTTP surface for the System -> Updates page. It resolves stable releases
+// from GitHub or nightlies from npm, persists isolated channel caches, and
 // exposes a 30s rate-limited "check now" handler.
 package updates
 
@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,7 +23,8 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 )
 
-// PollInterval is the cadence at which the background goroutine polls GitHub.
+// PollInterval is the cadence at which the background goroutine polls the
+// selected update source.
 const PollInterval = 6 * time.Hour
 
 // ManualCheckWindow is the minimum gap between two manual /check calls.
@@ -60,15 +62,18 @@ const devVersion = "dev"
 
 // UpdatesResponse is the JSON shape returned by both Get() and Check().
 type UpdatesResponse struct {
-	Current                string               `json:"current"`
-	Latest                 string               `json:"latest"`
-	LatestURL              string               `json:"latest_url"`
-	LatestCheckedAt        time.Time            `json:"latest_checked_at"`
-	UpdateAvailable        bool                 `json:"update_available"`
-	Install                InstallStateResponse `json:"install"`
-	ApplySupported         bool                 `json:"apply_supported"`
-	ApplyUnsupportedReason string               `json:"apply_unsupported_reason,omitempty"`
-	ManualCommands         []string             `json:"manual_commands,omitempty"`
+	Current                  string               `json:"current"`
+	Latest                   string               `json:"latest"`
+	LatestURL                string               `json:"latest_url"`
+	LatestCheckedAt          time.Time            `json:"latest_checked_at"`
+	UpdateAvailable          bool                 `json:"update_available"`
+	Channel                  Channel              `json:"channel"`
+	ChannelEditable          bool                 `json:"channel_editable"`
+	ChannelUnsupportedReason string               `json:"channel_unsupported_reason"`
+	Install                  InstallStateResponse `json:"install"`
+	ApplySupported           bool                 `json:"apply_supported"`
+	ApplyUnsupportedReason   string               `json:"apply_unsupported_reason,omitempty"`
+	ManualCommands           []string             `json:"manual_commands,omitempty"`
 }
 
 // ApplyResponse is the 202 payload returned when a self-update helper has
@@ -89,9 +94,6 @@ type InstallStateResponse struct {
 	MetadataPath     string `json:"metadata_path,omitempty"`
 }
 
-// releaseURL is the GitHub endpoint the service polls. Tests override it via
-// SetReleaseURL.
-//
 // Service holds the wiring needed to drive the poller and serve the two
 // HTTP endpoints.
 type Service struct {
@@ -105,6 +107,7 @@ type Service struct {
 	getenv     func(string) string
 	now        func() time.Time
 	applyRun   applyRunner
+	settings   settingsStore
 
 	// notifier routes update availability through the canonical notification
 	// service. It is nil-safe for isolated updates tests and minimal startup.
@@ -117,16 +120,23 @@ type Service struct {
 	// the backend cannot wedge apply behind a permanent 409.
 	applyStartedAt atomic.Int64
 
+	// updateMu serializes source resolution and cache persistence across the
+	// poller, manual checks, channel changes, and apply preflight. A slower,
+	// older resolution therefore cannot overwrite a newer operation's cache.
+	updateMu sync.Mutex
+
 	// releaseURL is the GitHub endpoint hit by Check + the poller; defaults
 	// to DefaultReleaseURL and can be overridden by SetReleaseURL for tests.
 	releaseURL string
+	nightlyURL string
 
 	// fetcher is the function used to retrieve the latest release. Defaults
 	// to FetchLatestReleaseFrom(httpClient). Tests inject a deterministic
 	// stub via SetFetcher so the synctest poller test does not block on
 	// real network I/O (which sits outside the fake-time bubble and prevents
 	// synctest.Wait from settling).
-	fetcher Fetcher
+	fetcher        Fetcher
+	nightlyFetcher Fetcher
 
 	// mu protects pollerStarted/cancel/wg under concurrent Start calls.
 	mu             sync.Mutex
@@ -136,8 +146,8 @@ type Service struct {
 	pollerInterval time.Duration
 }
 
-// Fetcher abstracts the GitHub release call so tests can drive
-// the poller and Check() without spinning up an httptest server.
+// Fetcher abstracts update-source resolution so tests can drive the poller
+// and Check() without spinning up an httptest server.
 type Fetcher func(ctx context.Context) (tag, url string, err error)
 
 // UpdateNotifier is the narrow canonical notification-service boundary used
@@ -207,12 +217,14 @@ func NewService(pool *db.Pool, current string, httpClient *http.Client, log *log
 		log:            log,
 		limiter:        NewLimiter(ManualCheckWindow),
 		releaseURL:     DefaultReleaseURL,
+		nightlyURL:     DefaultNPMRegistryURL,
 		pollerInterval: PollInterval,
 		homeDir:        homeDir,
 		getenv:         os.Getenv,
 		now:            time.Now,
 	}
 	s.fetcher = s.defaultFetcher
+	s.nightlyFetcher = s.defaultNightlyFetcher
 	s.applyRun = s.defaultApplyRunner
 	for _, opt := range opts {
 		opt(s)
@@ -230,6 +242,13 @@ func (s *Service) defaultFetcher(ctx context.Context) (string, string, error) {
 	return FetchLatestReleaseFrom(ctx, s.httpClient, url)
 }
 
+func (s *Service) defaultNightlyFetcher(ctx context.Context) (string, string, error) {
+	s.mu.Lock()
+	url := s.nightlyURL
+	s.mu.Unlock()
+	return FetchLatestNightlyFrom(ctx, s.httpClient, url)
+}
+
 // SetFetcher overrides the GitHub fetch implementation. Intended for tests
 // that need deterministic behaviour inside testing/synctest.
 func (s *Service) SetFetcher(f Fetcher) {
@@ -242,11 +261,29 @@ func (s *Service) SetFetcher(f Fetcher) {
 	s.mu.Unlock()
 }
 
+// SetNightlyFetcher overrides npm nightly resolution. Intended for tests.
+func (s *Service) SetNightlyFetcher(f Fetcher) {
+	s.mu.Lock()
+	if f == nil {
+		s.nightlyFetcher = s.defaultNightlyFetcher
+	} else {
+		s.nightlyFetcher = f
+	}
+	s.mu.Unlock()
+}
+
 // SetReleaseURL overrides the GitHub endpoint used by the poller and Check().
 // Intended for tests that point at a httptest stub server.
 func (s *Service) SetReleaseURL(url string) {
 	s.mu.Lock()
 	s.releaseURL = url
+	s.mu.Unlock()
+}
+
+// SetNightlyURL overrides the npm registry endpoint used by Check + poller.
+func (s *Service) SetNightlyURL(url string) {
+	s.mu.Lock()
+	s.nightlyURL = url
 	s.mu.Unlock()
 }
 
@@ -257,19 +294,24 @@ func (s *Service) SetNotifier(notifier UpdateNotifier) {
 	s.mu.Unlock()
 }
 
-// Get returns the last-known state from kandev_meta without contacting
-// GitHub. Safe to call on every page load.
-func (s *Service) Get() (UpdatesResponse, error) {
-	version, url, checkedAt, err := persistence.ReadLatestVersion(s.pool.Reader())
+// Get returns the selected channel's last-known state without contacting its
+// upstream. Safe to call on every page load.
+func (s *Service) Get(ctx context.Context) (UpdatesResponse, error) {
+	install, _ := s.detectInstallState()
+	channel, err := s.effectiveChannel(ctx, install)
 	if err != nil {
 		return UpdatesResponse{}, err
 	}
-	return s.buildResponse(version, url, checkedAt), nil
+	version, url, checkedAt, err := s.readLatestVersion(channel)
+	if err != nil {
+		return UpdatesResponse{}, err
+	}
+	return s.buildResponseFromChannel(channel, install, version, url, checkedAt), nil
 }
 
-// Check forces a synchronous poll against GitHub. Rate-limited per process by
-// the 30s Limiter. On success the result is persisted and returned. On
-// failure the previously persisted values are returned unchanged.
+// Check forces a synchronous poll against the effective channel's source.
+// It is rate-limited per process by the 30s Limiter. On failure the selected
+// channel's previously persisted values remain unchanged.
 func (s *Service) Check(ctx context.Context) (UpdatesResponse, error) {
 	if ok, _ := s.limiter.Allow(); !ok {
 		return UpdatesResponse{}, ErrRateLimited
@@ -277,19 +319,15 @@ func (s *Service) Check(ctx context.Context) (UpdatesResponse, error) {
 	return s.fetchAndPersist(ctx)
 }
 
-// Apply validates the cached update and current service install, writes an
-// intent file, and queues the OS-manager helper that performs the actual
-// package upgrade + service reinstall.
-func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
+// Apply validates that the expected target still matches the cached update and
+// current service install, writes an exact-version intent, and queues the
+// OS-manager helper that performs the package upgrade + service reinstall.
+func (s *Service) Apply(ctx context.Context, confirm, expectedTarget string) (string, error) {
 	if confirm != "UPDATE" {
 		return "", ErrApplyConfirm
 	}
 	if s.jobs == nil {
 		return "", ErrApplyUnsupported
-	}
-	resp, metadata, err := s.applyPreflight()
-	if err != nil {
-		return "", err
 	}
 	// Claim the in-flight guard across the launch. A successful launch keeps it
 	// held because the helper restarts the backend shortly (which clears it by
@@ -298,6 +336,11 @@ func (s *Service) Apply(ctx context.Context, confirm string) (string, error) {
 	// helper that exits 0 but never restarts cannot block apply forever.
 	if !s.claimApplyGuard() {
 		return "", ErrApplyInProgress
+	}
+	resp, metadata, err := s.applyPreflight(ctx, expectedTarget)
+	if err != nil {
+		s.applyStartedAt.Store(0)
+		return "", err
 	}
 	intentPath, intent, err := s.writeApplyIntent(resp, metadata)
 	if err != nil {
@@ -357,43 +400,69 @@ func (s *Service) peekLimiter() (bool, time.Duration) {
 	return false, retry
 }
 
-// fetchAndPersist hits GitHub, persists the result on success, and always
-// returns the now-current view of kandev_meta. A fetch failure preserves the
-// previously persisted state and returns the underlying error.
+// fetchAndPersist resolves the effective channel and persists its isolated
+// cache on success. A fetch failure preserves both caches.
 func (s *Service) fetchAndPersist(ctx context.Context) (UpdatesResponse, error) {
-	s.mu.Lock()
-	fetch := s.fetcher
-	s.mu.Unlock()
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
 
-	tag, releaseURL, err := fetch(ctx)
+	install, _ := s.detectInstallState()
+	channel, err := s.effectiveChannel(ctx, install)
 	if err != nil {
-		// Preserve persisted state; surface the error to caller.
-		current, _ := s.Get()
-		return current, err
+		return UpdatesResponse{}, err
 	}
-	now := time.Now().UTC()
-	if werr := persistence.WriteLatestVersion(s.pool.Writer(), tag, releaseURL, now); werr != nil {
+	tag, releaseURL, err := s.resolveLatest(ctx, channel)
+	if err != nil {
+		// Preserve persisted state without re-reading settings through a context
+		// the failed upstream request may already have canceled.
+		version, url, checkedAt, readErr := s.readLatestVersion(channel)
+		if readErr != nil {
+			s.log.Warn("updates: read cached version after fetch failure", zap.Error(readErr))
+			return UpdatesResponse{}, err
+		}
+		return s.buildResponseFromChannel(channel, install, version, url, checkedAt), err
+	}
+	now := s.now().UTC()
+	if werr := s.writeLatestVersion(channel, tag, releaseURL, now); werr != nil {
 		s.log.Warn("updates: persist latest version failed", zap.Error(werr))
 		return UpdatesResponse{}, werr
 	}
-	s.notifyUpdateAvailable(ctx, tag, releaseURL)
-	return s.buildResponse(tag, releaseURL, now), nil
+	s.notifyUpdateAvailableFor(ctx, channel, tag, releaseURL)
+	return s.buildResponseFromChannel(channel, install, tag, releaseURL, now), nil
+}
+
+func (s *Service) resolveLatest(ctx context.Context, channel Channel) (string, string, error) {
+	s.mu.Lock()
+	fetch := s.fetcher
+	if channel == ChannelNightly {
+		fetch = s.nightlyFetcher
+	}
+	s.mu.Unlock()
+	return fetch(ctx)
 }
 
 // ReplayCachedUpdate delivers a previously persisted newer release without
-// contacting GitHub. It is called when the default user becomes eligible for
-// Local delivery after an early startup poll.
+// contacting the selected upstream. It is called when the default user becomes
+// eligible for Local delivery after an early startup poll.
 func (s *Service) ReplayCachedUpdate(ctx context.Context) error {
-	tag, releaseURL, _, err := persistence.ReadLatestVersion(s.pool.Reader())
+	s.updateMu.Lock()
+	defer s.updateMu.Unlock()
+
+	install, _ := s.detectInstallState()
+	channel, err := s.effectiveChannel(ctx, install)
 	if err != nil {
 		return err
 	}
-	s.notifyUpdateAvailable(ctx, tag, releaseURL)
+	tag, releaseURL, _, err := s.readLatestVersion(channel)
+	if err != nil {
+		return err
+	}
+	s.notifyUpdateAvailableFor(ctx, channel, tag, releaseURL)
 	return nil
 }
 
-func (s *Service) notifyUpdateAvailable(ctx context.Context, tag, releaseURL string) {
-	if !s.updateAvailable(tag) {
+func (s *Service) notifyUpdateAvailableFor(ctx context.Context, channel Channel, tag, releaseURL string) {
+	if !s.notificationAvailableFor(channel, tag) {
 		return
 	}
 	s.mu.Lock()
@@ -405,33 +474,47 @@ func (s *Service) notifyUpdateAvailable(ctx context.Context, tag, releaseURL str
 	notifier.HandleUpdateAvailable(ctx, tag, releaseURL)
 }
 
-func (s *Service) buildResponse(latest, url string, checkedAt time.Time) UpdatesResponse {
-	install, _ := s.detectInstallState()
-	return s.buildResponseFrom(install, latest, url, checkedAt)
+func (s *Service) notificationAvailableFor(channel Channel, latest string) bool {
+	if !s.updateAvailableFor(channel, latest) {
+		return false
+	}
+	// Returning from a nightly to an older stable is an explicit user action,
+	// not a newly available upgrade. Keep it actionable in the UI without
+	// broadcasting an upgrade notification.
+	if channel == ChannelStable && isNightlyVersion(s.current) && compareSemver(latest, s.current) <= 0 {
+		return false
+	}
+	return true
 }
 
-// buildResponseFrom assembles the response from an already-detected install
-// state. Apply reuses this so the ApplySupported gate and the intent file are
-// derived from a single install-state snapshot rather than two independent
-// reads (closing a narrow TOCTOU window).
-func (s *Service) buildResponseFrom(install InstallStateResponse, latest, url string, checkedAt time.Time) UpdatesResponse {
+// buildResponseFromChannel assembles a response from one install-state
+// snapshot so capability gates and apply intent stay consistent.
+func (s *Service) buildResponseFromChannel(channel Channel, install InstallStateResponse, latest, url string, checkedAt time.Time) UpdatesResponse {
 	applySupported, reason := install.applySupport()
+	channelEditable, channelReason := s.channelSupport(install)
 	return UpdatesResponse{
-		Current:                s.current,
-		Latest:                 latest,
-		LatestURL:              url,
-		LatestCheckedAt:        checkedAt,
-		UpdateAvailable:        s.updateAvailable(latest),
-		Install:                install,
-		ApplySupported:         applySupported,
-		ApplyUnsupportedReason: reason,
-		ManualCommands:         manualCommands(install, latest),
+		Current:                  s.current,
+		Latest:                   latest,
+		LatestURL:                url,
+		LatestCheckedAt:          checkedAt,
+		UpdateAvailable:          s.updateAvailableFor(channel, latest),
+		Channel:                  channel,
+		ChannelEditable:          channelEditable,
+		ChannelUnsupportedReason: channelReason,
+		Install:                  install,
+		ApplySupported:           applySupported,
+		ApplyUnsupportedReason:   reason,
+		ManualCommands:           manualCommands(install, latest),
 	}
 }
 
 // updateAvailable returns true iff latest is a valid semver strictly greater
 // than current. Current = "dev" or empty disables the flag.
 func (s *Service) updateAvailable(latest string) bool {
+	return s.updateAvailableFor(ChannelStable, latest)
+}
+
+func (s *Service) updateAvailableFor(channel Channel, latest string) bool {
 	if latest == "" || !isValidSemver(latest) {
 		return false
 	}
@@ -441,5 +524,30 @@ func (s *Service) updateAvailable(latest string) bool {
 	if !isValidSemver(s.current) {
 		return false
 	}
+	current := strings.TrimPrefix(s.current, "v")
+	target := strings.TrimPrefix(latest, "v")
+	if current == target {
+		return false
+	}
+	if channel == ChannelNightly && isNightlyVersion(s.current) && isNightlyVersion(latest) {
+		return compareSemverCore(latest, s.current) >= 0
+	}
+	if channel == ChannelStable && isNightlyVersion(s.current) && !isNightlyVersion(latest) {
+		return true
+	}
 	return compareSemver(latest, s.current) > 0
+}
+
+func (s *Service) readLatestVersion(channel Channel) (string, string, time.Time, error) {
+	if channel == ChannelNightly {
+		return persistence.ReadLatestNightlyVersion(s.pool.Reader())
+	}
+	return persistence.ReadLatestVersion(s.pool.Reader())
+}
+
+func (s *Service) writeLatestVersion(channel Channel, version, url string, checkedAt time.Time) error {
+	if channel == ChannelNightly {
+		return persistence.WriteLatestNightlyVersion(s.pool.Writer(), version, url, checkedAt)
+	}
+	return persistence.WriteLatestVersion(s.pool.Writer(), version, url, checkedAt)
 }

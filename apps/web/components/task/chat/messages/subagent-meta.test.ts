@@ -79,3 +79,36 @@ describe("subagentMetaChips", () => {
     expect(subagentMetaChips(payload)).toEqual([{ label: "background", value: "background" }]);
   });
 });
+
+// The card header already reads "10 tool calls" from the rendered child count.
+// A "10 tools" chip beside it states the same fact twice, in two registers.
+describe("subagentMetaChips tool-count de-duplication", () => {
+  it("omits the tools chip when it repeats the rendered child count", () => {
+    const payload: SubagentTaskPayload = { tool_use_count: 10, duration_ms: 90278 };
+    const labels = subagentMetaChips(payload, 10).map((chip) => chip.label);
+    expect(labels).not.toContain("tools");
+    expect(labels).toContain("duration");
+  });
+
+  it("keeps the tools chip when the reported count differs from what streamed", () => {
+    expect(subagentMetaChips({ tool_use_count: 27 }, 20)).toEqual([
+      { label: "tools", value: "27 tools" },
+    ]);
+  });
+
+  it("keeps the tools chip when no children were rendered at all", () => {
+    expect(subagentMetaChips({ tool_use_count: 0 })).toEqual([
+      { label: "tools", value: "0 tools" },
+    ]);
+  });
+
+  // The card always passes a numeric childCount, so a zero-tool subagent hits
+  // 0 === 0 and would lose its "0 tools" chip — which is the one case the chip
+  // exists for. Passing undefined here (as the test above does) misses the
+  // production path entirely.
+  it("keeps the 0 tools chip when the card reports zero children", () => {
+    expect(subagentMetaChips({ tool_use_count: 0 }, 0)).toEqual([
+      { label: "tools", value: "0 tools" },
+    ]);
+  });
+});

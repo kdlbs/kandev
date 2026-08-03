@@ -28,6 +28,7 @@ import { useSidebarLinkActions } from "./task-session-sidebar-link-actions";
 import { buildArchivedSidebarItem } from "./task-session-sidebar-archived-item";
 import { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import { buildSidebarItem } from "./task-session-sidebar-item";
+import { useSidebarTaskEdit } from "./task-session-sidebar-edit";
 
 type TaskSessionSidebarProps = {
   workspaceId: string | null;
@@ -322,6 +323,7 @@ export function useSidebarActions(store: StoreApi) {
   const deleteActions = useDeleteActions(store, removeTaskFromBoard);
   const detachActions = useTaskDetachDialog(store);
   const linkActions = useSidebarLinkActions(store);
+  const editActions = useSidebarTaskEdit();
 
   const [renamingTask, setRenamingTask] = useState<{ id: string; title: string } | null>(null);
   const [creatingSubtask, setCreatingSubtask] = useState<{ id: string; title: string } | null>(
@@ -366,6 +368,7 @@ export function useSidebarActions(store: StoreApi) {
     ...archiveActions,
     ...deleteActions,
     ...detachActions,
+    ...editActions,
   };
 }
 
@@ -456,6 +459,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
         actions={sidebarActions}
         repositories={repositories}
         workspaceId={workspaceId}
+        stepsByWorkflowId={stepsByWorkflowId}
       />
       <SidebarBulkDialogs selection={selection} />
     </PanelRoot>

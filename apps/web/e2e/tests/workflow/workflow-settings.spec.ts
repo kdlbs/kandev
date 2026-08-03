@@ -38,6 +38,42 @@ test.describe("Workflow settings", () => {
     }
   });
 
+  test("keeps turn-complete policy controls aligned", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Turn Complete Layout");
+    await apiClient.createWorkflowStep(workflow.id, "Inbox", 0, { is_start_step: true });
+    const working = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
+    const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
+    await apiClient.updateWorkflowStep(working.id, {
+      events: {
+        on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
+      },
+    });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await testPage.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Turn Complete Layout");
+    const panel = await page.selectStep(card, "Working");
+    const signalRow = panel.getByTestId(`${working.id}-require-signal-row`);
+    const cancelRow = panel.getByTestId(`${working.id}-cancel-completion-row`);
+    const label = panel.getByTestId(`${working.id}-cancel-completion-label`);
+    const helpTip = panel.getByTestId(`${working.id}-cancel-completion-help`);
+    const [signalRowBox, cancelRowBox, labelBox, helpBox] = await Promise.all([
+      signalRow.boundingBox(),
+      cancelRow.boundingBox(),
+      label.boundingBox(),
+      helpTip.boundingBox(),
+    ]);
+
+    expect(signalRowBox).not.toBeNull();
+    expect(cancelRowBox).not.toBeNull();
+    expect(labelBox).not.toBeNull();
+    expect(helpBox).not.toBeNull();
+    expect(cancelRowBox!.height).toBeCloseTo(signalRowBox!.height, 1);
+    expect(helpBox!.x - (labelBox!.x + labelBox!.width)).toBeGreaterThanOrEqual(0);
+    expect(helpBox!.x - (labelBox!.x + labelBox!.width)).toBeLessThanOrEqual(12);
+  });
+
   test("configures the original session with the shared model settings picker", async ({
     testPage,
     backend,

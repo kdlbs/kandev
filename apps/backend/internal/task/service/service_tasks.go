@@ -1980,9 +1980,10 @@ func (s *Service) runTaskCleanup(
 	stopTargets = refreshedTargets
 	s.registerTaskRuntimeStopOwners(stopTargets, true)
 
-	failedStops := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
+	stopOutcome := s.stopTaskRuntimeTargets(cleanupCtx, id, stopTargets, stopReason, stopFailMsg)
 
-	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup, failedStops)
+	cleanupErrors := s.performTaskCleanup(cleanupCtx, id, sessions, worktrees, stopTargets, envCleanup,
+		taskCleanupPreserveRows(stopOutcome))
 
 	if len(cleanupErrors) > 0 {
 		s.logger.Warn(cleanupMsg+" with errors",
@@ -2153,14 +2154,46 @@ func exactTaskStopTargetSessions(targetSets ...[]taskStopTarget) map[string]stru
 	return exact
 }
 
-func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) map[string]struct{} {
-	failedStops := make(map[string]struct{})
+// taskRuntimeStopOutcome separates the two independent effects a stop pass has on
+// downstream cleanup. failed drives durable-job retry accounting AND row
+// preservation (a still-uncertain stop must be retried and its row kept).
+// preserve keeps a row (and its worktree) from being torn down WITHOUT counting
+// as a retryable failure — used for a confirmed-dead but resume-safe row that was
+// repaired in place under the resume-safety invariant.
+type taskRuntimeStopOutcome struct {
+	failed   map[string]struct{}
+	preserve map[string]struct{}
+}
+
+// taskCleanupPreserveRows is the set of sessions whose executor row and worktree
+// must survive this cleanup pass: every failed (retryable) stop plus every
+// resume-safe row repaired in place. performTaskCleanup treats membership as
+// "do not delete this row/worktree".
+func taskCleanupPreserveRows(outcome taskRuntimeStopOutcome) map[string]struct{} {
+	if len(outcome.preserve) == 0 {
+		return outcome.failed
+	}
+	preserve := make(map[string]struct{}, len(outcome.failed)+len(outcome.preserve))
+	for id := range outcome.failed {
+		preserve[id] = struct{}{}
+	}
+	for id := range outcome.preserve {
+		preserve[id] = struct{}{}
+	}
+	return preserve
+}
+
+func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, stopTargets []taskStopTarget, stopReason, stopFailMsg string) taskRuntimeStopOutcome {
+	outcome := taskRuntimeStopOutcome{
+		failed:   make(map[string]struct{}),
+		preserve: make(map[string]struct{}),
+	}
 	if s.executionStopper == nil || len(stopTargets) == 0 {
-		return failedStops
+		return outcome
 	}
 	for _, target := range stopTargets {
 		if context.Cause(ctx) != nil {
-			return failedStops
+			return outcome
 		}
 		if target.executionID != "" {
 			if err := s.executionStopper.StopExecution(ctx, target.executionID, stopReason, true); err != nil {
@@ -2174,7 +2207,7 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 						zap.Error(err))
 					continue
 				}
-				failedStops[target.sessionID] = struct{}{}
+				outcome.failed[target.sessionID] = struct{}{}
 				s.logger.Warn(stopFailMsg,
 					zap.String("task_id", taskID),
 					zap.String("session_id", target.sessionID),
@@ -2191,18 +2224,93 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 					zap.Error(err))
 				continue
 			}
-			failedStops[target.sessionID] = struct{}{}
+			// A session-level not-found is retryable by default (the execution may
+			// simply not be registered yet). But when the owned row is a
+			// confirmed-dead LOCAL runtime, the runtime really is gone — treat the
+			// stop as already complete so the durable cleanup job stops retrying a
+			// runtime that will never come back.
+			if runtimeStopAlreadyComplete(err) {
+				if running := s.confirmedDeadLocalRow(ctx, target.sessionID); running != nil {
+					s.reconcileConfirmedDeadRow(ctx, taskID, target.sessionID, running, &outcome)
+					continue
+				}
+			}
+			outcome.failed[target.sessionID] = struct{}{}
 			s.logger.Warn(stopFailMsg,
 				zap.String("task_id", taskID),
 				zap.String("session_id", target.sessionID),
 				zap.Error(err))
 		}
 	}
-	return failedStops
+	return outcome
+}
+
+// reconcileConfirmedDeadRow applies the resume-safety deletion invariant to a
+// confirmed-dead local row whose stop reported not-found. A row holding a
+// resume_token or backing a resumable session is repaired in place (never
+// deleted) and marked preserve-without-retry; a row that is neither is left for
+// the normal cleanup path to prune. Neither outcome is a failed stop, so the
+// durable cleanup job does not retry solely because the runtime was absent.
+func (s *Service) reconcileConfirmedDeadRow(
+	ctx context.Context,
+	taskID, sessionID string,
+	running *models.ExecutorRunning,
+	outcome *taskRuntimeStopOutcome,
+) {
+	if models.RowMustBePreserved(running, s.sessionStateForCleanup(ctx, sessionID)) {
+		outcome.preserve[sessionID] = struct{}{}
+		if err := s.executors.RepairExecutorRunningDead(ctx, sessionID); err != nil {
+			s.logger.Warn("failed to repair confirmed-dead resume-safe runtime row",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		s.logger.Info("session runtime confirmed dead and resume-safe; repairing row in place",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return
+	}
+	s.logger.Info("session runtime confirmed dead and already gone; treating stop as complete",
+		zap.String("task_id", taskID),
+		zap.String("session_id", sessionID))
+}
+
+// sessionStateForCleanup best-effort reads a session's state for the
+// resume-safety check. A missing session is treated as an empty (non-resumable)
+// state so a row's preservation then hinges on its resume_token alone.
+func (s *Service) sessionStateForCleanup(ctx context.Context, sessionID string) models.TaskSessionState {
+	if s.sessions == nil {
+		return ""
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		return ""
+	}
+	return session.State
 }
 
 func runtimeStopAlreadyComplete(err error) bool {
 	return errors.Is(err, runtimeapi.ErrNotFound)
+}
+
+// confirmedDeadLocalRow returns the executors_running row backing sessionID when
+// it is a confirmed-dead LOCAL runtime — a local process handle that no longer
+// exists on this host — and nil otherwise. It returns nil when no prober is
+// wired, the row is missing/unreadable, or the runtime-aware liveness is
+// anything other than Dead, so an alive, unknown, or remote row is never treated
+// as absent.
+func (s *Service) confirmedDeadLocalRow(ctx context.Context, sessionID string) *models.ExecutorRunning {
+	if s.rowLivenessProber == nil || s.executors == nil {
+		return nil
+	}
+	running, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil {
+		return nil
+	}
+	if s.rowLivenessProber.RowLiveness(running) != models.ProcessLivenessDead {
+		return nil
+	}
+	return running
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.

@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
@@ -14,6 +15,8 @@ type TaskEventBroadcaster struct {
 	hub           *Hub
 	subscriptions []bus.Subscription
 	logger        *logger.Logger
+	closeMu       sync.Mutex
+	closed        bool
 }
 
 func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *Hub, log *logger.Logger) *TaskEventBroadcaster {
@@ -72,6 +75,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.EnvironmentUpdated, ws.ActionEnvironmentUpdated)
 	b.subscribe(eventBus, events.EnvironmentDeleted, ws.ActionEnvironmentDeleted)
 	b.subscribe(eventBus, events.TaskSessionActivityChanged, ws.ActionSessionActivityChanged)
+	b.subscribe(eventBus, events.TaskSessionCancellationChanged, ws.ActionSessionCancellationChanged)
 	b.subscribe(eventBus, events.TaskStatusSummaryUpdated, ws.ActionTaskStatusSummaryUpdated)
 	b.subscribe(eventBus, events.MessageAdded, ws.ActionSessionMessageAdded)
 	b.subscribe(eventBus, events.MessageUpdated, ws.ActionSessionMessageUpdated)
@@ -97,12 +101,21 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 }
 
 func (b *TaskEventBroadcaster) Close() {
-	for _, sub := range b.subscriptions {
+	b.closeMu.Lock()
+	if b.closed {
+		b.closeMu.Unlock()
+		return
+	}
+	b.closed = true
+	subscriptions := b.subscriptions
+	b.subscriptions = nil
+	b.closeMu.Unlock()
+
+	for _, sub := range subscriptions {
 		if sub != nil && sub.IsValid() {
 			_ = sub.Unsubscribe()
 		}
 	}
-	b.subscriptions = nil
 }
 
 func (b *TaskEventBroadcaster) subscribe(eventBus bus.EventBus, subject, action string) {
@@ -140,7 +153,16 @@ func (b *TaskEventBroadcaster) subscribeWithResolver(
 		b.logger.Error("failed to subscribe to events", zap.String("subject", subject), zap.Error(err))
 		return
 	}
+	b.closeMu.Lock()
+	if b.closed {
+		b.closeMu.Unlock()
+		if sub.IsValid() {
+			_ = sub.Unsubscribe()
+		}
+		return
+	}
 	b.subscriptions = append(b.subscriptions, sub)
+	b.closeMu.Unlock()
 }
 
 func (b *TaskEventBroadcaster) broadcastEvent(ctx context.Context, event *bus.Event, action string) error {
@@ -211,6 +233,11 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 			return nil
 		}
 	case ws.ActionSessionWorkspaceSourcesUpdated:
+		if sessionID != "" {
+			b.hub.BroadcastToSession(sessionID, msg)
+			return nil
+		}
+	case ws.ActionSessionCancellationChanged:
 		if sessionID != "" {
 			b.hub.BroadcastToSession(sessionID, msg)
 			return nil

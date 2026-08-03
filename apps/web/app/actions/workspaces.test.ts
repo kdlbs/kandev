@@ -12,6 +12,9 @@ import {
   updateWorkflowStepAction,
 } from "./workspaces";
 
+const REVIEW_STEP_NAME = "Review";
+const STEP_COLOR = "bg-blue-500";
+
 describe("exportAllWorkflowsAction", () => {
   beforeEach(() => {
     vi.stubGlobal(
@@ -83,9 +86,9 @@ describe("workflow step WIP fields", () => {
         Response.json({
           id: "step-1",
           workflow_id: "wf-1",
-          name: "Review",
+          name: REVIEW_STEP_NAME,
           position: 1,
-          color: "bg-blue-500",
+          color: STEP_COLOR,
           wip_limit: 2,
           pull_from_step_id: "step-0",
           created_at: "",
@@ -109,9 +112,9 @@ describe("workflow step WIP fields", () => {
             {
               id: "step-1",
               workflow_id: "wf-1",
-              name: "Review",
+              name: REVIEW_STEP_NAME,
               position: 1,
-              color: "bg-blue-500",
+              color: STEP_COLOR,
               wip_limit: 2,
               pull_from_step_id: "step-0",
               created_at: "",
@@ -133,9 +136,9 @@ describe("workflow step WIP fields", () => {
   it("sends WIP fields when creating a workflow step", async () => {
     await createWorkflowStepAction({
       workflow_id: "wf-1",
-      name: "Review",
+      name: REVIEW_STEP_NAME,
       position: 1,
-      color: "bg-blue-500",
+      color: STEP_COLOR,
       wip_limit: 2,
       pull_from_step_id: "step-0",
     } as Parameters<typeof createWorkflowStepAction>[0]);
@@ -159,6 +162,85 @@ describe("workflow step WIP fields", () => {
     expect(JSON.parse(init.body as string)).toMatchObject({
       wip_limit: 3,
       pull_from_step_id: "",
+    });
+  });
+});
+
+describe("workflow step cancellation fields", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "step-1",
+          workflow_id: "wf-1",
+          name: REVIEW_STEP_NAME,
+          position: 1,
+          color: STEP_COLOR,
+          cancel_triggers_turn_complete: true,
+          created_at: "",
+          updated_at: "",
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preserves cancel completion policy returned from workflow step APIs", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: REVIEW_STEP_NAME,
+              position: 1,
+              color: STEP_COLOR,
+              cancel_triggers_turn_complete: true,
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await listWorkflowStepsAction("wf-1");
+
+    expect(result.steps[0].cancel_triggers_turn_complete).toBe(true);
+  });
+
+  it("sends cancel completion policy when creating a workflow step", async () => {
+    await createWorkflowStepAction({
+      workflow_id: "wf-1",
+      name: REVIEW_STEP_NAME,
+      position: 1,
+      color: STEP_COLOR,
+      cancel_triggers_turn_complete: true,
+    } as Parameters<typeof createWorkflowStepAction>[0]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      cancel_triggers_turn_complete: true,
+    });
+  });
+
+  it("sends an explicit false when disabling cancel completion policy", async () => {
+    await updateWorkflowStepAction("step-1", {
+      cancel_triggers_turn_complete: false,
+    } as Parameters<typeof updateWorkflowStepAction>[1]);
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      cancel_triggers_turn_complete: false,
     });
   });
 });

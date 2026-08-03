@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"reflect"
 	"testing"
 
 	"github.com/jmoiron/sqlx"
@@ -173,6 +174,100 @@ func TestWorkflowStepWIPFields_CreateUpdateAndGet(t *testing.T) {
 	}
 	if updated.PullFromStepID != "" {
 		t.Fatalf("updated PullFromStepID = %q, want empty", updated.PullFromStepID)
+	}
+}
+
+func TestWorkflowStepCancelTriggersTurnComplete_CreateUpdateAndGet(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	step := &models.WorkflowStep{WorkflowID: "wf-test", Name: "Cancelable", Position: 0}
+	field := reflect.ValueOf(step).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !field.IsValid() {
+		t.Fatal("WorkflowStep is missing CancelTriggersTurnComplete")
+	}
+	field.SetBool(true)
+	if err := repo.CreateStep(ctx, step); err != nil {
+		t.Fatalf("create step: %v", err)
+	}
+	retrieved, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("get step: %v", err)
+	}
+	retrievedField := reflect.ValueOf(retrieved).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !retrievedField.IsValid() {
+		t.Fatal("WorkflowStep is missing CancelTriggersTurnComplete after read")
+	}
+	if !retrievedField.Bool() {
+		t.Fatal("cancel trigger was not persisted as true")
+	}
+	retrievedField.SetBool(false)
+	if err := repo.UpdateStep(ctx, retrieved); err != nil {
+		t.Fatalf("update step: %v", err)
+	}
+	updated, err := repo.GetStep(ctx, step.ID)
+	if err != nil {
+		t.Fatalf("get updated step: %v", err)
+	}
+	updatedField := reflect.ValueOf(updated).Elem().FieldByName("CancelTriggersTurnComplete")
+	if updatedField.Bool() {
+		t.Fatal("cancel trigger remained true after explicit false update")
+	}
+}
+
+func TestWorkflowStepCancelTriggersTurnComplete_ReplayMigrationDefaultsExistingRows(t *testing.T) {
+	rawDB, err := sql.Open("sqlite3", ":memory:?_foreign_keys=on")
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	rawDB.SetMaxOpenConns(1)
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	_, err = db.Exec(`
+		CREATE TABLE workflows (
+			id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL DEFAULT '',
+			workflow_template_id TEXT DEFAULT '', name TEXT NOT NULL,
+			description TEXT DEFAULT '', created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL
+		);
+		CREATE TABLE task_sessions (id TEXT PRIMARY KEY);
+		CREATE TABLE workflow_steps (
+			id TEXT PRIMARY KEY, workflow_id TEXT NOT NULL, name TEXT NOT NULL,
+			position INTEGER NOT NULL, color TEXT, prompt TEXT, events TEXT,
+			allow_manual_move INTEGER DEFAULT 1, is_start_step INTEGER DEFAULT 0,
+			show_in_command_panel INTEGER DEFAULT 1, auto_archive_after_hours INTEGER DEFAULT 0,
+			agent_profile_id TEXT DEFAULT '', stage_type TEXT NOT NULL DEFAULT 'custom',
+			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+			created_at TIMESTAMP NOT NULL, updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (workflow_id) REFERENCES workflows(id) ON DELETE CASCADE
+		);
+		INSERT INTO workflows (id, workspace_id, name, created_at, updated_at)
+			VALUES ('wf-replay-cancel', '', 'Replay', datetime('now'), datetime('now'));
+		INSERT INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+			VALUES ('legacy-cancel-step', 'wf-replay-cancel', 'Legacy', 0, datetime('now'), datetime('now'));
+	`)
+	if err != nil {
+		t.Fatalf("seed legacy database: %v", err)
+	}
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("reopen repo: %v", err)
+	}
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('workflow_steps') WHERE name = 'cancel_triggers_turn_complete'`).Scan(&columnCount); err != nil {
+		t.Fatalf("inspect migrated schema: %v", err)
+	}
+	if columnCount != 1 {
+		t.Fatalf("cancel trigger migration column count = %d, want 1", columnCount)
+	}
+	step, err := repo.GetStep(context.Background(), "legacy-cancel-step")
+	if err != nil {
+		t.Fatalf("get legacy step: %v", err)
+	}
+	field := reflect.ValueOf(step).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !field.IsValid() {
+		t.Fatal("WorkflowStep is missing CancelTriggersTurnComplete")
+	}
+	if field.Bool() {
+		t.Fatal("legacy row cancel trigger defaulted true; want false")
 	}
 }
 

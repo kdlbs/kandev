@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -36,6 +37,9 @@ type FormState = {
   agent_id: string;
   model: string;
 };
+
+/** Opening delimiter of the prompt-template placeholder syntax, typed verbatim. */
+const PROMPT_VARIABLE_SIGIL = "{{";
 
 const defaultFormState: FormState = {
   name: "",
@@ -75,14 +79,15 @@ function AgentModelSelect({
   onModelChange,
   onRefresh,
 }: AgentModelSelectProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
-          <Label>Agent</Label>
+          <Label>{t("settings:agent")}</Label>
           <Select value={agentId} onValueChange={onAgentChange}>
             <SelectTrigger className="cursor-pointer">
-              <SelectValue placeholder="Select agent..." />
+              <SelectValue placeholder={t("settings:utilitySelectAgent")} />
             </SelectTrigger>
             <SelectContent>
               {inferenceAgents.map((ia) => (
@@ -94,13 +99,13 @@ function AgentModelSelect({
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Model</Label>
+          <Label>{t("settings:model")}</Label>
           <ModelCombobox
             value={model}
             onChange={onModelChange}
             models={availableModels}
             currentModelId={availableModels.find((m) => m.is_default)?.id}
-            placeholder="Select model..."
+            placeholder={t("settings:utilitySelectModel")}
             disabled={availableModels.length === 0}
           />
         </div>
@@ -135,25 +140,26 @@ function UtilityAgentForm({
   placeholders,
   onRefreshAgent,
 }: UtilityAgentFormProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4 py-4">
       <div className="space-y-2">
-        <Label htmlFor="name">Name</Label>
+        <Label htmlFor="name">{t("settings:name")}</Label>
         <Input
           id="name"
           value={form.name}
           onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-          placeholder="e.g., commit-message"
+          placeholder={t("settings:utilityAgentNamePlaceholder")}
           disabled={isBuiltin}
         />
       </div>
       <div className="space-y-2">
-        <Label htmlFor="description">Description</Label>
+        <Label htmlFor="description">{t("settings:utilityAgentDescriptionLabel")}</Label>
         <Input
           id="description"
           value={form.description}
           onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-          placeholder="Brief description of what this agent does"
+          placeholder={t("settings:utilityAgentDescriptionPlaceholder")}
         />
       </div>
       <AgentModelSelect
@@ -167,7 +173,7 @@ function UtilityAgentForm({
         onRefresh={onRefreshAgent}
       />
       <div className="space-y-2">
-        <Label>Prompt Template</Label>
+        <Label>{t("settings:utilityAgentPromptTemplate")}</Label>
         <div className="border rounded-md overflow-hidden">
           <ScriptEditor
             value={form.prompt}
@@ -179,7 +185,12 @@ function UtilityAgentForm({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Type {"{{"} to see available variables with autocomplete
+          <Trans
+            i18nKey="settings:utilityAgentPromptHint"
+            values={{ sigil: PROMPT_VARIABLE_SIGIL }}
+          >
+            Type <code>{PROMPT_VARIABLE_SIGIL}</code> to see available variables with autocomplete
+          </Trans>
         </p>
       </div>
     </div>
@@ -187,6 +198,7 @@ function UtilityAgentForm({
 }
 
 export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Props) {
+  const { t } = useTranslation();
   const [form, setForm] = useState<FormState>(defaultFormState);
   const [saving, setSaving] = useState(false);
   const [placeholders, setPlaceholders] = useState<ScriptPlaceholder[]>([]);
@@ -259,10 +271,12 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
     }
   };
 
-  const dialogTitle = isEdit ? "Edit Utility Agent" : "Create Utility Agent";
+  const dialogTitle = isEdit
+    ? t("settings:utilityAgentDialogEditTitle")
+    : t("settings:utilityAgentDialogCreateTitle");
   const getSubmitLabel = () => {
-    if (saving) return "Saving...";
-    return isEdit ? "Save Changes" : "Create Agent";
+    if (saving) return t("settings:saving");
+    return isEdit ? t("settings:utilityAgentDialogSave") : t("settings:utilityAgentDialogCreate");
   };
 
   return (
@@ -283,7 +297,7 @@ export function UtilityAgentDialog({ open, onOpenChange, agent, onSuccess }: Pro
         />
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("settings:cancel")}
           </Button>
           <Button onClick={handleSubmit} disabled={saving || !form.name} className="cursor-pointer">
             {getSubmitLabel()}

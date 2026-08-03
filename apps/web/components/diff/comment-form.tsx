@@ -5,11 +5,12 @@ import { Button } from "@kandev/ui/button";
 import { Textarea } from "@kandev/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconPlayerPlay, IconSend, IconX } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 
 interface CommentFormProps {
   initialContent?: string;
   onSubmit: (content: string) => void;
-  onCancel: () => void;
+  onCancel?: () => void;
   onSubmitAndRun?: (content: string) => void;
   isEditing?: boolean;
   autoFocus?: boolean;
@@ -28,22 +29,25 @@ function ActionButtons({
   modKey: string;
   isEditing: boolean;
   showRunButton: boolean;
-  onCancel: () => void;
+  onCancel?: () => void;
   onSubmit: () => void;
   onSubmitAndRun?: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <TooltipProvider delayDuration={400}>
       <div className="flex gap-1">
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={onCancel}
-          className="h-6 cursor-pointer px-2 text-xs"
-        >
-          <IconX className="mr-1 h-3 w-3" />
-          Cancel
-        </Button>
+        {onCancel && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={onCancel}
+            className="h-6 cursor-pointer px-2 text-xs"
+          >
+            <IconX className="mr-1 h-3 w-3" />
+            {t("common:cancel")}
+          </Button>
+        )}
         <div className="inline-flex">
           <Tooltip>
             <TooltipTrigger asChild>
@@ -125,7 +129,7 @@ export function CommentForm({
       e.preventDefault();
       if (e.shiftKey && onSubmitAndRun) handleSubmitAndRun();
       else handleSubmit();
-    } else if (e.key === "Escape") {
+    } else if (e.key === "Escape" && onCancel) {
       e.preventDefault();
       onCancel();
     }

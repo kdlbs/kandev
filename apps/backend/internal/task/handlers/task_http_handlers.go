@@ -384,6 +384,7 @@ func pendingActionPtr(
 
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
+	dto.EnrichCancellationPending(&result, h.cancellationPending)
 	if !isInputCapableSession(session) {
 		return result
 	}
@@ -437,6 +438,7 @@ func (h *TaskHandlers) httpListTaskSessions(c *gin.Context) {
 	for _, session := range sessions {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
 		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionDTOs = append(sessionDTOs, summary)
 		ids = append(ids, session.ID)
@@ -1764,7 +1766,9 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 			Name:           item.Name,
 			AgentProfileID: item.AgentProfileID,
 		})
-		response.TaskSessions = append(response.TaskSessions, dto.FromTaskSession(item.Session))
+		sessionDTO := dto.FromTaskSession(item.Session)
+		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)
 }

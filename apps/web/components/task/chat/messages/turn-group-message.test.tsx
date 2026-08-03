@@ -164,3 +164,36 @@ describe("TurnGroupMessage Codex subagent activity", () => {
     expect(settledHtml).not.toContain("Working...");
   });
 });
+
+// The count badge renders `messages.length` next to this label, so the two must
+// agree. The old label built its noun from a subagent-excluding count and read
+// "3 tool call, 2 subagents" — wrong number, wrong plural.
+describe("TurnGroupMessage collapsed label", () => {
+  function renderLabel(messageCount: number): string {
+    return renderToStaticMarkup(
+      <TurnGroupMessage
+        group={{
+          type: "turn_group",
+          id: "turn-group-tool-1",
+          turnId: "turn-1",
+          messages: Array.from({ length: messageCount }, (_, i) =>
+            toolExecute(`tool-${i + 1}`, {}, `command-${i + 1}`),
+          ),
+        }}
+        sessionId="s1"
+        permissionsByToolCallId={new Map()}
+      />,
+    );
+  }
+
+  it("pluralizes with the count it displays", () => {
+    expect(renderLabel(2)).toContain("tool calls");
+    const single = renderLabel(1);
+    expect(single).toContain("tool call");
+    expect(single).not.toContain("tool calls");
+  });
+
+  it("never mentions subagents, which are hoisted out of groups", () => {
+    expect(renderLabel(3)).not.toContain("subagent");
+  });
+});
