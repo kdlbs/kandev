@@ -50,11 +50,13 @@ returned error does not contain `text` and no backend action runs.
 
 ### Existing-install prompt refresh
 
-- `apps/backend/internal/prompts/store/sqlite.go` — refresh only the two exact
-  historical `changes-walkthrough` built-in revisions that predate the required
-  step shape and have never been saved by a user.
-- Preserve edited built-ins and user-owned name conflicts. Keep the conditional
-  write race-safe so an edit concurrent with startup cannot be overwritten.
+- `apps/backend/internal/prompts/store/sqlite.go` — refresh only the exact
+  loader-normalized stored content of the two historical `changes-walkthrough`
+  built-in revisions that predate the required step shape and have never been
+  saved by a user.
+- Preserve unrecognized content, edited built-ins, and user-owned name
+  conflicts. Keep the conditional write race-safe so an edit concurrent with
+  startup cannot be overwritten.
 
 ## Agent prompt contract
 
@@ -101,9 +103,10 @@ Primary content type: reference.
   without losing prompt customizations.
   **File:** `apps/backend/internal/prompts/store/sqlite_test.go` plus historical
   fixtures under `apps/backend/internal/prompts/store/testdata/`.
-  **How:** Initialize repositories over each shipped legacy built-in revision
-  and require refresh, then prove a saved built-in and a user-owned name
-  conflict remain unchanged.
+  **How:** Initialize repositories over each shipped legacy revision in the
+  exact trimmed form stored by `promptcfg.Get` and require refresh, then prove
+  unrecognized content, a saved built-in, and a user-owned name conflict remain
+  unchanged.
 
 No browser E2E is needed: this changes agent-facing MCP diagnostics and hidden
 prompt instructions, not rendered UI behavior.
@@ -132,6 +135,20 @@ PR review remediation also passed:
   contract, and immediate test cleanup.
 - `cd apps/backend && go test ./internal/prompts/store ./internal/mcp/server ./internal/sysprompt` — passed.
 - `cd apps/backend && golangci-lint run ./... --new-from-rev="0ca00c2aca4430a5e4f06874ba960743de1acf9a" --timeout=5m` — passed with 0 issues.
+
+Follow-up review remediation also passed:
+
+- Focused RED coverage seeded both historical revisions in the exact trimmed
+  form produced by `promptcfg.Get`; both remained stale with the fixture-file
+  hashes.
+- Focused GREEN coverage passed after hashing the loader-normalized historical
+  contents. Equal-timestamp unrecognized content and edited content remain
+  unchanged.
+- `cd apps/backend && go test ./internal/prompts/store ./internal/mcp/server ./internal/sysprompt` — passed.
+- `cd apps/backend && golangci-lint run ./... --new-from-rev="0ca00c2aca4430a5e4f06874ba960743de1acf9a" --timeout=5m` — passed with 0 issues.
+- `node --test scripts/validate-public-docs.test.mjs` — passed, 58 tests.
+- `node scripts/validate-public-docs.mjs` — passed, 41 published pages.
+- `git diff --check` — passed.
 
 No browser E2E was run because the change affects MCP diagnostics and embedded
 agent prompts, not rendered UI behavior.

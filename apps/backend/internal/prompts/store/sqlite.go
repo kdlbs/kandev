@@ -18,8 +18,9 @@ import (
 
 const (
 	builtinChangesWalkthroughPromptID = "builtin-changes-walkthrough"
-	changesWalkthroughV1SHA256        = "af54d978fefbd004b9563b13b4617253f0bff2722e75d73e69b267ec137ff0fe"
-	changesWalkthroughV2SHA256        = "73693e84e68b5b354221045779a38a3fae497de1262d39857f7f2303192d6c61"
+	// Historical prompt hashes use the same TrimSpace normalization as promptcfg.Get.
+	changesWalkthroughV1SHA256 = "23a82694ef3b6d0220da2879c1c351cf5ee4926c2bc54a52fa4f7d5182bcb111"
+	changesWalkthroughV2SHA256 = "7a28dc81df4bff75b4fb8d66d6b9118febe5daf7f4b570e3b8ef8c74ac3e3146"
 )
 
 type sqliteRepository struct {

@@ -278,7 +278,7 @@ func TestSQLiteRepository_RefreshesUnmodifiedLegacyChangesWalkthroughPrompt(t *t
 	} {
 		t.Run(fixture, func(t *testing.T) {
 			sqlxDB := createUnseededPromptDB(t)
-			legacyContent := readPromptFixture(t, fixture)
+			legacyContent := strings.TrimSpace(readPromptFixture(t, fixture))
 			now := time.Now().UTC()
 			seedStoredWalkthroughPrompt(t, sqlxDB, legacyContent, now, now)
 
@@ -313,5 +313,24 @@ func TestSQLiteRepository_PreservesEditedLegacyChangesWalkthroughPrompt(t *testi
 	}
 	if got.Content != legacyContent {
 		t.Fatalf("user-edited built-in prompt was overwritten")
+	}
+}
+
+func TestSQLiteRepository_PreservesUntouchedUnrecognizedChangesWalkthroughPrompt(t *testing.T) {
+	sqlxDB := createUnseededPromptDB(t)
+	customContent := "this is not a recognized legacy revision"
+	now := time.Now().UTC()
+	seedStoredWalkthroughPrompt(t, sqlxDB, customContent, now, now)
+
+	repo, err := newSQLiteRepositoryWithDB(sqlxDB, sqlxDB)
+	if err != nil {
+		t.Fatalf("initialize repository: %v", err)
+	}
+	got, err := repo.GetPromptByName(context.Background(), "changes-walkthrough")
+	if err != nil {
+		t.Fatalf("get unrecognized prompt: %v", err)
+	}
+	if got.Content != customContent {
+		t.Fatalf("unrecognized untouched content was overwritten")
 	}
 }

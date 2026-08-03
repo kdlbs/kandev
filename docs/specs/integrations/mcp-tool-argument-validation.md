@@ -23,7 +23,7 @@ Agents and external MCP clients need a failed tool call to be distinguishable fr
 - `create_task_kandev` advertises `prompt` for the text delivered to a newly started agent. It accepts the former `description` name as an unadvertised compatibility alias, without adding a second field or explanation to the tool schema. A call containing both names fails rather than choosing one silently.
 - The backend task action continues receiving the text in its existing `description` field; this naming convergence changes only the MCP boundary.
 - Task-mode agent context lists the walkthrough tools and states that every `show_walkthrough_kandev.steps` item requires `file`, `line`, and `text`. The built-in `changes-walkthrough` request repeats that load-bearing call shape so callers do not depend on a client rendering nested JSON Schema correctly.
-- On startup, a stored built-in `changes-walkthrough` prompt that still exactly matches an untouched shipped revision is refreshed to the current embedded prompt. User-edited built-ins and user-owned prompts remain unchanged.
+- On startup, a stored built-in `changes-walkthrough` prompt that exactly matches the loader-normalized content of an untouched shipped revision is refreshed to the current embedded prompt. User-edited built-ins, unrecognized stored content, and user-owned prompts remain unchanged.
 
 ## API surface
 
@@ -41,7 +41,7 @@ Validation failures are returned as MCP tool error results. They identify the in
 - If a registered tool schema cannot compile, calls to that tool fail closed and Kandev logs the schema defect; test coverage prevents shipping an uncompilable built-in schema.
 - If both `prompt` and compatibility alias `description` are supplied to `create_task_kandev`, Kandev returns an error and creates no task.
 - Missing-property diagnostics expose only names declared by the registered schema, never sibling values or rejected argument contents.
-- Prompt refresh recognizes only exact historical built-in content that has never been saved by a user; unknown or edited content is left intact.
+- Prompt refresh recognizes only exact stored content whose hash matches a loader-normalized historical built-in revision and that has never been saved by a user; unknown or edited content is left intact.
 - Validation errors do not echo complete prompts, credentials, configuration values, or other argument contents.
 
 ## Scenarios
@@ -56,7 +56,7 @@ Validation failures are returned as MCP tool error results. They identify the in
 - **GIVEN** a caller supplies only legacy `description` to `create_task_kandev`, **WHEN** validation runs, **THEN** the value is accepted as `prompt` and forwarded unchanged.
 - **GIVEN** a caller supplies both `prompt` and `description` to `create_task_kandev`, **WHEN** validation runs, **THEN** the call returns an error and creates no task.
 - **GIVEN** a task-mode agent receives Kandev's first-turn context or the built-in `changes-walkthrough` request, **WHEN** it prepares `show_walkthrough_kandev`, **THEN** the instructions identify `steps` as an ordered array whose items require `file`, `line`, and `text`; the first-turn context also names the show, get, and delete walkthrough tools.
-- **GIVEN** an existing installation with an untouched historical built-in `changes-walkthrough` prompt, **WHEN** Kandev starts with a newer embedded prompt, **THEN** the stored built-in is refreshed; a user-edited built-in or user-owned prompt is preserved.
+- **GIVEN** an existing installation with an untouched historical built-in `changes-walkthrough` prompt stored through the embedded loader, **WHEN** Kandev starts with a newer embedded prompt, **THEN** the stored built-in is refreshed; unrecognized content, a user-edited built-in, or a user-owned prompt is preserved.
 
 ## Out of scope
 

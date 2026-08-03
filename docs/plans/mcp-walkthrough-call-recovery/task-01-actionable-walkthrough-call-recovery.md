@@ -20,9 +20,10 @@ spec: "../../specs/integrations/mcp-tool-argument-validation.md"
    `file`, `line`, and `text`, with tests derived from the registered schema.
 3. Public MCP reference documents missing-property diagnostics; all focused Go
    and public-doc checks pass.
-4. Existing installations refresh untouched historical walkthrough prompts to
-   the corrected embedded content without overwriting user edits or user-owned
-   prompt conflicts.
+4. Existing installations refresh untouched historical walkthrough prompts in
+   their loader-normalized stored form to the corrected embedded content
+   without overwriting unrecognized content, user edits, or user-owned prompt
+   conflicts.
 
 ## Verification
 
@@ -109,11 +110,18 @@ Completed on 2026-08-03.
 - `git diff --check` — passed.
 - Browser E2E was intentionally not run because no rendered UI behavior
   changed.
-- PR review remediation refreshes the two exact untouched historical stored
-  prompt revisions, preserves edited built-ins and user-owned conflicts, sorts
-  missing schema properties deterministically, asserts top-level `steps`
-  requiredness, and registers backend cleanup with `t.Cleanup`.
+- PR review remediation refreshes the exact loader-normalized stored content of
+  the two untouched historical prompt revisions, preserves unrecognized
+  content, edited built-ins, and user-owned conflicts, sorts missing schema
+  properties deterministically, asserts top-level `steps` requiredness, and
+  registers backend cleanup with `t.Cleanup`.
 - Remediation RED tests reproduced both stale stored revisions and unsorted
   output; the focused GREEN regressions passed afterward.
 - `cd apps/backend && go test ./internal/prompts/store ./internal/mcp/server ./internal/sysprompt` — passed.
 - `cd apps/backend && golangci-lint run ./... --new-from-rev="0ca00c2aca4430a5e4f06874ba960743de1acf9a" --timeout=5m` — passed with 0 issues.
+- Follow-up review RED coverage proved the fixture-file hashes did not recognize
+  historical content in the exact trimmed form stored by `promptcfg.Get`.
+- Follow-up GREEN coverage uses loader-normalized historical hashes and proves
+  equal-timestamp unrecognized content remains unchanged.
+- The affected Go packages, changed-code lint, 58 public-doc tests, 41-page
+  public-doc validation, and `git diff --check` all passed again.
