@@ -194,6 +194,7 @@ func buildLifecycleLaunchRequest(
 		TaskDescription:        req.TaskDescription,
 		Attachments:            convertToLifecycleAttachments(req.Attachments),
 		Env:                    req.Env,
+		ApprovedSecretEnvKeys:  append([]string(nil), req.ApprovedSecretEnvKeys...),
 		ACPSessionID:           req.ACPSessionID,
 		Metadata:               req.Metadata,
 		ModelOverride:          req.ModelOverride,

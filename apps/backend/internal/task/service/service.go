@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -21,6 +22,12 @@ import (
 type WorktreeCleanup interface {
 	// OnTaskDeleted is called when a task is deleted to clean up its worktree.
 	OnTaskDeleted(ctx context.Context, taskID string) error
+}
+
+// WorkspaceSecretDeleter removes secrets owned by a workspace after the
+// workspace cascade commits. It is optional for isolated task-service users.
+type WorkspaceSecretDeleter interface {
+	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
 }
 
 // WorktreeProvider extends WorktreeCleanup with query capabilities.
@@ -277,6 +284,8 @@ type Service struct {
 	repoCloneLocation           RepoCloneLocation
 	blockers                    BlockerRepository
 	comments                    CommentRepository
+	secretStore                 secrets.SecretStore
+	workspaceSecretDeleter      WorkspaceSecretDeleter
 	baseBranchPusher            AgentBaseBranchPusher
 	runtimeOverridesMu          sync.Mutex
 
@@ -334,6 +343,18 @@ func (s *Service) AttachmentService() *AttachmentService {
 // task service. It is exposed for composition of the storage maintenance hook.
 func (s *Service) AttachmentRepository() repository.AttachmentRepository {
 	return s.attachments
+}
+
+// SetSecretStore wires metadata-only validation for shared executor profiles.
+// Workspace-scoped secret references are rejected before a profile is saved.
+func (s *Service) SetSecretStore(secretStore secrets.SecretStore) {
+	s.secretStore = secretStore
+}
+
+// SetWorkspaceSecretDeleter wires workspace-secret cleanup to workspace
+// deletion. The callback runs only after the repository cascade succeeds.
+func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
+	s.workspaceSecretDeleter = deleter
 }
 
 // NewService creates a new task service

@@ -3,6 +3,7 @@
 import { useCallback, useState } from "react";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
 import type { AgentProfile, ProfileEnvVar } from "@/lib/types/http";
+import type { SecretListItem } from "@/lib/types/http-secrets";
 import {
   EnvVarsCard,
   envVarsToRows,
@@ -25,7 +26,7 @@ export function areEnvVarsEqual(a?: ProfileEnvVar[], b?: ProfileEnvVar[]): boole
 type ProfileEnvVarsEditorProps = {
   envVars?: ProfileEnvVar[];
   baselineEnvVars?: ProfileEnvVar[];
-  secrets: { id: string; name: string }[];
+  secrets: SecretListItem[];
   onChange: (envVars: ProfileEnvVar[]) => void;
   discoveryTargetId?: string;
 };
@@ -108,7 +109,8 @@ export function ProfileEnvVarsSection({
   onChange,
   discoveryTargetId,
 }: ProfileEnvVarsSectionProps) {
-  const { items: secrets } = useSecrets();
+  const { items } = useSecrets();
+  const secrets = items.filter((secret) => secret.scope !== "workspace");
   const handleChange = useCallback(
     (next: ProfileEnvVar[]) => onChange({ envVars: next }),
     [onChange],

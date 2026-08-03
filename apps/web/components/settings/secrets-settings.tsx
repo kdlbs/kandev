@@ -2,8 +2,10 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconEdit, IconTrash, IconEye, IconEyeOff, IconKey } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { Badge } from "@kandev/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +18,6 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { useSecrets } from "@/hooks/domains/settings/use-secrets";
-import { useAppStore } from "@/components/state-provider";
 import {
   createSecret,
   updateSecret,
@@ -24,7 +25,7 @@ import {
   revealSecret,
 } from "@/lib/api/domains/secrets-api";
 import { useRequest } from "@/lib/http/use-request";
-import type { SecretListItem } from "@/lib/types/http-secrets";
+import type { SecretListItem, SecretScope, UpdateSecretRequest } from "@/lib/types/http-secrets";
 
 export type SecretFormState = {
   name: string;
@@ -112,6 +113,7 @@ function SecretForm({
 
 type SecretListItemRowProps = {
   secret: SecretListItem;
+  workspaceId?: string;
   onEdit: (secret: SecretListItem) => void;
   onDelete: (secret: SecretListItem) => void;
   isBusy: boolean;
@@ -121,12 +123,14 @@ type SecretListItemRowProps = {
 
 function SecretListItemRow({
   secret,
+  workspaceId,
   onEdit,
   onDelete,
   isBusy,
   showCreate,
   isEditing,
 }: SecretListItemRowProps) {
+  const { t } = useTranslation();
   const [revealed, setRevealed] = useState(false);
   const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
@@ -139,7 +143,10 @@ function SecretListItemRow({
     }
     setRevealing(true);
     try {
-      const resp = await revealSecret(secret.id, { cache: "no-store" });
+      const resp = await revealSecret(secret.id, {
+        cache: "no-store",
+        ...(workspaceId ? { workspaceId } : {}),
+      });
       setRevealedValue(resp.value);
       setRevealed(true);
     } catch {
@@ -155,6 +162,11 @@ function SecretListItemRow({
         <div className="flex items-center gap-2 min-w-0">
           <IconKey className="h-4 w-4 text-muted-foreground shrink-0" />
           <div className="text-sm font-medium text-foreground truncate">{secret.name}</div>
+          <Badge variant="outline" className="shrink-0 text-[10px]">
+            {secret.scope === "workspace"
+              ? t("settings:workspaceScope")
+              : t("settings:globalScope")}
+          </Badge>
         </div>
         <div className="flex items-center gap-1 shrink-0">
           <Button
@@ -162,7 +174,12 @@ function SecretListItemRow({
             size="icon"
             onClick={handleReveal}
             disabled={revealing || isBusy}
-            className="cursor-pointer"
+            className="min-h-11 min-w-11 cursor-pointer"
+            aria-label={
+              revealed
+                ? t("settings:hideSecretNamed", { name: secret.name })
+                : t("settings:revealSecretNamed", { name: secret.name })
+            }
           >
             {revealed ? <IconEyeOff className="h-4 w-4" /> : <IconEye className="h-4 w-4" />}
           </Button>
@@ -171,7 +188,8 @@ function SecretListItemRow({
             size="icon"
             onClick={() => onEdit(secret)}
             disabled={isBusy || showCreate || isEditing}
-            className="cursor-pointer"
+            className="min-h-11 min-w-11 cursor-pointer"
+            aria-label={t("settings:editSecretNamed", { name: secret.name })}
           >
             <IconEdit className="h-4 w-4" />
           </Button>
@@ -180,7 +198,8 @@ function SecretListItemRow({
             size="icon"
             onClick={() => onDelete(secret)}
             disabled={isBusy}
-            className="cursor-pointer"
+            className="min-h-11 min-w-11 cursor-pointer"
+            aria-label={t("settings:deleteSecretNamed", { name: secret.name })}
           >
             <IconTrash className="h-4 w-4" />
           </Button>
@@ -257,12 +276,16 @@ export function DeleteSecretDialog({
 /*  State + actions hooks                                              */
 /* ------------------------------------------------------------------ */
 
-function useSecretsState() {
-  const { loaded } = useSecrets();
-  const items = useAppStore((s) => s.secrets.items);
-  const addSecret = useAppStore((s) => s.addSecret);
-  const updateSecretInStore = useAppStore((s) => s.updateSecret);
-  const removeSecret = useAppStore((s) => s.removeSecret);
+function useSecretsState(
+  scope: SecretScope,
+  workspaceId?: string,
+  initialItems?: SecretListItem[],
+) {
+  const { loaded, items, addSecret, updateSecret, removeSecret } = useSecrets(
+    scope,
+    workspaceId,
+    initialItems,
+  );
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
@@ -273,8 +296,10 @@ function useSecretsState() {
     loaded,
     items,
     addSecret,
-    updateSecretInStore,
+    updateSecretInStore: updateSecret,
     removeSecret,
+    scope,
+    workspaceId,
     editingId,
     setEditingId,
     showCreate,
@@ -298,7 +323,14 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
     setDeleteTarget,
     deleteTarget,
     formState,
+    scope,
+    workspaceId,
   } = state;
+
+  const requestOptions = {
+    cache: "no-store" as const,
+    ...(scope === "workspace" && workspaceId ? { workspaceId } : {}),
+  };
 
   const resetForm = useCallback(() => {
     setEditingId(null);
@@ -313,23 +345,32 @@ function useSecretsActions(state: ReturnType<typeof useSecretsState>) {
   }, [formState, editingId]);
 
   const createRequest = useRequest(async (s: SecretFormState) => {
-    const item = await createSecret({ name: s.name.trim(), value: s.value }, { cache: "no-store" });
+    const item = await createSecret(
+      {
+        name: s.name.trim(),
+        value: s.value,
+        ...(scope === "workspace" && workspaceId
+          ? { scope: "workspace" as const, workspace_id: workspaceId }
+          : { scope: "global" as const }),
+      },
+      requestOptions,
+    );
     addToStore(item);
     resetForm();
   });
 
   const updateRequest = useRequest(async (id: string, s: SecretFormState) => {
-    const payload: Record<string, unknown> = {
+    const payload: UpdateSecretRequest = {
       name: s.name.trim(),
     };
     if (s.value.trim()) payload.value = s.value;
-    const item = await updateSecret(id, payload, { cache: "no-store" });
+    const item = await updateSecret(id, payload, requestOptions);
     updateSecretInStore(item);
     resetForm();
   });
 
   const deleteRequest = useRequest(async (id: string) => {
-    await deleteSecret(id, { cache: "no-store" });
+    await deleteSecret(id, requestOptions);
     removeFromStore(id);
     if (editingId === id) resetForm();
   });
@@ -405,39 +446,62 @@ export function getSecretDraftMeta(
   };
 }
 
-export function SecretsSettings() {
+type SecretsSettingsProps = {
+  scope?: SecretScope;
+  workspaceId?: string;
+  initialItems?: SecretListItem[];
+};
+
+type SecretsSettingsState = ReturnType<typeof useSecretsState>;
+type SecretsSettingsActions = ReturnType<typeof useSecretsActions>;
+
+function secretScopeTitle(t: TFunction, scope: SecretScope) {
+  return scope === "workspace" ? t("settings:workspaceSecrets") : t("settings:secrets");
+}
+
+function secretScopeDescription(t: TFunction, scope: SecretScope) {
+  return scope === "workspace"
+    ? t("settings:workspaceSecretsDescription")
+    : t("settings:manageApiKeysAndCredentialsSecrets");
+}
+
+function secretDraftInvalidReason(
+  t: TFunction,
+  showCreate: boolean,
+  isDirty: boolean,
+  isValid: boolean,
+) {
+  if (!isDirty || isValid) return undefined;
+  return showCreate
+    ? t("settings:aSecretNameAndValueAreRequired")
+    : t("settings:aSecretNameIsRequired");
+}
+
+type SecretsSettingsBodyProps = {
+  scope: SecretScope;
+  workspaceId?: string;
+  state: SecretsSettingsState;
+  actions: SecretsSettingsActions;
+  edit: ReturnType<typeof getSecretEditState>;
+  onFormChange: (patch: Partial<SecretFormState>) => void;
+};
+
+function SecretsSettingsBody({
+  scope,
+  workspaceId,
+  state,
+  actions,
+  edit,
+  onFormChange,
+}: SecretsSettingsBodyProps) {
   const { t } = useTranslation();
-  const state = useSecretsState();
-  const { loaded, editingId, showCreate, formState, setFormState, deleteTarget, items } = state;
-  const actions = useSecretsActions(state);
+  const { loaded, editingId, showCreate, formState, deleteTarget, items } = state;
   const { isValid, isBusy } = actions;
-  const { edit, isDirty, revision } = getSecretDraftMeta(items, editingId, showCreate, formState);
-  let invalidReason: string | undefined;
-  if (isDirty && !isValid) {
-    invalidReason = showCreate
-      ? t("settings:aSecretNameAndValueAreRequired")
-      : t("settings:aSecretNameIsRequired");
-  }
-
-  const onFormChange = (patch: Partial<SecretFormState>) =>
-    setFormState((prev) => ({ ...prev, ...patch }));
-
   return (
-    <SettingsPageTemplate
-      title={t("settings:secrets")}
-      description={t("settings:manageApiKeysAndCredentialsSecrets")}
-      isDirty={isDirty}
-      saveStatus="idle"
-      saveId="secrets-item-draft"
-      saveRevision={revision}
-      canSave={!isDirty || isValid}
-      invalidReason={invalidReason}
-      onSave={showCreate ? actions.handleCreate : actions.handleUpdate}
-      onDiscard={actions.resetForm}
-    >
+    <>
       <div className="space-y-6">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">{t("settings:secrets")}</div>
+          <div className="text-sm font-medium text-foreground">{secretScopeTitle(t, scope)}</div>
           <Button
             onClick={actions.startCreate}
             disabled={isBusy || Boolean(editingId) || showCreate}
@@ -492,6 +556,7 @@ export function SecretsSettings() {
             <SecretListItemRow
               key={secret.id}
               secret={secret}
+              workspaceId={workspaceId}
               onEdit={actions.startEditing}
               onDelete={actions.openDelete}
               isBusy={isBusy}
@@ -508,6 +573,68 @@ export function SecretsSettings() {
         onConfirm={actions.confirmDelete}
         isBusy={isBusy}
       />
+    </>
+  );
+}
+
+function SecretsSettingsContent({
+  scope,
+  workspaceId,
+  state,
+  actions,
+}: {
+  scope: SecretScope;
+  workspaceId?: string;
+  state: SecretsSettingsState;
+  actions: SecretsSettingsActions;
+}) {
+  const { t } = useTranslation();
+  const { editingId, showCreate, formState, setFormState, items } = state;
+  const { isValid } = actions;
+  const { edit, isDirty, revision } = getSecretDraftMeta(items, editingId, showCreate, formState);
+  const invalidReason = secretDraftInvalidReason(t, showCreate, isDirty, isValid);
+
+  const onFormChange = (patch: Partial<SecretFormState>) =>
+    setFormState((prev) => ({ ...prev, ...patch }));
+
+  return (
+    <SettingsPageTemplate
+      title={secretScopeTitle(t, scope)}
+      description={secretScopeDescription(t, scope)}
+      isDirty={isDirty}
+      saveStatus="idle"
+      saveId={`secrets-${scope}-item-draft`}
+      saveRevision={revision}
+      canSave={!isDirty || isValid}
+      invalidReason={invalidReason}
+      onSave={showCreate ? actions.handleCreate : actions.handleUpdate}
+      onDiscard={actions.resetForm}
+    >
+      <SecretsSettingsBody
+        scope={scope}
+        workspaceId={workspaceId}
+        state={state}
+        actions={actions}
+        edit={edit}
+        onFormChange={onFormChange}
+      />
     </SettingsPageTemplate>
+  );
+}
+
+export function SecretsSettings({
+  scope = "global",
+  workspaceId,
+  initialItems,
+}: SecretsSettingsProps) {
+  const state = useSecretsState(scope, workspaceId, initialItems);
+  const actions = useSecretsActions(state);
+  return (
+    <SecretsSettingsContent
+      scope={scope}
+      workspaceId={workspaceId}
+      state={state}
+      actions={actions}
+    />
   );
 }

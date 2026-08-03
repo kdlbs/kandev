@@ -263,8 +263,14 @@ export type Repository = {
    * suffix. Remote executors always copy the bytes.
    */
   copy_files: string;
+  secret_bindings?: RepositorySecretBinding[];
   created_at: string;
   updated_at: string;
+};
+
+export type RepositorySecretBinding = {
+  key: string;
+  secret_id: string;
 };
 
 export type RepositoryScript = {

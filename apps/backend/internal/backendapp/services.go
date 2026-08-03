@@ -56,6 +56,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		return nil, nil, err
 	}
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
+	agentSettingsController.SetSecretStore(repos.Secrets)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
@@ -91,6 +92,10 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
+	taskSvc.SetSecretStore(repos.Secrets)
+	if deleter, ok := repos.Secrets.(taskservice.WorkspaceSecretDeleter); ok {
+		taskSvc.SetWorkspaceSecretDeleter(deleter)
+	}
 
 	// Wire workflow step creator to task service for board creation
 	taskSvc.SetWorkflowStepCreator(workflowSvc)

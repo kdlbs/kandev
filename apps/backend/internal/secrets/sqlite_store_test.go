@@ -128,3 +128,62 @@ func TestSQLiteStore_PerUserScoping(t *testing.T) {
 		t.Fatalf("post-claim foreign reveal: %v, want ErrNotFound", err)
 	}
 }
+
+func TestSQLiteStore_ScopedSecretVisibility(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	userA := authn.WithIdentity(ctx, authn.Identity{UserID: "user-a", Role: authn.RoleMember})
+	userB := authn.WithIdentity(ctx, authn.Identity{UserID: "user-b", Role: authn.RoleMember})
+
+	global := &SecretWithValue{Secret: Secret{Name: "global"}, Value: "global-value"}
+	workspace := &SecretWithValue{Secret: Secret{
+		Name:        "workspace",
+		Scope:       ScopeWorkspace,
+		WorkspaceID: "workspace-a",
+	}, Value: "workspace-value"}
+	if err := store.Create(userA, global); err != nil {
+		t.Fatalf("create global: %v", err)
+	}
+	if err := store.Create(userA, workspace); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+
+	globalItems, err := store.ListScoped(userA, SecretListOptions{Scope: ScopeGlobal})
+	if err != nil {
+		t.Fatalf("list global: %v", err)
+	}
+	if len(globalItems) != 1 || globalItems[0].ID != global.ID || globalItems[0].Scope != ScopeGlobal {
+		t.Fatalf("global items = %+v, want only %s", globalItems, global.ID)
+	}
+
+	workspaceItems, err := store.ListScoped(userA, SecretListOptions{
+		Scope:       ScopeWorkspace,
+		WorkspaceID: "workspace-a",
+	})
+	if err != nil {
+		t.Fatalf("list workspace: %v", err)
+	}
+	if len(workspaceItems) != 1 || workspaceItems[0].ID != workspace.ID {
+		t.Fatalf("workspace items = %+v, want only %s", workspaceItems, workspace.ID)
+	}
+
+	if _, err := store.GetForWorkspace(userA, workspace.ID, "workspace-a"); err != nil {
+		t.Fatalf("workspace owner get: %v", err)
+	}
+	if _, err := store.GetForWorkspace(userB, workspace.ID, "workspace-a"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("foreign workspace get = %v, want ErrNotFound", err)
+	}
+	if _, err := store.GetForWorkspace(userA, workspace.ID, "workspace-b"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("wrong workspace get = %v, want ErrNotFound", err)
+	}
+	if _, err := store.RevealGlobal(userA, workspace.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("workspace reveal through global API = %v, want ErrNotFound", err)
+	}
+
+	if err := store.DeleteWorkspaceSecrets(ctx, "workspace-a"); err != nil {
+		t.Fatalf("delete workspace secrets: %v", err)
+	}
+	if _, err := store.Get(ctx, workspace.ID); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("deleted workspace secret = %v, want ErrNotFound", err)
+	}
+}

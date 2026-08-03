@@ -21,7 +21,7 @@ Authentication is a **runtime feature toggle** — the same system as the other 
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
 - **Workspaces become per-user.** You only see workspaces you own — including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
-- Secrets are per-user. Executors, agent profiles, environments, and integration configuration remain shared across the instance.
+- Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executors and agent profiles remain shared across the instance, so they can reference Global secrets only; repositories may bind Global or same-workspace secrets.
 - Admins manage users and instance settings, but do **not** see other users' workspaces.
 - Programmatic clients (external MCP, scripts) authenticate with personal access tokens.
 
@@ -67,7 +67,7 @@ External MCP clients (Claude Code, Cursor connecting to `/mcp`) must be configur
 
 ## What is isolated
 
-When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else — even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, secrets, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Slack/Azure) and automations**. Admins manage users but do not see other users' workspaces.
+When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else — even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Slack/Azure) and automations**. A user's Global secrets are also private to that user. Admins manage users but do not see other users' workspaces or secrets.
 
 Shared across the instance (by design): executors, agent profiles, environments, editors, prompts, and system pages.
 

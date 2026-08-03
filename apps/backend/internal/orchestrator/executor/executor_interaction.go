@@ -677,7 +677,6 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		TaskEnvironmentID: session.TaskEnvironmentID,
-		Env:               cloneStringMap(execConfig.ProfileEnv),
 	}
 
 	mcpMode, err := e.resolveTaskSessionMCPMode(ctx, task.ID, session, true)
@@ -697,6 +696,13 @@ func (e *Executor) buildSwitchModelRequest(ctx context.Context, task *models.Tas
 		req.RepositoryURL = running.WorktreePath
 	}
 	e.injectGitLabWorkspaceCredentials(ctx, req)
+	allRepos, err := e.resolveAllRepoInfo(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+	if err := e.resolveLaunchEnvironment(ctx, req, execConfig.ProfileEnvVars, allRepos); err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }

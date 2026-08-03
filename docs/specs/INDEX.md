@@ -121,6 +121,7 @@ Per-workspace credentials and triage triggers for external services.
 | [creation](workspaces/creation.md) | building |
 | [deletion](workspaces/deletion.md) | shipped |
 | [local-repositories](workspaces/local-repositories.md) | shipped |
+| [repository-secrets](workspaces/repository-secrets.md) | shipped |
 
 ## costs/ — cost tracking & budgets
 

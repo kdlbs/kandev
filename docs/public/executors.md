@@ -64,6 +64,14 @@ The MCP editor checks only that the value is a JSON object. Its presets cover st
 
 Profile edits apply when Kandev provisions a launch, but a Docker container or Sprite resume can reconnect to the already provisioned process, image, environment, credentials, and files. Use **Reset Environment** or explicitly destroy the resource when a change must take effect on a fresh environment. Deleting or editing a profile does not tear down an already-running resource.
 
+### Repository environment secrets
+
+Open a workspace repository's editor to add **Environment secrets** bindings. Each binding maps a POSIX environment key to a Global secret or a Workspace secret from that same workspace. A task receives the bindings from every repository attached to it, along with its selected executor profile environment. The resolved snapshot is available to repository setup scripts, the agent, child shells, and new terminal-panel terminals on supported executors.
+
+Kandev fails closed before provisioning when a repository binding is missing, deleted, unreadable, unauthorized, or from another workspace. It also rejects ambiguous keys: identical references to the same secret are merged, while different secrets, literals, or origins for one key are a launch error. The error identifies the key and source origins without exposing secret values or IDs. Editing a binding or rotating a secret does not mutate a running process or an open terminal. Fresh provisioning, a cold recreation, or **Reset Environment** resolves the current bindings; warm resume keeps its existing snapshot.
+
+SSH has an additional forwarding boundary. Remote agent and terminal instances receive the managed credential allowlist plus the repository keys explicitly approved by these bindings. Arbitrary host, request, or unrelated executor-profile variables are not forwarded to the remote process.
+
 ### Script behavior is runtime-specific
 
 Do not treat the two script fields as universal hooks:

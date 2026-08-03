@@ -532,6 +532,43 @@ func TestPostgresTaskEnvironmentReposMultiBranchMigration(t *testing.T) {
 	}
 }
 
+func TestPostgresRepositorySecretBindingsSchemaReplay(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+
+	if _, err := db.Exec("DROP TABLE repository_secret_bindings"); err != nil {
+		t.Fatalf("drop repository secret bindings table: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay repository secret bindings migration: %v", err)
+	}
+	if err := repo.runMigrations(); err != nil {
+		t.Fatalf("replay repository secret bindings migration twice: %v", err)
+	}
+
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-postgres-secret-bindings")
+	repository := &models.Repository{
+		ID:          "repo-postgres-secret-bindings",
+		WorkspaceID: "ws-postgres-secret-bindings",
+		Name:        "postgres secrets",
+	}
+	bindings := []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "secret-pg-npm"}}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, repository, bindings); err != nil {
+		t.Fatalf("create repository with bindings after replay: %v", err)
+	}
+	got, err := repo.GetRepository(ctx, repository.ID)
+	if err != nil {
+		t.Fatalf("get repository after replay: %v", err)
+	}
+	if len(got.SecretBindings) != 1 || got.SecretBindings[0] != bindings[0] {
+		t.Fatalf("repository bindings = %+v, want %+v", got.SecretBindings, bindings)
+	}
+}
+
 // openIsolatedPostgresMultiConn is like testutil.OpenIsolatedPostgres but
 // supports a real multi-connection pool. OpenIsolatedPostgres scopes its
 // isolated schema via a session-level `SET search_path` issued on one

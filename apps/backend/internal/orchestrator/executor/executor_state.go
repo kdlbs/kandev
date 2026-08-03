@@ -102,15 +102,15 @@ func (e *Executor) defaultExecutorID(ctx context.Context, workspaceID string) st
 
 // executorConfig holds resolved executor configuration.
 type executorConfig struct {
-	ExecutorID    string
-	ExecutorType  string
-	ExecutorCfg   map[string]string // The executor record's Config map (docker_host, etc.)
-	Metadata      map[string]interface{}
-	SetupScript   string            // Setup script from profile
-	CleanupScript string            // Cleanup script from profile (terminal teardown)
-	ProfileEnv    map[string]string // Resolved env vars from profile (secrets decrypted)
-	Resumable     bool              // Whether the executor supports session resume
-	RuntimeName   string            // Runtime name from the executor type (e.g. "local_pc")
+	ExecutorID     string
+	ExecutorType   string
+	ExecutorCfg    map[string]string // The executor record's Config map (docker_host, etc.)
+	Metadata       map[string]interface{}
+	SetupScript    string                 // Setup script from profile
+	CleanupScript  string                 // Cleanup script from profile (terminal teardown)
+	ProfileEnvVars []models.ProfileEnvVar // Source definitions resolved at launch checkpoint.
+	Resumable      bool                   // Whether the executor supports session resume
+	RuntimeName    string                 // Runtime name from the executor type (e.g. "local_pc")
 }
 
 // resolveExecutorConfig resolves executor configuration from an executor ID.
@@ -200,7 +200,7 @@ func (e *Executor) applyProfile(ctx context.Context, profileID string, cfg *exec
 
 	cfg.SetupScript = profile.PrepareScript
 	cfg.CleanupScript = profile.CleanupScript
-	cfg.ProfileEnv = e.resolveProfileEnvVars(ctx, profile.EnvVars)
+	cfg.ProfileEnvVars = append([]models.ProfileEnvVar(nil), profile.EnvVars...)
 	// Persist secret store IDs in metadata so runtimes can resolve tokens after restart
 	// (e.g., SpritesExecutor needs SPRITES_API_TOKEN to poll remote status).
 	for _, ev := range profile.EnvVars {
@@ -277,30 +277,6 @@ func applyProfileConfigToMetadata(profileConfig map[string]string, metadata map[
 		// to a default handles the empty case.
 		metadata[k] = profileConfig[k]
 	}
-}
-
-// resolveProfileEnvVars resolves profile env vars, dereferencing secret IDs to their values.
-func (e *Executor) resolveProfileEnvVars(ctx context.Context, envVars []models.ProfileEnvVar) map[string]string {
-	if len(envVars) == 0 {
-		return nil
-	}
-	resolved := make(map[string]string, len(envVars))
-	for _, ev := range envVars {
-		if ev.SecretID != "" && e.secretStore != nil {
-			value, err := e.secretStore.Reveal(ctx, ev.SecretID)
-			if err != nil {
-				e.logger.Warn("failed to resolve secret for profile env var",
-					zap.String("key", ev.Key),
-					zap.String("secret_id", ev.SecretID),
-					zap.Error(err))
-				continue
-			}
-			resolved[ev.Key] = value
-		} else if ev.Value != "" {
-			resolved[ev.Key] = ev.Value
-		}
-	}
-	return resolved
 }
 
 func cloneMetadata(src map[string]interface{}) map[string]interface{} {

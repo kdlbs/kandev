@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ type sqliteStore struct {
 	ownsDB bool
 }
 
-var _ SecretStore = (*sqliteStore)(nil)
+var _ ScopedSecretStore = (*sqliteStore)(nil)
 
 // Provide creates the SQLite secret store using separate writer and reader pools.
 func Provide(writer, reader *sqlx.DB, crypto *MasterKeyProvider) (*sqliteStore, func() error, error) {
@@ -39,6 +40,8 @@ func (s *sqliteStore) initSchema() error {
 		id              TEXT PRIMARY KEY,
 		name            TEXT NOT NULL,
 		user_id         TEXT NOT NULL DEFAULT '',
+		scope           TEXT NOT NULL DEFAULT 'global',
+		workspace_id    TEXT NOT NULL DEFAULT '',
 		encrypted_value %s NOT NULL,
 		nonce           %s NOT NULL,
 		created_at      TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -52,6 +55,8 @@ func (s *sqliteStore) initSchema() error {
 	// column must also be added via an idempotent migration (ADR 0027).
 	migrate := db.NewMigrateLogger(s.db, nil)
 	migrate.Apply("secrets.user_id", "ALTER TABLE secrets ADD COLUMN user_id TEXT NOT NULL DEFAULT ''")
+	migrate.Apply("secrets.scope", "ALTER TABLE secrets ADD COLUMN scope TEXT NOT NULL DEFAULT 'global'")
+	migrate.Apply("secrets.workspace_id", "ALTER TABLE secrets ADD COLUMN workspace_id TEXT NOT NULL DEFAULT ''")
 	return nil
 }
 
@@ -84,6 +89,15 @@ func (s *sqliteStore) Close() error {
 }
 
 func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error {
+	if secret == nil {
+		return fmt.Errorf("secret is required")
+	}
+	if secret.Scope == "" {
+		secret.Scope = ScopeGlobal
+	}
+	if err := validateSecretScope(secret.Scope, secret.WorkspaceID); err != nil {
+		return err
+	}
 	if secret.ID == "" {
 		secret.ID = uuid.New().String()
 	}
@@ -97,9 +111,9 @@ func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error
 	}
 
 	_, err = s.db.ExecContext(ctx, s.db.Rebind(`
-		INSERT INTO secrets (id, name, user_id, encrypted_value, nonce, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`),
-		secret.ID, secret.Name, scopeOwner(ctx), ciphertext, nonce, now, now,
+		INSERT INTO secrets (id, name, user_id, scope, workspace_id, encrypted_value, nonce, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+		secret.ID, secret.Name, scopeOwner(ctx), secret.Scope, secret.WorkspaceID, ciphertext, nonce, now, now,
 	)
 	if err != nil {
 		return fmt.Errorf("insert secret: %w", err)
@@ -110,7 +124,7 @@ func (s *sqliteStore) Create(ctx context.Context, secret *SecretWithValue) error
 func (s *sqliteStore) Get(ctx context.Context, id string) (*Secret, error) {
 	var row secretRow
 	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
-		SELECT id, name, created_at, updated_at
+		SELECT id, name, scope, workspace_id, created_at, updated_at
 		FROM secrets WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
 		id, scopeOwner(ctx), scopeOwner(ctx))
 	if err != nil {
@@ -162,8 +176,8 @@ func (s *sqliteStore) Update(ctx context.Context, id string, req *UpdateSecretRe
 		}
 		_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 			UPDATE secrets SET name = ?, encrypted_value = ?, nonce = ?, updated_at = ?
-			WHERE id = ?`),
-			existing.Name, ciphertext, nonce, now, id,
+			WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
+			existing.Name, ciphertext, nonce, now, id, scopeOwner(ctx), scopeOwner(ctx),
 		)
 		if err != nil {
 			return fmt.Errorf("update secret: %w", err)
@@ -171,8 +185,8 @@ func (s *sqliteStore) Update(ctx context.Context, id string, req *UpdateSecretRe
 	} else {
 		_, err = s.db.ExecContext(ctx, s.db.Rebind(`
 			UPDATE secrets SET name = ?, updated_at = ?
-			WHERE id = ?`),
-			existing.Name, now, id,
+			WHERE id = ? AND (user_id = '' OR ? = '' OR user_id = ?)`),
+			existing.Name, now, id, scopeOwner(ctx), scopeOwner(ctx),
 		)
 		if err != nil {
 			return fmt.Errorf("update secret: %w", err)
@@ -196,54 +210,166 @@ func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *sqliteStore) List(ctx context.Context) ([]*SecretListItem, error) {
+	return s.ListScoped(ctx, SecretListOptions{})
+}
+
+func (s *sqliteStore) ListScoped(ctx context.Context, opts SecretListOptions) ([]*SecretListItem, error) {
+	if err := validateListOptions(opts); err != nil {
+		return nil, err
+	}
 	var rows []secretListRow
-	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`
-		SELECT id, name, 1 as has_value, created_at, updated_at
-		FROM secrets WHERE (user_id = '' OR ? = '' OR user_id = ?)
-		ORDER BY created_at DESC`),
-		scopeOwner(ctx), scopeOwner(ctx))
+	query := `
+		SELECT id, name, scope, workspace_id, 1 as has_value, created_at, updated_at
+		FROM secrets WHERE (user_id = '' OR ? = '' OR user_id = ?)`
+	args := []any{scopeOwner(ctx), scopeOwner(ctx)}
+	switch opts.Scope {
+	case ScopeGlobal:
+		query += " AND scope = ?"
+		args = append(args, ScopeGlobal)
+	case ScopeWorkspace:
+		query += " AND ((scope = ? AND workspace_id = ?)"
+		args = append(args, ScopeWorkspace, opts.WorkspaceID)
+		if opts.IncludeGlobal {
+			query += " OR scope = ?"
+			args = append(args, ScopeGlobal)
+		}
+		query += ")"
+	}
+	query += " ORDER BY created_at DESC"
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(query), args...)
 	if err != nil {
 		return nil, fmt.Errorf("list secrets: %w", err)
 	}
 	return toSecretListItems(rows), nil
 }
 
+func (s *sqliteStore) GetForWorkspace(ctx context.Context, id, workspaceID string) (*Secret, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return nil, fmt.Errorf("workspace id is required")
+	}
+	secret, err := s.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if secret.Scope != ScopeGlobal && (secret.Scope != ScopeWorkspace || secret.WorkspaceID != workspaceID) {
+		return nil, fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	return secret, nil
+}
+
+func (s *sqliteStore) RevealGlobal(ctx context.Context, id string) (string, error) {
+	secret, err := s.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if secret.Scope != ScopeGlobal {
+		return "", fmt.Errorf("%w: %s", ErrNotFound, id)
+	}
+	return s.Reveal(ctx, id)
+}
+
+func (s *sqliteStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
+	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
+		return "", err
+	}
+	return s.Reveal(ctx, id)
+}
+
+func (s *sqliteStore) DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return fmt.Errorf("workspace id is required")
+	}
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		DELETE FROM secrets WHERE scope = ? AND workspace_id = ?`), ScopeWorkspace, workspaceID)
+	if err != nil {
+		return fmt.Errorf("delete workspace secrets: %w", err)
+	}
+	return nil
+}
+
+func validateSecretScope(scope SecretScope, workspaceID string) error {
+	switch scope {
+	case ScopeGlobal:
+		if strings.TrimSpace(workspaceID) != "" {
+			return fmt.Errorf("global secrets cannot have a workspace")
+		}
+	case ScopeWorkspace:
+		if strings.TrimSpace(workspaceID) == "" {
+			return fmt.Errorf("workspace secrets require a workspace")
+		}
+	default:
+		return fmt.Errorf("invalid secret scope")
+	}
+	return nil
+}
+
+func validateListOptions(opts SecretListOptions) error {
+	switch opts.Scope {
+	case "", ScopeGlobal:
+		if opts.Scope == ScopeGlobal && strings.TrimSpace(opts.WorkspaceID) != "" {
+			return fmt.Errorf("global secret listing cannot have a workspace")
+		}
+	case ScopeWorkspace:
+		if strings.TrimSpace(opts.WorkspaceID) == "" {
+			return fmt.Errorf("workspace secret listing requires a workspace")
+		}
+	default:
+		return fmt.Errorf("invalid secret scope")
+	}
+	return nil
+}
+
 // secretRow is the DB scan target for secret metadata queries.
 type secretRow struct {
-	ID        string    `db:"id"`
-	Name      string    `db:"name"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID          string      `db:"id"`
+	Name        string      `db:"name"`
+	Scope       SecretScope `db:"scope"`
+	WorkspaceID string      `db:"workspace_id"`
+	CreatedAt   time.Time   `db:"created_at"`
+	UpdatedAt   time.Time   `db:"updated_at"`
 }
 
 func (r *secretRow) toSecret() *Secret {
 	return &Secret{
-		ID:        r.ID,
-		Name:      r.Name,
-		CreatedAt: r.CreatedAt,
-		UpdatedAt: r.UpdatedAt,
+		ID:          r.ID,
+		Name:        r.Name,
+		Scope:       normalizeStoredScope(r.Scope),
+		WorkspaceID: r.WorkspaceID,
+		CreatedAt:   r.CreatedAt,
+		UpdatedAt:   r.UpdatedAt,
 	}
 }
 
 // secretListRow is the DB scan target for list queries.
 type secretListRow struct {
-	ID        string    `db:"id"`
-	Name      string    `db:"name"`
-	HasValue  bool      `db:"has_value"`
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID          string      `db:"id"`
+	Name        string      `db:"name"`
+	Scope       SecretScope `db:"scope"`
+	WorkspaceID string      `db:"workspace_id"`
+	HasValue    bool        `db:"has_value"`
+	CreatedAt   time.Time   `db:"created_at"`
+	UpdatedAt   time.Time   `db:"updated_at"`
 }
 
 func toSecretListItems(rows []secretListRow) []*SecretListItem {
 	items := make([]*SecretListItem, len(rows))
 	for i, r := range rows {
 		items[i] = &SecretListItem{
-			ID:        r.ID,
-			Name:      r.Name,
-			HasValue:  r.HasValue,
-			CreatedAt: r.CreatedAt,
-			UpdatedAt: r.UpdatedAt,
+			ID:          r.ID,
+			Name:        r.Name,
+			Scope:       normalizeStoredScope(r.Scope),
+			WorkspaceID: r.WorkspaceID,
+			HasValue:    r.HasValue,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
 		}
 	}
 	return items
+}
+
+func normalizeStoredScope(scope SecretScope) SecretScope {
+	if scope == "" {
+		return ScopeGlobal
+	}
+	return scope
 }

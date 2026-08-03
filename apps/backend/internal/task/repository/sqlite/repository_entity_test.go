@@ -297,6 +297,64 @@ func TestRepositoryCopyFiles_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestRepositorySecretBindings_RoundTripReplaceAndCascade(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-secret-bindings")
+
+	entity := &models.Repository{
+		ID:          "repo-secret-bindings",
+		WorkspaceID: "ws-secret-bindings",
+		Name:        "app",
+	}
+	bindings := []models.RepositorySecretBinding{
+		{Key: "NPM_TOKEN", SecretID: "secret-npm"},
+		{Key: "SENTRY_AUTH_TOKEN", SecretID: "secret-sentry"},
+	}
+	if err := repo.CreateRepositoryWithSecretBindings(ctx, entity, bindings); err != nil {
+		t.Fatalf("create repository with bindings: %v", err)
+	}
+
+	got, err := repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("get repository: %v", err)
+	}
+	if len(got.SecretBindings) != 2 || got.SecretBindings[0].SecretID == "" {
+		t.Fatalf("get bindings = %+v, want two references", got.SecretBindings)
+	}
+
+	list, err := repo.ListRepositories(ctx, entity.WorkspaceID)
+	if err != nil {
+		t.Fatalf("list repositories: %v", err)
+	}
+	if len(list) != 1 || len(list[0].SecretBindings) != 2 {
+		t.Fatalf("list bindings = %+v, want two references", list)
+	}
+
+	replacement := []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "secret-new"}}
+	if err := repo.ReplaceRepositorySecretBindings(ctx, entity.ID, replacement); err != nil {
+		t.Fatalf("replace bindings: %v", err)
+	}
+	got, err = repo.GetRepository(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("get after replace: %v", err)
+	}
+	if len(got.SecretBindings) != 1 || got.SecretBindings[0].SecretID != "secret-new" {
+		t.Fatalf("bindings after replace = %+v", got.SecretBindings)
+	}
+
+	if err := repo.DeleteRepository(ctx, entity.ID); err != nil {
+		t.Fatalf("delete repository: %v", err)
+	}
+	remaining, err := repo.ListRepositorySecretBindings(ctx, entity.ID)
+	if err != nil {
+		t.Fatalf("list bindings after delete: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("bindings after delete = %+v, want empty", remaining)
+	}
+}
+
 func TestRepositoryProviderHost_RoundTrip(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

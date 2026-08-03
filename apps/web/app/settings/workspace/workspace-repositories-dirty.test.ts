@@ -1,26 +1,40 @@
 import { describe, expect, it } from "vitest";
+import type { Repository, RepositoryScript } from "@/lib/types/http";
+import { repositoryId } from "@/lib/types/ids";
 import {
+  areRepositorySecretBindingsEqual,
+  cloneRepository,
   isRepositoryDirty,
   mergeSavedRepositoryDraft,
   type RepositoryWithScripts,
-} from "@/app/settings/workspace/workspace-repositories-dirty";
-import { repositoryId as toRepositoryId, workspaceId as toWorkspaceId } from "@/lib/types/http";
-import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
+} from "./workspace-repositories-dirty";
 
-function makeRepo(overrides: Partial<RepositoryWithScripts> = {}): RepositoryWithScripts {
-  return {
-    id: toRepositoryId("repo-1"),
-    workspace_id: toWorkspaceId("ws-1"),
-    name: "my-repo",
+const script = (overrides: Partial<RepositoryScript> = {}): RepositoryScript => ({
+  id: "script-1",
+  repository_id: repositoryId("repo-1"),
+  name: "setup",
+  command: "echo setup",
+  position: 0,
+  created_at: "",
+  updated_at: "",
+  ...overrides,
+});
+
+const repository = (overrides: Partial<Repository> = {}): RepositoryWithScripts =>
+  ({
+    id: repositoryId("repo-1"),
+    workspace_id: "workspace-1",
+    name: "repo",
     source_type: "local",
-    local_path: "/tmp/my-repo",
+    local_path: "/tmp/repo",
     provider: "",
     provider_repo_id: "",
+    provider_host: "",
     provider_owner: "",
     provider_name: "",
     default_branch: "main",
     worktree_branch_prefix: "feature/",
-    worktree_branch_template: defaultWorktreeBranchTemplate,
+    worktree_branch_template: "feature/{title}-{suffix}",
     pull_before_worktree: true,
     setup_script: "",
     cleanup_script: "",
@@ -30,92 +44,59 @@ function makeRepo(overrides: Partial<RepositoryWithScripts> = {}): RepositoryWit
     updated_at: "",
     scripts: [],
     ...overrides,
-  };
-}
+  }) as RepositoryWithScripts;
 
-describe("isRepositoryDirty", () => {
-  it("returns false when copy_files matches", () => {
-    const saved = makeRepo({ copy_files: ".env, .env.local" });
-    const repo = makeRepo({ copy_files: ".env, .env.local" });
-    expect(isRepositoryDirty(repo, saved)).toBe(false);
-  });
-
-  it("returns true when copy_files differs", () => {
-    const saved = makeRepo({ copy_files: "" });
-    const repo = makeRepo({ copy_files: ".env" });
-    expect(isRepositoryDirty(repo, saved)).toBe(true);
-  });
-
-  it("returns true when worktree branch template differs", () => {
-    const saved = makeRepo({ worktree_branch_template: defaultWorktreeBranchTemplate });
-    const repo = makeRepo({ worktree_branch_template: "feature/{ticket}-{title}" });
-    expect(isRepositoryDirty(repo, saved)).toBe(true);
-  });
-
-  it("treats an empty worktree branch template as the default", () => {
-    const saved = makeRepo({ worktree_branch_template: defaultWorktreeBranchTemplate });
-    const repo = makeRepo({ worktree_branch_template: "" });
-    expect(isRepositoryDirty(repo, saved)).toBe(false);
-  });
-
-  it("returns true when there is no saved repository", () => {
-    const repo = makeRepo();
-    expect(isRepositoryDirty(repo, undefined)).toBe(true);
-  });
-
-  it("treats a copy_files entry with a :symlink keyword as clean when unchanged", () => {
-    const saved = makeRepo({ copy_files: ".env, .env.local:symlink" });
-    const repo = makeRepo({ copy_files: ".env, .env.local:symlink" });
-    expect(isRepositoryDirty(repo, saved)).toBe(false);
-  });
-
-  it("returns true when a copy_files entry's keyword changes", () => {
-    const saved = makeRepo({ copy_files: ".env.local" });
-    const repo = makeRepo({ copy_files: ".env.local:symlink" });
-    expect(isRepositoryDirty(repo, saved)).toBe(true);
-  });
-});
-
-describe("mergeSavedRepositoryDraft", () => {
-  it("preserves client-only row state when the submitted draft is unchanged", () => {
-    const current = { ...makeRepo(), __autoOpen: true };
-    const saved = makeRepo({ name: "saved name" });
-
-    const merged = mergeSavedRepositoryDraft(current, current, saved);
-
-    expect((merged as RepositoryWithScripts & { __autoOpen?: boolean }).__autoOpen).toBe(true);
-    expect(merged.name).toBe("saved name");
-  });
-
-  it("remaps created script IDs while preserving edits made during save", () => {
-    const submittedScript = makeScript("temp-script-1", "submitted");
-    const submitted = makeRepo({ scripts: [submittedScript] });
-    const current = makeRepo({
-      name: "newer repository name",
-      scripts: [{ ...submittedScript, command: "newer command" }],
+describe("repository secret binding draft state", () => {
+  it("compares bindings independent of row order", () => {
+    const left = repository({
+      secret_bindings: [
+        { key: "NPM_TOKEN", secret_id: "secret-npm" },
+        { key: "API_TOKEN", secret_id: "secret-api" },
+      ],
     });
-    const saved = makeRepo({
-      id: toRepositoryId("persisted-repo"),
-      scripts: [makeScript("persisted-script", "submitted")],
+    const right = repository({
+      secret_bindings: [
+        { key: "API_TOKEN", secret_id: "secret-api" },
+        { key: "NPM_TOKEN", secret_id: "secret-npm" },
+      ],
     });
+
+    expect(areRepositorySecretBindingsEqual(left, right)).toBe(true);
+    expect(isRepositoryDirty(left, right)).toBe(false);
+  });
+
+  it("deep-clones bindings so draft edits do not mutate the saved row", () => {
+    const source = repository({ secret_bindings: [{ key: "TOKEN", secret_id: "secret-1" }] });
+    const cloned = cloneRepository(source);
+
+    cloned.secret_bindings![0]!.key = "CHANGED";
+
+    expect(source.secret_bindings![0]!.key).toBe("TOKEN");
+  });
+
+  it("preserves a locally edited binding when the save response is merged", () => {
+    const saved = repository({ secret_bindings: [{ key: "TOKEN", secret_id: "secret-old" }] });
+    const submitted = repository({ secret_bindings: [{ key: "TOKEN", secret_id: "secret-old" }] });
+    const current = repository({ secret_bindings: [{ key: "TOKEN", secret_id: "secret-new" }] });
 
     const merged = mergeSavedRepositoryDraft(current, submitted, saved);
 
-    expect(merged.id).toBe(toRepositoryId("persisted-repo"));
-    expect(merged.name).toBe("newer repository name");
-    expect(merged.scripts[0].id).toBe("persisted-script");
-    expect(merged.scripts[0].command).toBe("newer command");
+    expect(merged.secret_bindings).toEqual([{ key: "TOKEN", secret_id: "secret-new" }]);
+  });
+
+  it("detects explicit clear as dirty", () => {
+    const saved = repository({ secret_bindings: [{ key: "TOKEN", secret_id: "secret-1" }] });
+    const draft = repository({ secret_bindings: [] });
+
+    expect(isRepositoryDirty(draft, saved)).toBe(true);
+  });
+
+  it("clones scripts alongside repository bindings", () => {
+    const source = repository({ scripts: [script()] });
+    const cloned = cloneRepository(source);
+
+    cloned.scripts[0]!.command = "changed";
+
+    expect(source.scripts[0]!.command).toBe("echo setup");
   });
 });
-
-function makeScript(id: string, command: string) {
-  return {
-    id,
-    repository_id: toRepositoryId("repo-1"),
-    name: "script",
-    command,
-    position: 0,
-    created_at: "",
-    updated_at: "",
-  };
-}

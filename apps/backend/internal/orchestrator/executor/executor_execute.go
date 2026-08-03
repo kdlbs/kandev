@@ -972,6 +972,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	mergeEnv(req, opts.Env)
 	if opts.RouteOverride != nil {
 		req.RouteOverride = opts.RouteOverride
+		if opts.RouteOverride.ExecutionProfileID == "" {
+			mergeEnv(req, opts.RouteOverride.Env)
+		}
 	}
 
 	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
@@ -1012,7 +1015,9 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		zap.String("executor_type", req.ExecutorType),
 		zap.Bool("use_worktree", req.UseWorktree))
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
+	if err := e.resolveLaunchEnvironment(ctx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
+		return nil, err
+	}
 
 	// Call the AgentManager to launch the container
 	resp, err := e.agentManager.LaunchAgent(ctx, req)
@@ -1295,15 +1300,6 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		req.ExecutorType = execConfig.ExecutorType
 		req.ExecutorConfig = execConfig.ExecutorCfg
 		req.SetupScript = execConfig.SetupScript
-		// Merge profile env vars into request env
-		if len(execConfig.ProfileEnv) > 0 {
-			if req.Env == nil {
-				req.Env = make(map[string]string)
-			}
-			for k, v := range execConfig.ProfileEnv {
-				req.Env[k] = v
-			}
-		}
 	}
 
 	// For remote executors (containerized *and* SSH), resolve only explicitly

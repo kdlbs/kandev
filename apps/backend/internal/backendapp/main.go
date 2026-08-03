@@ -1806,6 +1806,8 @@ func buildHTTPServer(
 	// workspace_id with no gate of their own. No-op when auth is disabled.
 	router.Use(integrationWorkspaceScopeMiddleware(services.Auth, services.Task))
 
+	secretsSvc := secrets.NewService(userSecretStore, log)
+	secretsSvc.SetWorkspaceAuthorizer(services.Task.AuthorizeWorkspaceAccess)
 	registerRoutes(routeParams{
 		router:                        router,
 		gateway:                       gateway,
@@ -1831,7 +1833,7 @@ func buildHTTPServer(
 		promptCtrl:                    promptcontroller.NewController(services.Prompts),
 		utilityCtrl:                   utilitycontroller.NewController(services.Utility),
 		msgCreator:                    msgCreator,
-		secretsSvc:                    secrets.NewService(userSecretStore, log),
+		secretsSvc:                    secretsSvc,
 		secretStore:                   userSecretStore,
 		mcpConfigSvc:                  mcpconfig.NewService(repos.AgentSettings),
 		authSvc:                       services.Auth,

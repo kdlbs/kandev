@@ -66,7 +66,15 @@ func (h *Handler) httpCreateSecret(c *gin.Context) {
 }
 
 func (h *Handler) httpListSecrets(c *gin.Context) {
-	items, err := h.service.List(c.Request.Context())
+	opts := SecretListOptions{
+		Scope:         SecretScope(c.Query("scope")),
+		WorkspaceID:   c.Query("workspace_id"),
+		IncludeGlobal: c.Query("include_global") == "true",
+	}
+	if opts.Scope == "" && opts.WorkspaceID != "" {
+		opts.Scope = ScopeWorkspace
+	}
+	items, err := h.service.ListScoped(c.Request.Context(), opts)
 	if err != nil {
 		h.logger.Error("failed to list secrets", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list secrets"})
@@ -77,7 +85,7 @@ func (h *Handler) httpListSecrets(c *gin.Context) {
 
 func (h *Handler) httpGetSecret(c *gin.Context) {
 	id := c.Param("id")
-	secret, err := h.service.Get(c.Request.Context(), id)
+	secret, err := h.getSecret(c, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -93,7 +101,7 @@ func (h *Handler) httpUpdateSecret(c *gin.Context) {
 		return
 	}
 
-	item, err := h.service.Update(c.Request.Context(), id, &req)
+	item, err := h.updateSecret(c, id, &req)
 	if err != nil {
 		h.logger.Error("failed to update secret", zap.Error(err))
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -104,7 +112,7 @@ func (h *Handler) httpUpdateSecret(c *gin.Context) {
 
 func (h *Handler) httpDeleteSecret(c *gin.Context) {
 	id := c.Param("id")
-	if err := h.service.Delete(c.Request.Context(), id); err != nil {
+	if err := h.deleteSecret(c, id); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
 	}
@@ -113,7 +121,7 @@ func (h *Handler) httpDeleteSecret(c *gin.Context) {
 
 func (h *Handler) httpRevealSecret(c *gin.Context) {
 	id := c.Param("id")
-	value, err := h.service.Reveal(c.Request.Context(), id)
+	value, err := h.revealSecret(c, id)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
 		return
@@ -124,7 +132,20 @@ func (h *Handler) httpRevealSecret(c *gin.Context) {
 // WS handlers
 
 func (h *Handler) wsList(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	items, err := h.service.List(ctx)
+	var req struct {
+		Scope         SecretScope `json:"scope"`
+		WorkspaceID   string      `json:"workspace_id"`
+		IncludeGlobal bool        `json:"include_global"`
+	}
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
+	}
+	if req.Scope == "" && req.WorkspaceID != "" {
+		req.Scope = ScopeWorkspace
+	}
+	items, err := h.service.ListScoped(ctx, SecretListOptions{
+		Scope: req.Scope, WorkspaceID: req.WorkspaceID, IncludeGlobal: req.IncludeGlobal,
+	})
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -146,14 +167,15 @@ func (h *Handler) wsCreate(ctx context.Context, msg *ws.Message) (*ws.Message, e
 
 func (h *Handler) wsUpdate(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var payload struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspace_id"`
 		UpdateSecretRequest
 	}
 	if err := msg.ParsePayload(&payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 	}
 
-	item, err := h.service.Update(ctx, payload.ID, &payload.UpdateSecretRequest)
+	item, err := h.updateSecretForWorkspace(ctx, payload.ID, payload.WorkspaceID, &payload.UpdateSecretRequest)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, err.Error(), nil)
 	}
@@ -162,13 +184,14 @@ func (h *Handler) wsUpdate(ctx context.Context, msg *ws.Message) (*ws.Message, e
 
 func (h *Handler) wsDelete(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var payload struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspace_id"`
 	}
 	if err := msg.ParsePayload(&payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 	}
 
-	if err := h.service.Delete(ctx, payload.ID); err != nil {
+	if err := h.deleteSecretForWorkspace(ctx, payload.ID, payload.WorkspaceID); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})
@@ -176,15 +199,65 @@ func (h *Handler) wsDelete(ctx context.Context, msg *ws.Message) (*ws.Message, e
 
 func (h *Handler) wsReveal(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	var payload struct {
-		ID string `json:"id"`
+		ID          string `json:"id"`
+		WorkspaceID string `json:"workspace_id"`
 	}
 	if err := msg.ParsePayload(&payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 	}
 
-	value, err := h.service.Reveal(ctx, payload.ID)
+	value, err := h.revealSecretForWorkspace(ctx, payload.ID, payload.WorkspaceID)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, RevealSecretResponse{Value: value})
+}
+
+func (h *Handler) getSecret(c *gin.Context, id string) (*Secret, error) {
+	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
+		return h.service.GetWorkspaceSecret(c.Request.Context(), id, workspaceID)
+	}
+	return h.service.Get(c.Request.Context(), id)
+}
+
+func (h *Handler) updateSecret(c *gin.Context, id string, req *UpdateSecretRequest) (*SecretListItem, error) {
+	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
+		return h.service.UpdateWorkspaceSecret(c.Request.Context(), id, workspaceID, req)
+	}
+	return h.service.Update(c.Request.Context(), id, req)
+}
+
+func (h *Handler) updateSecretForWorkspace(ctx context.Context, id, workspaceID string, req *UpdateSecretRequest) (*SecretListItem, error) {
+	if workspaceID != "" {
+		return h.service.UpdateWorkspaceSecret(ctx, id, workspaceID, req)
+	}
+	return h.service.Update(ctx, id, req)
+}
+
+func (h *Handler) deleteSecret(c *gin.Context, id string) error {
+	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
+		return h.service.DeleteWorkspaceSecret(c.Request.Context(), id, workspaceID)
+	}
+	return h.service.Delete(c.Request.Context(), id)
+}
+
+func (h *Handler) deleteSecretForWorkspace(ctx context.Context, id, workspaceID string) error {
+	if workspaceID != "" {
+		return h.service.DeleteWorkspaceSecret(ctx, id, workspaceID)
+	}
+	return h.service.Delete(ctx, id)
+}
+
+func (h *Handler) revealSecret(c *gin.Context, id string) (string, error) {
+	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
+		return h.service.RevealWorkspaceSecret(c.Request.Context(), id, workspaceID)
+	}
+	return h.service.Reveal(c.Request.Context(), id)
+}
+
+func (h *Handler) revealSecretForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
+	if workspaceID != "" {
+		return h.service.RevealWorkspaceSecret(ctx, id, workspaceID)
+	}
+	return h.service.Reveal(ctx, id)
 }

@@ -93,15 +93,13 @@ func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []sett
 		if ev.SecretID != "" {
 			if m.secretStore == nil {
 				m.logger.Warn("secret store not configured for profile env var",
-					zap.String("key", key),
-					zap.String("secret_id", ev.SecretID))
+					zap.String("key", key))
 				continue
 			}
-			value, err := m.secretStore.Reveal(ctx, ev.SecretID)
+			value, err := m.revealGlobalSecret(ctx, ev.SecretID)
 			if err != nil {
 				m.logger.Warn("failed to resolve secret for profile env var",
 					zap.String("key", key),
-					zap.String("secret_id", ev.SecretID),
 					zap.Error(err))
 				continue
 			}
@@ -113,4 +111,8 @@ func (m *Manager) resolveAgentProfileEnvVars(ctx context.Context, envVars []sett
 		}
 	}
 	return resolved
+}
+
+func (m *Manager) revealGlobalSecret(ctx context.Context, secretID string) (string, error) {
+	return revealGlobalSecret(ctx, m.secretStore, secretID)
 }

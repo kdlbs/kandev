@@ -16,6 +16,7 @@ type inMemorySecretStore struct {
 }
 
 var _ secrets.SecretStore = (*inMemorySecretStore)(nil)
+var _ secrets.ScopedSecretStore = (*inMemorySecretStore)(nil)
 
 func newInMemorySecretStore() *inMemorySecretStore {
 	return &inMemorySecretStore{store: make(map[string]*secrets.SecretWithValue)}
@@ -54,6 +55,65 @@ func (s *inMemorySecretStore) List(_ context.Context) ([]*secrets.SecretListItem
 	return nil, nil
 }
 func (s *inMemorySecretStore) Close() error { return nil }
+
+func (s *inMemorySecretStore) ListScoped(_ context.Context, opts secrets.SecretListOptions) ([]*secrets.SecretListItem, error) {
+	items := make([]*secrets.SecretListItem, 0, len(s.store))
+	for _, stored := range s.store {
+		scope := stored.Scope
+		if scope == "" {
+			scope = secrets.ScopeGlobal
+		}
+		if opts.Scope == secrets.ScopeWorkspace && scope != secrets.ScopeWorkspace {
+			continue
+		}
+		if opts.Scope == secrets.ScopeGlobal && scope != secrets.ScopeGlobal {
+			continue
+		}
+		if scope == secrets.ScopeWorkspace && stored.WorkspaceID != opts.WorkspaceID {
+			continue
+		}
+		items = append(items, &secrets.SecretListItem{ID: stored.ID, Name: stored.Name, Scope: scope})
+	}
+	return items, nil
+}
+
+func (s *inMemorySecretStore) GetForWorkspace(_ context.Context, id, workspaceID string) (*secrets.Secret, error) {
+	secret, err := s.Get(context.Background(), id)
+	if err != nil {
+		return nil, err
+	}
+	if secret.Scope == secrets.ScopeWorkspace && secret.WorkspaceID != workspaceID {
+		return nil, fmt.Errorf("workspace secret unavailable")
+	}
+	return secret, nil
+}
+
+func (s *inMemorySecretStore) RevealGlobal(ctx context.Context, id string) (string, error) {
+	secret, err := s.Get(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	if secret.Scope == secrets.ScopeWorkspace {
+		return "", fmt.Errorf("workspace secret unavailable")
+	}
+	return s.Reveal(ctx, id)
+}
+
+func (s *inMemorySecretStore) RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error) {
+	if _, err := s.GetForWorkspace(ctx, id, workspaceID); err != nil {
+		return "", err
+	}
+	return s.Reveal(ctx, id)
+}
+
+func (s *inMemorySecretStore) DeleteWorkspaceSecrets(_ context.Context, workspaceID string) error {
+	for id, stored := range s.store {
+		if stored.Scope == secrets.ScopeWorkspace && stored.WorkspaceID == workspaceID {
+			delete(s.store, id)
+		}
+	}
+	return nil
+}
 
 func TestPersistAuthToken(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})

@@ -412,6 +412,8 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 	// req.Env credential keys are forwarded; non-credential keys (HOME/PATH) are not.
 	req := &ExecutorCreateRequest{Env: map[string]string{
 		"CLAUDE_CODE_OAUTH_TOKEN":       tokenFromReq,
+		"NPM_TOKEN":                     "repository-token",
+		"PROFILE_ONLY":                  "profile-value",
 		"HOME":                          nonCredentialHome,
 		"PATH":                          nonCredentialPath,
 		"OPENAI_API_KEY":                openAIKey,
@@ -420,13 +422,19 @@ func TestSSHRemoteAgentEnv(t *testing.T) {
 		"GIT_CONFIG_COUNT":              "1",
 		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
 		"GIT_CONFIG_VALUE_0":            "!agentctl git-credential",
-	}}
+	}, ApprovedSecretEnvKeys: []string{"NPM_TOKEN"}}
 	got := sshRemoteAgentEnv(req)
 	if got["CLAUDE_CODE_OAUTH_TOKEN"] != tokenFromReq {
 		t.Fatalf("CLAUDE_CODE_OAUTH_TOKEN = %q, want %q", got["CLAUDE_CODE_OAUTH_TOKEN"], tokenFromReq)
 	}
 	if got["OPENAI_API_KEY"] != openAIKey {
 		t.Fatalf("OPENAI_API_KEY = %q, want %q", got["OPENAI_API_KEY"], openAIKey)
+	}
+	if got["NPM_TOKEN"] != "repository-token" {
+		t.Fatalf("NPM_TOKEN = %q, want repository-token", got["NPM_TOKEN"])
+	}
+	if _, ok := got["PROFILE_ONLY"]; ok {
+		t.Fatal("unapproved profile key must not be forwarded to the remote agent")
 	}
 	if got[envKeyGitHubCredentialLease] != "opaque-lease" || got["GIT_CONFIG_KEY_0"] == "" {
 		t.Fatalf("managed GitHub broker env was not forwarded: %#v", got)

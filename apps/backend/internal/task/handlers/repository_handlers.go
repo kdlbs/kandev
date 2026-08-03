@@ -302,22 +302,23 @@ func (h *RepositoryHandlers) httpLocalRepositoryStatus(c *gin.Context) {
 }
 
 type httpCreateRepositoryRequest struct {
-	Name                   string `json:"name"`
-	SourceType             string `json:"source_type"`
-	LocalPath              string `json:"local_path"`
-	Provider               string `json:"provider"`
-	ProviderRepoID         string `json:"provider_repo_id"`
-	ProviderHost           string `json:"provider_host"`
-	ProviderOwner          string `json:"provider_owner"`
-	ProviderName           string `json:"provider_name"`
-	DefaultBranch          string `json:"default_branch"`
-	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string `json:"worktree_branch_template"`
-	PullBeforeWorktree     *bool  `json:"pull_before_worktree"`
-	SetupScript            string `json:"setup_script"`
-	CleanupScript          string `json:"cleanup_script"`
-	DevScript              string `json:"dev_script"`
-	CopyFiles              string `json:"copy_files"`
+	Name                   string                                 `json:"name"`
+	SourceType             string                                 `json:"source_type"`
+	LocalPath              string                                 `json:"local_path"`
+	Provider               string                                 `json:"provider"`
+	ProviderRepoID         string                                 `json:"provider_repo_id"`
+	ProviderHost           string                                 `json:"provider_host"`
+	ProviderOwner          string                                 `json:"provider_owner"`
+	ProviderName           string                                 `json:"provider_name"`
+	DefaultBranch          string                                 `json:"default_branch"`
+	WorktreeBranchPrefix   string                                 `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                                 `json:"worktree_branch_template"`
+	PullBeforeWorktree     *bool                                  `json:"pull_before_worktree"`
+	SetupScript            string                                 `json:"setup_script"`
+	CleanupScript          string                                 `json:"cleanup_script"`
+	DevScript              string                                 `json:"dev_script"`
+	CopyFiles              string                                 `json:"copy_files"`
+	SecretBindings         []service.RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 type httpInitializeLocalRepositoryRequest struct {
@@ -381,6 +382,7 @@ func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 		CleanupScript:          body.CleanupScript,
 		DevScript:              body.DevScript,
 		CopyFiles:              body.CopyFiles,
+		SecretBindings:         body.SecretBindings,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -454,22 +456,23 @@ func (h *RepositoryHandlers) refreshRepositoryBranches(ctx context.Context, repo
 }
 
 type httpUpdateRepositoryRequest struct {
-	Name                   *string `json:"name"`
-	SourceType             *string `json:"source_type"`
-	LocalPath              *string `json:"local_path"`
-	Provider               *string `json:"provider"`
-	ProviderRepoID         *string `json:"provider_repo_id"`
-	ProviderHost           *string `json:"provider_host"`
-	ProviderOwner          *string `json:"provider_owner"`
-	ProviderName           *string `json:"provider_name"`
-	DefaultBranch          *string `json:"default_branch"`
-	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate *string `json:"worktree_branch_template"`
-	PullBeforeWorktree     *bool   `json:"pull_before_worktree"`
-	SetupScript            *string `json:"setup_script"`
-	CleanupScript          *string `json:"cleanup_script"`
-	DevScript              *string `json:"dev_script"`
-	CopyFiles              *string `json:"copy_files"`
+	Name                   *string                                 `json:"name"`
+	SourceType             *string                                 `json:"source_type"`
+	LocalPath              *string                                 `json:"local_path"`
+	Provider               *string                                 `json:"provider"`
+	ProviderRepoID         *string                                 `json:"provider_repo_id"`
+	ProviderHost           *string                                 `json:"provider_host"`
+	ProviderOwner          *string                                 `json:"provider_owner"`
+	ProviderName           *string                                 `json:"provider_name"`
+	DefaultBranch          *string                                 `json:"default_branch"`
+	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template"`
+	PullBeforeWorktree     *bool                                   `json:"pull_before_worktree"`
+	SetupScript            *string                                 `json:"setup_script"`
+	CleanupScript          *string                                 `json:"cleanup_script"`
+	DevScript              *string                                 `json:"dev_script"`
+	CopyFiles              *string                                 `json:"copy_files"`
+	SecretBindings         *[]service.RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
@@ -495,6 +498,7 @@ func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 		CleanupScript:          body.CleanupScript,
 		DevScript:              body.DevScript,
 		CopyFiles:              body.CopyFiles,
+		SecretBindings:         body.SecretBindings,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -557,22 +561,23 @@ func (h *RepositoryHandlers) wsListRepositories(ctx context.Context, msg *ws.Mes
 }
 
 type wsCreateRepositoryRequest struct {
-	WorkspaceID            string `json:"workspace_id"`
-	Name                   string `json:"name"`
-	SourceType             string `json:"source_type"`
-	LocalPath              string `json:"local_path"`
-	Provider               string `json:"provider"`
-	ProviderRepoID         string `json:"provider_repo_id"`
-	ProviderHost           string `json:"provider_host"`
-	ProviderOwner          string `json:"provider_owner"`
-	ProviderName           string `json:"provider_name"`
-	DefaultBranch          string `json:"default_branch"`
-	WorktreeBranchPrefix   string `json:"worktree_branch_prefix"`
-	WorktreeBranchTemplate string `json:"worktree_branch_template"`
-	SetupScript            string `json:"setup_script"`
-	CleanupScript          string `json:"cleanup_script"`
-	DevScript              string `json:"dev_script"`
-	CopyFiles              string `json:"copy_files"`
+	WorkspaceID            string                                 `json:"workspace_id"`
+	Name                   string                                 `json:"name"`
+	SourceType             string                                 `json:"source_type"`
+	LocalPath              string                                 `json:"local_path"`
+	Provider               string                                 `json:"provider"`
+	ProviderRepoID         string                                 `json:"provider_repo_id"`
+	ProviderHost           string                                 `json:"provider_host"`
+	ProviderOwner          string                                 `json:"provider_owner"`
+	ProviderName           string                                 `json:"provider_name"`
+	DefaultBranch          string                                 `json:"default_branch"`
+	WorktreeBranchPrefix   string                                 `json:"worktree_branch_prefix"`
+	WorktreeBranchTemplate string                                 `json:"worktree_branch_template"`
+	SetupScript            string                                 `json:"setup_script"`
+	CleanupScript          string                                 `json:"cleanup_script"`
+	DevScript              string                                 `json:"dev_script"`
+	CopyFiles              string                                 `json:"copy_files"`
+	SecretBindings         []service.RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -600,6 +605,7 @@ func (h *RepositoryHandlers) wsCreateRepository(ctx context.Context, msg *ws.Mes
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
 		CopyFiles:              req.CopyFiles,
+		SecretBindings:         req.SecretBindings,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {
@@ -631,22 +637,23 @@ func (h *RepositoryHandlers) wsGetRepository(ctx context.Context, msg *ws.Messag
 }
 
 type wsUpdateRepositoryRequest struct {
-	ID                     string  `json:"id"`
-	Name                   *string `json:"name,omitempty"`
-	SourceType             *string `json:"source_type,omitempty"`
-	LocalPath              *string `json:"local_path,omitempty"`
-	Provider               *string `json:"provider,omitempty"`
-	ProviderRepoID         *string `json:"provider_repo_id,omitempty"`
-	ProviderHost           *string `json:"provider_host,omitempty"`
-	ProviderOwner          *string `json:"provider_owner,omitempty"`
-	ProviderName           *string `json:"provider_name,omitempty"`
-	DefaultBranch          *string `json:"default_branch,omitempty"`
-	WorktreeBranchPrefix   *string `json:"worktree_branch_prefix,omitempty"`
-	WorktreeBranchTemplate *string `json:"worktree_branch_template,omitempty"`
-	SetupScript            *string `json:"setup_script,omitempty"`
-	CleanupScript          *string `json:"cleanup_script,omitempty"`
-	DevScript              *string `json:"dev_script,omitempty"`
-	CopyFiles              *string `json:"copy_files,omitempty"`
+	ID                     string                                  `json:"id"`
+	Name                   *string                                 `json:"name,omitempty"`
+	SourceType             *string                                 `json:"source_type,omitempty"`
+	LocalPath              *string                                 `json:"local_path,omitempty"`
+	Provider               *string                                 `json:"provider,omitempty"`
+	ProviderRepoID         *string                                 `json:"provider_repo_id,omitempty"`
+	ProviderHost           *string                                 `json:"provider_host,omitempty"`
+	ProviderOwner          *string                                 `json:"provider_owner,omitempty"`
+	ProviderName           *string                                 `json:"provider_name,omitempty"`
+	DefaultBranch          *string                                 `json:"default_branch,omitempty"`
+	WorktreeBranchPrefix   *string                                 `json:"worktree_branch_prefix,omitempty"`
+	WorktreeBranchTemplate *string                                 `json:"worktree_branch_template,omitempty"`
+	SetupScript            *string                                 `json:"setup_script,omitempty"`
+	CleanupScript          *string                                 `json:"cleanup_script,omitempty"`
+	DevScript              *string                                 `json:"dev_script,omitempty"`
+	CopyFiles              *string                                 `json:"copy_files,omitempty"`
+	SecretBindings         *[]service.RepositorySecretBindingInput `json:"secret_bindings,omitempty"`
 }
 
 func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -673,6 +680,7 @@ func (h *RepositoryHandlers) wsUpdateRepository(ctx context.Context, msg *ws.Mes
 		CleanupScript:          req.CleanupScript,
 		DevScript:              req.DevScript,
 		CopyFiles:              req.CopyFiles,
+		SecretBindings:         req.SecretBindings,
 	})
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidRepositorySettings) {

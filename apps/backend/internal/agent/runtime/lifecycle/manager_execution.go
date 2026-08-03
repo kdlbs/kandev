@@ -821,8 +821,7 @@ func (m *Manager) persistRuntimeSecret(
 
 	m.logger.Debug("persisted runtime secret in secret store",
 		zap.String("instance_id", instance.InstanceID),
-		zap.String("metadata_key", metadataKey),
-		zap.String("secret_id", secret.ID))
+		zap.String("metadata_key", metadataKey))
 }
 
 func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]interface{}, metadataKey string) string {
@@ -833,11 +832,10 @@ func (m *Manager) revealRuntimeSecret(ctx context.Context, metadata map[string]i
 	if secretID == "" {
 		return ""
 	}
-	value, err := m.secretStore.Reveal(ctx, secretID)
+	value, err := revealGlobalSecret(ctx, m.secretStore, secretID)
 	if err != nil {
 		m.logger.Warn("failed to reveal runtime secret",
 			zap.String("metadata_key", metadataKey),
-			zap.String("secret_id", secretID),
 			zap.Error(err))
 		return ""
 	}
