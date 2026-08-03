@@ -375,7 +375,7 @@
   "useAgentForNewTaskTitles": "Use the agent for new task titles",
   "agentGeneratedTaskTitlesDisabledHint": "Disabled by default; save this setting before opening a creation dialog.",
   "logsPageTitle": "Logs",
-  "logsPageDescription": "Download a bounded diagnostic ZIP containing frontend and backend logs.",
+  "logsPageDescription": "Create a diagnostic ZIP with frontend and backend logs.",
   "diagnosticReviewBeforeSharing": "Review before sharing",
   "diagnosticReviewDescription": "This ZIP combines up to three days of backend logs with locally retained frontend console events from connected browsers. It may contain URLs, console arguments, stacks, paths, runtime metadata, and user-visible errors.",
   "diagnosticBundleTitle": "Frontend + backend diagnostic logs",
