@@ -55,7 +55,7 @@ import { UsersTable } from "@/components/settings/system/users-table";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { DiskUsageCard } from "@/components/settings/system/disk-usage-card";
-import { FeatureTogglesSettings } from "@/components/settings/system/feature-toggles-settings";
+import { FeatureTogglesRoute } from "@/components/settings/system/feature-toggles-route";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
 import { LicensesList } from "@/components/settings/system/licenses-list";
 import { LogViewer } from "@/components/settings/system/log-viewer";
@@ -202,7 +202,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       titleKey="system:navFeatureToggles"
       descriptionKey="system:featureTogglesPageDescription"
     >
-      <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
+      <FeatureTogglesRoute />
     </SystemRouteShell>
   ),
   "/settings/system/licenses": () => (
