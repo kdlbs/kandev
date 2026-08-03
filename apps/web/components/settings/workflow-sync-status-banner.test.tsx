@@ -15,7 +15,12 @@ import { WorkflowSyncStatusCard } from "./workflow-sync-status-banner";
  */
 
 function config(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncConfig {
+  // No `as` cast: the fixture must satisfy the real contract, so a field added
+  // to WorkflowSyncConfig fails here rather than being silently absent.
+  // `last_synced_at` is left off — it is optional and absent until the first
+  // sync attempt, which is the state most of these cases exercise.
   return {
+    workspace_id: "workspace-1",
     repo_owner: "kdlbs",
     repo_name: "kandev",
     branch: "main",
@@ -23,11 +28,12 @@ function config(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncConfig
     interval_seconds: 300,
     poll_enabled: true,
     last_ok: true,
-    last_synced_at: null,
     last_error: "",
     last_warnings: [],
+    created_at: "2026-08-01T00:00:00Z",
+    updated_at: "2026-08-01T00:00:00Z",
     ...overrides,
-  } as WorkflowSyncConfig;
+  };
 }
 
 describe("WorkflowSyncStatusCard", () => {
