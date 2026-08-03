@@ -163,7 +163,7 @@ describe("StorageQuarantineCard resource types and schedule copy", () => {
       entries: [
         entry("workspace-1", "task_workspace"),
         entry("cache-1", "go_cache"),
-        entry("future-1", "object_store"),
+        entry("future-1", "object_store_cache"),
       ],
     });
 
@@ -171,7 +171,10 @@ describe("StorageQuarantineCard resource types and schedule copy", () => {
       "task workspace",
     );
     expect(screen.getByTestId("storage-quarantine-cache-1").textContent).toContain("go cache");
-    expect(screen.getByTestId("storage-quarantine-future-1").textContent).toContain("object store");
+    // Multiple underscores, so a single-pattern `replace` fails this.
+    expect(screen.getByTestId("storage-quarantine-future-1").textContent).toContain(
+      "object store cache",
+    );
   });
 
   it("agrees the schedule copy with the interval", () => {

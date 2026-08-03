@@ -38,7 +38,10 @@ function resourceTypeLabel(
   resourceType: StorageQuarantineEntry["resource_type"],
 ): string {
   const key = RESOURCE_TYPE_LABEL_KEYS[resourceType];
-  return key ? t(key) : resourceType.replace("_", " ");
+  // `replaceAll`, not `replace`: the original single-pattern call only reached
+  // the first underscore, so a future `some_new_resource_type` would have
+  // rendered as "some new_resource_type".
+  return key ? t(key) : resourceType.replaceAll("_", " ");
 }
 
 type Props = {
