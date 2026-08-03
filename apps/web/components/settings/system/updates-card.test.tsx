@@ -117,29 +117,19 @@ afterEach(() => {
 });
 
 describe("UpdatesCard self-update", () => {
-  it("hides Apply update while a metadata check is pending", async () => {
-    let resolveCheck!: () => void;
-    const check = vi.fn(
-      () =>
-        new Promise<void>((resolve) => {
-          resolveCheck = resolve;
-        }),
-    );
+  it("uses hook-owned checking state to hide Apply update", () => {
     mocks.useUpdates.mockReturnValue({
       updates: updates(),
-      check,
+      check: vi.fn(),
       reload: vi.fn(),
       saveChannel: vi.fn(),
+      isChecking: true,
       error: null,
     });
 
     renderUpdatesCard();
-    expect(screen.getByTestId(APPLY_TESTID)).toBeTruthy();
-    fireEvent.click(screen.getByTestId(CHECK_TESTID));
-    await waitFor(() => expect(screen.queryByTestId(APPLY_TESTID)).toBeNull());
-
-    await act(async () => resolveCheck());
-    await waitFor(() => expect(screen.getByTestId(APPLY_TESTID)).toBeTruthy());
+    expect(screen.queryByTestId(APPLY_TESTID)).toBeNull();
+    expect(screen.getByTestId(CHECK_TESTID).hasAttribute("disabled")).toBe(true);
   });
 
   it("passes a stable document reload instead of the update-metadata refetch", () => {
@@ -417,27 +407,36 @@ describe("UpdatesCard channel setting", () => {
 
 describe("UpdatesCard channel save errors", () => {
   it("clears a previous check error after a channel save succeeds", async () => {
-    const check = vi.fn().mockRejectedValue(new Error("npm registry unavailable"));
-    const saveChannel = vi.fn().mockResolvedValue(updates({ channel: "nightly" }));
-    mocks.useUpdates.mockReturnValue({
+    let updatesError: string | null = null;
+    const check = vi.fn(async () => {
+      updatesError = "npm registry unavailable";
+      throw new Error(updatesError);
+    });
+    const saveChannel = vi.fn(async () => {
+      updatesError = null;
+      return updates({ channel: "nightly" });
+    });
+    mocks.useUpdates.mockImplementation(() => ({
       updates: updates(),
       check,
       reload: vi.fn(),
       saveChannel,
-      error: null,
-    });
+      isChecking: false,
+      error: updatesError,
+    }));
 
-    renderUpdatesCard();
+    const { rerender } = renderUpdatesCard();
     fireEvent.click(screen.getByTestId(CHECK_TESTID));
-    await waitFor(() =>
-      expect(screen.getByTestId(ERROR_TESTID).textContent).toContain("npm registry unavailable"),
-    );
+    await waitFor(() => expect(check).toHaveBeenCalledOnce());
+    rerender(updatesCard());
+    expect(screen.getByTestId(ERROR_TESTID).textContent).toContain("npm registry unavailable");
 
     fireEvent.click(screen.getByRole("radio", { name: /^Nightly/ }));
     fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_NAME }));
 
     await waitFor(() => expect(saveChannel).toHaveBeenCalledWith("nightly"));
-    await waitFor(() => expect(screen.queryByTestId(ERROR_TESTID)).toBeNull());
+    rerender(updatesCard());
+    expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
   });
 
   it("keeps a failed channel save dirty and retryable", async () => {
@@ -473,8 +472,11 @@ describe("UpdatesCard channel save errors", () => {
   });
 
   it("replaces a previous check error with the channel save failure", async () => {
-    const check = vi.fn().mockRejectedValue(new Error("retry after 27 seconds"));
     let updatesError: string | null = null;
+    const check = vi.fn(async () => {
+      updatesError = "retry after 27 seconds";
+      throw new Error(updatesError);
+    });
     const saveChannel = vi.fn(async () => {
       updatesError = "channel save failed";
       throw new Error(updatesError);
@@ -484,12 +486,15 @@ describe("UpdatesCard channel save errors", () => {
       check,
       reload: vi.fn(),
       saveChannel,
+      isChecking: false,
       error: updatesError,
     }));
 
-    renderUpdatesCard();
+    const { rerender } = renderUpdatesCard();
     fireEvent.click(screen.getByTestId(CHECK_TESTID));
-    await waitFor(() => expect(screen.getByTestId(ERROR_TESTID).textContent).toContain("27s"));
+    await waitFor(() => expect(check).toHaveBeenCalledOnce());
+    rerender(updatesCard());
+    expect(screen.getByTestId(ERROR_TESTID).textContent).toContain("27s");
 
     fireEvent.click(screen.getByRole("radio", { name: /^Nightly/ }));
     fireEvent.click(await screen.findByRole("button", { name: SAVE_CHANGES_NAME }));
@@ -623,7 +628,8 @@ describe("UpdatesCard channel availability", () => {
     mocks.useUpdates.mockReturnValue({
       updates: updates({
         channel_editable: false,
-        channel_unsupported_reason: "Nightly is available only for a managed npm user service.",
+        channel_unsupported_reason:
+          "Nightly updates require a Kandev-managed npm or npx user service.",
       }),
       check: vi.fn(),
       reload: vi.fn(),
@@ -642,18 +648,11 @@ describe("UpdatesCard channel availability", () => {
     expect(stable.getAttribute("aria-describedby")).toContain(reasonId);
     expect(nightly.getAttribute("aria-describedby")).toContain(reasonId);
     expect(screen.getByTestId("system-updates-channel-reason").textContent).toContain(
-      "managed npm user service",
+      "Kandev-managed npm or npx user service",
     );
   });
 
   it("does not expose an npm channel selector in the Desktop updater", () => {
-    mocks.useUpdates.mockReturnValue({
-      updates: updates(),
-      check: vi.fn(),
-      reload: vi.fn(),
-      saveChannel: vi.fn(),
-      error: null,
-    });
     mocks.useDesktopUpdater.mockReturnValue(
       desktopUpdater({
         available: true,
@@ -676,5 +675,7 @@ describe("UpdatesCard channel availability", () => {
     renderUpdatesCard();
 
     expect(screen.queryByTestId(CHANNEL_TESTID)).toBeNull();
+    expect(mocks.useUpdates).not.toHaveBeenCalled();
+    expect(mocks.useSelfUpdate).not.toHaveBeenCalled();
   });
 });

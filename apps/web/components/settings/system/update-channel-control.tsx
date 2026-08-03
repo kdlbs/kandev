@@ -6,14 +6,14 @@ import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { UpdatesChannel, UpdatesResponse } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "../settings-save-provider";
+import { updateChannelUnsupportedReasonKey } from "./update-channel-reasons";
 
 export function useUpdateChannelDraft(
   updates: UpdatesResponse | null | undefined,
   saveChannel: (channel: UpdatesChannel) => Promise<UpdatesResponse>,
-  serviceUpdater: boolean,
 ) {
   const authoritative = updates?.channel ?? "stable";
-  const editable = serviceUpdater && updates?.channel_editable === true;
+  const editable = updates?.channel_editable === true;
   const [saved, setSaved] = useState<UpdatesChannel>(authoritative);
   const savedRef = useRef(saved);
   const [draft, setDraftState] = useState<UpdatesChannel>(authoritative);
@@ -101,6 +101,7 @@ export function UpdateChannelControl({
 }: UpdateChannelControlProps) {
   const { t } = useTranslation();
   const reasonId = "system-updates-channel-reason";
+  const reason = unsupportedReason ? t(updateChannelUnsupportedReasonKey(unsupportedReason)) : "";
   return (
     <div
       className="min-w-0 space-y-2"
@@ -125,23 +126,23 @@ export function UpdateChannelControl({
           label={t("settings:updateChannelStable")}
           description={t("settings:updateChannelStableDescription")}
           disabled={!editable}
-          reasonId={!editable && unsupportedReason ? reasonId : undefined}
+          reasonId={!editable && reason ? reasonId : undefined}
         />
         <UpdateChannelOption
           channel="nightly"
           label={t("settings:updateChannelNightly")}
           description={t("settings:updateChannelNightlyDescription")}
           disabled={!editable}
-          reasonId={!editable && unsupportedReason ? reasonId : undefined}
+          reasonId={!editable && reason ? reasonId : undefined}
         />
       </RadioGroup>
-      {!editable && unsupportedReason && (
+      {!editable && reason && (
         <p
           id={reasonId}
           className="break-words text-xs text-muted-foreground"
           data-testid="system-updates-channel-reason"
         >
-          {unsupportedReason}
+          {reason}
         </p>
       )}
     </div>

@@ -56,44 +56,24 @@ def job_condition(name: str) -> str:
 
 
 class ReleaseWorkflowContractTest(unittest.TestCase):
-    def test_nightly_runs_at_noon_utc_and_skips_before_building(self) -> None:
+    def test_nightly_runs_at_noon_utc_and_delegates_metadata_resolution(self) -> None:
         self.assertIn('schedule:\n    - cron: "0 12 * * *"', WORKFLOW)
 
         nightly = job_block("nightly-prepare")
         self.assertIn("if: ${{ github.event_name == 'schedule' }}", nightly)
         self.assertIn("ref: ${{ github.sha }}", nightly)
-        self.assertIn('MAIN_SHA="$(git rev-parse HEAD)"', nightly)
-        self.assertIn(
-            'LATEST_STABLE="$(bash scripts/release/npm-view-version.sh kandev@latest)"',
-            nightly,
-        )
-        self.assertIn('echo "stable_version=$LATEST_STABLE" >> "$GITHUB_OUTPUT"', nightly)
-        self.assertIn('STABLE_COMMIT="$(git rev-parse "v${LATEST_STABLE}^{commit}")"', nightly)
-        self.assertIn('node scripts/release/nightly-version.mjs "$LATEST_STABLE" "$MAIN_SHA"', nightly)
-        self.assertIn('if [[ "$MAIN_SHA" == "$STABLE_COMMIT" ]]', nightly)
-        self.assertIn(
-            'bash scripts/release/npm-view-version.sh "${package}@$NIGHTLY_VERSION"', nightly
-        )
-        self.assertIn(
-            'bash scripts/release/npm-view-version.sh kandev@nightly', nightly
-        )
-        self.assertIn('echo "nightly_version_at_start=$PUBLISHED_NIGHTLY" >> "$GITHUB_OUTPUT"', nightly)
+        metadata = step_block("Resolve nightly metadata")
+        self.assertIn("id: metadata", metadata)
+        self.assertIn("bash scripts/release/nightly-release.sh prepare", metadata)
+        self.assertIn('--scheduled-sha "${{ github.sha }}"', metadata)
+        self.assertIn('--output "$GITHUB_OUTPUT"', metadata)
+        self.assertNotIn("npm-view-version.sh", metadata)
         self.assertIn(
             "nightly_tags_at_start: ${{ steps.metadata.outputs.nightly_tags_at_start }}",
             nightly,
         )
-        self.assertIn('NIGHTLY_TAGS_AT_START+="${package}=${tagged_version};"', nightly)
-        self.assertIn('echo "nightly_tags_at_start=$NIGHTLY_TAGS_AT_START" >> "$GITHUB_OUTPUT"', nightly)
-        self.assertIn('resolve_nightly_commit "$PUBLISHED_NIGHTLY" "kandev@nightly"', nightly)
-        self.assertIn('git merge-base --is-ancestor "$MAIN_SHA" "$PUBLISHED_COMMIT"', nightly)
-        self.assertIn('git merge-base --is-ancestor "$PUBLISHED_COMMIT" "$MAIN_SHA"', nightly)
-        self.assertIn('echo "should_publish=false" >> "$GITHUB_OUTPUT"', nightly)
-        self.assertIn('echo "should_publish=true" >> "$GITHUB_OUTPUT"', nightly)
 
-    def test_nightly_skip_requires_every_package_and_tag(self) -> None:
-        prepare = job_block("nightly-prepare")
-
-        self.assertIn("source scripts/release/npm-packages.sh", prepare)
+    def test_nightly_package_inventory_remains_shared(self) -> None:
         for package in (
             "kandev",
             "@kdlbs/runtime-linux-x64",
@@ -105,23 +85,6 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn(package, NPM_PACKAGES)
 
         self.assertIn('NIGHTLY_PACKAGES=("kandev" "${RUNTIME_PACKAGES[@]}")', NPM_PACKAGES)
-        self.assertIn('for package in "${NIGHTLY_PACKAGES[@]}"; do', prepare)
-        self.assertIn('"${package}@$NIGHTLY_VERSION"', prepare)
-        self.assertIn('"${package}@nightly"', prepare)
-        self.assertIn('if [[ "$ALL_PACKAGES_PUBLISHED" == "true" ]]; then', prepare)
-        self.assertLess(
-            prepare.index('PUBLISHED_COMMIT="$(resolve_nightly_commit'),
-            prepare.index('if [[ "$ALL_PACKAGES_PUBLISHED" == "true" ]]; then'),
-        )
-        self.assertLess(
-            prepare.index('PUBLISHED_COMMIT="$(resolve_nightly_commit'),
-            prepare.index('for package in "${NIGHTLY_PACKAGES[@]}"; do'),
-        )
-        self.assertIn('git merge-base --is-ancestor "$TAGGED_COMMIT" "$MAIN_SHA"', prepare)
-        self.assertIn(
-            'if [[ "$PUBLISHED_COMMIT" != "$MAIN_SHA" ]] && git merge-base --is-ancestor "$MAIN_SHA" "$PUBLISHED_COMMIT"',
-            prepare,
-        )
 
     def test_only_shared_runtime_builds_run_for_a_scheduled_nightly(self) -> None:
         for name in ("build-web", "build-bundles"):
@@ -165,41 +128,18 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         self.assertIn("pattern: bundle-*", nightly)
         self.assertIn("merge-multiple: true", nightly)
         self.assertIn('--version "${{ needs.nightly-prepare.outputs.version }}"', nightly)
-        self.assertIn('--dist-tag nightly', nightly)
         self.assertIn('--assets-dir dist/nightly-assets', nightly)
-        self.assertIn(
-            'CURRENT_LATEST="$(bash scripts/release/npm-view-version.sh kandev@latest)"',
-            nightly,
-        )
-        self.assertIn('if [[ "$CURRENT_LATEST" != "$NIGHTLY_BASELINE" ]]', nightly)
-        self.assertIn(
-            'CURRENT_NIGHTLY="$(bash scripts/release/npm-view-version.sh kandev@nightly)"',
-            nightly,
-        )
-        self.assertIn('if [[ "$CURRENT_NIGHTLY" != "$NIGHTLY_AT_START" ]]', nightly)
+        publish = step_block("Publish npm nightly packages")
+        self.assertIn("bash scripts/release/nightly-release.sh publish", publish)
+        self.assertIn('--stable-at-start "$NIGHTLY_BASELINE"', publish)
+        self.assertIn('--nightly-at-start "$NIGHTLY_AT_START"', publish)
+        self.assertIn('--tags-at-start "$NIGHTLY_TAGS_AT_START"', publish)
         self.assertIn(
             "NIGHTLY_TAGS_AT_START: ${{ needs.nightly-prepare.outputs.nightly_tags_at_start }}",
             nightly,
         )
-        self.assertIn("source scripts/release/npm-packages.sh", nightly)
-        self.assertIn('for package in "${NIGHTLY_PACKAGES[@]}"; do', nightly)
-        self.assertIn('"${package}@nightly"', nightly)
-        self.assertIn('if [[ "$CURRENT_NIGHTLY_TAGS" != "$NIGHTLY_TAGS_AT_START" ]]', nightly)
-        for condition in (
-            'if [[ "$CURRENT_LATEST" != "$NIGHTLY_BASELINE" ]]; then',
-            'if [[ "$CURRENT_NIGHTLY" != "$NIGHTLY_AT_START" ]]; then',
-        ):
-            guard_start = nightly.index(condition)
-            guard_end = nightly.index("\n          fi", guard_start)
-            self.assertIn("exit 0", nightly[guard_start:guard_end])
-        self.assertLess(
-            nightly.index('if [[ "$CURRENT_LATEST" != "$NIGHTLY_BASELINE" ]]'),
-            nightly.index("bash scripts/release/publish-npm.sh"),
-        )
-        self.assertLess(
-            nightly.index('if [[ "$CURRENT_NIGHTLY" != "$NIGHTLY_AT_START" ]]'),
-            nightly.index("bash scripts/release/publish-npm.sh"),
-        )
+        self.assertNotIn("npm-view-version.sh", publish)
+        self.assertNotIn("publish-npm.sh", publish)
 
         self.assertIn('--version "${{ needs.prepare.outputs.version }}"', stable)
         self.assertIn('--dist-tag latest', stable)
@@ -417,6 +357,8 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn('"scripts/release/npm-view-version.test.mjs"', trigger_block.group(0))
             self.assertIn('"scripts/release/nightly-version.mjs"', trigger_block.group(0))
             self.assertIn('"scripts/release/nightly-version.test.mjs"', trigger_block.group(0))
+            self.assertIn('"scripts/release/nightly-release.sh"', trigger_block.group(0))
+            self.assertIn('"scripts/release/nightly-release.test.mjs"', trigger_block.group(0))
 
         setup_node = (
             "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6"
@@ -429,6 +371,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
         )
         self.assertIn(
             "node --test scripts/release/nightly-version.test.mjs "
+            "scripts/release/nightly-release.test.mjs "
             "scripts/release/npm-view-version.test.mjs "
             "scripts/release/publish-npm.test.mjs",
             LINT_WORKFLOW,

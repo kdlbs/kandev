@@ -1,7 +1,6 @@
 package updates
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -69,8 +68,7 @@ func FetchLatestNightlyFrom(ctx context.Context, client *http.Client, registryUR
 		return "", "", fmt.Errorf("npm response has invalid exact version record %q", version)
 	}
 
-	packageVersion := strings.TrimPrefix(version, "v")
-	return "v" + packageVersion, "https://www.npmjs.com/package/kandev/v/" + url.PathEscape(packageVersion), nil
+	return "v" + version, "https://www.npmjs.com/package/kandev/v/" + url.PathEscape(version), nil
 }
 
 func isExactNPMVersionRecord(record json.RawMessage, version string) bool {
@@ -91,15 +89,8 @@ func decodeNPMPackagePayload(reader io.Reader) (npmPackagePayload, error) {
 	if len(body) > maxNPMPackageResponseBytes {
 		return npmPackagePayload{}, fmt.Errorf("npm response exceeds %d bytes", maxNPMPackageResponseBytes)
 	}
-	decoder := json.NewDecoder(bytes.NewReader(body))
 	var payload npmPackagePayload
-	if err := decoder.Decode(&payload); err != nil {
-		return npmPackagePayload{}, fmt.Errorf("decode npm response: %w", err)
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		if err == nil {
-			err = errors.New("multiple JSON values")
-		}
+	if err := json.Unmarshal(body, &payload); err != nil {
 		return npmPackagePayload{}, fmt.Errorf("decode npm response: %w", err)
 	}
 	return payload, nil

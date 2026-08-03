@@ -97,15 +97,11 @@ export function useUpdates() {
   const coordinator = coordinatorFor(store);
   const updates = useAppStore((s) => s.system.updates);
   const setSystemUpdates = useAppStore((s) => s.setSystemUpdates);
-  const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
-  const latestReload = useRef(0);
   const latestCheck = useRef(0);
 
   const reload = useCallback(async () => {
-    const reloadRequest = ++latestReload.current;
-    setIsLoading(true);
     setError(null);
     let flight = coordinator.reloadFlight;
     if (!flight || flight.request !== coordinator.readRevision) {
@@ -132,7 +128,6 @@ export function useUpdates() {
       }
     } finally {
       if (coordinator.reloadFlight === flight) coordinator.reloadFlight = null;
-      if (reloadRequest === latestReload.current) setIsLoading(false);
     }
   }, [coordinator, setSystemUpdates]);
 
@@ -174,5 +169,5 @@ export function useUpdates() {
     void reload();
   }, [updates, reload]);
 
-  return { updates, isLoading, isChecking, error, reload, check, saveChannel };
+  return { updates, isChecking, error, reload, check, saveChannel };
 }

@@ -48,7 +48,8 @@ For release automation changes, run:
 
 ```bash
 python3 .github/scripts/release-workflow-contract_test.py
-node --test scripts/release/nightly-version.test.mjs
+node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs
+bash -n scripts/release/nightly-release.sh scripts/release/publish-npm.sh
 bash scripts/release-desktop.test.sh
 make test-cli
 ```

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
@@ -50,17 +49,6 @@ function formatChecked(value: string | number | null | undefined): string {
   return d.toLocaleString();
 }
 
-function checkedAtForChannel(
-  pending: boolean,
-  checkedAt: string | number | null | undefined,
-): string | number | null | undefined {
-  return pending ? undefined : checkedAt;
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
-}
-
 function retryAfterSeconds(message: string): number | null {
   const match = /retry.*?(\d+)/i.exec(message);
   return match ? Number(match[1]) : null;
@@ -98,10 +86,6 @@ function serviceCardView(
   };
 }
 
-function canShowServiceApply(showApply: boolean, channelPending: boolean, checking: boolean) {
-  return showApply && !channelPending && !checking;
-}
-
 function ChannelPendingNotice({ pending, saving }: { pending: boolean; saving: boolean }) {
   const { t } = useTranslation();
   if (!pending) return null;
@@ -113,43 +97,18 @@ function ChannelPendingNotice({ pending, saving }: { pending: boolean; saving: b
 }
 
 export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesCardProps = {}) {
-  const { t } = useTranslation();
-  const { updates, check, saveChannel, error: updatesError } = useUpdates();
-  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reloadDocument });
   const desktopUpdater = useDesktopUpdater();
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
-  const channel = useUpdateChannelDraft(
-    updates,
-    async (nextChannel) => {
-      setError(null);
-      setRetryAfter(null);
-      const response = await saveChannel(nextChannel);
-      return response;
-    },
-    !desktopUpdater.available,
-  );
-
   if (desktopUpdater.available) {
     return <DesktopUpdatesCard updater={desktopUpdater} />;
   }
+  return <ServiceUpdatesCard reloadDocument={reloadDocument} />;
+}
 
-  const onCheck = async () => {
-    setChecking(true);
-    setError(null);
-    setRetryAfter(null);
-    try {
-      await check();
-    } catch (err) {
-      const message = errorMessage(err, "Update check failed");
-      setError(message);
-      setRetryAfter(retryAfterSeconds(message));
-    } finally {
-      setChecking(false);
-    }
-  };
-
+function ServiceUpdatesCard({ reloadDocument }: { reloadDocument: () => void }) {
+  const { t } = useTranslation();
+  const { updates, check, saveChannel, isChecking, error } = useUpdates();
+  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reloadDocument });
+  const channel = useUpdateChannelDraft(updates, saveChannel);
   const view = serviceCardView(updates, selfUpdate);
   const channelPending = channel.isDirty || channel.isSaving;
 
@@ -170,14 +129,14 @@ export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesC
               : t("settings:updateChannelLatestRelease")
           }
         />
-        <LastChecked checkedAt={checkedAtForChannel(channelPending, updates?.latest_checked_at)} />
+        <LastChecked checkedAt={channelPending ? undefined : updates?.latest_checked_at} />
         <UpdateActions
-          checking={checking}
+          checking={isChecking}
           disabled={channelPending}
-          showApply={canShowServiceApply(view.showApply, channelPending, checking)}
+          showApply={view.showApply && !channelPending && !isChecking}
           latest={view.latest}
           url={channelPending ? undefined : updates?.latest_url}
-          onCheck={onCheck}
+          onCheck={() => ignoreFailure(check())}
           onApply={selfUpdate.start}
         />
         <ManualUpdateInstructions
@@ -191,7 +150,7 @@ export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesC
           errorMessage={selfUpdate.errorMessage}
           onDismiss={selfUpdate.dismiss}
         />
-        <UpdateError error={error ?? updatesError} retryAfter={retryAfter} />
+        <UpdateError error={error} retryAfter={error ? retryAfterSeconds(error) : null} />
       </CardContent>
     </SettingsCard>
   );
@@ -264,7 +223,7 @@ function DesktopCurrentStatus({ phase }: { phase: string | undefined }) {
   );
 }
 
-async function ignoreFailure(operation: Promise<void>): Promise<void> {
+async function ignoreFailure(operation: Promise<unknown>): Promise<void> {
   await operation.catch(() => undefined);
 }
 

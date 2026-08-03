@@ -61,7 +61,6 @@ function ChannelDraft({
       apply_supported: true,
     },
     saveChannel,
-    true,
   );
   return (
     <>

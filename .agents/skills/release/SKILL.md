@@ -36,7 +36,9 @@ Stable runs entirely in CI via `.github/workflows/release.yml`, triggered by a m
 5. `publish-npm` publishes 5 `@kdlbs/runtime-*` packages + main `kandev` package to npmjs.
 6. `update-homebrew-tap` pushes updated `Formula/kandev.rb` to `kdlbs/homebrew-kandev` via SSH deploy key.
 
-There is no local release script — the entire flow runs in GHA.
+Stable has no local release driver; the entire Stable flow runs in GHA. The Nightly metadata and
+publication revalidation state machine lives in `scripts/release/nightly-release.sh`, which GHA
+invokes for scheduled runs.
 
 The same workflow schedules npm Nightly with cron `0 12 * * *`. It skips before building when
 `main` has no commit after the latest Stable tag, the exact commit is already published, or a same
@@ -49,9 +51,9 @@ value safely suppresses the stale publication.
 Validate Nightly automation changes with:
 
 ```bash
-node --test scripts/release/nightly-version.test.mjs
+node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs
 python3 .github/scripts/release-workflow-contract_test.py
-bash -n scripts/release/publish-npm.sh
+bash -n scripts/release/nightly-release.sh scripts/release/publish-npm.sh
 ```
 
 ## Release-tag signing configuration

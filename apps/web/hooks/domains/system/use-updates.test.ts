@@ -114,7 +114,6 @@ describe("useUpdates", () => {
       firstPromise = result.current.reload();
       secondPromise = result.current.reload();
     });
-    expect(result.current.isLoading).toBe(true);
     expect(mocks.fetchUpdates).toHaveBeenCalledOnce();
 
     const nightly = updates("nightly");
@@ -122,7 +121,6 @@ describe("useUpdates", () => {
       pending.resolve(nightly);
       await Promise.all([firstPromise, secondPromise]);
     });
-    expect(result.current.isLoading).toBe(false);
     expect(mocks.setSystemUpdates).toHaveBeenCalledOnce();
     expect(mocks.setSystemUpdates).toHaveBeenCalledWith(nightly);
   });

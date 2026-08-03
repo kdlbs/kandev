@@ -604,124 +604,9 @@ jobs:
       - name: Resolve nightly metadata
         id: metadata
         run: |
-          set -euo pipefail
-          echo "should_publish=false" >> "$GITHUB_OUTPUT"
-
-          MAIN_SHA="$(git rev-parse HEAD)"
-          if [[ "$MAIN_SHA" != "${{ github.sha }}" ]]; then
-            echo "Checked out $MAIN_SHA instead of scheduled SHA ${{ github.sha }}." >&2
-            exit 1
-          fi
-
-          if ! LATEST_STABLE="$(bash scripts/release/npm-view-version.sh kandev@latest)"; then
-            echo "Could not resolve npm @latest; skipping this best-effort Nightly run."
-            exit 0
-          fi
-          if [[ -z "$LATEST_STABLE" ]]; then
-            echo "npm @latest is missing; skipping this best-effort Nightly run."
-            exit 0
-          fi
-          echo "stable_version=$LATEST_STABLE" >> "$GITHUB_OUTPUT"
-          NIGHTLY_VERSION="$(node scripts/release/nightly-version.mjs "$LATEST_STABLE" "$MAIN_SHA")"
-          STABLE_COMMIT="$(git rev-parse "v${LATEST_STABLE}^{commit}")"
-
-          if ! git merge-base --is-ancestor "$STABLE_COMMIT" "$MAIN_SHA"; then
-            echo "Latest stable v$LATEST_STABLE is not an ancestor of scheduled main $MAIN_SHA." >&2
-            exit 1
-          fi
-
-          echo "version=$NIGHTLY_VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$NIGHTLY_VERSION" >> "$GITHUB_OUTPUT"
-          echo "ref=$MAIN_SHA" >> "$GITHUB_OUTPUT"
-
-          if [[ "$MAIN_SHA" == "$STABLE_COMMIT" ]]; then
-            echo "No commits on main since stable v$LATEST_STABLE; skipping nightly."
-            exit 0
-          fi
-
-          if ! PUBLISHED_NIGHTLY="$(bash scripts/release/npm-view-version.sh kandev@nightly)"; then
-            echo "Could not resolve npm @nightly; skipping this best-effort Nightly run."
-            exit 0
-          fi
-          echo "nightly_version_at_start=$PUBLISHED_NIGHTLY" >> "$GITHUB_OUTPUT"
-
-          source scripts/release/npm-packages.sh
-
-          resolve_nightly_commit() {
-            local version="$1"
-            local label="$2"
-            if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-nightly\.sha([0-9a-f]{12})$ ]]; then
-              echo "$label has unsupported version '$version'; refusing to infer publication order." >&2
-              return 1
-            fi
-            local sha="${BASH_REMATCH[1]}"
-            if ! git rev-parse --verify "${sha}^{commit}" 2>/dev/null; then
-              echo "Cannot resolve $label commit prefix $sha in main history." >&2
-              return 1
-            fi
-          }
-
-          PUBLISHED_COMMIT=""
-          if [[ -n "$PUBLISHED_NIGHTLY" ]]; then
-            if ! PUBLISHED_COMMIT="$(resolve_nightly_commit "$PUBLISHED_NIGHTLY" "kandev@nightly")"; then
-              exit 1
-            fi
-            if [[ "$PUBLISHED_COMMIT" != "$MAIN_SHA" ]] && git merge-base --is-ancestor "$MAIN_SHA" "$PUBLISHED_COMMIT"; then
-              echo "A Nightly from a newer main commit is already published; skipping superseded commit $MAIN_SHA."
-              exit 0
-            fi
-            if ! git merge-base --is-ancestor "$PUBLISHED_COMMIT" "$MAIN_SHA"; then
-              echo "Published Nightly commit $PUBLISHED_COMMIT is not an ancestor of scheduled main $MAIN_SHA." >&2
-              exit 1
-            fi
-          fi
-
-          ALL_PACKAGES_PUBLISHED=true
-          NIGHTLY_TAGS_AT_START=""
-          for package in "${NIGHTLY_PACKAGES[@]}"; do
-            if ! published_version="$(bash scripts/release/npm-view-version.sh "${package}@$NIGHTLY_VERSION")"; then
-              echo "Could not verify ${package}@$NIGHTLY_VERSION; skipping this best-effort Nightly run."
-              exit 0
-            fi
-            if ! tagged_version="$(bash scripts/release/npm-view-version.sh "${package}@nightly")"; then
-              echo "Could not verify ${package}@nightly; skipping this best-effort Nightly run."
-              exit 0
-            fi
-            NIGHTLY_TAGS_AT_START+="${package}=${tagged_version};"
-
-            if [[ -n "$published_version" ]]; then
-              if [[ "$tagged_version" != "$NIGHTLY_VERSION" ]]; then
-                echo "${package}@$NIGHTLY_VERSION exists but @nightly resolves to '${tagged_version:-nothing}'." >&2
-                exit 1
-              fi
-              continue
-            fi
-
-            ALL_PACKAGES_PUBLISHED=false
-            if [[ -n "$tagged_version" && "$tagged_version" != "$PUBLISHED_NIGHTLY" ]]; then
-              if ! TAGGED_COMMIT="$(resolve_nightly_commit "$tagged_version" "${package}@nightly")"; then
-                exit 1
-              fi
-              if ! git merge-base --is-ancestor "$TAGGED_COMMIT" "$MAIN_SHA"; then
-                echo "${package}@nightly commit $TAGGED_COMMIT is not an ancestor of scheduled main $MAIN_SHA." >&2
-                exit 1
-              fi
-              echo "${package}@nightly is an older partial publication; the current publish will repair it."
-            fi
-          done
-          echo "nightly_tags_at_start=$NIGHTLY_TAGS_AT_START" >> "$GITHUB_OUTPUT"
-          if [[ -n "$PUBLISHED_NIGHTLY" ]]; then
-            if [[ "$ALL_PACKAGES_PUBLISHED" == "true" ]]; then
-              if [[ "$PUBLISHED_COMMIT" != "$MAIN_SHA" ]]; then
-                echo "Nightly version identity does not resolve to scheduled commit $MAIN_SHA." >&2
-                exit 1
-              fi
-              echo "All Nightly packages are already published under @nightly; skipping."
-              exit 0
-            fi
-          fi
-
-          echo "should_publish=true" >> "$GITHUB_OUTPUT"
+          bash scripts/release/nightly-release.sh prepare \
+            --scheduled-sha "${{ github.sha }}" \
+            --output "$GITHUB_OUTPUT"
 
   build-web:
     name: Build web SPA
@@ -2003,43 +1888,11 @@ jobs:
           NIGHTLY_AT_START: ${{ needs.nightly-prepare.outputs.nightly_version_at_start }}
           NIGHTLY_TAGS_AT_START: ${{ needs.nightly-prepare.outputs.nightly_tags_at_start }}
         run: |
-          set -euo pipefail
-          if ! CURRENT_LATEST="$(bash scripts/release/npm-view-version.sh kandev@latest)"; then
-            echo "Could not revalidate npm @latest; skipping Nightly publication."
-            exit 0
-          fi
-          if [[ -z "$CURRENT_LATEST" ]]; then
-            echo "npm @latest is missing; skipping Nightly publication."
-            exit 0
-          fi
-          if [[ "$CURRENT_LATEST" != "$NIGHTLY_BASELINE" ]]; then
-            echo "Stable npm baseline moved from $NIGHTLY_BASELINE to $CURRENT_LATEST while this run was building; skipping stale Nightly publication."
-            exit 0
-          fi
-          if ! CURRENT_NIGHTLY="$(bash scripts/release/npm-view-version.sh kandev@nightly)"; then
-            echo "Could not revalidate npm @nightly; skipping Nightly publication."
-            exit 0
-          fi
-          if [[ "$CURRENT_NIGHTLY" != "$NIGHTLY_AT_START" ]]; then
-            echo "npm @nightly moved from ${NIGHTLY_AT_START:-nothing} to ${CURRENT_NIGHTLY:-nothing} while this run was building; skipping superseded publication."
-            exit 0
-          fi
-          source scripts/release/npm-packages.sh
-          CURRENT_NIGHTLY_TAGS=""
-          for package in "${NIGHTLY_PACKAGES[@]}"; do
-            if ! tagged_version="$(bash scripts/release/npm-view-version.sh "${package}@nightly")"; then
-              echo "Could not revalidate ${package}@nightly; skipping Nightly publication."
-              exit 0
-            fi
-            CURRENT_NIGHTLY_TAGS+="${package}=${tagged_version};"
-          done
-          if [[ "$CURRENT_NIGHTLY_TAGS" != "$NIGHTLY_TAGS_AT_START" ]]; then
-            echo "One or more npm @nightly tags moved while this run was building; skipping superseded publication."
-            exit 0
-          fi
-          bash scripts/release/publish-npm.sh \
+          bash scripts/release/nightly-release.sh publish \
+            --stable-at-start "$NIGHTLY_BASELINE" \
+            --nightly-at-start "$NIGHTLY_AT_START" \
+            --tags-at-start "$NIGHTLY_TAGS_AT_START" \
             --version "${{ needs.nightly-prepare.outputs.version }}" \
-            --dist-tag nightly \
             --assets-dir dist/nightly-assets
 
   update-homebrew-tap:
