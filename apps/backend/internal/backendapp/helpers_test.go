@@ -841,6 +841,31 @@ func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
 	}
 }
 
+func TestBootPayloadAnonymousMissingTaskDoesNotLoadHomeState(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	request := httptest.NewRequest(http.MethodGet, "/t/missing-task", nil)
+	route := webapp.ClassifyRoute("/t/missing-task")
+	payload := bootPayload(ctx, request, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		authSvc:  newSSOTestAuthService(t),
+		services: &Services{Workflow: harness.workflowSvc},
+	}, route)
+
+	if payload.RouteData != nil {
+		t.Fatalf("anonymous missing task route data = %#v, want nil", payload.RouteData)
+	}
+	if _, ok := payload.InitialState["auth"]; !ok {
+		t.Fatal("anonymous auth-enabled bootstrap should include auth state")
+	}
+	for _, key := range []string{"workspaces", "workflows", "repositories", "kanbanMulti"} {
+		if _, ok := payload.InitialState[key]; ok {
+			t.Fatalf("anonymous auth-enabled bootstrap should not include %s state", key)
+		}
+	}
+}
+
 func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()

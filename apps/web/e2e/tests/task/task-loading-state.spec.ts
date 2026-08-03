@@ -37,6 +37,7 @@ test.describe("Task loading state", () => {
 
     await testPage.goto(`/t/missing-task-route-desktop?workspaceId=${seedData.workspaceId}`);
     await expect(testPage.getByTestId("task-load-error-state")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("task-unavailable-overview-link")).toBeVisible();
 
     const sidebar = new SidebarTasksPage(testPage);
     await expect(sidebar.row(sibling.id)).toBeVisible({ timeout: 10_000 });

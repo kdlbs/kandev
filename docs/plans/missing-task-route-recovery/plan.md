@@ -39,12 +39,19 @@ list to avoid leaking stale workspace data.
   preserves URL/cookie/settings/default workspace precedence, Office-workflow
   exclusion, repository hydration, and all-workflow snapshots without adding a
   second data-loading implementation.
+- Only run that fallback for auth-disabled instances or requests carrying an
+  authenticated identity. Auth-enabled anonymous bootstrap requests must keep
+  the existing auth-only payload and must never invoke unscoped workspace or
+  task loaders.
 - Leave successful task-detail boot unchanged: its top-level initial state
   remains lean and `routeData.taskDetail.initialState` remains authoritative for
   the task's actual workspace.
 - Preserve the existing not-found/access-denied ambiguity and request identity
   when listing fallback workspaces and tasks. No unscoped service call or new
   endpoint is introduced.
+- Route-data errors remain intentionally represented by the existing generic
+  unavailable state; the client-side task fetch still retries and determines
+  whether the task can be rendered after the shell loads.
 
 ## Frontend
 
@@ -90,6 +97,9 @@ list to avoid leaking stale workspace data.
   and asserts that top-level boot state contains the selected workspace,
   workflows, and a snapshot containing the sibling while route-specific task
   data remains absent.
+- **Anonymous bootstrap guard:** assert that an auth-enabled request without a
+  request identity keeps only auth/features state and does not load workspace,
+  workflow, repository, or Kanban snapshots.
 - **Successful task boot remains lean:** extend the backend coverage to assert
   that a valid task route still provides `routeData.taskDetail` and does not
   add fallback workspace/Kanban data to the top-level initial state.
@@ -119,10 +129,14 @@ list to avoid leaking stale workspace data.
 
 ## Verification Results
 
-- Backend: `cd apps/backend && go test ./internal/backendapp -run 'TestBootPayload(MissingTaskFallsBackToHomeKanbanState|ValidTaskKeepsRouteSpecificState)$' -count=1` — 2 passed; the existing valid-detail check plus both new contracts ran with 3 passed.
-- Client: `cd apps && pnpm --filter @kandev/web exec vitest run src/task-detail-route.test.tsx` — 3 passed.
+- Backend contracts: `cd apps/backend && go test ./internal/backendapp -run '^(TestBootPayloadAnonymousMissingTaskDoesNotLoadHomeState|TestBootPayloadMissingTaskFallsBackToHomeKanbanState|TestBootPayloadValidTaskKeepsRouteSpecificState)$' -count=1` — 3 passed.
+- Anonymous regression: `cd apps/backend && go test ./internal/backendapp -run '^TestBootPayloadAnonymousMissingTaskDoesNotLoadHomeState$' -count=1` — 1 passed.
+- Client route boundary: `cd apps && pnpm --filter @kandev/web exec vitest run src/task-detail-route.test.tsx` — 3 passed.
+- Recovery-link component contract: `cd apps && pnpm --filter @kandev/web exec vitest run components/task/task-page-content.test.tsx` — 2 passed.
 - Frontend: `cd apps/web && pnpm run typecheck` — passed; `pnpm run i18n:check && pnpm run i18n:ratchet` — passed.
-- E2E: desktop sibling navigation — 1 passed; Pixel 5 overview recovery — 1 passed. The managed runner rebuilt the production Go-served Vite bundle and cleaned temporary reports.
+- Desktop E2E: `cd apps/web && pnpm e2e:run tests/task/task-loading-state.spec.ts -- --grep 'keeps sibling tasks available'` — 1 passed.
+- Mobile E2E: `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-task-loading-state.spec.ts -- --grep 'returns to task overview'` — 1 passed.
+- The managed runner rebuilt the production Go-served Vite bundle and cleaned temporary reports.
 
 ## Implementation Waves And Parallel Candidates
 

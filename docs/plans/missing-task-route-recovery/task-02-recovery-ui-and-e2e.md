@@ -30,6 +30,7 @@ phone-safe recovery path.
 - `apps/web/src/locales/en/common.json`
 - `apps/web/src/locales/pseudo/common.json`
 - `apps/web/src/task-detail-route.test.tsx`
+- `apps/web/components/task/task-page-content.test.tsx`
 - `apps/web/e2e/tests/task/task-loading-state.spec.ts`
 - `apps/web/e2e/tests/task/mobile-task-loading-state.spec.ts`
 
@@ -107,6 +108,8 @@ common catalogs. Added route-boundary, desktop, and Pixel 5 E2E coverage.
 - Desktop GREEN: `cd apps/web && pnpm e2e:run tests/task/task-loading-state.spec.ts -- --grep 'keeps sibling tasks available'` — 1 passed.
 - Mobile GREEN: `cd apps/web && pnpm e2e:run --no-build --project mobile-chrome tests/task/mobile-task-loading-state.spec.ts -- --grep 'returns to task overview'` — 1 passed.
 - Targeted Prettier and ESLint checks passed with no errors or warnings; typecheck and the i18n ratchets are clean.
+- `cd apps && pnpm exec prettier --check web/components/task/task-page-content.tsx web/components/task/task-page-content.test.tsx web/src/task-detail-route.test.tsx web/e2e/tests/task/task-loading-state.spec.ts web/e2e/tests/task/mobile-task-loading-state.spec.ts web/src/locales/en/common.json web/src/locales/pseudo/common.json` — passed.
+- `cd apps && pnpm --filter @kandev/web exec eslint components/task/task-page-content.tsx components/task/task-page-content.test.tsx src/task-detail-route.test.tsx e2e/tests/task/task-loading-state.spec.ts e2e/tests/task/mobile-task-loading-state.spec.ts` — passed with no errors or warnings.
 - The managed E2E runner rebuilt the Go backend and Vite bundle, and cleaned its temporary test-results/blob-report directories after each run; no generated artifacts are part of the change.
 
 The desktop flow keeps sibling rows usable after a cold missing-task route. The

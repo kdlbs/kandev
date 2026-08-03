@@ -23,6 +23,8 @@ workspace and sidebar snapshots without changing successful task boot.
   `routeData.taskDetail` remains absent.
 - A valid task route still uses only its route-specific task initial state and
   does not receive duplicate fallback Home state.
+- An auth-enabled anonymous request keeps its auth-only bootstrap and does not
+  invoke the fallback loaders.
 
 ## Files likely touched
 
@@ -52,14 +54,14 @@ payload behavior.
 
 1. Add a failing `helpers_test.go` regression for a missing task route with a
    real sibling task and selected workspace.
-2. Add the valid-route non-duplication assertion.
+2. Add the valid-route non-duplication and anonymous-bootstrap assertions.
 3. Implement the minimal route-data-aware fallback in `bootPayload`.
 4. Refactor only if needed to keep `bootPayload` small and explicit.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/backendapp -run 'TestBootPayload(MissingTaskFallsBackToHomeKanbanState|ValidTaskKeepsRouteSpecificState)$' -count=1
+cd apps/backend && go test ./internal/backendapp -run '^(TestBootPayloadAnonymousMissingTaskDoesNotLoadHomeState|TestBootPayloadMissingTaskFallsBackToHomeKanbanState|TestBootPayloadValidTaskKeepsRouteSpecificState)$' -count=1
 ```
 
 ## Risks
@@ -68,6 +70,8 @@ cd apps/backend && go test ./internal/backendapp -run 'TestBootPayload(MissingTa
   could expose a briefly incorrect active workspace before task hydration.
 - Fallback workspace listing must keep the request identity; bypassing the
   scoped task service would leak cross-user workspace metadata.
+- Auth-enabled anonymous requests must not reach any fallback loader because
+  identity-free task-service calls are intentionally unscoped internal calls.
 
 ## Output contract
 
@@ -89,3 +93,5 @@ The fallback reuses the existing request-scoped Home Kanban builder, so the
 active-workspace cookie/query/settings/default precedence and authorization
 boundary remain unchanged. Successful task routes retain their lean
 route-specific initial state.
+
+- Security regression: `cd apps/backend && go test ./internal/backendapp -run '^TestBootPayloadAnonymousMissingTaskDoesNotLoadHomeState$' -count=1` — 1 passed after the initial RED failure; the auth-enabled anonymous payload contains no workspace, workflow, repository, or Kanban state.

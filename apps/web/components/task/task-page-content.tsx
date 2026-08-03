@@ -154,7 +154,7 @@ function TaskLoadingState() {
   );
 }
 
-function TaskLoadErrorState() {
+export function TaskLoadErrorState() {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
 

@@ -753,7 +753,7 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
 	initialState := bootInitialState(ctx, req, p, route)
 	routeData := bootRouteData(ctx, req, p, route)
-	if route.Route == webapp.RouteTaskDetail && routeData == nil {
+	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
 		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
 	}
 	payload := webapp.NewBootPayload(
@@ -765,6 +765,17 @@ func bootPayload(ctx context.Context, req *http.Request, p routeParams, route we
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	return payload
+}
+
+func canLoadTaskDetailFallback(req *http.Request, authSvc *auth.Service) bool {
+	if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+		return true
+	}
+	if req == nil {
+		return false
+	}
+	_, ok := authn.IdentityFromContext(req.Context())
+	return ok
 }
 
 // bootActivePlugins populates the boot payload's Plugins list from every
