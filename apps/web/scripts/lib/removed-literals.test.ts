@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { accountedFor, buildCatalog, literals, looksLikeCopy } from "./removed-literals.mjs";
+import { isCandidate } from "./changed-files.mjs";
 
 /**
  * The failure this check exists for, reproduced exactly.
@@ -91,5 +92,40 @@ describe("looksLikeCopy", () => {
     ["px-1 py-0.5", false],
   ])("classifies %j as copy=%s", (value, expected) => {
     expect(looksLikeCopy(value)).toBe(expected);
+  });
+});
+
+/**
+ * Two false positives were reported from a large migration and traced to an
+ * earlier regex PROTOTYPE of this check rather than to this module. Pinned here
+ * because the reports were circulated as bugs, and the obvious "fix" for either
+ * would make the check worse: scanning catalogs would report keys as copy, and
+ * widening `{{…}}` further would weaken the rewrite detection that is the whole
+ * point.
+ */
+describe("reported false positives that this module does not have", () => {
+  it("matches a literal whose leading number moved into an interpolation", () => {
+    // Reported as "permanently unmatchable". Rule 2 turns {{…}} into a wildcard,
+    // so a placeholder at the START of the message matches just as well as an
+    // interior one.
+    expect(accountedFor("50 max", buildCatalog(["{{count}} max"]))).toBe(true);
+    expect(accountedFor("3 of 9 selected", buildCatalog(["{{count}} of {{total}} selected"]))).toBe(
+      true,
+    );
+  });
+
+  it("still reports a rewrite that only differs where a placeholder is not", () => {
+    // The guard on the rule above: a wildcard must not swallow changed prose.
+    expect(accountedFor("50 max", buildCatalog(["{{count}} maximum"]))).toBe(false);
+  });
+
+  it("never treats a catalog as a source of candidate literals", () => {
+    // Reported as "a whole-file JSON reformat floods the output with catalog
+    // KEYS". Catalogs are what the check compares *against*; `isCandidate`
+    // admits only .ts/.tsx, so reformatting one cannot produce a single
+    // candidate. Scanning them would report keys as removed copy.
+    expect(isCandidate("apps/web/src/locales/en/common.json")).toBe(false);
+    expect(isCandidate("apps/web/src/locales/pseudo/workspaces.json")).toBe(false);
+    expect(isCandidate("apps/web/components/settings/repository-card.tsx")).toBe(true);
   });
 });
