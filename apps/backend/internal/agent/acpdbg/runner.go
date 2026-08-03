@@ -170,6 +170,8 @@ func startChild(cfg RunConfig, workdir string) (*exec.Cmd, processTree, io.Write
 	}
 	tree, err := captureProcessTree(cmd)
 	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
 		return nil, processTree{}, nil, nil, nil, fmt.Errorf("contain %s: %w", cfg.Command[0], err)
 	}
 	return cmd, tree, stdin, stdout, stderr, nil
@@ -395,6 +397,12 @@ func (r *Runner) readLoop() {
 		select {
 		case r.oob <- frame:
 		case <-r.shutdownCh:
+			r.mu.Lock()
+			for id, ch := range r.pending {
+				close(ch)
+				delete(r.pending, id)
+			}
+			r.mu.Unlock()
 			return
 		}
 	}

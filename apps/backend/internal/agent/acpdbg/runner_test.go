@@ -26,7 +26,7 @@ func TestRunnerContextCancellationKillsProcessTree(t *testing.T) {
 		t.Fatalf("NewRunner: %v", err)
 	}
 
-	pid := waitForPIDFile(t, pidPath)
+	pid := 0
 	t.Cleanup(func() {
 		cancel()
 		runner.tree.kill(runner.cmd)
@@ -35,6 +35,7 @@ func TestRunnerContextCancellationKillsProcessTree(t *testing.T) {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
 	})
+	pid = waitForPIDFile(t, pidPath)
 
 	cancel()
 	closed := make(chan struct{})
@@ -73,6 +74,16 @@ func TestRunnerCloseUnblocksFullOOBQueue(t *testing.T) {
 		runner.Close("test cleanup")
 	})
 
+	requestDone := make(chan error, 1)
+	go func() {
+		_, err := runner.Request(context.Background(), Frame{
+			"jsonrpc": "2.0",
+			"id":      1,
+			"method":  "probe",
+		})
+		requestDone <- err
+	}()
+	waitForPendingRequest(t, runner)
 	waitForOOBQueue(t, runner)
 	cancel()
 	closed := make(chan struct{})
@@ -85,6 +96,14 @@ func TestRunnerCloseUnblocksFullOOBQueue(t *testing.T) {
 	case <-closed:
 	case <-time.After(3 * time.Second):
 		t.Fatal("Runner.Close remained blocked on a full OOB queue")
+	}
+	select {
+	case err := <-requestDone:
+		if err == nil {
+			t.Fatal("pending Request returned nil after runner shutdown")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending Request remained blocked after runner shutdown")
 	}
 }
 
@@ -120,6 +139,27 @@ func waitForOOBQueue(t *testing.T, runner *Runner) {
 		select {
 		case <-deadline.C:
 			t.Fatalf("timed out waiting for OOB queue to fill: %d/%d", len(runner.oob), cap(runner.oob))
+		case <-ticker.C:
+		}
+	}
+}
+
+func waitForPendingRequest(t *testing.T, runner *Runner) {
+	t.Helper()
+	deadline := time.NewTimer(3 * time.Second)
+	defer deadline.Stop()
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		runner.mu.Lock()
+		pending := len(runner.pending)
+		runner.mu.Unlock()
+		if pending > 0 {
+			return
+		}
+		select {
+		case <-deadline.C:
+			t.Fatal("timed out waiting for pending Request")
 		case <-ticker.C:
 		}
 	}
