@@ -915,15 +915,13 @@ func (m *cancelContextAgentManager) CancelAgent(ctx context.Context, sessionID s
 	return err
 }
 
-func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
+func newCancelTurnFailureFixture(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) (*Service, *cancelTurnFailureService) {
+	t.Helper()
 	ctx := context.Background()
-	repo := setupTestRepo(t)
-	taskID := "task-cancel-turn-failure"
-	sessionID := "session-cancel-turn-failure"
 	seedSession(t, repo, taskID, sessionID, "step1")
 	now := time.Now().UTC()
 	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID:            "turn-cancel-turn-failure",
+		ID:            "turn-" + sessionID,
 		TaskID:        taskID,
 		TaskSessionID: sessionID,
 		StartedAt:     now,
@@ -932,11 +930,18 @@ func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
 	}))
 
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
-	turnService := &cancelTurnFailureService{
-		repoTurnService: &repoTurnService{repo: repo},
-		completeErr:     errors.New("turn close failed"),
-	}
+	turnService := &cancelTurnFailureService{repoTurnService: &repoTurnService{repo: repo}}
 	svc.turnService = turnService
+	return svc, turnService
+}
+
+func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-turn-failure"
+	sessionID := "session-cancel-turn-failure"
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
+	turnService.completeErr = errors.New("turn close failed")
 
 	err := svc.CancelAgent(ctx, sessionID)
 	require.Error(t, err)
@@ -964,24 +969,9 @@ func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-active-turn-inspection-failure"
 	sessionID := "session-cancel-active-turn-inspection-failure"
-	seedSession(t, repo, taskID, sessionID, "step1")
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
-	now := time.Now().UTC()
-	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID:            "turn-cancel-active-turn-inspection-failure",
-		TaskID:        taskID,
-		TaskSessionID: sessionID,
-		StartedAt:     now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}))
-
-	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
-	turnService := &cancelTurnFailureService{
-		repoTurnService: &repoTurnService{repo: repo},
-		activeErr:       errors.New("active turn lookup failed"),
-	}
-	svc.turnService = turnService
+	turnService.activeErr = errors.New("active turn lookup failed")
 
 	err := svc.CancelAgent(ctx, sessionID)
 	require.Error(t, err)
