@@ -23,7 +23,10 @@ export default async function SystemBackupsPage() {
     <StateProvider initialState={initialState}>
       <SystemPageShell
         title={t("system:navBackups")}
-        description={t("system:backupsPageDescription")}
+        description={t("system:backupsPageDescription", {
+          command: "VACUUM INTO",
+          path: "<data-dir>/backups/",
+        })}
       >
         <BackupsTable />
       </SystemPageShell>

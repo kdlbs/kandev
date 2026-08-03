@@ -30,7 +30,7 @@
   "backupsKindAuto": "auto",
   "backupsKindManual": "manual",
   "backupsLoading": "Loading backups...",
-  "backupsPageDescription": "VACUUM INTO snapshots stored under <data-dir>/backups/.",
+  "backupsPageDescription": "{{command}} snapshots stored under {{path}}.",
   "backupsRestoreLabel": "Restore {{name}}",
   "backupsRetention_one": "Only the latest backup is kept on disk.",
   "backupsRetention_other": "Only the latest {{count}} backups are kept on disk.",

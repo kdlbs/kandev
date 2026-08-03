@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { Trans, useTranslation } from "react-i18next";
+import { Trans } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
@@ -59,6 +59,11 @@ import { HealthIssuesCard } from "@/components/settings/system/health-issues-car
 import { LicensesList } from "@/components/settings/system/licenses-list";
 import { LogViewer } from "@/components/settings/system/log-viewer";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
+import {
+  BACKUP_DIR,
+  BACKUP_SQL_COMMAND,
+  SystemRouteShell,
+} from "@/components/settings/system/system-route-shell";
 import { UIStateCard } from "@/components/settings/system/ui-state-card";
 import { UpdatesCard } from "@/components/settings/system/updates-card";
 import { VersionSummaryCard } from "@/components/settings/system/version-summary-card";
@@ -191,7 +196,11 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemRouteShell>
   ),
   "/settings/system/backups": () => (
-    <SystemRouteShell titleKey="system:navBackups" descriptionKey="system:backupsPageDescription">
+    <SystemRouteShell
+      titleKey="system:navBackups"
+      descriptionKey="system:backupsPageDescription"
+      descriptionValues={{ command: BACKUP_SQL_COMMAND, path: BACKUP_DIR }}
+    >
       <BackupsTable />
     </SystemRouteShell>
   ),
@@ -424,29 +433,6 @@ function UpdatesRoute() {
       </p>
       <UpdatesCard />
     </SystemRouteShell>
-  );
-}
-
-/**
- * The nine System routes share this shell. Titles and descriptions travel as
- * catalog keys rather than resolved strings because `SETTINGS_ROUTES` is a
- * SCREAMING_CASE identifier, which `i18next/no-literal-string` skips entirely —
- * the literals it replaced were invisible to lint and to the new-code ratchet.
- */
-function SystemRouteShell({
-  titleKey,
-  descriptionKey,
-  children,
-}: {
-  titleKey: string;
-  descriptionKey: string;
-  children: ReactNode;
-}) {
-  const { t } = useTranslation();
-  return (
-    <SystemPageShell title={t(titleKey)} description={t(descriptionKey)}>
-      {children}
-    </SystemPageShell>
   );
 }
 

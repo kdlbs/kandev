@@ -30,7 +30,7 @@
   "backupsKindAuto": "àũţō",
   "backupsKindManual": "ḿàńũàĺ",
   "backupsLoading": "Ĺōàďĩńĝ ƀàćķũƥś...",
-  "backupsPageDescription": "VÀĆŨŨḾ ĨŃŢŌ śńàƥśĥōţś śţōŕēď ũńďēŕ <ďàţà-ďĩŕ>/ƀàćķũƥś/.",
+  "backupsPageDescription": "{{command}} śńàƥśĥōţś śţōŕēď ũńďēŕ {{path}}.",
   "backupsRestoreLabel": "Ŕēśţōŕē {{name}}",
   "backupsRetention_one": "Ōńĺŷ ţĥē ĺàţēśţ ƀàćķũƥ ĩś ķēƥţ ōń ďĩśķ.",
   "backupsRetention_other": "Ōńĺŷ ţĥē ĺàţēśţ {{count}} ƀàćķũƥś àŕē ķēƥţ ōń ďĩśķ.",

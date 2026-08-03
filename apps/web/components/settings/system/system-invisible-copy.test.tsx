@@ -1,6 +1,6 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { activateLocale } from "@/lib/i18n";
+import { activateLocale, t } from "@/lib/i18n";
 import type { HealthCheckSummary, HealthIssue } from "@/lib/types/health";
 import { HealthIssuesCard } from "./health-issues-card";
 import { JobProgressIndicator } from "./job-progress-indicator";
@@ -158,6 +158,24 @@ describe("copy the guard cannot see, under the pseudo-locale", () => {
       expect(screen.getByTestId("system-job-vacuum").textContent).toMatch(ACCENTED);
       cleanup();
     }
+  });
+
+  /**
+   * The Backups description carries a SQL statement and a filesystem path. Baked
+   * into the message they render `VÀĆŨŨḾ ĨŃŢŌ` and `<ďàţà-ďĩŕ>/ƀàćķũƥś/` — a
+   * command the user runs and a directory they have to find, both turned into
+   * dead pointers. They are interpolated as values instead, so the frame
+   * accents and they do not.
+   */
+  it("keeps the backup SQL command and path literal inside a translated frame", () => {
+    const description = t("system:backupsPageDescription", {
+      command: "VACUUM INTO",
+      path: "<data-dir>/backups/",
+    });
+    expect(description).toContain("VACUUM INTO");
+    expect(description).toContain("<data-dir>/backups/");
+    // The surrounding sentence is still translated.
+    expect(description).toMatch(ACCENTED);
   });
 
   it("accents every System nav label", () => {
