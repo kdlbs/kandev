@@ -207,8 +207,11 @@
  *                             partial-update config-options preservation
  *                             decision (preserveConfigOptions).
  *     [model-selector:gate]   ModelSelector render gate — configHydrated,
- *                             currentModel, hasModelConfig, configOptionIds,
- *                             and willHide (the exact gate expression).
+ *                             currentModel, hasModelConfig, configOptionIds
+ *                             (usable/filtered), rawConfigOptionIds (unfiltered
+ *                             store entry), requiredKeys (keys the session's
+ *                             profile/runtime config demand), and willHide (the
+ *                             exact gate expression).
  *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions

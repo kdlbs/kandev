@@ -43,7 +43,9 @@ function configValueKeys(value: unknown): string[] {
     .map(([key]) => key);
 }
 
-function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
+const MODEL_CONFIG_KEY = "model";
+
+export function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): string[] {
   if (!session) return [];
   const keys = new Set(configValueKeys(session.agent_profile_snapshot?.config_options));
   for (const agent of agents) {
@@ -62,7 +64,7 @@ function requiredConfigKeys(session: TaskSession | null, agents: Agent[]): strin
   return [...keys];
 }
 
-function hasCompleteDynamicConfig(
+export function hasCompleteDynamicConfig(
   session: TaskSession | null,
   sessionModelsData: SessionModelsEntry | undefined,
   agents: Agent[],
@@ -71,7 +73,16 @@ function hasCompleteDynamicConfig(
   if (required.length === 0) return true;
   if (!sessionModelsData) return false;
   const available = new Set(sessionModelsData.configOptions.map((option) => option.id));
-  return required.every((key) => available.has(key));
+  // Flat-model-list agents (e.g. claude-opus) expose their models via the ACP
+  // top-level `models` list and switch with session/set_model rather than a
+  // SessionConfigOption(category="model"). For those the persisted runtime
+  // config still records a "model" key, but it will never appear in
+  // configOptions. Treat that key as satisfied when the session has a flat model
+  // list — the selector renders fine from it.
+  const hasFlatModelList = !!sessionModelsData.models.length;
+  return required.every(
+    (key) => available.has(key) || (key === MODEL_CONFIG_KEY && hasFlatModelList),
+  );
 }
 
 function resolveSessionState(
@@ -341,6 +352,8 @@ function useModelSelectorState(sessionId: string | null) {
     configOptions,
     configBaseline: sessionModelsData?.configBaseline,
     configHydrated: hasCompleteDynamicConfig(session, sessionModelsData, settingsAgents as Agent[]),
+    requiredKeys: requiredConfigKeys(session, settingsAgents as Agent[]),
+    rawConfigOptionIds: (sessionModelsData?.configOptions ?? []).map((o) => o.id),
     handleModelChange,
     handleConfigChange,
   };
@@ -356,6 +369,8 @@ export const ModelSelector = memo(function ModelSelector({
     configOptions,
     configBaseline,
     configHydrated,
+    requiredKeys,
+    rawConfigOptionIds,
     handleModelChange,
     handleConfigChange,
   } = useModelSelectorState(sessionId);
@@ -385,6 +400,8 @@ export const ModelSelector = memo(function ModelSelector({
       hasModelConfig: !!modelConfig,
       modelOptionsLen: modelOptions.length,
       configOptionIds: configOptions.map((o) => o.id),
+      rawConfigOptionIds,
+      requiredKeys,
       willHide: !sessionId || !configHydrated || (!currentModel && !modelConfig),
     });
   }

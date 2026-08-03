@@ -4,7 +4,12 @@ import {
   type ModelSelectorOption,
   usableConfigOptions,
 } from "@/components/model-config-selector";
-import type { ConfigOptionEntry } from "@/lib/state/slices/session-runtime/types";
+import { hasCompleteDynamicConfig, requiredConfigKeys } from "@/components/task/model-selector";
+import type { Agent, TaskSession } from "@/lib/types/http";
+import type {
+  ConfigOptionEntry,
+  SessionModelEntry,
+} from "@/lib/state/slices/session-runtime/types";
 
 function compactTriggerLabel(
   modelOptions: ModelSelectorOption[],
@@ -176,5 +181,101 @@ describe("task model selector compact label", () => {
     });
 
     expect(label).toBe(`${providerModelName} / Off`);
+  });
+});
+
+function makeSession(overrides: Partial<TaskSession> = {}): TaskSession {
+  return {
+    id: "session-1",
+    task_id: "task-1",
+    state: "RUNNING",
+    started_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  } as TaskSession;
+}
+
+const flatModelId = "claude-opus-4-8";
+
+function flatModelEntries(): SessionModelEntry[] {
+  return [
+    { modelId: flatModelId, name: "Claude Opus 4.8" },
+    { modelId: "claude-sonnet-4-8", name: "Claude Sonnet 4.8" },
+  ];
+}
+
+describe("hasCompleteDynamicConfig", () => {
+  const noAgents: Agent[] = [];
+
+  it("treats a required model key as satisfied by a flat ACP model list", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: flatModelId } } },
+    });
+    expect(requiredConfigKeys(session, noAgents)).toEqual(["model"]);
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      { currentModelId: flatModelId, models: flatModelEntries(), configOptions: [] },
+      noAgents,
+    );
+
+    expect(hydrated).toBe(true);
+  });
+
+  it("still requires the model config option when there is no flat model list", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId } } },
+    });
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      { currentModelId: providerModelId, models: [], configOptions: [] },
+      noAgents,
+    );
+
+    expect(hydrated).toBe(false);
+  });
+
+  it("hydrates a config-option agent once the model option is present", () => {
+    const session = makeSession({
+      metadata: { runtime_config: { config_options: { model: providerModelId } } },
+    });
+
+    const modelOption: ConfigOptionEntry = {
+      type: "select",
+      id: "model",
+      name: "Model",
+      currentValue: providerModelId,
+      category: "model",
+      options: [{ value: providerModelId, name: providerModelName }],
+    };
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      { currentModelId: providerModelId, models: [], configOptions: [modelOption] },
+      noAgents,
+    );
+
+    expect(hydrated).toBe(true);
+  });
+
+  it("does not let a flat model list satisfy a non-model required key", () => {
+    const session = makeSession({
+      metadata: {
+        runtime_config: { config_options: { model: flatModelId, reasoning_effort: "high" } },
+      },
+    });
+
+    const hydrated = hasCompleteDynamicConfig(
+      session,
+      { currentModelId: flatModelId, models: flatModelEntries(), configOptions: [] },
+      noAgents,
+    );
+
+    expect(hydrated).toBe(false);
+  });
+
+  it("is hydrated when there are no required config keys", () => {
+    expect(hasCompleteDynamicConfig(makeSession(), undefined, noAgents)).toBe(true);
   });
 });
