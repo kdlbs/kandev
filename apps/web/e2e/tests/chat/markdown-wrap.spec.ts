@@ -112,47 +112,62 @@ test.describe("Markdown text wrapping", () => {
     await expectNoMarkdownOverflow(testPage);
   });
 
-  test("long value cells wrap inside a readable two-column table at 320px", async ({
+  test("ordinary two-column tables wrap instead of scrolling at the 255px chat width", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     test.setTimeout(90_000);
-    await testPage.setViewportSize({ width: 320, height: 800 });
+    await testPage.setViewportSize({ width: 303, height: 800 });
 
-    const marker = "Long table value marker";
+    const marker = "dependency lifecycle scripts";
     const session = await openTaskWithMarkdown(testPage, apiClient, seedData, {
-      title: "Wrap Long Table Value",
+      title: "Wrap Pnpm Settings Table",
       kind: "message",
       text: [
-        "| Field | Value |",
+        "| pnpm setting | Effect |",
         "| --- | --- |",
-        `| Failing checks | ${LONG_WORD} ${marker} |`,
+        "| default (pnpm 10+) | dependency lifecycle scripts **off** unless approved |",
+        "| `strictDepBuilds: true` | install **fails** if a dep wants a build and isn't allowlisted |",
+        "| `allowBuilds.esbuild: true` | only then may esbuild's postinstall run |",
       ].join("\\n"),
     });
 
-    const markdown = session.activeChat().locator(".markdown-body", { hasText: marker });
-    const table = markdown.locator("table");
+    const table = session
+      .activeChat()
+      .locator(".markdown-body", { hasText: marker })
+      .locator("table");
+    const markdown = table.locator(
+      "xpath=ancestor::div[contains(concat(' ', normalize-space(@class), ' '), ' markdown-body ')]",
+    );
     const tableWrapper = table.locator("xpath=..");
-    const valueCell = table.locator("tbody td").nth(1);
+    const firstColumnCode = table.locator("tbody tr").nth(1).locator("td").first().locator("code");
 
     await expect(table).toBeVisible({ timeout: 30_000 });
-    await expect(valueCell).toContainText(marker);
+    expect(await tableWrapper.evaluate((element) => element.clientWidth)).toBe(255);
     expect(
-      await valueCell.evaluate((cell) => {
+      await firstColumnCode.evaluate((code) => {
         const range = document.createRange();
-        range.selectNodeContents(cell);
+        range.selectNodeContents(code);
         return range.getClientRects().length;
       }),
     ).toBeGreaterThan(1);
     expect(
-      await table.evaluate(
-        (element) => element.scrollWidth <= element.parentElement!.clientWidth + 1,
-      ),
+      await tableWrapper.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+    expect(await table.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(
+      true,
+    );
+    expect(
+      await markdown.evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
+    ).toBe(true);
+    expect(
+      await session
+        .activeChat()
+        .evaluate((element) => element.scrollWidth <= element.clientWidth + 1),
     ).toBe(true);
     await expectNoMarkdownOverflow(testPage);
     await expectNoDocumentOverflow(testPage);
-    await expect(tableWrapper).toBeVisible();
   });
 
   test("wide tables keep readable columns and scroll internally at 320px", async ({
