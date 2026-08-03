@@ -112,6 +112,10 @@ required screenshot embedding in step 7 is complete.
      entries: `test -s apps/web/.pr-assets/manifest.json`. If it is absent or
      lacks the capture, do not treat the run as successful; rerun with `--host`
      and report the managed-runner gap.
+   - Before inspecting, compressing, or publishing the assets, verify that every
+     manifest entry maps to an existing file under `apps/web/.pr-assets`. If any
+     entry is missing, treat the capture as incomplete and restore or recapture
+     the asset; revalidate the complete mapping immediately before publication.
    - If required assets are missing, run the Playwright capture before
      publication; do not create the PR first.
    - For a mobile capture through `pnpm e2e:run`, select the runner project

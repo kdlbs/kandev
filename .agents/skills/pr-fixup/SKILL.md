@@ -82,6 +82,12 @@ to wait or monitor.
 Treat a poller's unresolved/pending snapshot as provisional: it can predate a
 primary-session push or thread resolution. Re-run `scripts/pr-state --summary
 <PR>` at the current head before acting on it or declaring completion.
+If a job remains pending beyond the workflow's configured timeout, or its status
+conflicts with the GitHub UI/API, query the exact job with
+`gh api repos/<owner>/<repo>/actions/jobs/<job_id>` (or inspect the run with
+`gh run view <run_id>`) before calling CI hung or changing code. Treat the direct
+result as current-head evidence only after its `head_sha` matches
+`checks_head_sha`; otherwise report the result as stale or unknown.
 
 For a cross-repository PR whose current-head snapshot is unexpectedly sparse,
 inspect `approval_required_runs`. A current-head workflow with
@@ -135,6 +141,11 @@ editing. If it is a stale test expectation, the smallest valid remediation may
 be a test-only assertion update: keep it limited to the reported failure, run
 the focused test, and call out that scope. Do not change unrelated production
 behavior or duplicate a larger sibling change.
+When a remediation changes a documented behavior or contract, update the
+authoritative spec or guidance in the same change and keep the regression test
+and verification commands aligned with that contract. Re-check the affected
+documentation before declaring the fix complete; record why no update is
+needed when the behavior remains internal.
 
 ## 3. Triage And Address Reviews
 
@@ -160,8 +171,13 @@ remediation, report them or obtain separate confirmation before replying or
 resolving them.
 
 After an authorized fix is pushed, use the atomic helper path
-`scripts/pr-resolve reply <PR> <comment_id> <thread_id> "<body>"` to reply,
-resolve, and react in one operation. Then rerun
+`scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>` to
+reply, resolve, and react in one operation when the body contains Markdown or
+shell metacharacters. For short plain-text bodies, a safely quoted argument is
+acceptable. Never interpolate review text into an unquoted shell command or
+use backticks in the command itself. After the helper returns, re-fetch the
+thread and verify the posted reply body before treating the write as complete.
+Then rerun
 `scripts/pr-resolve list <PR>` and the exact-head `scripts/pr-state --summary
 <PR>` check before reporting.
 
