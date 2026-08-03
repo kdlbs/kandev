@@ -19,6 +19,12 @@ test.describe("mobile quick terminal", () => {
         element.nextElementSibling?.getAttribute("data-testid"),
       ),
     ).toBe("mobile-quick-chat-button");
+    for (const button of [terminalButton, quickChatButton]) {
+      const buttonBox = await button.boundingBox();
+      expect(buttonBox).not.toBeNull();
+      expect(buttonBox!.width).toBeGreaterThanOrEqual(44);
+      expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+    }
 
     await terminalButton.tap();
     const dialog = testPage.getByRole("dialog", { name: QUICK_TERMINAL_TITLE });

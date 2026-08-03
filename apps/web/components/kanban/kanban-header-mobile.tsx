@@ -96,8 +96,8 @@ function MobileHeaderActions({
           variant="outline"
           size="icon-lg"
           onClick={handleOpenQuickChat}
-          className="cursor-pointer"
-          aria-label={t("common:commandQuickChat")}
+          className="!size-11 cursor-pointer"
+          aria-label={t("sidebar:quickChat")}
           data-testid="mobile-quick-chat-button"
         >
           <IconMessageCircle className="h-4 w-4" />

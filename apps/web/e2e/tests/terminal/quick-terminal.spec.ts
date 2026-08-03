@@ -69,10 +69,12 @@ test.describe("quick terminal", () => {
       ),
     ).toBe("tablet-quick-chat-button");
 
-    const buttonBox = await terminalButton.boundingBox();
-    expect(buttonBox).not.toBeNull();
-    expect(buttonBox!.width).toBeGreaterThanOrEqual(44);
-    expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+    for (const button of [terminalButton, quickChatButton]) {
+      const buttonBox = await button.boundingBox();
+      expect(buttonBox).not.toBeNull();
+      expect(buttonBox!.width).toBeGreaterThanOrEqual(44);
+      expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+    }
 
     await terminalButton.click();
     const dialog = testPage.getByRole("dialog", { name: QUICK_TERMINAL_TITLE });

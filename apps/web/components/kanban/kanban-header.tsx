@@ -165,7 +165,7 @@ function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
         variant="outline"
         size="icon-lg"
         onClick={handleOpenQuickChat}
-        className="cursor-pointer"
+        className="!size-11 cursor-pointer"
         aria-label={t("sidebar:quickChat")}
         data-testid="tablet-quick-chat-button"
       >

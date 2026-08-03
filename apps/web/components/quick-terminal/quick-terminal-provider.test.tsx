@@ -31,10 +31,17 @@ function Launcher() {
   );
 }
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("QuickTerminalProvider", () => {
   it("opens one lazy host-shell dialog in the quick presentation and closes it", async () => {
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      callback(0);
+      return 0;
+    });
     render(
       <QuickTerminalProvider>
         <Launcher />
@@ -43,12 +50,21 @@ describe("QuickTerminalProvider", () => {
 
     expect(screen.queryByTestId("quick-terminal-dialog")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "launch" }));
+    const launcher = screen.getByRole("button", { name: "launch" });
+    launcher.focus();
+    fireEvent.click(launcher);
 
     const dialog = await screen.findByTestId("quick-terminal-dialog");
     expect(dialog.getAttribute("data-variant")).toBe("quick");
 
     fireEvent.click(screen.getByRole("button", { name: "close" }));
     expect(screen.queryByTestId("quick-terminal-dialog")).toBeNull();
+    expect(document.activeElement).toBe(launcher);
+  });
+
+  it("throws when the launcher is rendered outside its provider", () => {
+    expect(() => render(<Launcher />)).toThrow(
+      "useQuickTerminalLauncher must be used within QuickTerminalProvider",
+    );
   });
 });

@@ -182,16 +182,12 @@ function mountSession(args: MountArgs): () => void {
   args.termRef.current = term.term;
   args.fitRef.current = term.fit;
   let cancelled = false;
-  // AbortController cancels an in-flight start POST so React StrictMode's
-  // double-mount can't leave a half-spawned session behind.
-  const startAbort = new AbortController();
 
   void (async () => {
     try {
-      const sess = await args.startSession(
-        { cols: term.term.cols, rows: term.term.rows },
-        { init: { signal: startAbort.signal } },
-      );
+      // Let the start request settle after unmount so a session spawned before
+      // the response arrives can still be stopped by the cancelled branch.
+      const sess = await args.startSession({ cols: term.term.cols, rows: term.term.rows });
       if (cancelled) {
         await stopAgentLogin(sess.session_id);
         return;
@@ -228,7 +224,6 @@ function mountSession(args: MountArgs): () => void {
 
   return () => {
     cancelled = true;
-    startAbort.abort();
     resizeObs.disconnect();
     dataDisp.dispose();
     if (args.sessionIDRef.current) {
