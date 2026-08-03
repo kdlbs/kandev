@@ -520,4 +520,45 @@ export const i18nGuardFiles = [
   "components/model-config-selector.tsx",
   "components/settings/host-shell-dialog.tsx",
   "components/settings/pty-terminal-dialog.tsx",
+  // Settings → System → Storage: the route and the whole
+  // `components/settings/system/storage` directory, plus the page's own hook.
+  // The other eight System routes and the cards they render from
+  // `components/settings/system/*.tsx` are NOT migrated, which is why this stops
+  // at the `storage/` subdirectory.
+  //
+  // Four `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects them;
+  // the entries record that they are migrated and only the pseudo-locale can
+  // prove it stays that way. `use-storage-maintenance.ts` is the load-bearing
+  // one — it owns nine toast titles and the refresh-error message, none of which
+  // lint can ever see. It imports the module-level `t` rather than the hook so
+  // each string resolves when the callback fires. `storage-quarantine.ts` and
+  // `storage-totals.ts` carry no copy (the first now formats its deadline
+  // through `lib/i18n/formats` instead of the browser locale).
+  //
+  // Deliberately left in English, none of it copy:
+  //   - The type-to-confirm phrases `DEDICATED` / `ADOPT` / `DELETE` /
+  //     `DELETE ELIGIBLE` / `DELETE ALL NOW` in `storage-confirmation-dialogs`.
+  //     They are a string-literal union compared with `===` to enable the
+  //     confirm button, so translating one makes that dialog impossible to
+  //     satisfy. They travel as an interpolated value into both the visible
+  //     sentence and the input's aria-label.
+  //   - `storage-units.ts` in full. `B` / `GB`, `-` and `<0.01 GB` are units and
+  //     numeric formatting, not prose, which is why it is absent from this list
+  //     rather than listed with a note.
+  //   - `run.state` and `run.trigger` in `storage-run-history.tsx`. They are raw
+  //     API enum tokens rendered verbatim beside the run's raw JSON result —
+  //     `skipped_busy` is the proof — so they are values, not copy.
+  //   - Every filesystem path: the adopted/managed Go cache paths, the quarantine
+  //     `original_path` / `quarantine_path`, the Docker host, and the
+  //     `/root/.cache/go-build` placeholder. All are interpolated as values so
+  //     the pseudo-locale cannot turn them into dead pointers.
+  //   - `StorageBusyResource.label`, which the backend renders.
+  "app/settings/system/storage/**/*.{ts,tsx}",
+  "components/settings/system/storage/**/*.{ts,tsx}",
+  "hooks/domains/system/use-storage-maintenance.ts",
+  // The shell every System route renders. It takes title/description/actions as
+  // props and holds no literals of its own, so listing it costs nothing today
+  // and pins that contract for the sibling migration of the other eight routes,
+  // which will land their copy on top of it.
+  "components/settings/system/system-page-shell.tsx",
 ];

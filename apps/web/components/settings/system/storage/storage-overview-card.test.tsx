@@ -1,6 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { formatDateTime } from "@/lib/i18n/formats";
 import type { StorageOverviewResponse } from "@/lib/types/system";
 import { StorageOverviewCard } from "./storage-overview-card";
 
@@ -64,7 +65,11 @@ describe("StorageOverviewCard", () => {
     const timestamp = screen.getByText("Last analyzed 2m ago");
     expect(timestamp.tagName).toBe("TIME");
     expect(timestamp.getAttribute("dateTime")).toBe(analyzedAt);
-    expect(timestamp.getAttribute("title")).toBe(new Date(analyzedAt).toLocaleString());
+    // The absolute time follows the active i18next locale, not the browser's.
+    expect(timestamp.getAttribute("title")).toBe(formatDateTime(analyzedAt));
+    expect(timestamp.getAttribute("aria-label")).toBe(
+      `Last analyzed ${formatDateTime(analyzedAt)}`,
+    );
     vi.useRealTimers();
   });
 
