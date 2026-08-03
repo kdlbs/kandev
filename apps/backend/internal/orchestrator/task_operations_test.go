@@ -1003,7 +1003,9 @@ func TestCancelAgent_SurvivesCallerCancellationDuringWaitingRetry(t *testing.T) 
 		cancel:           cancel,
 	}
 
-	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	err := svc.CancelAgent(ctx, sessionID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), sessionID))
 	task, err := repo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
 	assert.Equal(t, "step2", task.WorkflowStepID)
@@ -1278,6 +1280,30 @@ func TestCancelAgent_DoesNotReconcileSuccessorTurn(t *testing.T) {
 	assert.Equal(t, models.TaskSessionStateRunning, session.State)
 }
 
+func TestCancelAgent_SurvivesCallerCancellationAfterAdmission(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-caller-disconnect"
+	sessionID := "session-cancel-caller-disconnect"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := &cancelContextAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		cancel:           cancel,
+	}
+	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
+
+	err := svc.CancelAgent(ctx, sessionID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), sessionID))
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+}
+
 // TestCancelAgent_DeduplicatesConcurrentCalls covers the impatient-user case:
 // the UI's cancel button has no in-flight disable, so users click it multiple
 // times while the agent is still tearing down a slow turn (e.g. a Claude
@@ -1446,7 +1472,8 @@ func TestCancelAgent_SurvivesCallerCancellation(t *testing.T) {
 	cancel()
 	close(agentMgr.cancelAgentBlock)
 
-	require.NoError(t, <-done)
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), "session1"))
 }
 
 func cancellationPendingEvents(recorded *recordingEventBus) []recordedEvent {

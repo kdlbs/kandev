@@ -871,6 +871,56 @@ func TestHandleAgentBootReady_DoesNotDrainForTerminalSession(t *testing.T) {
 	}
 }
 
+func TestHandleAgentBootReady_WaitsForNonCancellationGuardHolder(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	if err := repo.UpdateTaskSessionState(ctx, "s1", models.TaskSessionStateStarting, ""); err != nil {
+		t.Fatalf("set session starting: %v", err)
+	}
+
+	log := testLogger()
+	svc := &Service{
+		logger:       log,
+		repo:         repo,
+		taskRepo:     newMockTaskRepo(),
+		agentManager: &mockAgentManager{repoForExecutionLookup: repo},
+		messageQueue: messagequeue.NewServiceMemory(log),
+	}
+
+	lock, release := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+	handlerDone := make(chan struct{})
+	go func() {
+		svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+		close(handlerDone)
+	}()
+
+	select {
+	case <-handlerDone:
+		lock.Unlock()
+		release()
+		t.Fatal("boot-ready was dropped while a non-cancellation stream handler held the guard")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	lock.Unlock()
+	release()
+	select {
+	case <-handlerDone:
+	case <-time.After(time.Second):
+		t.Fatal("boot-ready did not resume after the guard was released")
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	if session.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %q, want %q", session.State, models.TaskSessionStateWaitingForInput)
+	}
+}
+
 func TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

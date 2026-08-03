@@ -243,15 +243,20 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	if !lock.TryLock() {
-		// Boot-ready has no turn-completion work to recover if it loses the
-		// admission race. A stream or cancellation owner will either persist
-		// the authoritative state or leave a later ready/drain event to retry;
-		// never block a cancellation caller on this advisory boot signal.
-		release()
-		s.logger.Debug("ignoring agent.boot_ready while session guard is busy",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID))
-		return
+		if s.isCancelInFlight(data.SessionID) {
+			// Cancellation owns reconciliation and intentionally holds the guard
+			// until it has settled the session. Never make it wait for this stale
+			// boot signal.
+			release()
+			s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		// Stream metadata also uses this guard, but boot-ready is a one-shot
+		// lifecycle signal. Wait for ordinary stream persistence to finish
+		// instead of dropping the only event that can settle a booted session.
+		lock.Lock()
 	}
 	guardLocked := true
 	defer func() {
