@@ -19,6 +19,7 @@ on:
       - "scripts/release/nightly-release.test.mjs"
       - "scripts/release/npm-view-version.sh"
       - "scripts/release/npm-view-version.test.mjs"
+      - "scripts/release/package-npm-runtime.sh"
       - "scripts/release/publish-npm.sh"
       - "scripts/release/publish-npm.test.mjs"
   pull_request:
@@ -39,6 +40,7 @@ on:
       - "scripts/release/nightly-release.test.mjs"
       - "scripts/release/npm-view-version.sh"
       - "scripts/release/npm-view-version.test.mjs"
+      - "scripts/release/package-npm-runtime.sh"
       - "scripts/release/publish-npm.sh"
       - "scripts/release/publish-npm.test.mjs"
 

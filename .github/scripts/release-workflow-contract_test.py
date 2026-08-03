@@ -401,6 +401,7 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIsNotNone(trigger_block)
             self.assertIn('".github/release-signing-key.asc"', trigger_block.group(0))
             self.assertIn('"docs/public/release-process.md"', trigger_block.group(0))
+            self.assertIn('"scripts/release/package-npm-runtime.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/publish-npm.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/publish-npm.test.mjs"', trigger_block.group(0))
             self.assertIn('"scripts/release/npm-packages.sh"', trigger_block.group(0))
