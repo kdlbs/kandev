@@ -97,7 +97,9 @@ describe("subagentMetaChips tool-count de-duplication", () => {
   });
 
   it("keeps the tools chip when no children were rendered at all", () => {
-    expect(subagentMetaChips({ tool_use_count: 0 })).toEqual([{ label: "tools", value: "0 tools" }]);
+    expect(subagentMetaChips({ tool_use_count: 0 })).toEqual([
+      { label: "tools", value: "0 tools" },
+    ]);
   });
 
   // The card always passes a numeric childCount, so a zero-tool subagent hits

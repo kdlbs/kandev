@@ -27,7 +27,6 @@ type TurnGroupMessageProps = {
   onScrollToMessage?: (messageId: string) => void;
 };
 
-
 function getActiveGroupDescription(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];

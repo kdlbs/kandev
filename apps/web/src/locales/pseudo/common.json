@@ -72,5 +72,8 @@
   "system": "Śŷśţēḿ",
   "title": "Ţĩţĺē",
   "workspace": "Ŵōŕķśƥàćē",
-  "workspaces": "Ŵōŕķśƥàćēś"
+  "workspaces": "Ŵōŕķśƥàćēś",
+  "activeSubagents_one": "{{count}} śũƀàĝēńţ ŕũńńĩńĝ",
+  "activeSubagents_other": "{{count}} śũƀàĝēńţś ŕũńńĩńĝ",
+  "openFullPage": "Ōƥēń ƒũĺĺ ƥàĝē"
 }

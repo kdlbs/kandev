@@ -111,11 +111,11 @@ describe("renderSubagentCountChip", () => {
   });
 
   it("labels the chip with a pluralized count for assistive tech", () => {
-    expect(renderToStaticMarkup(renderSubagentCountChip(task({ activeSubagentCount: 1 })))).toContain(
-      "1 subagent running",
-    );
-    expect(renderToStaticMarkup(renderSubagentCountChip(task({ activeSubagentCount: 2 })))).toContain(
-      "2 subagents running",
-    );
+    expect(
+      renderToStaticMarkup(renderSubagentCountChip(task({ activeSubagentCount: 1 }))),
+    ).toContain("1 subagent running");
+    expect(
+      renderToStaticMarkup(renderSubagentCountChip(task({ activeSubagentCount: 2 }))),
+    ).toContain("2 subagents running");
   });
 });
