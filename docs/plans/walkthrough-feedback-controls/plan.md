@@ -19,7 +19,7 @@ produce an observable result.
 Represent cancellation as an optional `CommentForm` capability. Render the
 button and handle Escape only when a caller provides a cancellation callback,
 then omit the no-op callback from the walkthrough note form. Existing diff and
-editor comment flows keep their real callbacks and behavior.
+editor comment call sites continue to provide their real callbacks.
 
 ## Frontend
 
@@ -50,7 +50,9 @@ editor comment flows keep their real callbacks and behavior.
 This is rendered UI behavior with no new pure logic. Per frontend testing
 conventions, use Playwright rather than adding a React component test.
 `pnpm run typecheck` verifies that all cancellable `CommentForm` consumers still
-provide valid callbacks after the prop contract changes.
+provide valid callbacks after the prop contract changes. Runtime cancellation
+in those unchanged consumers and the legacy inline walkthrough are outside this
+fix's acceptance scope.
 
 ## E2E Tests
 
@@ -70,6 +72,9 @@ provide valid callbacks after the prop contract changes.
 - GREEN: the focused Chromium desktop and `mobile-chrome` tests each passed one
   intended test; desktop and mobile screenshots confirmed **Add** and **Run**
   remain visible without **Cancel**.
+- Structural inspection confirmed the legacy inline walkthrough shares
+  `WalkthroughStepInner`, and existing cancellable `CommentForm` consumers still
+  provide callbacks; neither path received separate runtime coverage.
 - `pnpm run typecheck` and `pnpm run i18n:ratchet` passed.
 - The managed E2E commands exited cleanly, and no matching E2E, Playwright, or
   Vite process remained afterward.

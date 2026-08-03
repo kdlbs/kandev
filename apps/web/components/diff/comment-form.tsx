@@ -37,7 +37,7 @@ function ActionButtons({
   return (
     <TooltipProvider delayDuration={400}>
       <div className="flex gap-1">
-        {onCancel ? (
+        {onCancel && (
           <Button
             size="sm"
             variant="ghost"
@@ -47,7 +47,7 @@ function ActionButtons({
             <IconX className="mr-1 h-3 w-3" />
             {t("common:cancel")}
           </Button>
-        ) : null}
+        )}
         <div className="inline-flex">
           <Tooltip>
             <TooltipTrigger asChild>

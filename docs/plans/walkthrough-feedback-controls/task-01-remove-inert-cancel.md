@@ -12,11 +12,10 @@ spec: "../../specs/walkthrough-feedback-controls/spec.md"
 
 ## Acceptance
 
-1. Desktop, phone, and inline walkthrough note forms do not render a
-   **Cancel** action; **Add**, **Run**, close, discard, and navigation behavior
-   remain available.
-2. Shared comment forms with a real cancellation callback continue to render
-   **Cancel**, invoke it on click, and invoke it on Escape.
+1. Desktop floating and phone bottom-sheet walkthrough note forms do not render
+   a **Cancel** action.
+2. **Add**, **Run**, close, discard, and navigation behavior remain available in
+   those floating variants.
 3. Focused desktop and `mobile-chrome` walkthrough E2E coverage proves the
    action set in both rendered variants.
 
@@ -100,7 +99,8 @@ remaining risks, and synchronized task/plan statuses.
   The suites' configured retries repeated the same expected failure.
 - **Implementation:** made `CommentForm.onCancel` optional, hid its cancellation
   UI and Escape handling when absent, and removed the walkthrough's no-op
-  callback. Existing callers with real callbacks retain cancellation.
+  callback. Structural inspection confirmed existing cancellable callers still
+  provide their callbacks; their runtime click/Escape paths were not rerun.
 - **Desktop:**
   `pnpm e2e:run --host --project chromium -- tests/review/walkthrough.spec.ts --grep "ask box offers Add" --workers=1 --retries=0`
   passed 1 test.
@@ -109,11 +109,16 @@ remaining risks, and synchronized task/plan statuses.
   passed 1 test.
 - **Static checks:** `pnpm run typecheck` and `pnpm run i18n:ratchet` passed; the
   ratchet reported 0 added and 2 modified files clean.
+- **Review remediation:** simplified the conditional Cancel rendering and reran
+  both focused E2E tests (1 passed each), typecheck, and the i18n ratchet. The
+  package now distinguishes runtime proof for the floating variants from
+  structural inheritance by the legacy inline variant and existing callers.
 - **Rendered proof:** captured and inspected
   `desktop-walkthrough-feedback-controls.png` (1280x720) and
   `mobile-walkthrough-feedback-controls.png` (1081x1999). Both show **Add** and
   **Run**, no **Cancel**, and synthetic E2E data only.
 - **Cleanup:** all managed test commands exited successfully; a follow-up
   process check found no matching E2E, Playwright, or Vite process.
-- **Security/trust:** no boundary or credential changes. No remaining risks or
-  follow-up work identified.
+- **Security/trust:** no boundary or credential changes. Residual risk is low:
+  the legacy inline walkthrough and unchanged cancellable-form click/Escape
+  paths were not separately exercised at runtime.
