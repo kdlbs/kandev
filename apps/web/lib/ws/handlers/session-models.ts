@@ -100,7 +100,10 @@ function isEmptyModelsUpdate(
 
 function hasPopulatedModels(state: AppState, sessionId: string): boolean {
   const existing = state.sessionModels.bySessionId[sessionId];
-  return !!existing && (!!existing.currentModelId || existing.models.length > 0);
+  return (
+    !!existing &&
+    (!!existing.currentModelId || existing.models.length > 0 || existing.configOptions.length > 0)
+  );
 }
 
 // During an agentctl relaunch the backend can emit a transient
@@ -125,7 +128,12 @@ function debugModelsUpdate(
   state: AppState,
   sessionId: string,
   payload: SessionModelsPayload,
-  resolved: { currentModelId: string; isEmpty: boolean; populated: boolean },
+  resolved: {
+    currentModelId: string;
+    isEmpty: boolean;
+    populated: boolean;
+    preserveConfigOptions: boolean;
+  },
 ) {
   if (!isDebug()) return;
   const existing = state.sessionModels.bySessionId[sessionId];
@@ -141,6 +149,7 @@ function debugModelsUpdate(
     existingModelsLen: existing?.models.length ?? 0,
     existingConfigOptionIds: (existing?.configOptions ?? []).map((o) => o.id),
     willSkip: resolved.isEmpty && resolved.populated,
+    preserveConfigOptions: resolved.preserveConfigOptions,
   });
 }
 
@@ -180,16 +189,24 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
       const matchesPersisted = payloadMatchesPersistedRuntime(payload, persisted);
       if (matchesPersisted) hydrated.add(sessionId);
       const pendingRuntime = matchesPersisted ? {} : persisted;
-      const currentModelId = pendingRuntime.model || resolveCurrentModelId(payload);
-      const isEmpty = isEmptyModelsUpdate(currentModelId, acpModels, payload.config_options);
+      const payloadCurrentModelId = resolveCurrentModelId(payload);
+      const currentModelId = pendingRuntime.model || payloadCurrentModelId;
+      // Classify emptiness from the incoming payload alone; persisted metadata
+      // must not make a genuinely empty relaunch event look populated.
+      const isEmpty = isEmptyModelsUpdate(payloadCurrentModelId, acpModels, payload.config_options);
       const populated = hasPopulatedModels(state, sessionId);
-      debugModelsUpdate(state, sessionId, payload, { currentModelId, isEmpty, populated });
+      const preserveConfigOptions = shouldPreserveExistingConfigOptions(state, sessionId, payload);
+      debugModelsUpdate(state, sessionId, payload, {
+        currentModelId,
+        isEmpty,
+        populated,
+        preserveConfigOptions,
+      });
       if (isEmpty && populated) {
         return;
       }
       clearStaleContextWindow(state, sessionId, currentModelId);
 
-      const preserveConfigOptions = shouldPreserveExistingConfigOptions(state, sessionId, payload);
       const existingEntry = state.sessionModels.bySessionId[sessionId];
       const configOptions = preserveConfigOptions
         ? existingEntry.configOptions

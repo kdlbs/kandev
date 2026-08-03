@@ -196,6 +196,78 @@ describe("session.models_updated stale-empty guard", () => {
       expect.objectContaining({ currentModelId: "" }),
     );
   });
+});
+
+describe("session.models_updated stale-empty guard — payload-derived classification", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("ignores an empty update even when persisted runtime metadata carries a model", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "session-1": makeTaskSession({
+            runtime_config: { model: providerModelId },
+          }),
+        },
+      },
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: providerModelId,
+            models: [{ modelId: providerModelId, name: providerModelName }],
+            configOptions: [],
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(makeMessage(makePayload("", { models: [], config_options: [] })));
+
+    expect(store.getState().setSessionModels).not.toHaveBeenCalled();
+    expect(store.getState().sessionModels.bySessionId["session-1"].currentModelId).toBe(
+      providerModelId,
+    );
+  });
+
+  it("ignores a fully empty update when only config options are populated", () => {
+    const configOptions = [
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        currentValue: providerModelId,
+        options: [{ value: providerModelId, name: providerModelName }],
+      },
+    ];
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: "",
+            models: [],
+            configOptions,
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(makeMessage(makePayload("", { models: [], config_options: [] })));
+
+    expect(store.getState().setSessionModels).not.toHaveBeenCalled();
+    expect(store.getState().sessionModels.bySessionId["session-1"].configOptions).toEqual(
+      configOptions,
+    );
+  });
+});
+
+describe("session.models_updated stale-empty guard — config preservation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
 
   it("still applies a populated update over an existing entry", () => {
     const store = makeStore({

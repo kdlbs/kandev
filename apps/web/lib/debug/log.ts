@@ -202,8 +202,10 @@
  *
  *   Model selector pipeline (bug: selector shows then disappears on relaunch)
  *     [model-selector:ws]     session.models_updated handler — payload vs.
- *                             existing entry, isEmpty/populated guard, and the
- *                             stale-empty/partial skip decision.
+ *                             existing entry, isEmpty/populated guard, the
+ *                             stale-empty skip decision (willSkip), and the
+ *                             partial-update config-options preservation
+ *                             decision (preserveConfigOptions).
  *     [model-selector:gate]   ModelSelector render gate — configHydrated,
  *                             currentModel, hasModelConfig, configOptionIds,
  *                             and willHide (the exact gate expression).
