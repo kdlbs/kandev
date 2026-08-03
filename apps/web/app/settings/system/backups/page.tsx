@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { BackupsTable } from "@/components/settings/system/backups-table";
@@ -21,8 +22,8 @@ export default async function SystemBackupsPage() {
   return (
     <StateProvider initialState={initialState}>
       <SystemPageShell
-        title="Backups"
-        description="VACUUM INTO snapshots stored under <data-dir>/backups/."
+        title={t("system:navBackups")}
+        description={t("system:backupsPageDescription")}
       >
         <BackupsTable />
       </SystemPageShell>

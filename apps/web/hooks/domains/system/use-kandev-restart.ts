@@ -2,6 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchSystemInfo, requestRestart } from "@/lib/api/domains/system-api";
+// The module-level `t` (not the hook) so these resolve when the callback fires
+// and stay out of the callbacks' dependency arrays. This file has no JSX, so
+// `mode: "jsx-only"` can never see the strings below.
+import { t } from "@/lib/i18n";
 
 export type KandevRestartPhase = "idle" | "starting" | "restarting" | "done" | "error";
 
@@ -47,7 +51,7 @@ export function useKandevRestart({
       await requestRestart();
       setPhase("restarting");
     } catch (e) {
-      fail(e instanceof Error ? e.message : "Failed to restart Kandev");
+      fail(e instanceof Error ? e.message : t("system:restartStartFailed"));
     }
   }, [fail]);
 
@@ -68,7 +72,7 @@ export function useKandevRestart({
       const startedAt = startedAtRef.current ?? Date.now();
       if (Date.now() - startedAt > MAX_DURATION_MS) {
         if (!cancelled) {
-          fail("Restart is taking longer than expected. Refresh to check the current status.");
+          fail(t("system:restartTimedOut"));
         }
         return;
       }

@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { HealthIssuesCard } from "@/components/settings/system/health-issues-card";
@@ -32,7 +33,7 @@ export default async function SystemStatusPage() {
 
   return (
     <StateProvider initialState={initialState}>
-      <SystemPageShell title="Status" description="Health checks, disk usage, and version summary.">
+      <SystemPageShell title={t("common:status")} description={t("system:statusPageDescription")}>
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <HealthIssuesCard />
           <VersionSummaryCard />

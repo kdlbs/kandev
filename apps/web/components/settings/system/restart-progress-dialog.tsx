@@ -1,5 +1,7 @@
 "use client";
 
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -24,6 +26,7 @@ export function RestartProgressDialog({
   errorMessage,
   onDismiss,
 }: RestartProgressDialogProps) {
+  const { t } = useTranslation();
   if (phase === "idle") return null;
   const done = phase === "done";
   const failed = phase === "error";
@@ -37,9 +40,9 @@ export function RestartProgressDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RestartStatusIcon phase={phase} />
-            {restartTitle(phase)}
+            {restartTitle(phase, t)}
           </DialogTitle>
-          <DialogDescription>{restartDescription(phase, errorMessage)}</DialogDescription>
+          <DialogDescription>{restartDescription(phase, errorMessage, t)}</DialogDescription>
         </DialogHeader>
         {(done || failed) && (
           <DialogFooter>
@@ -48,7 +51,7 @@ export function RestartProgressDialog({
               className="w-full cursor-pointer sm:w-auto"
               onClick={done ? () => window.location.reload() : onDismiss}
             >
-              {done ? "Reload page" : "Dismiss"}
+              {done ? t("system:reloadPage") : t("system:dismiss")}
             </Button>
           </DialogFooter>
         )}
@@ -63,31 +66,37 @@ function RestartStatusIcon({ phase }: { phase: KandevRestartPhase }) {
   return <Spinner className="size-4" />;
 }
 
-function restartTitle(phase: KandevRestartPhase): string {
+/** `phase` is a wire enum; only these labels are copy. */
+function restartTitle(phase: KandevRestartPhase, t: TFunction): string {
   switch (phase) {
     case "starting":
-      return "Requesting restart";
+      return t("system:restartPhaseStartingTitle");
     case "restarting":
-      return "Restarting Kandev";
+      return t("system:restartPhaseRestartingTitle");
     case "done":
-      return "Kandev restarted";
+      return t("system:restartPhaseDoneTitle");
     case "error":
-      return "Restart failed";
+      return t("system:restartPhaseErrorTitle");
     default:
-      return "Restarting Kandev";
+      return t("system:restartPhaseRestartingTitle");
   }
 }
 
-function restartDescription(phase: KandevRestartPhase, errorMessage: string | null): string {
+function restartDescription(
+  phase: KandevRestartPhase,
+  errorMessage: string | null,
+  t: TFunction,
+): string {
   switch (phase) {
     case "starting":
-      return "Preparing the local supervisor restart request.";
+      return t("system:restartPhaseStartingBody");
     case "restarting":
-      return "Kandev is stopping and starting again. This page will detect the new process automatically.";
+      return t("system:restartPhaseRestartingBody");
     case "done":
-      return "The backend is running again. Reload the page to reconnect with the latest feature toggle state.";
+      return t("system:restartPhaseDoneBody");
     case "error":
-      return errorMessage ?? "The restart could not be completed.";
+      // `errorMessage` originates from the restart API and stays as sent.
+      return errorMessage ?? t("system:restartPhaseErrorBody");
     default:
       return "";
   }

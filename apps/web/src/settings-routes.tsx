@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Trans, useTranslation } from "react-i18next";
 
 import AgentsSettingsPage from "@/app/settings/agents/page";
 import AgentSetupPage from "@/app/settings/agents/[agentId]/page";
@@ -164,12 +165,9 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/integrations/slack": () => renderIntegrationSettingsRoute("slack"),
   "/settings/system": () => <SettingsRedirect to="/settings/system/status" />,
   "/settings/system/users": () => (
-    <SystemPageShell
-      title="Users"
-      description="Manage accounts, roles, and invite links for this instance."
-    >
+    <SystemRouteShell titleKey="system:navUsers" descriptionKey="system:usersPageDescription">
       <UsersTable />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/account/security": () => (
     <SystemPageShell
@@ -188,59 +186,50 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
     </SystemPageShell>
   ),
   "/settings/system/about": () => (
-    <SystemPageShell title="About" description="Version, build metadata, and links.">
+    <SystemRouteShell titleKey="system:navAbout" descriptionKey="system:aboutPageDescription">
       <AboutCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/backups": () => (
-    <SystemPageShell
-      title="Backups"
-      description="VACUUM INTO snapshots stored under <data-dir>/backups/."
-    >
+    <SystemRouteShell titleKey="system:navBackups" descriptionKey="system:backupsPageDescription">
       <BackupsTable />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/database": () => (
-    <SystemPageShell
-      title="Database"
-      description="Database driver, size, and available maintenance controls."
-    >
+    <SystemRouteShell titleKey="system:navDatabase" descriptionKey="system:databasePageDescription">
       <DatabaseStatsCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/feature-toggles": () => (
-    <SystemPageShell
-      title="Feature Toggles"
-      description="Manage Kandev feature and diagnostic switches."
+    <SystemRouteShell
+      titleKey="system:navFeatureToggles"
+      descriptionKey="system:featureTogglesPageDescription"
     >
       <FeatureTogglesSettings initialFlags={[]} restartCapability={null} />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/licenses": () => (
-    <SystemPageShell
-      title="Licenses"
-      description="Open-source licenses for every npm and Go dependency shipped with kandev."
-    >
+    <SystemRouteShell titleKey="system:navLicenses" descriptionKey="system:licensesPageDescription">
       <LicensesList entries={licenseEntries} />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/logs": () => (
-    <SystemPageShell
-      title="Logs"
-      description="Create a diagnostic ZIP with frontend and backend logs."
+    <SystemRouteShell
+      titleKey="settings:logsPageTitle"
+      descriptionKey="settings:logsPageDescription"
     >
       <LogViewer />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/status": () => (
-    <SystemPageShell title="Status" description="Health checks, disk usage, and version summary.">
+    <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <HealthIssuesCard />
         <VersionSummaryCard />
       </div>
       <DiskUsageCard />
       <UIStateCard />
-    </SystemPageShell>
+    </SystemRouteShell>
   ),
   "/settings/system/storage": () => <StoragePage />,
   "/settings/system/updates": renderUpdatesRoute,
@@ -418,19 +407,45 @@ function renderIntegrationSettingsRoute(section: string | null, workspaceId?: st
 }
 
 function renderUpdatesRoute() {
+  return <UpdatesRoute />;
+}
+
+function UpdatesRoute() {
   return (
-    <SystemPageShell
-      title="Updates"
-      description="Current vs latest release plus the full kandev changelog."
-    >
+    <SystemRouteShell titleKey="system:navUpdates" descriptionKey="system:updatesPageDescription">
       <p className="text-sm text-muted-foreground">
-        Notification preferences are managed in{" "}
-        <Link className="cursor-pointer underline" href="/settings/general/notifications">
-          Notifications
-        </Link>
-        .
+        <Trans i18nKey="system:updatesNotificationsHint">
+          Notification preferences are managed in{" "}
+          <Link className="cursor-pointer underline" href="/settings/general/notifications">
+            Notifications
+          </Link>
+          .
+        </Trans>
       </p>
       <UpdatesCard />
+    </SystemRouteShell>
+  );
+}
+
+/**
+ * The nine System routes share this shell. Titles and descriptions travel as
+ * catalog keys rather than resolved strings because `SETTINGS_ROUTES` is a
+ * SCREAMING_CASE identifier, which `i18next/no-literal-string` skips entirely —
+ * the literals it replaced were invisible to lint and to the new-code ratchet.
+ */
+function SystemRouteShell({
+  titleKey,
+  descriptionKey,
+  children,
+}: {
+  titleKey: string;
+  descriptionKey: string;
+  children: ReactNode;
+}) {
+  const { t } = useTranslation();
+  return (
+    <SystemPageShell title={t(titleKey)} description={t(descriptionKey)}>
+      {children}
     </SystemPageShell>
   );
 }
@@ -627,8 +642,11 @@ async function loadWorkspaceWorkflowsRoute(
 function SettingsRouteFallback({ pathname }: { pathname: string }) {
   return (
     <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
-      This settings route is handled by the SPA shell, but its dedicated client page is still being
-      ported: <span className="font-mono">{pathname}</span>
+      {/* `pathname` is a route string, never translated. */}
+      <Trans i18nKey="system:settingsRouteNotPorted" values={{ pathname }}>
+        This settings route is handled by the SPA shell, but its dedicated client page is still
+        being ported: <span className="font-mono">{pathname}</span>
+      </Trans>
     </div>
   );
 }

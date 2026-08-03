@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { Suspense } from "react";
 import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
@@ -17,8 +18,8 @@ export default async function SystemUpdatesPage() {
   return (
     <StateProvider initialState={initialState}>
       <SystemPageShell
-        title="Updates"
-        description="Current vs latest release plus the full kandev changelog."
+        title={t("system:navUpdates")}
+        description={t("system:updatesPageDescription")}
       >
         <UpdatesCard />
         {/*

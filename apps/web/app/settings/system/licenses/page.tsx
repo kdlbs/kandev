@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { LicensesList } from "@/components/settings/system/licenses-list";
@@ -10,8 +11,8 @@ export default function SystemLicensesPage() {
   return (
     <StateProvider initialState={{}}>
       <SystemPageShell
-        title="Licenses"
-        description="Open-source licenses for every npm and Go dependency shipped with kandev."
+        title={t("system:navLicenses")}
+        description={t("system:licensesPageDescription")}
       >
         <LicensesList entries={entries} />
       </SystemPageShell>

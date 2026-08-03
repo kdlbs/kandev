@@ -714,4 +714,103 @@ export const i18nGuardFiles = [
   // icons render here on every pipeline node, so leaving them would have left
   // plain English inside a card this PR claims is done.
   "components/step-capability-icons.tsx",
+  // Settings → System, the remaining eight routes (about, backups, database,
+  // feature-toggles, licenses, logs, status, updates) plus Users, which is a
+  // ninth System route reachable only when the `auth` feature is on. This
+  // completes the group: `components/settings/system/**` is now migrated in
+  // full, so the storage-only globs above are the historical record of which
+  // PR did which half rather than a boundary that still means anything.
+  //
+  // **The live titles and descriptions were not in `components/` at all.**
+  // `app/settings/system/{about,backups,database,feature-toggles,licenses,
+  // status,updates}/page.tsx` are unreferenced Next-era leftovers — nothing
+  // imports them; `src/settings-routes.tsx` is the SPA's real route table and
+  // `StoragePage` is the only `app/settings/system` page it still pulls in.
+  // Those nine titles/descriptions live in `SETTINGS_ROUTES`, a SCREAMING_CASE
+  // identifier that `i18next/no-literal-string` skips *entirely* — the guard
+  // reported 5 findings in a 652-line file holding copy for every settings
+  // route. They now travel as `titleKey`/`descriptionKey` through a
+  // `SystemRouteShell` wrapper. The dead pages are migrated too rather than
+  // deleted, which keeps this PR copy-only; deleting them is a separate call.
+  //
+  // `src/settings-routes.tsx` is deliberately NOT on this list. Only its System
+  // entries are migrated — Executors, Workflows, Integrations, Workspaces and
+  // the account routes still hold English titles there, and the file is one
+  // file, so allowlisting it would claim a completeness this PR does not have.
+  // Whichever sibling migration lands last should add it.
+  //
+  // Six entries hold no JSX, so `mode: "jsx-only"` never inspects them; they
+  // record that the file is migrated and only the pseudo-locale can prove it
+  // stays that way. Three are hooks that were in no lint-derived list at all
+  // (`use-kandev-restart`, `use-self-update`, `use-desktop-updater` own seven
+  // restart/update failure messages between them); all three import the
+  // module-level `t` so each string resolves when its callback fires, keeping
+  // `t` out of the callbacks' dependency arrays.
+  //
+  // Four more shapes the guard structurally cannot see were migrated here, and
+  // every one was found by reading rather than by lint:
+  //   - `job-progress-indicator.tsx` reported 0 and returned `Queued` /
+  //     `Running` / `Done` / `Failed` from `stateLabel()`. It renders on four
+  //     cards, one of which (`storage-quarantine-card.tsx`) is #2194's and is
+  //     on a route this PR does not otherwise touch.
+  //   - `action-button-content.tsx` reported 0: its `Running...` / `Done` /
+  //     `Failed` were destructuring defaults, which evaluate before the
+  //     component body, so they resolve inside the body now.
+  //   - SCREAMING_CASE config tables: `ROWS` in `disk-usage-card.tsx` (7 row
+  //     labels), `BASE_ITEMS`/`AUTH_ITEMS` in the sidebar's `system-group.tsx`
+  //     (10 nav labels — the guard saw only `label="System"`), and the four
+  //     `*_HELP` maintenance blurbs in `database-stats-card.tsx`.
+  //   - `aria-label`s, which the pseudo-locale oracle cannot see either:
+  //     `What is {label}?`, `Toggle {flag.label}`, `Restart support details`,
+  //     `What's monitored`, and the three icon-only backup row actions, which
+  //     had no accessible name at all before this PR.
+  //
+  // `bundle-customizer.tsx` (533 lines) and `log-viewer.tsx` (281) also report
+  // 0 and are listed because they are genuinely already migrated — an earlier
+  // diagnostics PR did them under `settings:diagnostic*`. Those 47 keys stay in
+  // `settings.json` rather than moving to `system`: unlike the twelve
+  // `storage*` keys #2194 relocated, they are already keyed, already correct,
+  // and moving them would be churn with a rename-typo risk and no user-visible
+  // gain.
+  //
+  // Deliberately left in English, none of it copy:
+  //   - The type-to-confirm tokens `RESET` (`factory-reset-dialog.tsx`) and
+  //     `RESTORE` (`restore-dialog.tsx`). Both gate their confirm button on
+  //     `typed === CONFIRM_TOKEN` *and* are sent to the API (`resetDatabase`,
+  //     `restoreBackup`), so translating either would make an irreversible
+  //     dialog impossible to satisfy in that locale. Each travels as an
+  //     interpolated value into the visible sentence, the placeholder and the
+  //     input's aria-label, so shown and compared cannot drift.
+  //   - Backend-owned copy, on the same contract as #2193's `PermissionSetting`:
+  //     `RuntimeFlagState.label` / `.description` / `.risk_description` are
+  //     authored in `runtimeflags/registry.go`; `HealthIssue.title` /
+  //     `.message` / `.fix_label`, `HealthCheckSummary.name`, `SystemJob.message`,
+  //     `RestartCapability.reason`, and `UpdatesResponse.apply_unsupported_reason`
+  //     / `.manual_commands` are all rendered by the API. Localizing them needs
+  //     a key/value split in Go, not a frontend change.
+  //   - Wire values, each rendered beside its own translated label: the runtime
+  //     flag `key` and `env_var` (the persisted registry identity — never
+  //     translate either), the user `role` / `status` (the `value` on each
+  //     `SelectItem` is the token posted to the API; only the child text is
+  //     copy), the snapshot `kind`, the job `state`, the health `severity`, and
+  //     the restart/update `phase` unions.
+  //   - Identifiers and third-party content in `licenses-list.tsx`: package
+  //     `name`, `version`, `ecosystem`, the SPDX `license` id (`MIT`,
+  //     `Apache-2.0`) and the full `license_text`. None of it is ours to
+  //     translate.
+  //   - Build and release values in `about-card.tsx` / `version-summary-card.tsx`
+  //     / `updates-card.tsx`: version strings, commit SHA, build time, Go
+  //     version, OS and arch. `PostgreSQL` / `SQLite` in `formatDriver` are the
+  //     products' own spellings, and `GitHub` is a brand noun.
+  //   - Every filesystem path: the data directory, the database `path`, the
+  //     backup filenames, and the `<data-dir>/backups/` placeholder — all
+  //     interpolated as values so the pseudo-locale cannot turn them into dead
+  //     pointers.
+  "app/settings/system/**/*.{ts,tsx}",
+  "components/app-sidebar/sections/settings/system-group.tsx",
+  "components/settings/changelog-list.tsx",
+  "components/settings/system/*.{ts,tsx}",
+  "hooks/domains/system/use-desktop-updater.ts",
+  "hooks/domains/system/use-kandev-restart.ts",
+  "hooks/domains/system/use-self-update.ts",
 ];
