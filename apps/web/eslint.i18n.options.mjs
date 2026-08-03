@@ -161,8 +161,21 @@ export const noLiteralStringOptions = {
  *     and there is no treadmill.
  *
  * Entries may be single files or directory globs — use a file glob while a
- * directory is partially migrated, and collapse to `dir/**` once it is done.
- * The list only shrinks by mistake; adding to it is the whole point.
+ * directory is partially migrated. Once it is done, LEAVE those entries alone:
+ * **adding a path is the only safe edit to this list.**
+ *
+ * Do not collapse several file globs into one `dir/**`. That fails
+ * `check-guard-allowlist.mjs`, which flags every entry that disappears while its
+ * path still exists — globs included, resolved with `fs.globSync`. The check
+ * cannot tell a tidy-up from quietly dropping protection, and refusing to guess
+ * is the whole point of the ratchet: the two edits produce an identical diff to
+ * the array, and only one of them is harmless. A broader glob added *alongside*
+ * the existing entries passes; swapping them for it never does.
+ *
+ * Nor may a path be listed twice. An exact duplicate protects nothing new and
+ * presents an earlier migration's work as yours; the same check rejects it.
+ * (Entries a broader glob already covers are a different thing and are kept on
+ * purpose — see the storage globs below.)
  *
  * A clean lint is NOT proof a path is fully migrated — the rule only sees plain
  * literals in JSX. Template literals, `confirm()`/`alert()` arguments, and copy
