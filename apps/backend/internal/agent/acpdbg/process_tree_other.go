@@ -18,7 +18,7 @@ func configureProcessTree(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 }
 
-func captureProcessTree(_ *exec.Cmd) processTree { return processTree{} }
+func captureProcessTree(_ *exec.Cmd) (processTree, error) { return processTree{}, nil }
 
 func (processTree) kill(cmd *exec.Cmd) {
 	if cmd == nil || cmd.Process == nil {

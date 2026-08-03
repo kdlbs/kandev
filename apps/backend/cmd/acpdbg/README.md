@@ -51,16 +51,18 @@ Create a session in one directory, then load it from another and ask the agent
 to report its working directory:
 
 ```bash
-apps/backend/bin/acpdbg prompt codex-acp \
+apps/backend/bin/acpdbg prompt \
   --workdir /tmp/folder-a \
   --prompt "Reply with pwd only" \
-  --file /tmp/codex-new.jsonl
+  --file /tmp/codex-new.jsonl \
+  codex-acp
 
-apps/backend/bin/acpdbg session-load codex-acp \
+apps/backend/bin/acpdbg session-load \
   --session-id <session-id-from-first-run> \
   --workdir /tmp/folder-b \
   --prompt "Reply with pwd only" \
-  --file /tmp/codex-load.jsonl
+  --file /tmp/codex-load.jsonl \
+  codex-acp
 ```
 
 `session-load` sends the selected `--workdir` as the ACP `cwd` parameter. The

@@ -4,8 +4,10 @@ package acpdbg
 
 import (
 	"os/exec"
+	"syscall"
 
 	"github.com/kandev/kandev/internal/agentctl/server/winproc"
+	"golang.org/x/sys/windows"
 )
 
 // processTree holds whatever the platform needs to kill a child *and* every
@@ -17,19 +19,21 @@ type processTree struct {
 	job winproc.KillOnCloseJob
 }
 
-// configureProcessTree is a no-op on Windows; containment is established after
-// the child starts, by assigning it to a Job Object.
-func configureProcessTree(_ *exec.Cmd) {}
-
-// captureProcessTree must be called after cmd.Start, because the Job Object is
-// assigned by pid. A failure here is not fatal: kill falls back to terminating
-// the direct child, which is what the code did before.
-func captureProcessTree(cmd *exec.Cmd) processTree {
-	job, err := winproc.InstallKillOnCloseJobForCommand(cmd)
-	if err != nil {
-		return processTree{}
+// configureProcessTree keeps the child suspended until its Job Object is ready.
+func configureProcessTree(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: syscall.CREATE_NEW_PROCESS_GROUP | windows.CREATE_SUSPENDED,
 	}
-	return processTree{job: job}
+}
+
+// captureProcessTree assigns the suspended child before resuming it. The
+// helper terminates the child if containment or resume setup fails.
+func captureProcessTree(cmd *exec.Cmd) (processTree, error) {
+	job, err := winproc.InstallKillOnCloseJobForSuspendedCommand(cmd)
+	if err != nil {
+		return processTree{}, err
+	}
+	return processTree{job: job}, nil
 }
 
 func (t processTree) kill(cmd *exec.Cmd) {

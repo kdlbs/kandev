@@ -60,7 +60,11 @@ type Runner struct {
 	readLoopWG sync.WaitGroup
 	readLoopEr error
 
-	closeOnce sync.Once
+	closeOnce    sync.Once
+	shutdownOnce sync.Once
+	shutdownCh   chan struct{}
+	watchStopCh  chan struct{}
+	cancelWG     sync.WaitGroup
 }
 
 // NewRunner spawns the configured child process, wires its stdio through a
@@ -103,7 +107,7 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 		"workdir": workdir,
 	})
 
-	cmd, tree, stdin, stdout, stderr, err := startChild(ctx, cfg, workdir)
+	cmd, tree, stdin, stdout, stderr, err := startChild(cfg, workdir)
 	if err != nil {
 		_ = rec.Meta("close", map[string]any{"reason": err.Error()})
 		_ = rec.Close()
@@ -114,17 +118,21 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 	}
 
 	r := &Runner{
-		rec:     rec,
-		cfg:     cfg,
-		tmpDir:  tmpDir,
-		cmd:     cmd,
-		tree:    tree,
-		stdin:   stdin,
-		stdout:  stdout,
-		framer:  NewFramer(stdin, stdout),
-		oob:     make(chan Frame, 32),
-		pending: map[int]chan Frame{},
+		rec:         rec,
+		cfg:         cfg,
+		tmpDir:      tmpDir,
+		cmd:         cmd,
+		tree:        tree,
+		stdin:       stdin,
+		stdout:      stdout,
+		framer:      NewFramer(stdin, stdout),
+		oob:         make(chan Frame, 32),
+		pending:     map[int]chan Frame{},
+		shutdownCh:  make(chan struct{}),
+		watchStopCh: make(chan struct{}),
 	}
+	r.cancelWG.Add(1)
+	go r.watchContext(ctx)
 
 	// Stderr goroutine. Always drain it to avoid blocking the child; only
 	// record to JSONL when CaptureStderr is set.
@@ -140,9 +148,9 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 }
 
 // startChild spawns the subprocess and returns its stdio pipes.
-func startChild(ctx context.Context, cfg RunConfig, workdir string) (*exec.Cmd, processTree, io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
+func startChild(cfg RunConfig, workdir string) (*exec.Cmd, processTree, io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
 	//nolint:gosec // the command comes from the agent registry or the user's --exec flag; both are trusted inputs
-	cmd := exec.CommandContext(ctx, cfg.Command[0], cfg.Command[1:]...)
+	cmd := exec.Command(cfg.Command[0], cfg.Command[1:]...)
 	cmd.Dir = workdir
 	configureProcessTree(cmd)
 	stdin, err := cmd.StdinPipe()
@@ -160,7 +168,25 @@ func startChild(ctx context.Context, cfg RunConfig, workdir string) (*exec.Cmd, 
 	if err := cmd.Start(); err != nil {
 		return nil, processTree{}, nil, nil, nil, fmt.Errorf("start %s: %w", cfg.Command[0], err)
 	}
-	return cmd, captureProcessTree(cmd), stdin, stdout, stderr, nil
+	tree, err := captureProcessTree(cmd)
+	if err != nil {
+		return nil, processTree{}, nil, nil, nil, fmt.Errorf("contain %s: %w", cfg.Command[0], err)
+	}
+	return cmd, tree, stdin, stdout, stderr, nil
+}
+
+func (r *Runner) watchContext(ctx context.Context) {
+	defer r.cancelWG.Done()
+	select {
+	case <-ctx.Done():
+		r.signalShutdown()
+		r.tree.kill(r.cmd)
+	case <-r.watchStopCh:
+	}
+}
+
+func (r *Runner) signalShutdown() {
+	r.shutdownOnce.Do(func() { close(r.shutdownCh) })
 }
 
 // Path returns the JSONL file path the runner is writing to.
@@ -263,6 +289,7 @@ func (r *Runner) NextOOB(ctx context.Context) (Frame, error) {
 // the recorder. Idempotent.
 func (r *Runner) Close(reason string) {
 	r.closeOnce.Do(func() {
+		r.signalShutdown()
 		_ = r.stdin.Close()
 		done := make(chan error, 1)
 		go func() { done <- r.cmd.Wait() }()
@@ -283,6 +310,10 @@ func (r *Runner) Close(reason string) {
 				reason = "killed after timeout"
 			}
 		}
+		// The child may have exited before the grace-period branch. Closing
+		// the owned tree in every terminal path also handles shims that leave
+		// descendants behind after the leader exits.
+		r.tree.kill(r.cmd)
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			exitCode = exitErr.ExitCode()
 		} else if waitErr != nil {
@@ -305,6 +336,8 @@ func (r *Runner) Close(reason string) {
 		}
 		_ = r.rec.Meta("close", meta)
 		_ = r.rec.Close()
+		close(r.watchStopCh)
+		r.cancelWG.Wait()
 		if r.tmpDir != "" {
 			_ = os.RemoveAll(r.tmpDir)
 		}
@@ -359,7 +392,11 @@ func (r *Runner) readLoop() {
 		// orphaned responses) goes out of band. Block rather than drop,
 		// so session/update chunks and agent-initiated requests are
 		// never lost — this is a debug tool, correctness beats throughput.
-		r.oob <- frame
+		select {
+		case r.oob <- frame:
+		case <-r.shutdownCh:
+			return
+		}
 	}
 }
 
