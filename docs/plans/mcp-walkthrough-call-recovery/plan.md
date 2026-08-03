@@ -48,6 +48,14 @@ returned error does not contain `text` and no backend action runs.
 - Keep fail-closed validation, root closure, open nested maps, mode rebuilds,
   handler suppression, and create-task compatibility normalization unchanged.
 
+### Existing-install prompt refresh
+
+- `apps/backend/internal/prompts/store/sqlite.go` — refresh only the two exact
+  historical `changes-walkthrough` built-in revisions that predate the required
+  step shape and have never been saved by a user.
+- Preserve edited built-ins and user-owned name conflicts. Keep the conditional
+  write race-safe so an edit concurrent with startup cannot be overwritten.
+
 ## Agent prompt contract
 
 - `apps/backend/config/prompts/kandev-context.md` — list
@@ -89,6 +97,13 @@ Primary content type: reference.
 - **What:** Public documentation remains structurally valid.
   **File:** `docs/public/automation-and-mcp.md`.
   **How:** Run both public-doc validation scripts.
+- **What:** Existing installations receive the corrected walkthrough request
+  without losing prompt customizations.
+  **File:** `apps/backend/internal/prompts/store/sqlite_test.go` plus historical
+  fixtures under `apps/backend/internal/prompts/store/testdata/`.
+  **How:** Initialize repositories over each shipped legacy built-in revision
+  and require refresh, then prove a saved built-in and a user-owned name
+  conflict remain unchanged.
 
 No browser E2E is needed: this changes agent-facing MCP diagnostics and hidden
 prompt instructions, not rendered UI behavior.
@@ -107,6 +122,16 @@ Completed on 2026-08-03 with strict red-green coverage:
 - `node --test scripts/validate-public-docs.test.mjs` — passed, 58 tests.
 - `node scripts/validate-public-docs.mjs` — passed, 41 published pages.
 - `git diff --check` — passed.
+
+PR review remediation also passed:
+
+- Focused RED tests reproduced stale stored prompts and declaration-ordered
+  missing-property output.
+- Focused GREEN tests passed for both shipped legacy prompt revisions, edited
+  prompt preservation, canonical property sorting, the top-level `steps`
+  contract, and immediate test cleanup.
+- `cd apps/backend && go test ./internal/prompts/store ./internal/mcp/server ./internal/sysprompt` — passed.
+- `cd apps/backend && golangci-lint run ./... --new-from-rev="0ca00c2aca4430a5e4f06874ba960743de1acf9a" --timeout=5m` — passed with 0 issues.
 
 No browser E2E was run because the change affects MCP diagnostics and embedded
 agent prompts, not rendered UI behavior.

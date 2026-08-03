@@ -20,6 +20,9 @@ spec: "../../specs/integrations/mcp-tool-argument-validation.md"
    `file`, `line`, and `text`, with tests derived from the registered schema.
 3. Public MCP reference documents missing-property diagnostics; all focused Go
    and public-doc checks pass.
+4. Existing installations refresh untouched historical walkthrough prompts to
+   the corrected embedded content without overwriting user edits or user-owned
+   prompt conflicts.
 
 ## Verification
 
@@ -27,7 +30,7 @@ Follow strict TDD, then run:
 
 ```bash
 cd apps/backend
-go test ./internal/mcp/server ./internal/sysprompt
+go test ./internal/prompts/store ./internal/mcp/server ./internal/sysprompt
 cd ../..
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
@@ -39,6 +42,9 @@ git diff --check
 - `apps/backend/internal/mcp/server/tool_argument_validation.go`
 - `apps/backend/internal/mcp/server/tool_argument_validation_test.go`
 - `apps/backend/internal/mcp/server/sysprompt_sync_test.go`
+- `apps/backend/internal/prompts/store/sqlite.go`
+- `apps/backend/internal/prompts/store/sqlite_test.go`
+- `apps/backend/internal/prompts/store/testdata/`
 - `apps/backend/config/prompts/kandev-context.md`
 - `apps/backend/config/prompts/changes-walkthrough.md`
 - `docs/public/automation-and-mcp.md`
@@ -103,3 +109,11 @@ Completed on 2026-08-03.
 - `git diff --check` — passed.
 - Browser E2E was intentionally not run because no rendered UI behavior
   changed.
+- PR review remediation refreshes the two exact untouched historical stored
+  prompt revisions, preserves edited built-ins and user-owned conflicts, sorts
+  missing schema properties deterministically, asserts top-level `steps`
+  requiredness, and registers backend cleanup with `t.Cleanup`.
+- Remediation RED tests reproduced both stale stored revisions and unsorted
+  output; the focused GREEN regressions passed afterward.
+- `cd apps/backend && go test ./internal/prompts/store ./internal/mcp/server ./internal/sysprompt` — passed.
+- `cd apps/backend && golangci-lint run ./... --new-from-rev="0ca00c2aca4430a5e4f06874ba960743de1acf9a" --timeout=5m` — passed with 0 issues.

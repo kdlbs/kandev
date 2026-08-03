@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strings"
@@ -12,6 +14,12 @@ import (
 
 	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/prompts/models"
+)
+
+const (
+	builtinChangesWalkthroughPromptID = "builtin-changes-walkthrough"
+	changesWalkthroughV1SHA256        = "af54d978fefbd004b9563b13b4617253f0bff2722e75d73e69b267ec137ff0fe"
+	changesWalkthroughV2SHA256        = "73693e84e68b5b354221045779a38a3fae497de1262d39857f7f2303192d6c61"
 )
 
 type sqliteRepository struct {
@@ -181,8 +189,56 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 		if err != nil {
 			return fmt.Errorf("failed to upsert built-in prompt %s: %w", prompt.ID, err)
 		}
+		if prompt.ID == builtinChangesWalkthroughPromptID {
+			if err := r.refreshLegacyChangesWalkthroughPrompt(prompt); err != nil {
+				return err
+			}
+		}
 	}
 	return nil
+}
+
+// refreshLegacyChangesWalkthroughPrompt updates exact, untouched revisions
+// shipped before the required step shape was documented. User edits change
+// updated_at, and the conditional update prevents racing a concurrent edit.
+func (r *sqliteRepository) refreshLegacyChangesWalkthroughPrompt(current *models.Prompt) error {
+	var storedContent string
+	var builtinInt int
+	var createdAt, updatedAt time.Time
+	err := r.db.QueryRow(r.db.Rebind(`
+		SELECT content, builtin, created_at, updated_at
+		FROM custom_prompts
+		WHERE id = ?
+	`), current.ID).Scan(&storedContent, &builtinInt, &createdAt, &updatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read stored changes walkthrough prompt: %w", err)
+	}
+	if builtinInt != 1 || !createdAt.Equal(updatedAt) || !isLegacyChangesWalkthroughPrompt(storedContent) {
+		return nil
+	}
+
+	_, err = r.db.Exec(r.db.Rebind(`
+		UPDATE custom_prompts
+		SET content = ?
+		WHERE id = ? AND builtin = 1 AND content = ? AND created_at = ? AND updated_at = ?
+	`), current.Content, current.ID, storedContent, createdAt, updatedAt)
+	if err != nil {
+		return fmt.Errorf("refresh stored changes walkthrough prompt: %w", err)
+	}
+	return nil
+}
+
+func isLegacyChangesWalkthroughPrompt(content string) bool {
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(content)))
+	switch hash {
+	case changesWalkthroughV1SHA256, changesWalkthroughV2SHA256:
+		return true
+	default:
+		return false
+	}
 }
 
 // getBuiltinPrompts returns the predefined built-in prompts loaded from embedded markdown files.
@@ -193,6 +249,6 @@ func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 		{ID: "builtin-open-pr", Name: "open-pr", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("open-pr")},
 		{ID: "builtin-merge-base", Name: "merge-base", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("merge-base")},
 		{ID: "builtin-ci-auto-fix", Name: "ci-auto-fix", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("ci-auto-fix")},
-		{ID: "builtin-changes-walkthrough", Name: "changes-walkthrough", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("changes-walkthrough")},
+		{ID: builtinChangesWalkthroughPromptID, Name: "changes-walkthrough", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("changes-walkthrough")},
 	}
 }

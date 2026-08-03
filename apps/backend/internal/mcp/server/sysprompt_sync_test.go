@@ -440,6 +440,9 @@ func extractWalkthroughStepRequiredFields(t *testing.T, s *Server) []string {
 	require.NoError(t, json.Unmarshal(raw, &parsed))
 	properties, ok := parsed["properties"].(map[string]any)
 	require.True(t, ok, "walkthrough schema must expose properties")
+	topLevelRequired, ok := parsed["required"].([]any)
+	require.True(t, ok, "walkthrough schema must declare top-level required fields")
+	require.Contains(t, topLevelRequired, "steps")
 	steps, ok := properties["steps"].(map[string]any)
 	require.True(t, ok, "walkthrough schema must expose steps")
 	require.Equal(t, "array", steps["type"])
@@ -461,7 +464,7 @@ func extractWalkthroughStepRequiredFields(t *testing.T, s *Server) []string {
 func TestWalkthroughDocs_MatchSchema(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
-	defer backend.Close()
+	t.Cleanup(backend.Close)
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
 	require.NotNil(t, s)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -124,6 +125,7 @@ func missingRequiredProperties(err *jsonschema.ValidationError) string {
 	for i, property := range required.Missing {
 		missing[i] = strconv.Quote(property)
 	}
+	sort.Strings(missing)
 	return "; missing: " + strings.Join(missing, ", ")
 }
 
