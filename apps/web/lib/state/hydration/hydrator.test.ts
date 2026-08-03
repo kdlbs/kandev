@@ -347,6 +347,84 @@ describe("hydrateState — sidebar views from user settings", () => {
   });
 });
 
+describe("hydrateState — session runtime model state", () => {
+  const sessionId = "session-1";
+  const modelId = "claude-opus-4-8";
+
+  it("hydrates sessionModels for the force-merged session so the selector survives resume", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(
+        draft,
+        {
+          sessionModels: {
+            bySessionId: {
+              [sessionId]: {
+                currentModelId: modelId,
+                models: [{ modelId, name: "Opus" }],
+                configOptions: [],
+              },
+            },
+          },
+        } as unknown as Partial<AppState>,
+        { forceMergeSessionId: sessionId },
+      );
+    });
+
+    expect(result.sessionModels.bySessionId[sessionId]).toEqual({
+      currentModelId: modelId,
+      models: [{ modelId, name: "Opus" }],
+      configOptions: [],
+    });
+  });
+
+  it("hydrates sessionMcpStatus for the force-merged session", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(
+        draft,
+        {
+          sessionMcpStatus: {
+            bySessionId: {
+              [sessionId]: { servers: [{ name: "fs", status: "connected" }] },
+            },
+          },
+        } as unknown as Partial<AppState>,
+        { forceMergeSessionId: sessionId },
+      );
+    });
+
+    expect(result.sessionMcpStatus.bySessionId[sessionId]).toEqual({
+      servers: [{ name: "fs", status: "connected" }],
+    });
+  });
+
+  it("does not overwrite live model state for the active (non-force-merged) session", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.sessionModels.bySessionId["active-session"] = {
+        currentModelId: "live-model",
+        models: [],
+        configOptions: [],
+      };
+      hydrateState(
+        draft,
+        {
+          sessionModels: {
+            bySessionId: {
+              "active-session": {
+                currentModelId: "stale-model",
+                models: [],
+                configOptions: [],
+              },
+            },
+          },
+        } as unknown as Partial<AppState>,
+        { activeSessionId: "active-session" },
+      );
+    });
+
+    expect(result.sessionModels.bySessionId["active-session"].currentModelId).toBe("live-model");
+  });
+});
+
 describe("hydrateState — system slice", () => {
   it("leaves the system slice untouched when the caller supplies no system fields", () => {
     const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
