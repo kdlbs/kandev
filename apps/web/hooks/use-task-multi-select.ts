@@ -4,7 +4,7 @@ import { useCallback, useEffect, useLayoutEffect, useReducer, useRef, type RefOb
 import { useTaskActions } from "@/hooks/use-task-actions";
 import { useAppStoreApi } from "@/components/state-provider";
 import type { KanbanState } from "@/lib/state/slices";
-import { sortIdsByCreatedDesc } from "@/lib/kanban/task-order";
+import { sortIdsByBoardOrder } from "@/lib/kanban/task-order";
 
 /** @internal Exported for reuse by the sidebar multi-select hook. */
 export function useTaskMultiSelectStore() {
@@ -79,18 +79,18 @@ export function useTaskMultiSelectStore() {
     [store],
   );
 
-  // Sort ids into the board's visible (created-desc) order. A backward range
-  // selection leaves `selectedIds` in anchor-first Set order, which would land
-  // scrambled when the move assigns sequential positions.
+  // Sort ids into the board's visible order. A backward range selection leaves
+  // `selectedIds` in anchor-first Set order, which would land scrambled when
+  // the move assigns sequential positions.
   const sortByDisplayOrder = useCallback(
     (ids: string[]): string[] => {
       const state = store.getState();
-      const taskById = new Map<string, { createdAt?: string }>();
+      const taskById = new Map<string, { createdAt?: string; position?: number; id?: string }>();
       for (const snap of Object.values(state.kanbanMulti.snapshots)) {
         for (const t of snap.tasks) taskById.set(t.id, t);
       }
       for (const t of state.kanban.tasks) if (!taskById.has(t.id)) taskById.set(t.id, t);
-      return sortIdsByCreatedDesc(ids, taskById);
+      return sortIdsByBoardOrder(ids, taskById);
     },
     [store],
   );

@@ -148,6 +148,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
 | [adaptive-kanban](ui/adaptive-kanban.md) | shipped |
+| [kanban-card-ordering](ui/kanban-card-ordering.md) | shipped |
 | [task-layout-profiles](ui/task-layout-profiles.md) | draft |
 | [task-surface-refresh](ui/task-surface-refresh.md) | draft |
 | [walkthrough-navigation-layout](walkthrough-navigation-layout/spec.md) | shipped |

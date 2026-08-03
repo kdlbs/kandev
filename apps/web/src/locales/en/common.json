@@ -40,5 +40,7 @@
   "presetIconSearch": "Search",
   "presetIconBug": "Bug",
   "presetIconSparkle": "Sparkle",
-  "presetIconCheck": "Check"
+  "presetIconCheck": "Check",
+  "overWipLimit": "Over WIP limit",
+  "tasksOverWipLimit": "{{countLabel}} tasks, over WIP limit"
 }

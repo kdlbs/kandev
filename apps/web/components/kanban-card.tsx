@@ -2,6 +2,9 @@
 
 import { useState } from "react";
 import { useDraggable } from "@dnd-kit/core";
+import { useSortable } from "@dnd-kit/sortable";
+import type { Transform } from "@dnd-kit/utilities";
+import { isQueuedOverflowKanbanTask } from "@/lib/kanban/task-order";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
 import { KanbanCardShell } from "@/components/kanban-card-content";
 import {
@@ -420,6 +423,14 @@ function useActiveWorkspaceRepositories() {
   );
 }
 
+type CardDragBindings = {
+  attributes: ReturnType<typeof useDraggable>["attributes"];
+  listeners: ReturnType<typeof useDraggable>["listeners"];
+  setNodeRef: ReturnType<typeof useDraggable>["setNodeRef"];
+  transform: Transform | null;
+  isDragging: boolean;
+};
+
 function KanbanCardFrame({
   task,
   repositoryChips,
@@ -446,7 +457,7 @@ function KanbanCardFrame({
   | "onToggleSelect"
   | "onOpenFullPage"
 > & {
-  draggable: ReturnType<typeof useDraggable>;
+  draggable: CardDragBindings;
   menu: KanbanCardMenuState;
   isPreviewed: boolean;
   onClick: (e: React.MouseEvent) => void;
@@ -479,6 +490,32 @@ function KanbanCardFrame({
   );
 }
 
+function SortableCardDrag({
+  taskId,
+  disabled,
+  children,
+}: {
+  taskId: string;
+  disabled: boolean;
+  children: (drag: CardDragBindings) => React.ReactNode;
+}) {
+  const drag = useSortable({ id: taskId, disabled });
+  return <>{children(drag)}</>;
+}
+
+function PlainCardDrag({
+  taskId,
+  disabled,
+  children,
+}: {
+  taskId: string;
+  disabled: boolean;
+  children: (drag: CardDragBindings) => React.ReactNode;
+}) {
+  const drag = useDraggable({ id: taskId, disabled });
+  return <>{children(drag)}</>;
+}
+
 export function KanbanCard({
   task,
   workspaceId,
@@ -500,10 +537,9 @@ export function KanbanCard({
   onRangeSelect,
   isMultiSelectMode,
 }: KanbanCardProps) {
-  const draggable = useDraggable({
-    id: task.id,
-    disabled: isMultiSelectMode,
-  });
+  // Admitted cards use SortableContext; queued overflow uses plain useDraggable so
+  // cross-step moves still work without participating in within-column sorting.
+  const Drag = isQueuedOverflowKanbanTask(task) ? PlainCardDrag : SortableCardDrag;
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
   const repositories = useActiveWorkspaceRepositories();
   const menu = useKanbanCardMenus({
@@ -530,21 +566,25 @@ export function KanbanCard({
 
   return (
     <>
-      <KanbanCardFrame
-        task={task}
-        repositoryChips={repositoryChips}
-        draggable={draggable}
-        menu={menu}
-        isPreviewed={isPreviewed}
-        isSelected={isSelected}
-        isMultiSelectMode={isMultiSelectMode}
-        showMaximizeButton={showMaximizeButton}
-        isDeleting={isDeleting}
-        isArchiving={isArchiving}
-        onClick={handleClick}
-        onToggleSelect={onToggleSelect}
-        onOpenFullPage={onOpenFullPage}
-      />
+      <Drag taskId={task.id} disabled={!!isMultiSelectMode}>
+        {(draggable) => (
+          <KanbanCardFrame
+            task={task}
+            repositoryChips={repositoryChips}
+            draggable={draggable}
+            menu={menu}
+            isPreviewed={isPreviewed}
+            isSelected={isSelected}
+            isMultiSelectMode={isMultiSelectMode}
+            showMaximizeButton={showMaximizeButton}
+            isDeleting={isDeleting}
+            isArchiving={isArchiving}
+            onClick={handleClick}
+            onToggleSelect={onToggleSelect}
+            onOpenFullPage={onOpenFullPage}
+          />
+        )}
+      </Drag>
       <KanbanCardDialogs
         task={task}
         workspaceId={workspaceId}

@@ -1,58 +1,29 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import {
-  DndContext,
-  DragEndEvent,
-  DragOverlay,
-  DragStartEvent,
-  PointerSensor,
-  TouchSensor,
-  useSensor,
-  useSensors,
-} from "@dnd-kit/core";
+import { DndContext, DragOverlay } from "@dnd-kit/core";
 import { KanbanColumn } from "@/components/kanban-column";
 import { type Task } from "@/components/kanban-card";
 import { KanbanCardPreview } from "@/components/kanban-card-preview";
 import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
-import { useTaskActions } from "@/hooks/use-task-actions";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useSwimlaneKanbanDnd } from "@/hooks/domains/kanban/use-swimlane-kanban-dnd";
+import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { MobileColumnTabs } from "./mobile-column-tabs";
 import { SwipeableColumns } from "./swipeable-columns";
 import { MobileDropTargets } from "./mobile-drop-targets";
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
-import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
-import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
+import { ORPHAN_STEP, ORPHAN_STEP_ID, isOrphanMoveTarget } from "@/lib/kanban/orphan-step";
+import { compareTasksByBoardOrder } from "@/lib/kanban/task-order";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import {
   type KanbanExternalLinkAvailability,
   useKanbanExternalLinkAvailability,
 } from "@/components/kanban-external-link-availability";
 
-/**
- * Sentinel step ID used to collect tasks whose workflow_step_id no longer
- * matches any rendered column.  Tasks remapped here are visible as a
- * "Needs Reassignment" fallback column so they are never silently hidden.
- */
-export const ORPHAN_STEP_ID = "__kandev_orphan__";
-
-export const ORPHAN_STEP: WorkflowStep = {
-  id: ORPHAN_STEP_ID,
-  title: "Needs Reassignment",
-  color: "#f59e0b",
-};
-
-/**
- * The "Needs Reassignment" column is a display-only fallback, not a real
- * workflow step — it must never be offered as a manual move destination
- * (drag-and-drop, "Move to" menus, or Pipeline navigation).
- */
-export function isOrphanMoveTarget(targetStepId: string): boolean {
-  return targetStepId === ORPHAN_STEP_ID;
-}
+export { ORPHAN_STEP, ORPHAN_STEP_ID, isOrphanMoveTarget };
 
 export type SwimlaneKanbanContentProps = {
   workflowId: string;
@@ -73,103 +44,6 @@ export type SwimlaneKanbanContentProps = {
   isMultiSelectMode?: boolean;
   mobileWorkflowNavigation?: MobileWorkflowNavigation;
 };
-
-type SwimlaneKanbanDndOptions = {
-  tasks: Task[];
-  workflowId: string;
-  onMoveError?: (error: MoveTaskError) => void;
-};
-
-function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanbanDndOptions) {
-  const store = useAppStoreApi();
-  const { moveTaskById } = useTaskActions();
-  const [activeTaskId, setActiveTaskId] = useState<string | null>(null);
-
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
-    useSensor(TouchSensor, {
-      activationConstraint: { delay: 250, tolerance: 5 },
-    }),
-  );
-
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    setActiveTaskId(event.active.id as string);
-  }, []);
-
-  const handleDragEnd = useCallback(
-    async (event: DragEndEvent) => {
-      const { active, over } = event;
-      setActiveTaskId(null);
-      if (!over) return;
-
-      const taskId = active.id as string;
-      const targetStepId = over.id as string;
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task || task.workflowStepId === targetStepId || isOrphanMoveTarget(targetStepId)) return;
-
-      const state = store.getState();
-      const snapshot = state.kanbanMulti.snapshots[workflowId];
-      if (!snapshot) return;
-
-      const targetTasks = snapshot.tasks.filter(
-        (t: KanbanState["tasks"][number]) => t.workflowStepId === targetStepId && t.id !== taskId,
-      );
-      const nextPosition = targetTasks.length;
-      const originalTasks = snapshot.tasks;
-
-      state.setWorkflowSnapshot(workflowId, {
-        ...snapshot,
-        tasks: snapshot.tasks.map((t: KanbanState["tasks"][number]) =>
-          t.id === taskId ? { ...t, workflowStepId: targetStepId, position: nextPosition } : t,
-        ),
-      });
-
-      try {
-        await moveTaskById(taskId, {
-          workflow_id: workflowId,
-          workflow_step_id: targetStepId,
-          position: nextPosition,
-        });
-      } catch (error) {
-        const currentSnapshot = store.getState().kanbanMulti.snapshots[workflowId];
-        if (currentSnapshot) {
-          store
-            .getState()
-            .setWorkflowSnapshot(workflowId, { ...currentSnapshot, tasks: originalTasks });
-        }
-        const message = error instanceof Error ? error.message : "Failed to move task";
-        onMoveError?.({ message, taskId, sessionId: task.primarySessionId ?? null });
-      }
-    },
-    [tasks, workflowId, store, moveTaskById, onMoveError],
-  );
-
-  const handleDragCancel = useCallback(() => {
-    setActiveTaskId(null);
-  }, []);
-
-  const moveTaskToStep = useCallback(
-    async (task: Task, targetStepId: string) => {
-      if (task.workflowStepId === targetStepId) return;
-      await handleDragEnd({ active: { id: task.id }, over: { id: targetStepId } } as DragEndEvent);
-    },
-    [handleDragEnd],
-  );
-
-  const activeTask = useMemo(
-    () => tasks.find((t) => t.id === activeTaskId) ?? null,
-    [tasks, activeTaskId],
-  );
-
-  return {
-    sensors,
-    handleDragStart,
-    handleDragEnd,
-    handleDragCancel,
-    moveTaskToStep,
-    activeTask,
-  };
-}
 
 function getInitialColumnIndex(steps: WorkflowStep[], tasks: Task[]): number {
   if (steps.length === 0) return 0;
@@ -242,7 +116,7 @@ function useOrphanDisplay(
 function useTasksByStep(tasks: Task[]) {
   return useCallback(
     (stepId: string) =>
-      tasks.filter((t) => t.workflowStepId === stepId).sort(compareTasksByCreatedDesc),
+      tasks.filter((t) => t.workflowStepId === stepId).sort(compareTasksByBoardOrder),
     [tasks],
   );
 }
@@ -533,8 +407,9 @@ export function SwimlaneKanbanContent({
     displaySteps,
     displayTasks,
   );
+  const stepIds = useMemo(() => new Set(displaySteps.map((step) => step.id)), [displaySteps]);
   const { sensors, handleDragStart, handleDragEnd, handleDragCancel, moveTaskToStep, activeTask } =
-    useSwimlaneKanbanDnd({ tasks: displayTasks, workflowId, onMoveError });
+    useSwimlaneKanbanDnd({ tasks: displayTasks, workflowId, stepIds, onMoveError });
 
   // Memoized so the layout components don't re-render from a fresh props object
   // on every parent render. Declared before the early return to keep hook order

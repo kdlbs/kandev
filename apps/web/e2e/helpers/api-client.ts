@@ -874,10 +874,16 @@ export class ApiClient {
     await this.request("PATCH", "/api/v1/user/settings", settings);
   }
 
-  async moveTask(taskId: string, workflowId: string, workflowStepId: string): Promise<void> {
+  async moveTask(
+    taskId: string,
+    workflowId: string,
+    workflowStepId: string,
+    position = 0,
+  ): Promise<void> {
     await this.request("POST", `/api/v1/tasks/${taskId}/move`, {
       workflow_id: workflowId,
       workflow_step_id: workflowStepId,
+      position,
     });
   }
 

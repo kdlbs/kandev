@@ -40,5 +40,7 @@
   "presetIconSearch": "Śēàŕćĥ",
   "presetIconBug": "Ɓũĝ",
   "presetIconSparkle": "Śƥàŕķĺē",
-  "presetIconCheck": "Ćĥēćķ"
+  "presetIconCheck": "Ćĥēćķ",
+  "overWipLimit": "Ōvēŕ ŴĨƤ ĺĩḿĩţ",
+  "tasksOverWipLimit": "{{countLabel}} ţàśķś, ōvēŕ ŴĨƤ ĺĩḿĩţ"
 }
