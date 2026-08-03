@@ -3,11 +3,13 @@ import { expect, type Page } from "@playwright/test";
 const PROFILE_CARD_TITLES = ["Profile Details", "Environment Variables", "Prepare Script"] as const;
 
 export async function expectExecutorProfileCardsSeparated(page: Page) {
+  const profileFieldset = page.locator("fieldset").filter({ hasText: "Profile Details" });
+
   for (const title of PROFILE_CARD_TITLES) {
-    await expect(page.getByText(title, { exact: true })).toBeVisible();
+    await expect(profileFieldset.getByText(title, { exact: true })).toBeVisible();
   }
 
-  const cards = page.locator('[data-slot="card"]:visible');
+  const cards = profileFieldset.locator(':scope > [data-slot="card"]:visible');
   const cardBoxes = await cards.evaluateAll((elements) =>
     elements.map((element) => {
       const box = element.getBoundingClientRect();
