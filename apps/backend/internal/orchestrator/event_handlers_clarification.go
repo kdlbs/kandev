@@ -542,6 +542,9 @@ func (s *Service) cancelAgentSilentAction(
 }
 
 func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sessionID string, operation *cancelOperation) {
+	endProjection := s.beginCancellationProjection(sessionID)
+	operation.projectionRelease = endProjection
+	defer endProjection()
 	operationCtx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), cancellationOperationTTL)
 	defer cancel()
 	err := s.runSilentCancellationOwned(operationCtx, taskID, sessionID, operation)

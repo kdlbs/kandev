@@ -3996,6 +3996,7 @@ type cancellationIdentity struct {
 type cancelOperation struct {
 	done                       chan struct{}
 	err                        error
+	projectionRelease          func()
 	kind                       cancellationKind
 	identity                   cancellationIdentity
 	identityReady              bool
@@ -4180,10 +4181,15 @@ func (s *Service) finishCancellationWithActions(
 			return
 		}
 		if operation.nextAction >= len(operation.actions) {
+			releaseProjection := operation.projectionRelease
+			operation.projectionRelease = nil
 			operation.err = err
 			delete(s.cancellationOperations, sessionID)
-			close(operation.done)
 			s.cancellationOperationsMu.Unlock()
+			if releaseProjection != nil {
+				releaseProjection()
+			}
+			close(operation.done)
 			return
 		}
 		action := operation.actions[operation.nextAction]
@@ -4220,6 +4226,7 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 	if !owner {
 		return endProjection
 	}
+	operation.projectionRelease = endProjection
 
 	var once sync.Once
 	return func() {
@@ -4681,6 +4688,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) (err error)
 
 func (s *Service) runExplicitCancellation(requestCtx context.Context, sessionID string, operation *cancelOperation) {
 	endProjection := s.beginCancellationProjection(sessionID)
+	operation.projectionRelease = endProjection
 	defer endProjection()
 	operationCtx, cancel := context.WithTimeout(context.WithoutCancel(requestCtx), cancellationOperationTTL)
 	defer cancel()
