@@ -17,27 +17,39 @@ npm_version() {
   bash "$ROOT_DIR/scripts/release/npm-view-version.sh" "$1"
 }
 
-latest_stable_tag_version() {
+latest_stable_tag() {
   local tag
   while IFS= read -r tag; do
-    if [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-      printf '%s\n' "${BASH_REMATCH[1]}"
+    if [[ "$tag" =~ ^v[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+      printf '%s\n' "$tag"
       return 0
     fi
   done < <(git tag --list 'v*' --sort=-version:refname)
   return 0
 }
 
+normalize_stable_tag() {
+  local tag="$1"
+  if [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+    printf '%s\n' "${BASH_REMATCH[1]}"
+  elif [[ "$tag" =~ ^v([0-9]+\.[0-9]+)$ ]]; then
+    printf '%s.0\n' "${BASH_REMATCH[1]}"
+  fi
+}
+
+MATCHED_STABLE_TAG=""
+
 stable_tag_matches_npm() {
   local npm_latest="$1"
   local tagged_stable
-  tagged_stable="$(latest_stable_tag_version)"
-  if [[ -z "$tagged_stable" ]]; then
+  MATCHED_STABLE_TAG="$(latest_stable_tag)"
+  if [[ -z "$MATCHED_STABLE_TAG" ]]; then
     echo "No stable Git tag is available; skipping this best-effort Nightly run."
     return 1
   fi
+  tagged_stable="$(normalize_stable_tag "$MATCHED_STABLE_TAG")"
   if [[ "$tagged_stable" != "$npm_latest" ]]; then
-    echo "Highest stable Git tag v$tagged_stable does not match npm @latest $npm_latest; skipping Nightly."
+    echo "Highest stable Git tag $MATCHED_STABLE_TAG does not match npm @latest $npm_latest; skipping Nightly."
     return 1
   fi
   return 0
@@ -108,7 +120,7 @@ prepare() {
   write_output stable_version "$latest_stable"
 
   local stable_commit
-  stable_commit="$(git rev-parse "v${latest_stable}^{commit}")"
+  stable_commit="$(git rev-parse "${MATCHED_STABLE_TAG}^{commit}")"
   if ! git merge-base --is-ancestor "$stable_commit" "$main_sha"; then
     if git merge-base --is-ancestor "$main_sha" "$stable_commit"; then
       echo "Scheduled commit $main_sha was superseded by stable v$latest_stable; skipping Nightly."

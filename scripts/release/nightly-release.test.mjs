@@ -217,6 +217,26 @@ test("prepare publishes a changed main commit and snapshots empty tags", async (
   }
 });
 
+test("prepare normalizes a legacy two-part stable tag", async () => {
+  const fixture = await createFixture();
+  try {
+    git(fixture.root, "tag", "-d", "v1.2.3");
+    git(fixture.root, "tag", "v1.2", fixture.stableSha);
+    await setRegistry(fixture, new Map([["kandev@latest", "1.2.0"]]));
+    const result = await runPrepare(fixture);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.output.should_publish, "true");
+    assert.equal(result.output.stable_version, "1.2.0");
+    assert.equal(
+      result.output.version,
+      `1.2.1-nightly.sha${fixture.mainSha.slice(0, 12)}`,
+    );
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("prepare skips when main has no commit after stable", async () => {
   const fixture = await createFixture();
   try {
