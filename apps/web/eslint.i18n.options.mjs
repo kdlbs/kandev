@@ -1091,4 +1091,41 @@ export const i18nGuardFiles = [
   "components/settings/utility-sections.tsx",
   "components/settings/voice-mode-settings.tsx",
   "lib/settings/external-mcp-tools.ts",
+  // Configuration Chat. `ConfigChatProvider` mounts the FAB on EVERY /settings
+  // route, so its `aria-label="Configuration Chat"` was the last text finding
+  // the pseudo-coverage oracle reported across the whole migrated surface.
+  //
+  // `use-config-chat.ts` holds no JSX, so `mode: "jsx-only"` never inspects it;
+  // the entry records that it was read by eye. The count from
+  // `pnpm run lint:i18n` reported it as 0 while it owned two strings that reach
+  // the user — the `setError` for a missing agent profile, and the fallback for
+  // a throw with no `message`. It imports the module-level `t` rather than the
+  // hook so each resolves when `startSession` runs, keeping `t` out of the
+  // callback's dependency array.
+  //
+  // `SUGGESTION_PROMPT_KEYS` in `config-chat-setup.tsx` was `SUGGESTION_PROMPTS`,
+  // four sentences the guard skipped entirely because the identifier is
+  // SCREAMING_CASE. They now travel as catalog keys and resolve at render.
+  //
+  // Copy lives in a new `configChat` namespace, except the feature NAME
+  // ("Configuration Chat"), which the command palette also renders and which is
+  // therefore `common:configurationChat` — `common:commandConfigurationChat`
+  // held the byte-identical string and was folded into it rather than left as a
+  // twin free to drift.
+  //
+  // Deliberately left in English: the `"Config Chat"` session-name fallback in
+  // `use-config-chat.ts`. `persistQuickChatRename` writes it to the task title,
+  // so translating it would persist a locale-dependent value — the same call as
+  // the built-in layout profile names and the seeded workflow step names.
+  //
+  // NOT listed, and not migrated here:
+  //   - `components/settings/config-chat-agent-section.tsx`, the Configuration
+  //     Chat card on Settings → Utility Agents. #2218 migrates it with the page
+  //     that owns it, into `settings:configChatAgent*`.
+  //   - `components/quick-chat/**`. `quick-chat-modal.tsx` renders
+  //     `ConfigChatSetup` in its `presentation="dialog"` form and calls
+  //     `useConfigChat`, so it inherits everything migrated here, but its own
+  //     chrome — and `configuration-chat-toggle.tsx`, which `ConfigChatSetup`
+  //     renders — is still English and belongs to the quick-chat migration.
+  "components/config-chat/*.{ts,tsx}",
 ];

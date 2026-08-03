@@ -171,7 +171,7 @@ export function GlobalCommands() {
   const configChatCommand: CommandItem = useMemo(
     () => ({
       id: "config-chat",
-      label: t("common:commandConfigurationChat"),
+      label: t("common:configurationChat"),
       group: t(GROUP_ACTIONS),
       icon: <IconSparkles className="size-3.5" />,
       keywords: searchKeywords(t, "common:commandConfigChatKeywords"),
