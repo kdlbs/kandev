@@ -36,6 +36,7 @@ import { useUpdates } from "./use-updates";
 
 const SAVE_FAILURE_MESSAGE = "save failed";
 const CHECK_FAILURE_MESSAGE = "check failed";
+const CHANNEL_SAVE_FAILURE_COPY = "Could not save the update channel. Try again.";
 
 function updates(channel: UpdatesResponse["channel"]): UpdatesResponse {
   const nightly = channel === "nightly";
@@ -289,6 +290,7 @@ describe("useUpdates channel saving", () => {
   });
 
   it("surfaces a channel save failure while revalidating the current state", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const failure = new Error(SAVE_FAILURE_MESSAGE);
     const stable = updates("stable");
     mocks.saveUpdatesChannel.mockRejectedValue(failure);
@@ -299,12 +301,15 @@ describe("useUpdates channel saving", () => {
       await expect(result.current.saveChannel("nightly")).rejects.toBe(failure);
     });
 
-    expect(result.current.error).toBe(SAVE_FAILURE_MESSAGE);
+    expect(result.current.error).toBe(CHANNEL_SAVE_FAILURE_COPY);
+    expect(errorLog).toHaveBeenCalledWith("[updates] Failed to save update channel", failure);
     expect(mocks.fetchUpdates).toHaveBeenCalledOnce();
     expect(mocks.setSystemUpdates).toHaveBeenCalledWith(stable);
+    errorLog.mockRestore();
   });
 
   it("revalidates after a failed save suppresses a concurrent reload", async () => {
+    const errorLog = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const pendingSave = deferred<UpdatesResponse>();
     const suppressedReload = deferred<UpdatesResponse>();
     const recoveryReload = deferred<UpdatesResponse>();
@@ -341,7 +346,8 @@ describe("useUpdates channel saving", () => {
     });
     expect(mocks.setSystemUpdates).toHaveBeenCalledOnce();
     expect(mocks.setSystemUpdates).toHaveBeenCalledWith(stable);
-    expect(result.current.error).toBe(SAVE_FAILURE_MESSAGE);
+    expect(result.current.error).toBe(CHANNEL_SAVE_FAILURE_COPY);
+    errorLog.mockRestore();
   });
 });
 

@@ -434,6 +434,7 @@
   "updateChannelStableDescription": "Signed GitHub releases. Recommended for most users.",
   "updateChannelNightly": "Nightly",
   "updateChannelNightlyDescription": "Install-wide prerelease builds from main via npm. Apply uses the exact version shown.",
+  "updateChannelSaveFailed": "Could not save the update channel. Try again.",
   "updateChannelSavingNotice": "Saving channel change before checking or applying an update.",
   "updateChannelUnsavedNotice": "Save channel changes before checking or applying an update.",
   "updateChannelUnavailable": "The Nightly update channel is unavailable for this installation.",

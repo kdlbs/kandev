@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { checkUpdates, fetchUpdates, saveUpdatesChannel } from "@/lib/api/domains/system-api";
 import type { UpdatesChannel, UpdatesResponse } from "@/lib/types/system";
@@ -58,6 +59,7 @@ function queueChannelSave(
   channel: UpdatesChannel,
   setSystemUpdates: (updates: UpdatesResponse) => void,
   setError: (error: string | null) => void,
+  saveErrorMessage: string,
 ): Promise<UpdatesResponse> {
   const request = ++coordinator.saveRevision;
   coordinator.activeSaves += 1;
@@ -74,7 +76,8 @@ function queueChannelSave(
       return response;
     } catch (error) {
       if (request === coordinator.saveRevision) {
-        setError(error instanceof Error ? error.message : String(error));
+        console.error("[updates] Failed to save update channel", error);
+        setError(saveErrorMessage);
       }
       throw error;
     } finally {
@@ -93,6 +96,7 @@ function queueChannelSave(
 }
 
 export function useUpdates() {
+  const { t } = useTranslation();
   const store = useAppStoreApi();
   const coordinator = coordinatorFor(store);
   const updates = useAppStore((s) => s.system.updates);
@@ -160,8 +164,15 @@ export function useUpdates() {
   }, [coordinator, setSystemUpdates, store]);
 
   const saveChannel = useCallback(
-    (channel: UpdatesChannel) => queueChannelSave(coordinator, channel, setSystemUpdates, setError),
-    [coordinator, setSystemUpdates],
+    (channel: UpdatesChannel) =>
+      queueChannelSave(
+        coordinator,
+        channel,
+        setSystemUpdates,
+        setError,
+        t("settings:updateChannelSaveFailed"),
+      ),
+    [coordinator, setSystemUpdates, t],
   );
 
   useEffect(() => {
