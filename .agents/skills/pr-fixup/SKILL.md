@@ -202,6 +202,11 @@ summary's authoritative head repository and ref only when
 `pr.head_ref_oid` to equal local `HEAD`; an upstream remote comparison is not
 sufficient. Run broad `/verify` only if the user explicitly requests it or the
 PR/CI finding requires it.
+After every push, also run a fresh
+`gh pr view <PR> --json baseRefName,headRefOid,mergeable,mergeStateStatus` (or
+equivalent) at that pushed head. Require `headRefOid` to equal local `HEAD` and
+confirm `mergeable` is not `CONFLICTING` and `mergeStateStatus` is not `DIRTY`;
+`scripts/pr-state --summary` does not include mergeability.
 
 Immediately before a remediation commit or push—and again after long-running
 remediation—refresh PR state. Require the PR to remain open and its head ref to

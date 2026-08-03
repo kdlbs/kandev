@@ -82,9 +82,27 @@ If `git ls-files -u` shows entries, a previous merge or rebase was left incomple
 
 Do not discard unrelated user changes to make a merge/rebase easier. If unrelated dirty files block the conflict-resolution attempt, stop and ask before stashing, committing, or reverting them.
 
-## Push after rebasing
+## Push after rebasing or merging
 
-Capture the remote branch SHA before rebasing when possible. After a successful rebase, prefer an exact force lease:
+Capture the remote branch SHA before fetching the base or starting a merge/rebase
+when possible. Recheck it immediately before pushing. This guards both merge-
+based conflict fixes and rebases against another writer advancing the PR branch:
+
+```bash
+git ls-remote origin refs/heads/<branch>
+# fetch/merge or rebase, resolve, test, and commit through hooks
+git ls-remote origin refs/heads/<branch>
+```
+
+If the second SHA differs from the first, stop and review the intervening remote
+changes before pushing; do not overwrite them. After a merge-based fixup whose
+remote SHA is unchanged, use a normal push:
+
+```bash
+git push origin HEAD:refs/heads/<branch>
+```
+
+After a successful rebase, prefer an exact force lease:
 
 ```bash
 git push \
