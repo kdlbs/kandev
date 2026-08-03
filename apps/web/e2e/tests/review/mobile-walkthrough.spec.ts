@@ -48,6 +48,15 @@ test.describe("Mobile code walkthrough", () => {
     const card = testPage.getByTestId("walkthrough-floating");
     await expect(card).toBeVisible({ timeout: 30_000 });
     await expect(card).toHaveAttribute("data-mobile-variant", "bottom-sheet");
+    await expect(card.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
+    await expect(card.getByRole("button", { name: "Add", exact: true })).toBeVisible();
+    await expect(card.getByRole("button", { name: "Run", exact: true })).toBeVisible();
+    await card.getByRole("textbox").fill("Why does this line exist?");
+    await expect(card.getByRole("button", { name: "Add", exact: true })).toBeEnabled();
+    await expect(card.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
+    await prCapture.screenshot("mobile-walkthrough-feedback-controls", {
+      caption: "Mobile walkthrough keeps Add and Run without an inert Cancel action",
+    });
 
     const box = await card.boundingBox();
     const viewport = testPage.viewportSize();

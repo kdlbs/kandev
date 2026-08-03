@@ -277,7 +277,6 @@ export function WalkthroughStepInner({
           key={`${walkthrough.id}:${activeStep}`}
           onSubmit={addWalkthroughFeedback}
           onSubmitAndRun={runWalkthroughFeedback}
-          onCancel={() => {}}
           autoFocus={false}
         />
       </div>
