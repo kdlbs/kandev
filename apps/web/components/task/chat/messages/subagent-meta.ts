@@ -55,8 +55,14 @@ export function subagentMetaChips(
   }
   // The header already states the child count ("10 tool calls"), so a chip
   // repeating the same number is noise. A divergence is not: it means the agent
-  // reported more tool uses than it streamed, which is worth seeing.
-  if (typeof payload.tool_use_count === "number" && payload.tool_use_count !== childCount) {
+  // reported more tool uses than it streamed, which is worth seeing. The header
+  // renders no count at all when nothing streamed, so a zero child count can
+  // never be the duplicate — and "0 tools" is exactly the case the chip is for.
+  const headerStatesCount = typeof childCount === "number" && childCount > 0;
+  if (
+    typeof payload.tool_use_count === "number" &&
+    !(headerStatesCount && payload.tool_use_count === childCount)
+  ) {
     chips.push({ label: "tools", value: formatTools(payload.tool_use_count) });
   }
   if (payload.model) {

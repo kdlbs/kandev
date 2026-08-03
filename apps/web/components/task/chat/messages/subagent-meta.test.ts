@@ -99,4 +99,14 @@ describe("subagentMetaChips tool-count de-duplication", () => {
   it("keeps the tools chip when no children were rendered at all", () => {
     expect(subagentMetaChips({ tool_use_count: 0 })).toEqual([{ label: "tools", value: "0 tools" }]);
   });
+
+  // The card always passes a numeric childCount, so a zero-tool subagent hits
+  // 0 === 0 and would lose its "0 tools" chip — which is the one case the chip
+  // exists for. Passing undefined here (as the test above does) misses the
+  // production path entirely.
+  it("keeps the 0 tools chip when the card reports zero children", () => {
+    expect(subagentMetaChips({ tool_use_count: 0 }, 0)).toEqual([
+      { label: "tools", value: "0 tools" },
+    ]);
+  });
 });

@@ -108,9 +108,12 @@ export function stripSubagentTypePrefix(description: string, subagentType: strin
     consumed += normalize(description[i]);
     if (consumed.length < target.length) continue;
     if (consumed !== target) return description;
+    // Only whitespace or a colon separates a type from its description. `.`
+    // and `,` are not boundaries: type "test" would otherwise eat the filename
+    // in "test.ts regression suite" and leave "ts regression suite".
     const rest = description.slice(i + 1);
-    if (rest !== "" && !/^[\s\-_:,.]/.test(rest)) return description;
-    return rest.replace(/^[\s\-_:,.]+/, "");
+    if (rest !== "" && !/^[\s:]/.test(rest)) return description;
+    return rest.replace(/^[\s:]+/, "");
   }
   return description;
 }

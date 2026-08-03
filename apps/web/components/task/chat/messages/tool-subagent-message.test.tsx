@@ -14,6 +14,7 @@ const WORKING = "Working...";
 const SUBAGENT_DESCRIPTION = "subagent-description";
 const SUBAGENT_RESULT_TEXT = "subagent-result-text";
 const CHILD_TOOL_LABEL = "Read SyncRunner.ts";
+const CODE_REVIEWER = "code-reviewer";
 
 function subagentMessage({
   metadataStatus = "in_progress",
@@ -375,7 +376,7 @@ describe("subagent description de-duplication", () => {
       subagentMessage({
         metadataStatus: COMPLETE,
         payloadStatus: COMPLETE,
-        subagentType: "code-reviewer",
+        subagentType: CODE_REVIEWER,
         description: "code-review of the closure diff",
       }),
     );
@@ -389,10 +390,33 @@ describe("subagent description de-duplication", () => {
       subagentMessage({
         metadataStatus: COMPLETE,
         payloadStatus: COMPLETE,
-        subagentType: "code-reviewer",
-        description: "code-reviewer",
+        subagentType: CODE_REVIEWER,
+        description: CODE_REVIEWER,
       }),
     );
     expect(screen.queryByTestId(SUBAGENT_DESCRIPTION)).toBeNull();
+  });
+});
+
+// A description opening with a filename must not be eaten by a type that is a
+// prefix of it: type "test" + "test.ts regression" must not become "ts
+// regression". Only whitespace and a colon separate a type from its description.
+describe("subagent description prefix boundaries", () => {
+  it.each([
+    ["test", "test.ts regression suite", "test.ts regression suite"],
+    ["review", "review.md findings", "review.md findings"],
+    [CODE_REVIEWER, "code-reviewer: the closure diff", "the closure diff"],
+    [CODE_REVIEWER, "code-reviewer on diff", "on diff"],
+  ])("type %s + %s renders %s", (subagentType, description, expected) => {
+    cleanup();
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        subagentType,
+        description,
+      }),
+    );
+    expect(screen.getByTestId(SUBAGENT_DESCRIPTION).textContent).toBe(expected);
   });
 });

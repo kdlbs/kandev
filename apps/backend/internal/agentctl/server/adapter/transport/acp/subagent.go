@@ -306,7 +306,11 @@ func contentBlocksText(v any) string {
 		}
 		parts = append(parts, text)
 	}
-	return strings.TrimSpace(strings.Join(parts, "\n"))
+	// Joined verbatim: TrimSpace is used only to decide whether a block is
+	// blank, never applied to the text that is stored. A verdict that opens
+	// with an indented code block must survive intact; truncation and
+	// first-line extraction are rendering concerns.
+	return strings.Join(parts, "\n")
 }
 
 // openCodeSubagentMetadata reads OpenCode's `rawOutput.metadata` into res and

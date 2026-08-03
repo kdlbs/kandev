@@ -1355,6 +1355,24 @@ func TestEnrichSubagentResult_ClaudeNoUsableResultText(t *testing.T) {
 	}
 }
 
+// The payload contract is that captured text is stored verbatim; truncation is
+// a rendering concern. Trimming the joined result would eat the indentation of
+// a verdict that opens with a code block.
+func TestEnrichSubagentResult_ClaudeResultTextKeepsIndentation(t *testing.T) {
+	n := NewNormalizer("")
+	payload := streams.NewSubagentTask("Review", "review it", "")
+	meta := map[string]any{"claudeCode": map[string]any{"toolResponse": map[string]any{
+		"content": []any{
+			map[string]any{"type": "text", "text": "    indented finding"},
+			map[string]any{"type": "text", "text": "\tsecond line"},
+		},
+	}}}
+	n.EnrichSubagentResult(payload, meta, nil)
+	if want := "    indented finding\n\tsecond line"; payload.SubagentTask().ResultText != want {
+		t.Errorf("ResultText = %q, want %q", payload.SubagentTask().ResultText, want)
+	}
+}
+
 // Claude sends the metrics envelope and the terminal status on different
 // frames, so enrichment runs more than once per subagent. A later frame
 // without content must not erase text an earlier one captured.
