@@ -4,12 +4,14 @@ import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 import {
   resolveCanonicalReviewParams,
+  resolveConfiguredReviewPanelPlacement,
   resolveConditionalReviewPanelAction,
   syncCanonicalReviewPanel,
   type ConditionalReviewPanelOptions,
 } from "./dockview-review-panel-sync";
 
 const CENTER_GROUP_ID = "group-center";
+const RIGHT_GROUP_ID = "group-right-top";
 const SESSION_PANEL_ID = "session:session-a";
 const PR_KEY = "kandev/kandev/42";
 
@@ -22,6 +24,7 @@ const syncWithOptions = (
 function makeApi(
   panel?: { params?: Record<string, unknown>; groupId?: string },
   sessionGroupId = CENTER_GROUP_ID,
+  extraGroupIds: string[] = [],
 ): {
   api: DockviewApi;
   updateParameters: ReturnType<typeof vi.fn>;
@@ -37,7 +40,7 @@ function makeApi(
     ? {
         id: "pr-detail",
         params: panel.params ?? {},
-        group: { id: panel.groupId ?? "group-right-top" },
+        group: { id: panel.groupId ?? RIGHT_GROUP_ID },
         api: { updateParameters, close },
       }
     : undefined;
@@ -55,6 +58,7 @@ function makeApi(
       groups: [
         { id: sessionGroupId },
         ...(sessionGroupId === CENTER_GROUP_ID ? [] : [{ id: CENTER_GROUP_ID }]),
+        ...extraGroupIds.map((id) => ({ id })),
       ],
       addPanel,
       removePanel: vi.fn(),
@@ -105,35 +109,27 @@ describe("resolveCanonicalReviewParams", () => {
 
 describe("resolveConditionalReviewPanelAction", () => {
   it.each([
-    [
-      "adds a linked review",
-      { hasReview: true, panelExists: false, autoAddedForReview: false, wasOffered: false },
-      "add",
-    ],
+    ["adds a linked review", { hasReview: true, panelExists: false, wasOffered: false }, "add"],
     [
       "waits while restoring",
-      { hasReview: true, panelExists: false, autoAddedForReview: false, isRestoringLayout: true },
+      { hasReview: true, panelExists: false, isRestoringLayout: true },
       "none",
     ],
-    [
-      "waits while maximized",
-      { hasReview: true, panelExists: false, autoAddedForReview: false, isMaximized: true },
-      "none",
-    ],
+    ["waits while maximized", { hasReview: true, panelExists: false, isMaximized: true }, "none"],
     [
       "respects a dismissed offer",
-      { hasReview: true, panelExists: false, autoAddedForReview: false, wasOffered: true },
+      { hasReview: true, panelExists: false, wasOffered: true },
       "none",
     ],
     [
       "removes a conditional panel without a review",
-      { hasReview: false, panelExists: true, autoAddedForReview: true },
+      { hasReview: false, panelExists: true },
       "remove",
     ],
     [
-      "syncs an explicit panel without a review",
-      { hasReview: false, panelExists: true, autoAddedForReview: false },
-      "sync",
+      "removes an explicitly configured panel without a review",
+      { hasReview: false, panelExists: true },
+      "remove",
     ],
   ])("$0", (_name, input, expected) => {
     expect(
@@ -147,12 +143,11 @@ describe("resolveConditionalReviewPanelAction", () => {
     ).toBe(expected);
   });
 
-  it("waits for review hydration before removing an automatic panel", () => {
+  it("waits for review hydration before removing any panel", () => {
     expect(
       resolveConditionalReviewPanelAction({
         hasReview: false,
         panelExists: true,
-        autoAddedForReview: true,
         reviewsLoaded: false,
         isRestoringLayout: false,
         isMaximized: false,
@@ -162,7 +157,35 @@ describe("resolveConditionalReviewPanelAction", () => {
   });
 });
 
-describe("syncCanonicalReviewPanel", () => {
+describe("resolveConfiguredReviewPanelPlacement", () => {
+  it("returns the saved group and tab index", () => {
+    expect(
+      resolveConfiguredReviewPanelPlacement({
+        columns: [
+          {
+            id: "right",
+            groups: [
+              {
+                id: RIGHT_GROUP_ID,
+                panels: [
+                  { id: "files", component: "files", title: "Files" },
+                  { id: "pr-detail", component: "pr-detail", title: "PR Details" },
+                  { id: "changes", component: "changes", title: "Changes" },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    ).toEqual({ groupId: RIGHT_GROUP_ID, index: 1 });
+  });
+
+  it("returns no placement for the built-in Default", () => {
+    expect(resolveConfiguredReviewPanelPlacement(null)).toBeNull();
+  });
+});
+
+describe("syncCanonicalReviewPanel placement", () => {
   it("leaves a layout without PR Details structurally untouched", () => {
     const { api, updateParameters, addPanel } = makeApi();
 
@@ -194,14 +217,13 @@ describe("syncCanonicalReviewPanel", () => {
           provider: "github",
           prKey: PR_KEY,
           mrKey: undefined,
-          autoAddedForReview: true,
         },
       }),
     );
   });
 
   it("falls back to the configured center group when Agent is in a side group", () => {
-    const { api, addPanel } = makeApi(undefined, "group-right-top");
+    const { api, addPanel } = makeApi(undefined, RIGHT_GROUP_ID);
 
     expect(
       syncWithOptions(api, resolveCanonicalReviewParams([githubPR], []), {
@@ -218,6 +240,30 @@ describe("syncCanonicalReviewPanel", () => {
     );
   });
 
+  it("adds a linked review in the group configured by the saved layout", () => {
+    const { api, addPanel } = makeApi(undefined, CENTER_GROUP_ID, [RIGHT_GROUP_ID]);
+
+    expect(
+      syncWithOptions(api, resolveCanonicalReviewParams([githubPR], []), {
+        sessionId: "session-a",
+        centerGroupId: CENTER_GROUP_ID,
+        configuredPlacement: { groupId: RIGHT_GROUP_ID, index: 2 },
+        reviewsLoaded: true,
+        isRestoringLayout: false,
+        isMaximized: false,
+        wasOffered: false,
+      }),
+    ).toBe(true);
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        inactive: true,
+        position: { referenceGroup: RIGHT_GROUP_ID, index: 2 },
+      }),
+    );
+  });
+});
+
+describe("syncCanonicalReviewPanel lifecycle", () => {
   it("does not add while restoring, maximized, or dismissed", () => {
     for (const options of [
       { isRestoringLayout: true, isMaximized: false, wasOffered: false },
@@ -244,16 +290,12 @@ describe("syncCanonicalReviewPanel", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("preserves an explicitly configured panel when review data disappears", () => {
+  it("closes an explicitly configured panel when review data disappears", () => {
     const { api, close, updateParameters } = makeApi({ params: { provider: "github" } });
 
     expect(syncCanonicalReviewPanel(api, resolveCanonicalReviewParams([], []))).toBe(true);
-    expect(close).not.toHaveBeenCalled();
-    expect(updateParameters).toHaveBeenCalledWith({
-      provider: undefined,
-      prKey: undefined,
-      mrKey: undefined,
-    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(updateParameters).not.toHaveBeenCalled();
   });
 
   it("updates an existing panel's identity without changing its configured group", () => {

@@ -15,8 +15,8 @@ Prove the conditional tab lifecycle in production-build desktop flows, preserve 
 ## Acceptance
 
 - Desktop E2E proves a fresh review-less Default task has no PR Details tab, linking a PR adds the tab without focus theft, and closing it suppresses automatic re-creation for the session.
-- Desktop and mobile Layout settings E2E add PR Details to the built-in Default through existing controls, save it, and prove configured placement persists; mobile retains touch reachability and no horizontal overflow.
-- Public Sessions and Review documentation describes conditional default behavior, explicit layout placement, existing-layout persistence, and same-session dismissal accurately.
+- Desktop and mobile Layout settings E2E add PR Details to the built-in Default through existing controls and prove configured placement persists; desktop additionally proves the saved tab is hidden before association and appears in that group after linking, while mobile retains touch reachability and no horizontal overflow.
+- Public Sessions and Review documentation describes association-gated visibility, explicit layout placement, and same-session dismissal accurately.
 
 ## TDD and E2E sequence
 
@@ -66,7 +66,7 @@ Report exact E2E discovery/count/results, failure artifacts, docs validation, mo
 
 Completed.
 
-- Chromium E2E passed for task default layout (`2` tests), PR Details lifecycle (`3` tests), and Layouts settings (`4` tests).
+- Chromium E2E passed for task default layout (`2` tests), PR Details lifecycle (`3` tests), and Layouts settings (`4` tests). The corrected saved-right-group flow independently passed its unlinked-then-linked transition (`1` test).
 - Mobile Chromium E2E passed for touch Layouts editing (`2` tests).
 - `node --test scripts/validate-public-docs.test.mjs` passed (`58` tests).
 - `node scripts/validate-public-docs.mjs` passed (`41` published docs pages).

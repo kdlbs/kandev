@@ -164,12 +164,13 @@ surface.
   `.dv-default-tab-action` close controls should be treated as close/delete
   actions rather than session-switch intent.
 - **Conditional review-panel ownership:** the reusable `pr-detail` panel may be
-  added automatically beside the active Agent tab only after review data has
-  hydrated. Automatic additions carry `autoAddedForReview: true`; review loss
-  removes only those marked panels, while explicit layout panels keep their
-  placement and empty state. Restoration, maximized layouts, and a session's
-  offered/dismissed marker defer or suppress automatic insertion; existing
-  panels synchronize provider and review identity without moving them.
+  visible only while the active task has a linked PR or MR. A custom Default
+  layout's canonical panel supplies the preferred group and tab index; it does
+  not make an empty tab persistent. After review data hydrates, review loss
+  removes any canonical panel regardless of how it entered the runtime layout.
+  Restoration, maximized layouts, and a session's offered/dismissed marker
+  defer or suppress automatic insertion; linked existing panels synchronize
+  provider and review identity without moving them.
 - **GitHub PR status UI:** visual PR/CI status surfaces should use the shared
   helpers in `apps/web/components/github/pr-task-icon.tsx`
   (`hasPRChecksPassedForDisplay`, `hasPRChecksInProgressForDisplay`, and

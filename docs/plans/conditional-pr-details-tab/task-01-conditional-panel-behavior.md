@@ -10,13 +10,13 @@ spec: "../../specs/ui/task-layout-profiles.md"
 
 # Task 01: Conditional panel behavior
 
-Restore conditional desktop review-tab behavior while preserving explicit layout ownership.
+Restore conditional desktop review-tab behavior while preserving explicit layout placement.
 
 ## Acceptance
 
 - Code-defined Default and compact layouts omit `pr-detail`, but reusable-layout validation and the editor still accept it.
-- A linked GitHub PR or GitLab MR adds one inactive canonical panel with `autoAddedForReview: true` beside Agent when no canonical panel exists; repeated syncs update identity without duplication or focus theft.
-- Review loss removes only a marked conditional panel. Explicit layout panels remain, and closing a conditional panel suppresses re-creation for that session without blocking explicit open/add actions.
+- A linked GitHub PR or GitLab MR adds one inactive canonical panel in the custom Default's configured group/index, or beside Agent when no custom placement exists; repeated syncs update identity without duplication or focus theft.
+- Review loss removes every canonical panel after hydration, including explicitly configured runtime panels. The saved layout keeps its placement, and closing a linked-review panel suppresses re-creation for that session without blocking explicit review open actions.
 
 ## TDD sequence
 
@@ -57,7 +57,7 @@ Sequential. The preset and synchronization changes share behavior and tests.
 
 - `docs/specs/ui/task-layout-profiles.md` What, Persistence guarantees, and Scenarios
 - `docs/plans/conditional-pr-details-tab/plan.md` Frontend and Tests
-- Pre-regression conditional behavior in parent of commit `f8c363f72`, adapted so explicit layout panels are preserved
+- Pre-regression conditional behavior in parent of commit `f8c363f72`, adapted so explicit layouts provide placement without overriding review-driven visibility
 
 ## Output contract
 
@@ -67,8 +67,9 @@ Report the red/green evidence, changed files, exact command results, blockers, r
 
 Completed.
 
-- Red: preset/profile expectations, conditional removal, insertion, and storage tests failed against the embedded PR default and parameter-only sync.
-- Green: focused Vitest suite passed (`86` tests across presets, profiles, merger, review sync, and local storage).
+- Red: preset/profile expectations, conditional removal, insertion, configured-placement, and storage tests failed against the embedded PR default and parameter-only sync.
+- Green: focused Vitest suite passed (`92` tests across presets, profiles, merger, review sync, and local storage); the corrected review-sync file passed independently (`20` tests).
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps && pnpm --filter @kandev/web lint` passed with zero warnings.
+- `cd apps/web && pnpm run i18n:check` passed.
 - `git diff --check` passed.

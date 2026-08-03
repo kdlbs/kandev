@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-import type { DockviewApi } from "dockview-react";
+import type { AddPanelOptions, DockviewApi } from "dockview-react";
 import { prTaskKey } from "@/components/github/pr-utils";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
@@ -10,7 +10,11 @@ import { t } from "@/lib/i18n";
 import { markPRPanelOffered, wasPRPanelOffered } from "@/lib/local-storage";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { CENTER_GROUP, isCenterCandidateGroupId } from "@/lib/state/layout-manager";
+import {
+  CENTER_GROUP,
+  isCenterCandidateGroupId,
+  type LayoutState,
+} from "@/lib/state/layout-manager";
 import type { TaskPR } from "@/lib/types/github";
 import type { TaskMR } from "@/lib/types/gitlab";
 
@@ -49,16 +53,14 @@ export type ConditionalReviewPanelAction = "add" | "remove" | "sync" | "none";
 export function resolveConditionalReviewPanelAction(params: {
   hasReview: boolean;
   panelExists: boolean;
-  autoAddedForReview: boolean;
   reviewsLoaded: boolean;
   isRestoringLayout: boolean;
   isMaximized: boolean;
   wasOffered: boolean;
 }): ConditionalReviewPanelAction {
   if (!params.hasReview) {
-    if (params.autoAddedForReview && !params.reviewsLoaded) return "none";
-    if (params.autoAddedForReview) return "remove";
-    return params.panelExists ? "sync" : "none";
+    if (params.panelExists && !params.reviewsLoaded) return "none";
+    return params.panelExists ? "remove" : "none";
   }
   if (params.panelExists) return "sync";
   if (params.isRestoringLayout || params.isMaximized || params.wasOffered) return "none";
@@ -68,11 +70,31 @@ export function resolveConditionalReviewPanelAction(params: {
 export type ConditionalReviewPanelOptions = {
   sessionId: string;
   centerGroupId: string;
+  configuredPlacement?: ReviewPanelPlacement | null;
   reviewsLoaded: boolean;
   isRestoringLayout: boolean;
   isMaximized: boolean;
   wasOffered: boolean;
 };
+
+export type ReviewPanelPlacement = {
+  groupId: string;
+  index: number;
+};
+
+/** Resolve where a custom Default layout wants the conditional review tab. */
+export function resolveConfiguredReviewPanelPlacement(
+  layout: LayoutState | null,
+): ReviewPanelPlacement | null {
+  if (!layout) return null;
+  for (const column of layout.columns) {
+    for (const group of column.groups) {
+      const index = group.panels.findIndex((panel) => panel.id === "pr-detail");
+      if (index >= 0 && group.id) return { groupId: group.id, index };
+    }
+  }
+  return null;
+}
 
 function resolveReviewPanelTargetGroup(
   api: DockviewApi,
@@ -83,6 +105,19 @@ function resolveReviewPanelTargetGroup(
   const sessionGroupId = sessionPanel?.group?.id;
   if (sessionGroupId && isCenterCandidateGroupId(sessionGroupId)) return sessionGroupId;
   return isCenterCandidateGroupId(centerGroupId) ? centerGroupId : CENTER_GROUP;
+}
+
+function resolveReviewPanelTargetPosition(
+  api: DockviewApi,
+  options: ConditionalReviewPanelOptions,
+): NonNullable<AddPanelOptions["position"]> {
+  const configured = options.configuredPlacement;
+  if (configured && api.groups.some((group) => group.id === configured.groupId)) {
+    return { referenceGroup: configured.groupId, index: configured.index };
+  }
+  return {
+    referenceGroup: resolveReviewPanelTargetGroup(api, options.sessionId, options.centerGroupId),
+  };
 }
 
 function addConditionalReviewPanel(
@@ -96,14 +131,8 @@ function addConditionalReviewPanel(
       id: "pr-detail",
       component: "pr-detail",
       title: t("common:prDetails"),
-      position: {
-        referenceGroup: resolveReviewPanelTargetGroup(
-          api,
-          options.sessionId,
-          options.centerGroupId,
-        ),
-      },
-      params: { ...next, autoAddedForReview: true },
+      position: resolveReviewPanelTargetPosition(api, options),
+      params: next,
     },
     true,
   );
@@ -129,7 +158,6 @@ function resolveReviewPanelAction(
   return resolveConditionalReviewPanelAction({
     hasReview: !!next.provider,
     panelExists: !!panel,
-    autoAddedForReview: panel?.params?.autoAddedForReview === true,
     reviewsLoaded: options?.reviewsLoaded ?? true,
     isRestoringLayout: options?.isRestoringLayout ?? false,
     isMaximized: options?.isMaximized ?? false,
@@ -141,9 +169,8 @@ function resolveReviewPanelAction(
  * Synchronize the canonical PR Details panel and, when options are supplied,
  * manage the conditional panel shown for a linked review.
  *
- * Layout profile and task-layout restoration own explicit panel existence and
- * position. Conditional panels are marked in their params so review loss only
- * removes panels created by this path.
+ * Review association owns panel existence. A custom Default layout can still
+ * provide the group and tab index used when a linked review makes it visible.
  */
 export function syncCanonicalReviewPanel(
   api: DockviewApi,
@@ -194,6 +221,7 @@ export function useSyncReviewPanel() {
   const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
   const isMaximized = useDockviewStore((state) => state.preMaximizeLayout !== null);
   const centerGroupId = useDockviewStore((state) => state.centerGroupId);
+  const userDefaultLayout = useDockviewStore((state) => state.userDefaultLayout);
 
   useEffect(() => {
     if (!taskId || !sessionId || !workspaceId || !hasApi) return;
@@ -221,6 +249,7 @@ export function useSyncReviewPanel() {
           {
             sessionId,
             centerGroupId: dockview.centerGroupId,
+            configuredPlacement: resolveConfiguredReviewPanelPlacement(dockview.userDefaultLayout),
             reviewsLoaded,
             isRestoringLayout: dockview.isRestoringLayout,
             isMaximized: dockview.preMaximizeLayout !== null,
@@ -244,6 +273,7 @@ export function useSyncReviewPanel() {
     reviewsLoaded,
     sessionId,
     taskId,
+    userDefaultLayout,
     workspaceId,
   ]);
 }
