@@ -591,7 +591,7 @@ function ProfileEditForm({ executor, profile }: { executor: Executor; profile: E
       />
       <fieldset
         disabled={!baselineReady || persistence.saveStatus === "loading"}
-        className="contents"
+        className="space-y-8"
       >
         <ProfileEditSections executor={executor} profile={profile} form={form} secrets={secrets} />
       </fieldset>

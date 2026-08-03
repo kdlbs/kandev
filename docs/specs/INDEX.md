@@ -148,6 +148,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
+| [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
