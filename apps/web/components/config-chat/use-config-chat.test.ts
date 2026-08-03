@@ -23,6 +23,9 @@ const appState = {
   renameQuickChatSession,
   setQuickChatInitialPrompt,
   setTaskSession,
+  taskSessions: {
+    items: {} as Record<string, { cancellation_pending?: boolean }>,
+  },
   agentProfiles: {
     items: [
       { id: CONFIG_PROFILE_ID, cli_passthrough: false },
@@ -60,6 +63,10 @@ beforeEach(() => {
     { id: CONFIG_PROFILE_ID, cli_passthrough: false },
     { id: PASSTHROUGH_PROFILE_ID, cli_passthrough: true },
   ];
+  appState.taskSessions.items = {};
+  setTaskSession.mockImplementation((session: { id: string; cancellation_pending?: boolean }) => {
+    appState.taskSessions.items[session.id] = session;
+  });
   startConfigChat.mockResolvedValue({ task_id: TASK_ID, session_id: SESSION_ID });
 });
 
@@ -80,6 +87,9 @@ describe("useConfigChat unified launch", () => {
     });
     expect(setTaskSession).toHaveBeenCalledWith(
       expect.objectContaining({ id: SESSION_ID, task_id: TASK_ID }),
+    );
+    expect(appState.taskSessions.items[SESSION_ID]).toEqual(
+      expect.objectContaining({ cancellation_pending: false }),
     );
     expect(closeQuickChatSession).toHaveBeenCalledWith(
       getQuickChatSetupSessionId(WORKSPACE_ID, "config"),

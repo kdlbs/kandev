@@ -32,7 +32,7 @@ import type { Repository, Task } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
+import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 type MobileMenuSheetProps = {
   open: boolean;
@@ -292,7 +292,7 @@ function MobileUtilityActions({
   onOpenChange: (open: boolean) => void;
 }) {
   const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
-  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
+  const issueDetails = useConnectionIssueCopy(issueSeverity);
   const closeSheet = () => onOpenChange(false);
   const openHealth = () => {
     closeSheet();

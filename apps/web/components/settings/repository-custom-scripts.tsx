@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import { IconPlus, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -5,6 +6,12 @@ import { Label } from "@kandev/ui/label";
 import { Textarea } from "@kandev/ui/textarea";
 import type { RepositoryScript } from "@/lib/types/http";
 import { UnsavedChangesBadge } from "./unsaved-indicator";
+
+/**
+ * A shell script sample: code the user edits and the executor runs verbatim,
+ * not copy.
+ */
+const SCRIPT_COMMAND_PLACEHOLDER = "#!/bin/bash\nnpm run dev";
 
 type RepositoryCustomScriptsProps = {
   repositoryId: string;
@@ -25,21 +32,22 @@ export function RepositoryCustomScripts({
   onUpdateScript,
   onDeleteScript,
 }: RepositoryCustomScriptsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <Label className="flex items-center gap-2">
-          <span>Custom Scripts</span>
+          <span>{t("workspaces:customScriptsLabel")}</span>
           {areScriptsDirty && <UnsavedChangesBadge />}
         </Label>
         <Button type="button" variant="outline" size="sm" onClick={() => onAddScript(repositoryId)}>
           <IconPlus className="h-4 w-4 mr-1" />
-          Add Script
+          {t("workspaces:addScript")}
         </Button>
       </div>
       <div className="space-y-3">
         {scripts.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No scripts yet.</p>
+          <p className="text-sm text-muted-foreground">{t("workspaces:noScriptsYet")}</p>
         ) : (
           scripts.map((script) => (
             <RepositoryCustomScript
@@ -70,6 +78,7 @@ function RepositoryCustomScript({
   onUpdate: RepositoryCustomScriptsProps["onUpdateScript"];
   onDelete: RepositoryCustomScriptsProps["onDeleteScript"];
 }) {
+  const { t } = useTranslation();
   const nameIsDirty = !savedScript || script.name !== savedScript.name;
   const commandIsDirty = !savedScript || script.command !== savedScript.command;
   return (
@@ -82,7 +91,7 @@ function RepositoryCustomScript({
         <Input
           value={script.name ?? ""}
           onChange={(event) => onUpdate(repositoryId, script.id, { name: event.target.value })}
-          placeholder="Script name"
+          placeholder={t("workspaces:scriptName")}
           data-settings-dirty={nameIsDirty}
         />
         <Button
@@ -97,7 +106,7 @@ function RepositoryCustomScript({
       <Textarea
         value={script.command ?? ""}
         onChange={(event) => onUpdate(repositoryId, script.id, { command: event.target.value })}
-        placeholder="#!/bin/bash&#10;npm run dev"
+        placeholder={SCRIPT_COMMAND_PLACEHOLDER}
         rows={3}
         className="font-mono text-sm"
         data-settings-dirty={commandIsDirty}

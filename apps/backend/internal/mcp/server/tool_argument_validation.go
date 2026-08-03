@@ -5,10 +5,13 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/mark3labs/mcp-go/mcp"
 	jsonschema "github.com/santhosh-tekuri/jsonschema/v6"
+	"github.com/santhosh-tekuri/jsonschema/v6/kind"
 	"go.uber.org/zap"
 )
 
@@ -108,8 +111,22 @@ func sanitizedToolArgumentError(toolName string, err error) error {
 		failure = validationErr
 		keyword = "schema"
 	}
-	return fmt.Errorf("invalid arguments for %s: validation failed at %s (keyword: %s)",
-		toolName, validationInstancePath(failure.InstanceLocation), keyword)
+	return fmt.Errorf("invalid arguments for %s: validation failed at %s (keyword: %s%s)",
+		toolName, validationInstancePath(failure.InstanceLocation), keyword, missingRequiredProperties(failure))
+}
+
+func missingRequiredProperties(err *jsonschema.ValidationError) string {
+	required, ok := err.ErrorKind.(*kind.Required)
+	if !ok || len(required.Missing) == 0 {
+		return ""
+	}
+
+	missing := make([]string, len(required.Missing))
+	for i, property := range required.Missing {
+		missing[i] = strconv.Quote(property)
+	}
+	sort.Strings(missing)
+	return "; missing: " + strings.Join(missing, ", ")
 }
 
 func firstKeywordFailure(err *jsonschema.ValidationError) (*jsonschema.ValidationError, string) {

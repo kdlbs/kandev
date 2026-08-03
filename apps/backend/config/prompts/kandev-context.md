@@ -11,6 +11,9 @@ Available tools:
 - get_task_plan_kandev: Retrieve the current plan for a task (includes any user edits). Required params: task_id.
 - update_task_plan_kandev: Update an existing plan. Required params: task_id, content (markdown). Optional: title.
 - delete_task_plan_kandev: Delete a task plan. Required params: task_id.
+- show_walkthrough_kandev: Show and store a code walkthrough for the current task. Required param: `steps` (ordered array; every step requires `file`, `line`, and `text`). Optional: task_id, title; each step may include repo, title, and line_end.
+- get_walkthrough_kandev: Retrieve the stored walkthrough for a task. Optional: task_id (defaults to the current task).
+- delete_walkthrough_kandev: Delete the stored walkthrough for a task. Optional: task_id (defaults to the current task).
 - list_workspaces_kandev: List all workspaces.
 - list_workflows_kandev: List workflows in a workspace. Required params: workspace_id.
 - list_tasks_kandev: List tasks in a workflow. Required params: workflow_id.

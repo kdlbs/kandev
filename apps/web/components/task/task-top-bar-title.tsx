@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Breadcrumb, BreadcrumbItem, BreadcrumbList, BreadcrumbPage } from "@kandev/ui/breadcrumb";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { Input } from "@kandev/ui/input";
@@ -15,6 +16,7 @@ type TaskTopBarTitleProps = {
 
 export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTitleProps) {
   const { renameTaskById } = useTaskActions();
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const titleRef = useRef<HTMLSpanElement>(null);
@@ -92,7 +94,7 @@ export function TaskTopBarTitle({ taskId, taskTitle, isArchived }: TaskTopBarTit
   }
 
   return (
-    <Breadcrumb className="min-w-0 max-w-full">
+    <Breadcrumb className="min-w-0 max-w-full" aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="min-w-0 max-w-full flex-nowrap text-sm">
         <BreadcrumbItem className="min-w-0 max-w-full">
           <Tooltip>

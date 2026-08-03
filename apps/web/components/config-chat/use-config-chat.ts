@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { t } from "@/lib/i18n";
 import { updateWorkspaceAction } from "@/app/actions/workspaces";
 import { startConfigChat } from "@/lib/api/domains/workspace-api";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
@@ -79,6 +80,7 @@ function registerStartedSession({
     id: toSessionId(response.session_id),
     task_id: toTaskId(response.task_id),
     state: "CREATED",
+    cancellation_pending: false,
     started_at: now,
     updated_at: now,
     agent_profile_id: toAgentProfileId(agentProfileId),
@@ -104,6 +106,12 @@ function registerStartedSession({
   // The config-chat endpoint has no title field, so name the tab from the
   // opening prompt and save it to the task — otherwise the label would live
   // only in this browser and be lost on the next resync.
+  //
+  // "Config Chat" is deliberately NOT translated: `persistQuickChatRename`
+  // writes it to the task title, so translating it would store a
+  // locale-dependent value that then renders unchanged after a locale switch,
+  // on surfaces this directory does not own. Same call as the built-in layout
+  // profile names and the seeded workflow step names.
   const derivedName = prompt.slice(0, 40) || "Config Chat";
   store.renameQuickChatSession(response.session_id, derivedName);
   void persistQuickChatRename(response.session_id, response.task_id, derivedName).catch(
@@ -160,7 +168,7 @@ export function useConfigChat(workspaceId: string) {
         .getState()
         .agentProfiles.items.find((item) => item.id === agentProfileId);
       if (!profile) {
-        setError("The selected agent profile is not available yet. Try again shortly.");
+        setError(t("configChat:profileUnavailable"));
         return undefined;
       }
       if (activeWorkspaceStarts.has(workspaceId)) return undefined;
@@ -201,7 +209,10 @@ export function useConfigChat(workspaceId: string) {
         return response.session_id;
       } catch (err) {
         if (latestRequestId.current !== requestId) return undefined;
-        setError(err instanceof Error ? err.message : "Unknown error");
+        // `err.message` is an API/network diagnostic and stays English by
+        // design (docs/i18n.md, "the interpolated-value limit"); the FALLBACK
+        // for a payload-less throw is our copy and is translated.
+        setError(err instanceof Error ? err.message : t("configChat:unknownError"));
         return undefined;
       } finally {
         if (activeWorkspaceStarts.get(workspaceId) === workspaceStart) {

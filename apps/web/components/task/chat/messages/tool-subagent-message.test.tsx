@@ -11,6 +11,10 @@ const SUBAGENT_CHEVRON = "subagent-chevron";
 const IN_PROGRESS = "in_progress";
 const STARTED = "started";
 const WORKING = "Working...";
+const SUBAGENT_DESCRIPTION = "subagent-description";
+const SUBAGENT_RESULT_TEXT = "subagent-result-text";
+const CHILD_TOOL_LABEL = "Read SyncRunner.ts";
+const CODE_REVIEWER = "code-reviewer";
 
 function subagentMessage({
   metadataStatus = "in_progress",
@@ -182,7 +186,7 @@ describe("ToolSubagentMessage", () => {
     );
 
     expect(screen.getByTestId("subagent-type").textContent).toBe("verify");
-    expect(screen.queryByTestId("subagent-description")).toBeNull();
+    expect(screen.queryByTestId(SUBAGENT_DESCRIPTION)).toBeNull();
     expect(screen.getByText(WORKING)).toBeTruthy();
     expect(screen.queryByTestId(SUBAGENT_CHEVRON)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
@@ -239,10 +243,10 @@ describe("ToolSubagentMessage expansion", () => {
     );
 
     expect(screen.getByRole("button").getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("subagent-result-text")).toBeNull();
+    expect(screen.queryByTestId(SUBAGENT_RESULT_TEXT)).toBeNull();
 
     fireEvent.click(screen.getByRole("button"));
-    expect(screen.getByTestId("subagent-result-text").textContent).toBe(
+    expect(screen.getByTestId(SUBAGENT_RESULT_TEXT).textContent).toBe(
       "Probe completed successfully",
     );
   });
@@ -269,7 +273,7 @@ describe("ToolSubagentMessage expansion", () => {
       />,
     );
 
-    expect(screen.queryByTestId("subagent-result-text")).toBeNull();
+    expect(screen.queryByTestId(SUBAGENT_RESULT_TEXT)).toBeNull();
   });
 
   it("keeps prompt-only subagents expandable", () => {
@@ -302,5 +306,117 @@ describe("ToolSubagentMessage expansion", () => {
     expect(screen.queryByRole("status", { name: "Loading" })).toBeNull();
     expect(screen.queryByTestId(SUBAGENT_CHEVRON)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
+  });
+});
+
+// A reviewer's verdict is the only thing anyone reads a review-wave card for.
+// It arrives on `toolResponse.content` and, before this, was shown only when
+// the subagent streamed no child tool calls — i.e. never, for Claude.
+describe("subagent result summary", () => {
+  const VERDICT = "VERDICT: REQUEST_CHANGES\nTwo blocking findings in SyncRunner.ts.";
+
+  it("shows a one-line summary on the collapsed card even when children exist", () => {
+    renderSubagent(
+      subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE, resultText: VERDICT }),
+      { childMessages: [childTool("c1", CHILD_TOOL_LABEL)] },
+    );
+    const summary = screen.getByTestId("subagent-result-summary");
+    expect(summary.textContent).toBe("VERDICT: REQUEST_CHANGES");
+    expect(summary.textContent).not.toContain("Two blocking findings");
+  });
+
+  it("shows the full result above the children once expanded", () => {
+    renderSubagent(
+      subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE, resultText: VERDICT }),
+      { childMessages: [childTool("c1", CHILD_TOOL_LABEL)] },
+    );
+    fireEvent.click(screen.getByTestId(SUBAGENT_CHEVRON).closest("button")!);
+    expect(screen.getByTestId(SUBAGENT_RESULT_TEXT).textContent).toBe(VERDICT);
+    expect(screen.getByText(CHILD_TOOL_LABEL)).toBeTruthy();
+  });
+
+  it("stays silent when no result was captured", () => {
+    renderSubagent(subagentMessage({ metadataStatus: COMPLETE, payloadStatus: COMPLETE }), {
+      childMessages: [childTool("c1", CHILD_TOOL_LABEL)],
+    });
+    expect(screen.queryByTestId("subagent-result-summary")).toBeNull();
+  });
+
+  it("skips leading blank lines when picking the summary line", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        resultText: "\n\n  APPROVE  \nrest",
+      }),
+    );
+    expect(screen.getByTestId("subagent-result-summary").textContent).toBe("APPROVE");
+  });
+});
+
+// The type chip already says TEST-SUPERVISOR; repeating it as the first word of
+// the description spent a third of a truncated line on a word already on screen.
+describe("subagent description de-duplication", () => {
+  it("strips a leading restatement of the subagent type", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        subagentType: "test-supervisor",
+        description: "Test-supervisor review of new invariant tests",
+      }),
+    );
+    expect(screen.getByTestId(SUBAGENT_DESCRIPTION).textContent).toBe(
+      "review of new invariant tests",
+    );
+  });
+
+  it("keeps a description that merely starts with a similar word", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        subagentType: CODE_REVIEWER,
+        description: "code-review of the closure diff",
+      }),
+    );
+    expect(screen.getByTestId(SUBAGENT_DESCRIPTION).textContent).toBe(
+      "code-review of the closure diff",
+    );
+  });
+
+  it("renders no description when it exactly restates the type", () => {
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        subagentType: CODE_REVIEWER,
+        description: CODE_REVIEWER,
+      }),
+    );
+    expect(screen.queryByTestId(SUBAGENT_DESCRIPTION)).toBeNull();
+  });
+});
+
+// A description opening with a filename must not be eaten by a type that is a
+// prefix of it: type "test" + "test.ts regression" must not become "ts
+// regression". Only whitespace and a colon separate a type from its description.
+describe("subagent description prefix boundaries", () => {
+  it.each([
+    ["test", "test.ts regression suite", "test.ts regression suite"],
+    ["review", "review.md findings", "review.md findings"],
+    [CODE_REVIEWER, "code-reviewer: the closure diff", "the closure diff"],
+    [CODE_REVIEWER, "code-reviewer on diff", "on diff"],
+  ])("type %s + %s renders %s", (subagentType, description, expected) => {
+    cleanup();
+    renderSubagent(
+      subagentMessage({
+        metadataStatus: COMPLETE,
+        payloadStatus: COMPLETE,
+        subagentType,
+        description,
+      }),
+    );
+    expect(screen.getByTestId(SUBAGENT_DESCRIPTION).textContent).toBe(expected);
   });
 });

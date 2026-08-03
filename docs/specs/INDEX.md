@@ -143,11 +143,13 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-view-creation](ui/sidebar-view-creation.md) | shipped |
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
+| [subagent-observability](ui/subagent-observability.md) | building |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
 | [agent-launch-prompt-composer](ui/agent-launch-prompt-composer.md) | shipped |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
+| [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
 | [mobile-task-navigation](ui/mobile-task-navigation.md) | shipped |
@@ -166,6 +168,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ws-connectivity-warning](ui/ws-connectivity-warning.md) | approved |
 | [context-compaction-count](context-compaction-count/spec.md) | approved |
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
+| [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 
 ## system-page/ — operational diagnostics & maintenance UI
 
@@ -201,6 +204,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [workflow-settings-autosave](workflow-settings-autosave/spec.md) | archived; superseded by settings-manual-save |
 | [mobile-quick-chat-topbar](mobile-quick-chat-topbar/spec.md) | building |
 | [native-code-review](native-code-review/spec.md) | building |
+| [missing-task-route-recovery](missing-task-route-recovery/spec.md) | draft |
 
 ---
 

@@ -5,9 +5,10 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import { createAppStore } from "@/lib/state/store";
 import { deriveSessionInputMode } from "@/hooks/domains/session/session-input-mode";
-import type { TaskSession } from "@/lib/types/http";
+import { sessionId as toSessionId, type TaskSession } from "@/lib/types/http";
 import type {
   TaskSessionActivityChangedPayload,
+  TaskSessionCancellationChangedPayload,
   TaskSessionStateChangedPayload,
 } from "@/lib/types/backend";
 
@@ -47,6 +48,7 @@ function makeStore(overrides: Record<string, unknown> = {}) {
 
 const STATE_CHANGED_EVENT = "session.state_changed";
 const ACTIVITY_EVENT = "session.activity_changed";
+const CANCELLATION_EVENT = "session.cancellation_changed";
 const RECOVERABLE_ERROR_MESSAGE = "peer disconnected before response";
 const RECOVERABLE_ERROR_AT = "2026-06-14T14:06:40Z";
 const TASK_ROOT = "/task-root";
@@ -70,6 +72,15 @@ function makeActivityMessage(
     type: "notification" as const,
     action: "session.activity_changed" as const,
     payload: { ...payload, active_subagent_count: payload.active_subagent_count ?? 0 },
+  };
+}
+
+function makeCancellationMessage(payload: TaskSessionCancellationChangedPayload) {
+  return {
+    id: "m-cancel",
+    type: "notification" as const,
+    action: "session.cancellation_changed" as const,
+    payload,
   };
 }
 
@@ -211,6 +222,109 @@ describe("session.state_changed handler", () => {
     );
 
     expect(store.getState().setSessionFailureNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe("session.state_changed cancellation snapshot", () => {
+  it("merges an explicit cancellation false from the authoritative snapshot", () => {
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          "s-1": {
+            id: "s-1",
+            task_id: "t-1",
+            state: "RUNNING",
+            cancellation_pending: true,
+          },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)[STATE_CHANGED_EVENT]!;
+
+    handler(
+      makeMessage({
+        task_id: "t-1",
+        session_id: "s-1",
+        new_state: "RUNNING",
+        cancellation_pending: false,
+        cancellation_revision: 2,
+      }),
+    );
+
+    expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenCalledWith(
+      "t-1",
+      expect.objectContaining({ cancellation_pending: false, cancellation_revision: 2 }),
+    );
+  });
+});
+
+describe("session.cancellation_changed handler", () => {
+  it("updates only the addressed session in the real store", () => {
+    const store = createAppStore();
+    const selected = {
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      cancellation_pending: false,
+      started_at: RECOVERABLE_ERROR_AT,
+      updated_at: RECOVERABLE_ERROR_AT,
+    } as TaskSession;
+    const peer = { ...selected, id: toSessionId("s-2") };
+    store.getState().setTaskSession(selected);
+    store.getState().setTaskSession(peer);
+
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+    handler(
+      makeCancellationMessage({
+        session_id: "s-1",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"].cancellation_pending).toBe(true);
+    expect(store.getState().taskSessions.items["s-1"].cancellation_revision).toBe(1);
+    expect(store.getState().taskSessions.items["s-2"].cancellation_pending).toBe(false);
+  });
+
+  it("ignores an event for a session that has not been loaded", () => {
+    const store = makeStore();
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+
+    handler(
+      makeCancellationMessage({
+        session_id: "unknown",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().upsertTaskSessionFromEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a lower-revision live event", () => {
+    const store = createAppStore();
+    store.getState().setTaskSession({
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      cancellation_pending: false,
+      cancellation_revision: 2,
+      started_at: RECOVERABLE_ERROR_AT,
+      updated_at: RECOVERABLE_ERROR_AT,
+    } as TaskSession);
+
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+    handler(
+      makeCancellationMessage({
+        session_id: "s-1",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"].cancellation_pending).toBe(false);
+    expect(store.getState().taskSessions.items["s-1"].cancellation_revision).toBe(2);
   });
 });
 

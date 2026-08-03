@@ -276,3 +276,30 @@ describe("AgentsSection request sequencing", () => {
     expect(state.setOfficeAgentProfiles).toHaveBeenCalledWith([agentFromThirdRequest]);
   });
 });
+
+describe("AgentsSection error badge", () => {
+  const renderWithFailedRuns = (failedRuns: number) => {
+    state.office.agentProfiles = [
+      createAgentProfile({ id: "agent-1", workspace: defaultWorkspaceId, name: "Alfa" }),
+    ];
+    state.office.inboxItems = Array.from({ length: failedRuns }, () => ({
+      type: "agent_run_failed",
+      payload: { agent_profile_id: agentProfileId("agent-1") },
+    }));
+    render(<AgentsSection collapsed={false} />);
+  };
+
+  // The badge used to concatenate an English "s" at the call site, which is
+  // untranslatable — it must go through a `count` plural instead.
+  it("uses the singular form for one failed run", () => {
+    renderWithFailedRuns(1);
+
+    expect(screen.getByText("1 error")).toBeTruthy();
+  });
+
+  it("uses the plural form for several failed runs", () => {
+    renderWithFailedRuns(3);
+
+    expect(screen.getByText("3 errors")).toBeTruthy();
+  });
+});

@@ -187,4 +187,44 @@ test.describe("Unread divider", () => {
     const newestRow = activeChat.locator(`[id="msg-${newestMessageId}"]`);
     expect(await isScrolledIntoView(scrollContainer, newestRow)).toBe(false);
   });
+
+  test("reserves room for the anchored last-prompt bar so it does not cover the New divider on visit start", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(60_000);
+    await apiClient.saveUserSettings({ show_anchored_prompt_bar: true });
+
+    const { taskId } = await seedScrollTestConversation(
+      apiClient,
+      seedData,
+      "Unread Divider Anchored Bar Overlap Test",
+    );
+
+    // First visit: the divider lands at the unread boundary while the task
+    // description (the session's only user-authored message, seeded far
+    // above it) is scrolled well past — exactly the condition that opens
+    // the anchored bar at the same moment the divider is placed.
+    const session = await openTaskSession(testPage, taskId);
+    const activeChat = session.activeChat();
+
+    const bar = activeChat.getByTestId("anchored-last-prompt-bar");
+    await expect(bar).toHaveAttribute("data-state", "open", { timeout: 10_000 });
+
+    const divider = activeChat.getByTestId("unread-divider");
+    await expect(divider).toBeVisible();
+
+    const barContent = activeChat.getByTestId("anchored-last-prompt-content");
+    await expect
+      .poll(async () => {
+        const [barBox, dividerBox] = await Promise.all([
+          barContent.boundingBox(),
+          divider.boundingBox(),
+        ]);
+        if (!barBox || !dividerBox) return null;
+        return dividerBox.y - (barBox.y + barBox.height);
+      })
+      .toBeGreaterThanOrEqual(0);
+  });
 });

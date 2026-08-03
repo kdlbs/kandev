@@ -27,6 +27,24 @@ import { test, expect } from "../../fixtures/test-base";
  * directory lands and the env guard comes off.
  *
  *   KANDEV_I18N_COVERAGE=1 pnpm e2e -- e2e/tests/i18n/pseudo-coverage.spec.ts
+ *
+ * BOTH passes walk `document.body`, deliberately, and NOT the page's `<main>`.
+ * Scoping to the page under test is the obvious reading of what each test claims,
+ * and it was tried and rejected on one fact: `@kandev/ui` builds Dialog,
+ * AlertDialog, DropdownMenu, Tooltip and Select on Radix `Portal`, which mounts
+ * to `document.body`. Every dialog, menu and tooltip in the app therefore renders
+ * OUTSIDE `<main>`, so a scoped walk would stop checking the surfaces densest in
+ * copy — and would do it silently, reporting clean. Trading a visible annoyance
+ * for an invisible blind spot is the wrong direction for an oracle whose whole
+ * purpose is the strings nothing else can see.
+ *
+ * The cost of body-wide is that a screen can fail for chrome it does not own.
+ * That cost is now small — migrating the sidebar, settings nav and status bar
+ * (#2214) took the baseline from 28 findings to 5 — and it buys the one thing
+ * nothing else has: copy that belongs to no directory, like `@kandev/ui`'s
+ * hardcoded breadcrumb landmark and sonner's toast-container label, is visible
+ * only because the walk is body-wide. The fix for chrome noise is migrating
+ * chrome, not narrowing the oracle.
  */
 
 const COVERAGE_ENABLED = process.env.KANDEV_I18N_COVERAGE === "1";
@@ -67,6 +85,13 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
     // default-action button once, which rendered a raw English "Default" until
     // `getDefaultActionState` was fixed to resolve it through the catalog.
     //
+    // It fails in the OTHER direction too, and has: these entries duplicate
+    // strings that live in `lib/layout/layout-profiles.ts`, with nothing keeping
+    // the two in sync. #2198 changed the Default profile's description and this
+    // list kept the old wording, so it manufactured a phantom finding for every
+    // run between `cc6eb4dd5` and this commit. Re-check these against
+    // `BUILT_IN_LAYOUT_PROFILES` whenever a built-in name or description moves.
+    //
     // Both groups are display strings that are also PERSISTED, so translating
     // them in place would write locale-dependent values into a user's saved
     // layouts and leave them there after a locale switch:
@@ -82,7 +107,7 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
       "Plan Mode",
       "Preview Mode",
       "VS Code",
-      "Agent with Files, Changes, PR Details, and Terminal",
+      "Agent with Files, Changes, and Terminal",
       "Agent and Plan side by side",
       "Agent and Browser side by side",
       "Agent and VS Code side by side",
@@ -136,17 +161,18 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // NOT YET: "settings — integrations github", "… gitlab", "… jira",
   // "… linear", "… sentry". Each page's
   // own copy is fully migrated (verified by running this oracle against it —
-  // every string the integration owns renders accented), but the route expands
-  // the Workspaces > Integrations branch of the settings nav, and
-  // `workspaces-group.tsx` / `settings-tree.tsx` are not migrated: "Workspaces",
-  // "Integrations", "Automations", "Executors", "Voice Mode", "Utility Agents",
-  // "External MCP", "Plugins", "System" and "Toggle theme" all still render plain
-  // English there. The /settings/general/* screens above pass because their
-  // expanded branch is `general-group.tsx`, which is migrated. Add these entries
-  // in the PR that migrates the settings nav — allowlisting those nav labels here
-  // would hide real misses instead.
+  // every string the integration owns renders accented).
   //
-  // Two shared components rendered by all five pages are also still English and
+  // The settings-nav half of this blocker is now GONE: `settings-tree.tsx`,
+  // `workspaces-group.tsx`, `executors-group.tsx`, `account-group.tsx` and
+  // `theme-toggle.tsx` are migrated, so "Workspaces", "Integrations",
+  // "Automations", "Executors", "Voice Mode", "Utility Agents", "External MCP",
+  // "Plugins" and "Toggle theme" render accented on every screen. Only "System"
+  // is left, from `sections/settings/system-group.tsx`, which the System-routes
+  // migration owns.
+  //
+  // What still blocks these five entries is the shared integration chrome, not
+  // the nav. Two components rendered by all five pages are still English and
   // would have to be migrated (or allowlisted, which is worse) first:
   // `components/integrations/drafted-integration-enabled-control.tsx`
   // ("Enabled"/"Disabled") and `components/watcher-repository-fields.tsx`
@@ -159,13 +185,43 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
   // "Close" label — both shared, both out of scope for a per-integration PR.
   //
-  // NOT YET, for the same reason: "settings — workspace workflows"
+  // NOT YET: "settings — external mcp", "… prompts", "… voice mode",
+  // "… utility agents". All four pages' own copy is fully migrated and was
+  // verified by running this oracle against each of them — every string those
+  // routes own renders accented, including the 43 in the MCP tool catalog
+  // (`lib/settings/external-mcp-tools.ts`), which is a `.ts` module no lint rule
+  // inspects. The collapsed tools preview, the utility agent dialog and the
+  // inference status note were scanned separately, since this spec only sees
+  // what a route renders on load.
+  //
+  // #2214 migrated the settings nav, which was the original blocker, and these
+  // four now come back clean of it. What still stops them being entries here is
+  // copy none of them owns:
+  //   - `aria-label="breadcrumb"` from `@kandev/ui`'s Breadcrumb primitive, and
+  //     Sonner's `Notifications alt+T` toast-region label. Both are the shared-UI
+  //     case docs/i18n.md describes: they need a strings-provider seam in the
+  //     package, not a per-route fix.
+  //   - `Configuration Chat` from `components/config-chat/`, not yet migrated.
+  // Allowlisting either here would hide misses belonging to whoever owns them,
+  // which is the failure this list's own comment warns about. The workspace
+  // names these routes also surfaced are no longer among them: #2220 derives
+  // them from the boot payload and makes them ineligible, which is the right
+  // fix — they are user data, and listing them by value would have fixed the
+  // fixture and left every developer's own instance broken.
+  //
+  // Each route also renders data that is correctly English and would need an
+  // `allow` entry: the built-in prompts' names and bodies and the built-in
+  // utility agents' names and descriptions (both backend-authored), the agent
+  // product names and config paths on External MCP, and `Ctrl+Shift+M`.
+  //
+  // NOT YET: "settings — workspace workflows"
   // (`/settings/workspace/:id/workflows`). The workflow editor's own copy is
   // fully migrated and was verified with this oracle against a live instance,
-  // but the route expands the same un-migrated Workspaces branch of the settings
-  // nav. It also renders the workspace's own name and its workflow/step names,
-  // which are user data — so the entry needs the nav migrated first, not an
-  // allowlist.
+  // and the Workspaces branch of the nav it expands is now migrated too. What
+  // remains is that the route renders the workspace's own name and its
+  // workflow/step names — user data, on the same footing as the fixture's
+  // "E2E Workspace". Adding the entry needs `findUnlocalizedText` to stop
+  // treating user data as eligible, not an allowlist entry per fixture name.
 ];
 
 /**
@@ -254,9 +310,27 @@ async function findUnlocalizedCopy(
       const wordlike = /[A-Za-z]{4,}/;
       const accented = /[À-ɏ]/;
 
+      // User data is never copy, and a workspace's name is user data on the same
+      // footing as a task title. Derived from the boot payload rather than
+      // listed, because listing it fixes one instance and leaves every other
+      // one broken: `E2E Workspace` is only the fixture's name, and a developer
+      // running this against their own instance would have hit the identical
+      // false positive under a different string.
+      const workspaceNames = (() => {
+        const payload = (window as unknown as { __KANDEV_BOOT_PAYLOAD__?: unknown })
+          .__KANDEV_BOOT_PAYLOAD__;
+        const state = (payload as { initialState?: { workspaces?: { items?: unknown } } })
+          ?.initialState;
+        const items = state?.workspaces?.items;
+        if (!Array.isArray(items)) return [];
+        return items
+          .map((item) => (item as { name?: unknown })?.name)
+          .filter((name): name is string => typeof name === "string" && name.trim().length > 0);
+      })();
+
       // Longest first: stripping "VS Code" before "Agent and VS Code side by
       // side" would leave "side by side" behind and report it as a leftover.
-      const tokens = [...allowedList].sort((a, b) => b.length - a.length);
+      const tokens = [...allowedList, ...workspaceNames].sort((a, b) => b.length - a.length);
 
       /** Still word-like ASCII once allowlisted tokens are removed. */
       const hasUnmigratedAscii = (text: string) => {
@@ -269,6 +343,19 @@ async function findUnlocalizedCopy(
       /** The text pass's rule, unchanged: any accented character clears a node. */
       const looksUnlocalized = (text: string) => !accented.test(text) && hasUnmigratedAscii(text);
 
+      // The text pass drops zero-size nodes because nothing is on screen to read.
+      // That test is WRONG for an attribute: a visually hidden control with an
+      // `aria-label` is precisely the case this pass exists to catch, and every
+      // `sr-only` node measures as good as zero. What actually disqualifies a
+      // label is the element not being rendered at all — `display: none`,
+      // `visibility: hidden`, or a skipped `content-visibility` subtree — because
+      // then no user receives it, sighted or not. `checkVisibility` asks that
+      // directly; deliberately WITHOUT `opacityProperty`, since an opacity-0
+      // element is still in the accessibility tree.
+      const isRendered = (el: Element) =>
+        typeof el.checkVisibility !== "function" ||
+        el.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true });
+
       const collectText = () => {
         const found = new Set<string>();
         const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -279,9 +366,17 @@ async function findUnlocalizedCopy(
 
           const el = node.parentElement;
           if (!el || skipTags.has(el.tagName)) continue;
-          // Ignore hidden nodes — not user-visible copy.
-          const rect = el.getBoundingClientRect();
-          if (rect.width === 0 && rect.height === 0) continue;
+          // Same rendered-or-not test the attribute pass uses, rather than the
+          // zero-size rect this used to apply. The rect check kept `sr-only`
+          // text ONLY because that utility measures 1px rather than 0 — so
+          // whether screen-reader-only copy was checked came down to a CSS
+          // implementation detail, and changing `.sr-only` to `clip` at 0×0
+          // would have silently dropped it. It IS copy, and a deliberately
+          // in-scope kind: `theme-toggle.tsx`'s "Toggle theme" reached a user
+          // only this way. `checkVisibility` keeps it for the right reason —
+          // the element renders and is in the accessibility tree — while
+          // correctly dropping `visibility: hidden`, which the rect check kept.
+          if (!isRendered(el)) continue;
 
           found.add(text.slice(0, 120));
         }
@@ -297,19 +392,6 @@ async function findUnlocalizedCopy(
         const role = el.getAttribute("role");
         return role ? `${tag}[role=${role}]` : tag;
       };
-
-      // The text pass drops zero-size nodes because nothing is on screen to read.
-      // That test is WRONG for an attribute: a visually hidden control with an
-      // `aria-label` is precisely the case this pass exists to catch, and every
-      // `sr-only` node measures as good as zero. What actually disqualifies a
-      // label is the element not being rendered at all — `display: none`,
-      // `visibility: hidden`, or a skipped `content-visibility` subtree — because
-      // then no user receives it, sighted or not. `checkVisibility` asks that
-      // directly; deliberately WITHOUT `opacityProperty`, since an opacity-0
-      // element is still in the accessibility tree.
-      const isRendered = (el: Element) =>
-        typeof el.checkVisibility !== "function" ||
-        el.checkVisibility({ contentVisibilityAuto: true, visibilityProperty: true });
 
       const seen = new Map<string, { label: string; count: number }>();
       // The positive control. An attribute that HAS been migrated renders as

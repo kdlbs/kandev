@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import Link from "@/components/routing/app-link";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconGitBranch } from "@tabler/icons-react";
@@ -57,6 +59,8 @@ function buildDraftRepo(
   manualRepoPath: string,
 ): RepositoryItem {
   const path = selectedRepo?.path ?? manualValidation.path ?? manualRepoPath.trim();
+  // "New Repository" is PERSISTED as the repository's name, not rendered copy —
+  // a stored name must not depend on the locale it was created in.
   const name =
     selectedRepo?.name ?? path.split("/").filter(Boolean).slice(-1)[0] ?? "New Repository";
   return {
@@ -120,6 +124,8 @@ async function saveNewRepository(
     dev_script: repo.dev_script,
     copy_files: repo.copy_files,
   });
+  // Like the repository name above, the seeded script name and command are
+  // PERSISTED and sent to a shell verbatim, so both stay in English.
   const scripts = await Promise.all(
     repo.scripts.map((script, index) =>
       createRepositoryScriptAction({
@@ -305,6 +311,7 @@ function useRepositoryHandlers({
 function useDiscoverDialog(
   workspace: Workspace | null,
   toast: ReturnType<typeof useToast>["toast"],
+  t: TFunction,
 ) {
   const [localRepoDialogOpen, setLocalRepoDialogOpen] = useState(false);
   const [discoveredRepositories, setDiscoveredRepositories] = useState<LocalRepository[]>([]);
@@ -330,8 +337,8 @@ function useDiscoverDialog(
       setDiscoveredRepositories(result.repositories);
     } catch (error) {
       toast({
-        title: "Failed to discover repositories",
-        description: error instanceof Error ? error.message : "Request failed",
+        title: t("workspaces:failedToDiscoverRepositories"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
     }
@@ -355,21 +362,23 @@ function useDiscoverDialog(
         setManualValidation({
           status: "success",
           isValid: true,
-          message: "Valid git repository",
+          message: t("workspaces:validGitRepository"),
           path: result.path,
         });
       else
+        // `result.message` is the backend's diagnostic and stays English by
+        // design; only the fallback for a missing payload is copy.
         setManualValidation({
           status: "error",
           isValid: false,
-          message: result.message || "Invalid repository path",
+          message: result.message || t("workspaces:invalidRepositoryPath"),
           path: result.path,
         });
     } catch (error) {
       setManualValidation({
         status: "error",
         isValid: false,
-        message: error instanceof Error ? error.message : "Request failed",
+        message: error instanceof Error ? error.message : t("common:requestFailed"),
       });
     }
   };
@@ -413,6 +422,7 @@ function useWorkspaceRepositoriesPage(
 ) {
   const router = useRouter();
   const { toast } = useToast();
+  const { t } = useTranslation();
   const clearRepositoryScripts = useAppStore((state) => state.clearRepositoryScripts);
   const [repositoryItems, setRepositoryItems] = useState<RepositoryItem[]>(repositories);
   const [savedRepositoryItems, setSavedRepositoryItems] =
@@ -439,7 +449,7 @@ function useWorkspaceRepositoriesPage(
     handleDeleteRepository,
   } = handlers;
 
-  const discover = useDiscoverDialog(workspace, toast);
+  const discover = useDiscoverDialog(workspace, toast, t);
   const {
     localRepoDialogOpen,
     setLocalRepoDialogOpen,
@@ -507,6 +517,7 @@ export function WorkspaceRepositoriesClient({
   repositories,
 }: WorkspaceRepositoriesClientProps) {
   const state = useWorkspaceRepositoriesPage(workspace, repositories);
+  const { t } = useTranslation();
   const {
     router,
     repositoryItems,
@@ -544,21 +555,23 @@ export function WorkspaceRepositoriesClient({
         <div>
           <h2 className="text-2xl font-bold">{workspace.name}</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Manage repositories connected to this workspace.
+            {t("workspaces:manageRepositoriesConnected")}
           </p>
         </div>
         <Button asChild variant="outline" size="sm">
-          <Link href={`/settings/workspace/${workspace.id}`}>Workspace settings</Link>
+          <Link href={`/settings/workspace/${workspace.id}`}>
+            {t("workspaces:workspaceSettingsLink")}
+          </Link>
         </Button>
       </div>
       <Separator />
       <SettingsSection
         icon={<IconGitBranch className="h-5 w-5" />}
-        title="Repositories"
-        description="Repositories in this workspace"
+        title={t("workspaces:repositories")}
+        description={t("workspaces:repositoriesInThisWorkspace")}
         action={
           <Button size="sm" className="cursor-pointer" onClick={openDialog}>
-            Add Local Repository
+            {t("workspaces:addLocalRepository")}
           </Button>
         }
       >

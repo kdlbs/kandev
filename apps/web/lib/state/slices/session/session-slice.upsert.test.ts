@@ -79,6 +79,17 @@ describe("upsertTaskSessionFromEvent", () => {
     expect(session.repository_id).toBe("repo-1");
   });
 
+  it("preserves backend cancellation state across unrelated partial events", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ cancellation_pending: true }));
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "RUNNING" }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].cancellation_pending).toBe(true);
+  });
+
   it("seeds environmentIdBySessionId when task_environment_id is present", () => {
     const store = makeStore();
 
@@ -146,6 +157,37 @@ describe("upsertTaskSessionFromEvent", () => {
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
     expect(store.getState().taskSessions.items[SESSION_ID].repository_id).toBe("repo-1");
+  });
+});
+
+describe("cancellation revision ordering", () => {
+  it("rejects a stale REST cancellation snapshot after a newer live event", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ cancellation_pending: true, cancellation_revision: 1 }),
+      );
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ cancellation_pending: false, cancellation_revision: 2 }),
+      );
+
+    // A delayed REST response captured during the older pending generation must
+    // not restore true after the newer live false event has settled.
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [
+        makeSession({ cancellation_pending: true, cancellation_revision: 1 }),
+      ]);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.cancellation_pending).toBe(false);
+    expect(session.cancellation_revision).toBe(2);
   });
 });
 

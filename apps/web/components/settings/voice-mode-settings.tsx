@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { IconAlertTriangle, IconMicrophone } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -39,30 +40,49 @@ import { SettingsCard } from "./settings-card";
 
 // Single source of truth for the language options. Web Speech reads `lang`,
 // Whisper engines treat it as a hint. "auto" defers to the browser locale.
-const LANGUAGE_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "auto", label: "Auto-detect (browser language)" },
-  { value: "en-US", label: "English (United States)" },
-  { value: "en-GB", label: "English (United Kingdom)" },
-  { value: "es-ES", label: "Spanish (Spain)" },
-  { value: "es-MX", label: "Spanish (Mexico)" },
-  { value: "pt-PT", label: "Portuguese (Portugal)" },
-  { value: "pt-BR", label: "Portuguese (Brazil)" },
-  { value: "fr-FR", label: "French" },
-  { value: "de-DE", label: "German" },
-  { value: "it-IT", label: "Italian" },
-  { value: "ja-JP", label: "Japanese" },
-  { value: "zh-CN", label: "Chinese (Simplified)" },
+// `value` is the BCP-47 tag handed to the engine, so it is never translated;
+// the labels travel as catalog keys and resolve at render.
+const LANGUAGE_OPTIONS: Array<{ value: string; labelKey: string }> = [
+  { value: "auto", labelKey: "settings:voiceLanguageAuto" },
+  { value: "en-US", labelKey: "settings:voiceLanguageEnUs" },
+  { value: "en-GB", labelKey: "settings:voiceLanguageEnGb" },
+  { value: "es-ES", labelKey: "settings:voiceLanguageEsEs" },
+  { value: "es-MX", labelKey: "settings:voiceLanguageEsMx" },
+  { value: "pt-PT", labelKey: "settings:voiceLanguagePtPt" },
+  { value: "pt-BR", labelKey: "settings:voiceLanguagePtBr" },
+  { value: "fr-FR", labelKey: "settings:voiceLanguageFrFr" },
+  { value: "de-DE", labelKey: "settings:voiceLanguageDeDe" },
+  { value: "it-IT", labelKey: "settings:voiceLanguageItIt" },
+  { value: "ja-JP", labelKey: "settings:voiceLanguageJaJp" },
+  { value: "zh-CN", labelKey: "settings:voiceLanguageZhCn" },
 ];
 
+// `value` is the persisted `WhisperWebModelSize` enum and `size` is a download
+// size in binary units, neither of which is prose. Label and hint are copy.
 const WHISPER_MODELS: Array<{
   value: WhisperWebModelSize;
-  label: string;
+  labelKey: string;
   size: string;
-  hint: string;
+  hintKey: string;
 }> = [
-  { value: "tiny", label: "Tiny", size: "~40 MB", hint: "Fastest, lower accuracy" },
-  { value: "base", label: "Base", size: "~75 MB", hint: "Balanced default" },
-  { value: "small", label: "Small", size: "~240 MB", hint: "Best accuracy, slower load" },
+  {
+    value: "tiny",
+    labelKey: "settings:voiceWhisperTiny",
+    size: "~40 MB",
+    hintKey: "settings:voiceWhisperTinyHint",
+  },
+  {
+    value: "base",
+    labelKey: "settings:voiceWhisperBase",
+    size: "~75 MB",
+    hintKey: "settings:voiceWhisperBaseHint",
+  },
+  {
+    value: "small",
+    labelKey: "settings:voiceWhisperSmall",
+    size: "~240 MB",
+    hintKey: "settings:voiceWhisperSmallHint",
+  },
 ];
 
 function toWire(state: VoiceModeState): VoiceModeWire {
@@ -183,51 +203,57 @@ function useVoiceModeSaver() {
 
 // ── Engine card ──────────────────────────────────────────────────────────
 
+// `value` is the persisted `VoiceInputEngine` enum; everything else is copy and
+// travels as a catalog key, because this builder holds no JSX and is therefore
+// invisible to the literal guard.
 type EngineOption = {
   value: VoiceInputEngine;
-  label: string;
-  description: string;
-  badge?: string;
+  labelKey: string;
+  descriptionKey: string;
+  badgeKey?: string;
   disabled?: boolean;
 };
+
+const ENGINE_UNSUPPORTED_KEY = "settings:voiceEngineUnsupported";
 
 function buildEngineOptions(caps: VoiceCapabilities): EngineOption[] {
   return [
     {
       value: "auto",
-      label: "Automatic",
-      description: "Use the best engine available in this browser.",
+      labelKey: "settings:voiceEngineAuto",
+      descriptionKey: "settings:voiceEngineAutoDescription",
     },
     {
       value: "webSpeech",
-      label: "Web Speech (in-browser)",
-      description: caps.webSpeech
-        ? "Free, instant, uses your browser's built-in speech recognition."
-        : "Not supported in this browser.",
+      labelKey: "settings:voiceEngineWebSpeech",
+      descriptionKey: caps.webSpeech
+        ? "settings:voiceEngineWebSpeechDescription"
+        : ENGINE_UNSUPPORTED_KEY,
       disabled: !caps.webSpeech,
     },
     {
       value: "whisperWeb",
-      label: "Whisper Web (private, in-browser)",
-      description: caps.whisperWeb
-        ? "Runs OpenAI Whisper entirely on this device. First use downloads the model (40–240 MB)."
-        : "Not supported in this browser.",
-      badge: "Local",
+      labelKey: "settings:voiceEngineWhisperWeb",
+      descriptionKey: caps.whisperWeb
+        ? "settings:voiceEngineWhisperWebDescription"
+        : ENGINE_UNSUPPORTED_KEY,
+      badgeKey: "settings:voiceEngineBadgeLocal",
       disabled: !caps.whisperWeb,
     },
     {
       value: "whisperServer",
-      label: "Whisper Server (OpenAI)",
-      description: caps.audioCapture
-        ? "Sends audio to the backend, which forwards it to OpenAI's Whisper API. Requires a configured API key on the server."
-        : "Not supported in this browser.",
-      badge: "Server",
+      labelKey: "settings:voiceEngineWhisperServer",
+      descriptionKey: caps.audioCapture
+        ? "settings:voiceEngineWhisperServerDescription"
+        : ENGINE_UNSUPPORTED_KEY,
+      badgeKey: "settings:voiceEngineBadgeServer",
       disabled: !caps.audioCapture,
     },
   ];
 }
 
 function EngineCard({ caps }: { caps: VoiceCapabilities }) {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   const options = useMemo(() => buildEngineOptions(caps), [caps]);
@@ -235,7 +261,7 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
   return (
     <SettingsCard isDirty={voiceMode.engine !== savedVoiceMode.engine}>
       <CardHeader>
-        <CardTitle className="text-base">Transcription Engine</CardTitle>
+        <CardTitle className="text-base">{t("settings:voiceEngineTitle")}</CardTitle>
       </CardHeader>
       <CardContent>
         <RadioGroup
@@ -263,10 +289,10 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
               />
               <div className="space-y-1">
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  {opt.label}
-                  {opt.badge && <Badge variant="secondary">{opt.badge}</Badge>}
+                  {t(opt.labelKey)}
+                  {opt.badgeKey && <Badge variant="secondary">{t(opt.badgeKey)}</Badge>}
                 </div>
-                <p className="text-xs text-muted-foreground">{opt.description}</p>
+                <p className="text-xs text-muted-foreground">{t(opt.descriptionKey)}</p>
               </div>
             </Label>
           ))}
@@ -279,11 +305,12 @@ function EngineCard({ caps }: { caps: VoiceCapabilities }) {
 // ── Behavior card (language + mode + auto-send) ──────────────────────────
 
 function LanguageRow() {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
-      <Label htmlFor="voice-language">Language</Label>
+      <Label htmlFor="voice-language">{t("settings:language")}</Label>
       <Select
         value={voiceMode.language}
         onValueChange={(v) => save({ language: v })}
@@ -297,29 +324,27 @@ function LanguageRow() {
         </SelectTrigger>
         <SelectContent>
           <SelectGroup>
-            <SelectLabel>Languages</SelectLabel>
+            <SelectLabel>{t("settings:voiceLanguagesGroup")}</SelectLabel>
             {LANGUAGE_OPTIONS.map((l) => (
               <SelectItem key={l.value} value={l.value}>
-                {l.label}
+                {t(l.labelKey)}
               </SelectItem>
             ))}
           </SelectGroup>
         </SelectContent>
       </Select>
-      <p className="text-xs text-muted-foreground">
-        Recognition quality drops sharply when the language doesn&apos;t match what you&apos;re
-        speaking.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("settings:voiceLanguageHint")}</p>
     </div>
   );
 }
 
 function ModeRow() {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="space-y-2">
-      <Label>Activation</Label>
+      <Label>{t("settings:voiceActivation")}</Label>
       <RadioGroup
         value={voiceMode.mode}
         onValueChange={(v) => save({ mode: v as VoiceInputActivationMode })}
@@ -329,11 +354,11 @@ function ModeRow() {
       >
         <Label htmlFor="voice-mode-toggle" className="flex items-center gap-2 cursor-pointer">
           <RadioGroupItem id="voice-mode-toggle" value="toggle" />
-          <span className="text-sm">Click to start / stop</span>
+          <span className="text-sm">{t("settings:voiceActivationToggle")}</span>
         </Label>
         <Label htmlFor="voice-mode-hold" className="flex items-center gap-2 cursor-pointer">
           <RadioGroupItem id="voice-mode-hold" value="hold" />
-          <span className="text-sm">Hold to talk</span>
+          <span className="text-sm">{t("settings:voiceActivationHold")}</span>
         </Label>
       </RadioGroup>
     </div>
@@ -341,17 +366,16 @@ function ModeRow() {
 }
 
 function AutoSendRow() {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
     <div className="flex items-center justify-between">
       <div className="space-y-1">
         <Label htmlFor="voice-auto-send" className="cursor-pointer">
-          Auto-send after transcription
+          {t("settings:voiceAutoSend")}
         </Label>
-        <p className="text-xs text-muted-foreground">
-          Submit the message as soon as the transcript is inserted.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("settings:voiceAutoSendDescription")}</p>
       </div>
       <Switch
         id="voice-auto-send"
@@ -365,6 +389,7 @@ function AutoSendRow() {
 }
 
 function BehaviorCard() {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const isDirty =
     voiceMode.language !== savedVoiceMode.language ||
@@ -373,7 +398,7 @@ function BehaviorCard() {
   return (
     <SettingsCard isDirty={isDirty}>
       <CardHeader>
-        <CardTitle className="text-base">Behavior</CardTitle>
+        <CardTitle className="text-base">{t("settings:voiceBehavior")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         <LanguageRow />
@@ -387,13 +412,14 @@ function BehaviorCard() {
 // ── Whisper Web model card ───────────────────────────────────────────────
 
 function WhisperModelCard() {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
 
   return (
     <SettingsCard isDirty={voiceMode.whisperWebModel !== savedVoiceMode.whisperWebModel}>
       <CardHeader>
-        <CardTitle className="text-base">Whisper Web Model</CardTitle>
+        <CardTitle className="text-base">{t("settings:voiceWhisperModelTitle")}</CardTitle>
       </CardHeader>
       <CardContent>
         <RadioGroup
@@ -415,17 +441,15 @@ function WhisperModelCard() {
               <RadioGroupItem id={`whisper-model-${m.value}`} value={m.value} className="mt-0.5" />
               <div>
                 <div className="text-sm font-medium">
-                  {m.label} <span className="text-muted-foreground font-normal">· {m.size}</span>
+                  {t(m.labelKey)}{" "}
+                  <span className="text-muted-foreground font-normal">· {m.size}</span>
                 </div>
-                <p className="text-xs text-muted-foreground">{m.hint}</p>
+                <p className="text-xs text-muted-foreground">{t(m.hintKey)}</p>
               </div>
             </Label>
           ))}
         </RadioGroup>
-        <p className="text-xs text-muted-foreground mt-3">
-          The model downloads on first use and is cached in your browser. Switching models triggers
-          another download next time you record.
-        </p>
+        <p className="text-xs text-muted-foreground mt-3">{t("settings:voiceWhisperModelHint")}</p>
       </CardContent>
     </SettingsCard>
   );
@@ -434,6 +458,7 @@ function WhisperModelCard() {
 // ── Enable card (top-level on/off) ───────────────────────────────────────
 
 function EnableCard() {
+  const { t } = useTranslation();
   const { voiceMode, savedVoiceMode } = useVoiceDraft();
   const { save, saving } = useVoiceModeSaver();
   return (
@@ -442,18 +467,15 @@ function EnableCard() {
       data-testid="voice-enable-card"
     >
       <CardHeader>
-        <CardTitle className="text-base">Enable Voice Input</CardTitle>
+        <CardTitle className="text-base">{t("settings:voiceEnableTitle")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <Label htmlFor="voice-enabled" className="cursor-pointer">
-              Show the mic button on the chat composer
+              {t("settings:voiceEnableLabel")}
             </Label>
-            <p className="text-xs text-muted-foreground">
-              When off, the voice button is hidden entirely and no voice-related code runs. Settings
-              below are preserved and re-applied when you turn it back on.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("settings:voiceEnableDescription")}</p>
           </div>
           <Switch
             id="voice-enabled"
@@ -471,6 +493,7 @@ function EnableCard() {
 // ── Availability banner ──────────────────────────────────────────────────
 
 function AvailabilityBanner({ caps }: { caps: VoiceCapabilities }) {
+  const { t } = useTranslation();
   if (caps.webSpeech || caps.whisperWeb || caps.audioCapture) return null;
   // Secure-context requirement is the most common reason capability detection
   // returns all-false on mobile (when reaching the dev server over LAN HTTP).
@@ -480,11 +503,11 @@ function AvailabilityBanner({ caps }: { caps: VoiceCapabilities }) {
     <div className="flex items-start gap-3 rounded-md border border-orange-500/40 bg-orange-500/5 p-3">
       <IconAlertTriangle className="h-5 w-5 text-orange-500 shrink-0 mt-0.5" />
       <div className="space-y-1 text-sm">
-        <p className="font-medium">Voice input is unavailable in this browser.</p>
+        <p className="font-medium">{t("settings:voiceUnavailableTitle")}</p>
         <p className="text-xs text-muted-foreground">
           {insecure
-            ? "Microphone APIs require HTTPS or localhost. You appear to be on an insecure HTTP origin — load this page over HTTPS (or http://localhost) to enable voice input."
-            : "Your browser doesn't expose either the Web Speech API or MediaRecorder. Try Chrome, Edge, or Safari 14.5+."}
+            ? t("settings:voiceUnavailableInsecure")
+            : t("settings:voiceUnavailableUnsupported")}
         </p>
       </div>
     </div>
@@ -498,6 +521,7 @@ function useShortcutSaver() {
 }
 
 function VoiceShortcutCard() {
+  const { t } = useTranslation();
   const { keyboardShortcuts: overrides, savedKeyboardShortcuts } = useVoiceDraft();
   const persist = useShortcutSaver();
   const current = getShortcut("VOICE_INPUT_TOGGLE", overrides);
@@ -519,7 +543,11 @@ function VoiceShortcutCard() {
     <SettingsCard isDirty={isDirty}>
       <CardHeader>
         <CardTitle className="text-base">
-          {CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label} Shortcut
+          {/* The shortcut's own label comes from the shared keyboard registry,
+              which is still English — see the guard comment for this route. */}
+          {t("settings:voiceShortcutTitle", {
+            shortcut: CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label,
+          })}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -532,10 +560,7 @@ function VoiceShortcutCard() {
           onReset={handleReset}
           isDirty={isDirty}
         />
-        <p className="text-xs text-muted-foreground mt-2">
-          Click the shortcut to record a new key combination. All keyboard shortcuts can also be
-          edited in General Settings.
-        </p>
+        <p className="text-xs text-muted-foreground mt-2">{t("settings:voiceShortcutHint")}</p>
       </CardContent>
     </SettingsCard>
   );
@@ -544,14 +569,15 @@ function VoiceShortcutCard() {
 // ── Page ─────────────────────────────────────────────────────────────────
 
 function VoiceModeSettingsContent() {
+  const { t } = useTranslation();
   const caps = useMemo(() => detectVoiceCapabilities(), []);
   const { voiceMode } = useVoiceDraft();
   const enabled = voiceMode.enabled;
   return (
     <SettingsSection
       icon={<IconMicrophone className="h-5 w-5" />}
-      title="Voice Mode"
-      description="Configure how voice input works on the chat composer."
+      title={t("settings:voiceMode")}
+      description={t("settings:voiceModePageDescription")}
     >
       <div className="space-y-4">
         <EnableCard />

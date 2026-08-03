@@ -1,6 +1,8 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTheme } from "@/components/theme/app-theme";
 import {
@@ -29,91 +31,97 @@ import type { CommandItem } from "@/lib/commands/types";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
 
-function buildNavigationCommands(push: PushFn): CommandItem[] {
+// Catalog keys, not copy — safe at module scope (no `t()` call here). The
+// palette groups by this resolved value, so every producer must use these.
+const GROUP_NAVIGATION = "common:commandGroupNavigation";
+const GROUP_SETTINGS = "common:commandGroupSettings";
+const GROUP_ACTIONS = "common:commandGroupActions";
+
+/**
+ * Search keywords are stored as one comma-separated catalog value so a
+ * translator can localize the whole set in one entry. They are matched, never
+ * displayed; the palette itself selects commands by `id` (see
+ * `command-panel-footer.tsx`), so no behavior keys off this copy.
+ */
+function searchKeywords(t: TFunction, key: string): string[] {
+  return t(key)
+    .split(",")
+    .map((keyword) => keyword.trim())
+    .filter(Boolean);
+}
+
+function buildNavigationCommands(push: PushFn, t: TFunction): CommandItem[] {
   return [
     {
       id: "nav-home",
-      label: "Go to Home",
-      group: "Navigation",
+      label: t("common:commandGoToHome"),
+      group: t(GROUP_NAVIGATION),
       icon: <IconHome className="size-3.5" />,
-      keywords: ["home", "kanban", "board"],
+      keywords: searchKeywords(t, "common:commandGoToHomeKeywords"),
       action: () => push(linkToTaskOverview()),
     },
     {
       id: "nav-tasks",
-      label: "Go to All Tasks",
-      group: "Navigation",
+      label: t("common:commandGoToAllTasks"),
+      group: t(GROUP_NAVIGATION),
       icon: <IconList className="size-3.5" />,
-      keywords: ["tasks", "list", "all"],
+      keywords: searchKeywords(t, "common:commandGoToAllTasksKeywords"),
       action: () => push("/tasks"),
     },
     {
       id: "nav-settings",
-      label: "Go to Settings",
-      group: "Navigation",
+      label: t("common:commandGoToSettings"),
+      group: t(GROUP_NAVIGATION),
       icon: <IconSettings className="size-3.5" />,
-      keywords: ["settings", "preferences", "config", "general settings"],
+      keywords: searchKeywords(t, "common:commandGoToSettingsKeywords"),
       action: () => push("/settings/general"),
     },
     {
       id: "nav-stats",
-      label: "Go to Stats",
-      group: "Navigation",
+      label: t("common:commandGoToStats"),
+      group: t(GROUP_NAVIGATION),
       icon: <IconChartBar className="size-3.5" />,
-      keywords: ["stats", "statistics", "analytics", "metrics"],
+      keywords: searchKeywords(t, "common:commandGoToStatsKeywords"),
       action: () => push("/stats"),
     },
     {
       id: "nav-github",
-      label: "Go to GitHub Dashboard",
-      group: "Navigation",
+      label: t("common:commandGoToGitHubDashboard"),
+      group: t(GROUP_NAVIGATION),
       icon: <IconBrandGithub className="size-3.5" />,
-      keywords: ["github", "dashboard", "pr", "pull request", "code review", "issues", "review"],
+      keywords: searchKeywords(t, "common:commandGoToGitHubDashboardKeywords"),
       action: () => push("/github"),
     },
     {
       id: "settings-agents",
-      label: "Agents Settings",
-      group: "Settings",
+      label: t("common:commandAgentsSettings"),
+      group: t(GROUP_SETTINGS),
       icon: <IconRobot className="size-3.5" />,
-      keywords: ["agents", "agent settings", "agent profiles", "installed agents", "claude"],
+      keywords: searchKeywords(t, "common:commandAgentsSettingsKeywords"),
       action: () => push("/settings/agents"),
     },
     {
       id: "settings-executors",
-      label: "Executors Settings",
-      group: "Settings",
+      label: t("common:commandExecutorsSettings"),
+      group: t(GROUP_SETTINGS),
       icon: <IconCpu className="size-3.5" />,
-      keywords: [
-        "executors",
-        "executor profiles",
-        "execution environment",
-        "environment variables",
-        "runtime",
-        "compute",
-      ],
+      keywords: searchKeywords(t, "common:commandExecutorsSettingsKeywords"),
       action: () => push("/settings/executors"),
     },
     {
       id: "settings-workspace",
-      label: "Workspace Settings",
-      group: "Settings",
+      label: t("common:commandWorkspaceSettings"),
+      group: t(GROUP_SETTINGS),
       icon: <IconFolder className="size-3.5" />,
-      keywords: ["workspace", "workspaces"],
+      keywords: searchKeywords(t, "common:commandWorkspaceSettingsKeywords"),
       action: () => push("/settings/workspace"),
     },
     {
       id: "settings-prompts",
-      label: "Prompts Settings",
-      group: "Settings",
+      label: t("common:commandPromptsSettings"),
+      group: t(GROUP_SETTINGS),
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: [
-        "prompts",
-        "prompt settings",
-        "custom prompts",
-        "prompt snippets",
-        "prompt templates",
-      ],
+      keywords: searchKeywords(t, "common:commandPromptsSettingsKeywords"),
       action: () => push("/settings/prompts"),
     },
   ];
@@ -122,20 +130,22 @@ function buildNavigationCommands(push: PushFn): CommandItem[] {
 function buildThemeCommand(
   resolvedTheme: string | undefined,
   setTheme: (theme: string) => void,
+  t: TFunction,
 ): CommandItem {
   const isDark = resolvedTheme === "dark";
   const destinationTheme = isDark ? "light" : "dark";
   return {
     id: "pref-theme",
-    label: isDark ? "Switch to Light Mode" : "Switch to Dark Mode",
-    group: "Preferences",
+    label: isDark ? t("common:commandSwitchToLightMode") : t("common:commandSwitchToDarkMode"),
+    group: t("common:commandGroupPreferences"),
     icon: isDark ? <IconSun className="size-3.5" /> : <IconMoon className="size-3.5" />,
-    keywords: ["theme", "color theme", "appearance"],
+    keywords: searchKeywords(t, "common:commandThemeKeywords"),
     action: () => setTheme(destinationTheme),
   };
 }
 
 export function GlobalCommands() {
+  const { t } = useTranslation();
   const router = useRouter();
   const { resolvedTheme, setTheme } = useTheme();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -148,42 +158,36 @@ export function GlobalCommands() {
   const quickChatCommand: CommandItem = useMemo(
     () => ({
       id: "quick-chat",
-      label: "Quick Chat",
-      group: "Actions",
+      label: t("common:commandQuickChat"),
+      group: t(GROUP_ACTIONS),
       icon: <IconMessageCircle className="size-3.5" />,
-      keywords: ["quick chat", "new quick chat", "quick question", "ask agent"],
+      keywords: searchKeywords(t, "common:commandQuickChatKeywords"),
       shortcut: quickChatShortcut,
       action: handleOpenQuickChat,
     }),
-    [handleOpenQuickChat, quickChatShortcut],
+    [handleOpenQuickChat, quickChatShortcut, t],
   );
 
   const configChatCommand: CommandItem = useMemo(
     () => ({
       id: "config-chat",
-      label: "Configuration Chat",
-      group: "Actions",
+      label: t("common:configurationChat"),
+      group: t(GROUP_ACTIONS),
       icon: <IconSparkles className="size-3.5" />,
-      keywords: [
-        "config chat",
-        "config mode",
-        "configure kandev",
-        "workflow configuration",
-        "mcp configuration",
-      ],
+      keywords: searchKeywords(t, "common:commandConfigChatKeywords"),
       action: handleOpenConfigChat,
     }),
-    [handleOpenConfigChat],
+    [handleOpenConfigChat, t],
   );
 
   const commands = useMemo<CommandItem[]>(
     () => [
-      ...buildNavigationCommands(router.push),
-      buildThemeCommand(resolvedTheme, setTheme),
+      ...buildNavigationCommands(router.push, t),
+      buildThemeCommand(resolvedTheme, setTheme, t),
       quickChatCommand,
       configChatCommand,
     ],
-    [router.push, resolvedTheme, setTheme, quickChatCommand, configChatCommand],
+    [router.push, resolvedTheme, setTheme, quickChatCommand, configChatCommand, t],
   );
 
   useRegisterCommands(commands);

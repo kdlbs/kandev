@@ -7,8 +7,14 @@ import { subagentMetaChips } from "@/components/task/chat/messages/subagent-meta
  * under a completed subagent's header. Renders nothing when no metric fields
  * are present, so the card degrades gracefully across agents.
  */
-export function SubagentMetaRow({ subagentTask }: { subagentTask?: SubagentTaskPayload }) {
-  const chips = subagentMetaChips(subagentTask);
+export function SubagentMetaRow({
+  subagentTask,
+  childCount,
+}: {
+  subagentTask?: SubagentTaskPayload;
+  childCount?: number;
+}) {
+  const chips = subagentMetaChips(subagentTask, childCount);
   if (chips.length === 0) return null;
   return (
     <div

@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { IconActivity } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@kandev/ui/lib/utils";
 import { useAppStore } from "@/components/state-provider";
@@ -52,15 +53,20 @@ type AppStatusDrawerTriggerProps = Omit<ComponentProps<typeof Button>, "onClick"
 export function AppStatusDrawerTrigger({
   className,
   children,
-  label = "Open status",
+  label,
   ...buttonProps
 }: AppStatusDrawerTriggerProps) {
+  const { t } = useTranslation();
   const drawer = useContext(AppStatusDrawerContext);
   if (!drawer?.enabled) return null;
   const issueDetails =
     drawer.issueSeverity === "none" ? null : connectionIssueDetails(drawer.issueSeverity);
   const issueActive = issueDetails !== null;
-  const accessibleLabel = issueDetails?.description ?? label;
+  // The default lives in the body, not the destructuring pattern: parameter
+  // defaults evaluate before the component body, so `t` is not in scope there.
+  const accessibleLabel = issueDetails
+    ? t(issueDetails.descriptionKey)
+    : (label ?? t("sidebar:openStatus"));
   return (
     <Button
       {...buttonProps}

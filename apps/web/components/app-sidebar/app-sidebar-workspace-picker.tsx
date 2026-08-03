@@ -1,6 +1,7 @@
 "use client";
 
 import { forwardRef, useCallback, useState, type ComponentPropsWithoutRef } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import {
   IconBriefcase,
@@ -38,12 +39,13 @@ const WorkspaceTrigger = forwardRef<
   HTMLButtonElement,
   ComponentPropsWithoutRef<"button"> & { activeName: string; chevronTestId: string }
 >(function WorkspaceTrigger({ activeName, chevronTestId, className, ...props }, ref) {
+  const { t } = useTranslation();
   return (
     <button
       ref={ref}
       type="button"
       data-testid="sidebar-workspace-trigger"
-      aria-label="Switch workspace"
+      aria-label={t("sidebar:switchWorkspace")}
       className={cn(
         "group/ws flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md border border-border/70 bg-background px-2.5 text-sm font-medium text-foreground shadow-sm cursor-pointer transition-colors hover:border-border hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         className,
@@ -82,8 +84,9 @@ function workspaceType(workspace: WorkspaceItem | undefined): WorkspaceType {
   return workspace?.office_workflow_id ? "office" : "kanban";
 }
 
-function workspaceTypeLabel(type: WorkspaceType) {
-  return type === "office" ? "Office" : "Kanban";
+/** Returns a catalog key, not copy: this is a plain function with no hook. */
+function workspaceTypeLabelKey(type: WorkspaceType) {
+  return type === "office" ? "sidebar:office" : "sidebar:kanban";
 }
 
 function WorkspaceTypeIcon({ type, className }: { type: WorkspaceType; className: string }) {
@@ -141,8 +144,9 @@ function WorkspaceList({
   WorkspacePickerContentProps,
   "workspaces" | "activeId" | "itemTestIdPrefix" | "onWorkspaceSelect"
 >) {
+  const { t } = useTranslation();
   if (workspaces.length === 0) {
-    return <DropdownMenuItem disabled>No workspaces</DropdownMenuItem>;
+    return <DropdownMenuItem disabled>{t("sidebar:noWorkspaces")}</DropdownMenuItem>;
   }
 
   return workspaces.map((ws) => {
@@ -157,7 +161,7 @@ function WorkspaceList({
         <WorkspaceTypeIcon type={type} className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate">{ws.name}</span>
         <span className="shrink-0 rounded border border-border/60 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground">
-          {workspaceTypeLabel(type)}
+          {t(workspaceTypeLabelKey(type))}
         </span>
         {ws.id === activeId && <IconCheck className="h-3.5 w-3.5 shrink-0" />}
       </DropdownMenuItem>
@@ -169,6 +173,7 @@ function WorkspaceCreateItems({
   officeEnabled,
   onNavigate,
 }: Pick<WorkspacePickerContentProps, "officeEnabled" | "onNavigate">) {
+  const { t } = useTranslation();
   if (!officeEnabled) {
     return (
       <DropdownMenuItem
@@ -176,7 +181,7 @@ function WorkspaceCreateItems({
         onSelect={() => onNavigate("/settings/workspace")}
       >
         <IconPlus className="h-3.5 w-3.5" />
-        <span>Add workspace</span>
+        <span>{t("sidebar:addWorkspace")}</span>
       </DropdownMenuItem>
     );
   }
@@ -188,14 +193,14 @@ function WorkspaceCreateItems({
         onSelect={() => onNavigate("/settings/workspace")}
       >
         <IconLayoutKanban className="h-3.5 w-3.5" />
-        <span>New kanban workspace</span>
+        <span>{t("sidebar:newKanbanWorkspace")}</span>
       </DropdownMenuItem>
       <DropdownMenuItem
         className="cursor-pointer gap-2"
         onSelect={() => onNavigate("/office/setup?mode=new")}
       >
         <IconBriefcase className="h-3.5 w-3.5" />
-        <span>New office workspace</span>
+        <span>{t("sidebar:newOfficeWorkspace")}</span>
       </DropdownMenuItem>
     </>
   );
@@ -211,6 +216,7 @@ export function AppSidebarWorkspacePicker({
   modal = true,
   onActionComplete,
 }: WorkspacePickerProps = {}) {
+  const { t } = useTranslation();
   const router = useRouter();
   const officeEnabled = useFeature("office");
   const workspaces = useAppStore((s) => s.workspaces);
@@ -220,7 +226,7 @@ export function AppSidebarWorkspacePicker({
 
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
   const activeId = activeWorkspace?.id ?? null;
-  const activeName = activeWorkspace?.name ?? "Workspace";
+  const activeName = activeWorkspace?.name ?? t("sidebar:workspaceFallback");
 
   const handleSelect = useCallback(
     (workspace: WorkspaceItem) => {

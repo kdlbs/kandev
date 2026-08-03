@@ -34,6 +34,7 @@ type TaskHandlers struct {
 	service                    *service.Service
 	orchestrator               OrchestratorStarter
 	foregroundActivity         dto.ForegroundActivityProvider
+	cancellationPending        dto.CancellationPendingProvider
 	repo                       handlerRepo
 	planService                *service.PlanService
 	handoffSvc                 *service.HandoffService
@@ -107,6 +108,9 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	// the field.
 	if fa, ok := orchestrator.(dto.ForegroundActivityProvider); ok {
 		h.foregroundActivity = fa
+	}
+	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
+		h.cancellationPending = cancellation
 	}
 	return h
 }

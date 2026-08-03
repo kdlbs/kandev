@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback } from "react";
 import {
   IconArrowUp,
   IconFileTextSpark,
@@ -12,7 +12,7 @@ import {
 
 import { GridSpinner } from "@/components/grid-spinner";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
@@ -26,6 +26,7 @@ import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/ty
 type SubmitButtonProps = {
   isAgentBusy: boolean;
   canCancelAgent?: boolean;
+  sessionId: string | null;
   hasContent: boolean;
   isDisabled: boolean;
   submitDisabledReason?: string;
@@ -97,6 +98,7 @@ function SendSubmitButton({
 export function SubmitButton({
   isAgentBusy,
   canCancelAgent = isAgentBusy,
+  sessionId,
   hasContent,
   isDisabled,
   submitDisabledReason,
@@ -107,26 +109,31 @@ export function SubmitButton({
   submitShortcut,
 }: SubmitButtonProps) {
   const showSendButton = !isAgentBusy || hasContent;
-  const [isCancelling, setIsCancelling] = useState(false);
+  const storeApi = useAppStoreApi();
+  const isCancelling = useAppStore((state) => {
+    if (!sessionId) return false;
+    return (
+      state.taskSessions.items[sessionId]?.cancellation_pending === true ||
+      state.chatInput.cancellingBySessionId[sessionId] === true
+    );
+  });
   const tooltipDescription = submitTooltipDescription(
     isAgentBusy,
     planModeEnabled,
     submitDisabledReason,
   );
-  const cancellingRef = useRef(false);
   const handleCancelClick = useCallback(async () => {
-    if (cancellingRef.current) return;
-    cancellingRef.current = true;
-    setIsCancelling(true);
+    if (!sessionId) return;
+    if (storeApi.getState().chatInput.cancellingBySessionId[sessionId]) return;
+    storeApi.getState().setCancelTurnPending(sessionId, true);
     try {
       await onCancel();
     } catch (error) {
       console.error("Failed to cancel agent turn:", error);
     } finally {
-      cancellingRef.current = false;
-      setIsCancelling(false);
+      storeApi.getState().setCancelTurnPending(sessionId, false);
     }
-  }, [onCancel]);
+  }, [onCancel, sessionId, storeApi]);
 
   return (
     <div className="flex items-center gap-1">

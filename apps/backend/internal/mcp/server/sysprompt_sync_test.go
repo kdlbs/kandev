@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	promptcfg "github.com/kandev/kandev/config/prompts"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -422,6 +423,74 @@ func TestAskUserQuestionDocs_MatchSchema(t *testing.T) {
 		for _, field := range facts.requiredFields {
 			assert.Contains(t, prompt, field,
 				"%s must mention required question sub-field %q", name, field)
+		}
+	}
+}
+
+func extractWalkthroughStepRequiredFields(t *testing.T, s *Server) []string {
+	t.Helper()
+
+	tool, ok := s.mcpServer.ListTools()["show_walkthrough_kandev"]
+	require.True(t, ok, "show_walkthrough_kandev not registered on this server")
+
+	raw, err := json.Marshal(tool.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]any
+	require.NoError(t, json.Unmarshal(raw, &parsed))
+	properties, ok := parsed["properties"].(map[string]any)
+	require.True(t, ok, "walkthrough schema must expose properties")
+	topLevelRequired, ok := parsed["required"].([]any)
+	require.True(t, ok, "walkthrough schema must declare top-level required fields")
+	require.Contains(t, topLevelRequired, "steps")
+	steps, ok := properties["steps"].(map[string]any)
+	require.True(t, ok, "walkthrough schema must expose steps")
+	require.Equal(t, "array", steps["type"])
+	items, ok := steps["items"].(map[string]any)
+	require.True(t, ok, "walkthrough steps must declare an item schema")
+	requiredRaw, ok := items["required"].([]any)
+	require.True(t, ok, "walkthrough step schema must declare required fields")
+
+	required := make([]string, 0, len(requiredRaw))
+	for _, value := range requiredRaw {
+		field, ok := value.(string)
+		require.True(t, ok, "walkthrough required field must be a string")
+		required = append(required, field)
+	}
+	sort.Strings(required)
+	return required
+}
+
+func TestWalkthroughDocs_MatchSchema(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	t.Cleanup(backend.Close)
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	require.NotNil(t, s)
+	requiredFields := extractWalkthroughStepRequiredFields(t, s)
+
+	context := sysprompt.KandevContext()
+	for _, toolName := range []string{
+		"show_walkthrough_kandev",
+		"get_walkthrough_kandev",
+		"delete_walkthrough_kandev",
+	} {
+		assert.Contains(t, context, toolName,
+			"KandevContext must advertise task-mode walkthrough tool %q", toolName)
+	}
+
+	for name, prompt := range map[string]string{
+		"KandevContext":      context,
+		"ChangesWalkthrough": promptcfg.Get("changes-walkthrough"),
+	} {
+		assert.Contains(t, prompt, "`steps`",
+			"%s must identify the walkthrough steps parameter", name)
+		assert.Contains(t, prompt, "ordered array",
+			"%s must say walkthrough steps preserve order", name)
+		for _, field := range requiredFields {
+			assert.Contains(t, prompt, fmt.Sprintf("`%s`", field),
+				"%s must identify required walkthrough step field %q", name, field)
 		}
 	}
 }

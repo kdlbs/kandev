@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconAdjustments, IconCheck, IconPlus } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -10,6 +11,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useAppStore } from "@/components/state-provider";
+import { MAX_SIDEBAR_VIEWS } from "@/lib/state/slices/ui/sidebar-view-builtins";
 import { SidebarFilterPopover } from "@/components/task/sidebar-filter/sidebar-filter-popover";
 import { useSidebarViewPopover } from "@/components/task/sidebar-filter/use-sidebar-view-popover";
 import { cn } from "@/lib/utils";
@@ -20,6 +22,7 @@ const TRIGGER_BUTTON_CLASS = cn(
 );
 
 export function TasksViewPicker() {
+  const { t } = useTranslation();
   const views = useAppStore((s) => s.sidebarViews.views);
   const activeViewId = useAppStore((s) => s.sidebarViews.activeViewId);
   const draft = useAppStore((s) => s.sidebarViews.draft);
@@ -39,7 +42,7 @@ export function TasksViewPicker() {
     [views, activeViewId],
   );
   const hasDraft = !!draft && draft.baseViewId === activeViewId;
-  const activeLabel = activeView?.name ?? "All";
+  const activeLabel = activeView?.name ?? t("sidebar:viewAll");
 
   return (
     <div className="flex items-center gap-0.5">
@@ -49,7 +52,7 @@ export function TasksViewPicker() {
             type="button"
             data-testid="tasks-view-picker"
             className={cn(TRIGGER_BUTTON_CLASS, "max-w-[120px] gap-0.5")}
-            aria-label={`View: ${activeLabel}`}
+            aria-label={t("sidebar:viewLabel", { name: activeLabel })}
           >
             <span className="truncate">{activeLabel}</span>
             <IconChevronDown className="h-3 w-3 shrink-0 opacity-70" />
@@ -101,14 +104,14 @@ export function TasksViewPicker() {
           <button
             type="button"
             data-testid="sidebar-filter-gear"
-            aria-label="Filters and sort"
+            aria-label={t("sidebar:filtersAndSort")}
             className={cn(TRIGGER_BUTTON_CLASS, "relative h-5 w-5 px-0")}
           >
             <IconAdjustments className="h-3.5 w-3.5" />
             {hasDraft && (
               <span
                 data-testid="sidebar-filter-gear-indicator"
-                aria-label="Unsaved filter changes"
+                aria-label={t("sidebar:unsavedFilterChanges")}
                 className="absolute right-0.5 top-0.5 h-1 w-1 rounded-full bg-amber-500"
               />
             )}
@@ -128,20 +131,30 @@ function NewViewMenuItem({
   hasDraft: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenuItem
       disabled={!!disabledReason}
       onSelect={onSelect}
       data-testid="sidebar-new-view"
-      aria-label={disabledReason ? `New view unavailable. ${disabledReason}` : "New view"}
+      aria-label={
+        // `disabledReason` is still English: it comes from
+        // components/task/sidebar-filter/use-sidebar-view-popover.ts, which that
+        // directory's migration owns.
+        disabledReason
+          ? t("sidebar:newViewUnavailable", { reason: disabledReason })
+          : t("sidebar:newView")
+      }
       title={disabledReason ?? undefined}
       className="cursor-pointer gap-2"
     >
       <IconPlus className="h-3.5 w-3.5" />
-      <span>New view</span>
+      <span>{t("sidebar:newView")}</span>
       {disabledReason && (
         <span className="ml-auto text-[10px] text-muted-foreground" aria-hidden="true">
-          {hasDraft ? "Save/discard first" : "50 max"}
+          {hasDraft
+            ? t("sidebar:saveDiscardFirst")
+            : t("sidebar:maxViews", { count: MAX_SIDEBAR_VIEWS })}
         </span>
       )}
     </DropdownMenuItem>

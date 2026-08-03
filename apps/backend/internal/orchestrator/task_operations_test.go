@@ -915,15 +915,13 @@ func (m *cancelContextAgentManager) CancelAgent(ctx context.Context, sessionID s
 	return err
 }
 
-func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
+func newCancelTurnFailureFixture(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) (*Service, *cancelTurnFailureService) {
+	t.Helper()
 	ctx := context.Background()
-	repo := setupTestRepo(t)
-	taskID := "task-cancel-turn-failure"
-	sessionID := "session-cancel-turn-failure"
 	seedSession(t, repo, taskID, sessionID, "step1")
 	now := time.Now().UTC()
 	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID:            "turn-cancel-turn-failure",
+		ID:            "turn-" + sessionID,
 		TaskID:        taskID,
 		TaskSessionID: sessionID,
 		StartedAt:     now,
@@ -932,11 +930,18 @@ func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
 	}))
 
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
-	turnService := &cancelTurnFailureService{
-		repoTurnService: &repoTurnService{repo: repo},
-		completeErr:     errors.New("turn close failed"),
-	}
+	turnService := &cancelTurnFailureService{repoTurnService: &repoTurnService{repo: repo}}
 	svc.turnService = turnService
+	return svc, turnService
+}
+
+func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-turn-failure"
+	sessionID := "session-cancel-turn-failure"
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
+	turnService.completeErr = errors.New("turn close failed")
 
 	err := svc.CancelAgent(ctx, sessionID)
 	require.Error(t, err)
@@ -964,24 +969,9 @@ func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-active-turn-inspection-failure"
 	sessionID := "session-cancel-active-turn-inspection-failure"
-	seedSession(t, repo, taskID, sessionID, "step1")
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
-	now := time.Now().UTC()
-	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID:            "turn-cancel-active-turn-inspection-failure",
-		TaskID:        taskID,
-		TaskSessionID: sessionID,
-		StartedAt:     now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}))
-
-	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
-	turnService := &cancelTurnFailureService{
-		repoTurnService: &repoTurnService{repo: repo},
-		activeErr:       errors.New("active turn lookup failed"),
-	}
-	svc.turnService = turnService
+	turnService.activeErr = errors.New("active turn lookup failed")
 
 	err := svc.CancelAgent(ctx, sessionID)
 	require.Error(t, err)
@@ -998,6 +988,31 @@ func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T
 	task, err = repo.GetTask(ctx, taskID)
 	require.NoError(t, err)
 	assert.Equal(t, "step2", task.WorkflowStepID, "a later retry should evaluate the settled cancellation")
+}
+
+func TestCancelAgent_SurvivesCallerCancellationDuringWaitingRetry(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-waiting-retry"
+	sessionID := "session-cancel-waiting-retry"
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	svc.agentManager = &cancelContextAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		cancel:           cancel,
+	}
+
+	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	activeTurn, err := turnService.GetActiveTurn(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Nil(t, activeTurn)
 }
 
 func TestCancelAgent_NonterminalTransitionReconcilesReviewState(t *testing.T) {
@@ -1053,7 +1068,7 @@ func TestReconcileCancelledTurn_DoesNotCloseTurnWhenSessionStateWriteFails(t *te
 	assert.NotNil(t, activeTurn, "a failed session-state write must not close the active turn")
 }
 
-func TestCancelAgent_DoesNotTransitionWhenSessionStateWriteFails(t *testing.T) {
+func TestCancelAgent_SurvivesCallerCancellationAfterAdmission(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-session-write"
 	sessionID := "session-cancel-session-write"
@@ -1067,13 +1082,13 @@ func TestCancelAgent_DoesNotTransitionWhenSessionStateWriteFails(t *testing.T) {
 	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
 
 	err := svc.CancelAgent(ctx, sessionID)
-	require.Error(t, err)
+	require.NoError(t, err)
 	task, err := repo.GetTask(context.Background(), taskID)
 	require.NoError(t, err)
-	assert.Equal(t, "step1", task.WorkflowStepID)
+	assert.Equal(t, "step2", task.WorkflowStepID)
 	session, err := repo.GetTaskSession(context.Background(), sessionID)
 	require.NoError(t, err)
-	assert.Equal(t, models.TaskSessionStateRunning, session.State)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
 }
 
 func TestCancelAgent_TerminalTransitionSkipsIntermediateReview(t *testing.T) {
@@ -1186,6 +1201,123 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 agentManager.CancelAgent calls after release, got %d", got)
 	}
+}
+
+func TestCancellationPendingTracksReferencesAndPublishesTransitions(t *testing.T) {
+	recorded := &recordingEventBus{}
+	svc := &Service{eventBus: recorded}
+
+	endFirst := svc.beginCancelInFlight("session1")
+	require.True(t, svc.CancellationPending("session1"))
+	require.False(t, svc.CancellationPending("session2"))
+	pending, revision := svc.CancellationPendingSnapshot("session1")
+	require.True(t, pending)
+	require.Equal(t, uint64(1), revision)
+
+	endSecond := svc.beginCancelInFlight("session1")
+	require.True(t, svc.CancellationPending("session1"))
+	require.Len(t, cancellationPendingEvents(recorded), 1)
+
+	endFirst()
+	require.True(t, svc.CancellationPending("session1"))
+	endSecond()
+	require.False(t, svc.CancellationPending("session1"))
+	pending, revision = svc.CancellationPendingSnapshot("session1")
+	require.False(t, pending)
+	require.Equal(t, uint64(2), revision)
+
+	events := cancellationPendingEvents(recorded)
+	require.Len(t, events, 2)
+	require.Equal(t, true, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(1), events[0].event.Data.(map[string]interface{})["cancellation_revision"])
+	require.Equal(t, false, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(2), events[1].event.Data.(map[string]interface{})["cancellation_revision"])
+}
+
+func TestCancellationPendingSuccessorGenerationPreservesTransitionOrder(t *testing.T) {
+	recorded := &recordingEventBus{}
+	svc := &Service{
+		eventBus: recorded,
+		cancelOperations: map[string]*cancellationOperationState{
+			"session1": {
+				count:    1,
+				revision: 1,
+				publications: cancellationPublicationQueue{
+					publishing: true,
+				},
+			},
+		},
+	}
+
+	state := svc.cancelOperations["session1"]
+	// Model the final release and successor admission in one critical section:
+	// the false transition must be queued before the successor's true transition
+	// while an earlier publication is still draining.
+	svc.cancelOperationsMu.Lock()
+	state.count--
+	state.revision++
+	require.False(t, svc.enqueueCancellationPendingLocked("session1", state, false))
+	state.count++
+	state.revision++
+	require.False(t, svc.enqueueCancellationPendingLocked("session1", state, true))
+	state.publications.publishing = false
+	svc.cancelOperationsMu.Unlock()
+
+	svc.drainCancellationPublicationQueue("session1", state)
+
+	events := cancellationPendingEvents(recorded)
+	require.Len(t, events, 2)
+	require.Equal(t, false, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(2), events[0].event.Data.(map[string]interface{})["cancellation_revision"])
+	require.Equal(t, true, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(3), events[1].event.Data.(map[string]interface{})["cancellation_revision"])
+}
+
+func TestCancelAgent_ClearsCancellationPendingOnError(t *testing.T) {
+	recorded := &recordingEventBus{}
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{cancelAgentErr: errors.New("cancel failed")}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.eventBus = recorded
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	require.Error(t, svc.CancelAgent(context.Background(), "session1"))
+	require.False(t, svc.CancellationPending("session1"))
+	require.Len(t, cancellationPendingEvents(recorded), 2)
+}
+
+func TestCancelAgent_SurvivesCallerCancellation(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:        true,
+		cancelAgentBlock:      make(chan struct{}),
+		cancelAgentEntered:    make(chan struct{}, 1),
+		cancelAgentContextErr: errors.New("cancel used caller context"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.CancelAgent(ctx, "session1")
+	}()
+	<-agentMgr.cancelAgentEntered
+	cancel()
+	close(agentMgr.cancelAgentBlock)
+
+	require.NoError(t, <-done)
+}
+
+func cancellationPendingEvents(recorded *recordingEventBus) []recordedEvent {
+	const subject = "task_session.cancellation_changed"
+	filtered := make([]recordedEvent, 0, len(recorded.events))
+	for _, event := range recorded.events {
+		if event.subject == subject {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
 }
 
 // TestCancelAgent_TaskStateReconcile ensures cancel lands actively-working

@@ -45,12 +45,13 @@ type taskTitleSessionClaimer interface {
 
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
-	service            *service.Service
-	orchestrator       OrchestratorService
-	logger             *logger.Logger
-	referenceValidator entityrefs.SubmissionValidator
-	messageIDMu        sync.Mutex
-	messageIDGates     map[string]*messageIDGate
+	service             *service.Service
+	orchestrator        OrchestratorService
+	cancellationPending dto.CancellationPendingProvider
+	logger              *logger.Logger
+	referenceValidator  entityrefs.SubmissionValidator
+	messageIDMu         sync.Mutex
+	messageIDGates      map[string]*messageIDGate
 }
 
 type messageIDGate struct {
@@ -72,6 +73,9 @@ func NewMessageHandlers(
 	}
 	if len(validators) > 0 {
 		handlers.referenceValidator = validators[0]
+	}
+	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
+		handlers.cancellationPending = cancellation
 	}
 	return handlers
 }
@@ -512,7 +516,9 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 		return nil, errors.New("failed to reload submitted session after on_turn_start")
 	}
 	if reloaded.State != models.TaskSessionStateCompleted {
-		return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(reloaded)}, nil
+		sessionDTO := dto.FromTaskSession(reloaded)
+		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 	}
 	primary, err := h.service.GetPrimarySession(ctx, taskID)
 	if err != nil || primary == nil {
@@ -527,7 +533,9 @@ func (h *MessageHandlers) resolveSessionAfterTurnStart(
 	if primary.ID == submittedSessionID {
 		return nil, errors.New("submitted session completed during on_turn_start but remains primary")
 	}
-	return &dto.GetTaskSessionResponse{Session: dto.FromTaskSession(primary)}, nil
+	sessionDTO := dto.FromTaskSession(primary)
+	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+	return &dto.GetTaskSessionResponse{Session: sessionDTO}, nil
 }
 
 func (h *MessageHandlers) errorForBlockedMessageSession(msg *ws.Message, sessionID string, state models.TaskSessionState) *ws.Message {
@@ -578,6 +586,7 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 		return nil, wsErr
 	}
 	sessionDTO := dto.FromTaskSession(session)
+	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
 	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
