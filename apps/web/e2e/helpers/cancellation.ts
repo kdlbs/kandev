@@ -5,7 +5,8 @@ export const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
 
 export async function expectCancelToSettlePromptly(session: SessionPage) {
   const startedAt = Date.now();
-  await expect(session.cancelAgentButton()).not.toBeVisible({
+  const cancelButton = session.activeChat().getByTestId("cancel-agent-button");
+  await expect(cancelButton).not.toBeVisible({
     timeout: CANCEL_SETTLE_TIMEOUT_MS,
   });
   await expect(session.idleInput()).toBeVisible({

@@ -20,11 +20,14 @@ spec: "../../specs/workflow/cancelled-turn-completion/spec.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/orchestrator -run 'Test(CancelAgent|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1
-cd apps/backend && go test ./internal/orchestrator -count=1 -timeout=120s
-cd apps/backend && go test -race ./internal/orchestrator -run 'Test(CancelAgent|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1
-cd apps/backend && go test ./cmd/mock-agent -count=1
-cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestCancelAgent' -count=1
+(
+  cd apps/backend
+  go test ./internal/orchestrator -run 'Test(CancelAgent|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1
+  go test ./internal/orchestrator -count=1 -timeout=120s
+  go test -race ./internal/orchestrator -run 'Test(CancelAgent|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1
+  go test ./cmd/mock-agent -count=1
+  go test ./internal/agent/runtime/lifecycle -run 'TestManager_CancelAgent_' -count=1
+)
 ```
 
 Follow TDD: first add the channel-synchronized stream callback regression and confirm it fails because the callback cannot acquire the guard; then implement operation ownership and the two-phase lock interval.
@@ -78,5 +81,5 @@ Report the operation ownership/result semantics, Red/Green evidence, exact files
 - `cd apps/backend && go test -race ./internal/orchestrator -run 'Test(CancellationSources|CancelAgent_JoinedSilentCancellationRunsExplicitReconciliation|CancelAgent_OwnerDisconnectDoesNotAbortJoinedOperation|CancelAgent_DefersLifecycleCompletionDuringCancellation|CancelAgentSilent_DoesNotCloseSuccessorTurn|QueueAndInterruptForPeerMessage_(ClosesStaleEarlyCheckRace|CancelFailureDoesNotStrandMessageWhenReadyIsRacing))' -count=1` — passed.
 - `cd apps/backend && go test ./... -count=1 -timeout=300s` — all backend packages passed.
 - `cd apps/backend && go test ./cmd/mock-agent -count=1` — package passed.
-- `cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestCancelAgent' -count=1` — no matching tests; command exited successfully.
+- `cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestManager_CancelAgent_' -count=1` — lifecycle cancellation tests passed.
 - `git diff --check` — passed. No schema, public API, ACP message, lifecycle timeout, external side effect, or new trust boundary was introduced.

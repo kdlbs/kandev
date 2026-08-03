@@ -6,7 +6,7 @@ import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 async function tapCancelButton(session: SessionPage) {
-  const button = session.cancelAgentButton();
+  const button = session.activeChat().getByTestId("cancel-agent-button");
   await expect(button).toBeVisible();
   await expect(button).toBeEnabled();
   await expect(button).toBeInViewport();

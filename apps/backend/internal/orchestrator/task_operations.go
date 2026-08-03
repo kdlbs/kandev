@@ -4754,9 +4754,13 @@ func (s *Service) reconcileJoinedExplicitCancellationLocked(
 	sessionID string,
 	operation *cancelOperation,
 ) error {
+	if _, _, ready := s.cancellationPreparationSnapshot(operation); !ready {
+		return errors.New("joined cancellation preparation is incomplete")
+	}
 	operation.explicitReconcileOnce.Do(func() {
 		identity, completionEligible, ready := s.cancellationPreparationSnapshot(operation)
 		if !ready {
+			operation.explicitReconcileErr = errors.New("joined cancellation preparation became incomplete")
 			return
 		}
 		session, err := s.repo.GetTaskSession(operationCtx, sessionID)

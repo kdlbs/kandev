@@ -94,9 +94,9 @@ No production frontend change is planned. `chat-input-area.tsx` already awaits t
 
 ## E2E Tests
 
-- **Scenario:** a delayed mock-agent turn acknowledges cancellation and emits terminal events; the desktop cancel control disappears and the input becomes promptable within two seconds, while enabled/disabled completion policy still advances or stays exactly once.
+- **Scenario:** a delayed mock-agent turn acknowledges cancellation and emits terminal events; the desktop cancel control disappears and the input becomes promptable within two seconds after those terminal frames, while enabled/disabled completion policy still advances or stays exactly once.
   **File:** `apps/web/e2e/tests/workflow/workflow-cancel-completion.spec.ts`.
-- **Scenario:** the same acknowledged cancellation settles through the compact composer within two seconds when invoked by touch, while the existing mobile workflow transition and overflow assertions remain valid.
+- **Scenario:** the same acknowledged cancellation settles through the compact composer within two seconds after terminal-frame publication when invoked by touch, while the existing mobile workflow transition and overflow assertions remain valid.
   **File:** `apps/web/e2e/tests/workflow/mobile-workflow-cancel-completion.spec.ts`.
 
 ## Verification Results
@@ -111,7 +111,7 @@ No production frontend change is planned. `chat-input-area.tsx` already awaits t
 - `cd apps && pnpm --filter @kandev/web run lint` — passed.
 - `cd apps && pnpm --filter @kandev/web run i18n:ratchet && pnpm --filter @kandev/web run i18n:check` — passed.
 - `cd apps/backend && go test ./cmd/mock-agent -count=1` — package passed, including the cancellation-aware prompt fixture test.
-- `cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestCancelAgent' -count=1` — no matching tests; command exited successfully.
+- `cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestManager_CancelAgent_' -count=1` — lifecycle cancellation tests passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm run lint` — passed.
 - Desktop E2E: `cd apps/web && pnpm e2e:run --no-build --project chromium tests/workflow/workflow-cancel-completion.spec.ts -- --retries=0` — 2 tests passed; both enabled and disabled completion-policy outcomes settled through the real cancel control.
