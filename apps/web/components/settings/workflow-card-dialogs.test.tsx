@@ -17,16 +17,34 @@ import { StepDeleteDialog, WorkflowDeleteDialog } from "./workflow-card-dialogs"
 
 const STEP_NAME = "In Review";
 
+const NO_WORKFLOWS: Workflow[] = [];
+const NO_STEPS: WorkflowStep[] = [];
+
+// Only `id` and `name` are read (the migration <Select>), but the fixture
+// satisfies the whole contract so a field added to WorkflowStep fails here
+// rather than being silently absent behind an `as` cast.
+function step(id: string, name: string): WorkflowStep {
+  return {
+    id,
+    workflow_id: "workflow-1" as WorkflowStep["workflow_id"],
+    name,
+    position: 0,
+    color: "bg-slate-500",
+    created_at: "",
+    updated_at: "",
+  };
+}
+
 function renderWorkflowDelete(taskCount: number | null, hasUnsavedChanges = false) {
   render(
     <WorkflowDeleteDialog
       open
       onOpenChange={vi.fn()}
       workflowTaskCount={taskCount}
-      otherWorkflows={[] as Workflow[]}
+      otherWorkflows={NO_WORKFLOWS}
       targetWorkflowId=""
       setTargetWorkflowId={vi.fn()}
-      targetWorkflowSteps={[] as WorkflowStep[]}
+      targetWorkflowSteps={NO_STEPS}
       targetStepId=""
       setTargetStepId={vi.fn()}
       migrateLoading={false}
@@ -61,7 +79,7 @@ function renderStepDelete(
   );
 }
 
-const migrationTarget = [{ id: "step-2", name: "Done" } as WorkflowStep];
+const migrationTarget = [step("step-2", "Done")];
 
 describe("WorkflowDeleteDialog description", () => {
   afterEach(cleanup);
