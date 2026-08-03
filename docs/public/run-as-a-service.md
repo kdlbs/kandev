@@ -194,9 +194,10 @@ provides an install-wide **Stable** or **Nightly** choice. A global npm install 
 durable service path. An npx-managed service is a recoverable but fragile fallback because its
 executable lives in npm's transient cache. Stable reads signed GitHub Releases and remains selected
 by default. Nightly reads npm's `kandev@nightly` tag and may contain unstable code from `main`. Select the row, use
-**Save changes**, inspect the exact version, and then apply it separately. Nightly apply re-resolves
-the mutable npm tag and installs the exact immutable version it names; Stable re-resolves its
-GitHub release.
+**Save changes**, inspect the exact version, and then apply it separately. Apply submits that exact
+immutable version; it does not re-resolve either mutable channel source. The backend accepts it
+only while it still matches the selected channel's cached target. If that cache changes, Apply
+returns a conflict and the page must refresh before you retry with the newly displayed target.
 
 To leave Nightly, select Stable, save, and apply the displayed stable release. If the UI cannot do
 that, use the manual stable recovery below. Homebrew, Desktop, system-service, unmanaged,
