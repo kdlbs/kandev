@@ -154,7 +154,7 @@ const PROGRAMMATIC_SCROLL_GUARD_MS = 1000;
  * streaming in mid-animation can silently snap the transcript back to the
  * bottom, cancelling the user's action.
  */
-function useAutoScroll(params: {
+export function useAutoScroll(params: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   messages: Message[];
   isWorking: boolean;

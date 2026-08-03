@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { Message } from "@/lib/types/http";
 
 vi.mock("@/lib/state/dockview-store", () => ({
   useDockviewStore: Object.assign(
@@ -10,9 +11,18 @@ vi.mock("@/lib/state/dockview-store", () => ({
   ),
 }));
 
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({
+    getState: () => ({ setTranscriptScrollTop: vi.fn() }),
+  }),
+}));
+
 import { useScrollToDividerOrBottom } from "./message-list-native";
+import { useAutoScroll } from "./message-list-native-scroll";
 
 const DIVIDER_KEY = "m2";
+const TEST_MESSAGES = [{} as Message];
+const NEVER_LOCKED = () => false;
 
 function Harness({
   itemCount,
@@ -39,6 +49,36 @@ function Harness({
       <div id={`msg-${DIVIDER_KEY}`} />
     </div>
   );
+}
+
+function AutoScrollHarness({
+  isWorking,
+  hasUnreadDivider,
+  messages = TEST_MESSAGES,
+  markRef,
+}: {
+  isWorking: boolean;
+  hasUnreadDivider: boolean;
+  messages?: Message[];
+  markRef?: { current?: () => void };
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const { markNotNearBottom } = useAutoScroll({
+    scrollRef,
+    messages,
+    isWorking,
+    sessionId: null,
+    enabled: true,
+    hasUnreadDivider,
+    isProgrammaticScrollLocked: NEVER_LOCKED,
+  });
+  if (markRef) markRef.current = markNotNearBottom;
+  return <div ref={scrollRef} data-testid="auto-scroll-container" />;
+}
+
+function setScrollMetrics(element: HTMLElement) {
+  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 1000 });
+  Object.defineProperty(element, "clientHeight", { configurable: true, value: 400 });
 }
 
 afterEach(() => {
@@ -70,6 +110,45 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
     render(<Harness itemCount={2} anchoredBarOffsetPx={0} onDividerScroll={onDividerScroll} />);
 
     expect(onDividerScroll).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not follow the bottom when work starts with an unread divider", () => {
+    const { rerender } = render(<AutoScrollHarness isWorking={false} hasUnreadDivider={true} />);
+    const scrollContainer = document.querySelector<HTMLElement>(
+      '[data-testid="auto-scroll-container"]',
+    );
+    if (!scrollContainer) throw new Error("auto-scroll container did not render");
+    setScrollMetrics(scrollContainer);
+    scrollContainer.scrollTop = 123;
+
+    rerender(<AutoScrollHarness isWorking={true} hasUnreadDivider={true} />);
+
+    expect(scrollContainer.scrollTop).toBe(123);
+  });
+
+  it("does not follow appended messages after the divider scroll marks the reader away from bottom", () => {
+    const markRef: { current?: () => void } = {};
+    const { rerender } = render(
+      <AutoScrollHarness isWorking={false} hasUnreadDivider={true} markRef={markRef} />,
+    );
+    const scrollContainer = document.querySelector<HTMLElement>(
+      '[data-testid="auto-scroll-container"]',
+    );
+    if (!scrollContainer) throw new Error("auto-scroll container did not render");
+    setScrollMetrics(scrollContainer);
+    scrollContainer.scrollTop = 123;
+    markRef.current?.();
+
+    rerender(
+      <AutoScrollHarness
+        isWorking={false}
+        hasUnreadDivider={true}
+        messages={[...TEST_MESSAGES, {} as Message]}
+        markRef={markRef}
+      />,
+    );
+
+    expect(scrollContainer.scrollTop).toBe(123);
   });
 
   it("never re-scrolls once the reader has started scrolling, even if the anchored bar's height changes afterward", () => {

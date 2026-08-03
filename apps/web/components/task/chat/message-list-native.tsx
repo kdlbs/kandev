@@ -72,6 +72,80 @@ function useTranscriptEdgeTracking(
   ]);
 }
 
+type NativeMessageListScrollParams = {
+  scrollRef: React.RefObject<HTMLDivElement | null>;
+  ref: React.ForwardedRef<MessageListHandle>;
+  items: RenderItem[];
+  messages: Message[];
+  isWorking: boolean;
+  sessionId: string | null;
+  enabled: boolean;
+  dividerBeforeItemKey?: string | null;
+  anchoredBarHeight?: number;
+  hasMore: boolean;
+  isLoadingMore: boolean;
+  loadMore: () => Promise<number>;
+  lastPromptMessageId: string | null | undefined;
+  onLastPromptEdgeChange: ((edge: LastPromptEdge) => void) | undefined;
+  firstMessageId: string | null | undefined;
+  onFirstMessageHiddenChange: ((isHidden: boolean) => void) | undefined;
+};
+
+function useNativeMessageListScroll(params: NativeMessageListScrollParams) {
+  const {
+    scrollRef,
+    ref,
+    items,
+    messages,
+    isWorking,
+    sessionId,
+    enabled,
+    dividerBeforeItemKey,
+    anchoredBarHeight,
+    hasMore,
+    isLoadingMore,
+    loadMore,
+    lastPromptMessageId,
+    onLastPromptEdgeChange,
+    firstMessageId,
+    onFirstMessageHiddenChange,
+  } = params;
+  const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
+    scrollRef,
+    items,
+    messages,
+    isWorking,
+    sessionId,
+    enabled,
+    hasUnreadDivider: Boolean(dividerBeforeItemKey),
+    hasMore,
+    isLoadingMore,
+    loadMore,
+  });
+  const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
+  useEffect(() => {
+    scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
+  }, [anchoredBarOffsetPx]);
+  useScrollToDividerOrBottom(
+    scrollRef,
+    items.length,
+    dividerBeforeItemKey,
+    anchoredBarOffsetPx,
+    markNotNearBottom,
+  );
+  useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
+    handleScrollToMessage,
+  ]);
+  useTranscriptEdgeTracking(
+    scrollRef,
+    lastPromptMessageId,
+    onLastPromptEdgeChange,
+    firstMessageId,
+    onFirstMessageHiddenChange,
+  );
+  return { handleScrollToMessage, sentinelRef };
+}
+
 type MessageRowProps = {
   item: RenderItem;
   sessionId: string | null;
@@ -345,7 +419,6 @@ function NativeMessageListBody({
  * via {@link useNativeScrollManagement}.
  */
 export const NativeMessageList = memo(
-  // eslint-disable-next-line max-lines-per-function -- coordinates transcript hooks and list rendering; each concern is factored into a hook or child component.
   forwardRef<MessageListHandle, MessageListProps>(function NativeMessageList(
     {
       items,
@@ -384,39 +457,24 @@ export const NativeMessageList = memo(
     const streamingMessageId = getStreamingAgentMessageId(messages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
-    const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
+    const { handleScrollToMessage, sentinelRef } = useNativeMessageListScroll({
       scrollRef,
+      ref,
       items,
       messages,
       isWorking,
       sessionId,
       enabled: autoScrollEnabled,
-      hasUnreadDivider: Boolean(dividerBeforeItemKey),
+      dividerBeforeItemKey,
+      anchoredBarHeight,
       hasMore,
       isLoadingMore,
       loadMore,
-    });
-    const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
-    useEffect(() => {
-      scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
-    }, [anchoredBarOffsetPx]);
-    useScrollToDividerOrBottom(
-      scrollRef,
-      items.length,
-      dividerBeforeItemKey,
-      anchoredBarOffsetPx,
-      markNotNearBottom,
-    );
-    useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
-      handleScrollToMessage,
-    ]);
-    useTranscriptEdgeTracking(
-      scrollRef,
       lastPromptMessageId,
       onLastPromptEdgeChange,
       firstMessageId,
       onFirstMessageHiddenChange,
-    );
+    });
 
     return (
       <SessionPanelContent
