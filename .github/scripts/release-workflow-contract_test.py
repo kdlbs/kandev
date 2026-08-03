@@ -111,20 +111,24 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn("github.event_name == 'workflow_dispatch'", block)
             self.assertNotIn("github.event_name == 'schedule'", block)
 
-    def test_nightly_publish_uses_exact_sha_local_assets_and_shared_serialization(self) -> None:
+    def test_nightly_publish_uses_exact_sha_local_assets_and_release_serialization(self) -> None:
         stable = job_block("publish-npm")
         nightly = job_block("publish-npm-nightly")
 
+        workflow_preamble = WORKFLOW.split("\njobs:", 1)[0]
+        self.assertIn("group: release-npm-publication", workflow_preamble)
+        self.assertIn("cancel-in-progress: false", workflow_preamble)
+        self.assertIn("queue: max", workflow_preamble)
+
         for block in (stable, nightly):
-            self.assertIn("group: release-npm-publication", block)
-            self.assertIn("cancel-in-progress: false", block)
-            self.assertIn("queue: max", block)
+            self.assertNotIn("\n    concurrency:", block)
             self.assertIn("id-token: write", block)
 
         self.assertIn("needs: [nightly-prepare, build-bundles]", nightly)
         self.assertIn("needs.build-bundles.result == 'success'", nightly)
         self.assertIn("needs.build-web.result == 'success'", job_block("build-bundles"))
         self.assertIn("ref: ${{ needs.nightly-prepare.outputs.ref }}", nightly)
+        self.assertIn("fetch-depth: 0", nightly)
         self.assertIn("pattern: bundle-*", nightly)
         self.assertIn("merge-multiple: true", nightly)
         self.assertIn('--version "${{ needs.nightly-prepare.outputs.version }}"', nightly)

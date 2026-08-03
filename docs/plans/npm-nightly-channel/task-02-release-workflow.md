@@ -14,9 +14,10 @@ spec: "../../specs/npm-nightly-channel/spec.md"
   commits before building.
 - **Acceptance:** Schedule reaches only web/runtime builds and nightly npm publication; every stable
   GitHub/Desktop/GHCR/Homebrew mutation remains dispatch-only.
-- **Acceptance:** Publication uses the exact checked-out SHA and is serialized with stable release.
-- **Acceptance:** The locked publish step skips when Stable or the observed Nightly tag moved while
-  bundles were building, preventing stale or backward tag movement.
+- **Acceptance:** Publication uses the exact checked-out SHA; complete Stable and Nightly workflow
+  runs are serialized so a pending Stable tag cannot race npm publication.
+- **Acceptance:** Preflight and publish skip when the stable Git/npm baseline disagrees or the
+  observed Nightly tag moved, preventing stale or backward tag movement.
 - **Acceptance:** An older scheduled rerun is skipped before building when a complete Nightly from
   a newer commit exists; an incomplete current target and ancestor-tagged older partial publishes
   are repaired, while unresolvable, divergent, or newer partial tag history fails closed.

@@ -66,6 +66,13 @@ on:
         default: ""
         type: string
 
+# A Stable tag is pushed before its npm job is ready. Serializing whole runs
+# prevents a Nightly from using the previous npm baseline during that window.
+concurrency:
+  group: release-npm-publication
+  cancel-in-progress: false
+  queue: max
+
 # Default to read-only at the workflow level. Each job opts into the writes
 # it actually needs.
 permissions:
@@ -1812,10 +1819,6 @@ jobs:
     permissions:
       id-token: write    # Required for OIDC trusted publishing
       contents: read
-    concurrency:
-      group: release-npm-publication
-      cancel-in-progress: false
-      queue: max
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
@@ -1852,14 +1855,11 @@ jobs:
     permissions:
       id-token: write    # Required for OIDC trusted publishing
       contents: read
-    concurrency:
-      group: release-npm-publication
-      cancel-in-progress: false
-      queue: max
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           ref: ${{ needs.nightly-prepare.outputs.ref }}
+          fetch-depth: 0
           persist-credentials: false
 
       - uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5

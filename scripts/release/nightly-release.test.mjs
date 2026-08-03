@@ -232,6 +232,36 @@ test("prepare skips when main has no commit after stable", async () => {
   }
 });
 
+test("prepare skips while a stable Git tag is ahead of npm latest", async () => {
+  const fixture = await createFixture();
+  try {
+    git(fixture.root, "tag", "v1.3.0", fixture.mainSha);
+    await setRegistry(fixture, new Map([["kandev@latest", "1.2.3"]]));
+    const result = await runPrepare(fixture);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.output.should_publish, "false");
+    assert.match(result.stdout, /stable Git tag v1\.3\.0.*npm @latest 1\.2\.3/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("prepare skips a scheduled commit superseded by the current stable", async () => {
+  const fixture = await createFixture();
+  try {
+    git(fixture.root, "tag", "v1.3.0", fixture.newerSha);
+    await setRegistry(fixture, new Map([["kandev@latest", "1.3.0"]]));
+    const result = await runPrepare(fixture);
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.output.should_publish, "false");
+    assert.match(result.stdout, /superseded by stable v1\.3\.0/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
+  }
+});
+
 test("prepare skips a complete publication and repairs a partial one", async () => {
   const fixture = await createFixture();
   try {
@@ -464,5 +494,33 @@ test("publish skips when any locked registry value moves", async () => {
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
+  }
+});
+
+test("publish skips while a stable Git tag is ahead of npm latest", async () => {
+  const fixture = await createFixture();
+  try {
+    git(fixture.root, "tag", "v1.3.0", fixture.mainSha);
+    await setRegistry(fixture, registryFor(fixture.version, fixture.version));
+    const result = runScript(
+      fixture,
+      "publish",
+      "--stable-at-start",
+      "1.2.3",
+      "--nightly-at-start",
+      fixture.version,
+      "--tags-at-start",
+      tagsSnapshot(fixture.version),
+      "--version",
+      fixture.version,
+      "--assets-dir",
+      fixture.assetsDir,
+    );
+
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(await readFile(fixture.publishLog, "utf8"), "");
+    assert.match(result.stdout, /stable Git tag v1\.3\.0.*npm @latest 1\.2\.3/);
+  } finally {
+    await rm(fixture.root, { recursive: true, force: true });
   }
 });

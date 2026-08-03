@@ -114,9 +114,14 @@ the installation.
   proceeds to repair. Divergent or unresolvable history fails closed.
 - A 12-hex collision makes Git abbreviation resolution ambiguous, so the run fails closed instead
   of treating the colliding commit as already published.
-- After acquiring the shared npm publication slot, a Nightly run rechecks `kandev@latest`. If a
-  Stable publish moved the baseline while Nightly was building, the stale run exits without
-  publishing.
+- Stable and Nightly workflow runs share one non-cancelling release-wide concurrency group. This
+  covers Stable tag creation through npm publication, so Nightly cannot derive a version while a
+  newly tagged Stable release is still pending on npm.
+- Before building and again before publishing, Nightly requires the highest stable Git tag to match
+  `kandev@latest`. A pending Stable tag or a scheduled commit superseded by the current Stable tag
+  exits successfully without publishing.
+- Before publishing, a Nightly run rechecks `kandev@latest`. If the baseline moved while Nightly
+  was building, the stale run exits without publishing.
 - The same locked preflight requires `kandev@nightly` to equal the value observed before building;
   an overlapping run that already moved the tag supersedes the stale run.
 - Runtime packages publish before `kandev`. If any runtime fails, the main launcher is not
@@ -143,6 +148,10 @@ the installation.
   `kandev@latest` is unchanged.
 - **GIVEN** `main` points at the latest stable tag's commit, **WHEN** the nightly schedule runs,
   **THEN** it exits successfully without a platform build or npm publication.
+- **GIVEN** the highest Stable Git tag is newer than npm `latest`, **WHEN** Nightly prepares or
+  publishes, **THEN** it exits successfully rather than deriving from the stale npm baseline.
+- **GIVEN** a Nightly schedule was queued before a Stable release superseded its commit, **WHEN**
+  that Nightly starts after Stable completes, **THEN** it exits successfully without building.
 - **GIVEN** the current `main` nightly already exists and `kandev@nightly` points to it, **WHEN**
   the schedule runs again, **THEN** it exits successfully without rebuilding.
 - **GIVEN** a previous run published only some runtime packages, **WHEN** the same commit retries,

@@ -77,7 +77,9 @@ Base image tags include `X.Y.Z`, `vX.Y.Z`, `sha-*`, and `latest`. Universal tags
 
 The same workflow runs on cron `0 12 * * *`. This means GitHub schedules it for 12:00 UTC; it may
 start later when Actions is delayed. The metadata job checks out the exact scheduled `main` commit,
-resolves `kandev@latest`, and requires that Stable tag's commit to be an ancestor of `main`.
+resolves `kandev@latest`, and verifies its matching Stable Git tag. The Stable tag must be an
+ancestor of the scheduled commit; a scheduled commit superseded by that Stable tag skips, while
+divergent history fails for operator review.
 
 For stable `X.Y.Z` and commit `abcdef123456...`, the version is
 `X.Y.(Z+1)-nightly.shaabcdef123456`. The run exits successfully without building when `main` is
@@ -90,11 +92,15 @@ for operator review.
 An eligible run builds the shared web application and all five native runtime archives from the
 exact scheduled SHA. It publishes the five `@kdlbs/runtime-*` packages before the `kandev`
 launcher, all at the same immutable version with provenance under npm's `nightly` dist-tag. Stable
-and Nightly npm jobs share non-cancelling publication concurrency so their package writes cannot
-overlap. After acquiring that publication slot, Nightly rechecks `kandev@latest`; if Stable moved
-while the native bundles were building, the stale Nightly exits without publishing. It also
-requires `kandev@nightly` to match the value observed before building, so overlapping reruns cannot
-move the tag backward.
+and Nightly workflow runs share non-cancelling release-wide concurrency. This covers Stable tag
+creation through npm publication, preventing Nightly from using the previous npm baseline while a
+new Stable tag is pending. A manual Stable release may therefore wait for an in-flight Nightly.
+Nightlies likewise queue behind a Stable run, including any release-environment approval wait.
+
+Before building and again before publishing, Nightly requires the highest stable Git tag to match
+`kandev@latest`. A pending Stable tag, a scheduled commit superseded by Stable, or a baseline that
+moved during the build causes a successful skip. Nightly also requires `kandev@nightly` to match
+the value observed before building, so overlapping reruns cannot move the tag backward.
 
 A Nightly run creates no version commit, release PR, Git tag, GitHub Release, changelog update,
 Desktop build/feed, GHCR tag, or Homebrew formula. It never moves npm's `latest` tag.

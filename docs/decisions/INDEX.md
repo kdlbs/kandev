@@ -93,7 +93,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted | backend, frontend, protocol, security | 2026-07-30 |
 | 2026-07-30-file-backed-diagnostic-bundles | [File-backed diagnostic bundles](2026-07-30-file-backed-diagnostic-bundles.md) | accepted | backend, frontend, infra, protocol, workflow | 2026-07-30 |
 | 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |
-| 2026-07-31-npm-nightly-release-channel | [Publish deterministic npm-only nightlies](2026-07-31-npm-nightly-release-channel.md) | accepted | workflow, backend, frontend, cli | 2026-07-31 |
+| 2026-07-31-npm-nightly-release-channel | [Publish deterministic npm-only nightlies](2026-07-31-npm-nightly-release-channel.md) | accepted (amended 2026-08-03) | workflow, backend, frontend, cli | 2026-07-31 |
 | 2026-07-31-isolate-manual-pr-review-content | [Isolate Manual PR Review Content](2026-07-31-isolate-manual-pr-review-content.md) | accepted | infra, workflow, security | 2026-07-31 |
 | 2026-07-31-agent-generated-task-titles | [Bind Agent Title Generation to Pending Tasks](2026-07-31-agent-generated-task-titles.md) | accepted | backend, frontend, protocol | 2026-07-31 |
 | 2026-07-31-system-service-user-continuity | [Preserve System Service Identity Across Reinstallation](2026-07-31-system-service-user-continuity.md) | accepted | backend, cli, security, operations | 2026-07-31 |

@@ -1,6 +1,6 @@
 # ADR-2026-07-31-npm-nightly-release-channel: Publish deterministic npm-only nightlies
 
-**Status:** accepted
+**Status:** accepted (amended 2026-08-03)
 **Date:** 2026-07-31
 **Area:** workflow, backend, frontend, cli
 
@@ -32,11 +32,17 @@ trusted publisher per package and validates the workflow filename. Scheduled nig
 five runtime packages before the launcher with `npm publish --tag nightly`; stable `latest` tags
 remain untouched. The publisher and scheduled preflight load one shared package inventory. Nightly
 jobs do not enter the Git tag, GitHub Release, Desktop, container, or Homebrew graph. Stable and
-Nightly publication is serialized. Before building, a Nightly target must be newer in `main`
-ancestry than the published Nightly unless the current target is incomplete and needs repair. An
-older partial runtime publication is recoverable only when its embedded commit is an ancestor of
-current `main`. Divergent or newer partial tags fail closed. After acquiring the publication slot,
-both the Stable baseline and previously observed Nightly tag must still match.
+Nightly workflow runs share one non-cancelling concurrency group from start through publication.
+This release-wide lock is required because Stable pushes its Git tag before its npm publish job is
+ready; locking only the two npm jobs leaves a window where Nightly can derive from the previous npm
+baseline. Before building and again before publishing, Nightly requires the highest stable Git tag
+to match npm `latest`. A scheduled commit superseded by that Stable tag exits successfully.
+
+A Nightly target must be newer in `main` ancestry than the published Nightly unless the current
+target is incomplete and needs repair. An older partial runtime publication is recoverable only
+when its embedded commit is an ancestor of current `main`. Divergent or newer partial tags fail
+closed. Before publishing, both the Stable baseline and previously observed Nightly tag must still
+match.
 
 The backend owns an install-wide Stable/Nightly preference. Stable remains the default and resolves
 GitHub Releases. Nightly resolves npm's `kandev@nightly` target and is selectable only for verified
@@ -55,7 +61,9 @@ runtime-first/main-last order and tag-consistency checks are required.
 
 npm accumulates immutable nightly versions. Homebrew and Desktop users do not receive channel
 parity in this iteration. The release workflow must explicitly gate every stable-only job when
-handling scheduled events.
+handling scheduled events. A manual Stable release can wait for an in-flight Nightly workflow;
+Nightlies also wait behind a Stable run, including any release-environment approval. Queued
+Nightlies whose scheduled commit was superseded by the completed Stable release skip.
 
 ## Alternatives Considered
 
@@ -67,6 +75,8 @@ handling scheduled events.
   version substantially longer; the shorter identity plus fail-closed ambiguity check is preferred.
 - **Separate nightly workflow:** cleaner YAML isolation, but it conflicts with npm's single trusted
   publisher configuration for the existing six packages.
+- **Serialize only npm publish jobs:** permits more build overlap, but Stable creates its tag before
+  its npm job enters that lock, allowing Nightly to derive from a stale npm baseline.
 - **GitHub prereleases:** would duplicate stable release artifacts and feeds when npm is the only
   requested consumer.
 - **Homebrew `HEAD` or a nightly formula:** viable future designs, but they need source builds or a

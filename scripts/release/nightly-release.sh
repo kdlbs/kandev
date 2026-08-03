@@ -17,6 +17,32 @@ npm_version() {
   bash "$ROOT_DIR/scripts/release/npm-view-version.sh" "$1"
 }
 
+latest_stable_tag_version() {
+  local tag
+  while IFS= read -r tag; do
+    if [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+      printf '%s\n' "${BASH_REMATCH[1]}"
+      return 0
+    fi
+  done < <(git tag --list 'v*' --sort=-version:refname)
+  return 0
+}
+
+stable_tag_matches_npm() {
+  local npm_latest="$1"
+  local tagged_stable
+  tagged_stable="$(latest_stable_tag_version)"
+  if [[ -z "$tagged_stable" ]]; then
+    echo "No stable Git tag is available; skipping this best-effort Nightly run."
+    return 1
+  fi
+  if [[ "$tagged_stable" != "$npm_latest" ]]; then
+    echo "Highest stable Git tag v$tagged_stable does not match npm @latest $npm_latest; skipping Nightly."
+    return 1
+  fi
+  return 0
+}
+
 write_output() {
   printf '%s=%s\n' "$1" "$2" >> "$OUTPUT_PATH"
 }
@@ -76,23 +102,31 @@ prepare() {
     echo "npm @latest is missing; skipping this best-effort Nightly run."
     return
   fi
+  if ! stable_tag_matches_npm "$latest_stable"; then
+    return
+  fi
   write_output stable_version "$latest_stable"
 
-  local nightly_version stable_commit
-  nightly_version="$(node "$ROOT_DIR/scripts/release/nightly-version.mjs" "$latest_stable" "$main_sha")"
+  local stable_commit
   stable_commit="$(git rev-parse "v${latest_stable}^{commit}")"
   if ! git merge-base --is-ancestor "$stable_commit" "$main_sha"; then
+    if git merge-base --is-ancestor "$main_sha" "$stable_commit"; then
+      echo "Scheduled commit $main_sha was superseded by stable v$latest_stable; skipping Nightly."
+      return
+    fi
     echo "Latest stable v$latest_stable is not an ancestor of scheduled main $main_sha." >&2
     exit 1
   fi
-
-  write_output version "$nightly_version"
-  write_output tag "v$nightly_version"
-  write_output ref "$main_sha"
   if [[ "$main_sha" == "$stable_commit" ]]; then
     echo "No commits on main since stable v$latest_stable; skipping nightly."
     return
   fi
+
+  local nightly_version
+  nightly_version="$(node "$ROOT_DIR/scripts/release/nightly-version.mjs" "$latest_stable" "$main_sha")"
+  write_output version "$nightly_version"
+  write_output tag "v$nightly_version"
+  write_output ref "$main_sha"
 
   local published_nightly
   if ! published_nightly="$(npm_version kandev@nightly)"; then
@@ -220,6 +254,9 @@ publish() {
   fi
   if [[ -z "$current_latest" ]]; then
     echo "npm @latest is missing; skipping Nightly publication."
+    return
+  fi
+  if ! stable_tag_matches_npm "$current_latest"; then
     return
   fi
   if [[ "$current_latest" != "$stable_at_start" ]]; then

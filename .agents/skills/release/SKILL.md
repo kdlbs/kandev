@@ -44,9 +44,9 @@ The same workflow schedules npm Nightly with cron `0 12 * * *`. It skips before 
 `main` has no commit after the latest Stable tag, the exact commit is already published, or a same
 or newer `main` Nightly supersedes the scheduled commit. Eligible runs build only the shared web
 bundle and five native runtime archives, then publish runtimes first and `kandev` last with OIDC
-provenance. Stable and Nightly npm writes share non-cancelling concurrency. After acquiring that
-slot, Nightly rechecks both the Stable baseline and the previously observed `nightly` tag; a moved
-value safely suppresses the stale publication.
+provenance. Stable and Nightly workflow runs share one non-cancelling release-wide concurrency
+slot. Before publishing, Nightly rechecks the stable Git/npm baseline and the previously observed
+`nightly` tag; a pending Stable tag or moved value safely suppresses stale publication.
 
 Validate Nightly automation changes with:
 
