@@ -310,10 +310,10 @@ timeout, and persists the last successful Stable and Nightly results separately.
 performs a synchronous request and permits one manual check per process every 30 seconds. Offline,
 rate-limited, or registry-failing installations continue to show that channel's cached state.
 
-The npm nightly publisher is scheduled for 12:00 UTC. GitHub scheduling is best effort, so the run
-may begin later. It publishes only when `main` contains commits after the latest stable release and
-the exact current commit has not already been published. Nightlies do not move npm `latest` and do
-not create Homebrew, Desktop, GHCR, Git tag, or GitHub Release artifacts.
+Nightlies are best-effort daily snapshots. A new version appears only when `main` contains commits
+after the latest Stable release and that exact commit has not already been published. Nightlies do
+not move npm `latest` and do not create Homebrew, Desktop, GHCR, Git tag, or GitHub Release
+artifacts.
 
 Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
 

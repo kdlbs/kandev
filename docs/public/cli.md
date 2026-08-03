@@ -69,9 +69,8 @@ npx -y kandev@nightly
 
 A nightly version has the form `X.Y.(Z+1)-nightly.sha<12-hex-character SHA prefix>`, based on the latest
 stable `X.Y.Z`. The launcher and all five platform runtime packages use that same immutable
-version. A best-effort GitHub schedule starts at 12:00 UTC and publishes only when `main` has
-changed since the latest stable release and that commit has not already been published. GitHub may
-start a scheduled run later than 12:00 UTC.
+version. Nightlies are best-effort daily snapshots. A new one appears only when `main` has changed
+since the latest Stable release, so some days may have no new Nightly.
 
 Nightly does not move `latest` and does not publish a Homebrew formula, Desktop updater feed,
 container tag, Git tag, or GitHub Release. Use it for prerelease testing, not unattended production
