@@ -1892,7 +1892,9 @@ export class ApiClient {
       executor_profile_id?: string;
       prompt: string;
       intent?: string;
+      session_id?: string;
       workflow_step_id?: string;
+      launch_workspace?: boolean;
       auto_start?: boolean;
     },
     timeoutMs = 30_000,

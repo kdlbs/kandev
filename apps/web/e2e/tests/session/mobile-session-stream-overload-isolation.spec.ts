@@ -35,21 +35,46 @@ test.describe("mobile: session stream overload isolation", () => {
       sessionId: `mobile-quiet-${noisyTask.id}`,
     });
 
+    // Prepare the noisy session before opening its browser. Starting the
+    // agent first creates a race where a fast mock run can finish before the
+    // second page has registered its session subscription, leaving no live
+    // frames to assert on in CI.
+    const prepared = await apiClient.launchSession({
+      task_id: noisyTask.id,
+      agent_profile_id: seedData.agentProfileId,
+      executor_profile_id: seedData.worktreeExecutorProfileId,
+      workflow_step_id: seedData.startStepId,
+      prompt: "",
+      intent: "prepare",
+      launch_workspace: true,
+    });
+    const noisySessionId = prepared.session_id;
+
+    await expect
+      .poll(async () => (await apiClient.getTaskEnvironment(noisyTask.id))?.status ?? null, {
+        timeout: 60_000,
+        message: "prepared noisy task environment did not become ready",
+      })
+      .toBe("ready");
+
     await testPage.goto(`/t/${noisyTask.id}`);
     const session = new SessionPage(testPage);
     const layout = testPage.locator("[data-testid='mobile-task-layout']:visible");
     await layout.waitFor({ state: "visible", timeout: 30_000 });
 
-    const launched = await apiClient.launchSession({
-      task_id: noisyTask.id,
-      agent_profile_id: seedData.agentProfileId,
-      executor_profile_id: seedData.worktreeExecutorProfileId,
-      workflow_step_id: seedData.startStepId,
-      prompt: 'e2e:message("noisy-ready")',
-    });
-    const noisySessionId = launched.session_id;
-
     await session.waitForLoad();
+    const quietPill = testPage.getByTestId("mobile-sessions-pill");
+    await expect(quietPill).toBeVisible({ timeout: 30_000 });
+    await quietPill.tap();
+    const initialQuietSheet = testPage.getByRole("dialog", { name: "Sessions" });
+    await expect(initialQuietSheet).toBeVisible({ timeout: 30_000 });
+    const initialQuietRow = initialQuietSheet.getByTestId(
+      `mobile-session-row-${quietSession.session_id}`,
+    );
+    await expect(initialQuietRow).toBeVisible({ timeout: 30_000 });
+    await initialQuietRow.tap();
+    await session.waitForLoad();
+
     const noisyPage = await testPage.context().newPage();
     const noisyCapture = attachGatewayTrafficCapture(noisyPage);
     await noisyPage.goto(`/t/${noisyTask.id}`);
@@ -79,6 +104,29 @@ test.describe("mobile: session stream overload isolation", () => {
       )
       .toBe(true);
 
+    await expect
+      .poll(
+        () =>
+          noisyCapture.frames.some(
+            (frame) =>
+              frame.direction === "received" &&
+              frame.action === "session.subscribe" &&
+              frame.sessionId === noisySessionId,
+          ),
+        { timeout: 30_000, message: "noisy page did not acknowledge its session subscription" },
+      )
+      .toBe(true);
+
+    noisyCapture.frames.length = 0;
+    capture.frames.length = 0;
+    await apiClient.launchSession({
+      task_id: noisyTask.id,
+      session_id: noisySessionId,
+      agent_profile_id: seedData.agentProfileId,
+      prompt: reasoningBurstPrompt(),
+      intent: "start_created",
+    });
+
     const pill = layout.getByTestId("mobile-sessions-pill");
     await expect(pill).toBeVisible({ timeout: 30_000 });
     await pill.tap();
@@ -102,9 +150,6 @@ test.describe("mobile: session stream overload isolation", () => {
       )
       .toBe(true);
 
-    noisyCapture.frames.length = 0;
-    capture.frames.length = 0;
-    await noisySession.sendMessageViaButton(reasoningBurstPrompt());
     await session.sendMessageViaButton("mobile-quiet-followup");
     await session.expectChatResponseVisible("mobile-quiet-followup", 0, { timeout: 60_000 });
 
