@@ -312,6 +312,72 @@ func TestStopTaskRuntimeTargets_SessionRuntimeAbsenceRemainsRetryable(t *testing
 	}
 }
 
+// stubRowLivenessProber is a minimal TaskRowLivenessProber for tests.
+type stubRowLivenessProber struct {
+	liveness models.ProcessLiveness
+}
+
+func (s stubRowLivenessProber) RowLiveness(*models.ExecutorRunning) models.ProcessLiveness {
+	return s.liveness
+}
+
+// TestStopTaskRuntimeTargets_SessionAbsenceDeadLocalIsIdempotent is the
+// regression test for the infinite cleanup-retry bug: a session-only stop that
+// returns not-found for a CONFIRMED-DEAD LOCAL row must be treated as an
+// already-stopped runtime (not a failed stop) so the durable cleanup job stops
+// retrying forever.
+func TestStopTaskRuntimeTargets_SessionAbsenceDeadLocalIsIdempotent(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{
+		runningBySession: &models.ExecutorRunning{
+			SessionID: "sess-dead", Runtime: agentruntime.RuntimeStandalone, LocalPID: 4242,
+		},
+	}
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("gone: %w", runtimeapi.ErrNotFound),
+	}
+	svc.rowLivenessProber = stubRowLivenessProber{liveness: models.ProcessLivenessDead}
+
+	failed := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-dead",
+		[]taskStopTarget{{sessionID: "sess-dead"}},
+		"archive",
+		"stop failed",
+	)
+	if len(failed) != 0 {
+		t.Errorf("session absence for a confirmed-dead local row must be idempotent; got %v", failed)
+	}
+}
+
+// TestStopTaskRuntimeTargets_SessionAbsenceUnknownRemainsRetryable guards the
+// anti-blanket-ignore rule for the cleanup worker: a session-only not-found stop
+// for a row whose liveness is Unknown (remote/no local handle) stays a failed,
+// retryable stop.
+func TestStopTaskRuntimeTargets_SessionAbsenceUnknownRemainsRetryable(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{
+		runningBySession: &models.ExecutorRunning{
+			SessionID: "sess-remote", Runtime: agentruntime.RuntimeSSH,
+		},
+	}
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("not registered yet: %w", runtimeapi.ErrNotFound),
+	}
+	svc.rowLivenessProber = stubRowLivenessProber{liveness: models.ProcessLivenessUnknown}
+
+	failed := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-remote",
+		[]taskStopTarget{{sessionID: "sess-remote"}},
+		"archive",
+		"stop failed",
+	)
+	if _, ok := failed["sess-remote"]; !ok {
+		t.Errorf("session absence for an unknown/remote row must remain retryable; got %v", failed)
+	}
+}
+
 func TestStopTaskRuntimeTargets_NonTerminalStopFailureBlocksCleanup(t *testing.T) {
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{}

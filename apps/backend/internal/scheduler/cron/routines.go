@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"reflect"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,14 +37,37 @@ type RoutinesHandler struct {
 
 // NewRoutinesHandler builds a RoutinesHandler. now defaults to
 // time.Now().UTC() when nil — tests pass a controlled clock.
+//
+// A typed-nil collaborator (a concrete nil pointer assigned into the
+// RoutineTicker interface, as happens when Office is disabled) is
+// normalised to a genuinely nil interface so Tick takes the no-op branch
+// instead of dereferencing a nil receiver.
 func NewRoutinesHandler(ticker RoutineTicker, now func() time.Time, log *logger.Logger) *RoutinesHandler {
 	if now == nil {
 		now = func() time.Time { return time.Now().UTC() }
+	}
+	if isNilTicker(ticker) {
+		ticker = nil
 	}
 	return &RoutinesHandler{
 		ticker: ticker,
 		now:    now,
 		log:    log.WithFields(zap.String("handler", "routines")),
+	}
+}
+
+// isNilTicker reports whether ticker is absent, treating a typed-nil
+// pointer wrapped in the interface the same as a genuinely nil interface.
+func isNilTicker(ticker RoutineTicker) bool {
+	if ticker == nil {
+		return true
+	}
+	v := reflect.ValueOf(ticker)
+	switch v.Kind() {
+	case reflect.Ptr, reflect.Map, reflect.Chan, reflect.Func, reflect.Slice, reflect.Interface:
+		return v.IsNil()
+	default:
+		return false
 	}
 }
 

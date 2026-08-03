@@ -36,7 +36,15 @@ func startCronScheduler(
 ) *schedulercron.Loop {
 	heartbeat := buildHeartbeatHandler(repos, dispatcher, log)
 	budget := buildBudgetHandler(repos, dispatcher, log)
-	routines := schedulercron.NewRoutinesHandler(routineSvc, nil, log)
+	// Only wire a routines ticker when the office routines service exists.
+	// Assigning a nil *RoutineService straight into the RoutineTicker
+	// interface would produce a non-nil typed-nil interface and panic on
+	// every tick when Office is disabled.
+	var routineTicker schedulercron.RoutineTicker
+	if routineSvc != nil {
+		routineTicker = routineSvc
+	}
+	routines := schedulercron.NewRoutinesHandler(routineTicker, nil, log)
 	loop := schedulercron.NewLoop(schedulercron.DefaultTickInterval, log,
 		heartbeat, budget, routines, officeRecovery)
 	loop.Start(ctx)

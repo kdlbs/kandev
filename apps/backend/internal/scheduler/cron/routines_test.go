@@ -54,3 +54,18 @@ func TestRoutinesHandler_NilTickerIsNoOp(t *testing.T) {
 		t.Fatalf("Tick: %v", err)
 	}
 }
+
+// TestRoutinesHandler_TypedNilTickerIsNoOp reproduces the Office-disabled
+// regression: a concrete nil pointer assigned into the RoutineTicker
+// interface is a non-nil interface value, so a naive h.ticker == nil guard
+// is bypassed and Tick dereferences the nil receiver. A handler built from a
+// typed-nil collaborator by any wiring path must no-op instead of panicking.
+func TestRoutinesHandler_TypedNilTickerIsNoOp(t *testing.T) {
+	var typedNil *fakeRoutineTicker
+	var ticker RoutineTicker = typedNil // non-nil interface wrapping a nil pointer
+
+	h := NewRoutinesHandler(ticker, nil, logger.Default())
+	if err := h.Tick(context.Background()); err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+}

@@ -2191,6 +2191,17 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 					zap.Error(err))
 				continue
 			}
+			// A session-level not-found is retryable by default (the execution may
+			// simply not be registered yet). But when the owned row is a
+			// confirmed-dead LOCAL runtime, the runtime really is gone — treat the
+			// stop as already complete so the durable cleanup job stops retrying a
+			// runtime that will never come back.
+			if runtimeStopAlreadyComplete(err) && s.rowConfirmedDeadLocal(ctx, target.sessionID) {
+				s.logger.Info("session runtime confirmed dead and already gone; treating stop as complete",
+					zap.String("task_id", taskID),
+					zap.String("session_id", target.sessionID))
+				continue
+			}
 			failedStops[target.sessionID] = struct{}{}
 			s.logger.Warn(stopFailMsg,
 				zap.String("task_id", taskID),
@@ -2203,6 +2214,22 @@ func (s *Service) stopTaskRuntimeTargets(ctx context.Context, taskID string, sto
 
 func runtimeStopAlreadyComplete(err error) bool {
 	return errors.Is(err, runtimeapi.ErrNotFound)
+}
+
+// rowConfirmedDeadLocal reports whether the executors_running row backing
+// sessionID is a confirmed-dead LOCAL runtime — a local process handle that no
+// longer exists on this host. It returns false when no prober is wired, the row
+// is missing/unreadable, or the runtime-aware liveness is anything other than
+// Dead, so an alive, unknown, or remote row is never treated as absent.
+func (s *Service) rowConfirmedDeadLocal(ctx context.Context, sessionID string) bool {
+	if s.rowLivenessProber == nil || s.executors == nil {
+		return false
+	}
+	running, err := s.executors.GetExecutorRunningBySessionID(ctx, sessionID)
+	if err != nil || running == nil {
+		return false
+	}
+	return s.rowLivenessProber.RowLiveness(running) == models.ProcessLivenessDead
 }
 
 // performTaskCleanup handles post-deletion cleanup operations.

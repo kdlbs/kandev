@@ -22,6 +22,8 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1732,11 +1734,25 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 		return
 	}
 	if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup missing session cleanup", true); err != nil {
-		s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+		// A not-found stop for a runtime whose row is a confirmed-dead LOCAL
+		// process means the runtime is already gone — treat it as an idempotent
+		// successful stop and prune/repair the row under the resume-safety
+		// invariant, so the orphan row does not survive restarts forever. Any
+		// other error (alive/unknown/remote row, or a non-not-found failure) is
+		// preserved and left for a later attempt.
+		if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
+			s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", running.TaskID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return
+		}
+		s.logger.Info("missing-session runtime already gone (confirmed dead); pruning executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID),
-			zap.Error(err))
+			zap.String("execution_id", executionID))
+		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateCancelled)
 		return
 	}
 	if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
@@ -1745,6 +1761,16 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 			zap.String("task_id", running.TaskID),
 			zap.Error(err))
 	}
+}
+
+// stopReportsRuntimeAbsent reports whether a stop error means the runtime is
+// already gone (a typed not-found sentinel), as opposed to a transient failure.
+// Only a typed sentinel counts — a generic store/lookup error must never be
+// reinterpreted as an absent runtime.
+func stopReportsRuntimeAbsent(err error) bool {
+	return errors.Is(err, lifecycle.ErrExecutionNotFound) ||
+		errors.Is(err, runtimeapi.ErrNotFound) ||
+		errors.Is(err, executor.ErrExecutionNotFound)
 }
 
 func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {

@@ -17,6 +17,7 @@ Long task titles crowd navigation and task chrome, especially when a remote pull
 - When a remote pull request, merge request, or issue supplies a title longer than 60 characters, the task dialog uses the first 59 characters followed by `…`. The full remote title remains available in the generated task description or linked remote item; only the task title is shortened.
 - The `create_task_kandev` MCP tool advertises and enforces the 60-character limit and asks agents to use a concise, few-word title.
 - Backend task creation and title updates reject titles longer than 60 characters regardless of whether the caller uses HTTP, WebSocket, MCP, Office, automation, or another service adapter.
+- Every backend watcher path that automatically generates a task title from a remote pull request, merge request, or issue shortens the complete generated title (including any `PR #<n>:` or `Issue #<n>:` prefix) to at most 60 characters before it reaches task creation. A title that is shortened ends with a single `…` and never exceeds 60 runes counted by Unicode code point, so multibyte titles are not split mid-character. This applies at minimum to the GitHub review-PR and GitHub issue watchers, which construct `PR #<n>: <title>` and `Issue #<n>: <title>` respectively. Because backend task creation rejects overlong titles, a watcher that skips this shortening drops the review/issue task entirely instead of creating a shortened one.
 - Existing stored titles longer than 60 characters remain readable and are not rewritten. Updates that omit `title` continue to work; any submitted replacement title must satisfy the new limit.
 
 ## API surface
@@ -41,6 +42,9 @@ Long task titles crowd navigation and task chrome, especially when a remote pull
 - **GIVEN** an MCP caller supplies a title longer than 60 characters, **WHEN** it calls `create_task_kandev`, **THEN** the call returns a validation error and creates no task.
 - **GIVEN** an HTTP or WebSocket caller supplies an overlong title for task creation or rename, **WHEN** the request is handled, **THEN** it returns the channel's validation response and leaves stored data unchanged.
 - **GIVEN** an existing task with a legacy title longer than 60 characters, **WHEN** a caller updates another task field without submitting `title`, **THEN** the existing title remains unchanged.
+- **GIVEN** a GitHub review watcher observes a pull request whose `PR #<n>: <title>` string exceeds 60 characters, **WHEN** the review task is created, **THEN** the generated title is shortened to at most 60 runes ending with `…`, the `PR #<n>:` prefix is retained, and the review task is created rather than dropped.
+- **GIVEN** a GitHub issue watcher observes an issue whose `Issue #<n>: <title>` string exceeds 60 characters, **WHEN** the issue task is created, **THEN** the generated title is shortened to at most 60 runes ending with `…`, the `Issue #<n>:` prefix is retained, and the issue task is created rather than dropped.
+- **GIVEN** a watcher-generated title contains multibyte characters near the 60-rune boundary, **WHEN** it is shortened, **THEN** the result is counted by Unicode code point and no character is split.
 
 ## Out of scope
 
