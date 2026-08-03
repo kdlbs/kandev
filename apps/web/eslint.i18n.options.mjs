@@ -830,6 +830,10 @@ export const i18nGuardFiles = [
   // redundant broader glob *alongside* them would pass; removing them never
   // does.
   //
+  // `general-group.tsx` and `agents-group.tsx` are absent on purpose: earlier
+  // migrations already listed them further up, and a second copy here would be
+  // dead weight that reads as this PR's coverage.
+  //
   // The four `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
   // them. They are listed because they were read and carry no copy (section
   // ids, cookie names, drag geometry, a route predicate) — not because the rule
@@ -837,9 +841,7 @@ export const i18nGuardFiles = [
   "components/app-sidebar/*.{ts,tsx}",
   "components/app-sidebar/sections/*.tsx",
   "components/app-sidebar/sections/settings/account-group.tsx",
-  "components/app-sidebar/sections/settings/agents-group.tsx",
   "components/app-sidebar/sections/settings/executors-group.tsx",
-  "components/app-sidebar/sections/settings/general-group.tsx",
   "components/app-sidebar/sections/settings/settings-nav-primitives.tsx",
   "components/app-sidebar/sections/settings/settings-tree.tsx",
   "components/app-sidebar/sections/settings/workspaces-group.tsx",
