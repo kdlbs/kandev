@@ -13,8 +13,16 @@ export function isOverWipLimit(taskCount: number, limit: number | null | undefin
   return normalizedLimit > 0 && taskCount > normalizedLimit;
 }
 
-export function countAdmittedTasks<
-  T extends { queuedForStepId?: string | null; wipAdmitted?: boolean | null },
->(tasks: T[]): number {
-  return tasks.filter((task) => task.wipAdmitted === true || !task.queuedForStepId).length;
+export type WipAdmissionTask = {
+  queuedForStepId?: string | null;
+  wipAdmitted?: boolean | null;
+};
+
+/** Admitted for WIP counts / sortable board lists: flagged admitted, or not queued. */
+export function isAdmittedTask(task: WipAdmissionTask): boolean {
+  return task.wipAdmitted === true || !task.queuedForStepId;
+}
+
+export function countAdmittedTasks<T extends WipAdmissionTask>(tasks: T[]): number {
+  return tasks.filter(isAdmittedTask).length;
 }
