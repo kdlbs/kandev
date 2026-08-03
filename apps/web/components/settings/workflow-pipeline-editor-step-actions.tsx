@@ -496,7 +496,7 @@ export function CancelCompletionToggle({
 }: CancelCompletionToggleProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-start gap-2 pt-1" data-testid={`${step.id}-cancel-completion-row`}>
+    <div className="flex items-center gap-2 pt-1" data-testid={`${step.id}-cancel-completion-row`}>
       <Checkbox
         id={`${step.id}-cancel-completion`}
         data-testid={`${step.id}-cancel-completion-checkbox`}
@@ -512,22 +512,17 @@ export function CancelCompletionToggle({
           (item) => item.cancel_triggers_turn_complete ?? false,
         )}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Label
-          htmlFor={`${step.id}-cancel-completion`}
-          data-testid={`${step.id}-cancel-completion-label`}
-          className="flex min-h-11 cursor-pointer items-center text-sm"
-        >
-          {t("settings:runCompletionActionsWhenTurnCancelled")}
-        </Label>
-        <p
-          data-testid={`${step.id}-cancel-completion-help`}
-          className="pb-1 text-xs leading-5 text-muted-foreground"
-        >
-          {t("settings:runCompletionActionsWhenTurnCancelledHelp")}
-        </p>
-      </div>
-      <HelpTip text={t("settings:runCompletionActionsWhenTurnCancelledHelp")} />
+      <Label
+        htmlFor={`${step.id}-cancel-completion`}
+        data-testid={`${step.id}-cancel-completion-label`}
+        className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center text-sm"
+      >
+        {t("settings:runCompletionActionsWhenTurnCancelled")}
+      </Label>
+      <HelpTip
+        testId={`${step.id}-cancel-completion-help`}
+        text={t("settings:runCompletionActionsWhenTurnCancelledHelp")}
+      />
     </div>
   );
 }
