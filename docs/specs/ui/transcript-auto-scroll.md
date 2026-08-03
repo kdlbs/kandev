@@ -38,6 +38,5 @@ the asynchronous hand-off it is designed to protect.
 
 ## Out of scope
 
-- Changing the transcript toggle's location, labels, persisted preference, or
-  Virtuoso renderer behavior.
+- Changing the transcript toggle's location, labels, or persisted preference.
 - Changing clarification recovery production behavior or ownership rules.

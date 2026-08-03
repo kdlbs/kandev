@@ -331,7 +331,6 @@ export type AppState = KanbanSlice & {
   setCancelTurnPending: UIA["setCancelTurnPending"];
   setTranscriptAutoScrollEnabled: UIA["setTranscriptAutoScrollEnabled"];
   setTranscriptScrollTop: UIA["setTranscriptScrollTop"];
-  setTranscriptVirtuosoState: UIA["setTranscriptVirtuosoState"];
   setReviewPRSelection: UIA["setReviewPRSelection"];
   setActiveDocument: (sessionId: string, doc: UISliceTypes.ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;

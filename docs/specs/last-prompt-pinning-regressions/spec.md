@@ -64,7 +64,8 @@ The desktop anchored last-prompt bar currently appears once the prompt's top cro
 ## Constraints
 
 - Preserve the existing `show_anchored_prompt_bar` setting and desktop-only behavior.
-- Native and Virtuoso transcript strategies must use the same directional (above/below/visible) threshold where their rendered prompt node is available; Virtuoso may use its range fallback only once that node is unmounted.
+- The native transcript renderer must use the directional (above/below/visible)
+  threshold for the rendered prompt node.
 - The repair does not change prompt persistence, API contracts, or the task transcript data model.
 
 ## Out of scope

@@ -377,10 +377,10 @@ func TestNormalizeShellToolResultStripsLeadingCommandEcho(t *testing.T) {
 func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath(t *testing.T) {
 	t.Parallel()
 
-	command := `grep -n "^const STRATEGY\|STRATEGY =" apps/web/components/task/chat/message-list.tsx`
+	command := `grep -n "NativeMessageList" apps/web/components/task/chat/message-list-native.tsx`
 	workDir := "/home/clem/.kandev/tasks/new-message-line_0vc/kdlbs-kandev"
-	absolutePath := workDir + "/apps/web/components/task/chat/message-list.tsx"
-	resolvedCommand := strings.Replace(command, "apps/web/components/task/chat/message-list.tsx", absolutePath, 1)
+	absolutePath := workDir + "/apps/web/components/task/chat/message-list-native.tsx"
+	resolvedCommand := strings.Replace(command, "apps/web/components/task/chat/message-list-native.tsx", absolutePath, 1)
 
 	normalizer := NewNormalizer("")
 	payload := normalizer.NormalizeToolCall("execute", map[string]any{
@@ -388,9 +388,9 @@ func TestNormalizeShellToolResultStripsLeadingCommandEchoWithWorkDirResolvedPath
 		"raw_input": map[string]any{"command": command, "cwd": workDir},
 	})
 
-	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\n24:const STRATEGY = \"native\";\n")
+	normalizer.NormalizeToolResult(payload, "$ "+resolvedCommand+"\n345:export const NativeMessageList = memo(\n")
 
-	require.Equal(t, "24:const STRATEGY = \"native\";\n", payload.ShellExec().Output.Stdout)
+	require.Equal(t, "345:export const NativeMessageList = memo(\n", payload.ShellExec().Output.Stdout)
 }
 
 // TestNormalizeShellToolUpdateStripsLeadingCommandEchoWithWorkDirResolvedPath

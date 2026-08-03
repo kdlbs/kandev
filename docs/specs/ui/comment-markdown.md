@@ -18,7 +18,7 @@ Task comments render as plain text with `whitespace-pre-wrap`. Agent responses r
 - Bare URLs in comment text are auto-linked (handled by `remark-gfm` linkify).
 - Markdown links to files in the active worktree open the in-app file editor; absolute worktree paths and repo-root paths may include `:line` or `:line:column` suffixes without navigating the browser away from the task.
 - Patterns matching `[A-Z]+-\d+` (e.g., `KAN-42`, `QA-7`) are rendered as links to `/office/tasks/<identifier>`. The link uses the raw identifier as the URL segment; resolution to an internal task ID (if needed) is handled by the issue page.
-- The comment list in `TaskChat` uses `react-virtuoso` (already in dependencies). Only visible comments plus a small buffer are mounted.
+- The comment list in `TaskChat` renders the available comments in transcript order.
 - Scroll position is preserved when new comments arrive if the user has scrolled away from the bottom.
 - When the user is at (or near) the bottom, new comments auto-scroll into view.
 

@@ -13,7 +13,7 @@ export async function seedTask(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  opts: { description: string; rendererOverride?: "native" | "virtuoso" },
+  opts: { description: string },
 ): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
@@ -26,8 +26,7 @@ export async function seedTask(
       repository_ids: [seedData.repositoryId],
     },
   );
-  const query = opts.rendererOverride ? `?renderer=${opts.rendererOverride}` : "";
-  await page.goto(`/t/${task.id}${query}`);
+  await page.goto(`/t/${task.id}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
