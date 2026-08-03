@@ -87,7 +87,7 @@ export const defaultUIState: UISliceState = {
     reviewMRKeyBySessionId: {},
     isTaskSwitcherOpen: false,
   },
-  chatInput: { planModeBySessionId: {} },
+  chatInput: { planModeBySessionId: {}, cancellingBySessionId: {} },
   transcriptAutoScroll: {
     enabledBySessionId: {},
     scrollTopBySessionId: {},
@@ -463,6 +463,14 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   setPlanMode: (sessionId, enabled) =>
     set((draft) => {
       draft.chatInput.planModeBySessionId[sessionId] = enabled;
+    }),
+  setCancelTurnPending: (sessionId, pending) =>
+    set((draft) => {
+      if (pending) {
+        draft.chatInput.cancellingBySessionId[sessionId] = true;
+      } else {
+        delete draft.chatInput.cancellingBySessionId[sessionId];
+      }
     }),
   setTranscriptAutoScrollEnabled: (sessionId, enabled) =>
     set((draft) => {

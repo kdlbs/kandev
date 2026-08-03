@@ -15,6 +15,13 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
+type CancelRequestHoldController = {
+  /** Number of browser-to-server cancel requests currently held by the proxy. */
+  heldCount: () => number;
+  /** Release the held request so the backend can settle the cancellation. */
+  release: () => void;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
@@ -189,5 +196,77 @@ export async function routeMainWebSocketWithMessageAddResponseDrop(
       dropped.value = 0;
     },
     droppedCount: () => dropped.value,
+  };
+}
+
+function isAgentCancelRequest(frame: Record<string, unknown>): boolean {
+  return frame.type === "request" && frame.action === "agent.cancel";
+}
+
+/**
+ * Holds the first `agent.cancel` request from the browser while forwarding all
+ * unrelated traffic. This keeps a cancellation promise pending long enough to
+ * exercise task switching and toolbar remount behavior.
+ */
+export async function routeMainWebSocketWithHeldCancelRequest(
+  page: Page,
+): Promise<CancelRequestHoldController> {
+  let heldRequest: string | null = null;
+  let released = false;
+  let releaseHeldRequest: (() => void) | null = null;
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+
+    releaseHeldRequest = () => {
+      if (!heldRequest) return;
+      const request = heldRequest;
+      heldRequest = null;
+      server.send(request);
+    };
+
+    ws.onMessage((message) => {
+      if (typeof message !== "string" || released || heldRequest) {
+        server.send(message);
+        return;
+      }
+
+      const kept: string[] = [];
+      for (const part of message.split("\n")) {
+        const trimmed = part.trim();
+        if (!trimmed) {
+          kept.push(part);
+          continue;
+        }
+
+        let shouldHold = false;
+        try {
+          const frame = asRecord(JSON.parse(trimmed));
+          shouldHold = frame !== null && isAgentCancelRequest(frame);
+        } catch {
+          // Preserve non-JSON frames.
+        }
+
+        if (shouldHold && heldRequest === null) {
+          heldRequest = part;
+          if (released) releaseHeldRequest?.();
+          continue;
+        }
+        kept.push(part);
+      }
+
+      const forwarded = kept.join("\n");
+      if (forwarded.trim()) server.send(forwarded);
+    });
+
+    server.onMessage((message) => ws.send(message));
+  });
+
+  return {
+    heldCount: () => (heldRequest ? 1 : 0),
+    release: () => {
+      released = true;
+      releaseHeldRequest?.();
+    },
   };
 }

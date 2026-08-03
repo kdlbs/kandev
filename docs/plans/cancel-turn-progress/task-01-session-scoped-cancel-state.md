@@ -1,7 +1,7 @@
 ---
 id: "01-session-scoped-cancel-state"
 title: "Session-scoped cancel state"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -66,4 +66,13 @@ conversation.
 
 ## Results
 
-Pending.
+ - RED: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/chat-input-toolbar.test.tsx` —
+  2 expected remount-regression failures (desktop and mobile) against the local-state implementation.
+- `cd apps && pnpm install --frozen-lockfile` — passed.
+- `cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx` —
+  passed, 2 files / 52 tests.
+- `cd apps/web && pnpm run typecheck` — first run caught the missing explicit `AppState` action export;
+  after adding it, rerun passed.
+- `cd apps && pnpm --filter @kandev/web run i18n:ratchet` — passed; 0 added and 7 modified files clean.
+- `git diff --check` — passed.
+- Security/trust or external side effects: none.

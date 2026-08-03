@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, cleanup } from "@testing-library/react";
+import { StateProvider } from "@/components/state-provider";
 
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
@@ -102,6 +103,7 @@ import { ChatInputToolbar } from "./chat-input-toolbar";
 import type { ChatInputToolbarProps } from "./chat-input-toolbar";
 
 const MOBILE_TOOLBAR_TEST_ID = "mobile-chat-input-toolbar";
+const CANCEL_AGENT_BUTTON_TEST_ID = "cancel-agent-button";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -113,44 +115,48 @@ function deferred<T>() {
 
 function renderToolbar(onCancel: () => void | Promise<void>) {
   return render(
-    <ChatInputToolbar
-      planModeEnabled={false}
-      onPlanModeChange={() => {}}
-      sessionId="s1"
-      taskId="t1"
-      taskDescription=""
-      isAgentBusy
-      isDisabled={false}
-      isSending={false}
-      onCancel={onCancel}
-      onSubmit={() => {}}
-      minimalToolbar
-    />,
+    <StateProvider>
+      <ChatInputToolbar
+        planModeEnabled={false}
+        onPlanModeChange={() => {}}
+        sessionId="s1"
+        taskId="t1"
+        taskDescription=""
+        isAgentBusy
+        isDisabled={false}
+        isSending={false}
+        onCancel={onCancel}
+        onSubmit={() => {}}
+        minimalToolbar
+      />
+    </StateProvider>,
   );
 }
 
 function renderFullToolbar(overrides: Partial<ChatInputToolbarProps> = {}) {
   return render(
-    <ChatInputToolbar
-      planModeEnabled={false}
-      onPlanModeChange={() => {}}
-      sessionId="s1"
-      taskId="t1"
-      taskDescription=""
-      isAgentBusy={false}
-      hasContent
-      isDisabled={false}
-      isSending={false}
-      onCancel={() => {}}
-      onSubmit={() => {}}
-      hidePlanMode
-      mcpServers={["filesystem"]}
-      contextCount={2}
-      onAttachFiles={() => {}}
-      onEnhancePrompt={() => {}}
-      isUtilityConfigured
-      {...overrides}
-    />,
+    <StateProvider>
+      <ChatInputToolbar
+        planModeEnabled={false}
+        onPlanModeChange={() => {}}
+        sessionId="s1"
+        taskId="t1"
+        taskDescription=""
+        isAgentBusy={false}
+        hasContent
+        isDisabled={false}
+        isSending={false}
+        onCancel={() => {}}
+        onSubmit={() => {}}
+        hidePlanMode
+        mcpServers={["filesystem"]}
+        contextCount={2}
+        onAttachFiles={() => {}}
+        onEnhancePrompt={() => {}}
+        isUtilityConfigured
+        {...overrides}
+      />
+    </StateProvider>,
   );
 }
 
@@ -159,10 +165,60 @@ function renderFullToolbar(overrides: Partial<ChatInputToolbarProps> = {}) {
 // tears down a long-running tool (Claude Monitor, etc.) sends N cancel requests
 // to the backend, each producing a duplicate "Turn cancelled by user" message.
 describe("ChatInputToolbar cancel button", () => {
+  it.each(["desktop", "mobile"] as const)(
+    "keeps cancellation progress after a %s toolbar remount",
+    async (breakpoint) => {
+      responsiveMock.breakpoint = breakpoint;
+      const { promise, resolve } = deferred<void>();
+      const onCancel = vi.fn(() => promise);
+      let mounted = true;
+
+      const renderToolbarTree = () => (
+        <StateProvider>
+          {mounted ? (
+            <ChatInputToolbar
+              planModeEnabled={false}
+              onPlanModeChange={() => {}}
+              sessionId="s1"
+              taskId="t1"
+              taskDescription=""
+              isAgentBusy
+              isDisabled={false}
+              isSending={false}
+              onCancel={onCancel}
+              onSubmit={() => {}}
+              hasContent={false}
+            />
+          ) : null}
+        </StateProvider>
+      );
+
+      const view = render(renderToolbarTree());
+      fireEvent.click(screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID));
+      await act(async () => {});
+
+      mounted = false;
+      view.rerender(renderToolbarTree());
+      mounted = true;
+      view.rerender(renderToolbarTree());
+
+      const remountedButton = screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID) as HTMLButtonElement;
+      expect(remountedButton.disabled).toBe(true);
+      expect(remountedButton.querySelector('[role="status"]')).toBeTruthy();
+      expect(onCancel).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        resolve();
+        await promise;
+      });
+      expect(remountedButton.disabled).toBe(false);
+    },
+  );
+
   it("keeps the queue affordance without a cancel control after clarification detaches", () => {
     renderFullToolbar({ isAgentBusy: true, canCancelAgent: false });
 
-    expect(screen.queryByTestId("cancel-agent-button")).toBeNull();
+    expect(screen.queryByTestId(CANCEL_AGENT_BUTTON_TEST_ID)).toBeNull();
     expect(screen.getByTestId("submit-message-button")).toBeTruthy();
     expect(screen.getByText("Queue message")).toBeTruthy();
   });
@@ -173,7 +229,7 @@ describe("ChatInputToolbar cancel button", () => {
 
     renderToolbar(onCancel);
 
-    const button = screen.getByTestId("cancel-agent-button") as HTMLButtonElement;
+    const button = screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID) as HTMLButtonElement;
     expect(button.disabled).toBe(false);
 
     fireEvent.click(button);
@@ -203,7 +259,7 @@ describe("ChatInputToolbar cancel button", () => {
     const onCancel = vi.fn(() => promise.then(() => Promise.reject(new Error("network"))));
 
     renderToolbar(onCancel);
-    const button = screen.getByTestId("cancel-agent-button") as HTMLButtonElement;
+    const button = screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID) as HTMLButtonElement;
 
     fireEvent.click(button);
     await act(async () => {});
@@ -221,21 +277,23 @@ describe("ChatInputToolbar cancel button", () => {
 describe("ChatInputToolbar submit button", () => {
   it("shows the setup-disabled reason while keeping the submit button disabled", () => {
     render(
-      <ChatInputToolbar
-        planModeEnabled={false}
-        onPlanModeChange={() => {}}
-        sessionId="s1"
-        taskId="t1"
-        taskDescription=""
-        isAgentBusy={false}
-        hasContent
-        isDisabled
-        submitDisabledReason="The agent is still being set up."
-        isSending={false}
-        onCancel={() => {}}
-        onSubmit={() => {}}
-        minimalToolbar
-      />,
+      <StateProvider>
+        <ChatInputToolbar
+          planModeEnabled={false}
+          onPlanModeChange={() => {}}
+          sessionId="s1"
+          taskId="t1"
+          taskDescription=""
+          isAgentBusy={false}
+          hasContent
+          isDisabled
+          submitDisabledReason="The agent is still being set up."
+          isSending={false}
+          onCancel={() => {}}
+          onSubmit={() => {}}
+          minimalToolbar
+        />
+      </StateProvider>,
     );
 
     expect((screen.getByTestId("submit-message-button") as HTMLButtonElement).disabled).toBe(true);

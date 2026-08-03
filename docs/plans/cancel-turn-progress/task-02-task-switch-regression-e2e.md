@@ -1,7 +1,7 @@
 ---
 id: "02-task-switch-regression-e2e"
 title: "Task-switch cancellation regression"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-session-scoped-cancel-state"]
 plan: "plan.md"
@@ -23,7 +23,7 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 
 ```bash
 cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run --project chromium tests/chat/cancel-progress-task-switch.spec.ts
+cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts
 ```
 
 Follow TDD: add and run the browser regression against the pre-fix control to demonstrate that the
@@ -58,4 +58,15 @@ status/results in the same primary conversation.
 
 ## Results
 
-Pending.
+- Initial regression evidence: the Task 01 remount test failed for both desktop and mobile before
+  the store-backed state was implemented (`disabled` was `false` after remount instead of `true`).
+- `cd apps && pnpm install --frozen-lockfile` — passed.
+- `cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx` — passed, 2 files / 52 tests.
+- `cd apps/web && pnpm run typecheck` — passed.
+- `cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts` — passed, 1 test in 13.7s.
+- The browser test observed one held `agent.cancel` request, verified the disabled loading control
+  after returning to task A, released the request, and asserted the held count returned to zero and
+  the idle composer resumed.
+- Files changed: `apps/web/e2e/helpers/ws-drop.ts` and
+  `apps/web/e2e/tests/chat/cancel-progress-task-switch.spec.ts`.
+- No blockers or external side effects found.

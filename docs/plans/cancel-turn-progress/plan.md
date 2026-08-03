@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/cancel-turn-progress.md
 created: 2026-08-03
-status: draft
+status: building
 ---
 
 # Implementation Plan: Preserve cancel-turn progress across task navigation
@@ -89,18 +89,23 @@ regression covers both toolbar branches.
 
 ## Verification Results
 
-Pending. Implementation tasks will record exact commands and outcomes here.
+- `cd apps && pnpm install --frozen-lockfile` — passed.
+- `cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx` — passed, 2 files / 52 tests.
+- `cd apps/web && pnpm run typecheck` — passed.
+- `cd apps && pnpm --filter @kandev/web run i18n:ratchet` — passed, 0 added / 7 modified files clean.
+- `cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts` — passed, 1 test in 13.7s.
+- `git diff --check` — passed.
 
 ## Implementation Waves And Parallel Candidates
 
 Wave 1:
 
-- [ ] [task-01-session-scoped-cancel-state](task-01-session-scoped-cancel-state.md) — sequential;
+- [x] [task-01-session-scoped-cancel-state](task-01-session-scoped-cancel-state.md) — done;
   establishes the state contract and shared control behavior.
 
 Wave 2:
 
-- [ ] [task-02-task-switch-regression-e2e](task-02-task-switch-regression-e2e.md) — sequential;
+- [x] [task-02-task-switch-regression-e2e](task-02-task-switch-regression-e2e.md) — done;
   depends on Task 01 and proves the complete navigation flow.
 
 The tasks are not parallel-safe because Task 02 validates the state and component behavior added by
