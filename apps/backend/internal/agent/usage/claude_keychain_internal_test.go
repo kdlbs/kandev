@@ -129,6 +129,37 @@ func TestNewClaudeUsageClientWithPath_IsFileOnly(t *testing.T) {
 // the CLI rather than surfacing a bare OAuth failure — and must not rewrite the
 // file, which would fabricate a competing source of truth for a token we do not
 // own.
+// The refresh token rotates: the endpoint can return a new one and invalidate
+// the one it was given. The keychain item is written by the Claude CLI and we
+// have no way to store a replacement there, so spending its refresh token would
+// leave the CLI holding a dead credential — the same sticky
+// invalid_request_error this change exists to fix, relocated from the file to
+// the keychain. An expired keychain token is therefore reported, never
+// refreshed, and the endpoint must not be contacted at all.
+func TestClaudeFetchUsage_NeverSpendsTheKeychainRefreshToken(t *testing.T) {
+	path := writeClaudeCreds(t, t.TempDir(), futureExpiryMillis(), nil)
+	stubKeychain(t, keychainBlob(t, "expired", time.Now().Add(-time.Hour).UnixMilli()))
+
+	var refreshCalls int
+	refresh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		refreshCalls++
+		// A rotating endpoint: succeeding here is what would burn the CLI's token.
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"access_token":"rotated","refresh_token":"rotated-refresh","expires_in":3600}`))
+	}))
+	defer refresh.Close()
+
+	client := NewClaudeUsageClientForProfile(path, ClaudeDefaultKeychainService)
+	client.refreshURL = refresh.URL
+
+	if _, err := client.FetchUsage(context.Background()); err == nil {
+		t.Fatal("expected an expired keychain credential to be reported, not refreshed")
+	}
+	if refreshCalls != 0 {
+		t.Errorf("refresh endpoint called %d time(s); a keychain token must never be spent", refreshCalls)
+	}
+}
+
 func TestClaudeFetchUsage_ExpiredKeychainTokenPointsAtCLI(t *testing.T) {
 	path := writeClaudeCreds(t, t.TempDir(), futureExpiryMillis(), nil)
 	stubKeychain(t, keychainBlob(t, "expired", time.Now().Add(-time.Hour).UnixMilli()))

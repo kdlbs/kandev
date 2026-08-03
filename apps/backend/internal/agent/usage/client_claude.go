@@ -225,10 +225,17 @@ func claudeLimitLabel(l claudeLimit) string {
 // freshAccessToken returns a valid access token, refreshing if expired.
 //
 // fromKeychain reports whether the credential came from the keychain, which the
-// Claude CLI owns and keeps refreshed. In that case we never write a refreshed
-// token back to ~/.claude/.credentials.json: that file is already stale by
-// design, and overwriting it would fabricate a second, competing source of
-// truth for a token we do not own.
+// Claude CLI owns and keeps refreshed. A keychain-sourced token is never
+// refreshed here, because the refresh token rotates: the endpoint may hand back
+// a new one and invalidate the one it was given. We cannot write the
+// replacement back to the keychain — the CLI holds the write side of that item
+// — so refreshing would spend the CLI's credential and leave it holding a dead
+// one. That is precisely the sticky invalid_request_error this whole change
+// exists to fix, just moved from the file to the keychain, where it would be
+// worse: the file can be repaired by re-login, the CLI's own session cannot.
+//
+// So an expired keychain credential is reported, not repaired. The CLI refreshes
+// it on its next run, which is a thing the user can do in one command.
 func (c *ClaudeUsageClient) freshAccessToken(
 	ctx context.Context, tok *claudeOAuthToken, fromKeychain bool,
 ) (string, error) {
@@ -237,25 +244,21 @@ func (c *ClaudeUsageClient) freshAccessToken(
 	if time.Until(expiresAt) > 60*time.Second {
 		return tok.AccessToken, nil
 	}
+	if fromKeychain {
+		return "", fmt.Errorf(
+			"claude keychain token expired; run `claude auth status` to refresh it")
+	}
 	if tok.RefreshToken == "" {
 		return "", fmt.Errorf("claude token expired and no refresh token available")
 	}
 	newTok, err := c.refreshToken(ctx, tok.RefreshToken)
 	if err != nil {
-		if fromKeychain {
-			// The CLI is the only writer of this credential. A failure here
-			// means it has not run recently enough, not that we should retry
-			// harder — say so instead of surfacing a bare OAuth error.
-			return "", fmt.Errorf("refresh token: %w (run `claude auth status` to refresh)", err)
-		}
 		return "", fmt.Errorf("refresh token: %w", err)
 	}
-	if !fromKeychain {
-		// Write new token back. Non-fatal — we have the new token in memory even if
-		// persistence fails, but log the error so it doesn't go unnoticed.
-		if writeErr := c.persistRefreshedToken(newTok); writeErr != nil {
-			fmt.Fprintf(os.Stderr, "claude usage: persist refreshed token: %v\n", writeErr)
-		}
+	// Write new token back. Non-fatal — we have the new token in memory even if
+	// persistence fails, but log the error so it doesn't go unnoticed.
+	if writeErr := c.persistRefreshedToken(newTok); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "claude usage: persist refreshed token: %v\n", writeErr)
 	}
 	return newTok.AccessToken, nil
 }
