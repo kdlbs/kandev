@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
 import {
@@ -31,7 +32,6 @@ import {
   shouldUsePermissionTaskIcon,
   shouldUseQuestionTaskIcon,
 } from "@/lib/ui/state-icons";
-import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
@@ -283,10 +283,9 @@ export function renderTaskStatusIcon(
 // the live registry (never a mutable counter) and summed across a task's
 // sessions, so it needs no local reconciliation: at zero there is nothing live
 // and the chip is absent.
-export function renderSubagentCountChip(task: Task) {
+export function renderSubagentCountChip(task: Task, label: string) {
   const count = task.activeSubagentCount ?? 0;
   if (count <= 0) return null;
-  const label = t("common:activeSubagents", { count });
   return (
     <span
       data-testid="task-subagent-count"
@@ -307,6 +306,8 @@ function OpenFullPageButton({
   task: Task;
   onOpenFullPage: (task: Task) => void;
 }) {
+  const { t } = useTranslation("common");
+
   return (
     <button
       type="button"
@@ -332,6 +333,7 @@ function KanbanCardActions({
   isDeleting,
   isArchiving,
 }: KanbanCardActionProps) {
+  const { t } = useTranslation("common");
   const [menuOpen, setMenuOpen] = useState(false);
   const [storePrimarySessionState, setStorePrimarySessionState] = useState<string | null>(null);
   const storeApi = useAppStoreApi();
@@ -402,7 +404,10 @@ function KanbanCardActions({
 
   return (
     <div className="flex items-center gap-2">
-      {renderSubagentCountChip(task)}
+      {renderSubagentCountChip(
+        task,
+        t("activeSubagents", { count: task.activeSubagentCount ?? 0 }),
+      )}
       {statusIcon}
       {showMaximizeButton && onOpenFullPage && hasKnownSession && (
         <OpenFullPageButton task={task} onOpenFullPage={onOpenFullPage} />

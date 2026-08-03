@@ -1,18 +1,18 @@
 ---
 spec: "../../specs/ui/subagent-observability.md"
 status: building
-created: 2026-08-04
+created: 2026-08-03
 ---
 
 # Plan: Subagent Observability
 
-Five independent slices. Task 1 is backend-only; tasks 2–5 are frontend-only and
-do not depend on task 1 landing first (the card degrades silently when
-`result_text` is absent, which is today's behavior). Ordered by value.
+Five slices. Task 1 is backend-only; Tasks 2, 4, and 5 are independent. Task 3
+depends on Tasks 1 and 2 because it consumes the captured result data. Ordered
+by value.
 
-Task detail is inline rather than in sibling `task-NN-*.md` files: each slice is
-a single-file change with a single verification command, and splitting them into
-separate documents would carry more ceremony than content.
+Task detail is inline rather than in sibling `task-NN-*.md` files. Each slice
+may change implementation, tests, locale files, or types, with one verification
+command documented per slice.
 
 | # | Task | Layer | Depends on |
 |---|---|---|---|
@@ -77,10 +77,11 @@ equals the rendered child count, and kept when they diverge.
 **Acceptance:** a kanban card renders a count chip while `activeSubagentCount > 0`
 and nothing at zero or absent. Driven by the existing store field; no new API.
 
-**Files:** `apps/web/components/kanban-card-content.tsx` and tests; copy in
-`apps/web/src/locales/en/chat.json` or `common.json`.
+**Files:** `apps/web/components/kanban-card-content.tsx`,
+`apps/web/components/kanban-card-status-icon.test.tsx`; copy in
+`apps/web/src/locales/en/common.json`.
 
-**Verification:** `cd apps/web && pnpm vitest run components/kanban-card-content.test.tsx`.
+**Verification:** `cd apps/web && pnpm vitest run components/kanban-card-status-icon.test.tsx`.
 
 ## Whole-feature validation
 

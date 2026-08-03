@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useCallback, memo, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
-import { t } from "@/lib/i18n";
 import type { Message } from "@/lib/types/http";
 import type { TurnGroup } from "@/hooks/use-processed-messages";
 import type { ToolCallMetadata } from "@/components/task/chat/types";
@@ -37,19 +37,6 @@ function getActiveGroupDescription(messages: Message[]): string {
     }
   }
   return "Working...";
-}
-
-// The count badge beside this label renders `messages.length`, so the label has
-// to agree with that same number. Subagents are hoisted out of turn groups
-// (`isSubagentMessage` in use-processed-messages), so a group is tool calls and
-// nothing else.
-function getCompletedGroupDescription(messages: Message[]): string {
-  return t("chat:turnGroupToolCalls", { count: messages.length });
-}
-
-function getGroupDescription(messages: Message[], isActive: boolean): string {
-  if (isActive) return getActiveGroupDescription(messages);
-  return getCompletedGroupDescription(messages);
 }
 
 function hasPendingPermission(
@@ -368,6 +355,7 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   streamingMessageId,
   onScrollToMessage,
 }: TurnGroupMessageProps) {
+  const { t } = useTranslation("chat");
   const isGroupRunning = hasRunningTool(group.messages, isTurnActive);
   const hasPending = hasPendingPermission(group.messages, permissionsByToolCallId);
 
@@ -381,7 +369,13 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
     setManualExpandState((prev) => !(prev ?? autoExpanded));
   }, [autoExpanded]);
 
-  const rawDescription = getGroupDescription(group.messages, isGroupRunning);
+  // The count badge beside this label renders `messages.length`, so the label
+  // has to agree with that same number. Subagents are hoisted out of turn
+  // groups (`isSubagentMessage` in use-processed-messages), so a group is tool
+  // calls and nothing else.
+  const rawDescription = isGroupRunning
+    ? getActiveGroupDescription(group.messages)
+    : t("turnGroupToolCalls", { count: group.messages.length });
   const description = transformPathsInText(rawDescription, worktreePath);
   const count = group.messages.length;
 
