@@ -42,6 +42,7 @@ function grouped(): GroupedSidebarList {
 }
 
 const TEST_WORKFLOW_ID = "workflow-1";
+const DETACH_MENU_LABEL = "Detach from parent";
 
 function renderSwitcher(collapsedSubtaskParentIds: string[] = []) {
   return render(
@@ -249,9 +250,33 @@ describe("TaskSwitcher — detach menu", () => {
     );
 
     fireEvent.contextMenu(screen.getByText(CHILD.title));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Detach from parent" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: DETACH_MENU_LABEL }));
 
     expect(onDetachTask).toHaveBeenCalledWith(CHILD.id);
+  });
+
+  it("clears a lone selected task before detaching it", () => {
+    const calls: string[] = [];
+    const onClearSelection = vi.fn(() => calls.push("clear"));
+    const onDetachTask = vi.fn(() => calls.push("detach"));
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={grouped()}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onDetachTask={onDetachTask}
+          onClearSelection={onClearSelection}
+          selectedTaskIds={new Set([CHILD.id])}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(CHILD.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: DETACH_MENU_LABEL }));
+
+    expect(calls).toEqual(["clear", "detach"]);
   });
 
   it("omits detach for root and multi-selection menus", () => {
@@ -268,7 +293,7 @@ describe("TaskSwitcher — detach menu", () => {
     );
 
     fireEvent.contextMenu(screen.getByText(ROOT.title));
-    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: DETACH_MENU_LABEL })).toBeNull();
 
     rerender(
       <Providers>
@@ -283,7 +308,7 @@ describe("TaskSwitcher — detach menu", () => {
       </Providers>,
     );
     fireEvent.contextMenu(screen.getByText(CHILD.title));
-    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: DETACH_MENU_LABEL })).toBeNull();
   });
 });
 

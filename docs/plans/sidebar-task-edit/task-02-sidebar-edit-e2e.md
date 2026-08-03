@@ -21,9 +21,9 @@ spec: "../../specs/tasks/sidebar-task-edit.md"
 Use TDD: add the new scenarios first and observe their missing-Edit failure before implementing or adjusting selectors. The managed runner rebuilds the production Vite bundle and backend fixtures before running both owning projects.
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run --host --no-build --project chromium tests/task/sidebar-layout.spec.ts -- --workers=1
-cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/task/sidebar-layout.spec.ts tests/task/mobile-sidebar-task-actions.spec.ts -- --workers=1
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/task/sidebar-layout.spec.ts -- --workers=1)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/task/sidebar-layout.spec.ts tests/task/mobile-sidebar-task-actions.spec.ts -- --workers=1)
 git diff --check
 ```
 

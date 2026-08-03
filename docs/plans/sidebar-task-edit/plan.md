@@ -17,6 +17,7 @@ Extend the shared sidebar `TaskSwitcher` single-task menu with an Edit callback,
 - Update `apps/web/components/task/task-switcher.tsx` so `TaskSwitcher`, `TaskRow`, and `TaskItemWithContextMenu` can receive `onEditTask(task)` for the exact `TaskSwitcherItem` whose menu was opened.
 - Update `apps/web/components/task/task-switcher-context-menu.tsx` to render a localized **Edit** item next to **Rename** for one live task. Keep it out of the existing multi-selection menu and omit it for archived or workflow-less synthetic rows; use the existing processing state to disable it while deletion is in progress.
 - Add `common:edit` to `apps/web/src/locales/en/common.json` and resolve it at render time with `useTranslation()`.
+- Regenerate `apps/web/src/locales/pseudo/common.json` as the checked-in locale synchronization artifact.
 
 ### Shared edit controller and dialog
 
@@ -75,7 +76,7 @@ Extend the shared sidebar `TaskSwitcher` single-task menu with an Edit callback,
 
 ## Verification Results
 
-- Focused unit tests followed Red-Green-Refactor: the pre-implementation run reported 2 expected Edit-menu failures with 16 passing tests; the final run passed 23 tests across the three focused files, including unresolved-source and missing-workflow guards added during PR review.
+- Focused unit tests followed Red-Green-Refactor: the pre-implementation run reported 2 expected Edit-menu failures with 16 passing tests; the final run passed 24 tests across the three focused files, including unresolved-source, missing-workflow, and selection-clear guards added during PR review.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm run i18n:check` and `pnpm run i18n:ratchet` passed after regenerating the pseudo locale.
 - Targeted ESLint for all changed frontend files passed with no warnings; `git diff --check` passed.
