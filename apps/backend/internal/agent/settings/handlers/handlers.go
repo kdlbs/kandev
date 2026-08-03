@@ -615,6 +615,7 @@ func (h *Handlers) httpDeleteProfile(c *gin.Context) {
 				"active_sessions": inUseErr.ActiveSessions,
 				"watchers":        inUseErr.Watchers,
 				"routing_tiers":   inUseErr.RoutingTiers,
+				"automations":     inUseErr.Automations,
 			})
 			return
 		}

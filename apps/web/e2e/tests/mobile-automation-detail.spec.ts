@@ -1,0 +1,151 @@
+import type { Page } from "@playwright/test";
+import { test, expect } from "../fixtures/test-base";
+import type { ApiClient } from "../helpers/api-client";
+
+/**
+ * The automation detail page on a phone.
+ *
+ * The desktop composition puts the run switcher in a permanent rail resized by
+ * dragging its edge — a mouse gesture, and a large share of a 393px viewport.
+ * On mobile the same runs move behind a drawer so the transcript and composer,
+ * which are the point of the page, get the screen.
+ *
+ * These tests seed real runs rather than asserting on empty states: a drawer
+ * with nothing in it would pass every check below while the feature was
+ * completely broken.
+ */
+
+type Seed = { workspaceId: string; workflowId: string; startStepId: string };
+
+/** An automation with two finished runs, newest last. */
+async function seedAutomationWithRuns(apiClient: ApiClient, seed: Seed, name: string) {
+  const automation = await apiClient.seedAutomation({
+    workspaceId: seed.workspaceId,
+    name,
+    workflowId: seed.workflowId,
+    workflowStepId: seed.startStepId,
+  });
+
+  const older = await apiClient.createTask(seed.workspaceId, `${name} — older run`, {
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+  });
+  const newer = await apiClient.createTask(seed.workspaceId, `${name} — newer run`, {
+    workflow_id: seed.workflowId,
+    workflow_step_id: seed.startStepId,
+  });
+  // A session per run, so each has a conversation the rail/drawer can switch to.
+  await apiClient.seedAutomationTaskSession(older.id, "WAITING_FOR_INPUT");
+  await apiClient.seedAutomationTaskSession(newer.id, "WAITING_FOR_INPUT");
+  await apiClient.seedAutomationRun(automation.id, "succeeded", older.id);
+  await apiClient.seedAutomationRun(automation.id, "succeeded", newer.id);
+
+  return { automation, older, newer };
+}
+
+async function openDetail(testPage: Page, automationId: string) {
+  await testPage.goto(`/automations/${automationId}`);
+  await expect(testPage.getByTestId("runs-drawer-trigger")).toBeVisible({ timeout: 15_000 });
+}
+
+test.describe("Automation detail on mobile", () => {
+  test("shows the runs in a drawer rather than a rail", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(apiClient, seedData, "Mobile Sweep");
+    await openDetail(testPage, automation.id);
+
+    // The rail is the desktop composition and must not be mounted here.
+    await expect(testPage.getByTestId("runs-rail")).toHaveCount(0);
+  });
+
+  test("switches to an older run and closes the drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(apiClient, seedData, "Mobile Switch");
+    await openDetail(testPage, automation.id);
+
+    await testPage.getByTestId("runs-drawer-trigger").click();
+    const completed = testPage.getByTestId("run-group-completed");
+    await expect(completed).toBeVisible({ timeout: 10_000 });
+
+    // Second row is the older run; the page opens on the newest.
+    const rows = completed.getByRole("button");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).click();
+
+    // Selecting must carry the run in the URL and dismiss the drawer — leaving
+    // it open would cover the transcript the user just asked for.
+    await expect(testPage).toHaveURL(/[?&]run=/, { timeout: 10_000 });
+    await expect(testPage.getByTestId("run-group-completed")).toHaveCount(0, { timeout: 10_000 });
+  });
+
+  test("offers a composer on a run with a conversation", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(apiClient, seedData, "Mobile Reply");
+    await openDetail(testPage, automation.id);
+
+    // The reply box is the reason this surface exists; on a phone it must be
+    // mounted and on screen rather than pushed below the fold by the switcher.
+    //
+    // Located by testid, not by role or placeholder text: the composer is a
+    // rich editor rather than an <input>, so `getByRole("textbox")` finds
+    // nothing, and its placeholder is a decorative paragraph that Playwright
+    // does not always resolve.
+    const transcript = testPage.getByTestId("run-transcript");
+    await expect(transcript).toBeVisible({ timeout: 15_000 });
+    const composer = testPage.getByTestId("chat-input-area");
+    await expect(composer).toBeVisible({ timeout: 10_000 });
+
+    // On screen, not merely mounted below the fold.
+    const box = await composer.boundingBox();
+    const height = testPage.viewportSize()?.height ?? 0;
+    expect(box, "composer should have a box").not.toBeNull();
+    expect(box!.y).toBeLessThan(height);
+  });
+
+  test("triggers Run now from the header", async ({ testPage, apiClient, seedData }) => {
+    const { automation } = await seedAutomationWithRuns(apiClient, seedData, "Mobile Trigger");
+    await openDetail(testPage, automation.id);
+
+    const runNow = testPage.getByTestId("automation-run-now");
+    await expect(runNow).toBeVisible({ timeout: 10_000 });
+
+    // Reachable, not clipped off the edge by the narrow bar.
+    const box = await runNow.boundingBox();
+    const width = testPage.viewportSize()?.width ?? 0;
+    expect(box, "Run now should have a box").not.toBeNull();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+
+    await runNow.click();
+    // Firing reports what happened — a fire or a skip — rather than going quiet.
+    await expect(testPage.getByText(/Triggered|Skipped/)).toBeVisible({ timeout: 15_000 });
+  });
+
+  test("does not scroll sideways with a transcript mounted", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(apiClient, seedData, "Mobile Overflow");
+    await openDetail(testPage, automation.id);
+    await expect(testPage.getByTestId("run-transcript")).toBeVisible({ timeout: 15_000 });
+
+    // The document itself must not scroll horizontally. Wide content — a
+    // transcript's code blocks, a long automation name — belongs in its own
+    // scroller, not pushing the page sideways.
+    const overflow = await testPage.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      clientWidth: document.documentElement.clientWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+  });
+});

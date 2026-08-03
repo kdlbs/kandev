@@ -39,7 +39,6 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
-	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -456,11 +455,6 @@ type Service struct {
 
 	// Automation service for handling automation triggers
 	automationService AutomationService
-
-	// Worktree manager — used to clean up ephemeral worktrees for run-mode
-	// automation tasks immediately on completion rather than waiting for
-	// the 24h Office GC. Nil-safe.
-	worktreeMgr *worktree.Manager
 
 	// Clarification canceller — cancels pending clarifications when agent's turn completes
 	clarificationCanceller ClarificationCanceller

@@ -47,6 +47,8 @@
   "commandThatWillRun": "Ćōḿḿàńď ţĥàţ ŵĩĺĺ ŕũń",
   "configured": "Ćōńƒĩĝũŕēď",
   "configureProfilesIntro": "Ćōńƒĩĝũŕē ƥŕōƒĩĺēś àńď ďēƒàũĺţś ƒōŕ ţĥĩś àĝēńţ.",
+  "conflictAutomationRow": "<0>{{name}}</0> ĩń {{workspace}}",
+  "conflictAutomationsTitle": "Àũţōḿàţĩōńś:",
   "conflictQuickChatsTitle": "Qũĩćķ Ćĥàţś:",
   "conflictTasksTitle": "Ţàśķś:",
   "conflictTierMappingRow": "<0>{{tier}}</0> ţĩēŕ ĩń {{workspace}} ƒōŕ {{provider}}",

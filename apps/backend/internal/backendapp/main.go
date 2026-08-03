@@ -523,6 +523,15 @@ func startAgentInfrastructure(
 	agentSettingsController.SetRoutingTierDependencyChecker(&routingTierDepsAdapter{
 		repo: repos.Office,
 	})
+	// An enabled automation is a standing instruction to launch against a
+	// profile. Nothing is running, so it never reaches the active-session list,
+	// but deleting the profile would leave the schedule firing into nothing —
+	// quietly, hours later. Name them in the confirmation instead.
+	if services.Automation != nil {
+		agentSettingsController.SetAutomationDependencyChecker(&automationDepsAdapter{
+			store: services.Automation.Service.Store(),
+		})
+	}
 
 	// Wire GitHub service into orchestrator for PR auto-detection on push
 	if services.GitHub != nil {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,10 @@ var ErrDuplicateRepositoryID = errors.New("automation: duplicate repository_ids 
 // because this check guards cross-workspace repository access.
 var ErrRepositoryLookupUnavailable = errors.New("automation: repository validation is not available")
 
+// ErrAutomationNotFound covers both a missing automation and one in a workspace
+// the caller cannot reach, so authorization never leaks which of the two it is.
+var ErrAutomationNotFound = errors.New("automation: not found")
+
 // TaskDeleter deletes a task and cleans up its resources.
 // Satisfied by *taskservice.Service; injected to avoid a cyclic import.
 // Implementations should return errors wrapping ErrTaskNotFound when the
@@ -46,12 +51,25 @@ type TaskDeleter interface {
 	DeleteTask(ctx context.Context, id string) error
 }
 
+// WorkflowLocator resolves the workspace a workflow belongs to. Satisfied by
+// the task service; injected to avoid a cyclic import, like TaskDeleter.
+//
+// Without it the server accepts any non-empty workflow id, so a request naming
+// another workspace's workflow is stored verbatim. The editor no longer offers
+// those, but a UI filter is not an authorization boundary.
+type WorkflowLocator interface {
+	WorkflowWorkspaceID(ctx context.Context, workflowID string) (string, error)
+}
+
 // Service coordinates automation operations.
 type Service struct {
 	store       *Store
 	eventBus    bus.EventBus
 	logger      *logger.Logger
 	taskDeleter TaskDeleter // optional; nil-safe
+	// workflowLocator gates workflow ownership. Optional: when nil (isolated
+	// tests) ownership is not enforced.
+	workflowLocator WorkflowLocator
 
 	// repoLookup validates repository_ids on create/update — every ID must
 	// resolve to a repository belonging to the automation's workspace. Nil
@@ -92,6 +110,27 @@ func (s *Service) SetTaskDeleter(d TaskDeleter) {
 	s.taskDeleter = d
 }
 
+// SetWorkflowLocator wires the workflow ownership check.
+func (s *Service) SetWorkflowLocator(l WorkflowLocator) {
+	s.workflowLocator = l
+}
+
+// authorizeWorkflowOwnership rejects a workflow belonging to a workspace other
+// than the one the automation is being saved into.
+func (s *Service) authorizeWorkflowOwnership(ctx context.Context, workspaceID, workflowID string) error {
+	if s.workflowLocator == nil || workflowID == "" {
+		return nil
+	}
+	owner, err := s.workflowLocator.WorkflowWorkspaceID(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("resolve workflow workspace: %w", err)
+	}
+	if owner != workspaceID {
+		return fmt.Errorf("workflow does not belong to this workspace")
+	}
+	return nil
+}
+
 // SetWorkspaceAuthorizer wires the per-user workspace-access check (opt-in
 // auth). The authorizer must return nil for contexts without a request
 // identity (internal callers).
@@ -126,6 +165,13 @@ func (s *Service) authorizeAutomation(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	// GetAutomation reports a missing row as (nil, nil), so a stale id — a
+	// bookmarked page for a deleted automation, a client retrying after a
+	// delete — reaches here with nothing to authorize. Dereferencing it panics
+	// the backend on an ordinary not-found.
+	if a == nil {
+		return ErrAutomationNotFound
+	}
 	return s.authorizeWorkspace(ctx, a.WorkspaceID)
 }
 
@@ -148,20 +194,11 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		maxRuns = 1
 	}
 
-	mode := req.ExecutionMode
-	if !mode.Valid() {
-		mode = ExecutionModeTask
-	}
-	// Workflow + step are required for task-mode automations (the run is
-	// surfaced on the kanban and needs a starting column). Run-mode is
-	// ephemeral and bypasses the workflow entirely.
-	if mode == ExecutionModeTask {
-		if req.WorkflowID == "" {
-			return nil, fmt.Errorf("workflow_id is required")
-		}
-		if req.WorkflowStepID == "" {
-			return nil, fmt.Errorf("workflow_step_id is required")
-		}
+	// Workflow + step are optional for every automation: no automation run is
+	// placed on a board, so no automation needs a starting column. Ownership
+	// is still enforced when one is supplied.
+	if err := s.authorizeWorkflowOwnership(ctx, req.WorkspaceID, req.WorkflowID); err != nil {
+		return nil, err
 	}
 	a := &Automation{
 		WorkspaceID:       req.WorkspaceID,
@@ -174,7 +211,6 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		RepositoryIDs:     req.RepositoryIDs,
 		Prompt:            req.Prompt,
 		TaskTitleTemplate: req.TaskTitleTemplate,
-		ExecutionMode:     mode,
 		Enabled:           true,
 		MaxConcurrentRuns: maxRuns,
 	}
@@ -185,8 +221,14 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 		return nil, fmt.Errorf("create automation: %w", err)
 	}
 
-	// Create initial triggers.
+	// Create initial triggers. The cron check is the same one AddTrigger and
+	// UpdateTrigger apply: without it an expression the scheduler cannot parse
+	// is accepted at creation and rejected on the first edit, and in between the
+	// automation simply never fires with nothing on screen to say why.
 	for _, ts := range req.Triggers {
+		if err := validateScheduledConfig(ts.Type, ts.Config); err != nil {
+			return nil, err
+		}
 		t := &AutomationTrigger{
 			AutomationID: a.ID,
 			Type:         ts.Type,
@@ -225,22 +267,39 @@ func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAu
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return nil, err
 	}
-	if req.RepositoryIDs != nil {
-		existing, err := s.store.GetAutomation(ctx, id)
-		if err != nil {
-			return nil, err
-		}
-		if existing == nil {
-			return nil, fmt.Errorf("automation not found: %s", id)
-		}
-		if err := s.validateRepositoryIDs(ctx, existing.WorkspaceID, req.RepositoryIDs); err != nil {
-			return nil, err
-		}
+	if err := s.authorizeUpdatedReferences(ctx, id, req); err != nil {
+		return nil, err
 	}
 	if err := s.store.UpdateAutomation(ctx, id, req); err != nil {
 		return nil, err
 	}
 	return s.store.GetAutomation(ctx, id)
+}
+
+// authorizeUpdatedReferences checks the fields of req that name something the
+// automation's workspace must own — its repositories and its workflow. Both
+// need the stored automation to learn that workspace, so it is loaded once
+// here rather than by each check.
+func (s *Service) authorizeUpdatedReferences(ctx context.Context, id string, req *UpdateAutomationRequest) error {
+	if req.RepositoryIDs == nil && req.WorkflowID == nil {
+		return nil
+	}
+	existing, err := s.store.GetAutomation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if existing == nil {
+		return fmt.Errorf("automation not found: %s", id)
+	}
+	if req.RepositoryIDs != nil {
+		if err := s.validateRepositoryIDs(ctx, existing.WorkspaceID, req.RepositoryIDs); err != nil {
+			return err
+		}
+	}
+	if req.WorkflowID == nil {
+		return nil
+	}
+	return s.authorizeWorkflowOwnership(ctx, existing.WorkspaceID, *req.WorkflowID)
 }
 
 // validateRepositoryIDs rejects a duplicate entry, or any ID that isn't a
@@ -298,12 +357,41 @@ func (s *Service) DisableAutomation(ctx context.Context, id string) error {
 
 // --- Trigger CRUD ---
 
+// validateScheduledConfig rejects a cron expression the scheduler could never
+// run. Without it the editor's regex is the only gate, and it is both too
+// permissive (accepting "60 * * * *", "*/0 * * * *", reversed ranges like
+// "10-5 * * * *") and too strict (rejecting named fields such as MON or JAN
+// that robfig/cron accepts). Either way the user saves a schedule that then
+// silently never fires. Parsing with the scheduler's own parser is the only
+// definition of valid that matters here.
+func validateScheduledConfig(triggerType TriggerType, raw json.RawMessage) error {
+	if triggerType != TriggerTypeScheduled || len(raw) == 0 {
+		return nil
+	}
+	var cfg ScheduledTriggerConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("invalid scheduled trigger config: %w", err)
+	}
+	// An empty expression means "not scheduled yet", not invalid — the editor
+	// writes it while the user is still choosing.
+	if strings.TrimSpace(cfg.CronExpression) == "" {
+		return nil
+	}
+	if _, err := nextCronFire(cfg.CronExpression, cfg.Timezone, time.Now().UTC()); err != nil {
+		return fmt.Errorf("invalid schedule %q: %w", cfg.CronExpression, err)
+	}
+	return nil
+}
+
 // AddTrigger adds a trigger to an automation.
 func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*AutomationTrigger, error) {
 	if req.AutomationID == "" {
 		return nil, fmt.Errorf("automation_id is required")
 	}
 	if err := s.authorizeAutomation(ctx, req.AutomationID); err != nil {
+		return nil, err
+	}
+	if err := validateScheduledConfig(req.Type, req.Config); err != nil {
 		return nil, err
 	}
 	t := &AutomationTrigger{
@@ -322,6 +410,17 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
 	if err := s.authorizeTrigger(ctx, id); err != nil {
 		return err
+	}
+	if req.Config != nil {
+		existing, err := s.store.GetTrigger(ctx, id)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			if err := validateScheduledConfig(existing.Type, *req.Config); err != nil {
+				return err
+			}
+		}
 	}
 	return s.store.UpdateTrigger(ctx, id, req)
 }
@@ -355,6 +454,38 @@ func (s *Service) ListRuns(ctx context.Context, automationID string, limit int) 
 		return nil, err
 	}
 	return s.store.ListRuns(ctx, automationID, limit)
+}
+
+// ListWorkspaceRuns returns recent runs across every automation in the
+// workspace. Authorization is on the workspace itself rather than
+// per-automation (as ListRuns does), because the workspace is the whole
+// scope of the query — every row it can return already belongs to it.
+func (s *Service) ListWorkspaceRuns(ctx context.Context, workspaceID string, limit int) ([]*WorkspaceAutomationRun, error) {
+	if err := s.authorizeWs(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.store.ListWorkspaceRuns(ctx, workspaceID, limit)
+}
+
+// ListAutomationSummaries returns one health summary per automation in the
+// workspace. Authorized on the workspace for the same reason ListWorkspaceRuns
+// is: every row it can return already belongs to that workspace.
+func (s *Service) ListAutomationSummaries(ctx context.Context, workspaceID string) ([]*AutomationSummary, error) {
+	if err := s.authorizeWs(ctx, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.store.ListAutomationSummaries(ctx, workspaceID)
+}
+
+// GetAutomationSummary returns one automation's summary, authorized on the
+// automation itself. The detail page reads it for the same reason the list
+// reads the workspace-wide set: its own run window is capped, so an open run
+// older than that window would leave the page claiming nothing is in flight.
+func (s *Service) GetAutomationSummary(ctx context.Context, automationID string) (*AutomationSummary, error) {
+	if err := s.authorizeAutomation(ctx, automationID); err != nil {
+		return nil, err
+	}
+	return s.store.GetAutomationSummary(ctx, automationID)
 }
 
 // GetRun returns a single run by ID, or nil if not found.
@@ -395,6 +526,14 @@ func (s *Service) DeleteRun(ctx context.Context, runID string) error {
 	if err != nil {
 		return fmt.Errorf("get run: %w", err)
 	}
+	// Authorized here rather than in the WS handler, like every other exported
+	// operation on this service. A destructive call that depends on its caller
+	// remembering to check is one new caller away from not being checked.
+	if run != nil {
+		if authErr := s.authorizeAutomation(ctx, run.AutomationID); authErr != nil {
+			return authErr
+		}
+	}
 	if run != nil && run.TaskID != "" && s.taskDeleter != nil {
 		if delErr := s.taskDeleter.DeleteTask(ctx, run.TaskID); delErr != nil {
 			if !errors.Is(delErr, ErrTaskNotFound) {
@@ -411,6 +550,9 @@ func (s *Service) DeleteRun(ctx context.Context, runID string) error {
 // DeleteAllRuns removes every run for an automation, deleting each associated
 // task first. Task deletion is best-effort: not-found errors are ignored.
 func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error {
+	if err := s.authorizeAutomation(ctx, automationID); err != nil {
+		return err
+	}
 	defer s.automationRunLock(automationID)()
 	if s.taskDeleter != nil {
 		taskIDs, err := s.store.ListRunTaskIDs(ctx, automationID)
@@ -433,29 +575,56 @@ func (s *Service) DeleteAllRuns(ctx context.Context, automationID string) error 
 
 // --- Trigger firing ---
 
+// FireResult reports what FireTrigger actually did. A skip is not an error:
+// the trigger was evaluated and deliberately not run. Callers that report back
+// to a human must distinguish the two, otherwise a deliberate skip is
+// indistinguishable from a fire that happened.
+type FireResult struct {
+	Skipped bool
+	// Reason is human-readable and set only when Skipped.
+	Reason string
+}
+
 // FireTrigger publishes an AutomationTriggered event for the given trigger.
 // The orchestrator handles task creation in response.
-func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) error {
+func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) (FireResult, error) {
+	// Admission decisions live in one place so every caller — scheduler,
+	// webhook, and the manual Run button — gets the same answer about whether a
+	// fire actually happened.
+	a, loadErr := s.store.GetAutomation(ctx, automationID)
+	if loadErr != nil {
+		return FireResult{}, fmt.Errorf("load automation: %w", loadErr)
+	}
+	if a == nil {
+		return FireResult{Skipped: true, Reason: "automation no longer exists"}, nil
+	}
+	// The UI offers Run on a disabled automation. The orchestrator discards the
+	// event downstream, so without this the caller is told a run started that
+	// never could — and last_triggered_at moves for a run that never ran.
+	if !a.Enabled {
+		return FireResult{Skipped: true, Reason: "automation is disabled"}, nil
+	}
+
 	// Check dedup.
 	if dedupKey != "" {
 		exists, err := s.store.HasRunWithDedupKey(ctx, automationID, dedupKey)
 		if err != nil {
-			return fmt.Errorf("check dedup: %w", err)
+			return FireResult{}, fmt.Errorf("check dedup: %w", err)
 		}
 		if exists {
 			s.logger.Debug("skipping duplicate trigger",
 				zap.String("automation_id", automationID),
 				zap.String("dedup_key", dedupKey))
-			return nil
+			return FireResult{Skipped: true, Reason: "this trigger has already fired"}, nil
 		}
 	}
 
 	// Enforce max_concurrent_runs: a run is "active" while still in
 	// task_created (succeeded/failed/skipped don't count). If at the cap,
 	// record a skipped run so the user can see the cap kicked in.
-	skipped, capErr := s.maybeSkipForConcurrencyCap(ctx, automationID, triggerID, triggerType, triggerData, dedupKey)
+	capReason, capErr := s.maybeSkipForConcurrencyCap(ctx, a, triggerID, triggerType, triggerData, dedupKey)
 	if capErr != nil {
-		return capErr
+		return FireResult{}, capErr
 	}
 
 	// Record that the trigger was evaluated now that the cap check itself
@@ -474,8 +643,8 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		s.logger.Warn("failed to update last_evaluated_at",
 			zap.String("trigger_id", triggerID), zap.Error(updateErr))
 	}
-	if skipped {
-		return nil
+	if capReason != "" {
+		return FireResult{Skipped: true, Reason: capReason}, nil
 	}
 
 	evt := &AutomationTriggeredEvent{
@@ -493,14 +662,14 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 
 	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
 	if err := s.eventBus.Publish(ctx, events.AutomationTriggered, event); err != nil {
-		return fmt.Errorf("publish automation triggered: %w", err)
+		return FireResult{}, fmt.Errorf("publish automation triggered: %w", err)
 	}
 
 	s.logger.Info("automation trigger fired",
 		zap.String("automation_id", automationID),
 		zap.String("trigger_id", triggerID),
 		zap.String("type", string(triggerType)))
-	return nil
+	return FireResult{}, nil
 }
 
 // RecordRun records a trigger run outcome.
@@ -508,24 +677,23 @@ func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
 	return s.createRunLocked(ctx, run)
 }
 
-// maybeSkipForConcurrencyCap enforces max_concurrent_runs. Returns (skipped,
-// err). When skipped, a "skipped" run row is persisted so the user can see
-// the cap kicked in.
-func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, automationID, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) (bool, error) {
-	a, err := s.store.GetAutomation(ctx, automationID)
-	if err != nil || a == nil {
-		return false, nil // not our problem here; FireTrigger will hit it again downstream
-	}
+// maybeSkipForConcurrencyCap enforces max_concurrent_runs. Returns the
+// human-readable skip reason, empty when the trigger may proceed. When
+// skipped, a "skipped" run row is persisted so the user can see the cap
+// kicked in.
+func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, a *Automation, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) (string, error) {
 	if a.MaxConcurrentRuns <= 0 {
-		return false, nil
+		return "", nil
 	}
+	automationID := a.ID
 	active, err := s.store.CountActiveRuns(ctx, automationID)
 	if err != nil {
-		return false, fmt.Errorf("count active runs: %w", err)
+		return "", fmt.Errorf("count active runs: %w", err)
 	}
 	if active < a.MaxConcurrentRuns {
-		return false, nil
+		return "", nil
 	}
+	reason := fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns)
 	skipRun := &AutomationRun{
 		AutomationID: automationID,
 		TriggerID:    triggerID,
@@ -533,7 +701,7 @@ func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, automationID, 
 		Status:       RunStatusSkipped,
 		DedupKey:     dedupKey,
 		TriggerData:  triggerData,
-		ErrorMessage: fmt.Sprintf("max_concurrent_runs=%d reached", a.MaxConcurrentRuns),
+		ErrorMessage: reason,
 	}
 	if recErr := s.createRunLocked(ctx, skipRun); recErr != nil {
 		s.logger.Warn("failed to record skipped run", zap.Error(recErr))
@@ -542,12 +710,12 @@ func (s *Service) maybeSkipForConcurrencyCap(ctx context.Context, automationID, 
 		zap.String("automation_id", automationID),
 		zap.Int("active", active),
 		zap.Int("max", a.MaxConcurrentRuns))
-	return true, nil
+	return reason, nil
 }
 
 // MarkRunFailedByTaskID transitions a still-pending run (task_created) into
 // the failed state. Used when something downstream of task creation aborts
-// the run, e.g. a permission prompt for a run-mode automation.
+// the run, e.g. a permission prompt an automation run can't answer.
 func (s *Service) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg string) error {
 	return s.store.MarkRunFailedByTaskID(ctx, taskID, errMsg)
 }

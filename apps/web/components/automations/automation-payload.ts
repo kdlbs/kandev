@@ -1,7 +1,6 @@
 import { createRepositoryAction } from "@/app/actions/workspaces";
 import type {
   CreateAutomationRequest,
-  ExecutionMode,
   TriggerType,
   UpdateAutomationRequest,
 } from "@/lib/types/automation";
@@ -28,7 +27,6 @@ export type FormState = {
   repositorySelections: RepositorySelection[];
   prompt: string;
   taskTitleTemplate: string;
-  executionMode: ExecutionMode;
   enabled: boolean;
   maxConcurrentRuns: number;
 };
@@ -137,7 +135,6 @@ export function buildCreatePayload(
     repository_ids: repositoryIds,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
-    execution_mode: form.executionMode,
     max_concurrent_runs: form.maxConcurrentRuns,
     triggers: pending.map((t) => ({ type: t.type, config: t.config, enabled: t.enabled })),
   };
@@ -157,7 +154,6 @@ export function buildUpdatePayload(
     repository_ids: repositoryIds,
     prompt: form.prompt,
     task_title_template: form.taskTitleTemplate,
-    execution_mode: form.executionMode,
     enabled: form.enabled,
     max_concurrent_runs: form.maxConcurrentRuns,
   };

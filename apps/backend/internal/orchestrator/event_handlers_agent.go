@@ -954,7 +954,7 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 			zap.String("session_id", data.SessionID))
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 		go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
-		// captureGitStatusSnapshot and finalizeAutomationRunIfEphemeral are deferred
+		// captureGitStatusSnapshot and finalizeAutomationRun are deferred
 		// until a later agent turn completes without pending clarifications, or the
 		// user dismisses a stale overlay (clarification.stale_dismissed).
 		return
@@ -983,9 +983,9 @@ func (s *Service) handleAgentCompletedLocked(ctx context.Context, data watcher.A
 	// Clean up the agent execution (stop agentctl, release port)
 	go s.cleanupAgentExecution(data.AgentExecutionID, data.TaskID, data.SessionID)
 
-	// Finalize run-mode automation runs: mark status=succeeded and reap
-	// the ephemeral worktree right away (the 24h Office GC is too late).
-	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, true, "")
+	// Finalize the automation run: mark status=succeeded so the automation's
+	// concurrency slot is released. The worktree stays.
+	s.finalizeAutomationRun(ctx, data.TaskID, true, "")
 }
 
 // handleAgentFailed handles agent failure events
@@ -1036,7 +1036,7 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 	// Transient provider errors (529 Overloaded) get a paced, visible
 	// retry-with-backoff before any red banner. This is the ONLY non-terminal
 	// failure path, so it runs before automation finalization below — otherwise
-	// a transient 529 on a run-mode automation would mark the run failed and
+	// a transient 529 on an automation run would mark the run failed and
 	// reap its ephemeral worktree out from under the in-flight retry.
 	// handleTransientFailure returns false (falling through) for non-transient
 	// errors, office tasks, or an exhausted budget.
@@ -1051,15 +1051,15 @@ func (s *Service) handleAgentFailedLocked(ctx context.Context, data watcher.Agen
 		context.WithoutCancel(ctx), data.TaskID, data.SessionID, data.AgentExecutionID,
 	)
 
-	// Terminal from here. Finalize run-mode automation runs — every branch
+	// Terminal from here. Finalize the automation run — every branch
 	// below returns early (session-backed recoverable failure, no-session retry),
-	// and run-mode automations need their AutomationRun flipped + worktree reaped
-	// on *every* terminal failure path.
+	// and automations need their AutomationRun flipped on *every* terminal
+	// failure path.
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = "agent failed"
 	}
-	s.finalizeAutomationRunIfEphemeral(ctx, data.TaskID, data.SessionID, false, errMsg)
+	s.finalizeAutomationRun(ctx, data.TaskID, false, errMsg)
 
 	// Make all agent CLI failures recoverable — let the user choose to resume or start fresh.
 	if data.SessionID != "" {

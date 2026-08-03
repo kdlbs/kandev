@@ -1625,13 +1625,20 @@ func (r *Repository) BatchGetSessionsByTaskIDs(ctx context.Context, taskIDs []st
 
 func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error) {
 	var exists int
-	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion
+	// Exclude ephemeral tasks (quick chat, config chat) - they shouldn't block profile deletion.
+	// Automation runs are excluded only where they are parked: a finished run
+	// rests in WAITING_FOR_INPUT so it stays answerable, and counting those would
+	// let one nightly report block its agent profile from ever being deleted. A
+	// run that is still working is using the profile now and blocks like any
+	// other task — see GetActiveTaskInfoByAgentProfile for the same split.
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT 1 FROM task_sessions ts
 		JOIN tasks t ON ts.task_id = t.id
 		WHERE ts.agent_profile_id = ?
 		  AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
 		  AND t.is_ephemeral = 0
+		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
+		           AND ts.state = 'WAITING_FOR_INPUT')
 		LIMIT 1
 	`), agentProfileID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -1641,11 +1648,27 @@ func (r *Repository) HasActiveTaskSessionsByAgentProfile(ctx context.Context, ag
 }
 
 func (r *Repository) GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error) {
+	// This list is "what is blocking this deletion", and automation runs sit on
+	// both sides of that question.
+	//
+	// A run that is CREATED, STARTING or RUNNING is using the profile right now.
+	// Deleting it out from under live work is the same failure as for any other
+	// task, so it blocks — the row names a task the user cannot find on a board,
+	// but the alternative is a silent kill.
+	//
+	// A run parked in WAITING_FOR_INPUT is different. That is where every
+	// finished automation run comes to rest, by design, so counting those would
+	// let one nightly report block its profile's deletion forever. Those are
+	// excluded, which makes them non-resumable if the profile goes: replying to
+	// an old run afterwards fails. That is the accepted trade — see
+	// docs/specs/office/automations-settings.md.
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT DISTINCT t.id, t.title, t.is_ephemeral
 		FROM task_sessions ts
 		JOIN tasks t ON t.id = ts.task_id
 		WHERE ts.agent_profile_id = ? AND ts.state IN ('CREATED', 'STARTING', 'RUNNING', 'WAITING_FOR_INPUT')
+		  AND NOT (COALESCE(t.origin, '') = '`+models.TaskOriginAutomationRun+`'
+		           AND ts.state = 'WAITING_FOR_INPUT')
 	`), agentProfileID)
 	if err != nil {
 		return nil, err

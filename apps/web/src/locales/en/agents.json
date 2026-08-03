@@ -47,6 +47,8 @@
   "commandThatWillRun": "Command that will run",
   "configured": "Configured",
   "configureProfilesIntro": "Configure profiles and defaults for this agent.",
+  "conflictAutomationRow": "<0>{{name}}</0> in {{workspace}}",
+  "conflictAutomationsTitle": "Automations:",
   "conflictQuickChatsTitle": "Quick Chats:",
   "conflictTasksTitle": "Tasks:",
   "conflictTierMappingRow": "<0>{{tier}}</0> tier in {{workspace}} for {{provider}}",

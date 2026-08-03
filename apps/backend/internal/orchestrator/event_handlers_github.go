@@ -123,9 +123,9 @@ type ReviewTaskRequest struct {
 	Description    string
 	Metadata       map[string]interface{}
 	Repositories   []ReviewTaskRepository
-	// IsEphemeral hides the task from the kanban — used by run-mode
-	// automations whose output should surface in the automation's run
-	// history rather than as a tracked task.
+	// IsEphemeral marks a quick-chat-style task. Automation runs do NOT set
+	// it: they are hidden from the board by their Origin instead, which is
+	// what lets them keep their worktree and reach a terminal run status.
 	IsEphemeral bool
 	// Origin tags the task with a provenance label (see task/models.TaskOrigin*).
 	// Defaults to TaskOriginManual when empty.

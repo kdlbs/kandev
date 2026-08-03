@@ -470,6 +470,9 @@ automation.list
 automation.run.delete
 automation.runs.delete_all
 automation.runs.list
+automation.runs.list_workspace
+automation.summaries
+automation.summary
 automation.trigger
 automation.trigger.add
 automation.trigger.delete

@@ -23,8 +23,8 @@ test.describe("Automations settings page", () => {
     await automations.nameInput.fill("Daily Check");
     await expect(automations.nameInput).toHaveAttribute("data-settings-dirty", "true");
 
-    // Select a schedule preset
-    await automations.schedulePreset("@daily").click();
+    // Pick a schedule
+    await automations.selectFrequency("every day");
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
@@ -45,8 +45,7 @@ test.describe("Automations settings page", () => {
     await automations.gotoNew();
 
     await automations.nameInput.fill("Custom Schedule");
-    await automations.customScheduleInput.fill("@every 2h");
-    await automations.customScheduleInput.blur();
+    await automations.setCustomSchedule("@every 2h");
 
     // Select workflow and step
     await automations.selectWorkflow("E2E Workflow");
@@ -63,11 +62,12 @@ test.describe("Automations settings page", () => {
     const automations = new AutomationsPage(testPage, seedData.workspaceId);
     await automations.gotoNew();
 
-    await automations.customScheduleInput.fill("invalid-cron");
-    await automations.customScheduleInput.blur();
+    await automations.setCustomSchedule("invalid-cron");
 
     // Should show error text
-    await expect(testPage.getByText("Invalid expression")).toBeVisible({ timeout: 5_000 });
+    await expect(testPage.getByText("not a schedule we can read")).toBeVisible({
+      timeout: 5_000,
+    });
   });
 
   test("edit automation name", async ({ testPage, seedData }) => {
@@ -76,7 +76,7 @@ test.describe("Automations settings page", () => {
     // Create an automation first
     await automations.gotoNew();
     await automations.nameInput.fill("Original Name");
-    await automations.schedulePreset("@hourly").click();
+    await automations.selectFrequency("every hour");
     await automations.selectWorkflow("E2E Workflow");
     await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -87,7 +87,7 @@ test.describe("Automations settings page", () => {
     // the row so the click doesn't race the listings hydration.
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
-    await automations.table.locator("tr", { hasText: "Original Name" }).click();
+    await automations.openByName("Original Name");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
     await expect(automations.editor).toBeVisible();
 
@@ -108,7 +108,7 @@ test.describe("Automations settings page", () => {
     // Create an automation first
     await automations.gotoNew();
     await automations.nameInput.fill("To Be Deleted");
-    await automations.schedulePreset("@weekly").click();
+    await automations.selectFrequency("every week");
     await automations.selectWorkflow("E2E Workflow");
     await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -117,7 +117,7 @@ test.describe("Automations settings page", () => {
     // Land on listings, click into the new row to reach the editor.
     await expect(testPage).toHaveURL(/automations$/, { timeout: 15_000 });
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
-    await automations.table.locator("tr", { hasText: "To Be Deleted" }).click();
+    await automations.openByName("To Be Deleted");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
 
     // Delete it
@@ -201,7 +201,7 @@ test.describe("Automations settings page", () => {
     await expect(automations.table).toBeVisible({ timeout: 10_000 });
 
     // Click into the automation row to open the editor
-    await automations.table.locator("tr", { hasText: "Reveal Me" }).click();
+    await automations.openByName("Reveal Me");
     await expect(testPage).toHaveURL(/automations\/[a-f0-9-]+$/, { timeout: 10_000 });
     await expect(automations.editor).toBeVisible();
 
@@ -260,7 +260,7 @@ test.describe("Automations settings page", () => {
     // Create an automation — the new flow lands directly on the listings page.
     await automations.gotoNew();
     await automations.nameInput.fill("Toggle Test");
-    await automations.schedulePreset("@daily").click();
+    await automations.selectFrequency("every day");
     await automations.selectWorkflow("E2E Workflow");
     await automations.selectWorkflowStep(seedData.steps[0].name);
     await expect(automations.saveButton).toBeEnabled({ timeout: 5_000 });
@@ -416,21 +416,17 @@ test.describe("Automations settings page", () => {
 
     // The archived task's run is no longer outstanding work, and reads
     // "Archived" rather than being conflated with a real cancellation.
-    const archivedRow = testPage.locator("table tbody tr", {
-      hasText: archivedTask.id.slice(0, 8),
-    });
+    const archivedRow = testPage.locator(`table tbody tr[data-task-id="${archivedTask.id}"]`);
     await expect(archivedRow.getByText("Archived", { exact: true })).toBeVisible();
 
     // A task whose current (primary) session was genuinely cancelled —
     // the signal a real Stop leaves behind — reads "Cancelled", distinct
     // from "Archived".
-    const cancelledRow = testPage.locator("table tbody tr", {
-      hasText: cancelledTask.id.slice(0, 8),
-    });
+    const cancelledRow = testPage.locator(`table tbody tr[data-task-id="${cancelledTask.id}"]`);
     await expect(cancelledRow.getByText("Cancelled", { exact: true })).toBeVisible();
 
     // The still-open task's run is unaffected.
-    const openRow = testPage.locator("table tbody tr", { hasText: openTask.id.slice(0, 8) });
+    const openRow = testPage.locator(`table tbody tr[data-task-id="${openTask.id}"]`);
     await expect(openRow.getByText("Running", { exact: true })).toBeVisible();
   });
 });

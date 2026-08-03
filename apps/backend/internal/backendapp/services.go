@@ -163,6 +163,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		automationComponents.Service.SetTaskDeleter(&automationTaskDeleterAdapter{svc: taskSvc})
 		// Per-user workspace scoping for the automation HTTP/WS surface.
 		automationComponents.Service.SetWorkspaceAuthorizer(taskSvc.AuthorizeWorkspaceAccess)
+		// A UI filter is not an authorization boundary: reject a workflow owned
+		// by another workspace even when a request names it directly.
+		automationComponents.Service.SetWorkflowLocator(&automationWorkflowLocatorAdapter{svc: taskSvc})
 	}
 
 	services := &Services{

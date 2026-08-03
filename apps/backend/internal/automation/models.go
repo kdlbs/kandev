@@ -62,46 +62,26 @@ const (
 	RunStatusCancelled RunStatus = "cancelled"
 )
 
-// ExecutionMode controls whether an automation firing creates a visible
-// kanban task or a fire-and-forget ephemeral run.
-type ExecutionMode string
-
-const (
-	// ExecutionModeTask is the default: a trigger fires, a normal kanban
-	// task is created, the user can see/track/comment on it.
-	ExecutionModeTask ExecutionMode = "task"
-	// ExecutionModeRun is the lightweight path: a trigger fires, an
-	// ephemeral task is created so the session pipeline still works, but
-	// the task is hidden from the kanban. Only the AutomationRun row is
-	// surfaced to the user. Intended for "scheduled prompt that produces
-	// output the user just reads" use cases.
-	ExecutionModeRun ExecutionMode = "run"
-)
-
-// Valid reports whether the execution mode is a recognised value.
-func (m ExecutionMode) Valid() bool {
-	return m == ExecutionModeTask || m == ExecutionModeRun
-}
-
 // Automation is a named rule with triggers, a prompt template, and agent/executor config.
 type Automation struct {
-	ID                string        `json:"id" db:"id"`
-	WorkspaceID       string        `json:"workspace_id" db:"workspace_id"`
-	Name              string        `json:"name" db:"name"`
-	Description       string        `json:"description" db:"description"`
-	WorkflowID        string        `json:"workflow_id" db:"workflow_id"`
-	WorkflowStepID    string        `json:"workflow_step_id" db:"workflow_step_id"`
-	AgentProfileID    string        `json:"agent_profile_id" db:"agent_profile_id"`
-	ExecutorProfileID string        `json:"executor_profile_id" db:"executor_profile_id"`
-	Prompt            string        `json:"prompt" db:"prompt"`
-	TaskTitleTemplate string        `json:"task_title_template" db:"task_title_template"`
-	ExecutionMode     ExecutionMode `json:"execution_mode" db:"execution_mode"`
-	Enabled           bool          `json:"enabled" db:"enabled"`
-	MaxConcurrentRuns int           `json:"max_concurrent_runs" db:"max_concurrent_runs"`
-	WebhookSecret     string        `json:"-" db:"webhook_secret"`
-	LastTriggeredAt   *time.Time    `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
-	CreatedAt         time.Time     `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time     `json:"updated_at" db:"updated_at"`
+	ID          string `json:"id" db:"id"`
+	WorkspaceID string `json:"workspace_id" db:"workspace_id"`
+	Name        string `json:"name" db:"name"`
+	Description string `json:"description" db:"description"`
+	// WorkflowID / WorkflowStepID are optional: no automation run is placed
+	// on a board, so no automation needs a starting column.
+	WorkflowID        string     `json:"workflow_id" db:"workflow_id"`
+	WorkflowStepID    string     `json:"workflow_step_id" db:"workflow_step_id"`
+	AgentProfileID    string     `json:"agent_profile_id" db:"agent_profile_id"`
+	ExecutorProfileID string     `json:"executor_profile_id" db:"executor_profile_id"`
+	Prompt            string     `json:"prompt" db:"prompt"`
+	TaskTitleTemplate string     `json:"task_title_template" db:"task_title_template"`
+	Enabled           bool       `json:"enabled" db:"enabled"`
+	MaxConcurrentRuns int        `json:"max_concurrent_runs" db:"max_concurrent_runs"`
+	WebhookSecret     string     `json:"-" db:"webhook_secret"`
+	LastTriggeredAt   *time.Time `json:"last_triggered_at,omitempty" db:"last_triggered_at"`
+	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 
 	// Hydrated separately, not stored as columns on this table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
@@ -139,6 +119,41 @@ type AutomationRun struct {
 	TriggerDataJSON string          `json:"-" db:"trigger_data"`
 	ErrorMessage    string          `json:"error_message,omitempty" db:"error_message"`
 	CreatedAt       time.Time       `json:"created_at" db:"created_at"`
+
+	// Summary is the tail of the agent's last message on the generated task,
+	// read at list time and truncated for display. Every automation hides its
+	// task from the board, so without this the run row can report that
+	// something happened but never what — which is the one thing the reader
+	// of a scheduled report actually wants. Empty when the run never produced
+	// a task or the agent never spoke.
+	Summary string `json:"summary,omitempty" db:"summary"`
+	// SessionID is the run's primary conversation, empty when the task is gone
+	// or never started one. The detail view mounts the transcript from it.
+	SessionID string `json:"session_id,omitempty" db:"session_id"`
+}
+
+// WorkspaceAutomationRun is a run carrying just enough of its owning
+// automation to be readable outside that automation's own settings page.
+// The workspace-wide feed interleaves runs from every automation, so a row
+// that knows only its automation_id is unattributable — the reader sees
+// that something fired but not what fired it.
+type WorkspaceAutomationRun struct {
+	AutomationRun
+	AutomationName string `json:"automation_name" db:"automation_name"`
+}
+
+// AutomationSummary is one automation's health, answered per automation rather
+// than inferred from a capped feed: what it last said, and whether anything of
+// its own is still running. The runs list reads exactly these two facts.
+type AutomationSummary struct {
+	AutomationID string `json:"automation_id"`
+	// OpenRuns counts the runs still outstanding under the same definition the
+	// concurrency cap uses, so "won't fire — still running" and the cap that
+	// causes it can never disagree.
+	OpenRuns int `json:"open_runs"`
+	// LastRun is nil when the automation has never run, or when its runs have
+	// all been deleted — both of which read as "no runs yet".
+	LastRun *AutomationRun `json:"last_run,omitempty"`
 }
 
 // --- Trigger config types ---
@@ -192,7 +207,6 @@ type CreateAutomationRequest struct {
 	RepositoryIDs     []string            `json:"repository_ids"`
 	Prompt            string              `json:"prompt"`
 	TaskTitleTemplate string              `json:"task_title_template"`
-	ExecutionMode     ExecutionMode       `json:"execution_mode"`
 	MaxConcurrentRuns int                 `json:"max_concurrent_runs"`
 	Triggers          []CreateTriggerSpec `json:"triggers"`
 }
@@ -214,12 +228,11 @@ type UpdateAutomationRequest struct {
 	ExecutorProfileID *string `json:"executor_profile_id,omitempty"`
 	// RepositoryIDs replaces the automation's repository list when non-nil.
 	// nil means "leave unchanged"; an explicit empty slice clears it.
-	RepositoryIDs     []string       `json:"repository_ids,omitempty"`
-	Prompt            *string        `json:"prompt,omitempty"`
-	TaskTitleTemplate *string        `json:"task_title_template,omitempty"`
-	ExecutionMode     *ExecutionMode `json:"execution_mode,omitempty"`
-	Enabled           *bool          `json:"enabled,omitempty"`
-	MaxConcurrentRuns *int           `json:"max_concurrent_runs,omitempty"`
+	RepositoryIDs     []string `json:"repository_ids,omitempty"`
+	Prompt            *string  `json:"prompt,omitempty"`
+	TaskTitleTemplate *string  `json:"task_title_template,omitempty"`
+	Enabled           *bool    `json:"enabled,omitempty"`
+	MaxConcurrentRuns *int     `json:"max_concurrent_runs,omitempty"`
 }
 
 // AddTriggerRequest adds a trigger to an existing automation.

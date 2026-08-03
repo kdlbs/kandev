@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
 
 const navigationMock = vi.hoisted(() => ({
@@ -89,6 +90,9 @@ const storeState = {
   features: {
     office: false,
   },
+  workspaces: {
+    activeId: undefined as string | undefined,
+  },
   appSidebar: {
     collapsed: false,
     sectionExpanded: {
@@ -98,6 +102,7 @@ const storeState = {
       projects: false,
       agents: false,
       integrations: false,
+      automations: false,
       settings: false,
     },
     width: APP_SIDEBAR_EXPANDED_WIDTH,
@@ -115,7 +120,29 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }));
 
+// The Automations section fetches its own list; this suite is about sidebar
+// composition, so it only needs the calls to resolve.
+vi.mock("@/lib/api/domains/automation-api", () => ({
+  listAutomations: vi.fn().mockResolvedValue([]),
+  listAutomationSummaries: vi.fn().mockResolvedValue([]),
+}));
+
 import { AppSidebar } from "./app-sidebar";
+
+// The app mounts the sidebar inside the root layout's TooltipProvider
+// (app/layout.tsx), and sidebar sections use tooltips for their rail buttons
+// and header shortcuts. Rendering bare would test it outside its real context.
+function sidebar() {
+  return (
+    <TooltipProvider>
+      <AppSidebar />
+    </TooltipProvider>
+  );
+}
+
+function renderSidebar() {
+  return render(sidebar());
+}
 
 describe("AppSidebar", () => {
   beforeEach(() => {
@@ -135,7 +162,7 @@ describe("AppSidebar", () => {
   });
 
   it("renders the expanded nav inside a clipped animation layer", () => {
-    render(<AppSidebar />);
+    renderSidebar();
     expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("false");
     expect(screen.getByTestId("tasks-section")).toBeTruthy();
     expect(screen.getByTestId("projects-section")).toBeTruthy();
@@ -149,7 +176,7 @@ describe("AppSidebar", () => {
     officeRouteMock.inOffice = true;
     navigationMock.pathname = "/office";
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     expect(screen.getByTestId("office-navigation-section-work")).toBeTruthy();
     expect(screen.getByTestId("office-navigation-section-office")).toBeTruthy();
@@ -161,7 +188,7 @@ describe("AppSidebar", () => {
     officeRouteMock.inOffice = true;
     navigationMock.pathname = "/office";
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     const nav = screen.getByRole("navigation");
     const expectedSections = [
@@ -180,13 +207,13 @@ describe("AppSidebar", () => {
 
   it("renders collapsed when store reports collapsed=true", () => {
     storeState.appSidebar.collapsed = true;
-    render(<AppSidebar />);
+    renderSidebar();
     expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("true");
     expect(screen.getByTestId("tasks-section").getAttribute("data-collapsed")).toBe("true");
   });
 
   it("invokes toggleAppSidebar when the header collapse button is clicked", () => {
-    render(<AppSidebar />);
+    renderSidebar();
     fireEvent.click(screen.getByTestId("header-toggle"));
     expect(storeState.toggleAppSidebar).toHaveBeenCalledOnce();
   });
@@ -195,7 +222,7 @@ describe("AppSidebar", () => {
     navigationMock.pathname =
       "/settings/agents/opencode-acp/profiles/1f593628-6752-4972-95ab-5c8c3e7eaeab";
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     await waitFor(() => {
       expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(true);
@@ -213,7 +240,7 @@ describe("AppSidebar", () => {
     });
     footerMock.onLayout = () => storeState.toggleAppSidebarSettingsMode();
 
-    render(<AppSidebar />);
+    renderSidebar();
 
     await waitFor(() => {
       expect(storeState.toggleAppSidebarSettingsMode).toHaveBeenCalledOnce();
@@ -226,10 +253,10 @@ describe("AppSidebar", () => {
     navigationMock.pathname = "/settings/agents";
     storeState.appSidebar.settingsMode = true;
 
-    const { rerender } = render(<AppSidebar />);
+    const { rerender } = renderSidebar();
 
     navigationMock.pathname = "/office/tasks";
-    rerender(<AppSidebar />);
+    rerender(sidebar());
 
     await waitFor(() => {
       expect(storeState.setAppSidebarSettingsMode).toHaveBeenCalledWith(false);

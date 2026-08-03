@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useState } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import {
   AlertDialog,
@@ -20,49 +20,46 @@ import { Label } from "@kandev/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
-import type { AutomationRun, ExecutionMode, RunStatus } from "@/lib/types/automation";
+import type { AutomationRun, RunStatus } from "@/lib/types/automation";
 import { formatRelativeTime } from "@/lib/utils";
 
 type RunsSectionProps = {
   automationId: string | null;
-  executionMode: ExecutionMode;
   workspaceId: string;
 };
 
-// The keys are persisted RunStatus values the backend writes and the frontend
-// matches on; only the catalog key is copy, and it is resolved at render so a
-// locale switch is picked up (a module-scope t() would freeze at boot).
 const STATUS_BADGE: Record<
   RunStatus,
-  { variant: "default" | "destructive" | "secondary" | "outline"; labelKey: string }
+  { variant: "default" | "destructive" | "secondary" | "outline"; label: string }
 > = {
-  triggered: { variant: "secondary", labelKey: "automations:runStatusTriggered" },
-  task_created: { variant: "secondary", labelKey: "automations:runStatusRunning" },
-  succeeded: { variant: "default", labelKey: "automations:runStatusSucceeded" },
-  failed: { variant: "destructive", labelKey: "automations:runStatusFailed" },
-  skipped: { variant: "outline", labelKey: "automations:runStatusSkipped" },
+  triggered: { variant: "secondary", label: "Triggered" },
+  task_created: { variant: "secondary", label: "Running" },
+  succeeded: { variant: "default", label: "Succeeded" },
+  failed: { variant: "destructive", label: "Failed" },
+  skipped: { variant: "outline", label: "Skipped" },
   // The generating task was archived — via the UI or by the agent itself
   // (e.g. an "archive this task" instruction). Distinct from a genuine
   // user cancellation: archiving just closes the task out, it doesn't
   // mean the run's work was rejected. See internal/automation.RunStatusArchived.
-  archived: { variant: "outline", labelKey: "automations:runStatusArchived" },
+  archived: { variant: "outline", label: "Archived" },
   // The generating task no longer exists, or its current primary session
   // is CANCELLED — a real cancellation, distinct from archived.
   // See internal/automation.RunStatusCancelled.
-  cancelled: { variant: "outline", labelKey: "automations:runStatusCancelled" },
+  cancelled: { variant: "outline", label: "Cancelled" },
 };
 
 type RunRowProps = {
   run: AutomationRun;
-  taskClickable: boolean;
   onDelete: (id: string) => void;
   onNavigate: (taskId: string) => void;
 };
 
-function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
-  const { t } = useTranslation();
+function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
-  const rowClickable = taskClickable && !!run.task_id;
+  // Any run that produced a task links to it, run-mode included. Run mode
+  // keeps the task off the board, which is not a reason to withhold the only
+  // route to what the run actually said.
+  const rowClickable = !!run.task_id;
   return (
     <TableRow
       className={
@@ -71,21 +68,27 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
           : "group hover:bg-transparent focus-within:bg-transparent"
       }
       onClick={rowClickable ? () => onNavigate(run.task_id) : undefined}
+      data-testid={`run-row-${run.id}`}
+      // The truncated task id used to be a column, and tooling identified a row
+      // by reading it. That column collapsed into Outcome, so the association
+      // lives here instead of being inferred from rendered copy.
+      data-task-id={run.task_id || undefined}
     >
-      {/* trigger_type is the persisted TriggerType identifier the backend
-          stored on the run — an id, not copy. */}
       <TableCell className="text-sm">{run.trigger_type}</TableCell>
       <TableCell>
-        <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
+        <Badge variant={badge.variant}>{badge.label}</Badge>
       </TableCell>
-      <TableCell className="text-sm font-mono">
-        {run.task_id ? run.task_id.slice(0, 8) : "-"}
+      <TableCell
+        className={`text-sm max-w-[420px] truncate ${
+          run.error_message ? "text-destructive" : "text-muted-foreground"
+        }`}
+        title={run.error_message || run.summary || undefined}
+        data-testid="run-outcome"
+      >
+        {run.error_message || run.summary || "-"}
       </TableCell>
-      <TableCell className="text-sm text-muted-foreground">
+      <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
         {formatRelativeTime(run.created_at)}
-      </TableCell>
-      <TableCell className="text-sm text-destructive max-w-[200px] truncate">
-        {run.error_message || "-"}
       </TableCell>
       <TableCell>
         <Button
@@ -97,7 +100,7 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
             e.preventDefault();
             onDelete(run.id);
           }}
-          title={t("automations:deleteRun")}
+          title="Delete run"
           data-testid="delete-run"
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -110,7 +113,6 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
 type DeleteAllButtonProps = { disabled: boolean; onConfirm: () => void };
 
 function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
-  const { t } = useTranslation();
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -119,7 +121,7 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
           size="icon-sm"
           className="cursor-pointer text-destructive hover:text-destructive"
           disabled={disabled}
-          title={t("automations:deleteAllRuns")}
+          title="Delete all runs"
           data-testid="delete-all-runs"
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -127,19 +129,20 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{t("automations:deleteAllRunsTitle")}</AlertDialogTitle>
+          <AlertDialogTitle>Delete all runs?</AlertDialogTitle>
           <AlertDialogDescription>
-            {t("automations:deleteAllRunsDescription")}
+            This will permanently remove all run records for this automation — including any not
+            currently loaded — and their associated tasks. This cannot be undone.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={onConfirm}
             data-testid="delete-all-runs-confirm"
           >
-            {t("automations:deleteAll")}
+            Delete all
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -147,9 +150,65 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
   );
 }
 
-export function RunsSection({ automationId, executionMode, workspaceId }: RunsSectionProps) {
+/**
+ * Status filters for the run log. "Skipped" is deliberately one of them: a
+ * scheduled firing turned away by the concurrency cap writes a row and
+ * nothing else, so without a way to see those a paused automation looks
+ * identical to one that was never due.
+ */
+const STATUS_FILTERS: { value: RunStatus | "all"; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "task_created", label: "Running" },
+  { value: "succeeded", label: "Succeeded" },
+  { value: "failed", label: "Failed" },
+  { value: "skipped", label: "Skipped" },
+  // Both are read-time-derived terminal statuses the table already renders, so
+  // leaving them out here made those runs visible but unfilterable.
+  { value: "archived", label: "Archived" },
+  { value: "cancelled", label: "Cancelled" },
+];
+
+function StatusFilter({
+  runs,
+  value,
+  onChange,
+}: {
+  runs: AutomationRun[];
+  value: RunStatus | "all";
+  onChange: (value: RunStatus | "all") => void;
+}) {
+  return (
+    <div className="flex items-center gap-1 flex-wrap" data-testid="run-status-filter">
+      {STATUS_FILTERS.map((filter) => {
+        const count =
+          filter.value === "all"
+            ? runs.length
+            : runs.filter((run) => run.status === filter.value).length;
+        // Only offer a filter that would show something, so the row of chips
+        // reflects what this automation has actually done.
+        if (count === 0 && filter.value !== "all" && value !== filter.value) return null;
+        return (
+          <Button
+            key={filter.value}
+            variant={value === filter.value ? "secondary" : "ghost"}
+            size="sm"
+            className="cursor-pointer h-7 text-xs"
+            onClick={() => onChange(filter.value)}
+            data-testid={`run-filter-${filter.value}`}
+          >
+            {filter.label}
+            <span className="ml-1 text-muted-foreground">{count}</span>
+          </Button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<RunStatus | "all">("all");
   const { runs, loading, refresh, deleteRun, deleteAllRuns } = useAutomationRuns(
     automationId,
     workspaceId,
@@ -157,6 +216,10 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
   const router = useRouter();
 
   if (!automationId) return null;
+
+  const visibleRuns =
+    statusFilter === "all" ? runs : runs.filter((run) => run.status === statusFilter);
+  const emptyMessage = runs.length === 0 ? "No runs yet" : "No runs match this filter";
 
   return (
     <div className="space-y-3">
@@ -166,7 +229,7 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
           onClick={() => setExpanded(!expanded)}
         >
           <Label className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer">
-            {t("automations:recentRuns", { count: runs.length })}
+            Recent Runs ({runs.length})
           </Label>
           {expanded ? (
             <IconChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -182,7 +245,7 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
               className="cursor-pointer"
               onClick={refresh}
               disabled={loading}
-              title={t("automations:refresh")}
+              title="Refresh"
             >
               <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
@@ -190,32 +253,33 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
           </div>
         )}
       </div>
+      {expanded && runs.length > 0 && (
+        <StatusFilter runs={runs} value={statusFilter} onChange={setStatusFilter} />
+      )}
       {expanded && (
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent focus-within:bg-transparent">
-                <TableHead>{t("automations:runsColumnTrigger")}</TableHead>
-                <TableHead>{t("common:status")}</TableHead>
-                <TableHead>{t("automations:runsColumnTask")}</TableHead>
-                <TableHead>{t("automations:runsColumnTime")}</TableHead>
-                <TableHead>{t("automations:runsColumnError")}</TableHead>
+                <TableHead>Trigger</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>{t("automations:outcome")}</TableHead>
+                <TableHead>Time</TableHead>
                 <TableHead className="w-8" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {runs.length === 0 ? (
+              {visibleRuns.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
-                    {loading ? t("automations:loading") : t("automations:noRunsYet")}
+                  <TableCell colSpan={5} className="text-center text-muted-foreground py-4">
+                    {loading ? t("automations:loading") : emptyMessage}
                   </TableCell>
                 </TableRow>
               ) : (
-                runs.map((run) => (
+                visibleRuns.map((run) => (
                   <RunRow
                     key={run.id}
                     run={run}
-                    taskClickable={executionMode !== "run"}
                     onDelete={deleteRun}
                     onNavigate={(id) => router.push(`/tasks/${id}`)}
                   />

@@ -52,8 +52,17 @@ func TestFireTrigger_SkippedForConcurrencyCap_UpdatesLastEvaluatedAt(t *testing.
 		t.Fatal(err)
 	}
 
-	if err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:trig:1"); err != nil {
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "scheduled:trig:1")
+	if err != nil {
 		t.Fatalf("FireTrigger returned error for a skip: %v", err)
+	}
+	// A skip must be reported as one. Callers that tell a human what happened
+	// cannot distinguish it from a real fire otherwise.
+	if !result.Skipped {
+		t.Fatal("expected FireTrigger to report the concurrency-cap skip")
+	}
+	if result.Reason == "" {
+		t.Fatal("expected a reason explaining the skip")
 	}
 
 	runs, err := svc.store.ListRuns(ctx, a.ID, 10)
@@ -182,7 +191,7 @@ func TestFireTrigger_ConcurrencyCapCheckError_DoesNotAdvanceLastEvaluatedAt(t *t
 		t.Fatal(err)
 	}
 
-	if err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), ""); err == nil {
+	if _, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), ""); err == nil {
 		t.Fatal("expected FireTrigger to return the concurrency-cap check error")
 	}
 
@@ -240,8 +249,12 @@ func TestFireTrigger_ArchivedTaskRun_DoesNotBlockConcurrencyCap(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "new-run"); err != nil {
+	result, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeScheduled, json.RawMessage(`{}`), "new-run")
+	if err != nil {
 		t.Fatalf("FireTrigger returned error: %v", err)
+	}
+	if result.Skipped {
+		t.Fatalf("expected the trigger to fire, got skipped: %s", result.Reason)
 	}
 
 	runs, err := svc.store.ListRuns(ctx, a.ID, 10)

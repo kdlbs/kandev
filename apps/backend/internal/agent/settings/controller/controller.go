@@ -56,6 +56,7 @@ type Controller struct {
 	sessionChecker  SessionChecker
 	watcherDeps     WatcherDependencyChecker
 	routingTierDeps RoutingTierDependencyChecker
+	automationDeps  AutomationDependencyChecker
 	mcpService      *mcpconfig.Service
 	modelCache      *modelfetcher.Cache
 	hostUtility     *hostutility.Manager
@@ -80,6 +81,14 @@ func (c *Controller) SetRoutingTierDependencyChecker(r RoutingTierDependencyChec
 	c.routingTierDeps = r
 }
 
+// SetAutomationDependencyChecker wires in the automation enumerator so
+// DeleteProfile can name the automations that would be left pointing at a
+// deleted profile. Optional; when unset the delete path keeps its
+// pre-automation behaviour.
+func (c *Controller) SetAutomationDependencyChecker(a AutomationDependencyChecker) {
+	c.automationDeps = a
+}
+
 // ErrProfileInUseDetail is returned when a profile cannot be deleted because
 // active sessions or external integration watchers reference it. The UI uses
 // the breakdown to render a "this will also disable N watchers — continue?"
@@ -88,11 +97,13 @@ type ErrProfileInUseDetail struct {
 	ActiveSessions []agentdto.ActiveTaskInfo
 	Watchers       []WatcherReference
 	RoutingTiers   []RoutingTierReference
+	Automations    []AutomationReference
 }
 
 func (e *ErrProfileInUseDetail) Error() string {
-	return fmt.Sprintf("agent profile is used by %d active session(s), %d watcher(s), and %d routing tier(s)",
-		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers))
+	return fmt.Sprintf(
+		"agent profile is used by %d active session(s), %d watcher(s), %d routing tier(s), and %d automation(s)",
+		len(e.ActiveSessions), len(e.Watchers), len(e.RoutingTiers), len(e.Automations))
 }
 
 // WatcherReference points at one issue/PR watcher row that uses the profile
@@ -124,6 +135,24 @@ type RoutingTierReference struct {
 // watcher stays enabled-but-orphaned until its next external trigger fires
 // the lazy preflight, which never happens for filters that match nothing
 // new after the profile is deleted.
+// AutomationReference points at one enabled automation that would be left
+// referencing a deleted agent profile. An automation is configuration rather
+// than a session: nothing is running, so it does not show up in the active-task
+// list, but its next firing would launch against a profile that no longer
+// exists.
+type AutomationReference struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// AutomationDependencyChecker enumerates enabled automations bound to an agent
+// profile.
+type AutomationDependencyChecker interface {
+	ListEnabledAutomationsByAgentProfile(ctx context.Context, agentProfileID string) ([]AutomationReference, error)
+	DisableAutomationsByAgentProfile(ctx context.Context, agentProfileID string) ([]AutomationReference, error)
+}
+
 type WatcherDependencyChecker interface {
 	ListWatchersByAgentProfile(ctx context.Context, agentProfileID string) ([]WatcherReference, error)
 	DisableWatchersByAgentProfile(ctx context.Context, agentProfileID, cause string) ([]WatcherReference, error)

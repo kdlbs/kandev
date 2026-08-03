@@ -27,6 +27,7 @@ The office umbrella covers kandev's autonomous-agent product surface: workspaces
 | [live-updates](office/live-updates.md) | draft |
 | [inbox](office/inbox.md) | draft |
 | [assistant](office/assistant.md) | draft |
+| [automation-runs](office/automation-runs.md) | draft |
 | [automations-settings](office/automations-settings.md) | draft |
 | [testing](office/testing.md) | shipped |
 | [unread-divider](office/unread-divider.md) | shipped |

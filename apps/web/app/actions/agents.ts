@@ -137,6 +137,7 @@ export async function updateAgentProfileAction(
 
 import type {
   ActiveSessionInfo,
+  AutomationReference,
   RoutingTierReference,
   WatcherReference,
 } from "@/lib/types/agent-profile-errors";
@@ -148,6 +149,7 @@ export type DeleteProfileResult =
       activeSessions: ActiveSessionInfo[];
       watchers: WatcherReference[];
       routingTiers: RoutingTierReference[];
+      automations: AutomationReference[];
     }
   | { status: "error"; message: string };
 
@@ -170,12 +172,16 @@ export async function deleteAgentProfileAction(
     // A 409 is active sessions, referencing watchers, routing tier mappings, or a mix.
     // Treat any non-empty list as the conflict signal — a watcher-only
     // conflict (the new self-heal path) must still pop the dialog.
-    if (response.status === 409 && (body.active_sessions || body.watchers || body.routing_tiers)) {
+    if (
+      response.status === 409 &&
+      (body.active_sessions || body.watchers || body.routing_tiers || body.automations)
+    ) {
       return {
         status: "conflict",
         activeSessions: body.active_sessions ?? [],
         watchers: body.watchers ?? [],
         routingTiers: body.routing_tiers ?? [],
+        automations: body.automations ?? [],
       };
     }
     return {

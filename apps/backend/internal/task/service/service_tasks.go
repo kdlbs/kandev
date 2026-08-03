@@ -342,7 +342,11 @@ func (s *Service) validateCreateTaskRequest(req *CreateTaskRequest) error {
 		return err
 	}
 	isOffice := isOfficeRequest(req)
-	if !req.IsEphemeral && !isOffice && req.WorkflowID == "" {
+	// Automation runs never land on a board, so they need no workflow — the
+	// trigger is the start signal, not a column. They are still ordinary,
+	// persistent tasks; only their origin keeps them out of board reads.
+	isAutomationRun := req.Origin == models.TaskOriginAutomationRun
+	if !req.IsEphemeral && !isOffice && !isAutomationRun && req.WorkflowID == "" {
 		return fmt.Errorf("workflow_id is required for non-ephemeral tasks")
 	}
 	if req.IsEphemeral && req.WorkflowID != "" {

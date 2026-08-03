@@ -8,13 +8,15 @@ owner: jcfs
 
 ## Why
 
-Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR event, or on a webhook) without first navigating to per-workspace settings, picking the right workspace, then drilling down into a workflow. They also want two execution flavors: **tracked work** that shows up on the kanban as a real task (current default), and **fire-and-forget runs** whose output is just informational — not kanban clutter.
+Users want to schedule an agent to run a prompt on a cron (or on a GitHub PR event, or on a webhook) without first navigating to per-workspace settings, picking the right workspace, then drilling down into a workflow. What they get back is informational — a report to read — so it must not land on the board as if it were work someone has to move.
 
-The Automations feature, originating in PR #406, gives kandev a standalone trigger-based subsystem (cron, GitHub PR events, webhooks) that turns triggers into Tasks. This spec extends it with two changes: (1) a per-automation `execution_mode` choice between **task** (existing behavior) and **run** (new — creates an ephemeral kanban-hidden task that surfaces only through the AutomationRun row), and (2) a flat `/settings/automations` entry point that drops the per-workspace nesting from the sidebar.
+The Automations feature, originating in PR #406, gives kandev a standalone trigger-based subsystem (cron, GitHub PR events, webhooks) that turns triggers into Tasks. This spec covers the automation object itself — its fields, triggers, and firing semantics. Where those runs are read and watched is `automation-runs.md`; that split is by concern, not by location, so keep both in step when either changes.
+
+An earlier revision offered two execution flavours, `task` and `run`. That choice is withdrawn: it welded *where a run appears* to *how a run lives*, which no label could carry, and the clutter problem it existed to solve is now handled by giving runs their own destination rather than by hiding them.
 
 ## What
 
-- Every automation has an `execution_mode` field — `task` (default) or `run`. The choice is per-automation, editable in the editor.
+- Every automation produces the same kind of run. There is no execution-mode choice — the task/run selector is removed, and the field is ignored. A control that decided both *where a run appeared* and *how it lived* could not be labelled honestly: "Run" silently meant the worktree was destroyed, "Task" silently meant the schedule jammed after one firing.
 - Every automation has an optional `repository_ids` field — an ordered list of repository IDs. When non-empty, scheduled and webhook firings pin the task to every listed repository (each on its own default branch, mirroring how the task-creation dialog resolves an explicit repository). When empty, falls back to the workspace's first repository (legacy behavior). `github_pr` triggers always use the PR's own repository and ignore `repository_ids`.
 - The editor's repository picker matches the task-creation dialog's UX: lists both registered workspace repositories AND filesystem-discovered repositories under the workspace's roots. Picking a discovered repo registers it with the workspace at automation-save time (one round-trip via `createRepositoryAction`), then stores the resulting id on the automation. After the first save, the selection is promoted from `discovered` to `registered` so subsequent edits don't try to re-register.
 - **Multi-repository selection is gated on the selected executor profile's capability**, reusing the task-creation dialog's `getMultiRepoExecutorDisabledReason` predicate (`apps/web/components/task-create-dialog-multi-repo-guard.ts`): `worktree`, `local_docker`, `ssh`, and `sprites` executor types support sibling repositories; `local`, `local_pc`, and `remote_docker` do not.
@@ -22,25 +24,35 @@ The Automations feature, originating in PR #406, gives kandev a standalone trigg
   - When the selected executor profile's type does not support multi-repo, the picker renders as today's single dropdown (registered/discovered repos, or "Auto").
   - The Executor Profile picker disables executor profiles that don't support multi-repo whenever two or more repositories are currently selected, with the same disabled-reason text as the task-creation dialog, so a user cannot silently strand a multi-repository automation on an incompatible executor.
   - Automations created via the WS API directly (bypassing the editor) may still combine an incompatible executor with multiple repository IDs; this is a client-side authoring guard, not a backend rejection. Task launch on an incompatible executor fails the same way manual multi-repo task creation would.
-- `execution_mode = task`: trigger fires → a normal kanban task is created (current PR #406 behavior). Task is visible on the kanban, commentable, reviewable, and has full lifecycle.
-- `execution_mode = run`: trigger fires → an ephemeral task is created (`is_ephemeral = true`, `origin = "automation_run"`) so the existing session pipeline still launches an agent. The kanban hides ephemeral tasks. The AutomationRun row is the surfaced artifact; the linked task is plumbing only.
-- Run-mode automations **auto-start** their agent regardless of the workflow step's `auto_start_agent` setting — the user never opens the task to drag it, so the trigger MUST be the start signal.
+- A trigger fires → a task is created with `origin = "automation_run"` so the existing session pipeline launches an agent. That task:
+  - **SHALL NOT appear on the kanban or in the task list.** It is hidden by its `origin`, not by ephemerality. Automation output has its own destination (`automation-runs.md`); the board stays the human work list.
+  - **SHALL keep its worktree.** It is not reaped when the turn ends. The files a run writes are usually the point of running it, and an agent that ends by asking a question needs a workspace in which to be answered.
+  - **SHALL be repliable.** A run is a thread the user can open and continue, not a fire-and-forget transcript.
+  - **SHALL reach a terminal run status on its own**, keyed on `origin`, so `max_concurrent_runs` frees up without a human archiving anything.
+- A firing produces **both** a task and its run row, or neither. The run row is the only thing that makes the work reachable — the task is hidden from every board and list by its `origin` — so a task without one is invisible, unfinalizable, and holds no concurrency slot anyone can see. If the run row cannot be written, the task created for it is deleted rather than left behind.
+- Workflow and workflow step are therefore optional for every automation: no automation run is placed on a board, so no automation needs a starting column.
+- Because the run row is the surfaced artifact, it MUST actually surface the artifact: each row carries the tail of the agent's last message and links to that run's transcript. Hiding a task from the board is not a reason to withhold the only route to what it said. The reading surface is specified in `automation-runs.md`.
+- The run log offers a status filter that includes **Skipped**, **Archived** and **Cancelled**. A scheduled firing turned away by the concurrency cap writes a run row and nothing else, so without it a paused automation is indistinguishable from one that was never due.
+- Automations **auto-start** their agent regardless of any workflow step's `auto_start_agent` setting — nobody opens the task to drag it, so the trigger MUST be the start signal.
 - The sidebar exposes a single top-level **Automations** entry pointing at `/settings/automations`. The per-workspace `Automations` sub-link is removed (PR #406 added it; this spec drops it).
 - `/settings/automations` is a client route that branches on the workspace list already loaded into the SPA (from the boot payload / store) — it does **not** fetch the workspace list on load:
   - 0 workspaces → empty state with "Create workspace" CTA.
   - 1 workspace → redirect to `/settings/workspace/<id>/automations`.
   - 2+ workspaces → workspace picker (grid of cards, click to enter).
-- The automations table shows the execution mode as a badge column ("Task" / "Run") so the user can scan which automations clutter the kanban and which don't.
+- Firing an automation by hand reports whether a run actually started. A trigger turned away by the concurrency cap, by dedup, or because the automation is disabled is reported as skipped with a reason — never as a successful fire, and it does not advance `last_triggered_at`.
+- A scheduled trigger carries a timezone alongside its cron expression. An empty timezone means UTC. The editor composes the schedule as a sentence and states the resolved next firing in both the chosen zone and UTC, because a cron expression alone never says which instant it means.
+- Cron expressions are validated with the scheduler's own parser at add/update time. Client-side validation MUST NOT be the only gate: an expression the scheduler cannot parse would otherwise save and then silently never fire.
+- The workflow offered for an automation MUST belong to that automation's workspace, enforced server-side. A UI filter is not an authorization boundary, and a workflow name present in two workspaces makes the wrong one look right.
 
 ## Data model
 
-Builds on PR #406's `internal/automation/` schema. `execution_mode` folded into the canonical `CREATE TABLE` (no in-branch migration needed). Repository selection moved from a single column to a join table:
+Builds on PR #406's `internal/automation/` schema. `execution_mode` is retained in the canonical `CREATE TABLE` so existing rows need no migration, but nothing reads it. Repository selection moved from a single column to a join table:
 
-```
-automations.execution_mode TEXT NOT NULL DEFAULT 'task'   -- 'task' | 'run'
+```sql
+automations.execution_mode TEXT NOT NULL DEFAULT 'task'   -- retained for existing rows; no longer read
 ```
 
-```
+```text
 automation_repositories
   id            string  PK
   automation_id string  FK -> automations.id (ON DELETE CASCADE)
@@ -54,13 +66,15 @@ The legacy `automations.repository_id TEXT NOT NULL DEFAULT ''` column is droppe
 
 `CreateAutomation`/`UpdateAutomation` validate that every submitted repository ID belongs to the automation's `workspace_id` and reject unknown, foreign, or duplicate IDs.
 
-The `tasks.is_ephemeral` and `tasks.origin` columns already exist (used by quick-chat). Run-mode automations set both at task-create time. New task origin constant `TaskOriginAutomationRun = "automation_run"` lives in `internal/task/models/models.go`.
+The `tasks.origin` column already exists (used by quick-chat); the origin constant `TaskOriginAutomationRun = "automation_run"` lives in `internal/task/models/models.go`.
 
-`automation_runs.task_id` continues to reference the created task for both modes. Run mode just means that task is hidden.
+`is_ephemeral` previously carried two unrelated meanings — "hide from the board" AND "reap the worktree, never finalize the run". Those are now separated. Automation tasks are hidden by `origin`, keep their worktree, and finalize on `origin`. `is_ephemeral` is no longer set for automation runs and retains only its original quick-chat meaning.
+
+`automation_runs.task_id` continues to reference the created task. The task is hidden from the board by its `origin`; it is otherwise an ordinary task.
 
 ## API surface
 
-PR #406's WS-based API gets `execution_mode` and `repository_ids` (an ordered `string[]`, replacing the old singular `repository_id`) on:
+PR #406's WS-based API gets `repository_ids` (an ordered `string[]`, replacing the old singular `repository_id`) on the payloads below. `execution_mode` is accepted and ignored on input, and omitted from responses; the column stays only so existing rows need no migration.
 
 - `automation.create` payload (input) — `repository_ids?: string[]`
 - `automation.update` payload (input) — `repository_ids?: string[]`; a present-but-empty array clears the automation's repositories, an absent field leaves them unchanged (matches the existing task-update `repositories` convention)
@@ -70,16 +84,21 @@ No new endpoints. No HTTP routes change. Sidebar deep-links to `/settings/automa
 
 ## State machine
 
-Automation lifecycle unchanged. Run-mode and task-mode share the trigger → AutomationRun pipeline. The only branching is in `orchestrator/event_handlers_automation.go::handleAutomationTriggered`:
+One pipeline, no branches. Every firing takes the same path through
+`orchestrator/event_handlers_automation.go::handleAutomationTriggered`:
 
-```
+```text
 trigger fires
   → resolve repository
-  → CreateReviewTask(IsEphemeral=mode==run, Origin=automation_run)
+  → CreateReviewTask(Origin=automation_run)          -- never ephemeral
   → record AutomationRun (status=task_created, task_id set)
   → associate PR if github_pr trigger
-  → if mode==run OR step.auto_start_agent: StartTask
-  → for mode==run: agent terminal turn outcome marks AutomationRun succeeded/failed and tears down the execution/worktree
+  → StartTask                                        -- unconditional; the trigger IS the start signal
+      ↳ if the launch fails, the run is marked failed immediately: no completion
+        event is coming, and an open run holds a max_concurrent_runs slot forever
+  → agent terminal turn outcome marks the AutomationRun succeeded/failed and stops
+    the execution. The worktree stays, and a successful run's session parks in
+    WAITING_FOR_INPUT rather than COMPLETED so the user can reply to it.
 ```
 
 ## Permissions
@@ -91,31 +110,37 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 | Dependency / invariant                                                    | Behavior                                                                                                                                                                             |
 | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | No workspaces are loaded into the SPA store when the flat page renders    | Page renders the empty state (treating "none loaded" as "no workspaces"). The page reads the store and never fetches on load, so there is no per-render fetch that can fail or loop. |
-| Run-mode automation's task starts but agent fails                         | AutomationRun transitions from `task_created` to `failed`; the row surfaces the failure instead of remaining "Running".                                                              |
-| Run-mode automation's agent completes its turn successfully               | AutomationRun transitions from `task_created` to `succeeded`; the agent execution and ephemeral worktree are torn down.                                                              |
-| Run-mode automation's turn is cancelled by the user                       | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down.                  |
-| User manually drags a run-mode task on the kanban                         | Cannot happen — ephemeral tasks are hidden from the kanban. The "auto-start" rule fires once at trigger time; no manual recovery path.                                               |
-| Existing automation upgraded from pre-execution_mode version              | Migration sets `execution_mode = 'task'` for all existing rows. UI shows them with "Task" badge.                                                                                     |
-| Existing automation upgraded from before `automation_repositories` existed | Its non-empty legacy `repository_id` is backfilled into `automation_repositories` at position 0 before the column is dropped; an empty legacy value backfills nothing (unchanged fallback-to-first-repository behavior).                                                              |
+| Automation's task starts but the agent fails                              | AutomationRun transitions from `task_created` to `failed`; the row surfaces the failure instead of remaining "Running".                                                              |
+| Automation's agent completes its turn successfully                        | AutomationRun transitions from `task_created` to `succeeded`; the agent execution is stopped. The worktree stays, and the session parks in `WAITING_FOR_INPUT` so the run can be answered. |
+| Automation's turn is cancelled by the user                                | AutomationRun transitions from `task_created` to `failed` with a cancellation error; the hidden session is marked `CANCELLED` and the agent execution is torn down.                  |
+| User manually drags an automation's task on the kanban                    | Cannot happen — automation tasks are hidden from the board by their `origin`. The "auto-start" rule fires once at trigger time; recovery is by replying to the run, not by dragging.  |
+| Automation that previously ran in `task` mode                             | Its next firing no longer produces a board card. Cards already on the board are left alone; they are ordinary tasks now and can be archived by hand.                                 |
+| Automation that previously ran in `run` mode                              | Its next firing keeps its worktree instead of having it reaped, so the run's output survives and the run can be answered.                                                            |
+| A finished run parks in `WAITING_FOR_INPUT` so it stays answerable          | That state is in the "active session" set, so agent-profile deletion and its blocker list exclude automation runs **in that state only**. One nightly report must not permanently block deleting its profile, nor appear as a blocker the user cannot find on any board. The accepted consequence is that deleting the profile makes those parked conversations non-resumable — replying to an old run afterwards fails. |
+| Agent-profile deletion while an automation run is `CREATED`, `STARTING` or `RUNNING` | Blocked, and the run is named in the confirmation. The run is using the profile right now, so this is the same hazard as for any other live task; only the parked state is exempt, not the origin. |
+| A run left in `task_created` before this change                           | Finalization now keys on `origin`, so the stuck run reaches a terminal status on the next completion event and stops holding `max_concurrent_runs`.                                  |
+| The run row cannot be written after the task is created | The task is deleted and the firing is abandoned, so nothing survives that no run points at. A delete that itself fails is logged with both ids — the task is then genuinely orphaned and needs manual cleanup, which is why it is reported rather than swallowed. |
 | `automation.create`/`automation.update` submits a `repository_ids` entry outside the automation's workspace, or a duplicate ID | Request is rejected with a validation error; no partial repository list is persisted.                                                                                                                              |
 | Editor has 2+ repositories selected and the user picks an executor profile whose type doesn't support multi-repo | Editor disables that executor profile in the picker with the same reason text as the task-creation dialog; the WS API itself does not reject the combination if reached directly. |
-| User edits `execution_mode` from `task` to `run` on an enabled automation | Next firing uses the new mode. In-flight runs are unaffected.                                                                                                                        |
 
 ## Persistence guarantees
 
-`automations.execution_mode` and `tasks.is_ephemeral` survive restart. `automation_repositories` rows survive restart and automation edits (replaced transactionally on update, cascade-deleted with the automation). Run-mode AutomationRuns and their hidden tasks persist normally. The kanban filter on `is_ephemeral` is applied at query time, not at write time — so re-marking a task non-ephemeral via direct DB update would reveal it.
+AutomationRuns and their tasks persist normally, worktree included — an automation run survives a restart exactly as a hand-created task does. `automation_repositories` rows survive restart and automation edits (replaced transactionally on update, cascade-deleted with the automation). The board filter is applied at query time against `origin`, not at write time, so the hiding is a read-side decision and nothing about the task row is special-cased on write.
 
 ## Scenarios
 
-- **GIVEN** a user creates an automation with `execution_mode = "task"` and a cron trigger, **WHEN** the cron fires, **THEN** a normal kanban task appears with the rendered title; the user can click it, drag it, comment on it.
-- **GIVEN** a user creates an automation with `execution_mode = "run"` and a cron trigger, **WHEN** the cron fires, **THEN** an ephemeral task is created (not visible on the kanban), the agent starts automatically, and the AutomationRun row in the automation's history shows the result.
-- **GIVEN** a run-mode automation agent finishes a turn with `stop_reason = "end_turn"`, **WHEN** the complete event is handled, **THEN** the AutomationRun row is marked `succeeded` and the agent execution is stopped instead of waiting for process exit.
+- **GIVEN** any automation with a cron trigger, **WHEN** the cron fires, **THEN** a task is created that does NOT appear on the kanban or in the task list, the agent starts automatically, and the run appears in the automation's activity.
+- **GIVEN** an automation run whose agent ended by asking a question, **WHEN** the user opens that run, **THEN** they can reply to it and the agent continues in the same worktree.
+- **GIVEN** an automation run that wrote files, **WHEN** the run finishes, **THEN** those files are still present in its worktree.
+- **GIVEN** an automation at `max_concurrent_runs = 1` whose run has completed, **WHEN** the next scheduled firing is due, **THEN** it runs — no archiving required.
+- **GIVEN** an automation agent finishes a turn with `stop_reason = "end_turn"`, **WHEN** the complete event is handled, **THEN** the AutomationRun row is marked `succeeded`, the agent execution is stopped instead of waiting for process exit, and the session is left answerable rather than `COMPLETED`.
+- **GIVEN** a firing whose task is created but whose launch then fails, **WHEN** the error is handled, **THEN** the AutomationRun is marked `failed` with the launch error, so the automation's concurrency slot is released instead of jamming permanently.
+- **GIVEN** a firing whose task is created but whose run row cannot be written, **WHEN** the error is handled, **THEN** the task is deleted and no agent is launched, so no hidden task survives that nothing can reach or finalize.
 - **GIVEN** a user opens `/settings/automations` in an install with one workspace, **WHEN** the page loads, **THEN** the browser redirects to `/settings/workspace/<id>/automations`.
 - **GIVEN** a user opens `/settings/automations` in an install with three workspaces, **WHEN** the page loads, **THEN** a workspace picker is shown; clicking one navigates to its automations.
 - **GIVEN** a user opens `/settings/automations` in a fresh install with zero workspaces, **WHEN** the page loads, **THEN** an empty-state card explains "create a workspace first" with a CTA.
 - **GIVEN** a user opens `/settings/automations` in a multi-workspace install, **WHEN** the page loads, **THEN** it renders the picker from the already-loaded workspace list and issues **no** additional `GET /api/v1/workspaces` request on load (guards against the render/refetch loop that a server-style `await listWorkspaces()` in the page body caused after the SPA migration).
-- **GIVEN** a user toggles an existing task-mode automation to run mode in the editor, **WHEN** the next trigger fires, **THEN** the resulting task is hidden from the kanban; previously-created tasks (from task-mode firings) remain visible.
-- **GIVEN** a run-mode automation triggered by a GitHub PR event, **WHEN** the trigger fires, **THEN** the PR is associated with the ephemeral task via `AssociatePRWithTask` exactly as in task mode.
+- **GIVEN** an automation triggered by a GitHub PR event, **WHEN** the trigger fires, **THEN** the PR is associated with the created task via `AssociatePRWithTask` as before.
 - **GIVEN** a scheduled automation with `repository_ids` set to one repo, **WHEN** the cron fires, **THEN** the resulting task is pinned to that repo's default branch — regardless of whether the workspace has other repositories.
 - **GIVEN** a scheduled automation with `repository_ids` set to two or more repos, **WHEN** the cron fires, **THEN** the resulting task is created with all of them attached, each pinned to its own default branch, same as a manually created multi-repository task.
 - **GIVEN** a scheduled automation with `repository_ids = []` in a multi-repo workspace, **WHEN** the cron fires, **THEN** the task uses the workspace's first repository (legacy fallback) and a warning is logged.
@@ -125,16 +150,16 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 - **GIVEN** the editor has two or more repositories selected, **WHEN** the user opens the Executor Profile picker, **THEN** profiles whose type doesn't support multi-repo are disabled with an explanatory reason, matching the task-creation dialog's guard text.
 - **GIVEN** an automation created before `repository_ids` existed with a non-empty legacy `repository_id`, **WHEN** the schema migration runs, **THEN** the editor shows that repository pre-selected as the sole row after upgrade.
 - **GIVEN** a user picks a discovered (not-yet-registered) repository in the editor and clicks Save, **WHEN** the save flow runs, **THEN** the discovered repo is registered with the workspace first (`createRepositoryAction`), its new id is written onto the automation, and the picker selection is promoted to `registered` so re-saving doesn't duplicate the registration.
-- **GIVEN** an upgrade from a pre-execution_mode kandev version, **WHEN** the user opens the editor for an existing automation, **THEN** the execution-mode selector defaults to "Task" (preserving previous behavior).
+- **GIVEN** an automation created before this change, **WHEN** the user opens the editor, **THEN** no execution-mode selector is shown and the automation behaves like every other one.
 
 ## Out of scope
 
-- **AutomationRun-as-true-session-owner** (instead of ephemeral task). The cleaner model — make `task_sessions.task_id` nullable, add `task_sessions.automation_run_id`, route run-mode bypassing tasks entirely — was considered and explicitly deferred to a future PR. It touches ~50+ files in the orchestrator + session pipeline + WS layer + frontend state, which is out of scope here. The ephemeral-task path is the pragmatic shim.
+- **AutomationRun-as-true-session-owner** (instead of ephemeral task). The cleaner model — make `task_sessions.task_id` nullable, add `task_sessions.automation_run_id`, route automation runs bypassing tasks entirely — was considered and explicitly deferred to a future PR. It touches ~50+ files in the orchestrator + session pipeline + WS layer + frontend state, which is out of scope here. The origin-tagged-task path is the pragmatic shim.
 - **Agent-type primary picker.** PR #406's editor still picks an `agent_profile_id` (a fully configured profile), not a raw agent type (`claude` / `codex` / `opencode`). Switching to agent-type-primary requires plumbing changes in the orchestrator (which expects a profile id). Deferred.
 - **Auto-provisioned default workspace.** When no workspaces exist, the flat page shows a CTA; it does not auto-create one. Most installs already have a workspace (workspace setup is part of onboarding), so the CTA is sufficient for now.
 - **Cross-workspace automation listing** on the flat page. Multi-workspace installs see a picker, not a merged list. Merging would require a new list-all endpoint and a workspace column in the table.
-- A standalone AutomationRun detail page (showing session output for run-mode firings). Run-mode automations currently link to the linked task's detail page; since the task is hidden from the kanban it's reachable only by direct URL.
-- Webhook execution-mode override (e.g. webhook payload setting `execution_mode` per call). The execution mode is automation-level, not per-firing.
+- A standalone AutomationRun detail page showing session output inline. A run links to its task's detail page, which is where the transcript already lives; `automation-runs.md` covers how a reader reaches it.
+- Reinstating a per-automation choice about board placement. If an automation that *creates work* is wanted later, it should be asked as an outcome — "a report I read" vs "a task on my board" — not as an execution mode named after an internal enum.
 
 ## Open questions
 

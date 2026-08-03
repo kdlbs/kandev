@@ -1327,7 +1327,7 @@ func TestCompleteStreamFromCompletedExecutionSkipsDuplicateOfficeTeardown(t *tes
 func TestCompleteStreamFromCompletedExecutionSkipsDuplicateAutomationFinalize(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedRunModeAutomationSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
+	seedAutomationRunSession(t, repo, "t-auto-terminal", "s-auto-terminal", "exec-auto-terminal")
 
 	taskRepo := newMockTaskRepo()
 	mgr := &mockAgentManager{}
@@ -2328,7 +2328,9 @@ func TestHandleCompleteStreamEvent_NaturalOfficeCompleteStillIdle(t *testing.T) 
 		"natural office turn completion must still call StopAgent to tear down the executor")
 }
 
-func seedRunModeAutomationSession(
+// Automation tasks are ordinary, non-ephemeral tasks tagged by origin — the
+// task/run execution mode is withdrawn, so nothing here sets IsEphemeral.
+func seedAutomationRunSession(
 	t *testing.T,
 	repo *sqliterepo.Repository,
 	taskID, sessionID, executionID string,
@@ -2348,13 +2350,9 @@ func seedRunModeAutomationSession(
 		Title:       "Automation run",
 		Description: "run this",
 		State:       v1.TaskStateInProgress,
-		IsEphemeral: true,
 		Origin:      models.TaskOriginAutomationRun,
-		Metadata: map[string]interface{}{
-			"execution_mode": string(automation.ExecutionModeRun),
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}))
 	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
 		ID:        sessionID,
@@ -2366,10 +2364,10 @@ func seedRunModeAutomationSession(
 	seedExecutorRunning(t, repo, sessionID, taskID, executionID)
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing.T) {
+func TestHandleCompleteStreamEvent_AutomationRunStopsAndFinalizes(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
-	seedRunModeAutomationSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
+	seedAutomationRunSession(t, repo, "t-auto-run", "s-auto-run", "exec-auto-run")
 
 	mgr := &mockAgentManager{}
 	automationSvc := &mockAutomationRunService{}
@@ -2394,7 +2392,9 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 	require.Empty(t, automationSvc.failedTaskIDs)
 	gotSession, err := repo.GetTaskSession(ctx, "s-auto-run")
 	require.NoError(t, err)
-	require.Equal(t, models.TaskSessionStateCompleted, gotSession.State)
+	// Not COMPLETED: that state refuses resume, which would make a finished
+	// report unanswerable. Success lives on the AutomationRun row instead.
+	require.Equal(t, models.TaskSessionStateWaitingForInput, gotSession.State)
 
 	mgr.mu.Lock()
 	stopCalls := append([]stopAgentCall(nil), mgr.stopAgentArgs...)
@@ -2402,7 +2402,7 @@ func TestHandleCompleteStreamEvent_RunModeAutomationStopsAndFinalizes(t *testing
 	require.Equal(t, []stopAgentCall{{ExecutionID: "exec-auto-run"}}, stopCalls)
 }
 
-func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *testing.T) {
+func TestHandleCompleteStreamEvent_AutomationRunFailureStopsAndFinalizes(t *testing.T) {
 	cases := []struct {
 		name        string
 		data        map[string]interface{}
@@ -2444,7 +2444,7 @@ func TestHandleCompleteStreamEvent_RunModeAutomationFailureStopsAndFinalizes(t *
 			taskID := "t-auto-" + tc.name
 			sessionID := "s-auto-" + tc.name
 			executionID := "exec-auto-" + tc.name
-			seedRunModeAutomationSession(t, repo, taskID, sessionID, executionID)
+			seedAutomationRunSession(t, repo, taskID, sessionID, executionID)
 
 			mgr := &mockAgentManager{}
 			automationSvc := &mockAutomationRunService{}
