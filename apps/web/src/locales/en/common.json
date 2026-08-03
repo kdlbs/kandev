@@ -65,12 +65,14 @@
   "resetWatchTitle": "Reset {{label}}?",
   "resetting": "Resetting…",
   "retryPreview": "Retry preview",
+  "save": "Save",
   "settings": "Settings",
   "shell": "Shell",
   "status": "Status",
   "subtaskTitle": "Subtask title",
   "system": "System",
   "title": "Title",
+  "unsavedChanges": "Unsaved changes",
   "workspace": "Workspace",
   "workspaces": "Workspaces"
 }

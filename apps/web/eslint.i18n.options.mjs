@@ -853,4 +853,84 @@ export const i18nGuardFiles = [
   // and had its `group` converted here, but the rest of that file belongs to the
   // components/task migration and is not listed.
   "components/global-commands.tsx",
+  // Settings → Workspace: the workspace list and its inline create form, the
+  // workspace edit page (settings card, links card and delete dialog), the
+  // repositories page with its discover dialog, and the repository card with the
+  // branch-template help, copy-files help, custom-scripts editor and delete
+  // dialog it renders. Copy lives in a new `workspaces` namespace.
+  //
+  // This is a FILE list in `app/settings/workspace/`, not `**`, because the
+  // sibling `workspace-workflows-client.tsx` / `workspace-workflows-dialogs.tsx`
+  // and `use-workflow-creation.ts` belong to the workflow editor migrated in
+  // #2201 and are already listed above, while `[id]/automations/**` is a
+  // separate task.
+  //
+  // `components/settings/unsaved-indicator.tsx` is included: it is reached from
+  // nowhere else in the app today, so its "Unsaved changes" badge and its Save
+  // button were the only plain English left inside a repository card. Both
+  // strings went to `common` rather than `workspaces`, since the component is a
+  // generic settings primitive the remaining migrations will reuse.
+  //
+  // `components/settings/editable-card.tsx`, `settings-card.tsx` and
+  // `settings-section.tsx` are all in the closure and all already correct —
+  // the first two are pure render-prop/prop-forwarding shells and the third
+  // takes title/description as props. `editable-card.tsx` is already listed
+  // above from the Editors migration; the other two carry no literals at all.
+  //
+  // Two `.ts` files in this directory are deliberately ABSENT rather than
+  // listed. `workspace-repositories-validation.ts` is a single boolean predicate
+  // over the API response (`exists && is_git`) and
+  // `workspace-repositories-dirty.ts` is field-comparison logic — neither holds
+  // a string of any kind. Their user-facing validation MESSAGES live in
+  // `workspace-repositories-client.tsx`'s `useDiscoverDialog`, which is listed
+  // and migrated; `mode: "jsx-only"` could not have seen them there either,
+  // because they are `setManualValidation` arguments rather than JSX.
+  //
+  // Deliberately left in English, because each is PERSISTED rather than
+  // rendered: the seeded `New Repository` name in `buildDraftRepo`, and the
+  // `New Script` name and `echo ""` command the save path writes for a script
+  // left blank. Translating any of them would store a localized string in the
+  // database and render it later on surfaces this PR does not own — the same
+  // call as the `New Step` / `DEFAULT_CUSTOM_STEPS` names in #2201.
+  //
+  // Also English by design, each a VALUE the user types or a parser consumes,
+  // and each interpolated so the pseudo-locale cannot turn it into a dead
+  // pointer:
+  //   - The six branch-template placeholders `{title}` / `{title_full}` /
+  //     `{ticket}` / `{issue_key}` / `{task_id}` / `{suffix}`. `RenderTaskBranchName`
+  //     in `apps/backend/internal/worktree/config.go` substitutes each by exact
+  //     string match, so a translated token would land in the branch name
+  //     verbatim. Only the description beside each one is copy. Same for the
+  //     `feature/{ticket}-{title}` example and the default template
+  //     `feature/{title}-{suffix}`.
+  //   - Every copy-files glob: `.env`, `*`, `?`, `[abc]`, `**`, `**/.env`,
+  //     `{a,b}`, `.env{,.local}`, and the `:symlink` / `::symlink` suffixes.
+  //     The explanation around them is copy; the patterns are what the backend
+  //     matches on.
+  //   - `$PORT`, the environment variable a dev script reads.
+  //   - Every script placeholder (`#!/bin/bash` plus a command). Shell samples
+  //     the executor runs verbatim, the same call as `DEFAULT_DOCKERFILE` in the
+  //     executor editor.
+  //   - The `/absolute/path/to/repository`, `/path/to/repository` and `my-repo`
+  //     placeholders — value shapes, not prose.
+  //
+  // Repository names, paths, `owner/name` slugs, branch names and workspace
+  // names are user data throughout and are never built into a message by
+  // concatenation. The workspace delete dialog compares the typed text with the
+  // workspace's own name, so there is no translatable type-to-confirm token
+  // here to break; the name travels into the sentence as an interpolated value.
+  "app/settings/workspace/page.tsx",
+  "app/settings/workspace/[id]/page.tsx",
+  "app/settings/workspace/[id]/repositories/page.tsx",
+  "app/settings/workspace/workspace-edit-client.tsx",
+  "app/settings/workspace/workspace-not-found-card.tsx",
+  "app/settings/workspace/workspace-repositories-client.tsx",
+  "app/settings/workspace/workspace-repositories-dialog.tsx",
+  "app/settings/workspace/workspaces-page-client.tsx",
+  "components/settings/repository-branch-template-help.tsx",
+  "components/settings/repository-card.tsx",
+  "components/settings/repository-copy-files-help.tsx",
+  "components/settings/repository-custom-scripts.tsx",
+  "components/settings/repository-delete-dialog.tsx",
+  "components/settings/unsaved-indicator.tsx",
 ];
