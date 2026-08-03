@@ -7,6 +7,7 @@ import type { SessionModelsPayload } from "@/lib/types/session-runtime-payloads"
 import { registerSessionModelsHandlers } from "./session-models";
 
 const providerModelId = "gpt-5.6-sol";
+const providerModelName = "GPT-5.6 Sol";
 const reasoningOptionId = "reasoning_effort";
 const reasoningOptionName = "Reasoning Effort";
 const optionDescription = "Controls how much reasoning the model performs.";
@@ -151,6 +152,111 @@ describe("session.models_updated handler", () => {
     expect(store.getState().setSessionModels).toHaveBeenCalledWith(
       "session-1",
       expect.objectContaining({ currentModelId: "gpt-5.5" }),
+    );
+  });
+});
+
+describe("session.models_updated stale-empty guard", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("ignores a fully empty update when a populated entry already exists", () => {
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: "gpt-5.5",
+            models: [{ modelId: "gpt-5.5", name: "GPT-5.5" }],
+            configOptions: [],
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(makeMessage(makePayload("", { models: [], config_options: [] })));
+
+    expect(store.getState().setSessionModels).not.toHaveBeenCalled();
+    expect(store.getState().sessionModels.bySessionId["session-1"]).toEqual({
+      currentModelId: "gpt-5.5",
+      models: [{ modelId: "gpt-5.5", name: "GPT-5.5" }],
+      configOptions: [],
+    });
+  });
+
+  it("applies an empty update when no entry exists yet", () => {
+    const store = makeStore();
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(makeMessage(makePayload("", { models: [], config_options: [] })));
+
+    expect(store.getState().setSessionModels).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ currentModelId: "" }),
+    );
+  });
+
+  it("still applies a populated update over an existing entry", () => {
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: "gpt-5.5",
+            models: [{ modelId: "gpt-5.5", name: "GPT-5.5" }],
+            configOptions: [],
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(makeMessage(makePayload("gpt-5.6-sol")));
+
+    expect(store.getState().setSessionModels).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ currentModelId: "gpt-5.6-sol" }),
+    );
+  });
+
+  it("preserves populated config options when a partial relaunch update drops them", () => {
+    const existingConfigOptions = [
+      {
+        type: "select",
+        id: "model",
+        name: "Model",
+        currentValue: providerModelId,
+        options: [{ value: providerModelId, name: providerModelName }],
+      },
+    ];
+    const store = makeStore({
+      sessionModels: {
+        bySessionId: {
+          "session-1": {
+            currentModelId: providerModelId,
+            models: [{ modelId: providerModelId, name: providerModelName }],
+            configOptions: existingConfigOptions,
+          },
+        },
+      } as AppState["sessionModels"],
+    });
+    const handler = registerSessionModelsHandlers(store)["session.models_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload(providerModelId, {
+          models: [{ model_id: providerModelId, name: providerModelName }],
+          config_options: [],
+        }),
+      ),
+    );
+
+    expect(store.getState().setSessionModels).toHaveBeenCalledWith(
+      "session-1",
+      expect.objectContaining({ configOptions: existingConfigOptions }),
+    );
+    expect(store.getState().sessionModels.bySessionId["session-1"].configOptions).toEqual(
+      existingConfigOptions,
     );
   });
 });

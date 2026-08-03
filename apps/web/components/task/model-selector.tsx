@@ -12,6 +12,7 @@ import {
 } from "@/components/model-config-selector";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
+import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { useAvailableAgents } from "@/hooks/domains/settings/use-available-agents";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { setSessionConfigOption, setSessionModel } from "@/lib/api/domains/session-api";
@@ -32,6 +33,8 @@ type ModelSelectorProps = {
   sessionId: string | null;
   triggerClassName?: string;
 };
+
+const debug = createDebugLogger("model-selector:gate");
 
 function configValueKeys(value: unknown): string[] {
   if (!value || typeof value !== "object" || Array.isArray(value)) return [];
@@ -374,6 +377,17 @@ export const ModelSelector = memo(function ModelSelector({
     [sessionId, handleConfigChange],
   );
 
+  if (isDebug()) {
+    debug("render", {
+      sessionId: sessionId ?? "",
+      configHydrated,
+      currentModel: currentModel ?? "",
+      hasModelConfig: !!modelConfig,
+      modelOptionsLen: modelOptions.length,
+      configOptionIds: configOptions.map((o) => o.id),
+      willHide: !sessionId || !configHydrated || (!currentModel && !modelConfig),
+    });
+  }
   if (!sessionId || !configHydrated || (!currentModel && !modelConfig)) return null;
 
   return (
