@@ -17,6 +17,7 @@ import {
   MessageListStatus,
   MessageItem,
   UnreadDivider,
+  anchoredBarScrollOffsetPx,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
@@ -106,7 +107,7 @@ function MessageRow({
   return (
     <div
       id={`msg-${key}`}
-      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-0"
+      className="pb-2 scroll-mt-[calc(4rem+env(safe-area-inset-top))] sm:scroll-mt-[var(--anchored-bar-h,0px)]"
       style={{ overflowAnchor: "none" }}
     >
       {dividerBeforeItemKey === key && <UnreadDivider />}
@@ -188,10 +189,11 @@ type NativeMessageListBodyProps = {
  *   see TaskChatPanel) never resolve a divider, so they keep the
  *   original, unconditional scroll-to-bottom-on-mount behavior untouched.
  */
-function useScrollToDividerOrBottom(
+export function useScrollToDividerOrBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   itemCount: number,
   dividerBeforeItemKey: string | null | undefined,
+  anchoredBarOffsetPx: number,
 ) {
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
@@ -252,7 +254,7 @@ function useScrollToDividerOrBottom(
     }
     el.scrollTop = el.scrollHeight;
     didInitialScroll.current = true;
-  }, [itemCount, dividerBeforeItemKey]);
+  }, [itemCount, dividerBeforeItemKey, anchoredBarOffsetPx]);
 }
 
 /** Sentinel, status/footer, and transcript rows — everything below the
@@ -361,6 +363,7 @@ export const NativeMessageList = memo(
       onFirstMessageHiddenChange,
       stickyPromptBar,
       dividerBeforeItemKey,
+      anchoredBarHeight,
     }: MessageListProps,
     ref,
   ) {
@@ -389,7 +392,11 @@ export const NativeMessageList = memo(
       isLoadingMore,
       loadMore,
     });
-    useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey);
+    const anchoredBarOffsetPx = anchoredBarScrollOffsetPx(anchoredBarHeight);
+    useEffect(() => {
+      scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
+    }, [anchoredBarOffsetPx]);
+    useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey, anchoredBarOffsetPx);
     useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
       handleScrollToMessage,
     ]);

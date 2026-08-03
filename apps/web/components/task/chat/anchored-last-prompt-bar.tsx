@@ -17,7 +17,41 @@ type AnchoredLastPromptBarProps = {
   onScrollUp: () => void;
   /** Whether the scroll-to-last-prompt control is enabled. */
   showScrollToLastPrompt?: boolean;
+  /** Reports the pinned content's current rendered height (px) whenever it
+   * changes, and 0 on unmount. Measures the content row nested *inside*
+   * the grid item that the open/closed transform collapses via
+   * `grid-template-rows` — that grandchild is normal block content, not
+   * itself a grid item, so its own box keeps its natural (open) height
+   * even while an ancestor's `overflow-hidden` clips it down to nothing
+   * on screen. This lets a caller reserve scroll room for the bar ahead
+   * of it actually opening (see resolveLastPromptControls). */
+  onHeightChange?: (height: number) => void;
 };
+
+/** Reports `contentRef`'s rendered height to `onHeightChange` on mount and
+ * on every subsequent resize, and 0 once unmounted. */
+function useReportContentHeight(
+  contentRef: React.RefObject<HTMLDivElement | null>,
+  onHeightChange: ((height: number) => void) | undefined,
+) {
+  useLayoutEffect(() => {
+    const el = contentRef.current;
+    if (!el || !onHeightChange) return;
+
+    const report = () => onHeightChange(el.offsetHeight);
+    report();
+
+    let observer: ResizeObserver | undefined;
+    if ("ResizeObserver" in window) {
+      observer = new ResizeObserver(report);
+      observer.observe(el);
+    }
+    return () => {
+      observer?.disconnect();
+      onHeightChange(0);
+    };
+  }, [contentRef, onHeightChange]);
+}
 
 /** Proportional cap for the expanded view: 40% of the transcript scroll
  * container's actual height, so it stays sensible on both a tall
@@ -90,12 +124,15 @@ export function AnchoredLastPromptBar({
   isVisible,
   onScrollUp,
   showScrollToLastPrompt = true,
+  onHeightChange,
 }: AnchoredLastPromptBarProps) {
   const [expanded, setExpanded] = useState(false);
   const textRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const visible = stripSystemTags(promptText);
   const expandedMaxHeight = useExpandedMaxHeight(textRef);
   const canExpand = useCanExpand(textRef, expanded, visible);
+  useReportContentHeight(contentRef, onHeightChange);
 
   useLayoutEffect(() => {
     setExpanded(false);
@@ -122,7 +159,11 @@ export function AnchoredLastPromptBar({
         )}
       >
         <div className="min-h-0 overflow-hidden">
-          <div className="flex items-start gap-2 px-4 py-4">
+          <div
+            ref={contentRef}
+            data-testid="anchored-last-prompt-content"
+            className="flex items-start gap-2 px-4 py-4"
+          >
             {showScrollToLastPrompt && (
               <ScrollToLastPromptButton
                 onClick={onScrollUp}
