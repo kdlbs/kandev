@@ -22,7 +22,7 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Verification
 
 ```bash
-(cd apps/backend && go test ./internal/orchestrator -run 'TestCancelAgent_(PublishesCancellationPending|SurvivesCallerCancellation|DeduplicatesConcurrentCalls|ClearsCancellationPendingOnError)')
+(cd apps/backend && go test ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_(SurvivesCallerCancellation|DeduplicatesConcurrentCalls|ClearsCancellationPendingOnError)')
 make -C apps/backend test
 ```
 

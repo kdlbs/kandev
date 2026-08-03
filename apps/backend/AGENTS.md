@@ -101,6 +101,12 @@ apps/backend/
 - Handles event-driven state transitions via workflow engine
 - Located in `internal/orchestrator/`
 
+**Cancellation progress projection:** `orchestrator.Service.CancellationPending(sessionID)` is a
+runtime-only, session-scoped view of accepted cancellation work. The task DTO package exposes it
+through `CancellationPendingProvider`; boot state, task-session HTTP/WS lists and detail responses,
+and the session-scoped WebSocket notification must all project explicit `true` and `false` values.
+Do not persist this transient operation marker or turn it into a coarse session lifecycle state.
+
 **Watcher Dispatch Coordinator** (`internal/orchestrator/watcher_dispatch.go`) is the single pipeline that turns a freshly-observed external issue (Linear, Jira, future) into a Kandev task. Bus subscribers for each integration forward the event to `WatcherDispatchCoordinator.Dispatch` with a per-integration `WatcherSource` implementation (`source_linear.go`, `source_jira.go`). Source methods carry the integration-specific bits (reserve dedup, build task request, attach task ID, release, auto-start params); the coordinator owns the cross-cutting pipeline (create task, decide auto-start, error/release handling). Add a new watcher = implement `WatcherSource` + register a one-line bus subscriber. Do NOT add another `createXIssueTask` mirror.
 
 **GitHub App registration catalog** (`internal/github/`) stores zero or more managed/imported App

@@ -242,3 +242,34 @@ func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
 		t.Fatal("cancellation notification crossed the session boundary")
 	}
 }
+
+func TestTaskEventBroadcaster_CancellationSubscriptionIsSessionScoped(t *testing.T) {
+	log := testLogger()
+	eventBus := bus.NewMemoryEventBus(log)
+	hub := newTestHub(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	registerTestClient(hub, first)
+	registerTestClient(hub, second)
+	hub.SubscribeToSession(first, "session-1")
+	hub.SubscribeToSession(second, "session-2")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := RegisterTaskNotifications(ctx, eventBus, hub, log)
+	t.Cleanup(b.Close)
+
+	require.NoError(t, eventBus.Publish(ctx, events.TaskSessionCancellationChanged, bus.NewEvent(
+		events.TaskSessionCancellationChanged,
+		"test",
+		map[string]any{"session_id": "session-1", "cancellation_pending": true},
+	)))
+
+	var notification ws.Message
+	received := <-first.send
+	require.NoError(t, json.Unmarshal(received, &notification))
+	require.Equal(t, ws.ActionSessionCancellationChanged, notification.Action)
+	if clientReceived(second) {
+		t.Fatal("cancellation subscription crossed the session boundary")
+	}
+}

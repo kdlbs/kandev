@@ -155,11 +155,11 @@ layouts. Because reload persistence changes user-visible behavior on compact scr
 The backend-owned package is complete. Superseded Tasks 01 and 02 below remain as historical
 records; revised Tasks 03-06 are the authoritative implementation evidence.
 
-- Backend lifecycle focused tests: 3 passed; cancellation regression set: 16 passed; race set: 4
+- Backend lifecycle-focused tests: 3 passed; cancellation regression set: 16 passed; race set: 4
   passed.
 - Backend projection packages (`internal/task/dto`, `internal/task/handlers`, `internal/backendapp`,
-  `internal/gateway/websocket`): 676 passed.
-- Frontend focused contract/control/store tests: 104 passed; typecheck, lint, and i18n ratchet passed.
+  `internal/gateway/websocket`): 681 passed.
+- Frontend-focused contract/control/store tests: 104 passed; typecheck, lint, and i18n ratchet passed.
 - `make -C apps/backend test` and `make -C apps/backend build` completed without failures.
 - Desktop backend-owned switch/reload E2E: 1 passed; mobile-chrome reload E2E: 1 passed.
 - `git diff --check`: passed.

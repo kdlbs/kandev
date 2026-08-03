@@ -4000,7 +4000,6 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 		return func() {}
 	}
 
-	s.cancelOperationsPublishMu.Lock()
 	s.cancelOperationsMu.Lock()
 	if s.cancelOperations == nil {
 		s.cancelOperations = make(map[string]int)
@@ -4009,14 +4008,12 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 	s.cancelOperations[sessionID]++
 	s.cancelOperationsMu.Unlock()
 	if !wasPending {
-		s.publishCancellationPending(sessionID, true)
+		s.enqueueCancellationPending(sessionID, true)
 	}
-	s.cancelOperationsPublishMu.Unlock()
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
-			s.cancelOperationsPublishMu.Lock()
 			s.cancelOperationsMu.Lock()
 			count := s.cancelOperations[sessionID]
 			cleared := count <= 1
@@ -4027,9 +4024,8 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 			}
 			s.cancelOperationsMu.Unlock()
 			if cleared {
-				s.publishCancellationPending(sessionID, false)
+				s.enqueueCancellationPending(sessionID, false)
 			}
-			s.cancelOperationsPublishMu.Unlock()
 		})
 	}
 }
@@ -4063,6 +4059,60 @@ func (s *Service) publishCancellationPending(sessionID string, pending bool) {
 				zap.Bool("cancellation_pending", pending),
 				zap.Error(err))
 		}
+	}
+}
+
+type cancellationPublicationQueue struct {
+	pending    []bool
+	publishing bool
+}
+
+// enqueueCancellationPending keeps transition ordering per session without
+// holding the global queue mutex across the event-bus send. Calls for another
+// session can therefore enqueue and publish independently while a slow NATS
+// connection is draining this session's queue.
+func (s *Service) enqueueCancellationPending(sessionID string, pending bool) {
+	if s.eventBus == nil || sessionID == "" {
+		return
+	}
+
+	s.cancelOperationsPublishMu.Lock()
+	if s.cancelOperationsPublishQueues == nil {
+		s.cancelOperationsPublishQueues = make(map[string]*cancellationPublicationQueue)
+	}
+	queue := s.cancelOperationsPublishQueues[sessionID]
+	if queue == nil {
+		queue = &cancellationPublicationQueue{}
+		s.cancelOperationsPublishQueues[sessionID] = queue
+	}
+	queue.pending = append(queue.pending, pending)
+	if queue.publishing {
+		s.cancelOperationsPublishMu.Unlock()
+		return
+	}
+	queue.publishing = true
+	s.cancelOperationsPublishMu.Unlock()
+
+	s.drainCancellationPublicationQueue(sessionID, queue)
+}
+
+func (s *Service) drainCancellationPublicationQueue(
+	sessionID string,
+	queue *cancellationPublicationQueue,
+) {
+	for {
+		s.cancelOperationsPublishMu.Lock()
+		if len(queue.pending) == 0 {
+			queue.publishing = false
+			delete(s.cancelOperationsPublishQueues, sessionID)
+			s.cancelOperationsPublishMu.Unlock()
+			return
+		}
+		pending := queue.pending[0]
+		queue.pending = queue.pending[1:]
+		s.cancelOperationsPublishMu.Unlock()
+
+		s.publishCancellationPending(sessionID, pending)
 	}
 }
 

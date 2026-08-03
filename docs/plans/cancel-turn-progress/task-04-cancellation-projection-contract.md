@@ -72,7 +72,7 @@ conversation.
 Implemented the runtime projection contract across DTO, REST, boot, subscription, and WebSocket
 boundaries.
 
-- `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -count=1` — 676 passed.
+- `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -count=1` — 681 passed.
 - `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -run 'Cancellation|CancelPending|SessionDataProvider|TaskEventBroadcaster_CancellationIsSessionScoped|AppendSessionStateMessage_IncludesCancellationPending' -count=1` — 11 passed.
 - `git diff --check` — passed.
 
