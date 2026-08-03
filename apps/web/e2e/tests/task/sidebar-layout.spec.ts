@@ -252,8 +252,16 @@ test.describe("Sidebar layout — context menu", () => {
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
     });
+    const navigationTask = await apiClient.createTask(
+      seedData.workspaceId,
+      "Sidebar edit navigation task",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
     await apiClient.updateTaskState(task.id, "IN_PROGRESS");
-    await testPage.goto(`/t/${task.id}`);
+    await testPage.goto(`/t/${navigationTask.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     const initialUrl = testPage.url();

@@ -80,6 +80,7 @@ export function SidebarTaskEditDialog({
       mode="edit"
       workspaceId={workspaceId}
       workflowId={target?.workflowId ?? null}
+      lockedFields={{ workflow: true }}
       defaultStepId={target?.workflowStepId ?? null}
       steps={steps}
       editingTask={
