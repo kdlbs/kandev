@@ -56,6 +56,27 @@ export async function waitForSessionDone(
     .toBe(true);
 }
 
+export async function waitForSessionState(
+  apiClient: ApiClient,
+  options: {
+    taskId: string;
+    sessionId: string;
+    expectedState: string;
+    message: string;
+    timeout?: number;
+  },
+): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(options.taskId);
+        return sessions.find((session) => session.id === options.sessionId)?.state ?? null;
+      },
+      { timeout: options.timeout ?? 120_000, message: options.message },
+    )
+    .toBe(options.expectedState);
+}
+
 export async function waitForSessionEnvironment(
   apiClient: ApiClient,
   options: {
