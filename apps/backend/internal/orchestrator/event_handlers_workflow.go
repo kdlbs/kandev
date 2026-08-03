@@ -268,6 +268,9 @@ func (s *Service) ProcessOnTurnStart(ctx context.Context, taskID, sessionID stri
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.waitForCancellationWithGuard(ctx, sessionID, lock.Unlock, lock.Lock); err != nil {
+		return err
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -1783,6 +1786,12 @@ func (s *Service) fallbackFreshLaunchOnMissingExecution(
 	// the guarded state CAS below sees CANCELLED and aborts the replacement.
 	cancelLock, releaseCancelLock := s.acquireCancelInFlightGuard(sessionID)
 	cancelLock.Lock()
+	if s.isCancelInFlight(sessionID) {
+		cancelLock.Unlock()
+		releaseCancelLock()
+		requeue()
+		return &executor.SessionStateSupersededError{SessionID: sessionID, State: models.TaskSessionStateCancelled}
+	}
 	fresh, err := s.resetSessionForFreshFallback(ctx, sessionID)
 	cancelLock.Unlock()
 	releaseCancelLock()

@@ -2,6 +2,7 @@ import { expect } from "@playwright/test";
 import type { Page } from "@playwright/test";
 import { test as e2eTest } from "../../fixtures/test-base";
 import { ApiClient } from "../../helpers/api-client";
+import { expectCancelToSettlePromptly } from "../../helpers/cancellation";
 import { SessionPage } from "../../pages/session-page";
 
 type CancellationWorkflow = {
@@ -10,19 +11,6 @@ type CancellationWorkflow = {
   workingStepId: string;
   doneStepId: string;
 };
-
-const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
-
-async function expectCancelToSettlePromptly(session: SessionPage) {
-  const startedAt = Date.now();
-  await expect(session.cancelAgentButton()).not.toBeVisible({
-    timeout: CANCEL_SETTLE_TIMEOUT_MS,
-  });
-  await expect(session.idleInput()).toBeVisible({
-    timeout: CANCEL_SETTLE_TIMEOUT_MS,
-  });
-  expect(Date.now() - startedAt).toBeLessThan(CANCEL_SETTLE_TIMEOUT_MS);
-}
 
 async function createCancellationWorkflow(
   apiClient: ApiClient,

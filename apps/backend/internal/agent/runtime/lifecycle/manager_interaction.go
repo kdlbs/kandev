@@ -1191,6 +1191,18 @@ func (m *Manager) OwnsPromptGeneration(sessionID, executionID string, generation
 	return m.executionStore.OwnsPromptGeneration(sessionID, executionID, generation)
 }
 
+// GetPromptGenerationForSession returns the generation currently owned by the
+// active prompt for sessionID. Orchestrator cancellation uses this together
+// with the execution and turn IDs to reject stale terminal events while the
+// lifecycle manager waits for an acknowledged cancel to settle.
+func (m *Manager) GetPromptGenerationForSession(_ context.Context, sessionID string) (uint64, error) {
+	execution, exists := m.executionStore.GetBySessionID(sessionID)
+	if !exists {
+		return 0, fmt.Errorf("%w: %s", ErrNoExecutionForSession, sessionID)
+	}
+	return execution.promptGenerationSnapshot(), nil
+}
+
 // MarkReady marks an execution as ready for follow-up prompts AFTER A TURN.
 // Use MarkBootReady instead when the agent has just initialized and hasn't yet
 // processed a turn — orchestrator subscribers rely on the distinction.

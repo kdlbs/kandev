@@ -8,7 +8,7 @@ status: complete
 
 ## Overview
 
-Remove the cancellation/stream lock cycle without weakening the per-session serialization that protects coordinator stops and turn replacement. First make explicit user cancellation a two-phase, backend-owned operation with exact turn ownership and focused orchestrator regressions; then tighten the existing desktop and mobile Playwright scenarios around the observable response-time contract. No ACP, WebSocket, persistence, or frontend component contract changes are required.
+Remove the cancellation/stream lock cycle without weakening the per-session serialization that protects coordinator stops and turn replacement. Use one backend-owned cancellation coordinator for explicit, silent, and peer cancellation sources, then tighten the existing desktop and mobile Playwright scenarios around the observable response-time contract. No ACP, WebSocket, persistence, or frontend component contract changes are required.
 
 ## Confirmed Root Cause
 
@@ -20,7 +20,7 @@ The smallest reliable regression is an orchestrator test whose mock lifecycle ca
 
 ## Backend
 
-### Explicit cancellation operation ownership
+### Unified cancellation operation ownership
 
 Files:
 
@@ -29,9 +29,10 @@ Files:
 
 Changes:
 
-- Extend the existing per-session cancellation registry with explicit user-cancel ownership, completion notification, and one stored result. Preserve the current cancellation-intent signal used by ready/boot-ready paths and internal cancellations.
-- Let the first authorized request own the operation. Concurrent requests for the same session join that operation and return its result rather than invoking the lifecycle manager or reconciliation a second time.
+- Replace the split explicit-user and silent cancellation markers with one per-session cancellation coordinator. Record the cancellation source, completion notification, result, and captured `(executionID, promptGeneration, turnID)` identity in one operation.
+- Let the first authorized source own the operation. Concurrent explicit, silent, and peer requests join that operation; only the owner invokes the lifecycle manager, while joiners wait and then re-evaluate their source-specific queue or clarification action.
 - Keep operation ownership active across the whole lifecycle wait and every reconciliation exit path. Remove the entry only after the owner publishes the final result, so the temporarily unlocked guard cannot admit a second user-cancel owner.
+- Run the accepted operation with a bounded service-owned context derived from `context.WithoutCancel`; a disconnected caller stops waiting without aborting the shared lifecycle/reconciliation work.
 - Preserve session authorization, tolerated `ErrNoExecutionForSession` and `ErrCancelEscalated` reconciliation, the visible cancel message, parked queued messages, workflow completion policy, and retry behavior after a settled operation.
 
 ### Two-phase per-session serialization
@@ -45,7 +46,7 @@ Files:
 Changes:
 
 - Under `cancelInFlightGuard`, load the authoritative session and capture the active turn identity needed by cancellation bookkeeping. Retain the guard registry reference, but unlock its mutex before calling the blocking lifecycle cancel.
-- While the mutex is released, keep cancellation intent/ownership active so boot-ready, ready, queued dispatch, peer interrupt, and duplicate user requests cannot claim the turn as idle or start replacement work.
+- While the mutex is released, keep cancellation intent/ownership active as an admission gate. Non-stream claimants (prompt claims, running/boot-ready, completion/failure, step completion, clarification cleanup, teardown, and fallback reset) must defer or drop their mutation; only ordered stream frames matching the captured execution/prompt generation may proceed.
 - Allow the existing ordered stream handler to acquire the same guard and persist Codex's terminal usage, session-status, interruption-message, and completion frames. Do not bypass or remove the stream guard globally.
 - Reacquire the guard after the lifecycle call returns, re-read the authoritative session and active turn, and reconcile only the captured cancellation generation. If a successor turn exists, fail closed or leave it untouched rather than closing it as part of the cancelled turn.
 - Apply the same unlock-around-blocking-wait rule to silent clarification/peer-interrupt call sites that already enter lifecycle cancellation while owning the guard. Keep their distinct message, queue-drain, workflow, and visibility semantics unchanged.
@@ -87,6 +88,9 @@ No production frontend change is planned. `chat-input-area.tsx` already awaits t
 - **What:** silent clarification and peer-interrupt cancellation do not reproduce the same stream/cancel cycle and preserve their existing no-visible-message or queue-delivery contracts.
   **Files:** `apps/backend/internal/orchestrator/event_handlers_clarification_test.go`, `apps/backend/internal/orchestrator/task_operations_test.go`.
   **How:** reuse channel-synchronized lifecycle hooks and existing semantic assertions.
+- **What:** cancellation sources share one lifecycle call, a disconnected owner cannot abort a live joiner, and a peer message arriving during explicit cancellation remains queued.
+  **File:** `apps/backend/internal/orchestrator/task_operations_test.go`.
+  **How:** stage the lifecycle call with channels, race explicit/silent and silent/silent sources, cancel the owner context, and assert one manager call plus an undispatched queue entry.
 
 ## E2E Tests
 
@@ -97,10 +101,15 @@ No production frontend change is planned. `chat-input-area.tsx` already awaits t
 
 ## Verification Results
 
-- Backend RED/GREEN: the channel-synchronized stream-drain regression first failed on the old implementation because `CancelAgent` held the per-session guard while the lifecycle cancel waited for `handleAgentStreamEvent`; after the two-phase unlock, it passes without escalation. Duplicate cancellation, ready-vs-cancel parking, successor-turn ownership, silent cancellation, and ordinary stream-guard coverage are green.
-- `cd apps/backend && go test ./internal/orchestrator -run 'Test(CancelAgent|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1` — 45 tests passed.
-- `cd apps/backend && go test ./internal/orchestrator -count=1 -timeout=120s` — package passed in 59.160s.
-- `cd apps/backend && go test -race ./internal/orchestrator -run 'Test(CancelAgent|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1` — passed.
+- Backend RED/GREEN: the channel-synchronized stream-drain regression first failed on the old implementation because `CancelAgent` held the per-session guard while the lifecycle cancel waited for `handleAgentStreamEvent`; after the two-phase unlock, it passes without escalation. Cross-kind ownership, owner-disconnect, prompt/event admission, ready-vs-cancel parking, successor-turn ownership, silent cancellation, and ordinary stream-guard coverage are green.
+- `cd apps/backend && go test ./internal/orchestrator -run 'Test(CancelAgent|CancellationSources|CancellationStreamAdmission|QueueAndInterruptForPeerMessage|CancelAgentSilent|AgentStreamEventWaitsForCancellationGuard)' -count=1` — focused regression suite passed.
+- `cd apps/backend && go test ./internal/orchestrator -count=1 -timeout=180s` — passed after the final admission-gate and joined-source changes.
+- `cd apps/backend && go test -race ./internal/orchestrator -run 'Test(CancellationSources|CancelAgent_JoinedSilentCancellationRunsExplicitReconciliation|CancelAgent_OwnerDisconnectDoesNotAbortJoinedOperation|CancelAgent_DefersLifecycleCompletionDuringCancellation|CancelAgentSilent_DoesNotCloseSuccessorTurn|QueueAndInterruptForPeerMessage_(ClosesStaleEarlyCheckRace|CancelFailureDoesNotStrandMessageWhenReadyIsRacing))' -count=1` — passed.
+- `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/backendapp ./internal/orchestrator -count=1 -timeout=180s` — lifecycle and backendapp packages passed; orchestrator package was covered by the preceding full run.
+- `cd apps/backend && go test ./... -count=1 -timeout=300s` — all backend packages passed.
+- `cd apps && pnpm --filter @kandev/web run typecheck` — passed.
+- `cd apps && pnpm --filter @kandev/web run lint` — passed.
+- `cd apps && pnpm --filter @kandev/web run i18n:ratchet && pnpm --filter @kandev/web run i18n:check` — passed.
 - `cd apps/backend && go test ./cmd/mock-agent -count=1` — package passed, including the cancellation-aware prompt fixture test.
 - `cd apps/backend && go test ./internal/agent/runtime/lifecycle -run 'TestCancelAgent' -count=1` — no matching tests; command exited successfully.
 - `cd apps/web && pnpm run typecheck` — passed.

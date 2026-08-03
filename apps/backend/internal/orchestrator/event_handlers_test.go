@@ -415,11 +415,11 @@ func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) er
 	if m.cancelAgentBlock != nil {
 		<-m.cancelAgentBlock
 	}
-	if m.cancelAgentContextErr != nil && ctx.Err() != nil {
-		return m.cancelAgentContextErr
-	}
 	if m.cancelAgentFunc != nil {
 		return m.cancelAgentFunc(ctx, sessionID)
+	}
+	if m.cancelAgentContextErr != nil && ctx.Err() != nil {
+		return m.cancelAgentContextErr
 	}
 	return m.cancelAgentErr
 }
@@ -441,6 +441,10 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 
 func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, generation uint64) bool {
 	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
+}
+
+func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
+	return m.currentPromptGeneration.Load(), nil
 }
 
 // RowLiveness makes the mock satisfy the orchestrator's optional

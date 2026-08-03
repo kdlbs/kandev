@@ -36,6 +36,27 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 		lock.Lock()
 		defer lock.Unlock()
 	}
+	// Cancellation owns the yielded interval between the guarded preparation
+	// and lifecycle wait. Terminal frames from that captured execution/prompt
+	// remain admissible so the lifecycle manager can drain them; frames from a
+	// successor or stale execution must not mutate the session while the owner
+	// is reconciling the cancelled turn.
+	eventExecutionID := payload.ExecutionID
+	if eventExecutionID == "" {
+		eventExecutionID = payload.AgentID
+	}
+	if !s.cancellationOwnsStreamEvent(
+		payload.SessionID,
+		eventExecutionID,
+		payload.Data.PromptGeneration,
+	) {
+		s.logger.Debug("ignoring stream event for execution outside cancellation identity",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID),
+			zap.String("event_execution_id", eventExecutionID),
+			zap.Uint64("event_prompt_generation", payload.Data.PromptGeneration))
+		return
+	}
 	taskID := payload.TaskID
 	sessionID := payload.SessionID
 	eventType := payload.Data.Type

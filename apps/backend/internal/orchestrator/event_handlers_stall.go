@@ -23,6 +23,16 @@ func (s *Service) handleAgentStalled(ctx context.Context, payload lifecycle.Agen
 	if s.messageCreator == nil || s.repo == nil || payload.TaskID == "" || payload.SessionID == "" {
 		return
 	}
+	lock, release := s.acquireCancelInFlightGuard(payload.SessionID)
+	defer release()
+	lock.Lock()
+	defer lock.Unlock()
+	if s.isCancelInFlight(payload.SessionID) {
+		s.logger.Debug("ignoring agent stall while cancellation is in progress",
+			zap.String("task_id", payload.TaskID),
+			zap.String("session_id", payload.SessionID))
+		return
+	}
 	session, err := s.repo.GetTaskSession(ctx, payload.SessionID)
 	if err != nil || session == nil || session.State != models.TaskSessionStateRunning {
 		return

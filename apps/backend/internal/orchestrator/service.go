@@ -12,6 +12,7 @@ package orchestrator
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"regexp"
@@ -41,6 +42,10 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+func isNoActiveTurnError(err error) bool {
+	return errors.Is(err, sql.ErrNoRows)
+}
 
 // Common errors
 var (
@@ -574,8 +579,8 @@ type Service struct {
 	cancelInFlightMu sync.Mutex
 	// cancelInFlight holds one *cancelInFlightGuard per session with an
 	// active reference — an in-progress or waiting claim from CancelAgent
-	// (the user cancel button, with duplicate calls joined by a separate
-	// operation registry), the natural turn-completion/boot-ready drain
+	// (the user cancel button, with duplicate and cross-source calls joined by
+	// the unified cancellation operation registry), the natural turn-completion/boot-ready drain
 	// decision in handleAgentReady / handleAgentBootReady (blocking while an
 	// active cancellation marker yields),
 	// or QueueAndInterruptForPeerMessage (blocking Lock — must wait rather
@@ -594,6 +599,14 @@ type Service struct {
 	// long-lived backend's lifetime.
 	cancelInFlight map[string]*cancelInFlightGuard
 
+	// cancellationOperations is the single per-session ownership boundary for
+	// every lifecycle cancellation source: explicit user cancel, silent
+	// clarification recovery, and peer-message interrupts. The owner keeps the
+	// operation in this map across the lifecycle wait and source-specific
+	// reconciliation so all other state claimants either join it or defer.
+	cancellationOperationsMu sync.Mutex
+	cancellationOperations   map[string]*cancelOperation
+
 	// cancelOperations tracks cancellation intent separately from the shared
 	// cancelInFlight mutex. Stream and lifecycle handlers use that mutex to
 	// serialize their side effects, but they are not themselves cancellations;
@@ -606,18 +619,6 @@ type Service struct {
 	// sends happen after releasing it so one slow bus cannot delay other sessions.
 	cancelOperationsMu sync.Mutex
 	cancelOperations   map[string]*cancellationOperationState
-	// cancelOperationDone closes when the last cancellation intent for a
-	// session finishes. Consumers that already hold a per-session guard may
-	// temporarily release it, wait on this channel, and reacquire it without
-	// spinning or blocking the cancellation owner from its post-wait cleanup.
-	cancelOperationDone map[string]chan struct{}
-	// userCancelOperations owns explicit user-cancel requests separately from
-	// the broader cancellation-intent counter above. An owner keeps its entry
-	// while the lifecycle manager waits for terminal stream frames, so duplicate
-	// requests can join even while the shared per-session mutex is temporarily
-	// unlocked for those frames to drain.
-	userCancelOperationsMu sync.Mutex
-	userCancelOperations   map[string]*userCancelOperation
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
@@ -1295,6 +1296,9 @@ func (s *Service) verifyExpectedTurnOwnership(ctx context.Context, sessionID, ex
 	}
 	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
 		return fmt.Errorf("look up captured active turn: %w", err)
 	}
 	if turn != nil && turn.ID != expectedTurnID {
@@ -1306,6 +1310,9 @@ func (s *Service) verifyExpectedTurnOwnership(ctx context.Context, sessionID, ex
 func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedTurnID string) error {
 	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
 		return fmt.Errorf("look up captured active turn: %w", err)
 	}
 	if turn == nil {
@@ -1319,6 +1326,10 @@ func (s *Service) completeExpectedTurn(ctx context.Context, sessionID, expectedT
 	}
 	active, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
+		if isNoActiveTurnError(err) {
+			s.activeTurns.CompareAndDelete(sessionID, expectedTurnID)
+			return nil
+		}
 		return fmt.Errorf("verify captured turn closure: %w", err)
 	}
 	if active == nil {
@@ -1339,6 +1350,9 @@ func (s *Service) completeAllTurns(ctx context.Context, sessionID string) error 
 	for closed < maxIterations {
 		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 		if err != nil {
+			if isNoActiveTurnError(err) {
+				return nil
+			}
 			return fmt.Errorf("look up active turn: %w", err)
 		}
 		if turn == nil {
@@ -1356,6 +1370,9 @@ func (s *Service) completeAllTurns(ctx context.Context, sessionID string) error 
 	// finding the session clean is a successful reconciliation, not a runaway.
 	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
+		if isNoActiveTurnError(err) {
+			return nil
+		}
 		return fmt.Errorf("verify active turn closure: %w", err)
 	}
 	if turn != nil {
@@ -1432,6 +1449,9 @@ func (s *Service) peekActiveTurnID(ctx context.Context, sessionID string) (strin
 	}
 	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 	if err != nil {
+		if isNoActiveTurnError(err) {
+			return "", nil
+		}
 		return "", err
 	}
 	if turn == nil {

@@ -1,21 +1,9 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expectCancelToSettlePromptly } from "../../helpers/cancellation";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
-
-const CANCEL_SETTLE_TIMEOUT_MS = 2_000;
-
-async function expectCancelToSettlePromptly(session: SessionPage) {
-  const startedAt = Date.now();
-  await expect(session.cancelAgentButton()).not.toBeVisible({
-    timeout: CANCEL_SETTLE_TIMEOUT_MS,
-  });
-  await expect(session.idleInput()).toBeVisible({
-    timeout: CANCEL_SETTLE_TIMEOUT_MS,
-  });
-  expect(Date.now() - startedAt).toBeLessThan(CANCEL_SETTLE_TIMEOUT_MS);
-}
 
 async function tapCancelButton(session: SessionPage) {
   const button = session.cancelAgentButton();
