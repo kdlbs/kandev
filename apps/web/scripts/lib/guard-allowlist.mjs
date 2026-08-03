@@ -9,12 +9,14 @@
 /**
  * Entries listed more than once, each named once however often it repeats.
  *
- * A duplicate is invisible to every other gate — ESLint does not care that a
- * pattern appears twice, so lint, `i18n:check`, the ratchet and the unit suite
- * all pass. What it damages is the record: a second copy of a path an earlier
- * migration already listed reads as the new PR's own coverage, which is the
- * misinformation the comments around the list exist to prevent. #2214 added two
- * and nothing objected.
+ * Nothing else looks for one, because a duplicate changes no behaviour: ESLint is
+ * indifferent to a repeated pattern, and the removal check in
+ * `check-guard-allowlist.mjs` only ever inspects entries that LEFT the array. So
+ * when #2214 added two, lint, `i18n:check`, the ratchet and the unit suite all
+ * passed and it was caught by eye. What a duplicate damages is the record: a
+ * second copy of a path an earlier migration already listed reads as the new
+ * PR's own coverage, which is the misinformation the comments around the list
+ * exist to prevent.
  *
  * EXACT duplicates only, deliberately. The list also carries entries a broader
  * glob already covers — `app/settings/system/storage/**` sits inside

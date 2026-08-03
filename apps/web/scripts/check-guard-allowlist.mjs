@@ -12,9 +12,9 @@
  * Both are detectable, so the check only complains when the path still exists.
  *
  * The list also has to stay honest about what it claims, so a second check
- * rejects a path listed twice. That costs nothing at runtime and so slips
- * through every other gate, while quietly presenting an earlier migration's work
- * as the current PR's.
+ * rejects a path listed twice. A duplicate costs nothing at runtime, so before
+ * this check existed it slipped through every gate the repo had while quietly
+ * presenting an earlier migration's work as the current PR's.
  *
  * Usage: node scripts/check-guard-allowlist.mjs [--base <ref-or-sha>]
  */
@@ -100,9 +100,10 @@ if (removed.length > 0) {
 
 /**
  * Nothing above catches a path listed twice: a removal check only ever looks at
- * what left. A duplicate changes no behaviour, so it clears every gate in the
- * repo — which is exactly why it needs its own check. See `duplicateEntries`
- * for why this is deliberately exact-match and not a subsumption check.
+ * what left. A duplicate changes no behaviour either, so `i18next/no-literal-string`,
+ * `i18n:check` and the new-code half of the ratchet are all indifferent to one —
+ * which is exactly why it needs its own check here. See `duplicateEntries` for
+ * why this is deliberately exact-match and not a subsumption check.
  */
 const duplicates = duplicateEntries(after);
 
