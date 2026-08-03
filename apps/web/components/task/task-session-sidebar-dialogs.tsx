@@ -9,6 +9,8 @@ import { TaskExternalLinkDialog } from "./task-external-link-dialog";
 import { TaskGitHubIssueDialog } from "./task-github-issue-dialog";
 import { TaskGitHubPRDialog } from "./task-github-pr-dialog";
 import { TaskMRLinkDialog } from "@/components/gitlab/task-mr-link-dialog";
+import { SidebarTaskEditDialog, type SidebarTaskEditTarget } from "./task-session-sidebar-edit";
+import type { StepDef } from "./task-switcher-context-menu";
 import type { Repository } from "@/lib/types/http";
 import type {
   SidebarExternalLinkTarget,
@@ -51,6 +53,8 @@ export type SidebarDialogsActions = {
   setLinkingMergeRequestTask: (next: LinkTarget) => void;
   linkingExternalIssueTask: SidebarExternalLinkTarget | null;
   setLinkingExternalIssueTask: (next: SidebarExternalLinkTarget | null) => void;
+  editingTask: SidebarTaskEditTarget | null;
+  setEditingTask: (next: SidebarTaskEditTarget | null) => void;
 };
 
 function SidebarSubtaskDialog({
@@ -76,10 +80,12 @@ export function SidebarDialogs({
   actions,
   repositories,
   workspaceId,
+  stepsByWorkflowId,
 }: {
   actions: SidebarDialogsActions;
   repositories: Repository[];
   workspaceId: string | null;
+  stepsByWorkflowId: Record<string, StepDef[]>;
 }) {
   const {
     renamingTask,
@@ -100,6 +106,8 @@ export function SidebarDialogs({
     setDetachingTask,
     detachingTaskId,
     handleDetachConfirm,
+    editingTask,
+    setEditingTask,
   } = actions;
   return (
     <>
@@ -139,6 +147,12 @@ export function SidebarDialogs({
         detachingTaskId={detachingTaskId}
         onDismiss={() => setDetachingTask(null)}
         onConfirm={handleDetachConfirm}
+      />
+      <SidebarTaskEditDialog
+        target={editingTask}
+        onTargetChange={setEditingTask}
+        workspaceId={workspaceId}
+        stepsByWorkflowId={stepsByWorkflowId}
       />
       <SidebarLinkDialogs actions={actions} repositories={repositories} workspaceId={workspaceId} />
     </>

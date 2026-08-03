@@ -124,4 +124,35 @@ describe("MobileTaskList", () => {
 
     expect(onDetachTask).toHaveBeenCalledWith("child");
   });
+
+  it("opens edit from the touch task actions button", () => {
+    const onEditTask = vi.fn();
+    const editableTask = task("editable");
+    render(
+      <ToastProvider>
+        <MobileTaskList
+          tasks={[editableTask]}
+          workflows={[]}
+          stepsByWorkflowId={{}}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+          onArchiveTask={vi.fn()}
+          onDeleteTask={vi.fn()}
+          onDetachTask={vi.fn()}
+          deletingTaskId={null}
+        />
+      </ToastProvider>,
+    );
+
+    const row = screen
+      .getByText(editableTask.title)
+      .closest<HTMLElement>("[data-testid='sidebar-task-item']");
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row!).getByRole("button", { name: "Task actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+
+    expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
 });

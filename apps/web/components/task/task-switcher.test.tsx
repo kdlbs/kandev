@@ -41,6 +41,8 @@ function grouped(): GroupedSidebarList {
   };
 }
 
+const TEST_WORKFLOW_ID = "workflow-1";
+
 function renderSwitcher(collapsedSubtaskParentIds: string[] = []) {
   return render(
     <Providers>
@@ -151,13 +153,13 @@ describe("TaskSwitcher — workflow completion icons", () => {
       item("Turn finished", undefined, {
         state: "REVIEW",
         sessionState: "COMPLETED",
-        workflowId: "workflow-1",
+        workflowId: TEST_WORKFLOW_ID,
         workflowStepId: "step-middle",
       }),
       item("Workflow complete", undefined, {
         state: "REVIEW",
         sessionState: "COMPLETED",
-        workflowId: "workflow-1",
+        workflowId: TEST_WORKFLOW_ID,
         workflowStepId: finalStepId,
       }),
       item("Missing workflow metadata", undefined, {
@@ -174,7 +176,7 @@ describe("TaskSwitcher — workflow completion icons", () => {
             subTasksByParentId: new Map(),
           }}
           stepsByWorkflowId={{
-            "workflow-1": [
+            [TEST_WORKFLOW_ID]: [
               { id: "step-start", title: "Start" },
               { id: "step-middle", title: "Middle" },
               { id: finalStepId, title: "Done" },
@@ -304,6 +306,84 @@ describe("TaskSwitcher — create subtask menu", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Create Subtask" }));
 
     expect(onCreateSubtask).toHaveBeenCalledWith(CHILD.id, CHILD.title);
+  });
+});
+
+describe("TaskSwitcher — edit menu", () => {
+  it("passes the clicked task to the edit action", () => {
+    const editableTask = item("Editable task", undefined, {
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    const onEditTask = vi.fn();
+
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [editableTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(editableTask.title));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+
+    expect(onEditTask).toHaveBeenCalledWith(editableTask);
+  });
+
+  it("omits edit for archived rows and multi-selection menus", () => {
+    const archivedTask = item("Archived task", undefined, {
+      isArchived: true,
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    const editableTask = item("Editable task", undefined, {
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    const onEditTask = vi.fn();
+    const { rerender } = render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [archivedTask, editableTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(archivedTask.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+
+    rerender(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [archivedTask, editableTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={onEditTask}
+          selectedTaskIds={new Set([editableTask.id, archivedTask.id])}
+        />
+      </Providers>,
+    );
+    fireEvent.contextMenu(screen.getByText(editableTask.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
 });
 

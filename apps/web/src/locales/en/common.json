@@ -5,6 +5,7 @@
   "contextCompactionCountHelp": "Kandev infers this count from observed context usage drops. Missing samples or provider resets can make it approximate.",
   "aboutContextCompactionCount": "About inferred compaction count",
   "cancel": "Cancel",
+  "edit": "Edit",
   "createAWorkspaceToConfigureThisIntegration": "Create a workspace to configure this integration.",
   "dAgo": "{{diffDay}}d ago",
   "executors": "Executors",

@@ -28,6 +28,7 @@ import { useSidebarTaskLinking } from "../task-session-sidebar-task-linking";
 import { useSheetData, useSheetActions } from "./session-task-switcher-sheet-hooks";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
+import { SidebarTaskEditDialog, useSidebarTaskEdit } from "../task-session-sidebar-edit";
 
 type SessionTaskSwitcherSheetProps = {
   open: boolean;
@@ -50,6 +51,14 @@ function useMobileTaskLinking(workspaceId: string | null) {
   };
 }
 
+function useSidebarGroupToggle(viewId: string) {
+  const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
+  return useCallback(
+    (groupKey: string) => toggleSidebarGroupCollapsed(viewId, groupKey),
+    [toggleSidebarGroupCollapsed, viewId],
+  );
+}
+
 export function MobileTaskList({
   tasks,
   workflows,
@@ -57,6 +66,7 @@ export function MobileTaskList({
   activeTaskId,
   selectedTaskId,
   onSelectTask,
+  onEditTask,
   onRenameTask,
   onCreateSubtask,
   onArchiveTask,
@@ -77,6 +87,7 @@ export function MobileTaskList({
   activeTaskId: string | null;
   selectedTaskId: string | null;
   onSelectTask: (taskId: string) => void;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
   onArchiveTask: (taskId: string) => void;
@@ -100,13 +111,9 @@ export function MobileTaskList({
     handleReorderGroup,
     handleReorderSubtasks,
   } = useSidebarTaskPrefs();
-  const toggleSidebarGroupCollapsed = useAppStore((s) => s.toggleSidebarGroupCollapsed);
   const collapsedSubtaskParents = useAppStore((s) => s.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((s) => s.toggleSubtaskCollapsed);
-  const handleToggleGroup = useCallback(
-    (groupKey: string) => toggleSidebarGroupCollapsed(view.id, groupKey),
-    [toggleSidebarGroupCollapsed, view.id],
-  );
+  const handleToggleGroup = useSidebarGroupToggle(view.id);
   const grouped = useMemo(
     () =>
       applyView(tasks, view, {
@@ -128,6 +135,7 @@ export function MobileTaskList({
       collapsedSubtaskParentIds={collapsedSubtaskParents}
       onToggleSubtasks={toggleSubtaskCollapsed}
       onSelectTask={onSelectTask}
+      onEditTask={onEditTask}
       onRenameTask={onRenameTask}
       onCreateSubtask={onCreateSubtask}
       onArchiveTask={onArchiveTask}
@@ -248,6 +256,7 @@ type TaskSwitcherSurfaceContentProps = {
   data: ReturnType<typeof useSheetData>;
   actions: ReturnType<typeof useSheetActions>;
   rename: ReturnType<typeof useMobileTaskRename>;
+  edit: ReturnType<typeof useSidebarTaskEdit>;
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
 
@@ -280,6 +289,7 @@ function TaskSwitcherSurfaceContent({
   data,
   actions,
   rename,
+  edit,
   linking,
 }: TaskSwitcherSurfaceContentProps) {
   return (
@@ -303,6 +313,7 @@ function TaskSwitcherSurfaceContent({
           activeTaskId={data.activeTaskId}
           selectedTaskId={data.selectedTaskId}
           onSelectTask={actions.handleSelectTask}
+          onEditTask={surfaceAction(presentation, onOpenChange, edit.handleEditTask)}
           onRenameTask={surfaceAction(presentation, onOpenChange, rename.handleRenameTask)}
           onCreateSubtask={onCreateSubtask}
           onArchiveTask={surfaceAction(presentation, onOpenChange, actions.handleArchiveTask)}
@@ -354,6 +365,7 @@ function TaskSwitcherDialogs({
   data,
   actions,
   rename,
+  edit,
   linking,
   subtaskTarget,
   onSubtaskTargetChange,
@@ -365,6 +377,7 @@ function TaskSwitcherDialogs({
   data: ReturnType<typeof useSheetData>;
   actions: ReturnType<typeof useSheetActions>;
   rename: ReturnType<typeof useMobileTaskRename>;
+  edit: ReturnType<typeof useSidebarTaskEdit>;
   linking: ReturnType<typeof useMobileTaskLinking>;
   subtaskTarget: { id: string; title: string } | null;
   onSubtaskTargetChange: (target: { id: string; title: string } | null) => void;
@@ -382,6 +395,12 @@ function TaskSwitcherDialogs({
         onSuccess={actions.handleTaskCreated}
       />
       <MobileSubtaskDialog target={subtaskTarget} onTargetChange={onSubtaskTargetChange} />
+      <SidebarTaskEditDialog
+        target={edit.editingTask}
+        onTargetChange={edit.setEditingTask}
+        workspaceId={workspaceId}
+        stepsByWorkflowId={data.stepsByWorkflowId}
+      />
       <TaskArchiveConfirmDialog
         open={actions.archivingTask !== null}
         onOpenChange={(open) => {
@@ -439,6 +458,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   const data = useSheetData(workspaceId);
   const actions = useSheetActions(workspaceId, onOpenChange);
   const rename = useMobileTaskRename();
+  const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);
   const openQuickChat = useQuickChatLauncher(workspaceId);
   const handleQuickChat = useCallback(() => {
@@ -467,6 +487,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
       data={data}
       actions={actions}
       rename={rename}
+      edit={edit}
       linking={linking}
     />
   );
@@ -501,6 +522,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
         data={data}
         actions={actions}
         rename={rename}
+        edit={edit}
         linking={linking}
         subtaskTarget={subtaskTarget}
         onSubtaskTargetChange={setSubtaskTarget}
