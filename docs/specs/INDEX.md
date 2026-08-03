@@ -166,7 +166,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [ws-connectivity-warning](ui/ws-connectivity-warning.md) | approved |
 | [context-compaction-count](context-compaction-count/spec.md) | approved |
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
-| [cancel-turn-progress](ui/cancel-turn-progress.md) | draft |
+| [cancel-turn-progress](ui/cancel-turn-progress.md) | approved |
 
 ## system-page/ — operational diagnostics & maintenance UI
 

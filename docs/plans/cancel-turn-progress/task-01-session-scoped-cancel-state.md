@@ -4,11 +4,15 @@ title: "Session-scoped cancel state"
 status: done
 wave: 1
 depends_on: []
+superseded_by: "05-backend-owned-cancel-control"
 plan: "plan.md"
 spec: "../../specs/ui/cancel-turn-progress.md"
 ---
 
 # Task 01: Session-scoped cancel state
+
+> Historical implementation record. The UI-slice flag remains only as immediate optimistic
+> feedback; Task 05 replaces it as the authoritative owner with backend-hydrated session state.
 
 ## Acceptance
 
@@ -66,7 +70,7 @@ conversation.
 
 ## Results
 
- - RED: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/chat-input-toolbar.test.tsx` —
+- RED: `cd apps && pnpm --filter @kandev/web test -- --run components/task/chat/chat-input-toolbar.test.tsx` —
   2 expected remount-regression failures (desktop and mobile) against the local-state implementation.
 - `cd apps && pnpm install --frozen-lockfile` — passed.
 - `cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx` —

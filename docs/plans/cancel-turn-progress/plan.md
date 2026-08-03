@@ -1,120 +1,177 @@
 ---
 spec: docs/specs/ui/cancel-turn-progress.md
 created: 2026-08-03
-status: building
+status: draft
 ---
 
-# Implementation Plan: Preserve cancel-turn progress across task navigation
+# Implementation Plan: Backend-owned cancel-turn progress
 
 ## Overview
 
-Move cancel-request progress out of the remounted button instance and into the application-level UI
-store, keyed by session ID. Keep the existing `agent.cancel` request and visual treatment, then add
-a component regression and a delayed-WebSocket Playwright flow that switches away from and back to
-the cancelling task.
+Promote the orchestrator's existing per-session cancellation registry into the authoritative
+runtime projection described by
+[ADR-2026-08-03](../../decisions/2026-08-03-backend-owned-cancellation-progress.md). Publish the
+projection through live session events and every session hydration path, then make the shared cancel
+control combine that backend value with its existing short-lived optimistic request state. Replace
+the request-held browser regression with backend-accepted task-switch and reload coverage on desktop
+and mobile.
 
-## Root cause
+## Root cause and superseded direction
 
-`SubmitButton` in `apps/web/components/task/chat/chat-input-toolbar-primitives.tsx` owns
-`isCancelling` in component-local `useState` and guards duplicate requests with a component-local
-ref. Task navigation remounts the chat toolbar while the original `agent.cancel` promise continues
-waiting for its WebSocket response. The new button instance initializes both values to `false`, so
-it renders the pause icon as enabled even though cancellation is still pending.
+`SubmitButton` originally owned cancellation progress in component-local state, so a task-route
+remount lost it. Tasks 01 and 02 moved that state into the application UI store and proved SPA
+navigation, but the store is still scoped to one loaded browser page. It cannot hydrate a reload or
+second tab and it treats the request promise, rather than the orchestrator operation, as the source
+of truth.
 
-## Decision
+The existing `Service.cancelOperations` registry already tracks actual cancellation intent and the
+existing `cancelInFlight` guard already deduplicates lifecycle work. The revised implementation
+exposes that fact instead of adding another lifecycle state or a durable database marker. The Task
+01 store remains useful only as immediate optimistic feedback before backend acceptance.
 
-Extend the existing `chatInput` UI slice with `cancellingBySessionId` and a
-`setCancelTurnPending(sessionId, pending)` action. `SubmitButton` will select the entry for its
-`sessionId`, use the store as the duplicate-request guard, set it before awaiting `onCancel`, and
-delete it in `finally`. The root `StateProvider` already outlives SPA task-route remounts, so no
-backend, hydration, local-storage, or protocol change is needed.
+## Backend
+
+### Cancellation operation ownership
+
+- `apps/backend/internal/orchestrator/service.go`: document the cancellation registry as the source
+  of the public runtime projection; keep its reference-counted, per-session ownership separate from
+  the broader `cancelInFlight` mutex.
+- `apps/backend/internal/orchestrator/task_operations.go`: expose
+  `CancellationPending(sessionID string) bool`; make `beginCancelInFlight` publish only the `0 -> 1`
+  and `1 -> 0` transitions; retain idempotent release and duplicate-request reference counting.
+- In `Service.CancelAgent`, authorize with the caller context and then use
+  `context.WithoutCancel(ctx)` for the accepted cancellation, reconciliation, message, turn, and
+  transition publications. This preserves page-disconnect behavior without removing the lifecycle
+  manager's own ten-second cancel wait and escalation bounds.
+- Publish `{session_id, cancellation_pending}` on
+  `events.TaskSessionCancellationChanged`. Event-publication failure is logged but never changes the
+  cancellation result; the final deferred release must clear pending on every error path.
+
+### Session wire contract and routing
+
+- `apps/backend/internal/events/types.go` and `apps/backend/pkg/websocket/actions.go`: add the
+  semantic event/action pair `task_session.cancellation_changed` /
+  `session.cancellation_changed`.
+- `apps/backend/internal/gateway/websocket/task_notifications.go`: subscribe to the event and route
+  it only through `Hub.BroadcastToSession`. It is semantic session traffic, not replaceable stream
+  traffic and not a task-summary update.
+- `apps/backend/internal/task/dto/dto.go`: add non-omitempty `CancellationPending bool` fields to
+  both `TaskSessionDTO` and `TaskSessionSummaryDTO`; add a narrow `CancellationPendingProvider` and
+  enrichers that always write the provider result.
+- `apps/backend/internal/task/handlers/task_handlers.go` and
+  `task_http_handlers.go`: discover the provider from the orchestrator and enrich list/get session
+  responses alongside foreground activity.
+
+### Boot, REST, and subscription reconciliation
+
+- `apps/backend/internal/backendapp/boot_state.go`: enrich every task-detail and quick-chat session
+  DTO before inserting it into `taskSessions.items` and `taskSessionsByTask`.
+- `apps/backend/internal/backendapp/helpers.go`: pass a cancellation provider into
+  `buildSessionDataProvider` and add explicit `cancellation_pending` to the authoritative
+  `session.state_changed` subscription snapshot.
+- `apps/backend/internal/backendapp/main.go`: wire `orchestratorSvc` into the session data provider.
+  A fresh page or a client that missed a live transition must therefore reconcile without waiting
+  for another cancel event.
+- No repository, schema, migration, or session-metadata change is planned. A backend restart resets
+  the runtime projection and leaves existing coarse session/execution recovery authoritative.
 
 ## Frontend
 
-### Transient chat-input state
+### Session contracts and live updates
 
-- `apps/web/lib/state/slices/ui/types.ts`: add the session-keyed cancellation map to
-  `ChatInputState` and add the typed `setCancelTurnPending` action.
-- `apps/web/lib/state/slices/ui/ui-slice.ts`: initialize the map empty; set an entry to `true` when a
-  request begins and delete it when the request settles. Do not persist this map to browser storage
-  or the boot payload.
-- `apps/web/lib/state/slices/ui/ui-slice.test.ts`: prove per-session isolation and removal on clear.
+- `apps/web/lib/types/http.ts`: add non-optional `cancellation_pending: boolean` to `TaskSession`.
+- `apps/web/lib/types/backend.ts`: add the cancellation field to the state-snapshot payload, define
+  `TaskSessionCancellationChangedPayload`, and register `session.cancellation_changed` in the
+  backend message map.
+- `apps/web/lib/ws/handlers/agent-session.ts`: merge explicit true and false values carried by
+  `session.state_changed`; handle `session.cancellation_changed` by updating the existing session
+  row and its per-task list without changing coarse state or triggering task/Office lifecycle work.
+- `apps/web/lib/ws/handlers/agent-session.test.ts`: cover explicit-false clearing, session isolation,
+  an event arriving for an unloaded session, and state-snapshot/live-event convergence.
 
 ### Shared cancel control
 
-- `apps/web/components/task/chat/chat-input-toolbar-primitives.tsx`: give `SubmitButton` the current
-  `sessionId`; replace its local state/ref with selectors and the UI-slice action; retain the
-  existing spinner, disabled styling, tooltip, error handling, and single-request behavior.
-- `apps/web/components/task/chat/chat-input-toolbar.tsx`: pass `sessionId` through the minimal
-  toolbar as well as the existing responsive paths.
-- `apps/web/components/task/chat/chat-input-toolbar-desktop.tsx` and
-  `apps/web/components/task/chat/chat-input-toolbar-mobile.tsx`: pass their existing session ID to
-  the shared `SubmitButton`.
+- `apps/web/components/task/chat/chat-input-toolbar-primitives.tsx`: derive effective progress from
+  `taskSessions.items[sessionId].cancellation_pending ||
+  chatInput.cancellingBySessionId[sessionId]`. Keep the current UI-slice value as immediate
+  optimistic feedback and a same-page duplicate-click guard; it must not override an authoritative
+  backend `true` after the request promise settles.
+- `apps/web/components/task/chat/chat-input-toolbar.test.tsx`: retain desktop/mobile remount coverage
+  and add a new-store hydration case proving a backend-pending session renders the spinner after a
+  page boundary. Prove explicit backend false plus cleared optimistic state returns to idle.
+- The existing `chatInput` store action remains transient and is not added to boot state or browser
+  persistence.
 
 ### Mobile design contract
 
-The desktop outcome and mobile entry point remain the existing inline cancel control in the chat
-composer. The nearest shipped mobile exemplar is `MobileChatInputToolbar`, which already renders the
-same `SubmitButton` as desktop; no surface, hierarchy, scroll owner, safe-area, touch-target, or
-navigation behavior changes. The shared store selector and request guard remain viewport-neutral,
-and component coverage will exercise both responsive branches.
+Desktop and mobile continue using the same inline `SubmitButton`; there is no new surface, copy,
+hierarchy, safe-area behavior, scroll owner, or gesture. The backend session field drives both
+layouts. Because reload persistence changes user-visible behavior on compact screens, a dedicated
+`mobile-chrome` Playwright regression is required in addition to the shared component coverage.
 
 ## Tests
 
-- **Store lifecycle and isolation:** in
-  `apps/web/lib/state/slices/ui/ui-slice.test.ts`, set cancellation pending for one session, verify a
-  second session is unaffected, and verify clearing removes the first entry.
-- **Remount regression and duplicate guard:** in
-  `apps/web/components/task/chat/chat-input-toolbar.test.tsx`, keep a `StateProvider` mounted while
-  unmounting and remounting the toolbar around an unresolved `onCancel` promise. Assert the
-  remounted control remains disabled with `GridSpinner`, additional activation does not duplicate
-  the request, and resolution or rejection clears the state. Run this flow for desktop and compact
-  mobile toolbar selection because both use the same control.
+- **Backend operation lifecycle:** `apps/backend/internal/orchestrator/task_operations_test.go`
+  blocks the mock manager, observes pending true, cancels the initiating context, and proves the
+  accepted operation remains pending until release and clears on success/error. Concurrent requests
+  must still invoke the manager once and publish one true/false pair.
+- **DTO projection:** add focused tests under `apps/backend/internal/task/dto/` for full and summary
+  serialization of explicit true and false values.
+- **REST and boot hydration:** extend
+  `apps/backend/internal/task/handlers/task_http_handlers_test.go` and
+  `apps/backend/internal/backendapp/helpers_test.go` to assert current cancellation state in list,
+  get, task-detail boot, and initial session-subscription payloads.
+- **WebSocket routing:** extend
+  `apps/backend/internal/gateway/websocket/task_notifications_test.go` to prove cancellation events
+  reach only the subscribed session and preserve both transition values.
+- **Frontend reconciliation:** extend
+  `apps/web/lib/ws/handlers/agent-session.test.ts` and
+  `apps/web/components/task/chat/chat-input-toolbar.test.tsx` for hydration, live updates,
+  optimistic/backend union semantics, session isolation, and desktop/mobile rendering.
 
 ## E2E Tests
 
-- **Scenario:** **GIVEN** task A has a running turn and its `agent.cancel` request is held before it
-  reaches the backend, **WHEN** the user clicks cancel, switches to task B, and returns to task A,
-  **THEN** task A's cancel control remains disabled and animated until the held request is released.
-- **Files:** extend `apps/web/e2e/helpers/ws-drop.ts` with a controller that holds and later forwards
-  one correlated `agent.cancel` request without dropping unrelated frames; add
-  `apps/web/e2e/tests/chat/cancel-progress-task-switch.spec.ts` for the desktop task-switch flow.
-- **What to verify:** one held request, visible spinner and disabled control before and after the
-  route remount, no duplicate request, and normal idle rendering after release.
-
-Separate mobile Playwright coverage is not required for this repair because it changes only the
-session-keyed state source behind the existing shared control; it does not change mobile layout,
-touch behavior, scrolling, navigation, or viewport-dependent interaction. The responsive component
-regression covers both toolbar branches.
+- **Task switch and reload:** revise
+  `apps/web/e2e/tests/chat/cancel-progress-task-switch.spec.ts`. Start the existing slow mock-agent
+  turn, send cancellation through to the backend, wait until the exposed session store reports
+  `cancellation_pending=true`, switch away and back, reload the page, and assert the same disabled
+  animated control until the backend settles. This replaces the current helper that holds the
+  request before backend acceptance.
+- **Compact reload parity:** add
+  `apps/web/e2e/tests/chat/mobile-cancel-progress-reload.spec.ts`, limited to `mobile-chrome`. Tap
+  cancel during the slow mock turn, wait for backend-owned pending state, reload, and assert the
+  shared control remains disabled and animated without desktop-only navigation assumptions.
+- **Test support:** add a cancellation-pending reader/waiter to
+  `apps/web/e2e/helpers/session-store.ts`; remove
+  `routeMainWebSocketWithHeldCancelRequest` from `apps/web/e2e/helpers/ws-drop.ts` once no test uses
+  it. The existing `/slow` mock scenario is cancellation-insensitive long enough to keep the
+  lifecycle operation deterministically pending; no production delay or new test-only endpoint is
+  required.
 
 ## Verification Results
 
-- `cd apps && pnpm install --frozen-lockfile` — passed.
-- `cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx` — passed, 2 files / 52 tests.
-- `cd apps/web && pnpm run typecheck` — passed.
-- `cd apps && pnpm --filter @kandev/web run i18n:ratchet` — passed, 0 added / 7 modified files clean.
-- `cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts` — passed, 1 test in 13.7s.
-- `git diff --check` — passed.
-- PR fixup commit `1bb1b2539` addressed three review findings: the spec is now active, the held
-  request controller documents its `0 | 1` count, and the remount test isolates plugin actions.
-- Focused unit tests, typecheck, lint, diff check, and the task-switch E2E all passed again after the
-  fixup; all three review threads were replied to and resolved.
+Pending. Tasks 01 and 02 below record the superseded frontend-only evidence; revised Tasks 03-06
+must replace this section with their exact command results before the plan is complete.
 
 ## Implementation Waves And Parallel Candidates
 
-Wave 1:
+Previous implementation record (completed, partially retained as optimistic behavior):
 
-- [x] [task-01-session-scoped-cancel-state](task-01-session-scoped-cancel-state.md) — done;
-  establishes the state contract and shared control behavior.
+- [x] [task-01-session-scoped-cancel-state](task-01-session-scoped-cancel-state.md) — frontend
+  navigation state; superseded as the authoritative owner by Tasks 03-05.
+- [x] [task-02-task-switch-regression-e2e](task-02-task-switch-regression-e2e.md) — request-held
+  regression; replaced by Task 06's backend-accepted navigation/reload coverage.
 
-Wave 2:
+Revised implementation, sequential dependency chain:
 
-- [x] [task-02-task-switch-regression-e2e](task-02-task-switch-regression-e2e.md) — done;
-  depends on Task 01 and proves the complete navigation flow.
+- [ ] [task-03-backend-cancellation-lifecycle](task-03-backend-cancellation-lifecycle.md) — pending;
+  establishes runtime ownership and operation transitions.
+- [ ] [task-04-cancellation-projection-contract](task-04-cancellation-projection-contract.md) —
+  pending; depends on Task 03 and exposes hydration/live contracts.
+- [ ] [task-05-backend-owned-cancel-control](task-05-backend-owned-cancel-control.md) — pending;
+  depends on Task 04 and consumes the backend projection.
+- [ ] [task-06-cancel-reload-regression-e2e](task-06-cancel-reload-regression-e2e.md) — pending;
+  depends on Task 05 and proves desktop/mobile navigation and reload behavior.
 
-The tasks are not parallel-safe because Task 02 validates the state and component behavior added by
-Task 01.
-
-## Open Questions
-
-None.
+These tasks are not parallel-safe: each changes or validates the contract established by the
+preceding task. The wave list does not authorize subagents.

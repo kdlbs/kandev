@@ -1,0 +1,64 @@
+---
+id: "03-backend-cancellation-lifecycle"
+title: "Backend cancellation lifecycle"
+status: pending
+wave: 1
+depends_on: []
+plan: "plan.md"
+spec: "../../specs/ui/cancel-turn-progress.md"
+---
+
+# Task 03: Backend cancellation lifecycle
+
+## Acceptance
+
+- `orchestrator.Service.CancellationPending(sessionID)` is true from the first accepted cancellation
+  reference until the final reference settles, isolated by session and false outside that window.
+- An accepted cancellation continues after the initiating request context is cancelled, while the
+  existing lifecycle timeout/escalation and per-session deduplication remain intact.
+- Overlapping requests invoke the agent manager once and publish exactly one pending transition and
+  one idle transition; success and every error return clear the registry.
+
+## Verification
+
+```bash
+cd apps/backend && go test ./internal/orchestrator -run 'TestCancelAgent_(PublishesCancellationPending|SurvivesCallerCancellation|DeduplicatesConcurrentCalls|ClearsCancellationPendingOnError)'
+make -C apps/backend test
+```
+
+Follow TDD: first block the mock agent manager and assert the missing public state/transitions, then
+add transition-aware registry publication and detach the accepted work from caller cancellation.
+
+## Files likely touched
+
+- `apps/backend/internal/orchestrator/service.go`
+- `apps/backend/internal/orchestrator/task_operations.go`
+- `apps/backend/internal/orchestrator/task_operations_test.go`
+- `apps/backend/internal/events/types.go`
+
+## Dependencies
+
+None.
+
+## Parallelism
+
+Sequential. Task 04 consumes the provider and event established here.
+
+## Inputs
+
+- Spec: `Data model`, `State machine`, `Failure modes`, and `Persistence guarantees`.
+- Plan: `Cancellation operation ownership`.
+- Decision: `ADR-2026-08-03-backend-owned-cancellation-progress`.
+- Existing patterns: `cancelOperations`, `beginCancelInFlight`, `isCancelInFlight`, the
+  `cancelInFlight` guard, and `PromptTask`'s use of `context.WithoutCancel` after admission.
+
+## Output contract
+
+Report the state-transition API, context ownership, exact Red/Green tests, duplicate and error-path
+evidence, files changed, blockers/risks, and synchronize this task plus `plan.md` in the same primary
+conversation.
+
+## Results
+
+Pending. Record every exact command and outcome, `git diff --check`, and confirm that the change
+adds no persistent state, external side effect, or new trust boundary.

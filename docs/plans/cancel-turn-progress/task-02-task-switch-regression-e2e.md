@@ -4,11 +4,15 @@ title: "Task-switch cancellation regression"
 status: done
 wave: 2
 depends_on: ["01-session-scoped-cancel-state"]
+superseded_by: "06-cancel-reload-regression-e2e"
 plan: "plan.md"
 spec: "../../specs/ui/cancel-turn-progress.md"
 ---
 
 # Task 02: Task-switch cancellation regression
+
+> Historical implementation record. Holding the browser request proves only frontend-local state;
+> Task 06 replaces this flow with backend-accepted task-switch, reload, and mobile regressions.
 
 ## Acceptance
 

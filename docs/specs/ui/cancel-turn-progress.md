@@ -1,65 +1,134 @@
 ---
-status: active
+status: approved
 created: 2026-08-03
 owner: kandev
 ---
 
-# Cancel-turn progress across task navigation
+# Backend-owned cancel-turn progress
 
 ## Why
 
-Cancelling an agent turn can take long enough for a user to inspect another task. Today the
-cancel control loses its progress animation when the user returns, making an outstanding request
-look retryable and leaving the user unsure whether Kandev is still stopping the agent.
+Cancelling an agent turn can outlive the chat component or browser page that started it. Users
+need the cancel control to keep showing the real operation state after task navigation, a page
+reload, or opening the session in another tab, rather than treating one browser component as the
+source of truth.
+
+Decision: [ADR-2026-08-03-backend-owned-cancellation-progress](../../decisions/2026-08-03-backend-owned-cancellation-progress.md)
 
 ## What
 
-- Starting a turn cancellation puts that session's cancel control into a disabled progress state
-  until the cancellation request settles.
-- The progress state survives task or session navigation that remounts the chat composer within
-  the same browser tab.
+- Activating turn cancellation immediately disables that session's cancel control and shows its
+  existing progress animation.
+- Once the backend accepts the request, the backend owns whether cancellation is pending. Every
+  client renders the same session-scoped state from backend hydration and live updates.
+- Pending progress survives task and session navigation, a full page reload, replacement of the
+  browser tab, and a second tab while the same backend cancellation operation remains active.
 - Cancellation progress is isolated by session; cancelling one session does not animate or disable
   another session's control.
-- Repeated activation while the request is pending sends only one cancellation request.
-- Success, rejection, timeout, or an unavailable WebSocket clears the progress state so a still
-  running session can be retried.
-- Desktop and mobile chat composers expose the same progress behavior through their shared cancel
-  control.
+- Repeated activation may send a duplicate transport request during a race, but the backend runs at
+  most one cancellation operation for that session and keeps progress pending until the owning
+  operation settles.
+- Success, reconciliation of a missing or unresponsive execution, rejection, or timeout clears the
+  backend progress state. A still-running session becomes retryable after a failed attempt.
+- Desktop and mobile chat composers expose the same behavior through their shared cancel control.
 
-## Persistence guarantees
+## Data model
 
-Cancellation progress is transient browser-tab state keyed by session ID. It survives React
-component and task-route remounts under the existing application-level state provider. It does not
-survive a full page reload, browser restart, or navigation that replaces the application shell;
-after those boundaries, authoritative session state determines whether the cancel control remains
-available.
+Cancellation progress is a backend runtime projection keyed by task-session ID:
+
+- `cancellation_pending: boolean` is `true` while the orchestrator has an accepted cancellation
+  operation for the session and `false` otherwise.
+- The field is orthogonal to `TaskSession.state`; cancellation does not introduce a `CANCELLING`
+  lifecycle state and the session remains `RUNNING` until the existing lifecycle reconciliation
+  changes it.
+- The projection is not written to `task_sessions`, session metadata, browser storage, or another
+  durable store. It is derived from the orchestrator's live cancellation registry and is serialized
+  explicitly as both `true` and `false` so hydration can clear stale client state.
+- The frontend may retain a session-keyed optimistic request flag between the click and the first
+  backend signal. The effective control state is optimistic pending OR backend pending; only the
+  backend field is authoritative after request acceptance and across page boundaries.
+
+## API surface
+
+- The existing `agent.cancel` WebSocket request remains
+  `{ "session_id": string }`. Its success/error response continues to describe the completed
+  cancellation attempt; request authorization and error codes do not change.
+- Full and summary task-session DTOs add the non-optional field
+  `cancellation_pending: boolean`.
+- Task-detail boot state and task-session REST responses include the field on every session row.
+- The initial session-subscription `session.state_changed` snapshot includes
+  `cancellation_pending`, including an explicit `false` value.
+- Live transitions use the semantic WebSocket notification `session.cancellation_changed` with
+  payload `{ "session_id": string, "cancellation_pending": boolean }`. It is delivered only to
+  clients subscribed to that session; task-summary and task-switcher traffic do not carry it.
+
+## State machine
+
+| State | Trigger | Result |
+|---|---|---|
+| Idle | An authorized `agent.cancel` request is accepted | Backend publishes pending and starts or joins the guarded cancellation operation. |
+| Pending | The initiating page disconnects or reloads | No transition; the backend operation continues. |
+| Pending | A duplicate request arrives | The existing operation remains the sole lifecycle cancellation; progress stays pending. |
+| Pending | Cancellation succeeds or the backend reconciles a missing/unresponsive execution | Backend publishes idle after lifecycle, session, message, and turn reconciliation settle. |
+| Pending | Cancellation fails or times out | Backend publishes idle and the existing request error behavior remains visible to the initiating client. |
+
+## Permissions
+
+Invoking cancellation continues to use the existing session authorization check. Boot state, REST
+session reads, session subscriptions, and live cancellation notifications retain their existing
+workspace/session visibility rules.
 
 ## Failure modes
 
-- If the WebSocket client is unavailable, the UI does not retain a stuck progress state.
-- If `agent.cancel` rejects or reaches its client timeout, the progress state clears and the control
-  becomes retryable when the session is still running.
-- If the session stops through another lifecycle event while cancellation is pending, existing
-  session-state rendering may remove the cancel control; settling the original request still clears
-  its transient session entry.
+- If the WebSocket is unavailable before the backend accepts the request, the optimistic browser
+  flag clears on request failure and no backend pending state is created.
+- If the initiating page disconnects after acceptance, cancellation continues independently of the
+  request connection. A replacement page hydrates the backend state.
+- If a live cancellation notification is missed, the next boot payload, REST session read, or
+  session-subscription snapshot repairs the client.
+- If cancellation fails or reaches its lifecycle timeout, the backend clears pending in all exit
+  paths. A session still reported as running exposes the cancel control for retry.
+- If publishing a live transition fails, cancellation itself still proceeds; an authoritative
+  snapshot repairs the display on the next read or subscription.
+
+## Persistence guarantees
+
+The state survives React remounts, SPA navigation, full page reloads, browser-tab replacement, and
+other clients for as long as the same backend process owns the active cancellation operation. The
+accepted operation also ignores cancellation of the initiating WebSocket request.
+
+The runtime projection intentionally does not survive a Kandev backend restart. There is no safe
+continuation token for an in-flight process cancellation, so startup exposes no stale pending flag
+and existing session/execution recovery determines the durable coarse state. If the session remains
+`RUNNING`, the user can issue another idempotent cancellation request.
 
 ## Scenarios
 
 - **GIVEN** an agent turn is running, **WHEN** the user activates the cancel control, **THEN** the
-  control is disabled, shows progress, and sends exactly one `agent.cancel` request until that
-  request settles.
-- **GIVEN** a cancellation request is still pending, **WHEN** the user opens another task and returns
-  to the original task in the same tab, **THEN** the original session's cancel control still shows
-  progress and remains disabled.
+  control is immediately disabled, shows progress, and the backend runs one guarded cancellation.
+- **GIVEN** the backend reports cancellation pending for task A, **WHEN** the user opens task B and
+  returns to task A, **THEN** task A's cancel control still shows progress and remains disabled.
+- **GIVEN** the backend reports cancellation pending, **WHEN** the user reloads or replaces the
+  page, **THEN** the first hydrated task-session state shows the disabled animated control without
+  waiting for a new transition.
+- **GIVEN** one tab has an accepted cancellation pending, **WHEN** a second authorized tab opens the
+  same session, **THEN** the second tab shows the same pending control state.
 - **GIVEN** one session has a pending cancellation, **WHEN** the user views another running session,
-  **THEN** the other session's cancel control does not show cancellation progress.
-- **GIVEN** a pending cancellation rejects or times out while the session remains running, **WHEN**
-  the user returns to that session, **THEN** its cancel control is enabled for another attempt.
-- **GIVEN** the compact mobile chat composer is active, **WHEN** the same cancel-and-navigate flow
-  occurs, **THEN** its shared cancel control reflects the same session-scoped progress state.
+  **THEN** the other session's cancel control remains independent and enabled.
+- **GIVEN** a cancellation is pending, **WHEN** another cancel request arrives for that session,
+  **THEN** the backend does not invoke a second lifecycle cancellation and does not clear progress
+  until the owning operation settles.
+- **GIVEN** cancellation rejects or times out while the session remains running, **WHEN** pending is
+  cleared, **THEN** the control becomes retryable.
+- **GIVEN** the compact mobile chat composer is active, **WHEN** cancellation is accepted and the
+  page reloads, **THEN** its shared cancel control hydrates the same backend-owned progress state.
+- **GIVEN** cancellation was pending before a backend restart, **WHEN** Kandev starts again, **THEN**
+  no stale pending flag is exposed and the recovered session state determines whether cancel can be
+  retried.
 
 ## Out of scope
 
-- Persisting cancellation progress across a full page reload or browser restart.
-- Changing the `agent.cancel` WebSocket contract, backend cancellation semantics, or timeout.
-- Adding new cancel copy, notifications, task navigation, layout, or touch interactions.
+- Persisting or replaying an in-flight cancellation across a Kandev backend restart.
+- Adding `CANCELLING` to the durable session lifecycle or changing prompt-admission semantics.
+- Changing the lifecycle cancellation timeout, escalation policy, or terminal task/session result.
+- Adding task-list badges, new cancel copy, notifications, navigation, layout, or touch gestures.
