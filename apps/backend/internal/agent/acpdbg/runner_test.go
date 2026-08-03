@@ -3,10 +3,12 @@
 package acpdbg
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"syscall"
 	"testing"
@@ -127,7 +129,20 @@ func processAlive(pid int) bool {
 	if pid <= 0 {
 		return false
 	}
-	return syscall.Kill(pid, 0) == nil
+	if syscall.Kill(pid, 0) != nil {
+		return false
+	}
+	// Linux keeps killed children as zombies until their parent reaps them.
+	// A zombie is no longer running, so do not treat it as a surviving
+	// descendant while the test waits for the process group to settle.
+	if runtime.GOOS == "linux" {
+		if raw, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid)); err == nil {
+			if end := bytes.LastIndexByte(raw, ')'); end >= 0 && end+2 < len(raw) {
+				return raw[end+2] != 'Z'
+			}
+		}
+	}
+	return true
 }
 
 func waitForProcessGone(t *testing.T, pid int) {
