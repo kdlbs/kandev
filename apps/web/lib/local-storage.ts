@@ -72,6 +72,31 @@ export function removeLocalStorage(key: string): void {
   }
 }
 
+// PR panel "offered" flag — tracks whether the conditional review panel was
+// shown for a session. If the user closes it, we respect that dismissal for
+// the rest of the browser tab session.
+const PR_PANEL_OFFERED_PREFIX = "kandev.pr-panel-offered.";
+
+/** Whether the conditional review panel was already offered for this session. */
+export function wasPRPanelOffered(sessionId: string): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** Record that the conditional review panel was offered for this session. */
+export function markPRPanelOffered(sessionId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`, "1");
+  } catch {
+    // Ignore write failures.
+  }
+}
+
 // Internal storage keys for kanban preview (not exported - encapsulated)
 const KANBAN_PREVIEW_KEYS = {
   OPEN: "kandev.kanban.preview.open",
@@ -741,6 +766,7 @@ export function cleanupTaskStorage(
   // Session-keyed storage — drafts, files panel state, scroll, etc.
   for (const sessionId of sessionIds) {
     removeStoredQuickChatName(sessionId);
+    removeSessionStorage(`${PR_PANEL_OFFERED_PREFIX}${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_TEXT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_CONTENT_KEY}.${sessionId}`);
     removeSessionStorage(`${CHAT_DRAFT_ATTACHMENTS_KEY}.${sessionId}`);

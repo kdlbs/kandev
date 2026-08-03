@@ -137,6 +137,8 @@ func (r *Repository) ensureRunnerProjectionTables() {
 			auto_archive_after_hours INTEGER DEFAULT 0,
 			agent_profile_id TEXT NOT NULL DEFAULT '',
 			stage_type TEXT NOT NULL DEFAULT 'custom',
+			auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0,
+			cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`)

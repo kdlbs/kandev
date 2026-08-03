@@ -212,7 +212,6 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 			zap.Error(err))
 		return "", err
 	}
-
 	// Resolve agent/executor profile from task metadata if not explicitly provided
 	if agentProfileID == "" {
 		if v, ok := task.Metadata[models.MetaKeyAgentProfileID].(string); ok && v != "" {
@@ -4034,6 +4033,120 @@ func (s *Service) isCancelInFlight(sessionID string) bool {
 	return s.cancelOperations[sessionID] > 0
 }
 
+// reconcileCancelledTurn durably settles the cancelled session and its turn.
+// A user cancellation may trigger workflow completion only after both pieces
+// of bookkeeping have been confirmed from their authoritative stores. The
+// best-effort lifecycle helpers intentionally remain unchanged for other event
+// paths; this path fails closed so a persistence or turn-service failure cannot
+// advance the task while the cancelled turn is still running.
+func (s *Service) reconcileCancelledTurn(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	session *models.TaskSession,
+	requireWaiting bool,
+) (*models.TaskSession, error) {
+	authoritativeSession, err := s.reconcileCancelledSessionState(ctx, taskID, session, requireWaiting)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
+		return nil, fmt.Errorf("settle cancelled turn: %w", err)
+	}
+
+	if session == nil {
+		return nil, nil
+	}
+	if err := validateCancelledSessionState(session.ID, authoritativeSession, requireWaiting); err != nil {
+		return nil, err
+	}
+	if err := s.verifyCancelledTurnClosed(ctx, sessionID); err != nil {
+		return nil, err
+	}
+
+	return authoritativeSession, nil
+}
+
+func (s *Service) reconcileCancelledSessionState(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	requireWaiting bool,
+) (*models.TaskSession, error) {
+	if session == nil || !requireWaiting {
+		return session, nil
+	}
+	updated := s.updateTaskSessionState(
+		ctx,
+		taskID,
+		session.ID,
+		models.TaskSessionStateWaitingForInput,
+		"",
+		true,
+		session,
+	)
+	if updated == nil {
+		return nil, fmt.Errorf("persist cancelled session %s as WAITING_FOR_INPUT", session.ID)
+	}
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		return nil, fmt.Errorf(
+			"cancelled session %s persisted as %s, want WAITING_FOR_INPUT",
+			session.ID,
+			updated.State,
+		)
+	}
+	authoritative, err := s.repo.GetTaskSession(ctx, session.ID)
+	if err != nil {
+		return nil, fmt.Errorf("verify cancelled session %s state: %w", session.ID, err)
+	}
+	if authoritative == nil {
+		return nil, fmt.Errorf(
+			"cancelled session %s is missing before turn settlement, want WAITING_FOR_INPUT",
+			session.ID,
+		)
+	}
+	if authoritative.State != models.TaskSessionStateWaitingForInput {
+		return nil, fmt.Errorf(
+			"cancelled session %s is %s before turn settlement, want WAITING_FOR_INPUT",
+			session.ID,
+			authoritative.State,
+		)
+	}
+	return authoritative, nil
+}
+
+func validateCancelledSessionState(
+	sessionID string,
+	authoritativeSession *models.TaskSession,
+	requireWaiting bool,
+) error {
+	if authoritativeSession == nil {
+		return fmt.Errorf("cancelled session %s has no authoritative state", sessionID)
+	}
+	if requireWaiting && authoritativeSession.State != models.TaskSessionStateWaitingForInput {
+		return fmt.Errorf(
+			"cancelled session %s settled as %s, want WAITING_FOR_INPUT",
+			sessionID,
+			authoritativeSession.State,
+		)
+	}
+	return nil
+}
+
+func (s *Service) verifyCancelledTurnClosed(ctx context.Context, sessionID string) error {
+	if s.turnService == nil {
+		return nil
+	}
+	activeTurn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify cancelled turn closure: %w", err)
+	}
+	if activeTurn != nil {
+		return fmt.Errorf("cancelled turn %s remains open", activeTurn.ID)
+	}
+	return nil
+}
+
 // CancelAgent interrupts the current agent turn without terminating the process,
 // allowing the user to send a new prompt.
 //
@@ -4081,6 +4194,23 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 	}
+	cancelTurnCompletionEligible := false
+	if session != nil {
+		switch session.State {
+		case models.TaskSessionStateRunning, models.TaskSessionStateStarting:
+			cancelTurnCompletionEligible = true
+		case models.TaskSessionStateWaitingForInput:
+			// A previous cancellation may have settled the session before a
+			// transient turn-close failure. Keep that retry eligible only while
+			// an active turn is still present; a settled second cancel must not
+			// re-run the source step's completion actions.
+			activeTurnID, turnErr := s.peekActiveTurnID(ctx, sessionID)
+			if turnErr != nil {
+				return fmt.Errorf("inspect active turn before cancel retry: %w", turnErr)
+			}
+			cancelTurnCompletionEligible = activeTurnID != ""
+		}
+	}
 
 	// Capture the active turn before cancelling so the cancel message attaches
 	// to the turn the user was actually cancelling. If we waited until after
@@ -4114,13 +4244,20 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 		}
 	}
 
-	// Transition session to WAITING_FOR_INPUT so the user can send a new
-	// prompt, and reconcile the task row to REVIEW so the sidebar shows the
-	// green check rather than the yellow "needs input" question icon — a
-	// cancelled turn is treated as finished work the user may want to review.
+	// Transition the session to WAITING_FOR_INPUT and close every open turn.
+	// Both writes are checked against their authoritative stores before any
+	// workflow completion is evaluated; a failure leaves the task on its
+	// current step so a retry can reconcile it safely.
 	if session != nil {
-		s.updateTaskSessionState(ctx, session.TaskID, sessionID, models.TaskSessionStateWaitingForInput, "", true, session)
-		s.writeTaskReviewStateOnCancel(ctx, session.TaskID, sessionID)
+		reconciled, err := s.reconcileCancelledTurn(ctx, session.TaskID, sessionID, session, cancelTurnCompletionEligible)
+		if err != nil {
+			return fmt.Errorf("reconcile cancelled turn: %w", err)
+		}
+		if reconciled != nil {
+			session = reconciled
+		}
+	} else if _, err := s.reconcileCancelledTurn(ctx, "", sessionID, nil, false); err != nil {
+		return fmt.Errorf("reconcile cancelled turn: %w", err)
 	}
 
 	// Record cancellation in the message history
@@ -4145,9 +4282,23 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 		}
 	}
 
-	// Complete the turn since the agent was cancelled. Idempotent w.r.t. a
-	// concurrent agent.complete event having already closed the turn.
-	s.completeTurnForSession(ctx, sessionID)
+	// A configured explicit user cancellation is a human completion decision.
+	// Evaluate it only after the cancellation message and turn settlement are
+	// durable, while the per-session guard still excludes a late agent.ready
+	// event from observing a successor turn and transitioning a second time.
+	if session != nil && cancelTurnCompletionEligible {
+		s.processOnTurnCompleteViaEngineWithCause(ctx, session.TaskID, session, turnCompletionCauseUserCancellation)
+		// Disabled/no-transition outcomes and successful nonterminal transitions
+		// both reconcile the source task to REVIEW after session and turn
+		// settlement. The guarded state write is a no-op for terminal tasks or a
+		// destination that has already restarted work.
+		s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
+	} else if session != nil {
+		// Preserve the existing review reconciliation for cancellations that
+		// are not eligible to run workflow completion (already waiting or a
+		// terminal/ineligible session).
+		s.reconcileCancelledTaskReview(ctx, session.TaskID, session.ID)
+	}
 
 	// Release the cancel/interrupt guard now that this session's cancel is
 	// fully resolved. Do not drain here: a user cancellation must not itself
@@ -4159,6 +4310,17 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 
 	s.logger.Debug("agent turn cancelled", zap.String("session_id", sessionID))
 	return nil
+}
+
+func (s *Service) reconcileCancelledTaskReview(ctx context.Context, taskID, sessionID string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err == nil && task != nil && task.WorkflowStepID != "" && s.workflowStepGetter != nil {
+		step, stepErr := s.workflowStepGetter.GetStep(ctx, task.WorkflowStepID)
+		if stepErr == nil && step != nil && s.workflowStepIsTerminal(ctx, step.ID) {
+			return
+		}
+	}
+	s.writeTaskReviewState(ctx, taskID, sessionID)
 }
 
 // takeAndDispatchEntryLocked takes entryID from sessionID's queue and

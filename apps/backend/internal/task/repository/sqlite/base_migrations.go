@@ -192,6 +192,11 @@ func (r *Repository) runMigrations() error {
 	// fail. Required for tests and any environment where the workflow
 	// repo hasn't run yet.
 	r.ensureRunnerProjectionTables()
+	// Keep the projection table compatible with databases whose workflow
+	// repository has not replayed its own migrations yet. These additive
+	// migrations are idempotent and preserve the false default for legacy rows.
+	r.migrate.Apply("workflow_steps.auto_advance_requires_signal", `ALTER TABLE workflow_steps ADD COLUMN auto_advance_requires_signal INTEGER NOT NULL DEFAULT 0`)
+	r.migrate.Apply("workflow_steps.cancel_triggers_turn_complete", `ALTER TABLE workflow_steps ADD COLUMN cancel_triggers_turn_complete INTEGER NOT NULL DEFAULT 0`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { desktopUpdater } from "@/lib/desktop/updater-client";
+// Module-level `t`: resolved at call time, no JSX in this file for lint to see.
+import { t } from "@/lib/i18n";
 import type { DesktopUpdateState } from "@/lib/desktop/protocol";
 import type { DesktopUpdaterAdapter } from "@/lib/desktop/updater-adapter";
 
@@ -127,5 +129,5 @@ export function useDesktopUpdater(
 }
 
 function message(error: unknown): string {
-  return error instanceof Error ? error.message : "Desktop update failed";
+  return error instanceof Error ? error.message : t("system:desktopUpdateFailed");
 }

@@ -1,5 +1,6 @@
 import type React from "react";
 import type { Icon } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import {
   IconArrowRight,
   IconClipboard,
@@ -24,7 +25,8 @@ const TRANSITION_TYPES = ["move_to_next", "move_to_previous", "move_to_step"];
 type CapabilityDef = {
   key: string;
   icon: Icon;
-  tooltip: string;
+  /** Catalog key: `key` and the action `type`s it checks are wire values. */
+  tooltipKey: string;
   check: (events: KanbanStepEvents) => boolean;
 };
 
@@ -32,37 +34,37 @@ const CAPABILITIES: CapabilityDef[] = [
   {
     key: "onTurnStart",
     icon: IconMessageForward,
-    tooltip: "On user message",
+    tooltipKey: "workflows:onUserMessage",
     check: (e) => e.on_turn_start?.some((a) => TRANSITION_TYPES.includes(a.type)) ?? false,
   },
   {
     key: "autoStart",
     icon: IconRobot,
-    tooltip: "Auto-start agent",
+    tooltipKey: "workflows:autoStartAgent",
     check: (e) => e.on_enter?.some((a) => a.type === "auto_start_agent") ?? false,
   },
   {
     key: "planMode",
     icon: IconClipboard,
-    tooltip: "Plan mode",
+    tooltipKey: "workflows:planMode",
     check: (e) => e.on_enter?.some((a) => a.type === "enable_plan_mode") ?? false,
   },
   {
     key: "resetContext",
     icon: IconRefresh,
-    tooltip: "Reset agent context",
+    tooltipKey: "workflows:resetAgentContext",
     check: (e) => e.on_enter?.some((a) => a.type === "reset_agent_context") ?? false,
   },
   {
     key: "transition",
     icon: IconArrowRight,
-    tooltip: "Auto-transition",
+    tooltipKey: "workflows:autoTransition",
     check: (e) => e.on_turn_complete?.some((a) => TRANSITION_TYPES.includes(a.type)) ?? false,
   },
   {
     key: "onExit",
     icon: IconDoorExit,
-    tooltip: "On exit actions",
+    tooltipKey: "workflows:onExitActions",
     check: (e) => (e.on_exit?.length ?? 0) > 0,
   },
 ];
@@ -73,6 +75,7 @@ export function StepCapabilityIcons({
   className,
   fallback,
 }: StepCapabilityIconsProps) {
+  const { t } = useTranslation();
   const defaultClassName = "flex items-center gap-1.5 text-muted-foreground";
   const activeCapabilities = events ? CAPABILITIES.filter((cap) => cap.check(events)) : [];
   const hasAgentProfile = Boolean(agentProfileId);
@@ -89,7 +92,7 @@ export function StepCapabilityIcons({
             <TooltipTrigger asChild>
               <IconUserCog className="h-3.5 w-3.5" />
             </TooltipTrigger>
-            <TooltipContent>Custom agent profile</TooltipContent>
+            <TooltipContent>{t("workflows:customAgentProfile")}</TooltipContent>
           </Tooltip>
         </TooltipProvider>
       )}
@@ -101,7 +104,7 @@ export function StepCapabilityIcons({
               <TooltipTrigger asChild>
                 <IconComponent className="h-3.5 w-3.5" />
               </TooltipTrigger>
-              <TooltipContent>{cap.tooltip}</TooltipContent>
+              <TooltipContent>{t(cap.tooltipKey)}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
         );

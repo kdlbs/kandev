@@ -10,7 +10,7 @@ import {
 } from "@/components/settings/profile-edit/script-editor";
 import {
   HelpTip,
-  STEP_PROMPT_PLACEHOLDERS,
+  stepPromptPlaceholders,
   PROMPT_TEMPLATES,
 } from "./workflow-pipeline-editor-helpers";
 
@@ -38,16 +38,16 @@ export function StepPromptSection({
           htmlFor={`${step.id}-prompt`}
           className="text-xs font-medium uppercase tracking-wider text-muted-foreground"
         >
-          {t("settings:stepPrompt")}
+          {t("workflows:stepPrompt")}
         </Label>
-        <HelpTip text={t("settings:stepPromptHelp", { taskPrompt: "{{task_prompt}}" })} />
+        <HelpTip text={t("workflows:stepPromptHelp", { taskPrompt: "{{task_prompt}}" })} />
       </div>
       {!readOnly && (
         <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[11px] text-muted-foreground/60">{t("settings:templates")}</span>
+          <span className="text-[11px] text-muted-foreground/60">{t("workflows:templates")}</span>
           {PROMPT_TEMPLATES.map((template) => (
             <button
-              key={template.label}
+              key={template.labelKey}
               type="button"
               onClick={() => {
                 onLocalPromptChange(template.prompt);
@@ -55,7 +55,7 @@ export function StepPromptSection({
               }}
               className="cursor-pointer rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
-              {template.label}
+              {t(template.labelKey)}
             </button>
           ))}
         </div>
@@ -75,12 +75,12 @@ export function StepPromptSection({
           height={computeEditorHeight(localPrompt)}
           lineNumbers="off"
           readOnly={readOnly}
-          placeholders={STEP_PROMPT_PLACEHOLDERS}
+          placeholders={stepPromptPlaceholders(t)}
           mentionPrompts={prompts}
         />
       </div>
       <p className="text-[11px] text-muted-foreground/60">
-        {t("settings:stepPromptUsageHint", {
+        {t("workflows:stepPromptUsageHint", {
           open: "{{",
           taskPrompt: "{{task_prompt}}",
         })}

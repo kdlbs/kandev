@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { Dispatch, SetStateAction } from "react";
 import { deleteWorkflowAction } from "@/app/actions/workspaces";
+import { t } from "@/lib/i18n";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
 import { SettingsSaveCancelledError, useSettingsSaveContributor } from "./settings-save-provider";
@@ -102,7 +103,7 @@ export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) 
     revision: persistence.revision,
     isDirty: args.isWorkflowDirty || stepsDirty,
     canSave: workflow.name.trim().length > 0,
-    invalidReason: workflow.name.trim() ? undefined : "Workflow name is required",
+    invalidReason: workflow.name.trim() ? undefined : t("workflows:workflowNameIsRequired"),
     save: async (submittedRevision) => {
       if (!workflow.id.startsWith(TEMP_WORKFLOW_PREFIX)) {
         await persistence.persistSubmittedDraft(submittedRevision);
@@ -121,8 +122,8 @@ export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) 
           } catch (error) {
             if (!guardReturned) throw error;
             toast({
-              title: "Failed to save workflow changes",
-              description: error instanceof Error ? error.message : "Request failed",
+              title: t("workflows:failedToSaveWorkflowChanges"),
+              description: error instanceof Error ? error.message : t("common:requestFailed"),
               variant: "error",
             });
           }
@@ -136,7 +137,7 @@ export function useWorkflowDraftContributor(args: WorkflowDraftContributorArgs) 
       if (workflow.id.startsWith(TEMP_WORKFLOW_PREFIX) && persistedDraft) {
         await deleteWorkflowAction(persistedDraft.id);
       } else if (persistence.saveFailedRef.current) {
-        throw new Error("Retry the partial workflow save before leaving");
+        throw new Error(t("workflows:retryPartialSaveBeforeLeaving"));
       }
       args.setWorkflowSteps(savedWorkflowSteps);
       args.onDiscardWorkflow();

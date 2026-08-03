@@ -2555,6 +2555,7 @@ type recordingTaskExecutionStopper struct {
 	stopExecutionCh      chan stopExecutionCall
 	stopExecutionErr     error
 	stopExecutionErrByID map[string]error
+	stopSessionErr       error
 	claimExecutionFunc   func(sessionID, executionID string, force bool) bool
 }
 
@@ -2567,7 +2568,7 @@ func (s *recordingTaskExecutionStopper) StopTask(context.Context, string, string
 }
 
 func (s *recordingTaskExecutionStopper) StopSession(context.Context, string, string, bool) error {
-	return nil
+	return s.stopSessionErr
 }
 
 func (s *recordingTaskExecutionStopper) StopExecution(_ context.Context, executionID, reason string, force bool) error {

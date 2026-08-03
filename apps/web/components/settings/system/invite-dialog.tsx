@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -42,19 +43,17 @@ function InviteForm({
   onCancel: () => void;
   onSubmit: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Invite a user</DialogTitle>
-        <DialogDescription>
-          Generates a one-time invite link. Leave the email blank to create a link anyone can use to
-          sign up with the selected role; set an email to pin the invite to that address.
-        </DialogDescription>
+        <DialogTitle>{t("system:inviteTitle")}</DialogTitle>
+        <DialogDescription>{t("system:inviteDescription")}</DialogDescription>
       </DialogHeader>
       <div className="space-y-3">
         <div className="flex flex-col gap-1">
           <label htmlFor="invite-dialog-email" className="text-xs text-muted-foreground">
-            Email (optional)
+            {t("system:inviteEmailOptional")}
           </label>
           <Input
             id="invite-dialog-email"
@@ -66,15 +65,16 @@ function InviteForm({
         </div>
         <div className="flex flex-col gap-1">
           <label htmlFor="invite-dialog-role" className="text-xs text-muted-foreground">
-            Role
+            {t("system:createUserRole")}
           </label>
           <Select value={role} onValueChange={setRole}>
             <SelectTrigger id="invite-dialog-role" data-testid="invite-dialog-role">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="member">Member</SelectItem>
-              <SelectItem value="admin">Admin</SelectItem>
+              {/* `value` is the wire role sent to the API; only the child text is copy. */}
+              <SelectItem value="member">{t("system:usersRoleMember")}</SelectItem>
+              <SelectItem value="admin">{t("system:usersRoleAdmin")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -86,7 +86,7 @@ function InviteForm({
       </div>
       <DialogFooter>
         <Button variant="outline" className="cursor-pointer" onClick={onCancel}>
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           className="cursor-pointer"
@@ -94,7 +94,7 @@ function InviteForm({
           onClick={onSubmit}
           data-testid="invite-dialog-submit"
         >
-          {submitting ? "Creating..." : "Create invite link"}
+          {submitting ? t("system:inviteCreating") : t("system:inviteCreate")}
         </Button>
       </DialogFooter>
     </>
@@ -102,6 +102,7 @@ function InviteForm({
 }
 
 function InviteLinkResult({ url, onDone }: { url: string; onDone: () => void }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const onCopy = async () => {
     if (await copyToClipboard(url)) setCopied(true);
@@ -109,18 +110,24 @@ function InviteLinkResult({ url, onDone }: { url: string; onDone: () => void }) 
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Invite link ready</DialogTitle>
-        <DialogDescription>
-          Share this link with the invitee. It is shown only once — copy it now.
-        </DialogDescription>
+        <DialogTitle>{t("system:inviteReadyTitle")}</DialogTitle>
+        <DialogDescription>{t("system:inviteReadyDescription")}</DialogDescription>
       </DialogHeader>
       <div className="flex items-center gap-2">
-        <Input readOnly value={url} data-testid="invite-dialog-url" className="font-mono text-xs" />
+        {/* The generated invite URL is a value. */}
+        <Input
+          readOnly
+          value={url}
+          aria-label={t("system:inviteUrlLabel")}
+          data-testid="invite-dialog-url"
+          className="font-mono text-xs"
+        />
         <Button
           size="icon"
           variant="outline"
           className="cursor-pointer"
           onClick={() => void onCopy()}
+          aria-label={copied ? t("system:inviteCopied") : t("system:inviteCopy")}
           data-testid="invite-dialog-copy"
         >
           {copied ? <IconCheck className="h-4 w-4" /> : <IconCopy className="h-4 w-4" />}
@@ -128,7 +135,7 @@ function InviteLinkResult({ url, onDone }: { url: string; onDone: () => void }) 
       </div>
       <DialogFooter>
         <Button className="cursor-pointer" onClick={onDone} data-dialog-default-action>
-          Done
+          {t("system:inviteDone")}
         </Button>
       </DialogFooter>
     </>
@@ -136,6 +143,7 @@ function InviteLinkResult({ url, onDone }: { url: string; onDone: () => void }) 
 }
 
 export function InviteDialog({ open, onOpenChange, onCreated }: Props) {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("member");
   const [error, setError] = useState<string | null>(null);
@@ -157,7 +165,7 @@ export function InviteDialog({ open, onOpenChange, onCreated }: Props) {
       setResultUrl(`${window.location.origin}${url}`);
       onCreated();
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not create invite.");
+      setError(err instanceof ApiError ? err.message : t("system:inviteFailed"));
     } finally {
       setSubmitting(false);
     }

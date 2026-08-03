@@ -82,6 +82,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
+| [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | shipped |
 | [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 
 ## agents/ — agent governance

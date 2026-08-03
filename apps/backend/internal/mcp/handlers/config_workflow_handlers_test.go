@@ -194,6 +194,27 @@ func TestHandleCreateWorkflowStep_PersistsAutoAdvanceRequiresSignal(t *testing.T
 	assert.True(t, steps[0].AutoAdvanceRequiresSignal)
 }
 
+func TestHandleCreateWorkflowStep_PersistsCancelTriggersTurnComplete(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateWorkflowStep, map[string]interface{}{
+		"workflow_id":                   "wf-test",
+		"name":                          "Cancel completion",
+		"position":                      0,
+		"cancel_triggers_turn_complete": true,
+	})
+	resp, err := h.handleCreateWorkflowStep(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	steps, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	require.NoError(t, err)
+	require.Len(t, steps, 1)
+	assert.True(t, steps[0].CancelTriggersTurnComplete)
+}
+
 func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	h, _, repo := setupImportHandlers(t)
 	ctx := context.Background()
@@ -269,6 +290,31 @@ func TestHandleUpdateWorkflowStep_PersistsAutoAdvanceRequiresSignalFalse(t *test
 	assert.False(t, step.AutoAdvanceRequiresSignal)
 }
 
+func TestHandleUpdateWorkflowStep_PersistsCancelTriggersTurnCompleteFalse(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                         "cancel-gated",
+		WorkflowID:                 "wf-test",
+		Name:                       "Cancel gated",
+		Position:                   0,
+		CancelTriggersTurnComplete: true,
+	}))
+	msg := makeWSMessage(t, ws.ActionMCPUpdateWorkflowStep, map[string]interface{}{
+		"step_id":                       "cancel-gated",
+		"cancel_triggers_turn_complete": false,
+	})
+	resp, err := h.handleUpdateWorkflowStep(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	step, err := repo.GetStep(ctx, "cancel-gated")
+	require.NoError(t, err)
+	assert.False(t, step.CancelTriggersTurnComplete)
+}
+
 func TestHandleListWorkflowSteps_IncludesAutoAdvanceRequiresSignal(t *testing.T) {
 	h, _, repo := setupImportHandlers(t)
 	ctx := context.Background()
@@ -308,6 +354,36 @@ func TestHandleListWorkflowSteps_IncludesAutoAdvanceRequiresSignal(t *testing.T)
 	assert.Equal(t, false, body.Steps[0]["auto_advance_requires_signal"])
 	assert.Contains(t, body.Steps[1], "auto_advance_requires_signal")
 	assert.Equal(t, true, body.Steps[1]["auto_advance_requires_signal"])
+}
+
+func TestHandleListWorkflowSteps_IncludesCancelTriggersTurnComplete(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:         "cancel-legacy",
+		WorkflowID: "wf-test",
+		Name:       "Legacy",
+		Position:   0,
+	}))
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                         "cancel-enabled",
+		WorkflowID:                 "wf-test",
+		Name:                       "Enabled",
+		Position:                   1,
+		CancelTriggersTurnComplete: true,
+	}))
+
+	msg := makeWSMessage(t, ws.ActionMCPListWorkflowSteps, map[string]interface{}{"workflow_id": "wf-test"})
+	resp, err := h.handleListWorkflowSteps(ctx, msg)
+	require.NoError(t, err)
+	var body struct {
+		Steps []map[string]interface{} `json:"steps"`
+	}
+	require.NoError(t, json.Unmarshal(resp.Payload, &body))
+	require.Len(t, body.Steps, 2)
+	assert.Equal(t, false, body.Steps[0]["cancel_triggers_turn_complete"])
+	assert.Equal(t, true, body.Steps[1]["cancel_triggers_turn_complete"])
 }
 
 func TestHandleImportWorkflow_PersistsWorkflow(t *testing.T) {

@@ -619,4 +619,198 @@ export const i18nGuardFiles = [
   "components/settings/profile-edit/**/*.{ts,tsx}",
   "components/settings/executor-profile-dialog.tsx",
   "components/settings/executor-profiles-card.tsx",
+  // The two hooks the Agents routes reach for install/update and capability
+  // probing. Both are `.ts` with no JSX, and both carried copy the lint count
+  // could never report: a thrown `Error` and an async `setError` fallback. Each
+  // surfaces inside an already-translated wrapper (`unableToStartUpdate`,
+  // `failedToRefresh`), so the English payload rendered *inside* accented copy —
+  // the shape the pseudo-locale is easiest to skim past. Only the pseudo-locale
+  // can prove they stay migrated.
+  "hooks/domains/settings/use-agent-runtime-updates.ts",
+  "hooks/domains/settings/use-dynamic-models.ts",
+  // Settings → Workspace → Workflows: the workflow editor end to end — the
+  // route, the list and its reorder/import/export chrome, the workflow card,
+  // the pipeline/step editor with its WIP and transition controls, the
+  // session-config editor and rule cards, the replay-cycle diagnostic, and the
+  // GitHub-sync and export/import dialogs. Copy lives in a new `workflows`
+  // namespace; the 27 workflow-editor keys that already sat in `settings` moved
+  // there in this PR so the surface is not split across two catalogs.
+  //
+  // The closure was re-derived from the route's imports rather than from the
+  // string counter. `components/workflow-selector-row.tsx` is deliberately
+  // ABSENT: the counter attributed it here, but the only path to it from this
+  // route runs through the settings save provider into the config-chat →
+  // quick-chat → task-create-dialog tree, so it belongs to the task-create
+  // surface, not this one. Same for `components/task-create-dialog-*` and
+  // `components/task/chat/messages/workflow-step-message-badge.tsx`.
+  //
+  // `components/integrations/auth-status-banner.tsx` is also deliberately
+  // absent. This surface reaches it only for `useTick`, the shared 30s
+  // re-render hook, which carries no copy; every literal in that file belongs to
+  // the integration status banner, so listing it would pull an un-migrated
+  // component into this PR. It is the same call as `sentry-issue-common.tsx`
+  // above.
+  //
+  // The `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects them;
+  // the entries record that they are migrated (toast titles, the sync
+  // `confirm()`, thrown save/order errors, and the carry-forward warning
+  // sentence all reach the user) and only the pseudo-locale can prove it stays
+  // that way.
+  //
+  // Deliberately left in English, because each is PERSISTED rather than
+  // rendered: the seeded `New Step` name in `workflow-card-actions.ts` and
+  // `workflow-step-mutations.ts`, the `New Workflow` fallback and the
+  // `DEFAULT_CUSTOM_STEPS` names (`Todo` / `In Progress` / `Review` / `Done`) in
+  // `use-workflow-creation.ts`, and the three `PROMPT_TEMPLATES` bodies in
+  // `workflow-pipeline-editor-helpers.tsx` — the template button writes its
+  // prompt into `WorkflowStep.prompt`, which is stored and sent to the agent
+  // verbatim. Translating any of them would write a localized string into the
+  // database. Same reasoning as the Jira/Linear/Sentry default watch prompts.
+  //
+  // Also English by design: the `kandev_workflow` YAML sample in the import
+  // dialog (a wire format), the GitHub repository-link example, git's default
+  // branch name `main`, the `{{task_prompt}}` substitution token, and the
+  // `step_complete_kandev` MCP tool name — all interpolated as values so the
+  // pseudo-locale cannot turn them into dead pointers.
+  //
+  // Wire values stay wire values, with only their labels as copy resolved at
+  // render from a catalog key: the step `color` Tailwind classes
+  // (`STEP_COLORS`), the transition action `type`s (`move_to_next` and
+  // friends), the capability `key`s in `step-capability-icons.tsx`, the replay
+  // diagnostic's `promptSource` / `trigger` / `actionKind`, the sync `state`
+  // union, and the `configure_session` rule `operation`s. Workflow and step
+  // NAMES are user data throughout and are always interpolated as values,
+  // never built into a message by concatenation.
+  "app/settings/workspace/[id]/workflows/**/*.{ts,tsx}",
+  "app/settings/workspace/use-workflow-creation.ts",
+  "app/settings/workspace/workspace-workflows-client.tsx",
+  "app/settings/workspace/workspace-workflows-dialogs.tsx",
+  "components/settings/use-workflow-draft-contributor.ts",
+  "components/settings/workflow-card-actions.ts",
+  "components/settings/workflow-card-dialogs.tsx",
+  "components/settings/workflow-card-header-actions.tsx",
+  "components/settings/workflow-card.tsx",
+  "components/settings/workflow-cycle-diagnostic.tsx",
+  "components/settings/workflow-export-dialog.tsx",
+  "components/settings/workflow-pipeline-editor-helpers.tsx",
+  "components/settings/workflow-pipeline-editor-panels.tsx",
+  "components/settings/workflow-pipeline-editor-step-actions.tsx",
+  "components/settings/workflow-pipeline-editor-wip-controls.tsx",
+  "components/settings/workflow-pipeline-editor.tsx",
+  "components/settings/workflow-section-actions.tsx",
+  "components/settings/workflow-session-config-carry-warning.tsx",
+  "components/settings/workflow-session-config-editor.tsx",
+  "components/settings/workflow-session-config-rule-card.tsx",
+  "components/settings/workflow-step-mutations.ts",
+  "components/settings/workflow-step-prompt-section.tsx",
+  "components/settings/workflow-sync-dialog.tsx",
+  "components/settings/workflow-sync-section.tsx",
+  "components/settings/workflow-sync-status-banner.tsx",
+  "components/settings/workflow-synced-badge.tsx",
+  "hooks/domains/settings/use-workflow-sync.ts",
+  "lib/workflows/session-config-carry-analysis.ts",
+  // Shared with the task board's `components/task/workflow-stepper.tsx`, which
+  // is not migrated. The guard is per-file, so that surface is unaffected; the
+  // icons render here on every pipeline node, so leaving them would have left
+  // plain English inside a card this PR claims is done.
+  "components/step-capability-icons.tsx",
+  // Settings → System, the remaining eight routes (about, backups, database,
+  // feature-toggles, licenses, logs, status, updates) plus Users, which is a
+  // ninth System route reachable only when the `auth` feature is on. This
+  // completes the group: `components/settings/system/**` is now migrated in
+  // full, so the storage-only globs above are the historical record of which
+  // PR did which half rather than a boundary that still means anything.
+  //
+  // **The live titles and descriptions were not in `components/` at all.**
+  // `app/settings/system/{about,backups,database,feature-toggles,licenses,
+  // status,updates}/page.tsx` are unreferenced Next-era leftovers — nothing
+  // imports them; `src/settings-routes.tsx` is the SPA's real route table and
+  // `StoragePage` is the only `app/settings/system` page it still pulls in.
+  // Those nine titles/descriptions live in `SETTINGS_ROUTES`, a SCREAMING_CASE
+  // identifier that `i18next/no-literal-string` skips *entirely* — the guard
+  // reported 5 findings in a 652-line file holding copy for every settings
+  // route. They now travel as `titleKey`/`descriptionKey` through a
+  // `SystemRouteShell` wrapper. The dead pages are migrated too rather than
+  // deleted, which keeps this PR copy-only; deleting them is a separate call.
+  //
+  // `src/settings-routes.tsx` is deliberately NOT on this list. Only its System
+  // entries are migrated — Executors, Workflows, Integrations, Workspaces and
+  // the account routes still hold English titles there, and the file is one
+  // file, so allowlisting it would claim a completeness this PR does not have.
+  // Whichever sibling migration lands last should add it.
+  //
+  // Six entries hold no JSX, so `mode: "jsx-only"` never inspects them; they
+  // record that the file is migrated and only the pseudo-locale can prove it
+  // stays that way. Three are hooks that were in no lint-derived list at all
+  // (`use-kandev-restart`, `use-self-update`, `use-desktop-updater` own seven
+  // restart/update failure messages between them); all three import the
+  // module-level `t` so each string resolves when its callback fires, keeping
+  // `t` out of the callbacks' dependency arrays.
+  //
+  // Four more shapes the guard structurally cannot see were migrated here, and
+  // every one was found by reading rather than by lint:
+  //   - `job-progress-indicator.tsx` reported 0 and returned `Queued` /
+  //     `Running` / `Done` / `Failed` from `stateLabel()`. It renders on four
+  //     cards, one of which (`storage-quarantine-card.tsx`) is #2194's and is
+  //     on a route this PR does not otherwise touch.
+  //   - `action-button-content.tsx` reported 0: its `Running...` / `Done` /
+  //     `Failed` were destructuring defaults, which evaluate before the
+  //     component body, so they resolve inside the body now.
+  //   - SCREAMING_CASE config tables: `ROWS` in `disk-usage-card.tsx` (7 row
+  //     labels), `BASE_ITEMS`/`AUTH_ITEMS` in the sidebar's `system-group.tsx`
+  //     (10 nav labels — the guard saw only `label="System"`), and the four
+  //     `*_HELP` maintenance blurbs in `database-stats-card.tsx`.
+  //   - `aria-label`s, which the pseudo-locale oracle cannot see either:
+  //     `What is {label}?`, `Toggle {flag.label}`, `Restart support details`,
+  //     `What's monitored`, and the three icon-only backup row actions, which
+  //     had no accessible name at all before this PR.
+  //
+  // `bundle-customizer.tsx` (533 lines) and `log-viewer.tsx` (281) also report
+  // 0 and are listed because they are genuinely already migrated — an earlier
+  // diagnostics PR did them under `settings:diagnostic*`. Those 47 keys stay in
+  // `settings.json` rather than moving to `system`: unlike the twelve
+  // `storage*` keys #2194 relocated, they are already keyed, already correct,
+  // and moving them would be churn with a rename-typo risk and no user-visible
+  // gain.
+  //
+  // Deliberately left in English, none of it copy:
+  //   - The type-to-confirm tokens `RESET` (`factory-reset-dialog.tsx`) and
+  //     `RESTORE` (`restore-dialog.tsx`). Both gate their confirm button on
+  //     `typed === CONFIRM_TOKEN` *and* are sent to the API (`resetDatabase`,
+  //     `restoreBackup`), so translating either would make an irreversible
+  //     dialog impossible to satisfy in that locale. Each travels as an
+  //     interpolated value into the visible sentence, the placeholder and the
+  //     input's aria-label, so shown and compared cannot drift.
+  //   - Backend-owned copy, on the same contract as #2193's `PermissionSetting`:
+  //     `RuntimeFlagState.label` / `.description` / `.risk_description` are
+  //     authored in `runtimeflags/registry.go`; `HealthIssue.title` /
+  //     `.message` / `.fix_label`, `HealthCheckSummary.name`, `SystemJob.message`,
+  //     `RestartCapability.reason`, and `UpdatesResponse.apply_unsupported_reason`
+  //     / `.manual_commands` are all rendered by the API. Localizing them needs
+  //     a key/value split in Go, not a frontend change.
+  //   - Wire values, each rendered beside its own translated label: the runtime
+  //     flag `key` and `env_var` (the persisted registry identity — never
+  //     translate either), the user `role` / `status` (the `value` on each
+  //     `SelectItem` is the token posted to the API; only the child text is
+  //     copy), the snapshot `kind`, the job `state`, the health `severity`, and
+  //     the restart/update `phase` unions.
+  //   - Identifiers and third-party content in `licenses-list.tsx`: package
+  //     `name`, `version`, `ecosystem`, the SPDX `license` id (`MIT`,
+  //     `Apache-2.0`) and the full `license_text`. None of it is ours to
+  //     translate.
+  //   - Build and release values in `about-card.tsx` / `version-summary-card.tsx`
+  //     / `updates-card.tsx`: version strings, commit SHA, build time, Go
+  //     version, OS and arch. `PostgreSQL` / `SQLite` in `formatDriver` are the
+  //     products' own spellings, and `GitHub` is a brand noun.
+  //   - Every filesystem path: the data directory, the database `path`, the
+  //     backup filenames, and the `<data-dir>/backups/` placeholder — all
+  //     interpolated as values so the pseudo-locale cannot turn them into dead
+  //     pointers.
+  "app/settings/system/**/*.{ts,tsx}",
+  "components/app-sidebar/sections/settings/system-group.tsx",
+  "components/settings/changelog-list.tsx",
+  "components/settings/system/*.{ts,tsx}",
+  "hooks/domains/system/use-desktop-updater.ts",
+  "hooks/domains/system/use-kandev-restart.ts",
+  "hooks/domains/system/use-self-update.ts",
 ];

@@ -12,7 +12,6 @@ export type SessionConfigCarryWarning = {
   sourceStepName: string;
   model?: string;
   configOptions: Record<string, string>;
-  message: string;
 };
 
 type CarryState = "original" | "changed";
@@ -129,7 +128,6 @@ function carryWarning(agentName: string, source: ChangedSource): SessionConfigCa
     sourceStepName: source.step.name,
     model: source.rule.operation === "set" ? source.rule.model : undefined,
     configOptions: source.rule.operation === "set" ? { ...(source.rule.config_options ?? {}) } : {},
-    message: `Settings changed in ${source.step.name} may carry into this step for ${agentName}. Choose keep, restore original, or set new values.`,
   };
 }
 

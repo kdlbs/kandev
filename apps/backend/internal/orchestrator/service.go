@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1230,13 +1231,26 @@ func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) 
 }
 
 func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessionID string) {
+	if err := s.completeTurnForTaskSessionChecked(ctx, taskID, sessionID); err != nil {
+		s.logger.Warn("failed to reconcile active turn",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
+}
+
+// completeTurnForTaskSessionChecked closes every open turn for a session and
+// returns an error unless the turn service confirms that none remain. The
+// regular lifecycle paths use completeTurnForTaskSession, which preserves
+// their best-effort behavior; cancellation uses this checked variant because
+// workflow completion must not run while the cancelled turn is still open.
+func (s *Service) completeTurnForTaskSessionChecked(ctx context.Context, taskID, sessionID string) error {
 	// Foreground ownership ends with the turn, but detached background work can
 	// outlive it. Preserve those registrations for accounting; full cleanup
 	// belongs to execution/session teardown paths.
 	s.yieldForegroundAndPublish(ctx, taskID, sessionID, foregroundYieldTurnCompletion)
 
 	if s.turnService == nil {
-		return
+		return nil
 	}
 
 	s.activeTurns.Delete(sessionID)
@@ -1246,34 +1260,29 @@ func (s *Service) completeTurnForTaskSession(ctx context.Context, taskID, sessio
 	for closed < maxIterations {
 		turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
 		if err != nil {
-			s.logger.Warn("failed to look up active turn",
-				zap.String("session_id", sessionID),
-				zap.Error(err))
-			return
+			return fmt.Errorf("look up active turn: %w", err)
 		}
 		if turn == nil {
-			return
+			return nil
 		}
 		if err := s.turnService.CompleteTurn(ctx, turn.ID); err != nil {
 			// GetActiveTurn returns the latest open turn — retrying here
 			// would just hit the same row and loop. Bail; the next
 			// completeTurnForSession call will pick it up.
-			s.logger.Warn("failed to complete turn; will retry on next sweep",
-				zap.String("session_id", sessionID),
-				zap.String("turn_id", turn.ID),
-				zap.Error(err))
-			return
+			return fmt.Errorf("complete turn %s: %w", turn.ID, err)
 		}
 		closed++
 	}
-	// Only warn if turns are *still* accumulating after the cap. Closing
-	// exactly maxIterations turns and then finding the session clean is not a
-	// runaway.
-	if turn, err := s.turnService.GetActiveTurn(ctx, sessionID); err == nil && turn != nil {
-		s.logger.Warn("completeTurnForSession iteration cap hit; possible turn close loop",
-			zap.String("session_id", sessionID),
-			zap.Int("max_iterations", maxIterations))
+	// Verify after the cap. Closing exactly maxIterations turns and then
+	// finding the session clean is a successful reconciliation, not a runaway.
+	turn, err := s.turnService.GetActiveTurn(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify active turn closure: %w", err)
 	}
+	if turn != nil {
+		return fmt.Errorf("active turn %s remains after %d closure attempts", turn.ID, maxIterations)
+	}
+	return nil
 }
 
 // completeTurnIfCurrent closes turnID only when it is still sessionID's active
@@ -1732,11 +1741,25 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 		return
 	}
 	if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup missing session cleanup", true); err != nil {
-		s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+		// A not-found stop for a runtime whose row is a confirmed-dead LOCAL
+		// process means the runtime is already gone — treat it as an idempotent
+		// successful stop and prune/repair the row under the resume-safety
+		// invariant, so the orphan row does not survive restarts forever. Any
+		// other error (alive/unknown/remote row, or a non-not-found failure) is
+		// preserved and left for a later attempt.
+		if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
+			s.logger.Warn("failed to stop missing-session runtime; preserving executor record",
+				zap.String("session_id", sessionID),
+				zap.String("task_id", running.TaskID),
+				zap.String("execution_id", executionID),
+				zap.Error(err))
+			return
+		}
+		s.logger.Info("missing-session runtime already gone (confirmed dead); pruning executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", running.TaskID),
-			zap.String("execution_id", executionID),
-			zap.Error(err))
+			zap.String("execution_id", executionID))
+		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateCancelled)
 		return
 	}
 	if err := s.repo.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
@@ -1745,6 +1768,17 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 			zap.String("task_id", running.TaskID),
 			zap.Error(err))
 	}
+}
+
+// stopReportsRuntimeAbsent reports whether a stop error means the runtime is
+// already gone (a typed not-found sentinel), as opposed to a transient failure.
+// Only a typed sentinel counts — a generic store/lookup error must never be
+// reinterpreted as an absent runtime. The runtime seam (lifecycleAdapter)
+// normalizes the backend lifecycle not-found sentinel to runtimeapi.ErrNotFound,
+// so reconciliation depends only on the public runtime and executor sentinels.
+func stopReportsRuntimeAbsent(err error) bool {
+	return errors.Is(err, runtimeapi.ErrNotFound) ||
+		errors.Is(err, executor.ErrExecutionNotFound)
 }
 
 func (s *Service) abandonOpenTurnsOnStartup(ctx context.Context, sessionID, reason string) {
@@ -1775,15 +1809,8 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
-		executionID := strings.TrimSpace(running.AgentExecutionID)
-		if executionID != "" && s.agentManager != nil {
-			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup terminal session cleanup", true); err != nil {
-				s.logger.Warn("failed to stop terminal session runtime; preserving executor record",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", executionID),
-					zap.Error(err))
-				return true
-			}
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup") {
+			return true
 		}
 		// Resume-safety invariant: prune the row only if it is not still resumable
 		// (no resume_token). A terminal session that kept a resume_token — e.g. an
@@ -1827,20 +1854,47 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		executionID := strings.TrimSpace(running.AgentExecutionID)
-		if executionID != "" && s.agentManager != nil {
-			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup failed session cleanup", true); err != nil {
-				s.logger.Warn("failed to stop failed session runtime; preserving executor record",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", executionID),
-					zap.Error(err))
-				return
-			}
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup") {
+			return
 		}
 		// Prune only subject to the resume-safety invariant (a lingering
 		// resume_token is repaired in place rather than deleted).
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
 	}
+}
+
+// stopRuntimeForStartupCleanup stops a session's still-registered runtime handle
+// during startup reconciliation and reports whether the caller may proceed to
+// prune/repair the executor row. It mirrors handleMissingSessionOnStartup's
+// classification so terminal and non-resumable-failed reconciliation stop
+// leaking stale rows: a not-found stop for a confirmed-dead LOCAL runtime means
+// the runtime is already gone and cleanup proceeds; any other error
+// (alive/unknown/remote row, or a non-not-found failure) preserves the row for a
+// later attempt. A row with no stoppable handle is already stoppable-complete.
+func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string) bool {
+	executionID := strings.TrimSpace(running.AgentExecutionID)
+	if executionID == "" || s.agentManager == nil {
+		return true
+	}
+	err := s.agentManager.StopAgentWithReason(ctx, executionID, reason, true)
+	if err == nil {
+		return true
+	}
+	if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
+		s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record",
+			zap.String("session_id", running.SessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("execution_id", executionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+		return false
+	}
+	s.logger.Info("session runtime already gone (confirmed dead) during startup cleanup; proceeding to prune/repair",
+		zap.String("session_id", running.SessionID),
+		zap.String("task_id", running.TaskID),
+		zap.String("execution_id", executionID),
+		zap.String("reason", reason))
+	return true
 }
 
 func canResumeRunning(running *models.ExecutorRunning) bool {

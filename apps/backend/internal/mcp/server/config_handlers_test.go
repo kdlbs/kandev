@@ -121,6 +121,16 @@ func TestWorkflowStepTools_SchemaExposesAutoAdvanceRequiresSignal(t *testing.T) 
 	assert.Contains(t, updateProps, "auto_advance_requires_signal")
 }
 
+func TestWorkflowStepTools_SchemaExposesCancelTriggersTurnComplete(t *testing.T) {
+	backend := &testBackend{}
+	s := newTestServer(t, backend)
+
+	createProps := toolInputProperties(t, s, "create_workflow_step_kandev")
+	updateProps := toolInputProperties(t, s, "update_workflow_step_kandev")
+	assert.Contains(t, createProps, "cancel_triggers_turn_complete")
+	assert.Contains(t, updateProps, "cancel_triggers_turn_complete")
+}
+
 func TestCreateWorkflowHandler_Success(t *testing.T) {
 	backend := &testBackend{
 		response: map[string]interface{}{"id": "wf-1", "name": "Sprint Board"},
@@ -305,6 +315,21 @@ func TestCreateWorkflowStepHandler_AllFields(t *testing.T) {
 	assert.NotNil(t, payload["events"])
 }
 
+func TestCreateWorkflowStepHandler_ForwardsCancelTriggersTurnComplete(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1"}}}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "create_workflow_step_kandev", map[string]interface{}{
+		"workflow_id":                   "wf-123",
+		"name":                          "Cancel completion",
+		"cancel_triggers_turn_complete": true,
+	})
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, true, payload["cancel_triggers_turn_complete"])
+}
+
 func TestCreateWorkflowStepHandler_MissingWorkflowID(t *testing.T) {
 	backend := &testBackend{}
 	s := newTestServer(t, backend)
@@ -370,6 +395,20 @@ func TestUpdateWorkflowStepHandler_AllFields(t *testing.T) {
 	assert.Equal(t, false, payload["auto_advance_requires_signal"])
 	assert.Equal(t, float64(48), payload["auto_archive_after_hours"])
 	assert.NotNil(t, payload["events"])
+}
+
+func TestUpdateWorkflowStepHandler_ForwardsCancelTriggersTurnComplete(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"step": map[string]interface{}{"id": "step-1"}}}
+	s := newTestServer(t, backend)
+
+	result := callTool(t, s, "update_workflow_step_kandev", map[string]interface{}{
+		"step_id":                       "step-1",
+		"cancel_triggers_turn_complete": false,
+	})
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, false, payload["cancel_triggers_turn_complete"])
 }
 
 func TestUpdateWorkflowStepHandler_MissingStepID(t *testing.T) {

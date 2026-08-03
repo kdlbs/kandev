@@ -1,36 +1,47 @@
 "use client";
 
 import { IconInfoCircle } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { WorkflowStep } from "@/lib/types/http";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
 
-export const STEP_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
-  {
-    key: "task_prompt",
-    description: "The original task description provided by the user",
-    example: "Implement user authentication with OAuth2",
-    executor_types: [],
-  },
-];
+/**
+ * Monaco completion entries for the step-prompt editor. `key` is the
+ * substitution token the backend expands (`{{task_prompt}}`) and is never
+ * translated; only the description and example are copy, so the list is built
+ * at render rather than frozen at module scope where `t()` cannot run.
+ */
+export function stepPromptPlaceholders(t: (key: string) => string): ScriptPlaceholder[] {
+  return [
+    {
+      key: "task_prompt",
+      description: t("workflows:stepPromptPlaceholderTaskPrompt"),
+      example: t("workflows:stepPromptPlaceholderExample"),
+      executor_types: [],
+    },
+  ];
+}
 
 export function HelpTip({
   text,
   testId,
-  ariaLabel = "More information",
+  ariaLabel,
 }: {
   text: string;
   testId?: string;
   ariaLabel?: string;
 }) {
+  const { t } = useTranslation();
+  const label = ariaLabel ?? t("workflows:moreInformation");
   return (
     <TooltipProvider>
       <Tooltip>
         <TooltipTrigger asChild>
           <button
             type="button"
-            className="inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={ariaLabel}
+            className="inline-flex h-5 w-5 shrink-0 cursor-help items-center justify-center rounded-sm text-muted-foreground/50 hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            aria-label={label}
             data-testid={testId}
           >
             <IconInfoCircle className="h-3.5 w-3.5" />
@@ -42,21 +53,26 @@ export function HelpTip({
   );
 }
 
+// `value` is the Tailwind class persisted as `WorkflowStep.color`; only
+// `labelKey` is copy, and it resolves at render (see `StepConfigHeader`).
 export const STEP_COLORS = [
-  { value: "bg-slate-500", label: "Gray" },
-  { value: "bg-red-500", label: "Red" },
-  { value: "bg-orange-500", label: "Orange" },
-  { value: "bg-yellow-500", label: "Yellow" },
-  { value: "bg-green-500", label: "Green" },
-  { value: "bg-cyan-500", label: "Cyan" },
-  { value: "bg-blue-500", label: "Blue" },
-  { value: "bg-indigo-500", label: "Indigo" },
-  { value: "bg-purple-500", label: "Purple" },
+  { value: "bg-slate-500", labelKey: "workflows:colorGray" },
+  { value: "bg-red-500", labelKey: "workflows:colorRed" },
+  { value: "bg-orange-500", labelKey: "workflows:colorOrange" },
+  { value: "bg-yellow-500", labelKey: "workflows:colorYellow" },
+  { value: "bg-green-500", labelKey: "workflows:colorGreen" },
+  { value: "bg-cyan-500", labelKey: "workflows:colorCyan" },
+  { value: "bg-blue-500", labelKey: "workflows:colorBlue" },
+  { value: "bg-indigo-500", labelKey: "workflows:colorIndigo" },
+  { value: "bg-purple-500", labelKey: "workflows:colorPurple" },
 ];
 
+// The `prompt` bodies are deliberately NOT translated: clicking a template
+// writes the text into `WorkflowStep.prompt`, which is persisted and sent to
+// the agent verbatim. Only the button `labelKey` is copy.
 export const PROMPT_TEMPLATES = [
   {
-    label: "Plan",
+    labelKey: "workflows:templatePlan",
     prompt: `Analyze the task and create a detailed implementation plan.
 
 {{task_prompt}}
@@ -70,7 +86,7 @@ INSTRUCTIONS:
 Output the plan as a numbered list. Be specific about file paths, function names, and the approach for each step. Do NOT implement anything yet — only plan.`,
   },
   {
-    label: "Code Review",
+    labelKey: "workflows:templateCodeReview",
     prompt: `Please review the changed files in the current git worktree.
 
 STEP 1: Determine what to review
@@ -108,7 +124,7 @@ PERFORMANCE: Algorithmic or resource usage problems with measurable impact
 Now review the changes.`,
   },
   {
-    label: "Security Audit",
+    labelKey: "workflows:templateSecurityAudit",
     prompt: `Perform a security audit on the changed files in the current git worktree.
 
 {{task_prompt}}

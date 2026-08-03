@@ -15,6 +15,7 @@ steps:
     position: 0
     color: bg-neutral-400
     allow_manual_move: true
+    cancel_triggers_turn_complete: true
     events:
       on_turn_start:
         - type: move_to_next
@@ -30,6 +31,7 @@ steps:
     is_start_step: true
     show_in_command_panel: true
     allow_manual_move: true
+    cancel_triggers_turn_complete: true
     events:
       on_enter:
         - type: auto_start_agent

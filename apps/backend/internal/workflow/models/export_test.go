@@ -1,12 +1,15 @@
 package models
 
 import (
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"gopkg.in/yaml.v3"
 )
 
 func TestBuildWorkflowExport(t *testing.T) {
@@ -429,6 +432,46 @@ func TestAutoAdvanceRequiresSignalExport(t *testing.T) {
 		assert.False(t, export.Workflows[0].Steps[0].AutoAdvanceRequiresSignal)
 		assert.True(t, export.Workflows[0].Steps[1].AutoAdvanceRequiresSignal)
 	})
+}
+
+func TestCancelTriggersTurnCompleteExport(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-cancel", Name: "Cancel workflow"}
+	steps := []*WorkflowStep{
+		{ID: "s1", Name: "Paused", Position: 0},
+		{ID: "s2", Name: "Advance", Position: 1},
+	}
+	field := reflect.ValueOf(steps[1]).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !field.IsValid() {
+		t.Fatal("WorkflowStep is missing CancelTriggersTurnComplete")
+	}
+	field.SetBool(true)
+
+	export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-cancel": steps}, nil)
+	require.Len(t, export.Workflows[0].Steps, 2)
+	exportedField := reflect.ValueOf(&export.Workflows[0].Steps[1]).Elem().FieldByName("CancelTriggersTurnComplete")
+	if !exportedField.IsValid() {
+		t.Fatal("StepPortable is missing CancelTriggersTurnComplete")
+	}
+	assert.True(t, exportedField.Bool())
+}
+
+func TestCancelTriggersTurnCompleteYAMLExportIncludesFalse(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-yaml-cancel", Name: "YAML cancellation"}
+	export := BuildWorkflowExport(
+		[]*taskmodels.Workflow{wf},
+		map[string][]*WorkflowStep{"wf-yaml-cancel": {
+			{ID: "s1", Name: "Todo", Position: 0},
+		}},
+		nil,
+	)
+
+	encoded, err := yaml.Marshal(export)
+	if err != nil {
+		t.Fatalf("marshal workflow export: %v", err)
+	}
+	if got := string(encoded); !strings.Contains(got, "cancel_triggers_turn_complete: false") {
+		t.Fatalf("YAML export omitted false cancellation policy:\n%s", got)
+	}
 }
 
 func TestPullFromStepPositionToID(t *testing.T) {

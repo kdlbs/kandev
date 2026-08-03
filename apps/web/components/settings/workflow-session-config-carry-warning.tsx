@@ -25,7 +25,7 @@ export function SessionConfigCarryWarningPanel({
     >
       <div className="flex items-start gap-2 text-xs text-amber-800 dark:text-amber-100">
         <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-        <span>{t("settings:sessionConfigCarryForwardWarning")}</span>
+        <span>{t("workflows:sessionConfigCarryForwardWarning")}</span>
       </div>
       <div className="space-y-2">
         {warnings.map((warning) => (
@@ -33,7 +33,14 @@ export function SessionConfigCarryWarningPanel({
             key={`${warning.agentName}-${warning.sourceStepId}`}
             className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
           >
-            <span className="min-w-0 text-xs text-muted-foreground">{warning.message}</span>
+            <span className="min-w-0 text-xs text-muted-foreground">
+              {/* Resolved here rather than in the analyzer so the sentence
+                  follows a locale switch; the step and agent names are data. */}
+              {t("workflows:sessionConfigCarryForwardWarningMessage", {
+                stepName: warning.sourceStepName,
+                agentName: warning.agentName,
+              })}
+            </span>
             <div className="flex shrink-0 flex-wrap gap-1.5">
               <Button
                 type="button"
@@ -43,7 +50,7 @@ export function SessionConfigCarryWarningPanel({
                 disabled={readOnly || disabled}
                 onClick={() => onChoose(warning, "keep")}
               >
-                {t("settings:sessionConfigKeep")}
+                {t("workflows:sessionConfigKeep")}
               </Button>
               <Button
                 type="button"
@@ -53,7 +60,7 @@ export function SessionConfigCarryWarningPanel({
                 disabled={readOnly || disabled}
                 onClick={() => onChoose(warning, "restore_original")}
               >
-                {t("settings:sessionConfigRestore")}
+                {t("workflows:sessionConfigRestore")}
               </Button>
               <Button
                 type="button"
@@ -63,7 +70,7 @@ export function SessionConfigCarryWarningPanel({
                 disabled={readOnly || disabled}
                 onClick={() => onChoose(warning, "set")}
               >
-                {t("settings:sessionConfigSetNew")}
+                {t("workflows:sessionConfigSetNew")}
               </Button>
             </div>
           </div>

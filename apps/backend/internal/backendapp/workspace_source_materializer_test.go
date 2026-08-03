@@ -269,7 +269,7 @@ func TestWorkspaceSourceMaterializer_RemoteRejectsLocalOnlyAdditionalRepositoryB
 func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSessions(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	source := filepath.Join(t.TempDir(), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -319,7 +319,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSe
 func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	source := filepath.Join(t.TempDir(), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
@@ -356,7 +356,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce
 func TestWorkspaceSourceMaterializer_LocalPromotionPreservesPrimaryRepository(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	primary := filepath.Join(t.TempDir(), "primary")
 	folder := filepath.Join(t.TempDir(), "notes")
@@ -402,10 +402,10 @@ func TestWorkspaceSourceMaterializer_LocalPromotionPreservesPrimaryRepository(t 
 func TestWorkspaceSourceMaterializer_LocalClonesProviderRepositoryBeforeLinking(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
 	seedWorkspaceSourceTask(t, repo, t.TempDir())
-	clonePath := filepath.Join(t.TempDir(), "cloned")
+	clonePath := filepath.Join(canonicalTempDir(t), "cloned")
 	if err := os.MkdirAll(clonePath, 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -481,9 +481,9 @@ func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *te
 func TestWorkspaceSourceMaterializer_RebindFailureRestoresEarlierSessionsInReverseOrder(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
-	tasksBase := filepath.Join(t.TempDir(), "tasks")
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
-	source := filepath.Join(t.TempDir(), "notes")
+	source := filepath.Join(canonicalTempDir(t), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}

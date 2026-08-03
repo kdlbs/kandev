@@ -5,7 +5,7 @@ description: "Move Kanban workflows between workspaces with Kandev's portable YA
 
 # Workflow Import / Export
 
-Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, and supported events. It deliberately omits database IDs and workspace ownership.
+Kandev's versioned portable format moves Kanban workflow definitions between workspaces or installations. It carries prompts, step behavior, portable agent-profile descriptors, WIP rules, supported events, and the explicit-cancellation completion policy. It deliberately omits database IDs and workspace ownership.
 
 Use this for snapshots and one-time copies. Use [Workflow Sync](workflow-sync.md) when a GitHub repository should remain the source of truth.
 
@@ -123,6 +123,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
   allow_manual_move: true
   auto_archive_after_hours: 0
   auto_advance_requires_signal: true
+  cancel_triggers_turn_complete: true
   wip_limit: 2
   pull_from_step_position: 0
   agent_profile:
@@ -142,6 +143,7 @@ IDs, workspace ID, ordering among workflows, source/sync ownership, style, visib
 | `auto_archive_after_hours` | integer | Omitted when `0`; `0` disables auto-archive. The portable validator currently does not reject negative values, so use only `0` or a positive value. |
 | `agent_profile` | object | Omitted when unset; exact-match behavior is below. |
 | `auto_advance_requires_signal` | boolean | Always exported. `true` makes `on_turn_complete` transitions wait for `step_complete_kandev`; missing input is `false`. |
+| `cancel_triggers_turn_complete` | boolean | Always exported. `true` lets an explicit user cancellation run the step's normal `on_turn_complete` actions after the cancelled turn settles; missing input is `false`. Pending clarification and non-user interruption/failure paths are not eligible. |
 | `wip_limit` | integer | Omitted when `0`. Must be non-negative; `0` is unlimited. |
 | `pull_from_step_position` | integer | Optional feeder reference using another step's `position`. It must exist, cannot point to itself, and cannot form a pull cycle. |
 
@@ -232,6 +234,7 @@ workflows:
         show_in_command_panel: false
         allow_manual_move: true
         auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
 
       - name: Work
         position: 1
@@ -251,6 +254,7 @@ workflows:
         show_in_command_panel: true
         allow_manual_move: true
         auto_advance_requires_signal: true
+        cancel_triggers_turn_complete: true
         wip_limit: 2
         pull_from_step_position: 0
 
@@ -266,6 +270,7 @@ workflows:
         show_in_command_panel: true
         allow_manual_move: true
         auto_advance_requires_signal: false
+        cancel_triggers_turn_complete: false
 ```
 
 After import, assign a workflow-level or Work-step agent profile if the destination did not produce an exact portable profile match. Create a disposable task, verify Backlog → Work pulling, the WIP rejection at capacity, explicit completion, and Review feedback before adopting it.

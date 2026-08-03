@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import type { TFunction } from "i18next";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
@@ -15,25 +17,24 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useDatabaseStats } from "@/hooks/domains/system/use-database-stats";
 import { optimizeDatabase, vacuumDatabase } from "@/lib/api/domains/system-api";
 import type { DatabaseStats } from "@/lib/types/system";
+import { formatDateTime } from "@/lib/i18n/formats";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { useActionFeedback, type ActionFeedbackState } from "@/hooks/use-action-feedback";
 import { ActionButtonContent } from "./action-button-content";
 import { JobProgressIndicator } from "./job-progress-indicator";
 import { FactoryResetDialog } from "./factory-reset-dialog";
 
-function formatTimestamp(iso: string | null | undefined): string {
-  if (!iso) return "Never";
+function formatTimestamp(iso: string | null | undefined, t: TFunction): string {
+  if (!iso) return t("system:databaseNever");
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
+  return formatDateTime(d);
 }
-
-const WAL_HELP =
-  "Write-Ahead Log. SQLite writes new changes to this companion file first and merges them into the main database over time. A non-zero WAL size is normal - it temporarily grows under load and shrinks back during checkpoints. Running vacuum will reset it.";
 
 type Row = { label: string; value: string; testid: string; info?: string };
 
 function StatRow({ label, value, testid, info }: Row) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-baseline justify-between gap-4 py-1.5 border-b last:border-b-0">
       <span className="text-xs text-muted-foreground inline-flex items-center gap-1">
@@ -43,7 +44,7 @@ function StatRow({ label, value, testid, info }: Row) {
             <TooltipTrigger asChild>
               <button
                 type="button"
-                aria-label={`What is ${label}?`}
+                aria-label={t("system:databaseWhatIs", { label })}
                 className="cursor-pointer text-muted-foreground/70 hover:text-foreground transition-colors"
                 data-testid={`${testid}-info`}
               >
@@ -65,6 +66,11 @@ function databaseDriver(database: DatabaseStats): string {
   return database.driver || "sqlite";
 }
 
+/**
+ * `driver` is a wire enum. `PostgreSQL` / `SQLite` are the products' own
+ * spellings — brand nouns, not copy — so they stay literal, and an unknown
+ * driver echoes its raw token.
+ */
 function formatDriver(driver: string): string {
   if (driver === "postgres") return "PostgreSQL";
   if (driver === "sqlite") return "SQLite";
@@ -72,51 +78,49 @@ function formatDriver(driver: string): string {
 }
 
 function StatsTable({ database }: { database: DatabaseStats }) {
+  const { t } = useTranslation();
   const driver = databaseDriver(database);
   const isSQLite = driver === "sqlite";
 
   return (
     <div className="rounded-md border px-3 py-2">
-      <StatRow label="Driver" value={formatDriver(driver)} testid="system-db-driver" />
-      {isSQLite && <StatRow label="Path" value={database.path} testid="system-db-path" />}
       <StatRow
-        label={isSQLite ? "Size" : "Database size"}
+        label={t("system:databaseDriver")}
+        value={formatDriver(driver)}
+        testid="system-db-driver"
+      />
+      {/* The database file path is a value. */}
+      {isSQLite && (
+        <StatRow label={t("system:databasePath")} value={database.path} testid="system-db-path" />
+      )}
+      <StatRow
+        label={isSQLite ? t("system:databaseSize") : t("system:databaseSizeLong")}
         value={formatBytes(database.size_bytes)}
         testid="system-db-size"
       />
       {isSQLite && (
         <StatRow
-          label="WAL"
+          label={t("system:databaseWal")}
           value={formatBytes(database.wal_size_bytes)}
           testid="system-db-wal"
-          info={WAL_HELP}
+          info={t("system:databaseWalHelp")}
         />
       )}
       <StatRow
-        label="Schema version"
+        label={t("system:databaseSchemaVersion")}
         value={database.schema_version || "-"}
         testid="system-db-schema-version"
       />
       {isSQLite && (
         <StatRow
-          label="Last backup"
-          value={formatTimestamp(database.last_backup_at)}
+          label={t("system:databaseLastBackup")}
+          value={formatTimestamp(database.last_backup_at, t)}
           testid="system-db-last-backup"
         />
       )}
     </div>
   );
 }
-
-// Plain-language descriptions of each maintenance operation. Surfaced as a
-// short paragraph next to the button + an on-hover tooltip so users without
-// database background know what each action does and when to use it.
-const VACUUM_HELP =
-  "Reclaims unused space inside the database file. The file can grow over time as you delete tasks or sessions; vacuum compacts it back down. Safe to run anytime - it does not change any data. Use it once in a while if the database size looks large.";
-const OPTIMIZE_HELP =
-  "Asks the database to refresh its internal indexes so common queries stay fast. Run it after deleting a lot of data or if the app feels sluggish. Quick and safe - no data is changed.";
-const FACTORY_RESET_HELP =
-  "Wipes ALL Kandev data: tasks, sessions, settings, repositories, and worktrees. There is no undo. A backup is taken first, but restoring it requires using the Backups page after the reset. Only use this if you want to start over from scratch.";
 
 function OperationRow({
   testid,
@@ -144,12 +148,13 @@ function OperationRow({
 }
 
 function UnsupportedMaintenance({ driver }: { driver: string }) {
+  const { t } = useTranslation();
   return (
     <p
       className="text-xs text-muted-foreground"
       data-testid="system-database-maintenance-unavailable"
     >
-      SQLite maintenance actions are unavailable for {formatDriver(driver)}.
+      {t("system:databaseMaintenanceUnavailable", { driver: formatDriver(driver) })}
     </p>
   );
 }
@@ -169,12 +174,18 @@ function SQLiteMaintenanceButtons({
   onOptimize,
   onResetOpen,
 }: SQLiteMaintenanceButtonsProps) {
+  const { t } = useTranslation();
+  // Each operation's plain-language description is shown both as a paragraph
+  // and in the button's tooltip, so it resolves once here.
+  const vacuumHelp = t("system:databaseVacuumHelp");
+  const optimizeHelp = t("system:databaseOptimizeHelp");
+  const factoryResetHelp = t("system:databaseFactoryResetHelp");
   return (
     <div className="space-y-2">
       <OperationRow
         testid="system-vacuum-row"
-        label="Vacuum"
-        description={VACUUM_HELP}
+        label={t("system:databaseVacuum")}
+        description={vacuumHelp}
         button={
           <Tooltip>
             <TooltipTrigger asChild>
@@ -190,18 +201,18 @@ function SQLiteMaintenanceButtons({
                 <ActionButtonContent
                   state={vacuumState}
                   idleIcon={<IconBolt className="h-3.5 w-3.5 mr-1" />}
-                  idleLabel="Run vacuum"
+                  idleLabel={t("system:databaseRunVacuum")}
                 />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{VACUUM_HELP}</TooltipContent>
+            <TooltipContent>{vacuumHelp}</TooltipContent>
           </Tooltip>
         }
       />
       <OperationRow
         testid="system-optimize-row"
-        label="Optimize"
-        description={OPTIMIZE_HELP}
+        label={t("system:databaseOptimize")}
+        description={optimizeHelp}
         button={
           <Tooltip>
             <TooltipTrigger asChild>
@@ -217,18 +228,18 @@ function SQLiteMaintenanceButtons({
                 <ActionButtonContent
                   state={optimizeState}
                   idleIcon={<IconRefresh className="h-3.5 w-3.5 mr-1" />}
-                  idleLabel="Run optimize"
+                  idleLabel={t("system:databaseRunOptimize")}
                 />
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{OPTIMIZE_HELP}</TooltipContent>
+            <TooltipContent>{optimizeHelp}</TooltipContent>
           </Tooltip>
         }
       />
       <OperationRow
         testid="system-factory-reset-row"
-        label="Factory reset"
-        description={FACTORY_RESET_HELP}
+        label={t("system:databaseFactoryReset")}
+        description={factoryResetHelp}
         button={
           <Tooltip>
             <TooltipTrigger asChild>
@@ -239,10 +250,10 @@ function SQLiteMaintenanceButtons({
                 className="cursor-pointer"
                 data-testid="system-factory-reset-button"
               >
-                <IconTrash className="h-3.5 w-3.5 mr-1" /> Factory reset
+                <IconTrash className="h-3.5 w-3.5 mr-1" /> {t("system:databaseFactoryReset")}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{FACTORY_RESET_HELP}</TooltipContent>
+            <TooltipContent>{factoryResetHelp}</TooltipContent>
           </Tooltip>
         }
       />
@@ -266,6 +277,7 @@ function MaintenanceButtons({
 }
 
 export function DatabaseStatsCard() {
+  const { t } = useTranslation();
   const { database, isLoading, error, reload } = useDatabaseStats();
   const vacuum = useActionFeedback();
   const optimize = useActionFeedback();
@@ -287,7 +299,7 @@ export function DatabaseStatsCard() {
     <Card data-testid="system-database-card">
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <IconDatabase className="h-4 w-4" /> Database
+          <IconDatabase className="h-4 w-4" /> {t("system:databaseTitle")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -298,7 +310,7 @@ export function DatabaseStatsCard() {
         )}
         {!database && isLoading && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-4" /> Loading database stats...
+            <Spinner className="size-4" /> {t("system:databaseLoading")}
           </div>
         )}
         {database && <StatsTable database={database} />}

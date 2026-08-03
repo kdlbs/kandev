@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import { StateProvider } from "@/components/state-provider";
 import { SystemPageShell } from "@/components/settings/system/system-page-shell";
 import { AboutCard } from "@/components/settings/system/about-card";
@@ -16,7 +17,7 @@ export default async function SystemAboutPage() {
 
   return (
     <StateProvider initialState={initialState}>
-      <SystemPageShell title="About" description="Version, build metadata, and links.">
+      <SystemPageShell title={t("system:navAbout")} description={t("system:aboutPageDescription")}>
         <AboutCard />
       </SystemPageShell>
     </StateProvider>

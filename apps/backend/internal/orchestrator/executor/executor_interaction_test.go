@@ -108,6 +108,46 @@ func TestStopSessionDetailed_ClassifiesExecutionLookup(t *testing.T) {
 	}
 }
 
+// TestStop_MissingSessionReportsRuntimeNotFound covers the boundary contract the
+// durable task cleanup depends on: when the task_session row is genuinely gone,
+// Stop must report the runtime as not-found (wrapping the public
+// runtimeapi.ErrNotFound sentinel) so cleanup can classify a confirmed-dead
+// local runtime as already-stopped. An unrelated store error must NOT be
+// collapsed into a not-found result.
+func TestStop_MissingSessionReportsRuntimeNotFound(t *testing.T) {
+	t.Run("missing session row normalizes to runtime not-found", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+			return nil, fmt.Errorf("agent session not found: %w", models.ErrTaskSessionNotFound)
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+		err := exec.Stop(context.Background(), "sess-gone", "cleanup", true)
+		if !errors.Is(err, ErrExecutionNotFound) {
+			t.Fatalf("error = %v, want ErrExecutionNotFound", err)
+		}
+		if !errors.Is(err, runtimeapi.ErrNotFound) {
+			t.Fatalf("missing session must normalize to runtimeapi.ErrNotFound; got %v", err)
+		}
+	})
+
+	t.Run("unrelated store error is not collapsed to not-found", func(t *testing.T) {
+		repo := newMockRepository()
+		repo.getTaskSessionFunc = func(context.Context, string) (*models.TaskSession, error) {
+			return nil, errors.New("database is unavailable")
+		}
+		exec := newTestExecutor(t, &mockAgentManager{}, repo)
+
+		err := exec.Stop(context.Background(), "sess-x", "cleanup", true)
+		if !errors.Is(err, ErrExecutionNotFound) {
+			t.Fatalf("error = %v, want ErrExecutionNotFound", err)
+		}
+		if errors.Is(err, runtimeapi.ErrNotFound) {
+			t.Fatalf("an unrelated store error must not be reclassified as runtime not-found; got %v", err)
+		}
+	})
+}
+
 func TestStopSessionDetailed_RejectsInvalidSession(t *testing.T) {
 	exec := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
 

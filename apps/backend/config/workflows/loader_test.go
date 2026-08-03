@@ -2,12 +2,63 @@ package workflows
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/workflow/models"
 	"gopkg.in/yaml.v3"
 )
+
+func boolFieldForTest(t *testing.T, value any, name string) bool {
+	t.Helper()
+	v := reflect.ValueOf(value)
+	if v.Kind() == reflect.Pointer {
+		v = v.Elem()
+	}
+	field := v.FieldByName(name)
+	if !field.IsValid() {
+		t.Fatalf("%T is missing %s", value, name)
+	}
+	if field.Kind() != reflect.Bool {
+		t.Fatalf("%T.%s has kind %s, want bool", value, name, field.Kind())
+	}
+	return field.Bool()
+}
+
+func TestLoadTemplates_CancelTriggersTurnCompleteDefaults(t *testing.T) {
+	templates, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates() returned error: %v", err)
+	}
+	var simple *models.WorkflowTemplate
+	for _, template := range templates {
+		if template.ID == "simple" {
+			simple = template
+			break
+		}
+	}
+	if simple == nil {
+		t.Fatal("simple template not found")
+	}
+	want := map[string]bool{"Backlog": true, "In Progress": true, "Review": false, "Done": false}
+	seen := make(map[string]bool, len(want))
+	for _, step := range simple.Steps {
+		wantValue, ok := want[step.Name]
+		if !ok {
+			continue
+		}
+		seen[step.Name] = true
+		if got := boolFieldForTest(t, step, "CancelTriggersTurnComplete"); got != wantValue {
+			t.Errorf("simple template step %q cancel trigger = %t, want %t", step.Name, got, wantValue)
+		}
+	}
+	for name := range want {
+		if !seen[name] {
+			t.Errorf("simple template step %q not found", name)
+		}
+	}
+}
 
 func TestLoadTemplates_AllValid(t *testing.T) {
 	templates, err := LoadTemplates()

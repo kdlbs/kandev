@@ -3,12 +3,15 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/service"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
@@ -179,6 +182,68 @@ func TestCoordinator_Dispatch_HappyPath(t *testing.T) {
 	}
 	if starter.gotPrompt != "persisted body" {
 		t.Fatalf("auto-start prompt must come from created task.Description, got %q", starter.gotPrompt)
+	}
+}
+
+// TestCoordinator_Dispatch_TruncatesOverlongTitle pins the watcher-wide title
+// guarantee: any WatcherSource (Linear, Jira, GitLab, future) whose
+// BuildTaskRequest returns an overlong Title has that title bounded to the task
+// title limit by the coordinator before CreateIssueTask, so a long remote issue
+// title is never rejected by backend title validation.
+func TestCoordinator_Dispatch_TruncatesOverlongTitle(t *testing.T) {
+	longTitle := "[ENG-1] " + strings.Repeat("x", 200)
+	src := &fakeWatcherSource{
+		name:      "linear",
+		reserveOK: true,
+		buildReq: &IssueTaskRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowStepID: "step-1",
+			Title:          longTitle,
+			Description:    "body",
+		},
+	}
+	tc := &fakeTaskCreator{}
+	starter := &fakeTaskStarter{}
+	c := newTestCoordinator(t, tc, false, starter)
+
+	c.Dispatch(context.Background(), src, "evt")
+
+	if tc.gotReq == nil {
+		t.Fatal("expected task creator to receive the built request")
+	}
+	got := tc.gotReq.Title
+	if runes := utf8.RuneCountInString(got); runes > service.TaskTitleMaxLength {
+		t.Fatalf("title not truncated: %d runes (limit %d): %q", runes, service.TaskTitleMaxLength, got)
+	}
+	if !utf8.ValidString(got) {
+		t.Fatalf("truncated title is not valid UTF-8: %q", got)
+	}
+	if !strings.HasPrefix(got, "[ENG-1] ") {
+		t.Fatalf("truncation dropped the source prefix: %q", got)
+	}
+}
+
+// TestCoordinator_Dispatch_KeepsShortTitleUnchanged confirms the truncation is a
+// no-op for a title already within the limit — the coordinator does not append an
+// ellipsis or otherwise rewrite a compliant title.
+func TestCoordinator_Dispatch_KeepsShortTitleUnchanged(t *testing.T) {
+	src := &fakeWatcherSource{
+		name:      "jira",
+		reserveOK: true,
+		buildReq: &IssueTaskRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowStepID: "step-1",
+			Title:          "[PROJ-7] short enough",
+			Description:    "body",
+		},
+	}
+	tc := &fakeTaskCreator{}
+	c := newTestCoordinator(t, tc, false, &fakeTaskStarter{})
+
+	c.Dispatch(context.Background(), src, "evt")
+
+	if tc.gotReq == nil || tc.gotReq.Title != "[PROJ-7] short enough" {
+		t.Fatalf("expected short title unchanged, got %+v", tc.gotReq)
 	}
 }
 

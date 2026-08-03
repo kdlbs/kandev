@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"testing"
 	"time"
 
@@ -453,6 +454,30 @@ func TestCreateStepsFromTemplate_RemapsStepIDs(t *testing.T) {
 	require.Len(t, done.Events.OnTurnStart, 1)
 	assert.Equal(t, models.OnTurnStartMoveToStep, done.Events.OnTurnStart[0].Type)
 	assert.Equal(t, nameToID["In Progress"], done.Events.OnTurnStart[0].Config["step_id"])
+}
+
+func TestCreateStepsFromTemplate_PreservesCancelTriggersTurnComplete(t *testing.T) {
+	svc, db := setupTestService(t)
+	ctx := context.Background()
+	insertWorkflow(t, db, "wf-cancel-defaults", "Cancel defaults")
+
+	require.NoError(t, svc.CreateStepsFromTemplate(ctx, "wf-cancel-defaults", "simple"))
+	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-cancel-defaults")
+	require.NoError(t, err)
+	want := map[string]bool{"Backlog": true, "In Progress": true, "Review": false, "Done": false}
+	for _, step := range steps {
+		wantValue, ok := want[step.Name]
+		if !ok {
+			continue
+		}
+		field := reflect.ValueOf(step).Elem().FieldByName("CancelTriggersTurnComplete")
+		if !field.IsValid() {
+			t.Fatalf("WorkflowStep is missing CancelTriggersTurnComplete")
+		}
+		if got := field.Bool(); got != wantValue {
+			t.Errorf("created step %q cancel trigger = %t, want %t", step.Name, got, wantValue)
+		}
+	}
 }
 
 func TestCreateStepsFromTemplate_NormalizesDuplicateStartSteps(t *testing.T) {

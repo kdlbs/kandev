@@ -24,7 +24,7 @@ func TestAttachWorkspaceSourcesDerivesLegacyPrimaryBranchForWorktreeProjection(t
 	}
 	primaryPath := t.TempDir()
 	seedBareGitDir(t, primaryPath, "ref: refs/heads/main\n")
-	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-legacy-primary", WorkspaceID: "ws-legacy-primary", Name: "primary", LocalPath: primaryPath}); err != nil {
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-legacy-primary", WorkspaceID: "ws-legacy-primary", Name: "primary", LocalPath: canonicalRepoTestPath(t, primaryPath)}); err != nil {
 		t.Fatal(err)
 	}
 	task, err := svc.CreateTask(ctx, &CreateTaskRequest{WorkspaceID: "ws-legacy-primary", WorkflowID: "wf-legacy-primary", WorkflowStepID: "step", Title: "Task", Repositories: []TaskRepositoryInput{{RepositoryID: "repo-legacy-primary"}}})

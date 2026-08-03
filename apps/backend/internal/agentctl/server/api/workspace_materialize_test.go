@@ -359,7 +359,7 @@ func TestWorkspaceRemoveMaterializedRepository_RejectsSymlinkedGitMetadata(t *te
 
 func TestWorkspaceRemoveMaterializedRepository_RestoresSwappedReplacement(t *testing.T) {
 	origin := createMaterializeOrigin(t)
-	workDir := t.TempDir()
+	workDir := canonicalTempDir(t)
 	destination := filepath.Join(workDir, "second-repo")
 	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
 		t.Fatal(err)
@@ -393,7 +393,7 @@ func TestWorkspaceRemoveMaterializedRepository_RestoresSwappedReplacement(t *tes
 
 func TestWorkspaceRemoveMaterializedRepository_RejectsPostQuarantineReplacement(t *testing.T) {
 	origin := createMaterializeOrigin(t)
-	workDir := t.TempDir()
+	workDir := canonicalTempDir(t)
 	destination := filepath.Join(workDir, "second-repo")
 	if _, err := materializeRepository(context.Background(), origin, destination, "main", ""); err != nil {
 		t.Fatal(err)
@@ -439,6 +439,16 @@ func TestWorkspaceRemoveMaterializedRepository_RejectsTraversal(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d (body: %s)", w.Code, w.Body.String())
 	}
+}
+
+// canonicalTempDir resolves symlinks so expected paths match the canonical roots production computes (no-op on Linux).
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	return d
 }
 
 func newMaterializeTestServer(t *testing.T, workDir string) *Server {

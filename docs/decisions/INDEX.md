@@ -105,6 +105,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-01-release-toggle-gating-contract | [Release Toggles Are Install-Wide Fail-Closed Gates](2026-08-01-release-toggle-gating-contract.md) | proposed | backend, frontend, workflow | 2026-08-01 |
 | 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
 | 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |
+| 2026-08-02-explicit-user-cancel-completion | [Explicit User Cancellation May Complete a Workflow Step](2026-08-02-explicit-user-cancel-completion.md) | accepted | workflow | 2026-08-02 |
 | 2026-08-02-single-owner-agent-task-titles | [Assign Agent Task Titles to One Session](2026-08-02-single-owner-agent-task-titles.md) | accepted | backend, frontend, protocol, workflow | 2026-08-02 |
 | 2026-08-02-agent-terminal-diagnostics-over-stderr | [Capture Agent Terminal Diagnostics From Managed Stderr](2026-08-02-agent-terminal-diagnostics-over-stderr.md) | accepted | backend, frontend, protocol, security | 2026-08-02 |
 | 2026-08-02-class-aware-git-subprocess-admission | [Class-Aware Git Subprocess Admission](2026-08-02-class-aware-git-subprocess-admission.md) | accepted | backend, agentctl, observability | 2026-08-02 |

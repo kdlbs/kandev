@@ -10,6 +10,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
@@ -126,6 +127,45 @@ func TestEnsureOfficeDefaultWorkflow_CreatesFiveSteps(t *testing.T) {
 		if steps[i].StageType != want.StageType {
 			t.Errorf("step %d stage_type = %q, want %q", i, steps[i].StageType, want.StageType)
 		}
+	}
+}
+
+func TestCreateWorkspaceWithKanban_CancelTriggersTurnCompleteDefaults(t *testing.T) {
+	repo := newRepoForBuiltinWorkflowTests(t)
+	ctx := context.Background()
+	workflow, err := repo.CreateWorkspaceWithKanban(ctx, &taskmodels.Workspace{ID: "ws-kanban-cancel", Name: "Kanban Cancel"})
+	if err != nil {
+		t.Fatalf("create Kanban workspace: %v", err)
+	}
+
+	rows, err := repo.db.QueryContext(ctx, repo.db.Rebind(`
+		SELECT name, cancel_triggers_turn_complete
+		FROM workflow_steps WHERE workflow_id = ? ORDER BY position
+	`), workflow.ID)
+	if err != nil {
+		t.Fatalf("query Kanban flags: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	want := map[string]bool{"Backlog": true, "In Progress": true, "Review": false, "Done": false}
+	seen := 0
+	for rows.Next() {
+		var name string
+		var enabled int
+		if err := rows.Scan(&name, &enabled); err != nil {
+			t.Fatalf("scan Kanban flag: %v", err)
+		}
+		if wantValue, ok := want[name]; ok {
+			if got := enabled == 1; got != wantValue {
+				t.Errorf("Kanban step %q cancel trigger = %t, want %t", name, got, wantValue)
+			}
+			seen++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate Kanban flags: %v", err)
+	}
+	if seen != len(want) {
+		t.Fatalf("observed %d Kanban steps with cancel flags, want %d", seen, len(want))
 	}
 }
 

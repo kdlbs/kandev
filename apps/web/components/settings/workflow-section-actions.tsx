@@ -1,6 +1,7 @@
 "use client";
 
 import { IconDownload, IconPlus, IconUpload } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { WorkflowSyncButton } from "@/components/settings/workflow-sync-section";
 
@@ -19,6 +20,7 @@ export function WorkflowSectionActions({
   onAdd,
   onGitHubSync,
 }: WorkflowSectionActionsProps) {
+  const { t } = useTranslation();
   return (
     // sm:justify-end keeps wrapped rows right-aligned next to the section
     // title; below sm the toolbar sits under the title, left-aligned.
@@ -32,7 +34,7 @@ export function WorkflowSectionActions({
         className="cursor-pointer"
       >
         <IconDownload className="h-4 w-4 mr-2" />
-        Export All
+        {t("workflows:exportAll")}
       </Button>
       <Button
         type="button"
@@ -42,7 +44,7 @@ export function WorkflowSectionActions({
         className="cursor-pointer"
       >
         <IconUpload className="h-4 w-4 mr-2" />
-        Import
+        {t("workflows:import")}
       </Button>
       <Button
         type="button"
@@ -52,7 +54,7 @@ export function WorkflowSectionActions({
         data-testid="add-workflow-button"
       >
         <IconPlus className="h-4 w-4 mr-2" />
-        Add Workflow
+        {t("workflows:addWorkflow")}
       </Button>
     </div>
   );

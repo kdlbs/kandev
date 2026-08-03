@@ -55,6 +55,28 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - A cleanup operation treats a classifiable missing owned resource as already
   complete. This includes a missing worktree and a missing `TaskEnvironment`
   row captured by the durable cleanup snapshot.
+- Stopping a runtime that is already gone is a successful, idempotent stop, not a
+  failed stop. When a stop operation is asked to stop an execution or session
+  that no longer exists, and the row it owns is a confirmed-dead local runtime,
+  the cleanup treats the runtime as already stopped so the runtime row can be
+  pruned or repaired under the resume-safety invariant and the durable cleanup
+  job does not retry solely because the owned runtime is absent.
+- "Confirmed dead" is judged in a runtime-aware way. A row is confirmed dead only
+  when it is a local runtime whose local liveness handle refers to a process that
+  no longer exists on this host. An alive local runtime, or a runtime whose
+  liveness is Unknown (remote SSH, containerized, or a local row with no liveness
+  handle), is never treated as dead on the basis of a not-found stop result; its
+  row is preserved and the outcome remains retryable.
+- Missing-runtime handling never blanket-ignores every session-level or
+  execution-level not-found error. Only a not-found result for a runtime whose row
+  is confirmed dead is reclassified as a successful stop. A not-found result for
+  an alive or unknown/remote row, or a session/task lookup error that is not a
+  typed not-found sentinel, remains a preserved, retryable outcome so a transient
+  store error is never mistaken for an absent runtime.
+- Where a runtime-specific persisted stop handle exists (for example
+  `agent_execution_id`, or a remote/container handle), missing-runtime handling
+  uses it to decide the stop result rather than inferring absence from a generic
+  error.
 - Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a
   cleanup intent and resource snapshot before mutating or deleting task state.
   Cleanup is performed by a durable worker rather than a detached goroutine.
@@ -174,6 +196,18 @@ The durable cleanup job wraps that resource lifecycle:
 - If a runtime row points at a missing in-memory execution, cleanup attempts the
   runtime-specific persisted handle when available. If no handle can be used, the
   row is preserved with a warning instead of being silently dropped.
+- If a stop operation reports the execution or session is not found and the owned
+  row is a confirmed-dead local runtime, cleanup records the stop as successful,
+  prunes or repairs the row under the resume-safety invariant, proceeds with any
+  now-safe shared-environment/worktree teardown, and does not count the row as a
+  failed stop. The durable cleanup job therefore does not re-enter `retry_wait`
+  solely because that owned runtime was confirmed absent.
+- If a stop operation reports not found but the owned row is alive, or its
+  liveness is Unknown (remote/containerized/no local handle), cleanup preserves
+  the row and treats the outcome as retryable rather than pruning it.
+- If a session or task lookup during stop fails with an error that is not a typed
+  not-found sentinel, cleanup treats it as a retryable failure and preserves the
+  row; it does not reinterpret the error as an absent runtime.
 - If worktree or task environment cleanup fails after runtime shutdown is
   confirmed, the runtime tracking row can still be removed because it no longer
   identifies a live process. The resource cleanup error is logged and handled by
@@ -241,6 +275,29 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** the backend restarts with an `executors_running` row for an archived
   task, **WHEN** startup reconciliation runs, **THEN** it attempts cleanup for the
   row instead of treating the archived task as active.
+- **GIVEN** an `executors_running` row whose task session is missing and whose
+  local liveness handle refers to a dead host process, **WHEN** startup
+  reconciliation stops it and the stop reports the execution is not found, **THEN**
+  the row is pruned or repaired under the resume-safety invariant instead of being
+  preserved indefinitely.
+- **GIVEN** a resumed durable cleanup job whose only remaining runtime target is a
+  confirmed-dead local runtime, **WHEN** the cleanup worker stops it and the stop
+  reports not found, **THEN** the job records a successful stop, completes owned
+  resource teardown, and does not re-enter `retry_wait` because of that runtime.
+- **GIVEN** an `executors_running` row that is still alive on this host, **WHEN**
+  a stop reports not found for it, **THEN** the row is preserved and the outcome is
+  treated as retryable rather than pruned.
+- **GIVEN** an `executors_running` row for a remote (SSH) or containerized runtime
+  whose local liveness is Unknown, **WHEN** a stop reports not found, **THEN** the
+  row is preserved with its remote handle and resume token intact and is not
+  pruned on the basis of a host-local not-found.
+- **GIVEN** a session lookup during a stop fails with a non-not-found store error,
+  **WHEN** cleanup evaluates the result, **THEN** it preserves the row and retries
+  rather than treating the runtime as absent.
+- **GIVEN** a confirmed-dead local row that still carries a resume token, **WHEN**
+  a not-found stop is reclassified as successful, **THEN** the row is repaired in
+  place (token and worktree preserved) rather than deleted, per
+  `RowMustBePreserved`.
 - **GIVEN** agentctl is stopped while an ACP child process ignores stdin EOF,
   **WHEN** the stop timeout expires, **THEN** the ACP process group is killed and
   no ACP child is reparented to PID 1.

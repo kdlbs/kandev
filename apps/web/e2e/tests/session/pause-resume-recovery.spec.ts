@@ -28,6 +28,12 @@ async function seedTaskAndWaitForIdle(
   seedData: SeedData,
   title: string,
 ): Promise<SessionPage> {
+  // The Kanban template now opts into workflow completion for explicit
+  // cancellation. These tests exercise pause/resume queue semantics instead,
+  // so keep the source step in-place while the turn is paused.
+  await apiClient.updateWorkflowStep(seedData.startStepId, {
+    cancel_triggers_turn_complete: false,
+  });
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
