@@ -763,6 +763,136 @@ func TestBootRouteDataTaskDetailIncludesTaskPageData(t *testing.T) {
 	}
 }
 
+func TestBootPayloadMissingTaskFallsBackToHomeKanbanState(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: count=%d err=%v", len(workspaces), err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: count=%d err=%v", len(workflows), err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Visible sibling task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/t/missing-task",
+		nil,
+	)
+	request.AddCookie(&http.Cookie{Name: activeWorkspaceCookie, Value: workspaces[0].ID})
+	route := webapp.ClassifyRoute("/t/missing-task")
+	payload := bootPayload(ctx, request, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, route)
+
+	if payload.RouteData != nil {
+		t.Fatalf("missing task route data = %#v, want nil", payload.RouteData)
+	}
+	workspacesState, ok := payload.InitialState["workspaces"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fallback workspaces state: %#v", payload.InitialState["workspaces"])
+	}
+	if got := workspacesState["activeId"]; got != workspaces[0].ID {
+		t.Fatalf("fallback active workspace = %v, want %q", got, workspaces[0].ID)
+	}
+	if _, ok := payload.InitialState["workflows"].(map[string]any); !ok {
+		t.Fatalf("missing fallback workflows state: %#v", payload.InitialState["workflows"])
+	}
+	if _, ok := payload.InitialState["repositories"].(map[string]any); !ok {
+		t.Fatalf("missing fallback repositories state: %#v", payload.InitialState["repositories"])
+	}
+	kanbanMulti, ok := payload.InitialState["kanbanMulti"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fallback kanban state: %#v", payload.InitialState["kanbanMulti"])
+	}
+	snapshots, ok := kanbanMulti["snapshots"].(map[string]any)
+	if !ok {
+		t.Fatalf("fallback kanban snapshots = %#v", kanbanMulti["snapshots"])
+	}
+	snapshot, ok := snapshots[workflows[0].ID].(map[string]any)
+	if !ok {
+		t.Fatalf("missing fallback workflow snapshot %q: %#v", workflows[0].ID, snapshots)
+	}
+	tasks, ok := snapshot["tasks"].([]map[string]any)
+	if !ok {
+		// JSON-safe boot state is assembled with []map[string]any, so this
+		// assertion protects the sidebar's task source without depending on
+		// JSON round-tripping in the test.
+		t.Fatalf("fallback workflow tasks = %#v", snapshot["tasks"])
+	}
+	if len(tasks) != 1 || tasks[0]["id"] != task.ID {
+		t.Fatalf("fallback workflow tasks = %#v, want task %q", tasks, task.ID)
+	}
+}
+
+func TestBootPayloadValidTaskKeepsRouteSpecificState(t *testing.T) {
+	harness := newBootStateTestHarness(t)
+	ctx := context.Background()
+	workspaces, err := harness.taskSvc.ListWorkspaces(ctx)
+	if err != nil || len(workspaces) == 0 {
+		t.Fatalf("ListWorkspaces: count=%d err=%v", len(workspaces), err)
+	}
+	workflows, err := harness.taskSvc.ListWorkflows(ctx, workspaces[0].ID, true)
+	if err != nil || len(workflows) == 0 {
+		t.Fatalf("ListWorkflows: count=%d err=%v", len(workflows), err)
+	}
+	steps, err := harness.workflowSvc.ListStepsByWorkflow(ctx, workflows[0].ID)
+	if err != nil || len(steps) == 0 {
+		t.Fatalf("ListStepsByWorkflow: count=%d err=%v", len(steps), err)
+	}
+	task, err := harness.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{
+		WorkspaceID:    workspaces[0].ID,
+		WorkflowID:     workflows[0].ID,
+		WorkflowStepID: steps[0].ID,
+		Title:          "Valid detail task",
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	request := httptest.NewRequest(http.MethodGet, "/t/"+task.ID, nil)
+	route := webapp.ClassifyRoute("/t/" + task.ID)
+	payload := bootPayload(ctx, request, routeParams{
+		taskSvc:  harness.taskSvc,
+		userCtrl: harness.userCtrl,
+		services: &Services{Workflow: harness.workflowSvc},
+	}, route)
+
+	if payload.RouteData == nil {
+		t.Fatal("valid task route data is nil")
+	}
+	detail, ok := payload.RouteData["taskDetail"].(map[string]any)
+	if !ok {
+		t.Fatalf("task detail route data = %#v", payload.RouteData["taskDetail"])
+	}
+	detailTask, ok := detail["task"].(taskdto.TaskDTO)
+	if !ok {
+		t.Fatalf("task detail task = %#v", detail["task"])
+	}
+	if detailTask.ID != task.ID {
+		t.Fatalf("task detail id = %q, want %q", detailTask.ID, task.ID)
+	}
+	if _, ok := payload.InitialState["workspaces"]; ok {
+		t.Fatal("valid task route should keep the lean initial state without home workspace data")
+	}
+}
+
 func TestBootTaskDetailMessagesProjectShellOutput(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()

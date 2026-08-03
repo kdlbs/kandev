@@ -751,12 +751,17 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 }
 
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
+	initialState := bootInitialState(ctx, req, p, route)
+	routeData := bootRouteData(ctx, req, p, route)
+	if route.Route == webapp.RouteTaskDetail && routeData == nil {
+		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
+	}
 	payload := webapp.NewBootPayload(
 		route,
 		webRuntimeConfig(p.devMode, req),
-		bootInitialState(ctx, req, p, route),
+		initialState,
 	)
-	payload.RouteData = bootRouteData(ctx, req, p, route)
+	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	return payload
