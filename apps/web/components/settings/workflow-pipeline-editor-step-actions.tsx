@@ -4,7 +4,6 @@ import { useTranslation } from "react-i18next";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
-import { useTranslation } from "react-i18next";
 import type {
   WorkflowStep,
   OnEnterAction,

@@ -152,6 +152,8 @@
   "restoreOriginal": "Ŕēśţōŕē ōŕĩĝĩńàĺ",
   "retryPartialSaveBeforeLeaving": "Ŕēţŕŷ ţĥē ƥàŕţĩàĺ ŵōŕķƒĺōŵ śàvē ƀēƒōŕē ĺēàvĩńĝ",
   "returnToWorkflow": "Ŕēţũŕń ţō ŵōŕķƒĺōŵ",
+  "runCompletionActionsWhenTurnCancelled": "Ŕũń ćōḿƥĺēţĩōń àćţĩōńś ŵĥēń à ţũŕń ĩś ćàńćēĺĺēď",
+  "runCompletionActionsWhenTurnCancelledHelp": "Àƥƥĺĩēś ōńĺŷ ŵĥēń à ũśēŕ ēxƥĺĩćĩţĺŷ ćàńćēĺś à ţũŕń. Ţĥē ďēśţĩńàţĩōń śţēƥ’ś ōń-ēńţēŕ àćţĩōńś ḿàŷ ĩḿḿēďĩàţēĺŷ śţàŕţ àńōţĥēŕ àĝēńţ ţũŕń.",
   "save": "Śàvē",
   "saveBeforeExporting": "Śàvē ţĥē ŵōŕķƒĺōŵ ƀēƒōŕē ēxƥōŕţĩńĝ.",
   "saveFailed": "Śàvē ƒàĩĺēď: {{error}}",
