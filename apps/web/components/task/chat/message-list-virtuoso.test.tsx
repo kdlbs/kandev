@@ -24,6 +24,7 @@ function makeHarness(
   virtuosoRef: { current: VirtuosoHandle },
   scrollParent: HTMLDivElement,
   dividerKey: string | null = DIVIDER_KEY,
+  runLocked: (performScroll: () => void) => void = (performScroll) => performScroll(),
 ) {
   return function DirectHarness({
     offsetPx,
@@ -35,10 +36,37 @@ function makeHarness(
     useScrollToDividerOnceResolved(virtuosoRef, renderItems, 0, dividerKey, {
       offsetPx,
       scrollParent,
+      runLocked,
     });
     return null;
   };
 }
+
+it("runs the reassert scroll through runLocked so followOutput can't fight a live-update reassertion", () => {
+  let insideLock = false;
+  let scrolledInsideLock: boolean | null = null;
+  const scrollToIndex = vi.fn(() => {
+    scrolledInsideLock = insideLock;
+  });
+  const virtuosoRef = { current: { scrollToIndex } as unknown as VirtuosoHandle };
+  const runLocked = vi.fn((performScroll: () => void) => {
+    insideLock = true;
+    performScroll();
+    insideLock = false;
+  });
+  const DirectHarness = makeHarness(
+    virtuosoRef,
+    document.createElement("div"),
+    DIVIDER_KEY,
+    runLocked,
+  );
+
+  render(<DirectHarness offsetPx={76} />);
+
+  expect(runLocked).toHaveBeenCalledTimes(1);
+  expect(scrollToIndex).toHaveBeenCalledTimes(1);
+  expect(scrolledInsideLock).toBe(true);
+});
 
 describe("useScrollToDividerOnceResolved — anchored-bar offset", () => {
   it("negatively offsets the divider scroll by the anchored bar's height so the item lands below the pinned bar", () => {

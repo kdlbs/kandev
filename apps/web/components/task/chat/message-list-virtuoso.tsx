@@ -272,15 +272,25 @@ function useVirtuosoRenderItem(args: RenderItemArgs) {
  * does, under the same settling-window/no-user-scroll gate
  * `useScrollToDividerOrBottom` (message-list-native.tsx) uses for its
  * own multi-wave corrections.
+ *
+ * The actual `scrollToIndex` call runs through `runLocked` (see
+ * `useProgrammaticScrollLock`) so `followOutput` can't fight a reassertion
+ * that fires while a live message is streaming in — without the lock, a
+ * `followOutput` re-evaluation triggered by that same message could snap
+ * the transcript back to the bottom and silently cancel the correction.
  */
 export function useScrollToDividerOnceResolved(
   virtuosoRef: React.RefObject<VirtuosoHandle | null>,
   items: RenderItem[],
   firstItemIndex: number,
   dividerBeforeItemKey: string | null | undefined,
-  anchoredBar: { offsetPx: number; scrollParent: HTMLDivElement },
+  anchoredBar: {
+    offsetPx: number;
+    scrollParent: HTMLDivElement;
+    runLocked: (performScroll: () => void) => void;
+  },
 ) {
-  const { offsetPx: anchoredBarOffsetPx, scrollParent } = anchoredBar;
+  const { offsetPx: anchoredBarOffsetPx, scrollParent, runLocked } = anchoredBar;
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
     const markUserScrolling = () => {
@@ -315,13 +325,23 @@ export function useScrollToDividerOnceResolved(
       isWithinSettlingWindow: isWithinSettlingWindow(),
     });
     if (!canReassert) return;
-    virtuosoRef.current?.scrollToIndex({
-      index: firstItemIndex + dividerIndex,
-      align: "start",
-      offset: -anchoredBarOffsetPx || 0,
+    runLocked(() => {
+      virtuosoRef.current?.scrollToIndex({
+        index: firstItemIndex + dividerIndex,
+        align: "start",
+        offset: -anchoredBarOffsetPx || 0,
+      });
     });
     didScrollRef.current = true;
-  }, [virtuosoRef, items, firstItemIndex, dividerBeforeItemKey, anchoredBarOffsetPx, scrollParent]);
+  }, [
+    virtuosoRef,
+    items,
+    firstItemIndex,
+    dividerBeforeItemKey,
+    anchoredBarOffsetPx,
+    scrollParent,
+    runLocked,
+  ]);
 }
 
 /** Debounced `startReached` handler for lazy-loading older messages: a
@@ -361,11 +381,12 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const itemCount = items.length;
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const firstItemIndex = useStableFirstItemIndex(items);
+  const { isLocked, runLocked } = useProgrammaticScrollLock(props.scrollParent);
   useScrollToDividerOnceResolved(virtuosoRef, items, firstItemIndex, dividerBeforeItemKey, {
     offsetPx: anchoredBarScrollOffsetPx(props.anchoredBarHeight),
     scrollParent: props.scrollParent,
+    runLocked,
   });
-  const { isLocked, runLocked } = useProgrammaticScrollLock(props.scrollParent);
   const handleStartReached = useLoadOlderOnStartReached(hasMore, isLoadingMore, loadMore);
 
   const handleScrollToMessage = useCallback(
