@@ -129,3 +129,38 @@ describe("reported false positives that this module does not have", () => {
     expect(isCandidate("apps/web/components/settings/repository-card.tsx")).toBe(true);
   });
 });
+
+/**
+ * The assertions the rest of this file structurally cannot make: they all assume
+ * a well-formed catalog, so none of them can tell a working check from one that
+ * accepts everything. A check that silently passes is worse than no check, so
+ * these prove it can still FAIL.
+ */
+describe("a degenerate catalog message cannot disable the check", () => {
+  it("does not let a message that is only a placeholder match everything", () => {
+    // `settings:externalMcpConfigPath` was literally "{{path}}", which compiled
+    // to /^[\s\S]+?$/ and made accountedFor return true for every string in the
+    // repo — the whole check became a no-op that still printed a tick.
+    expect(accountedFor("anything at all", buildCatalog(["{{x}}"]))).toBe(false);
+    expect(accountedFor("Delete a workflow and all its steps.", buildCatalog(["{{path}}"]))).toBe(
+      false,
+    );
+  });
+
+  it("does not let a message with no word in it anchor a pattern", () => {
+    // "{{a}} —" normalizes to "—" and would compile to /^[\s\S]+? —$/.
+    expect(accountedFor("totally unrelated prose —", buildCatalog(["{{a}} —"]))).toBe(false);
+  });
+
+  it("still matches such a message exactly and as a fragment", () => {
+    // Dropping its PATTERN must not drop the message from the catalog.
+    expect(accountedFor("{{path}}", buildCatalog(["{{path}}"]))).toBe(true);
+  });
+
+  it("keeps anchoring on a short message that does carry a word", () => {
+    expect(accountedFor("3 of 9", buildCatalog(["{{count}} of {{total}}"]))).toBe(true);
+    expect(accountedFor("totally unrelated prose", buildCatalog(["{{count}} of {{total}}"]))).toBe(
+      false,
+    );
+  });
+});

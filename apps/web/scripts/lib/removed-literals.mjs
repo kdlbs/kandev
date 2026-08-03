@@ -119,12 +119,32 @@ export function looksLikeCopy(value) {
   return true;
 }
 
+/**
+ * Can this message anchor a pattern, or would its pattern match anything?
+ *
+ * A message that is NOTHING BUT a placeholder — `settings:externalMcpConfigPath`
+ * is literally `"{{path}}"` — compiles to `/^[\s\S]+?$/`, which matches every
+ * string in the repository. Because rule 2 runs before rule 3, ONE such key
+ * makes `accountedFor` return true for everything and the whole check becomes a
+ * silent no-op that still prints ✓. That is strictly worse than not running it,
+ * because it converts "I verified" into "I ran something".
+ *
+ * The requirement is prose to anchor on, not merely a non-empty remainder:
+ * `"{{a}} —"` normalizes to `"—"` and compiles to `/^[\s\S]+? —$/`, which is
+ * nearly as permissive. A message with no word in it cannot distinguish a
+ * rewrite from an unrelated string, so it earns no pattern — it is still
+ * matched exactly and as a fragment, which is all it can honestly support.
+ */
+function canAnchorPattern(message) {
+  return /[A-Za-z]{2,}/.test(normalize(message));
+}
+
 /** Build the three lookup shapes `accountedFor` needs from a set of messages. */
 export function buildCatalog(values) {
   const set = values instanceof Set ? values : new Set(values);
   return {
     exact: set,
     normalized: new Set([...set].map(normalize)),
-    patterns: [...set].filter((v) => v.includes("{{")).map(messagePattern),
+    patterns: [...set].filter((v) => v.includes("{{") && canAnchorPattern(v)).map(messagePattern),
   };
 }
