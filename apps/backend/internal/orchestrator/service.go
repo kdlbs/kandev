@@ -1801,15 +1801,8 @@ func (s *Service) handleTerminalSessionOnStartup(ctx context.Context, session *m
 			zap.String("task_id", session.TaskID),
 			zap.String("state", string(previousState)))
 		s.abandonOpenTurnsOnStartup(ctx, sessionID, "terminal session cleanup")
-		executionID := strings.TrimSpace(running.AgentExecutionID)
-		if executionID != "" && s.agentManager != nil {
-			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup terminal session cleanup", true); err != nil {
-				s.logger.Warn("failed to stop terminal session runtime; preserving executor record",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", executionID),
-					zap.Error(err))
-				return true
-			}
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup terminal session cleanup") {
+			return true
 		}
 		// Resume-safety invariant: prune the row only if it is not still resumable
 		// (no resume_token). A terminal session that kept a resume_token — e.g. an
@@ -1853,20 +1846,47 @@ func (s *Service) handleFailedSessionOnStartup(ctx context.Context, session *mod
 		s.logger.Info("stopping failed session runtime before cleaning up executor record",
 			zap.String("session_id", sessionID),
 			zap.String("task_id", session.TaskID))
-		executionID := strings.TrimSpace(running.AgentExecutionID)
-		if executionID != "" && s.agentManager != nil {
-			if err := s.agentManager.StopAgentWithReason(ctx, executionID, "startup failed session cleanup", true); err != nil {
-				s.logger.Warn("failed to stop failed session runtime; preserving executor record",
-					zap.String("session_id", sessionID),
-					zap.String("execution_id", executionID),
-					zap.Error(err))
-				return
-			}
+		if !s.stopRuntimeForStartupCleanup(ctx, running, "startup failed session cleanup") {
+			return
 		}
 		// Prune only subject to the resume-safety invariant (a lingering
 		// resume_token is repaired in place rather than deleted).
 		s.pruneOrRepairExecutorRow(ctx, running, models.TaskSessionStateFailed)
 	}
+}
+
+// stopRuntimeForStartupCleanup stops a session's still-registered runtime handle
+// during startup reconciliation and reports whether the caller may proceed to
+// prune/repair the executor row. It mirrors handleMissingSessionOnStartup's
+// classification so terminal and non-resumable-failed reconciliation stop
+// leaking stale rows: a not-found stop for a confirmed-dead LOCAL runtime means
+// the runtime is already gone and cleanup proceeds; any other error
+// (alive/unknown/remote row, or a non-not-found failure) preserves the row for a
+// later attempt. A row with no stoppable handle is already stoppable-complete.
+func (s *Service) stopRuntimeForStartupCleanup(ctx context.Context, running *models.ExecutorRunning, reason string) bool {
+	executionID := strings.TrimSpace(running.AgentExecutionID)
+	if executionID == "" || s.agentManager == nil {
+		return true
+	}
+	err := s.agentManager.StopAgentWithReason(ctx, executionID, reason, true)
+	if err == nil {
+		return true
+	}
+	if !stopReportsRuntimeAbsent(err) || s.rowLiveness(running) != models.ProcessLivenessDead {
+		s.logger.Warn("failed to stop session runtime during startup cleanup; preserving executor record",
+			zap.String("session_id", running.SessionID),
+			zap.String("task_id", running.TaskID),
+			zap.String("execution_id", executionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+		return false
+	}
+	s.logger.Info("session runtime already gone (confirmed dead) during startup cleanup; proceeding to prune/repair",
+		zap.String("session_id", running.SessionID),
+		zap.String("task_id", running.TaskID),
+		zap.String("execution_id", executionID),
+		zap.String("reason", reason))
+	return true
 }
 
 func canResumeRunning(running *models.ExecutorRunning) bool {
