@@ -19,6 +19,7 @@ The desktop anchored last-prompt bar currently appears once the prompt's top cro
 - The pinned prompt preserves the user message's Markdown formatting, including inline code, block code, lists, headings, and tables. Its compact and expanded layouts may constrain height, but do not render Markdown source as plain text.
 - On mobile, the pinned bar remains absent and the existing scroll-to-last-prompt action remains the discoverable, touch-accessible fallback.
 - **Scroll to last prompt** and **Scroll to start of transcript** reliably land on their target even if the agent streams new content into the transcript while the scroll animation is still in progress; a streamed message never silently snaps the transcript back to the bottom mid-scroll.
+- The **Scroll to last prompt** and anchored-bar affordances are available whenever the session has a last prompt *anywhere* in its transcript, including when that prompt is older than the initially loaded transcript window (e.g. an autonomous session whose only user prompt is its task description, with hundreds of agent/tool messages after it). Opening the transcript for such a session must show the scroll-to-last-prompt control (pointing up) and, since the viewport sits below the last prompt, the open anchored bar. Clicking either jumps to the prompt, paginating the transcript as needed.
 
 ## Regression scenarios
 
@@ -60,6 +61,13 @@ The desktop anchored last-prompt bar currently appears once the prompt's top cro
 **GIVEN** a user clicks **Scroll to start of transcript** or **Scroll to last prompt**
 **WHEN** the agent streams a new message into the transcript before the scroll animation settles
 **THEN** the transcript still lands at the requested target instead of being snapped back to the bottom.
+
+### Last prompt beyond the loaded window
+
+**GIVEN** a session whose last user prompt is older than the initially loaded transcript window (its newest messages are all agent/tool output)
+**WHEN** the transcript is opened
+**THEN** the scroll-to-last-prompt control is available (pointing up), the anchored bar is open (the viewport sits below the last prompt), and clicking either scrolls the transcript up to the prompt, loading older pages as needed.
+
 
 ## Constraints
 

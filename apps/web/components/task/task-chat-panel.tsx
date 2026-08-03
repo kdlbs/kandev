@@ -12,12 +12,12 @@ import { MessageList } from "@/components/task/chat/message-list";
 import {
   type MessageListHandle,
   type LastPromptEdge,
-  getLastUserMessageId,
   getFirstUserMessageId,
   resolveLastPromptControls,
-  shouldLoadMoreForTranscriptTarget,
+  resolveEffectiveLastPromptEdge,
 } from "@/components/task/chat/message-list-shared";
 import { AnchoredLastPromptBar } from "@/components/task/chat/anchored-last-prompt-bar";
+import { useLastUserMessage } from "@/hooks/domains/session/use-last-user-message";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useIsTaskArchived } from "./task-archived-context";
 import { useChatPanelState } from "./chat/use-chat-panel-state";
@@ -37,16 +37,6 @@ import { useAppStore } from "@/components/state-provider";
 import type { Message } from "@/lib/types/http";
 import { getSessionWorkspacePath } from "@/lib/session-workspace-path";
 import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
-
-/**
- * Cap on how many extra pages the last-prompt background lookup will fetch
- * (see the `lastPromptLookupPagesRef` effect below) before giving up and
- * falling back to the transcript's manual "Load older messages" pagination.
- * 3 pages of 20 covers a long single agent turn without silently draining
- * an entire long-lived conversation that happens to have no recent user
- * message at all.
- */
-const MAX_LAST_PROMPT_LOOKUP_PAGES = 3;
 
 function useClarificationKey(agentMessageCount: number) {
   const lastCountRef = useRef(agentMessageCount);
@@ -249,14 +239,12 @@ export const TaskChatPanel = memo(function TaskChatPanel({
 
   const panelRef = useRef<HTMLDivElement>(null);
   const messageListRef = useRef<MessageListHandle>(null);
-  const lastPromptMessageId = useMemo(() => getLastUserMessageId(allMessages), [allMessages]);
-  const lastPromptMessage = useMemo(
-    () =>
-      lastPromptMessageId
-        ? (allMessages.find((message) => message.id === lastPromptMessageId) ?? null)
-        : null,
-    [allMessages, lastPromptMessageId],
-  );
+  // The last prompt may sit far above the initially loaded window (autonomous
+  // session whose only user prompt is its task description). Resolve it with a
+  // targeted fetch when the loaded window has no user message, rather than
+  // paginating the whole transcript in the background.
+  const { lastPromptMessage } = useLastUserMessage(resolvedSessionId, allMessages);
+  const lastPromptMessageId = lastPromptMessage?.id ?? null;
   const [lastPromptEdge, setLastPromptEdge] = useState<LastPromptEdge>("visible");
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
@@ -265,28 +253,69 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   // The anchored bar is a desktop-only, opt-in affordance; mobile always
   // falls back to the scroll button.
   const showAnchoredBar = !isMobile && showAnchoredPromptBar;
-  const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
-    resolveLastPromptControls(lastPromptEdge);
-  const showScrollButton =
-    showScrollToLastPrompt && Boolean(lastPromptMessageId) && scrollButtonEligible;
-  const scrollToLastPrompt = useCallback(() => {
-    if (lastPromptMessageId) {
-      messageListRef.current?.scrollToMessage(lastPromptMessageId, { align: "start" });
-    }
-  }, [lastPromptMessageId]);
   const firstMessageId = useMemo(() => getFirstUserMessageId(allMessages), [allMessages]);
   const [isFirstMessageHidden, setIsFirstMessageHidden] = useState(false);
   const showScrollToStartButton =
     showScrollToStart && Boolean(firstMessageId) && isFirstMessageHidden;
-  const { loadMore, hasMore, isLoading: isLoadingMore } = useLazyLoadMessages(resolvedSessionId);
+  const { loadMore, hasMore } = useLazyLoadMessages(resolvedSessionId);
+  const lastPromptRendered = useMemo(
+    () =>
+      lastPromptMessageId
+        ? allMessages.some((message) => message.id === lastPromptMessageId)
+        : false,
+    [allMessages, lastPromptMessageId],
+  );
+  // While the last prompt is resolved but not mounted and older pages remain,
+  // it deterministically sits above the viewport (the loaded window is the
+  // newest content), so report "above" instead of the renderer's "visible"
+  // default. Once the prompt row mounts, the tracked edge takes over.
+  const effectiveLastPromptEdge = resolveEffectiveLastPromptEdge({
+    trackedEdge: lastPromptEdge,
+    lastPromptMessageId,
+    lastPromptRendered,
+    hasMore,
+  });
+  const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
+    resolveLastPromptControls(effectiveLastPromptEdge);
+  const showScrollButton =
+    showScrollToLastPrompt && Boolean(lastPromptMessageId) && scrollButtonEligible;
+  // Scroll-to-last-prompt: a resolved prompt that is not mounted needs older
+  // pages drained before the row exists to scroll to — the same drain-then-
+  // scroll pattern scroll-to-start uses below.
+  const [pendingScrollToLastPrompt, setPendingScrollToLastPrompt] = useState(false);
+  const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
+  // Reset both pending navigations when the session changes so a drain started
+  // on a previous tab can't keep paginating the new session.
+  useEffect(() => {
+    setPendingScrollToLastPrompt(false);
+    setPendingScrollToStart(false);
+  }, [resolvedSessionId]);
+  useDrainOlderMessages(
+    resolvedSessionId,
+    (pendingScrollToLastPrompt || pendingScrollToStart) && hasMore,
+  );
+  useEffect(() => {
+    if (!pendingScrollToLastPrompt) return;
+    if (!lastPromptRendered && hasMore) return;
+    setPendingScrollToLastPrompt(false);
+    if (lastPromptMessageId) {
+      messageListRef.current?.scrollToMessage(lastPromptMessageId, { align: "start" });
+    }
+  }, [pendingScrollToLastPrompt, lastPromptRendered, hasMore, lastPromptMessageId]);
+  const scrollToLastPrompt = useCallback(() => {
+    if (!lastPromptMessageId) return;
+    if (hasMore && !lastPromptRendered) {
+      setPendingScrollToLastPrompt(true);
+      return;
+    }
+    messageListRef.current?.scrollToMessage(lastPromptMessageId, { align: "start" });
+  }, [hasMore, lastPromptRendered, lastPromptMessageId]);
   // A paginated session's `firstMessageId` only reflects the oldest message in
   // the currently loaded page while `hasMore` is true — jumping there directly
   // lands on a partial-page boundary, not the transcript's real start. Drain
   // older pages first so `firstMessageId` (derived from `allMessages` above,
   // which grows as pages prepend) has settled on the true first prompt by the
   // time the scroll fires.
-  const [pendingScrollToStart, setPendingScrollToStart] = useState(false);
-  useDrainOlderMessages(resolvedSessionId, pendingScrollToStart && hasMore);
   useEffect(() => {
     if (!pendingScrollToStart || hasMore) return;
     setPendingScrollToStart(false);
@@ -303,26 +332,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       messageListRef.current?.scrollToMessage(firstMessageId, { align: "start" });
     }
   }, [hasMore, firstMessageId]);
-  // Bounded background lookup: the last prompt is usually within a page or
-  // two of a long single agent turn, but a session with no recent user
-  // message at all (e.g. hours of tool-only activity) would otherwise drain
-  // its *entire* history just to power this convenience affordance. Stop
-  // after a handful of pages and fall back to the manual "Load older
-  // messages" pagination the transcript already offers.
-  const lastPromptLookupPagesRef = useRef(0);
-  useEffect(() => {
-    lastPromptLookupPagesRef.current = 0;
-  }, [resolvedSessionId]);
-  useEffect(() => {
-    if (lastPromptMessageId !== null) {
-      lastPromptLookupPagesRef.current = 0;
-      return;
-    }
-    if (isLoadingMore || lastPromptLookupPagesRef.current >= MAX_LAST_PROMPT_LOOKUP_PAGES) return;
-    if (!shouldLoadMoreForTranscriptTarget("last_prompt", allMessages, hasMore)) return;
-    lastPromptLookupPagesRef.current += 1;
-    void loadMore();
-  }, [allMessages, hasMore, isLoadingMore, loadMore, lastPromptMessageId, resolvedSessionId]);
   const search = useSessionSearch(resolvedSessionId, loadMore);
   const { label: agentLabel, name: agentName } = useSessionAgentIdentity(resolvedSessionId);
   usePanelSearch({

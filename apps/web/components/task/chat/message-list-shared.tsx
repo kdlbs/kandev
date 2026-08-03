@@ -102,22 +102,6 @@ export function getFirstUserMessageId(messages: Message[]): string | null {
   return first ? first.id : null;
 }
 
-export type TranscriptNavigationTarget = "last_prompt" | "start";
-
-/**
- * Whether resolving a transcript-navigation target needs another older page.
- * The latest prompt may sit before a long agent response; the true start can
- * only be known after the pagination cursor is exhausted.
- */
-export function shouldLoadMoreForTranscriptTarget(
-  target: TranscriptNavigationTarget,
-  messages: Message[],
-  hasMore: boolean,
-): boolean {
-  if (!hasMore) return false;
-  return target === "start" || getLastUserMessageId(messages) === null;
-}
-
 /**
  * Whether the transcript's auto-follow-bottom behavior should force a scroll
  * to the bottom right now. `false` whenever a user-initiated programmatic
@@ -169,6 +153,25 @@ export function resolveLastPromptControls(edge: LastPromptEdge): {
     scrollButtonEligible: edge !== "visible",
     scrollDirection: edge === "below" ? "down" : "up",
   };
+}
+
+/**
+ * Effective last-prompt edge when the prompt's DOM row may not be mounted.
+ * The renderer reports `"visible"` whenever the target row is absent, which
+ * would wrongly suppress both affordances for a session whose last prompt is
+ * older than the loaded window. When the prompt is resolved but not mounted
+ * and older messages remain (`hasMore`), the loaded window is the newest
+ * content, so the prompt deterministically sits above the viewport — report
+ * `"above"` until the row mounts and the renderer's tracked edge takes over.
+ */
+export function resolveEffectiveLastPromptEdge(params: {
+  trackedEdge: LastPromptEdge;
+  lastPromptMessageId: string | null;
+  lastPromptRendered: boolean;
+  hasMore: boolean;
+}): LastPromptEdge {
+  if (params.lastPromptMessageId && !params.lastPromptRendered && params.hasMore) return "above";
+  return params.trackedEdge;
 }
 
 /** True when `target` sits entirely within `container`'s visible viewport —

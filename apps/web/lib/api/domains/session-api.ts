@@ -111,7 +111,13 @@ export async function markSessionRead(
 
 export async function listTaskSessionMessages(
   taskSessionId: string,
-  params?: { limit?: number; before?: string; after?: string; sort?: "asc" | "desc" },
+  params?: {
+    limit?: number;
+    before?: string;
+    after?: string;
+    sort?: "asc" | "desc";
+    author_type?: "user" | "agent";
+  },
   options?: ApiRequestOptions,
 ) {
   const query = new URLSearchParams();
@@ -119,6 +125,7 @@ export async function listTaskSessionMessages(
   if (params?.before) query.set("before", params.before);
   if (params?.after) query.set("after", params.after);
   if (params?.sort) query.set("sort", params.sort);
+  if (params?.author_type) query.set("author_type", params.author_type);
   const suffix = query.toString();
   const url = `/api/v1/task-sessions/${taskSessionId}/messages${suffix ? `?${suffix}` : ""}`;
   return fetchJson<ListMessagesResponse>(url, options);

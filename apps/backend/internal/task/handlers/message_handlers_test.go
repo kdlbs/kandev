@@ -17,6 +17,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 )
 
@@ -115,7 +116,7 @@ func TestHTTPShellOutputSnapshot(t *testing.T) {
 	}
 }
 
-func shellOutputTestRouter(t *testing.T, repo *shellOutputMessageRepo) *gin.Engine {
+func shellOutputTestRouter(t *testing.T, repo repository.MessageRepository) *gin.Engine {
 	t.Helper()
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	require.NoError(t, err)
@@ -267,4 +268,70 @@ func TestWaitForSessionReady_ContextCancelled(t *testing.T) {
 	err := h.waitForSessionReady(ctx, "session-1")
 	require.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
+}
+
+// authorTypeCapturingRepo records the ListMessagesOptions the service passes
+// to the repository so the handler test can assert the author_type query param
+// reaches the pagination layer.
+type authorTypeCapturingRepo struct {
+	mockRepository
+	mu       sync.Mutex
+	captured []models.ListMessagesOptions
+}
+
+func (r *authorTypeCapturingRepo) GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error) {
+	return &models.TaskSession{ID: id, TaskID: "task-1"}, nil
+}
+
+func (r *authorTypeCapturingRepo) ListMessagesPaginated(ctx context.Context, sessionID string, opts models.ListMessagesOptions) ([]*models.Message, bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.captured = append(r.captured, opts)
+	return nil, false, nil
+}
+
+func TestHTTPListMessagesAuthorTypeParam(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &authorTypeCapturingRepo{}
+	router := shellOutputTestRouter(t, repo)
+
+	t.Run("author_type=user passes through", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(
+			response,
+			httptest.NewRequest(http.MethodGet, "/api/v1/task-sessions/session-1/messages?limit=1&sort=desc&author_type=user", nil),
+		)
+		require.Equal(t, http.StatusOK, response.Code)
+		repo.mu.Lock()
+		require.Len(t, repo.captured, 1)
+		require.Equal(t, "user", repo.captured[0].AuthorType)
+		repo.captured = nil
+		repo.mu.Unlock()
+	})
+
+	t.Run("author_type=agent passes through", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(
+			response,
+			httptest.NewRequest(http.MethodGet, "/api/v1/task-sessions/session-1/messages?limit=1&author_type=agent", nil),
+		)
+		require.Equal(t, http.StatusOK, response.Code)
+		repo.mu.Lock()
+		require.Len(t, repo.captured, 1)
+		require.Equal(t, "agent", repo.captured[0].AuthorType)
+		repo.captured = nil
+		repo.mu.Unlock()
+	})
+
+	t.Run("invalid author_type rejected", func(t *testing.T) {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(
+			response,
+			httptest.NewRequest(http.MethodGet, "/api/v1/task-sessions/session-1/messages?author_type=banana", nil),
+		)
+		require.Equal(t, http.StatusBadRequest, response.Code)
+		repo.mu.Lock()
+		require.Len(t, repo.captured, 0)
+		repo.mu.Unlock()
+	})
 }
