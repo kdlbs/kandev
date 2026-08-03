@@ -16,8 +16,8 @@ type MessageAddResponseDropController = {
 };
 
 type CancelRequestHoldController = {
-  /** Number of browser-to-server cancel requests currently held by the proxy. */
-  heldCount: () => number;
+  /** 0 if no cancel request is held; 1 if the first agent.cancel request is held. */
+  heldCount: () => 0 | 1;
   /** Release the held request so the backend can settle the cancellation. */
   release: () => void;
 };

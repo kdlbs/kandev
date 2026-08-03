@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 created: 2026-08-03
 owner: kandev
 ---

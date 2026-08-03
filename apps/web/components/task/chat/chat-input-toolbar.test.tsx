@@ -95,6 +95,10 @@ vi.mock("./reset-context-button", () => ({
   ResetContextButton: () => <button type="button">Reset context</button>,
 }));
 
+vi.mock("./chat-input-plugin-actions", () => ({
+  ChatInputPluginActions: () => null,
+}));
+
 vi.mock("./voice-input-button", () => ({
   VoiceInputButton: () => <button type="button">Voice</button>,
 }));
