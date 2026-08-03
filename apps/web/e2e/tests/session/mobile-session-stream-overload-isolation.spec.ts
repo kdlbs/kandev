@@ -37,9 +37,8 @@ test.describe("mobile: session stream overload isolation", () => {
 
     await testPage.goto(`/t/${noisyTask.id}`);
     const session = new SessionPage(testPage);
-    await testPage
-      .locator("[data-testid='mobile-task-layout']:visible")
-      .waitFor({ state: "visible", timeout: 30_000 });
+    const layout = testPage.locator("[data-testid='mobile-task-layout']:visible");
+    await layout.waitFor({ state: "visible", timeout: 30_000 });
 
     const launched = await apiClient.launchSession({
       task_id: noisyTask.id,
@@ -56,10 +55,13 @@ test.describe("mobile: session stream overload isolation", () => {
     await noisyPage.goto(`/t/${noisyTask.id}`);
     const noisySession = new SessionPage(noisyPage);
     await noisySession.waitForLoad();
-    const noisyPill = noisyPage.getByTestId("mobile-sessions-pill");
+    const noisyLayout = noisyPage.locator("[data-testid='mobile-task-layout']:visible");
+    const noisyPill = noisyLayout.getByTestId("mobile-sessions-pill");
     await expect(noisyPill).toBeVisible({ timeout: 30_000 });
     await noisyPill.tap();
-    const noisyRow = noisyPage.getByTestId(`mobile-session-row-${noisySessionId}`);
+    const noisySheet = noisyPage.getByRole("dialog", { name: "Sessions" });
+    await expect(noisySheet).toBeVisible({ timeout: 30_000 });
+    const noisyRow = noisySheet.getByTestId(`mobile-session-row-${noisySessionId}`);
     await expect(noisyRow).toBeVisible({ timeout: 30_000 });
     await noisyRow.tap();
     await noisySession.waitForLoad();
@@ -77,10 +79,12 @@ test.describe("mobile: session stream overload isolation", () => {
       )
       .toBe(true);
 
-    const pill = testPage.getByTestId("mobile-sessions-pill");
+    const pill = layout.getByTestId("mobile-sessions-pill");
     await expect(pill).toBeVisible({ timeout: 30_000 });
     await pill.tap();
-    const quietRow = testPage.getByTestId(`mobile-session-row-${quietSession.session_id}`);
+    const quietSheet = testPage.getByRole("dialog", { name: "Sessions" });
+    await expect(quietSheet).toBeVisible({ timeout: 30_000 });
+    const quietRow = quietSheet.getByTestId(`mobile-session-row-${quietSession.session_id}`);
     await expect(quietRow).toBeVisible({ timeout: 30_000 });
     await quietRow.tap();
     await session.waitForLoad();
@@ -111,13 +115,13 @@ test.describe("mobile: session stream overload isolation", () => {
     expect(noisyFrames.length).toBeLessThan(REASONING_BURST_COUNT);
     expect(
       quietSessionNoisyFrames,
-      "quiet mobile view must not receive noisy-session updates",
+      "quiet mobile view must not receive noisy-session message frames",
     ).toHaveLength(0);
     await assertNoHorizontalOverflow(testPage, "mobile session stream overload surface");
 
     const evidence = {
       sourceChunks: REASONING_BURST_COUNT,
-      gatewayReceivedUpdatedFrames: noisyFrames.length,
+      gatewayReceivedMessageFrames: noisyFrames.length,
       noisySessionId,
       quietSessionId: quietSession.session_id,
       quietResponse: "mobile-quiet-followup",
