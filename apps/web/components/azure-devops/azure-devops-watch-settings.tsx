@@ -3,6 +3,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconPlayerPlay, IconPlus, IconRefresh, IconTrash, IconX } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Badge } from "@kandev/ui/badge";
@@ -14,6 +15,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { formatDateTime } from "@/lib/i18n/formats";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useAzureDevOpsWatches } from "@/hooks/domains/azure-devops/use-azure-devops-watches";
 import type {
@@ -26,12 +28,63 @@ import type {
 
 type Kind = "work-item" | "pull-request";
 
-function formatLastChecked(value?: string | null): string {
-  if (!value) return "Not checked yet";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "Not checked yet" : `checked ${date.toLocaleString()}`;
+type Translate = (key: string, values?: Record<string, unknown>) => string;
+
+/** Azure DevOps identity shorthand accepted by the creator/reviewer filters. */
+const AZURE_ME_TOKEN = "@me";
+
+/**
+ * Catalog keys for the two watch kinds. `Kind` is a wire discriminant compared
+ * with `===` and baked into `data-testid`s, so it is never rendered directly —
+ * only the label resolves at render.
+ */
+const KIND_NOUN_KEYS: Record<Kind, string> = {
+  "work-item": "azuredevops:workItemKindNoun",
+  "pull-request": "azuredevops:pullRequestKindNoun",
+};
+
+/**
+ * Sentence-cased cleanup-policy labels for the watch summary line. The map key
+ * is the persisted `AzureDevOpsCleanupPolicy` value; the menu items in the
+ * editor use the standalone (capitalized) forms instead.
+ */
+const CLEANUP_POLICY_KEYS: Record<string, string> = {
+  auto: "azuredevops:cleanupAuto",
+  always: "azuredevops:cleanupAlways",
+  never: "azuredevops:cleanupNever",
+};
+
+/**
+ * Sentence-cased labels for the watch card's status line. The map key is the
+ * Azure DevOps pull-request status sent on the wire; `all` shares the label used
+ * when no status is set, since both mean "not filtered by status". The editor's
+ * menu items use the standalone (capitalized) forms instead.
+ */
+const WATCH_STATUS_KEYS: Record<string, string> = {
+  active: "azuredevops:watchStatusActive",
+  completed: "azuredevops:watchStatusCompleted",
+  abandoned: "azuredevops:watchStatusAbandoned",
+  all: "azuredevops:pullRequestAny",
+};
+
+/** An unrecognized status is echoed verbatim rather than blanked. */
+function watchStatusLabel(t: Translate, status: string | undefined): string {
+  if (!status) return t("azuredevops:pullRequestAny");
+  const key = WATCH_STATUS_KEYS[status];
+  return key ? t(key) : status;
 }
 
+function formatLastChecked(t: Translate, value?: string | null): string {
+  if (!value) return t("azuredevops:notCheckedYet");
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return t("azuredevops:notCheckedYet");
+  return t("azuredevops:checkedAt", { at: formatDateTime(date) });
+}
+
+// The two default prompts are PERSISTED on the watch and sent to the agent
+// verbatim, and they carry `{{work_item.title}}` / `{{pull_request.title}}`
+// placeholders the backend substitutes. They are deliberately NOT translated —
+// see the GitLab and Sentry watch defaults for the same contract.
 const emptyWorkItem: AzureDevOpsWorkItemWatchInput = {
   workflowId: "",
   workflowStepId: "",
@@ -81,6 +134,7 @@ function WatchActions({
   onReset: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-2">
       <Button
@@ -91,7 +145,7 @@ function WatchActions({
         onClick={onEdit}
         data-testid={`azure-${kind}-watch-edit-${watch.id}`}
       >
-        Edit
+        {t("azuredevops:edit")}
       </Button>
       <Button
         type="button"
@@ -101,7 +155,7 @@ function WatchActions({
         onClick={onToggle}
         data-testid={`azure-${kind}-watch-toggle-${watch.id}`}
       >
-        {watch.enabled ? "Disable" : "Enable"}
+        {watch.enabled ? t("azuredevops:disable") : t("azuredevops:enable")}
       </Button>
       <Button
         type="button"
@@ -111,7 +165,7 @@ function WatchActions({
         onClick={onTrigger}
         data-testid={`azure-${kind}-watch-trigger-${watch.id}`}
       >
-        <IconPlayerPlay className="h-4 w-4" /> Run now
+        <IconPlayerPlay className="h-4 w-4" /> {t("azuredevops:runNow")}
       </Button>
       <Button
         type="button"
@@ -120,7 +174,7 @@ function WatchActions({
         className="min-h-11 cursor-pointer"
         onClick={onReset}
       >
-        <IconRefresh className="h-4 w-4" /> Reset
+        <IconRefresh className="h-4 w-4" /> {t("common:reset")}
       </Button>
       <Button
         type="button"
@@ -129,7 +183,7 @@ function WatchActions({
         className="min-h-11 cursor-pointer text-destructive"
         onClick={onDelete}
       >
-        <IconTrash className="h-4 w-4" /> Delete
+        <IconTrash className="h-4 w-4" /> {t("azuredevops:delete")}
       </Button>
     </div>
   );
@@ -152,19 +206,32 @@ function WatchCard({
   onReset: () => void;
   onDelete: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card data-testid={`azure-${kind}-watch-${watch.id}`}>
       <CardHeader className="space-y-2">
         <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-sm">
-          <span>{kind === "work-item" ? "Work-item query" : "Pull-request filter"}</span>
+          <span>
+            {kind === "work-item"
+              ? t("azuredevops:workItemQuery")
+              : t("azuredevops:pullRequestFilter")}
+          </span>
           <Badge variant={watch.enabled ? "default" : "secondary"}>
-            {watch.enabled ? "Enabled" : "Disabled"}
+            {watch.enabled ? t("azuredevops:enabled") : t("azuredevops:disabled")}
           </Badge>
         </CardTitle>
         <div className="text-xs text-muted-foreground">
-          {watch.projectId} · every {watch.pollIntervalSeconds}s · cleanup {watch.cleanupPolicy}
+          {/* `projectId` is Azure DevOps data and `cleanupPolicy` a wire enum;
+              both are interpolated rather than written into the message. */}
+          {t("azuredevops:watchSummary", {
+            projectId: watch.projectId,
+            count: watch.pollIntervalSeconds,
+            policy: t(CLEANUP_POLICY_KEYS[watch.cleanupPolicy] ?? CLEANUP_POLICY_KEYS.auto),
+          })}
         </div>
-        <div className="text-xs text-muted-foreground">{formatLastChecked(watch.lastPolledAt)}</div>
+        <div className="text-xs text-muted-foreground">
+          {formatLastChecked(t, watch.lastPolledAt)}
+        </div>
       </CardHeader>
       <CardContent className="space-y-3">
         {kind === "work-item" && (
@@ -174,7 +241,9 @@ function WatchCard({
         )}
         {kind === "pull-request" && (
           <div className="text-xs text-muted-foreground">
-            Status: {(watch as AzureDevOpsPullRequestWatch).status || "any"}
+            {t("azuredevops:statusLine", {
+              status: watchStatusLabel(t, (watch as AzureDevOpsPullRequestWatch).status),
+            })}
           </div>
         )}
         {watch.lastError && (
@@ -214,6 +283,7 @@ function WatchEditor({
     input: AzureDevOpsWorkItemWatchInput | AzureDevOpsPullRequestWatchInput,
   ) => Promise<unknown>;
 }) {
+  const { t } = useTranslation();
   const { isMobile } = useResponsiveBreakpoint();
   const [workItem, setWorkItem] = useState<AzureDevOpsWorkItemWatchInput>(
     kind === "work-item" && initial ? (initial as AzureDevOpsWorkItemWatchInput) : emptyWorkItem,
@@ -242,8 +312,8 @@ function WatchEditor({
     ) {
       setError(
         kind === "work-item"
-          ? "Project, WIQL, repository, workflow, step, agent, and executor are required."
-          : "Project, repository, workflow, step, agent, and executor are required.",
+          ? t("azuredevops:workItemWatchFieldsRequired")
+          : t("azuredevops:pullRequestWatchFieldsRequired"),
       );
       return;
     }
@@ -258,10 +328,12 @@ function WatchEditor({
       setSaving(false);
     }
   };
-  let submitLabel = editing ? "Update watch" : "Create watch";
-  if (saving) submitLabel = "Saving…";
-  const watchLabel = kind === "work-item" ? "work-item" : "pull-request";
-  const editorTitle = `${editing ? "Edit" : "New"} ${watchLabel} watch`;
+  let submitLabel = editing ? t("azuredevops:updateWatch") : t("azuredevops:createWatch");
+  if (saving) submitLabel = t("azuredevops:savingEllipsis");
+  const kindNoun = t(KIND_NOUN_KEYS[kind]);
+  const editorTitle = editing
+    ? t("azuredevops:editWatchTitle", { kind: kindNoun })
+    : t("azuredevops:newWatchTitle", { kind: kindNoun });
   const body = (
     <div className="min-h-0 space-y-4 overflow-y-auto p-4 pb-[env(safe-area-inset-bottom,0px)] sm:p-6">
       {error && (
@@ -271,7 +343,7 @@ function WatchEditor({
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>Azure project ID</Label>
+          <Label>{t("azuredevops:azureProjectId")}</Label>
           <Input
             value={current.projectId}
             onChange={(event) => set("projectId", event.target.value)}
@@ -279,7 +351,7 @@ function WatchEditor({
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Poll interval (seconds)</Label>
+          <Label>{t("azuredevops:pollIntervalSeconds")}</Label>
           <Input
             type="number"
             min={60}
@@ -290,6 +362,7 @@ function WatchEditor({
       </div>
       {kind === "work-item" ? (
         <div className="space-y-1.5">
+          {/* WIQL is the Azure DevOps query language, not copy. */}
           <Label>WIQL</Label>
           <textarea
             className="min-h-28 w-full rounded-md border bg-background p-3 text-sm"
@@ -301,14 +374,14 @@ function WatchEditor({
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label>Azure repository ID (optional)</Label>
+            <Label>{t("azuredevops:azureRepositoryIdOptional")}</Label>
             <Input
               value={pullRequest.azureRepositoryId ?? ""}
               onChange={(event) => set("azureRepositoryId", event.target.value)}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Status</Label>
+            <Label>{t("azuredevops:status")}</Label>
             <Select
               value={pullRequest.status || "active"}
               onValueChange={(value) => set("status", value)}
@@ -316,35 +389,37 @@ function WatchEditor({
               <SelectTrigger className="min-h-11">
                 <SelectValue />
               </SelectTrigger>
+              {/* `value` is the Azure DevOps pull-request status sent on the
+                  wire; only the item label is copy. */}
               <SelectContent>
-                <SelectItem value="active">Active</SelectItem>
-                <SelectItem value="completed">Completed</SelectItem>
-                <SelectItem value="abandoned">Abandoned</SelectItem>
-                <SelectItem value="all">Any status</SelectItem>
+                <SelectItem value="active">{t("azuredevops:statusActive")}</SelectItem>
+                <SelectItem value="completed">{t("azuredevops:statusCompleted")}</SelectItem>
+                <SelectItem value="abandoned">{t("azuredevops:statusAbandoned")}</SelectItem>
+                <SelectItem value="all">{t("azuredevops:statusAny")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-1.5">
-            <Label>Creator ID</Label>
+            <Label>{t("azuredevops:creatorId")}</Label>
             <Input
               value={pullRequest.creatorId ?? ""}
               onChange={(event) => set("creatorId", event.target.value)}
-              placeholder="@me or identity"
+              placeholder={t("azuredevops:identityPlaceholder", { token: AZURE_ME_TOKEN })}
             />
           </div>
           <div className="space-y-1.5">
-            <Label>Reviewer ID</Label>
+            <Label>{t("azuredevops:reviewerId")}</Label>
             <Input
               value={pullRequest.reviewerId ?? ""}
               onChange={(event) => set("reviewerId", event.target.value)}
-              placeholder="@me or identity"
+              placeholder={t("azuredevops:identityPlaceholder", { token: AZURE_ME_TOKEN })}
             />
           </div>
         </div>
       )}
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>Kandev repository ID</Label>
+          <Label>{t("azuredevops:kandevRepositoryId")}</Label>
           <Input
             value={current.repositoryId}
             onChange={(event) => set("repositoryId", event.target.value)}
@@ -352,7 +427,7 @@ function WatchEditor({
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Base branch</Label>
+          <Label>{t("azuredevops:baseBranch")}</Label>
           <Input
             value={current.baseBranch}
             onChange={(event) => set("baseBranch", event.target.value)}
@@ -361,7 +436,7 @@ function WatchEditor({
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Workflow ID</Label>
+          <Label>{t("azuredevops:workflowId")}</Label>
           <Input
             value={current.workflowId}
             onChange={(event) => set("workflowId", event.target.value)}
@@ -369,7 +444,7 @@ function WatchEditor({
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Workflow step ID</Label>
+          <Label>{t("azuredevops:workflowStepId")}</Label>
           <Input
             value={current.workflowStepId}
             onChange={(event) => set("workflowStepId", event.target.value)}
@@ -377,7 +452,7 @@ function WatchEditor({
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Agent profile ID</Label>
+          <Label>{t("azuredevops:agentProfileId")}</Label>
           <Input
             value={current.agentProfileId}
             onChange={(event) => set("agentProfileId", event.target.value)}
@@ -385,7 +460,7 @@ function WatchEditor({
           />
         </div>
         <div className="space-y-1.5">
-          <Label>Executor profile ID</Label>
+          <Label>{t("azuredevops:executorProfileId")}</Label>
           <Input
             value={current.executorProfileId}
             onChange={(event) => set("executorProfileId", event.target.value)}
@@ -394,7 +469,7 @@ function WatchEditor({
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label>Prompt</Label>
+        <Label>{t("azuredevops:prompt")}</Label>
         <textarea
           className="min-h-24 w-full rounded-md border bg-background p-3 text-sm"
           value={current.prompt}
@@ -403,25 +478,25 @@ function WatchEditor({
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label>Cleanup policy</Label>
+          <Label>{t("azuredevops:cleanupPolicy")}</Label>
           <Select
             value={current.cleanupPolicy}
-            onValueChange={(value: AzureDevOpsCleanupPolicy) =>
-              set(kind === "work-item" ? "cleanupPolicy" : "cleanupPolicy", value)
-            }
+            onValueChange={(value: AzureDevOpsCleanupPolicy) => set("cleanupPolicy", value)}
           >
             <SelectTrigger className="min-h-11">
               <SelectValue />
             </SelectTrigger>
+            {/* `value` is the persisted `AzureDevOpsCleanupPolicy`; only the
+                item label is copy. */}
             <SelectContent>
-              <SelectItem value="auto">Auto</SelectItem>
-              <SelectItem value="always">Always</SelectItem>
-              <SelectItem value="never">Never</SelectItem>
+              <SelectItem value="auto">{t("azuredevops:cleanupPolicyAuto")}</SelectItem>
+              <SelectItem value="always">{t("azuredevops:cleanupPolicyAlways")}</SelectItem>
+              <SelectItem value="never">{t("azuredevops:cleanupPolicyNever")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-1.5">
-          <Label>Max in-flight tasks (0 = unlimited)</Label>
+          <Label>{t("azuredevops:maxInflightTasks")}</Label>
           <Input
             type="number"
             min={0}
@@ -451,7 +526,7 @@ function WatchEditor({
               variant="ghost"
               size="icon"
               className="min-h-11 min-w-11 cursor-pointer"
-              aria-label="Close watch editor"
+              aria-label={t("azuredevops:closeWatchEditor")}
               data-testid="azure-watch-editor-close"
               onClick={() => onOpenChange(false)}
             >
@@ -472,7 +547,7 @@ function WatchEditor({
             variant="ghost"
             size="icon"
             className="min-h-11 min-w-11 cursor-pointer"
-            aria-label="Close watch editor"
+            aria-label={t("azuredevops:closeWatchEditor")}
             data-testid="azure-watch-editor-close"
             onClick={() => onOpenChange(false)}
           >
@@ -487,6 +562,7 @@ function WatchEditor({
 
 // eslint-disable-next-line max-lines-per-function -- settings coordinates watch lists, editor state, and destructive confirmations.
 export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const watches = useAzureDevOpsWatches(workspaceId);
   const [editor, setEditor] = useState<{
     kind: Kind;
@@ -497,7 +573,7 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
   const run = async (kind: Kind, id: string) => {
     try {
       const result = await watches.trigger(kind, id);
-      setMessage(`${result.matched} new match${result.matched === 1 ? "" : "es"}.`);
+      setMessage(t("azuredevops:newMatches", { count: result.matched }));
     } catch (error) {
       setMessage(String(error));
     }
@@ -505,9 +581,15 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
   const reset = async (kind: Kind, id: string, policy: string) => {
     try {
       const preview = await watches.previewReset(kind, id);
-      if (!confirm(`Reset this ${policy} watch and remove ${preview.taskCount} task(s)?`)) return;
+      const confirmed = confirm(
+        t("azuredevops:resetWatchConfirm", {
+          policy: t(CLEANUP_POLICY_KEYS[policy] ?? CLEANUP_POLICY_KEYS.auto),
+          count: preview.taskCount,
+        }),
+      );
+      if (!confirmed) return;
       await watches.reset(kind, id);
-      setMessage("Watch reset.");
+      setMessage(t("azuredevops:watchReset"));
     } catch (error) {
       setMessage(String(error));
     }
@@ -516,16 +598,16 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
     try {
       if (kind === "work-item") await watches.updateWorkItem(id, { enabled });
       else await watches.updatePullRequest(id, { enabled });
-      setMessage(enabled ? "Watch enabled." : "Watch disabled.");
+      setMessage(enabled ? t("azuredevops:watchEnabled") : t("azuredevops:watchDisabled"));
     } catch (error) {
       setMessage(String(error));
     }
   };
   const remove = async (kind: Kind, id: string) => {
-    if (!confirm("Delete this watch?")) return;
+    if (!confirm(t("azuredevops:deleteWatchConfirm"))) return;
     try {
       await watches.remove(kind, id);
-      setMessage("Watch deleted.");
+      setMessage(t("azuredevops:watchDeleted"));
     } catch (error) {
       setMessage(String(error));
     }
@@ -542,10 +624,12 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
           <AlertDescription>{watches.error}</AlertDescription>
         </Alert>
       )}
-      {watches.loading && <p className="text-sm text-muted-foreground">Loading watchers…</p>}
+      {watches.loading && (
+        <p className="text-sm text-muted-foreground">{t("azuredevops:loadingWatchers")}</p>
+      )}
       <SettingsSection
-        title="Pull-request watches"
-        description="Create tasks automatically from matching Azure DevOps pull requests."
+        title={t("azuredevops:pullRequestWatches")}
+        description={t("azuredevops:pullRequestWatchesDescription")}
         action={
           <Button
             type="button"
@@ -553,14 +637,14 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
             onClick={() => setEditor({ kind: "pull-request" })}
             data-testid="azure-add-pull-request-watch"
           >
-            <IconPlus className="h-4 w-4" /> Add PR watch
+            <IconPlus className="h-4 w-4" /> {t("azuredevops:addPrWatch")}
           </Button>
         }
       >
         {!watches.loading && watches.pullRequests.length === 0 && (
           <Card>
             <CardContent className="p-6 text-sm text-muted-foreground">
-              No pull-request watches yet.
+              {t("azuredevops:noPullRequestWatches")}
             </CardContent>
           </Card>
         )}
@@ -580,8 +664,8 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
         </div>
       </SettingsSection>
       <SettingsSection
-        title="Work-item watches"
-        description="Create tasks automatically from matching Azure DevOps work-item queries."
+        title={t("azuredevops:workItemWatches")}
+        description={t("azuredevops:workItemWatchesDescription")}
         action={
           <Button
             type="button"
@@ -589,14 +673,14 @@ export function AzureDevOpsWatchSettings({ workspaceId }: { workspaceId: string 
             onClick={() => setEditor({ kind: "work-item" })}
             data-testid="azure-add-work-item-watch"
           >
-            <IconPlus className="h-4 w-4" /> Add work-item watch
+            <IconPlus className="h-4 w-4" /> {t("azuredevops:addWorkItemWatch")}
           </Button>
         }
       >
         {!watches.loading && watches.workItems.length === 0 && (
           <Card>
             <CardContent className="p-6 text-sm text-muted-foreground">
-              No work-item watches yet.
+              {t("azuredevops:noWorkItemWatches")}
             </CardContent>
           </Card>
         )}

@@ -2767,6 +2767,53 @@ func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T)
 	require.Equal(t, baseline, lastPayload.ConfigBaseline)
 }
 
+func TestHandleSessionModelsEventCapturesOriginalEffectiveConfigurationOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: &recordingEventBus{}}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			OriginalConfigCandidate: []streams.ConfigOption{
+				{Type: "select", ID: "reasoning_effort", CurrentValue: "high"},
+				{Type: "toggle", ID: "fast_mode", CurrentValue: "on"},
+			},
+			Data: map[string]any{"original_config_settled": true},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	original, ok := models.LoadOriginalSessionEffectiveConfiguration(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", original.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-luna",
+			OriginalConfigCandidate: []streams.ConfigOption{
+				{ID: "reasoning_effort", CurrentValue: "low"},
+			},
+			Data: map[string]any{"original_config_settled": true},
+		},
+	})
+
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	original, ok = models.LoadOriginalSessionEffectiveConfiguration(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", original.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
+}
+
 func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

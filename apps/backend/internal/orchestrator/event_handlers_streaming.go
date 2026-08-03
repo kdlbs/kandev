@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -16,6 +17,8 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+const sessionModelConfigKey = "model"
 
 // handleAgentStreamEvent handles agent stream events (tool calls, message chunks, etc.)
 func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
@@ -2106,7 +2109,7 @@ func resolvePromptUsageLabels(
 	agentType := ""
 	if session != nil && session.AgentProfileSnapshot != nil {
 		if model == "" {
-			if m, ok := session.AgentProfileSnapshot["model"].(string); ok {
+			if m, ok := session.AgentProfileSnapshot[sessionModelConfigKey].(string); ok {
 				model = m
 			}
 		}
@@ -2174,7 +2177,7 @@ func (s *Service) persistPromptMetadataOnTurn(
 	}
 	metadata["prompt_usage"] = promptUsageMetadata(payload.Data.Usage)
 	if model != "" {
-		metadata["model"] = model
+		metadata[sessionModelConfigKey] = model
 	}
 	if agentType != "" {
 		metadata["agent_type"] = agentType
@@ -2382,6 +2385,22 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	if sessionID == "" || s.eventBus == nil {
 		return
 	}
+	if failures := workflowSessionConfigFailures(payload.Data.Data); len(failures) > 0 {
+		stepID := ""
+		if s.repo != nil && payload.TaskID != "" {
+			if task, err := s.repo.GetTask(ctx, payload.TaskID); err == nil && task != nil {
+				stepID = task.WorkflowStepID
+			}
+		}
+		s.warnWorkflowSessionConfig(ctx, payload.TaskID, sessionID, stepID,
+			fmt.Sprintf("Some session settings could not be applied at startup: %s.", strings.Join(failures, ", ")))
+		return
+	}
+	if _, err := s.sessionOriginalEffectiveConfigurationForEvent(ctx, sessionID, payload.Data); err != nil {
+		s.logger.Warn("failed to persist original effective session configuration",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+	}
 
 	// Store the write-once baseline before the mutable selector snapshot so a
 	// concurrent task-detail boot cannot observe the new state without its
@@ -2414,6 +2433,104 @@ func (s *Service) handleSessionModelsEvent(ctx context.Context, payload *lifecyc
 	)
 	subject := events.BuildSessionModelsSubject(sessionID)
 	_ = s.eventBus.Publish(ctx, subject, bus.NewEvent(events.SessionModelsUpdated, "orchestrator", eventPayload))
+}
+
+func workflowSessionConfigFailures(raw any) []string {
+	data, ok := raw.(map[string]any)
+	if !ok || data == nil {
+		return nil
+	}
+	switch values := data["workflow_session_config_failures"].(type) {
+	case []string:
+		return values
+	case []any:
+		failures := make([]string, 0, len(values))
+		for _, value := range values {
+			if failure, ok := value.(string); ok && failure != "" {
+				failures = append(failures, failure)
+			}
+		}
+		return failures
+	default:
+		return nil
+	}
+}
+
+func (s *Service) sessionOriginalEffectiveConfigurationForEvent(
+	ctx context.Context,
+	sessionID string,
+	data *lifecycle.AgentStreamEventData,
+) (*models.SessionOriginalEffectiveConfiguration, error) {
+	if data == nil || !originalConfigSettled(data.Data) || s.repo == nil {
+		return nil, nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if session == nil || !models.IsOriginalTaskSession(session.Metadata) {
+		return nil, nil
+	}
+	if existing, ok := models.LoadOriginalSessionEffectiveConfiguration(session.Metadata); ok {
+		return &existing, nil
+	}
+	config := originalConfigurationFromEvent(data)
+	if config.Model == "" && len(config.ConfigOptions) == 0 {
+		return nil, nil
+	}
+	return s.persistOriginalSessionConfiguration(ctx, sessionID, session, config)
+}
+
+func originalConfigurationFromEvent(data *lifecycle.AgentStreamEventData) models.SessionOriginalEffectiveConfiguration {
+	options := data.OriginalConfigCandidate
+	if len(options) == 0 {
+		options = data.ConfigOptions
+	}
+	return models.SessionOriginalEffectiveConfiguration{
+		Model:         data.CurrentModelID,
+		ConfigOptions: configOptionValuesWithoutModel(options),
+	}
+}
+
+func (s *Service) persistOriginalSessionConfiguration(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	config models.SessionOriginalEffectiveConfiguration,
+) (*models.SessionOriginalEffectiveConfiguration, error) {
+	writeCtx := context.WithoutCancel(ctx)
+	stored, err := s.repo.SetSessionMetadataKeyIfAbsent(
+		writeCtx, sessionID, models.SessionMetaKeyOriginalEffectiveConfig, config,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if stored {
+		return &config, nil
+	}
+	return s.originalSessionConfigurationAfterRace(writeCtx, sessionID, session, config)
+}
+
+func (s *Service) originalSessionConfigurationAfterRace(
+	ctx context.Context,
+	sessionID string,
+	session *models.TaskSession,
+	config models.SessionOriginalEffectiveConfiguration,
+) (*models.SessionOriginalEffectiveConfiguration, error) {
+	if existing, ok := models.LoadOriginalSessionEffectiveConfiguration(session.Metadata); ok {
+		return &existing, nil
+	}
+	fresh, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if fresh == nil {
+		return &config, nil
+	}
+	if existing, ok := models.LoadOriginalSessionEffectiveConfiguration(fresh.Metadata); ok {
+		return &existing, nil
+	}
+	return &config, nil
 }
 
 // handleSessionMCPAttachmentEvent reduces safe attachment observations into
@@ -2515,9 +2632,41 @@ func configOptionValues(options []streams.ConfigOption) map[string]string {
 	return values
 }
 
+func configOptionValuesWithoutModel(options []streams.ConfigOption) map[string]string {
+	values := configOptionValues(options)
+	for key, option := range optionsByID(options) {
+		// The immutable restore snapshot contains only selectable ACP options.
+		// Toggle/boolean values are provider state, not model configuration, and
+		// may be invalid when replayed after a model switch.
+		if option.Type != "select" || key == sessionModelConfigKey || option.Category == sessionModelConfigKey {
+			delete(values, key)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+func optionsByID(options []streams.ConfigOption) map[string]streams.ConfigOption {
+	result := make(map[string]streams.ConfigOption, len(options))
+	for _, option := range options {
+		if option.ID != "" {
+			result[option.ID] = option
+		}
+	}
+	return result
+}
+
 func configOptionsSettled(data any) bool {
 	metadata, _ := data.(map[string]any)
 	result, _ := metadata["config_options_settled"].(bool)
+	return result
+}
+
+func originalConfigSettled(data any) bool {
+	metadata, _ := data.(map[string]any)
+	result, _ := metadata["original_config_settled"].(bool)
 	return result
 }
 
@@ -2644,7 +2793,7 @@ func (s *Service) persistSessionRuntimeConfigOnSession(ctx context.Context, sess
 			s.logger.Warn("failed to clear stale context window after runtime model change",
 				zap.String("session_id", sessionID),
 				zap.String("previous_model", previousModel),
-				zap.String("model", cfg.Model),
+				zap.String(sessionModelConfigKey, cfg.Model),
 				zap.Error(err))
 		}
 	}
@@ -2654,10 +2803,10 @@ func (s *Service) persistSessionModelOnSession(ctx context.Context, sessionID st
 	if session.AgentProfileSnapshot == nil {
 		session.AgentProfileSnapshot = make(map[string]interface{})
 	}
-	if existing, _ := session.AgentProfileSnapshot["model"].(string); existing == model {
+	if existing, _ := session.AgentProfileSnapshot[sessionModelConfigKey].(string); existing == model {
 		return
 	}
-	session.AgentProfileSnapshot["model"] = model
+	session.AgentProfileSnapshot[sessionModelConfigKey] = model
 	if updater, ok := s.repo.(taskSessionAgentProfileSnapshotUpdater); ok {
 		_ = updater.UpdateTaskSessionAgentProfileSnapshot(ctx, sessionID, session.AgentProfileSnapshot)
 	} else {
@@ -2692,7 +2841,7 @@ func applySessionRuntimeConfigUpdate(cfg *models.SessionRuntimeConfig, model, mo
 			cfg.ConfigOptions = make(map[string]string)
 		}
 		cfg.ConfigOptions[option.ID] = option.CurrentValue
-		if option.ID == "model" || option.Category == "model" {
+		if option.ID == sessionModelConfigKey || option.Category == sessionModelConfigKey {
 			cfg.Model = option.CurrentValue
 		}
 	}

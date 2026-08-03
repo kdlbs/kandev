@@ -143,8 +143,12 @@ func IsAgentTitleOwner(metadata map[string]interface{}, sessionID string) bool {
 // workflow_switch means the session profile was selected by workflow routing
 // rather than direct user selection.
 const (
-	SessionMetaKeyCreatedBy              = "created_by"
-	SessionCreatedByWorkflowSwitch       = "workflow_switch"
+	SessionMetaKeyCreatedBy        = "created_by"
+	SessionCreatedByWorkflowSwitch = "workflow_switch"
+	// SessionMetaKeyOrigin identifies immutable task-session provenance. Unlike
+	// IsPrimary, it never changes when the user selects another conversation tab.
+	SessionMetaKeyOrigin                 = "origin"
+	SessionOriginTaskInitial             = "task_initial"
 	SessionMetaKeyContextWindow          = "context_window"
 	SessionMetaKeyContextCompactionCount = "context_compaction_count"
 )
@@ -163,6 +167,12 @@ const SessionMetaKeyRuntimeConfig = "runtime_config"
 // separately from provider snapshots so delayed events cannot clobber resume
 // intent. Overrides are applied after SessionMetaKeyRuntimeConfig.
 const SessionMetaKeyRuntimeConfigOverrides = "runtime_config_overrides"
+
+// SessionMetaKeyOriginalEffectiveConfig stores the write-once effective model
+// and selectable ACP option values after profile settings settle. It is the
+// restore source for workflow rules and is intentionally separate from the
+// provider-default comparison baseline and mutable runtime state.
+const SessionMetaKeyOriginalEffectiveConfig = "original_effective_config"
 
 // SessionMetaKeyACPConfigBaseline records the write-once effective ACP select
 // values with which a task session started. It is comparison metadata only;
@@ -206,6 +216,47 @@ type SessionRuntimeConfig struct {
 	Model         string            `json:"model,omitempty"`
 	Mode          string            `json:"mode,omitempty"`
 	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// SessionOriginalEffectiveConfiguration is the immutable configuration a task
+// session had after provider defaults and its profile settings settled.
+type SessionOriginalEffectiveConfiguration struct {
+	Model         string            `json:"model,omitempty"`
+	ConfigOptions map[string]string `json:"config_options,omitempty"`
+}
+
+// LoadOriginalSessionEffectiveConfiguration decodes the original configuration
+// from typed or JSON-rehydrated session metadata.
+func LoadOriginalSessionEffectiveConfiguration(metadata map[string]interface{}) (SessionOriginalEffectiveConfiguration, bool) {
+	if metadata == nil {
+		return SessionOriginalEffectiveConfiguration{}, false
+	}
+	raw, ok := metadata[SessionMetaKeyOriginalEffectiveConfig]
+	if !ok || raw == nil {
+		return SessionOriginalEffectiveConfiguration{}, false
+	}
+	if config, ok := raw.(SessionOriginalEffectiveConfiguration); ok {
+		config.ConfigOptions = maps.Clone(config.ConfigOptions)
+		return config, config.Model != "" || len(config.ConfigOptions) > 0
+	}
+	data, err := json.Marshal(raw)
+	if err != nil {
+		return SessionOriginalEffectiveConfiguration{}, false
+	}
+	var config SessionOriginalEffectiveConfiguration
+	if err := json.Unmarshal(data, &config); err != nil {
+		return SessionOriginalEffectiveConfiguration{}, false
+	}
+	return config, config.Model != "" || len(config.ConfigOptions) > 0
+}
+
+// IsOriginalTaskSession reports whether immutable task-session provenance marks
+// this row as the session created when the task first started.
+func IsOriginalTaskSession(metadata map[string]interface{}) bool {
+	if metadata == nil {
+		return false
+	}
+	return StringFromAny(metadata[SessionMetaKeyOrigin]) == SessionOriginTaskInitial
 }
 
 // TurnRuntimeConfigSnapshot is the minimal display state captured when a turn

@@ -128,7 +128,7 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   },
   { name: "settings — task actions", url: "/settings/general/task-actions" },
   // NOT YET: "settings — integrations github", "… gitlab", "… jira",
-  // "… linear". Each page's
+  // "… linear", "… sentry". Each page's
   // own copy is fully migrated (verified by running this oracle against it —
   // every string the integration owns renders accented), but the route expands
   // the Workspaces > Integrations branch of the settings nav, and
@@ -140,14 +140,18 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // in the PR that migrates the settings nav — allowlisting those nav labels here
   // would hide real misses instead.
   //
-  // Two shared components rendered by all four pages are also still English and
+  // Two shared components rendered by all five pages are also still English and
   // would have to be migrated (or allowlisted, which is worse) first:
   // `components/integrations/drafted-integration-enabled-control.tsx`
   // ("Enabled"/"Disabled") and `components/watcher-repository-fields.tsx`
   // ("Repository", "Base Branch", "(no repository)"), plus `STEP_DEFAULT_LABEL`
-  // and `stepPlaceholder`. All four are shared with the un-migrated Sentry and
-  // Azure DevOps surfaces, plus `components/integrations/settings-section.tsx`
-  // chrome and the watcher card's own empty/loading states.
+  // and `stepPlaceholder`. All four are shared with the un-migrated Azure DevOps
+  // surface, plus `components/integrations/settings-section.tsx` chrome and the
+  // watcher card's own empty/loading states.
+  //
+  // The Sentry run also surfaced `components/integrations/auth-status-banner.tsx`
+  // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
+  // "Close" label — both shared, both out of scope for a per-integration PR.
 ];
 
 /**

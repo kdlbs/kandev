@@ -1,3 +1,27 @@
+/**
+ * Seed presets for a workspace that has never saved Azure DevOps settings.
+ *
+ * NOTHING in this file is translated, and nothing in it should be.
+ *
+ *   - The `wiql` filters are Azure DevOps' query language — `[System.State]`,
+ *     `@Me`, `ORDER BY` — i.e. code, on the same footing as Jira's JQL and
+ *     Sentry's search syntax.
+ *   - `label`, `hint` and `promptTemplate` are PERSISTED. They seed the
+ *     editable drafts in azure-devops-default-queries.tsx and
+ *     azure-devops-quick-actions.tsx and are written back to workspace settings
+ *     as `AzureDevOpsQueryPreset` / `AzureDevOpsActionPreset`, so translating
+ *     them would write locale-dependent values into a user's saved presets and
+ *     leave them there after a locale switch. `promptTemplate` is additionally
+ *     sent to the agent verbatim.
+ *   - They must also keep matching the server-side defaults in
+ *     `apps/backend/internal/azuredevops/workspace_settings.go`, which has no
+ *     locale: the backend returns those records whenever the client asks for a
+ *     reset, so a translated copy here would flip back to English on save.
+ *
+ * Localizing them needs a key/persisted-value split in the preset type — the
+ * same open item recorded for GitHub's `DEFAULT_PR_PRESETS` and Jira's
+ * `my-jira/presets.ts`.
+ */
 import type { AzureDevOpsActionPreset, AzureDevOpsQueryPreset } from "@/lib/types/azure-devops";
 
 const WIQL_START = "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project";

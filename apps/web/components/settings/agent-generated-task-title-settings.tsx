@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
@@ -10,6 +11,7 @@ import { SettingsCard } from "./settings-card";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 
 export function AgentGeneratedTaskTitleSettings() {
+  const { t } = useTranslation();
   const preference = useAppStore((state) => state.userSettings.agentGeneratedTaskTitles);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const storeApi = useAppStoreApi();
@@ -43,21 +45,17 @@ export function AgentGeneratedTaskTitleSettings() {
   return (
     <SettingsCard isDirty={isDirty} data-testid="agent-generated-task-title-card">
       <CardHeader>
-        <CardTitle className="text-base">Agent-generated task titles</CardTitle>
-        <CardDescription>
-          When enabled, new task and subtask forms hide the manual title field and require a prompt.
-          Kandev shows a provisional title using the prompt&apos;s first six words immediately, then
-          asks the agent to replace it with a concise title targeting about three words. If the
-          agent cannot rename the task, the provisional title remains available for you to edit.
-          Existing and edited tasks keep their normal title field.
-        </CardDescription>
+        <CardTitle className="text-base">{t("settings:agentGeneratedTaskTitles")}</CardTitle>
+        <CardDescription>{t("settings:agentGeneratedTaskTitlesDescription")}</CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex min-h-11 items-center justify-between gap-4">
           <div className="min-w-0 space-y-0.5">
-            <Label htmlFor="agent-generated-task-titles">Use the agent for new task titles</Label>
+            <Label htmlFor="agent-generated-task-titles">
+              {t("settings:useAgentForNewTaskTitles")}
+            </Label>
             <p className="text-xs text-muted-foreground">
-              Disabled by default; save this setting before opening a creation dialog.
+              {t("settings:agentGeneratedTaskTitlesDisabledHint")}
             </p>
           </div>
           <Switch

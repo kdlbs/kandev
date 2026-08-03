@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   IconBrandAzure,
   IconDeviceFloppy,
@@ -142,6 +143,7 @@ function useConfigRefresh(
 }
 
 function useAzureDevOpsSettings(workspaceId: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [config, setConfig] = useState<AzureDevOpsConfig | null>(null);
   const [form, setForm] = useState<FormState>(EMPTY_FORM);
@@ -158,13 +160,13 @@ function useAzureDevOpsSettings(workspaceId: string) {
       setForm(configToForm(next));
     } catch (err) {
       toast({
-        description: `Failed to load Azure DevOps config: ${String(err)}`,
+        description: t("azuredevops:failedToLoadConfig", { error: String(err) }),
         variant: "error",
       });
     } finally {
       setLoading(false);
     }
-  }, [toast, workspaceId]);
+  }, [t, toast, workspaceId]);
 
   useEffect(() => void load(), [load]);
   useConfigRefresh(workspaceId, setConfig);
@@ -201,26 +203,32 @@ function useAzureDevOpsSettings(workspaceId: string) {
       setConfig(next);
       setForm(configToForm(next));
       setTestResult(null);
-      toast({ description: "Azure DevOps configuration saved", variant: "success" });
+      toast({ description: t("azuredevops:configurationSaved"), variant: "success" });
     } catch (err) {
-      toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      toast({
+        description: t("azuredevops:saveFailed", { error: String(err) }),
+        variant: "error",
+      });
     } finally {
       setSaving(false);
     }
-  }, [config, form, toast, workspaceId]);
+  }, [config, form, t, toast, workspaceId]);
 
   const remove = useCallback(async () => {
-    if (!confirm("Remove Azure DevOps configuration?")) return;
+    if (!confirm(t("azuredevops:removeConfigurationConfirm"))) return;
     try {
       await deleteAzureDevOpsConfig(workspaceId);
       setConfig(null);
       setForm(EMPTY_FORM);
       setTestResult(null);
-      toast({ description: "Azure DevOps configuration removed", variant: "success" });
+      toast({ description: t("azuredevops:configurationRemoved"), variant: "success" });
     } catch (err) {
-      toast({ description: `Remove failed: ${String(err)}`, variant: "error" });
+      toast({
+        description: t("azuredevops:removeFailed", { error: String(err) }),
+        variant: "error",
+      });
     }
-  }, [toast, workspaceId]);
+  }, [t, toast, workspaceId]);
 
   return {
     config,
@@ -237,15 +245,24 @@ function useAzureDevOpsSettings(workspaceId: string) {
   };
 }
 
+function testResultMessage(
+  t: (key: string, values?: Record<string, unknown>) => string,
+  result: TestAzureDevOpsConnectionResult,
+): string {
+  if (!result.ok) return result.error || t("azuredevops:connectionFailed");
+  // `displayName` is the Azure DevOps identity — data, so it is interpolated
+  // rather than concatenated into the message.
+  return result.displayName
+    ? t("azuredevops:connectedAs", { name: result.displayName })
+    : t("azuredevops:connected");
+}
+
 function TestResult({ result }: { result: TestAzureDevOpsConnectionResult | null }) {
+  const { t } = useTranslation();
   if (!result) return null;
   return (
     <Alert variant={result.ok ? "default" : "destructive"} data-testid="azure-devops-test-result">
-      <AlertDescription>
-        {result.ok
-          ? `Connected${result.displayName ? ` as ${result.displayName}` : ""}`
-          : result.error || "Connection failed"}
-      </AlertDescription>
+      <AlertDescription>{testResultMessage(t, result)}</AlertDescription>
     </Alert>
   );
 }
@@ -253,7 +270,14 @@ function TestResult({ result }: { result: TestAzureDevOpsConnectionResult | null
 type SettingsState = ReturnType<typeof useAzureDevOpsSettings>;
 type ProjectsState = ReturnType<typeof useAzureDevOpsProjects>;
 
+// Azure DevOps names these two PAT scope groups in its own token UI. They are
+// pointers into that screen, not copy, so they are interpolated as values — the
+// pseudo-locale must not transliterate a label the user has to find verbatim.
+const PAT_SCOPE_WORK_ITEMS = "Work Items";
+const PAT_SCOPE_CODE = "Code";
+
 function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
+  const { t } = useTranslation();
   const patURL = azureDevOpsPATURL(organizationUrl);
   const [open, setOpen] = useState(false);
 
@@ -266,7 +290,7 @@ function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
             variant="ghost"
             size="icon-sm"
             className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
-            aria-label="How to create a personal access token"
+            aria-label={t("azuredevops:howToCreatePat")}
             onClick={() => setOpen((current) => !current)}
           >
             <IconInfoCircle className="size-4" />
@@ -279,18 +303,22 @@ function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
           className="pointer-events-auto max-w-sm space-y-2 p-3 text-left text-xs leading-relaxed"
           data-testid="azure-devops-pat-help"
         >
-          <p className="font-medium text-foreground">
-            Create a personal access token for board editing
-          </p>
+          <p className="font-medium text-foreground">{t("azuredevops:patHelpTitle")}</p>
           <ol className="list-decimal space-y-1 pl-4 text-muted-foreground">
-            <li>Open token settings and select New Token.</li>
-            <li>Choose this organization, a short expiration, and Custom defined scopes.</li>
+            <li>{t("azuredevops:patStepOpenTokenSettings")}</li>
+            <li>{t("azuredevops:patStepChooseScopes")}</li>
             <li>
-              Under <span className="font-medium text-foreground">Work Items</span>, check Read
-              &amp; write. Under <span className="font-medium text-foreground">Code</span>, check
-              Read. Leave all other scopes unchecked.
+              <Trans
+                i18nKey="azuredevops:patStepCheckScopes"
+                values={{ workItems: PAT_SCOPE_WORK_ITEMS, code: PAT_SCOPE_CODE }}
+              >
+                Under <span className="font-medium text-foreground">{PAT_SCOPE_WORK_ITEMS}</span>,
+                check Read &amp; write. Under{" "}
+                <span className="font-medium text-foreground">{PAT_SCOPE_CODE}</span>, check Read.
+                Leave all other scopes unchecked.
+              </Trans>
             </li>
-            <li>Create the token, copy it, and paste it into this field.</li>
+            <li>{t("azuredevops:patStepCreateAndPaste")}</li>
           </ol>
           {patURL ? (
             <a
@@ -300,12 +328,10 @@ function PATSetupHelp({ organizationUrl }: { organizationUrl: string }) {
               className="inline-flex cursor-pointer items-center gap-1 font-medium text-foreground underline underline-offset-4"
             >
               <IconExternalLink className="size-3.5" />
-              Create personal access token
+              {t("azuredevops:createPersonalAccessToken")}
             </a>
           ) : (
-            <p className="text-muted-foreground">
-              Enter a valid organization URL to open its token settings.
-            </p>
+            <p className="text-muted-foreground">{t("azuredevops:enterValidOrganizationUrl")}</p>
           )}
         </TooltipContent>
       </Tooltip>
@@ -324,12 +350,15 @@ function ConnectionFields({
   canReusePAT: boolean;
   projectSelectionEnabled: boolean;
 }) {
-  const projectPlaceholder = projects.loading ? "Loading projects..." : "Optional";
+  const { t } = useTranslation();
+  const projectPlaceholder = projects.loading
+    ? t("azuredevops:loadingProjects")
+    : t("azuredevops:optional");
   return (
     <>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor="azure-devops-organization">Organization URL</Label>
+          <Label htmlFor="azure-devops-organization">{t("azuredevops:organizationUrl")}</Label>
           <Input
             id="azure-devops-organization"
             value={state.form.organizationUrl}
@@ -342,7 +371,7 @@ function ConnectionFields({
         </div>
         <div className="space-y-1.5">
           <div className="sm:flex sm:min-h-7 sm:items-center">
-            <Label htmlFor="azure-devops-project">Default project</Label>
+            <Label htmlFor="azure-devops-project">{t("azuredevops:defaultProject")}</Label>
           </div>
           <Select
             value={state.form.defaultProjectId || undefined}
@@ -372,7 +401,7 @@ function ConnectionFields({
         </div>
         <div className="space-y-1.5">
           <div className="flex items-center gap-1 sm:min-h-7">
-            <Label htmlFor="azure-devops-pat">Personal Access Token</Label>
+            <Label htmlFor="azure-devops-pat">{t("azuredevops:personalAccessToken")}</Label>
             <PATSetupHelp organizationUrl={state.form.organizationUrl} />
           </div>
           <Input
@@ -380,7 +409,7 @@ function ConnectionFields({
             type="password"
             value={state.form.pat}
             onChange={(event) => state.update("pat", event.target.value)}
-            placeholder={canReusePAT ? "Saved credential" : "Paste PAT"}
+            placeholder={canReusePAT ? t("azuredevops:savedCredential") : t("azuredevops:pastePat")}
             disabled={state.loading}
             autoComplete="new-password"
             aria-describedby="azure-devops-pat-help"
@@ -397,12 +426,13 @@ function ConnectionFields({
   );
 }
 
-function saveButtonLabel(state: SettingsState): string {
-  if (state.saving) return "Saving...";
-  return state.config ? "Update" : "Save";
+function saveButtonLabel(t: (key: string) => string, state: SettingsState): string {
+  if (state.saving) return t("azuredevops:saving");
+  return state.config ? t("azuredevops:update") : t("azuredevops:save");
 }
 
 function ConnectionActions({ state, disabled }: { state: SettingsState; disabled: boolean }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:items-center">
       <Button
@@ -414,7 +444,7 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
         data-testid="azure-devops-test-button"
       >
         <IconPlugConnected className="h-4 w-4" />
-        {state.testing ? "Testing..." : "Test connection"}
+        {state.testing ? t("azuredevops:testing") : t("azuredevops:testConnection")}
       </Button>
       <Button
         type="button"
@@ -424,7 +454,7 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
         data-testid="azure-devops-save-button"
       >
         <IconDeviceFloppy className="h-4 w-4" />
-        {saveButtonLabel(state)}
+        {saveButtonLabel(t, state)}
       </Button>
       {state.config && (
         <Button
@@ -435,7 +465,7 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
           data-testid="azure-devops-delete-button"
         >
           <IconTrash className="h-4 w-4" />
-          Remove
+          {t("azuredevops:remove")}
         </Button>
       )}
     </div>
@@ -443,6 +473,7 @@ function ConnectionActions({ state, disabled }: { state: SettingsState; disabled
 }
 
 export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const state = useAzureDevOpsSettings(workspaceId);
   const projects = useAzureDevOpsProjects(workspaceId, !!state.config?.hasSecret);
   const canReusePAT = savedPATMatches(state.config, state.form);
@@ -456,8 +487,8 @@ export function AzureDevOpsConnectionSection({ workspaceId }: { workspaceId: str
   return (
     <SettingsSection
       icon={<IconBrandAzure className="h-5 w-5" />}
-      title="Azure DevOps integration"
-      description="Azure DevOps Services organization, project, and PAT for this workspace."
+      title={t("azuredevops:integrationTitle")}
+      description={t("azuredevops:integrationDescription")}
     >
       <Card>
         <CardContent className="space-y-4 pt-6">

@@ -256,6 +256,11 @@ type Adapter struct {
 	// Synchronization
 	mu     sync.RWMutex
 	closed bool
+	// closedCh is closed as soon as shutdown begins so direct sendUpdate
+	// callers stop waiting before updatesCh is closed. updateSendWg lets Close
+	// wait for those callers before closing the channel.
+	closedCh     chan struct{}
+	updateSendWg sync.WaitGroup
 
 	// promptTurn tracks the in-flight session/prompt RPC so Cancel can interrupt it
 	// and wait for acknowledgment before reporting success.
@@ -337,6 +342,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		asyncTurnEpochs:           make(map[string]uint64),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
+		closedCh:                  make(chan struct{}),
 	}
 	a.wakeup = newWakeupScheduler(l, a.fireWakeup)
 	// Start the update worker before returning so any caller that connects
@@ -501,12 +507,38 @@ func (a *Adapter) SetPermissionHandler(handler PermissionHandler) {
 }
 
 // sendUpdate safely sends an event to the updates channel.
-// It checks the closed flag under read-lock to prevent panics on closed channels.
+//
+// Stream events are lossless at this boundary: when the per-agent consumer is
+// slower than the ACP producer, the ACP update worker applies backpressure to
+// that agent instead of silently dropping transcript content. The lifetime
+// context makes the wait cancelable during shutdown. Do not hold a.mu while
+// waiting; Close needs the write lock to cancel the context and unblock us.
 func (a *Adapter) sendUpdate(event AgentEvent) {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-	if !a.sendUpdateLocked(event) && !a.closed {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
+	if a.closed {
+		a.mu.RUnlock()
+		return
+	}
+	updatesCh := a.updatesCh
+	lifetimeCtx := a.lifetimeCtx
+	if lifetimeCtx == nil {
+		lifetimeCtx = context.Background()
+	}
+	closedCh := a.closedCh
+	if closedCh != nil {
+		a.updateSendWg.Add(1)
+	}
+	a.mu.RUnlock()
+	if closedCh != nil {
+		defer a.updateSendWg.Done()
+	}
+
+	select {
+	case updatesCh <- event:
+	case <-closedCh:
+	case <-lifetimeCtx.Done():
+		// Shutdown cancels the wait. The event is intentionally discarded after
+		// the adapter has become terminal; no later transcript can be applied.
 	}
 }
 
@@ -532,6 +564,9 @@ func (a *Adapter) Close() error {
 		return nil
 	}
 	a.closed = true
+	if a.closedCh != nil {
+		close(a.closedCh)
+	}
 	a.mu.Unlock()
 
 	a.logger.Info("closing ACP adapter")
@@ -552,6 +587,7 @@ func (a *Adapter) Close() error {
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
 	// until the worker is gone.
 	a.workerWg.Wait()
+	a.updateSendWg.Wait()
 	a.mu.Lock()
 	a.clearCodexSubagentCorrelationsLocked("")
 	a.clearPromptHandoffToolTrackingLocked()

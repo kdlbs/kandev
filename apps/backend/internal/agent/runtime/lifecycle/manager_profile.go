@@ -169,8 +169,24 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 // values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
-	model, mode, configOptions := m.effectiveSessionRuntimeConfig(ctx, execution, profileModel, profileMode, profileConfigOptions)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, model, mode, configOptions)
+	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
+	return m.sessionManager.InitializeAndPromptWithLayers(
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady,
+		profileModel, profileMode, profileConfigOptions,
+		runtimeModel, runtimeMode, runtimeConfigOptions,
+	)
+}
+
+func (m *Manager) sessionRuntimeOverrides(ctx context.Context, execution *AgentExecution) (string, string, map[string]string) {
+	info := m.sessionWorkspaceInfo(ctx, execution)
+	if info == nil {
+		return "", "", nil
+	}
+	var options map[string]string
+	if info.RuntimeConfigOptionsSet {
+		options = maps.Clone(info.RuntimeConfigOptions)
+	}
+	return info.RuntimeModel, info.SessionMode, options
 }
 
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {

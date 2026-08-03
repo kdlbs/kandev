@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	"github.com/kandev/kandev/internal/plugins/store"
 )
@@ -15,7 +16,8 @@ import (
 //
 // Get and List return copies of the stored *store.Record so callers cannot
 // mutate registry state by holding onto a returned pointer; all writes go
-// through Add / Remove / SetStatus / SetRestartCount.
+// through Add / Remove / SetStatus / SetRuntimeState / SetAutoUpdate /
+// SetRestartCount.
 type Registry struct {
 	mu   sync.RWMutex
 	byID map[string]*store.Record
@@ -37,7 +39,7 @@ func (r *Registry) Load(s store.Store) error {
 
 	byID := make(map[string]*store.Record, len(records))
 	for _, rec := range records {
-		byID[rec.ID] = rec
+		byID[rec.ID] = cloneRecord(rec)
 	}
 
 	r.mu.Lock()
@@ -54,8 +56,7 @@ func (r *Registry) Get(id string) (*store.Record, bool) {
 	if !ok {
 		return nil, false
 	}
-	clone := *rec
-	return &clone, true
+	return cloneRecord(rec), true
 }
 
 // List returns a copy of every registered record, sorted by id for
@@ -65,8 +66,7 @@ func (r *Registry) List() []*store.Record {
 	defer r.mu.RUnlock()
 	out := make([]*store.Record, 0, len(r.byID))
 	for _, rec := range r.byID {
-		clone := *rec
-		out = append(out, &clone)
+		out = append(out, cloneRecord(rec))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -76,8 +76,7 @@ func (r *Registry) List() []*store.Record {
 func (r *Registry) Add(record *store.Record) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	clone := *record
-	r.byID[record.ID] = &clone
+	r.byID[record.ID] = cloneRecord(record)
 }
 
 // Remove deletes the record for id, if present. A no-op if id is unknown.
@@ -99,8 +98,7 @@ func (r *Registry) SetStatus(id string, status Status) (*store.Record, bool) {
 		return nil, false
 	}
 	rec.Status = status
-	clone := *rec
-	return &clone, true
+	return cloneRecord(rec), true
 }
 
 // SetAutoUpdate updates the in-memory per-plugin auto-update override for id
@@ -115,8 +113,7 @@ func (r *Registry) SetAutoUpdate(id string, v *bool) (*store.Record, bool) {
 		return nil, false
 	}
 	rec.AutoUpdate = v
-	clone := *rec
-	return &clone, true
+	return cloneRecord(rec), true
 }
 
 // SetRestartCount updates the in-memory restart count for id and returns a
@@ -131,6 +128,40 @@ func (r *Registry) SetRestartCount(id string, count int) (*store.Record, bool) {
 		return nil, false
 	}
 	rec.RestartCount = count
+	return cloneRecord(rec), true
+}
+
+// SetRuntimeState updates the lifecycle status and persisted failure
+// diagnostic for id and returns a copy of the resulting record. The caller is
+// responsible for FSM validation and persistence; this method only performs
+// the in-memory mutation under the registry lock.
+func (r *Registry) SetRuntimeState(id string, status Status, lastError string, lastErrorAt *time.Time) (*store.Record, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	rec, ok := r.byID[id]
+	if !ok {
+		return nil, false
+	}
+	rec.Status = status
+	rec.LastError = lastError
+	if lastErrorAt == nil {
+		rec.LastErrorAt = nil
+	} else {
+		at := *lastErrorAt
+		rec.LastErrorAt = &at
+	}
+	return cloneRecord(rec), true
+}
+
+func cloneRecord(rec *store.Record) *store.Record {
 	clone := *rec
-	return &clone, true
+	if rec.AutoUpdate != nil {
+		autoUpdate := *rec.AutoUpdate
+		clone.AutoUpdate = &autoUpdate
+	}
+	if rec.LastErrorAt != nil {
+		at := *rec.LastErrorAt
+		clone.LastErrorAt = &at
+	}
+	return &clone
 }

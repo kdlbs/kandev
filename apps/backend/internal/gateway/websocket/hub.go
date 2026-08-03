@@ -263,11 +263,12 @@ func (h *Hub) broadcastMessage(msg *ws.Message) {
 
 	h.mu.RLock()
 	defer h.mu.RUnlock()
+	frame := newOutboundNotification(data, msg.Action)
 
 	// For now, broadcast to all clients
 	// TODO: Add topic-based routing for task-specific notifications
 	for client := range h.clients {
-		client.sendBytes(data)
+		client.sendNotificationFrame(frame)
 	}
 }
 
@@ -365,9 +366,10 @@ func (h *Hub) getSubscribersLocked(m map[string]map[*Client]bool, id string) []*
 
 // sendToClients delivers a pre-marshalled message to a list of clients.
 func (h *Hub) sendToClients(data []byte, clients []*Client, action string) int {
+	frame := newOutboundNotification(data, action)
 	queued := 0
 	for _, client := range clients {
-		if client.sendBytes(data) {
+		if client.sendNotificationFrame(frame) {
 			queued++
 			h.logger.Debug("Sent message to client",
 				zap.String("client_id", client.ID),

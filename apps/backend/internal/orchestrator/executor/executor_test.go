@@ -169,6 +169,9 @@ func TestPrepareSession_Success(t *testing.T) {
 	if !createdSession.IsPrimary {
 		t.Error("Expected session to be primary")
 	}
+	if !models.IsOriginalTaskSession(createdSession.Metadata) {
+		t.Fatalf("expected first session to carry immutable original marker, metadata = %#v", createdSession.Metadata)
+	}
 
 	// Verify SetSessionPrimary was called
 	if len(repo.setSessionPrimaryCalls) != 1 {

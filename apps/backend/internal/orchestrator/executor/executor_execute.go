@@ -709,10 +709,17 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	// Resolve agent profile to get model and other settings for snapshot
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
-	// Determine if this new session should become primary.
-	// Only the first session for a task is primary by default; subsequent sessions
-	// leave the existing primary unchanged so the user's explicit choice is preserved.
-	existingSessions, _ := e.repo.ListTaskSessions(ctx, task.ID)
+	// Determine whether this is the task's first session and whether it should
+	// become primary. The immutable origin marker follows creation order, not
+	// primary-session ownership, because a later user-selected primary must not
+	// change which conversation workflow rules treat as the original.
+	existingSessions, err := e.repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		e.logger.Error("failed to list task sessions before creating initial session",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return "", fmt.Errorf("list task sessions: %w", err)
+	}
+	isTaskInitialSession := len(existingSessions) == 0
 	hasPrimary := false
 	for _, s := range existingSessions {
 		if s.IsPrimary {
@@ -720,7 +727,13 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			break
 		}
 	}
-	isFirstSession := !hasPrimary
+	isPrimarySession := !hasPrimary
+	if isTaskInitialSession {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
 
 	// Create agent session in database. WorkspacePath is propagated from task
 	// metadata for repo-less tasks where the user picked a starting folder.
@@ -738,7 +751,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            isFirstSession,
+		IsPrimary:            isPrimarySession,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
 	}
@@ -768,7 +781,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	// Set primary flag only for the first session (no existing primary).
 	// Subsequent sessions do not override the established primary.
-	if isFirstSession {
+	if isPrimarySession {
 		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 			e.logger.Warn("failed to update primary session flag",
 				zap.String("task_id", task.ID),

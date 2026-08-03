@@ -38,10 +38,11 @@ import (
 // Tests override these via Option so retry/backoff loops don't rely on real
 // sleeps.
 const (
-	DefaultRequestTimeout = 10 * time.Second
-	DefaultQueueSize      = 100
-	DefaultRingBufferCap  = 100
-	DefaultRingBufferTTL  = 5 * time.Minute
+	DefaultRequestTimeout      = 10 * time.Second
+	DefaultQueueSize           = 100
+	DefaultRingBufferCap       = 100
+	DefaultRingBufferTTL       = 5 * time.Minute
+	DefaultOverflowLogInterval = time.Minute
 )
 
 // DefaultRetryDelays is the backoff schedule between delivery attempts
@@ -115,6 +116,13 @@ func WithNow(fn func() time.Time) Option {
 	return func(d *Deliverer) { d.nowFn = fn }
 }
 
+// WithOverflowLogInterval overrides the per-plugin ring-buffer overflow log
+// aggregation window. Production uses one minute; tests inject a shorter
+// window or advance an injected clock instead of sleeping.
+func WithOverflowLogInterval(interval time.Duration) Option {
+	return func(d *Deliverer) { d.overflowLogInterval = interval }
+}
+
 // withOnProcessed is an unexported Option (only constructible from within
 // this package) used by tests to observe exactly when a worker finishes
 // handling each queued Delivery, so a test can wait for "all N events have
@@ -136,12 +144,13 @@ type Deliverer struct {
 	lister    PluginLister
 	log       *logger.Logger
 
-	requestTimeout time.Duration
-	retryDelays    []time.Duration
-	queueSize      int
-	ringBufferCap  int
-	ringBufferTTL  time.Duration
-	nowFn          func() time.Time
+	requestTimeout      time.Duration
+	retryDelays         []time.Duration
+	queueSize           int
+	ringBufferCap       int
+	ringBufferTTL       time.Duration
+	overflowLogInterval time.Duration
+	nowFn               func() time.Time
 
 	mu      sync.Mutex
 	workers map[string]*pluginWorker
@@ -160,17 +169,18 @@ type Deliverer struct {
 // from the current plugin set.
 func New(eventBus bus.EventBus, transport Transport, lister PluginLister, log *logger.Logger, opts ...Option) *Deliverer {
 	d := &Deliverer{
-		eventBus:       eventBus,
-		transport:      transport,
-		lister:         lister,
-		log:            log,
-		requestTimeout: DefaultRequestTimeout,
-		retryDelays:    DefaultRetryDelays(),
-		queueSize:      DefaultQueueSize,
-		ringBufferCap:  DefaultRingBufferCap,
-		ringBufferTTL:  DefaultRingBufferTTL,
-		nowFn:          time.Now,
-		workers:        make(map[string]*pluginWorker),
+		eventBus:            eventBus,
+		transport:           transport,
+		lister:              lister,
+		log:                 log,
+		requestTimeout:      DefaultRequestTimeout,
+		retryDelays:         DefaultRetryDelays(),
+		queueSize:           DefaultQueueSize,
+		ringBufferCap:       DefaultRingBufferCap,
+		ringBufferTTL:       DefaultRingBufferTTL,
+		overflowLogInterval: DefaultOverflowLogInterval,
+		nowFn:               time.Now,
+		workers:             make(map[string]*pluginWorker),
 	}
 	for _, opt := range opts {
 		opt(d)
@@ -267,11 +277,13 @@ func (d *Deliverer) newWorker(id string) *pluginWorker {
 	return &pluginWorker{
 		id: id,
 		deps: &workerDeps{
-			transport:      d.transport,
-			requestTimeout: d.requestTimeout,
-			retryDelays:    d.retryDelays,
-			log:            d.log,
-			onProcessed:    d.onProcessed,
+			transport:           d.transport,
+			requestTimeout:      d.requestTimeout,
+			retryDelays:         d.retryDelays,
+			log:                 d.log,
+			nowFn:               d.nowFn,
+			overflowLogInterval: d.overflowLogInterval,
+			onProcessed:         d.onProcessed,
 		},
 		queue:         make(chan Delivery, d.queueSize),
 		buffer:        newRingBuffer(d.ringBufferCap, d.ringBufferTTL, d.nowFn),
@@ -357,11 +369,13 @@ func (d *Deliverer) makeHandler(w *pluginWorker, pattern string) bus.EventHandle
 // delivery, factored out of Deliverer so pluginWorker doesn't hold a back
 // reference to it.
 type workerDeps struct {
-	transport      Transport
-	requestTimeout time.Duration
-	retryDelays    []time.Duration
-	log            *logger.Logger
-	onProcessed    func(pluginID string, d Delivery)
+	transport           Transport
+	requestTimeout      time.Duration
+	retryDelays         []time.Duration
+	log                 *logger.Logger
+	nowFn               func() time.Time
+	overflowLogInterval time.Duration
+	onProcessed         func(pluginID string, d Delivery)
 }
 
 // pluginWorker owns sequential delivery for one plugin: a bounded queue
@@ -388,9 +402,12 @@ type pluginWorker struct {
 	deliverCtx    context.Context
 	cancelDeliver context.CancelFunc
 
-	mu     sync.Mutex
-	subs   []bus.Subscription
-	status string
+	mu              sync.Mutex
+	subs            []bus.Subscription
+	status          string
+	overflowLogAt   time.Time
+	overflowLogSet  bool
+	overflowDropped int
 }
 
 // start launches the worker's run loop. Must be called at most once.
@@ -479,8 +496,7 @@ func (w *pluginWorker) run() {
 func (w *pluginWorker) process(d Delivery) {
 	if w.snapshotStatus() == store.StatusError {
 		if dropped := w.buffer.Add(d); dropped != "" {
-			w.deps.log.Warn("plugin event ring buffer overflow, dropped oldest buffered event",
-				zap.String("plugin_id", w.id), zap.String("dropped_delivery_id", dropped))
+			w.logOverflow(dropped)
 		}
 	} else {
 		w.deliverWithRetry(w.deliverCtx, d)
@@ -488,6 +504,30 @@ func (w *pluginWorker) process(d Delivery) {
 	if w.deps.onProcessed != nil {
 		w.deps.onProcessed(w.id, d)
 	}
+}
+
+// logOverflow rate-limits ring-buffer overflow warnings per plugin while
+// retaining an aggregate count of suppressed drops. The first drop is logged
+// immediately; the first drop after the interval logs every drop accumulated
+// since the previous warning.
+func (w *pluginWorker) logOverflow(dropped string) {
+	now := w.deps.nowFn().UTC()
+	w.overflowDropped++
+	count := w.overflowDropped
+	shouldLog := !w.overflowLogSet || !now.Before(w.overflowLogAt.Add(w.deps.overflowLogInterval))
+	if shouldLog {
+		w.overflowDropped = 0
+		w.overflowLogAt = now
+		w.overflowLogSet = true
+	}
+
+	if !shouldLog {
+		return
+	}
+	w.deps.log.Warn("plugin event ring buffer overflow, dropped oldest buffered event",
+		zap.String("plugin_id", w.id),
+		zap.String("latest_dropped_delivery_id", dropped),
+		zap.Int("dropped_count", count))
 }
 
 // deliverWithRetry attempts d up to 1+len(retryDelays) times, sleeping

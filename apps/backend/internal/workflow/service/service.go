@@ -204,7 +204,9 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 		idMap[stepDef.ID] = uuid.New().String()
 	}
 
-	// Create each step from the template, remapping step_id references in events
+	steps := make([]*models.WorkflowStep, 0, len(template.Steps))
+	// Build and validate every step before the first write. A malformed later
+	// step must not leave a partially-created workflow behind.
 	for _, stepDef := range template.Steps {
 		events := models.RemapStepEvents(stepDef.Events, idMap)
 		step := &models.WorkflowStep{
@@ -225,6 +227,13 @@ func (s *Service) CreateStepsFromTemplate(ctx context.Context, workflowID, templ
 			StageType:             stepDef.StageType,
 		}
 
+		if err := models.ValidateWorkflowStep(step); err != nil {
+			return fmt.Errorf("validate template step %q: %w", step.Name, err)
+		}
+		steps = append(steps, step)
+	}
+
+	for _, step := range steps {
 		if err := s.repo.CreateStep(ctx, step); err != nil {
 			s.logger.Error("failed to create step from template",
 				zap.String("workflow_id", workflowID),
@@ -280,6 +289,9 @@ func (s *Service) CreateStep(ctx context.Context, step *models.WorkflowStep) err
 // CreateStepWithStartStepUpdates creates a new workflow step and returns any
 // other workflow steps whose start-step flag was cleared.
 func (s *Service) CreateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	if err := models.ValidateWorkflowStep(step); err != nil {
+		return nil, err
+	}
 	if step.ID == "" {
 		step.ID = uuid.New().String()
 	}
@@ -301,6 +313,9 @@ func (s *Service) UpdateStep(ctx context.Context, step *models.WorkflowStep) err
 // UpdateStepWithStartStepUpdates updates a workflow step and returns any other
 // workflow steps whose start-step flag was cleared.
 func (s *Service) UpdateStepWithStartStepUpdates(ctx context.Context, step *models.WorkflowStep) ([]*models.WorkflowStep, error) {
+	if err := models.ValidateWorkflowStep(step); err != nil {
+		return nil, err
+	}
 	demoted, err := s.repo.UpdateStepWithDemotedStartSteps(ctx, step)
 	if err != nil {
 		s.logger.Error("failed to update step", zap.String("step_id", step.ID), zap.Error(err))
@@ -515,6 +530,23 @@ func (s *Service) ImportWorkflows(ctx context.Context, workspaceID string, expor
 }
 
 func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, pw models.WorkflowPortable) (*taskmodels.Workflow, error) {
+	// Generate UUIDs for all steps and build position→ID map.
+	posToID := make(map[int]string, len(pw.Steps))
+	for _, sp := range pw.Steps {
+		posToID[sp.Position] = uuid.New().String()
+	}
+
+	// Build and validate every step before creating the workflow or persisting
+	// any step. This keeps imports atomic with respect to validation failures.
+	steps := make([]*models.WorkflowStep, 0, len(pw.Steps))
+	for _, sp := range pw.Steps {
+		step := s.stepFromPortable("pending-workflow", sp, posToID)
+		if err := models.ValidateWorkflowStep(step); err != nil {
+			return nil, fmt.Errorf("validate step %q: %w", sp.Name, err)
+		}
+		steps = append(steps, step)
+	}
+
 	wf, err := s.workflowProvider.CreateWorkflow(ctx, workspaceID, pw.Name, pw.Description)
 	if err != nil {
 		return nil, fmt.Errorf("create workflow: %w", err)
@@ -530,17 +562,10 @@ func (s *Service) importSingleWorkflow(ctx context.Context, workspaceID string, 
 		}
 	}
 
-	// Generate UUIDs for all steps and build position→ID map.
-	posToID := make(map[int]string, len(pw.Steps))
-	for _, sp := range pw.Steps {
-		posToID[sp.Position] = uuid.New().String()
-	}
-
-	// Create each step with remapped events.
-	for _, sp := range pw.Steps {
-		step := s.stepFromPortable(wf.ID, sp, posToID)
+	for _, step := range steps {
+		step.WorkflowID = wf.ID
 		if err := s.repo.CreateStep(ctx, step); err != nil {
-			return nil, fmt.Errorf("create step %q: %w", sp.Name, err)
+			return nil, fmt.Errorf("create step %q: %w", step.Name, err)
 		}
 	}
 	return wf, nil

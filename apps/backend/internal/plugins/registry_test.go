@@ -105,13 +105,19 @@ func TestRegistrySetStatusMissingReturnsNotOK(t *testing.T) {
 
 func TestRegistryGetReturnsIndependentCopy(t *testing.T) {
 	reg := NewRegistry()
-	reg.Add(&store.Record{Manifest: *testManifest("kandev-plugin-slack"), Status: store.StatusRegistered})
+	autoUpdate := true
+	reg.Add(&store.Record{
+		Manifest:   *testManifest("kandev-plugin-slack"),
+		Status:     store.StatusRegistered,
+		AutoUpdate: &autoUpdate,
+	})
 
 	rec, ok := reg.Get("kandev-plugin-slack")
 	if !ok {
 		t.Fatalf("Get() expected ok = true")
 	}
 	rec.Status = store.StatusActive // mutate the returned copy
+	*rec.AutoUpdate = false         // mutate the returned pointer copy
 
 	fresh, ok := reg.Get("kandev-plugin-slack")
 	if !ok {
@@ -119,6 +125,9 @@ func TestRegistryGetReturnsIndependentCopy(t *testing.T) {
 	}
 	if fresh.Status != store.StatusRegistered {
 		t.Fatalf("mutating a Get() result leaked into the registry: Status = %q, want %q", fresh.Status, store.StatusRegistered)
+	}
+	if fresh.AutoUpdate == nil || !*fresh.AutoUpdate {
+		t.Fatalf("mutating a Get() result leaked into the registry: AutoUpdate = %v, want true", fresh.AutoUpdate)
 	}
 }
 

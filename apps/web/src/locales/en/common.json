@@ -30,5 +30,15 @@
   "status": "Status",
   "system": "System",
   "workspace": "Workspace",
-  "workspaces": "Workspaces"
+  "workspaces": "Workspaces",
+  "title": "Title",
+  "subtaskTitle": "Subtask title",
+  "presetIconEye": "Eye",
+  "presetIconMessage": "Message",
+  "presetIconTool": "Tool",
+  "presetIconCode": "Code",
+  "presetIconSearch": "Search",
+  "presetIconBug": "Bug",
+  "presetIconSparkle": "Sparkle",
+  "presetIconCheck": "Check"
 }

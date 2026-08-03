@@ -1071,6 +1071,11 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
 	}
 
+	// Conditional session configuration is applied after a context reset so the
+	// new ACP session receives the workflow-selected settings before any
+	// auto-start prompt is dispatched. It never switches or creates a tab.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+
 	hasAutoStart := false
 	for _, action := range step.Events.OnEnter {
 		switch action.Type {

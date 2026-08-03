@@ -105,6 +105,23 @@ describe("PluginRow repo link", () => {
   });
 });
 
+describe("PluginRow error recovery", () => {
+  it("shows the failure diagnostic and an Enable action for errored plugins", () => {
+    const onEnable = vi.fn();
+    const p = plugin({
+      status: "error",
+      last_error: "plugins/runtime: handshake failed",
+      last_error_at: "2026-08-02T12:34:56Z",
+    });
+    render(<PluginRow {...baseProps} plugin={p} onEnable={onEnable} />);
+
+    expect(screen.getByRole("alert").textContent).toContain("plugins/runtime: handshake failed");
+    const enable = screen.getByRole("button", { name: "Enable" });
+    fireEvent.click(enable);
+    expect(onEnable).toHaveBeenCalledWith(p);
+  });
+});
+
 describe("PluginRow auto-update toggle", () => {
   it("reflects the global default when the plugin has no override", () => {
     render(<PluginRow {...baseProps} plugin={plugin({ auto_update: null })} autoUpdateDefault />);

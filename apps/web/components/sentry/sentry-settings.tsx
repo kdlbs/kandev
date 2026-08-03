@@ -20,6 +20,7 @@ import type { SentryConfig } from "@/lib/types/sentry";
 import { SentryInstanceCard } from "./sentry-instance-card";
 import { SentryInstanceForm } from "./sentry-instance-form";
 import { SentryIssueWatchersSection } from "./sentry-issue-watchers-section";
+import { useTranslation } from "react-i18next";
 
 // EditMode is the mutually-exclusive form state: at most one add-or-edit form
 // is open at a time.
@@ -29,6 +30,7 @@ type EditMode = { kind: "none" } | { kind: "add" } | { kind: "edit"; id: string 
 // request-versioned so a slow load for a previous workspace (or an overlapping
 // poll) can't clobber newer results.
 function useInstanceList(workspaceId: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [instances, setInstances] = useState<SentryConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,7 +47,7 @@ function useInstanceList(workspaceId: string) {
         if (current !== requestId.current) return;
         if (reportError) {
           toast({
-            description: `Failed to load Sentry instances: ${String(err)}`,
+            description: t("sentry:failedToLoadInstances", { error: String(err) }),
             variant: "error",
           });
         }
@@ -53,7 +55,7 @@ function useInstanceList(workspaceId: string) {
         if (current === requestId.current) setLoading(false);
       }
     },
-    [workspaceId, toast],
+    [workspaceId, toast, t],
   );
 
   useEffect(() => {
@@ -89,10 +91,11 @@ function InstanceList({
   onCancel,
   onDirtyChange,
 }: InstanceListProps) {
+  const { t } = useTranslation();
   if (instances.length === 0 && mode.kind !== "add") {
     return (
       <p className="text-sm text-muted-foreground py-2" data-testid="sentry-no-instances">
-        No Sentry instances yet. Add one to connect this workspace.
+        {t("sentry:noInstancesYet")}
       </p>
     );
   }
@@ -127,9 +130,44 @@ function EnabledPill() {
   return <DraftedIntegrationEnabledControl id="sentry" enabled={enabled} persist={setEnabled} />;
 }
 
-export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
-  const { instances, loading, reload } = useInstanceList(workspaceId);
+// useDeleteInstance confirms, deletes, and reports the outcome. Split out of
+// SentryConnectionSection so that component stays under the file's
+// max-lines-per-function limit.
+function useDeleteInstance(workspaceId: string, reload: () => Promise<void>) {
+  const { t } = useTranslation();
   const { toast } = useToast();
+  return useCallback(
+    async (instance: SentryConfig) => {
+      if (!confirm(t("sentry:removeInstanceConfirm", { name: instance.name }))) return;
+      try {
+        await deleteSentryInstance(workspaceId, instance.id);
+        toast({ description: t("sentry:instanceRemoved"), variant: "success" });
+        await reload();
+      } catch (err) {
+        const watchCount = sentryInUseWatchCount(err);
+        if (watchCount !== null) {
+          // `count` drives i18next's plural selection; writing the "watch" /
+          // "watches" ending at the call site would make the message
+          // untranslatable for every language with a different plural rule.
+          toast({
+            description: t("sentry:cantDeleteInstanceInUse", {
+              name: instance.name,
+              count: watchCount,
+            }),
+            variant: "error",
+          });
+          return;
+        }
+        toast({ description: t("sentry:deleteFailed", { error: String(err) }), variant: "error" });
+      }
+    },
+    [workspaceId, toast, reload, t],
+  );
+}
+
+export function SentryConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
+  const { instances, loading, reload } = useInstanceList(workspaceId);
   const [mode, setMode] = useState<EditMode>({ kind: "none" });
   const [formDirty, setFormDirty] = useState(false);
 
@@ -143,28 +181,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
     await reload();
   }, [reload]);
 
-  const handleDelete = useCallback(
-    async (instance: SentryConfig) => {
-      if (!confirm(`Remove Sentry instance "${instance.name}"?`)) return;
-      try {
-        await deleteSentryInstance(workspaceId, instance.id);
-        toast({ description: "Sentry instance removed", variant: "success" });
-        await reload();
-      } catch (err) {
-        const watchCount = sentryInUseWatchCount(err);
-        if (watchCount !== null) {
-          const plural = watchCount === 1 ? "watch" : "watches";
-          toast({
-            description: `Can't delete "${instance.name}": ${watchCount} ${plural} still bound to it. Reassign or remove those watchers first.`,
-            variant: "error",
-          });
-          return;
-        }
-        toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
-      }
-    },
-    [workspaceId, toast, reload],
-  );
+  const handleDelete = useDeleteInstance(workspaceId, reload);
 
   const canAddInstance =
     mode.kind === "none" ||
@@ -173,17 +190,19 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
   return (
     <SettingsSection
       icon={<IconBrandSentry className="h-5 w-5" />}
-      title="Sentry integration"
-      description="Connect this workspace to Sentry. Add a named instance for each Sentry org or self-hosted host; credentials are stored encrypted server-side."
+      title={t("sentry:sentryIntegration")}
+      description={t("sentry:sentryIntegrationDescription")}
       action={<EnabledPill />}
     >
       <SettingsCard isDirty={formDirty}>
         <CardContent className="space-y-3 pt-6">
           <h3 className="text-sm font-semibold" data-testid="sentry-instances-heading">
-            Instances
+            {t("sentry:instances")}
           </h3>
           {loading && instances.length === 0 ? (
-            <p className="text-sm text-muted-foreground py-4 text-center">Loading…</p>
+            <p className="text-sm text-muted-foreground py-4 text-center">
+              {t("sentry:loadingEllipsis")}
+            </p>
           ) : (
             <InstanceList
               instances={instances}
@@ -221,7 +240,7 @@ export function SentryConnectionSection({ workspaceId }: { workspaceId: string }
               data-testid="sentry-add-instance-button"
             >
               <IconPlus className="h-4 w-4" />
-              Add instance
+              {t("sentry:addInstance")}
             </Button>
           )}
         </CardContent>

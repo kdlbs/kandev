@@ -205,6 +205,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
 		ConfigBaselineCandidate: event.ConfigBaselineCandidate,
+		OriginalConfigCandidate: event.OriginalConfigCandidate,
 		SessionTitle:            event.SessionTitle,
 		SessionUpdatedAt:        event.SessionUpdatedAt,
 		SessionMeta:             event.SessionMeta,

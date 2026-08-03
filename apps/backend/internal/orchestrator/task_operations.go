@@ -798,6 +798,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
+	workflowSessionConfigStepID := workflowStepID
+	// Manual starts often omit workflow_step_id because the task is already
+	// bound to its current step. Resolve that canonical step before profile
+	// selection and launch-layer session configuration so a start-step rule is
+	// applied before the first prompt as well.
+	if workflowSessionConfigStepID == "" {
+		if dbTask, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+			s.logger.Warn("failed to fetch task for workflow step fallback",
+				zap.String("task_id", taskID), zap.Error(taskErr))
+		} else if dbTask != nil {
+			workflowSessionConfigStepID = dbTask.WorkflowStepID
+		}
+	}
 
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
 	// every run. Their lifecycle status (todo / in_review / done /
@@ -871,6 +884,11 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if err != nil {
 		return nil, err
 	}
+	// Seed a matching conditional session configuration before lifecycle
+	// startup. The ACP manager applies this durable runtime layer after the
+	// selected profile and before the first prompt, preserving the original
+	// session tab.
+	s.applyWorkflowSessionConfigBeforeLaunchForStep(ctx, taskID, sessionID, workflowSessionConfigStepID)
 	// Surface the newly created session before LaunchPreparedSession performs
 	// potentially slow environment setup (for example, a Docker health check).
 	// The frontend adopts this CREATED session and can render
@@ -986,6 +1004,33 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.
 
 	return execution, nil
+}
+
+func (s *Service) applyWorkflowSessionConfigBeforeLaunchForStep(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+) {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return
+	}
+	workflowStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		s.logger.Warn("failed to load workflow step for session configuration",
+			zap.String("task_id", taskID), zap.String("step_id", workflowStepID), zap.Error(err))
+		return
+	}
+	if workflowStep == nil {
+		return
+	}
+	preparedSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session for session configuration",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	s.applyWorkflowSessionConfigBeforeLaunch(ctx, taskID, preparedSession, workflowStep)
 }
 
 // launchPromptContext carries what the first turn of a launch needs in order to
@@ -1708,6 +1753,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 	if err := s.ensureSessionRunning(ctx, sessionID, session); err != nil {
 		return err
 	}
+
+	// Apply conditional session settings after a manual resume and before the
+	// step prompt. The helper reloads the session so a resume-created runtime
+	// state cannot be overwritten by the stale request snapshot.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
 
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)

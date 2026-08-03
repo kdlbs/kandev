@@ -270,7 +270,7 @@ func TestManager_CrashTriggersAutomaticRestart(t *testing.T) {
 
 	var mu sync.Mutex
 	var transitions []bool
-	onStatusChange := func(_ string, healthy bool) {
+	onStatusChange := func(_ string, healthy bool, _ error) {
 		mu.Lock()
 		transitions = append(transitions, healthy)
 		mu.Unlock()
@@ -500,6 +500,60 @@ func TestManager_StartAfterExhaustionRespawns(t *testing.T) {
 	if !m.Running("exhaust-plugin") {
 		t.Fatal("Running() = false after a fresh Start() following exhaustion")
 	}
+}
+
+// TestManager_ConcurrentEnableDuringRestartExhaustionDoesNotDeadlock pins the
+// lock ordering between the final supervision callback and a manual Enable.
+// The callback deliberately re-enters Manager.RestartCount after a barrier;
+// Enable must be able to stop the exhausted process without holding m.mu while
+// it waits for that callback to return.
+func TestManager_ConcurrentEnableDuringRestartExhaustionDoesNotDeadlock(t *testing.T) {
+	callbackEntered := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	var m *Manager
+	m = NewManager(t.TempDir(), func(id string, healthy bool, reason error) {
+		if healthy || reason == nil || reason.Error() != "plugin restart attempts exhausted" {
+			return
+		}
+		close(callbackEntered)
+		<-releaseCallback
+		_ = m.RestartCount(id)
+	}, testLogger(t))
+	t.Cleanup(m.StopAll)
+
+	const id = "deadlock-plugin"
+	p := newProcess(id, testLogger(t), nil, m.onStatusChange)
+	p.maxRestartAttempts = 0
+	p.current = &fakeSpawnedProcess{}
+	m.mu.Lock()
+	m.processes[id] = p
+	m.mu.Unlock()
+
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		_ = p.handleFailureAndRestart(errors.New("initial failure"))
+	}()
+	<-callbackEntered
+
+	startDone := make(chan error, 1)
+	go func() {
+		startDone <- m.startProcess(id, func() (spawnedProcess, error) {
+			return &fakeSpawnedProcess{}, nil
+		})
+	}()
+	<-p.stopCh
+	close(releaseCallback)
+
+	select {
+	case err := <-startDone:
+		if err != nil {
+			t.Fatalf("startProcess() returned unexpected error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("concurrent Enable remained blocked after restart-exhaustion callback was released")
+	}
+	m.Stop(id)
 }
 
 // TestManager_DefaultStartTimeoutIs30s pins the fix for bounded startup:

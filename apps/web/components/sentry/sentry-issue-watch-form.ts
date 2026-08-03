@@ -7,15 +7,37 @@ import type {
 } from "@/lib/types/sentry";
 import { DEFAULT_SENTRY_ISSUE_WATCH_PROMPT } from "./sentry-issue-watch-placeholders";
 
-export const LEVEL_OPTIONS: SentryLevel[] = ["fatal", "error", "warning", "info", "debug"];
-export const STATUS_OPTIONS: SentryStatus[] = ["unresolved", "resolved", "ignored"];
+// Every `value` below is wire data, never copy: the levels and statuses are the
+// `SentryLevel` / `SentryStatus` string-literal unions — compared with
+// `includes`, persisted on the watch filter, and sent to Sentry verbatim — and
+// the stats periods are Sentry's own `statsPeriod` tokens. Only the chip and
+// menu text is translatable, so it travels as `labelKey` and resolves at render
+// through `resolveOptionLabel`; a module-scope `t()` here would freeze the copy
+// at the boot locale (see docs/i18n.md).
+//
+// The level/status labels are lowercase in the catalog because the chips render
+// them under a CSS `uppercase`, so the source string a translator sees is the
+// one the badge actually carries.
+export const LEVEL_OPTIONS: { value: SentryLevel; labelKey: string }[] = [
+  { value: "fatal", labelKey: "sentry:levelFatal" },
+  { value: "error", labelKey: "sentry:levelError" },
+  { value: "warning", labelKey: "sentry:levelWarning" },
+  { value: "info", labelKey: "sentry:levelInfo" },
+  { value: "debug", labelKey: "sentry:levelDebug" },
+];
 
-export const STATS_PERIOD_OPTIONS: { value: string; label: string }[] = [
-  { value: "1h", label: "Last hour" },
-  { value: "24h", label: "Last 24 hours" },
-  { value: "7d", label: "Last 7 days" },
-  { value: "14d", label: "Last 14 days" },
-  { value: "30d", label: "Last 30 days" },
+export const STATUS_OPTIONS: { value: SentryStatus; labelKey: string }[] = [
+  { value: "unresolved", labelKey: "sentry:statusUnresolved" },
+  { value: "resolved", labelKey: "sentry:statusResolved" },
+  { value: "ignored", labelKey: "sentry:statusIgnored" },
+];
+
+export const STATS_PERIOD_OPTIONS: { value: string; labelKey: string }[] = [
+  { value: "1h", labelKey: "sentry:statsPeriodLastHour" },
+  { value: "24h", labelKey: "sentry:statsPeriodLast24Hours" },
+  { value: "7d", labelKey: "sentry:statsPeriodLast7Days" },
+  { value: "14d", labelKey: "sentry:statsPeriodLast14Days" },
+  { value: "30d", labelKey: "sentry:statsPeriodLast30Days" },
 ];
 
 export interface FormState {

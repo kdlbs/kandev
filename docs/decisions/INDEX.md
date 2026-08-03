@@ -96,6 +96,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-31-isolate-manual-pr-review-content | [Isolate Manual PR Review Content](2026-07-31-isolate-manual-pr-review-content.md) | accepted | infra, workflow, security | 2026-07-31 |
 | 2026-07-31-agent-generated-task-titles | [Bind Agent Title Generation to Pending Tasks](2026-07-31-agent-generated-task-titles.md) | accepted | backend, frontend, protocol | 2026-07-31 |
 | 2026-07-31-system-service-user-continuity | [Preserve System Service Identity Across Reinstallation](2026-07-31-system-service-user-continuity.md) | accepted | backend, cli, security, operations | 2026-07-31 |
+| 2026-08-01-workflow-session-original-configuration | [Keep Workflow Restoration Separate From Provider Defaults](2026-08-01-workflow-session-original-configuration.md) | accepted | backend, frontend, workflow | 2026-08-01 |
 | 2026-08-01-repository-task-executor-defaults | [Resolve Task Executor Policy Before Last-Used Profile](2026-08-01-repository-task-executor-defaults.md) | accepted | frontend | 2026-08-01 |
 | 2026-08-01-validate-mcp-tool-arguments | [Validate MCP Tool Arguments at the Shared Server Boundary](2026-08-01-validate-mcp-tool-arguments.md) | accepted | backend, protocol | 2026-08-01 |
 | 2026-08-01-separate-task-summary-session-stream-traffic | [Separate Task Summary and Session Stream Traffic](2026-08-01-separate-task-summary-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-01 |
@@ -106,3 +107,4 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-02-single-owner-agent-task-titles | [Assign Agent Task Titles to One Session](2026-08-02-single-owner-agent-task-titles.md) | accepted | backend, frontend, protocol, workflow | 2026-08-02 |
 | 2026-08-02-agent-terminal-diagnostics-over-stderr | [Capture Agent Terminal Diagnostics From Managed Stderr](2026-08-02-agent-terminal-diagnostics-over-stderr.md) | accepted | backend, frontend, protocol, security | 2026-08-02 |
 | 2026-08-02-class-aware-git-subprocess-admission | [Class-Aware Git Subprocess Admission](2026-08-02-class-aware-git-subprocess-admission.md) | accepted | backend, agentctl, observability | 2026-08-02 |
+| 2026-08-02-isolate-replaceable-session-stream-traffic | [Isolate Replaceable Session Stream Traffic](2026-08-02-isolate-replaceable-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-02 |

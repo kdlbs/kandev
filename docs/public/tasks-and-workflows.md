@@ -243,7 +243,8 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Start step**            | Makes this the normal starting step. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step.                                         |
-| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context.                                                          |
+| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context. The fixed profile override and original-session options are mutually exclusive. |
+| **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
 | **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
 | **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the profile switch already creates a fresh session.                                 |
@@ -293,6 +294,36 @@ For example, a review step with `on_enter: auto_start_agent` and
 review turn completes, not during startup.
 
 Plan mode can be disabled when the turn completes and/or when the task exits the step. A step prompt is Markdown and can include `{{task_prompt}}` to insert the original task description.
+
+#### Override original session options
+
+Check **Override original session options** when a workflow should keep one
+conversation while changing its model settings between steps. For example, a
+task can start with session model **5.6 Sol** and switch to **5.6 Luna** for an
+implementation step. The options editor appears below WIP settings after the
+checkbox is enabled; selecting a fixed **Agent profile** disables this option.
+
+Add one rule per agent family; the rule is ignored when the task started with
+another family. The family picker lists only families represented by configured
+agent profiles, while existing persisted rules remain visible if capability
+data later becomes unavailable. The editor uses the same model and ACP option
+picker as the chat input, so provider-specific models and options are selected
+from the agent's advertised capabilities.
+
+Each rule can **Set** a model and any selected options, **Keep** the settings
+already active, or **Restore original** to reapply the immutable model and
+option values captured when the original session finished initializing, after
+profile settings were applied.
+Rules are best-effort: a rejected field produces a warning, while successful
+fields remain active and the step continues. The settings are applied before
+an auto-start prompt and persist as the session's runtime overrides.
+
+This behavior is mutually exclusive with the step's fixed **Agent profile**
+override. A fixed profile intentionally creates a separate session; conditional
+rules never activate or mutate that replacement tab. If an earlier rule may
+carry changed values into a later step, the editor shows a warning with **Keep**,
+**Restore**, and **Set new** choices. Read-only synced workflows display these
+rules and warnings but cannot edit them.
 
 ### Build a human gate
 

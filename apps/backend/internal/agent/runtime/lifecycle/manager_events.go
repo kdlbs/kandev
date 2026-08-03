@@ -391,6 +391,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 // handleToolUpdateEvent stores completed tool results in session history.
 func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ParentToolCallID == "" && isTerminalToolUpdate(event) {
+		m.flushStreamCoalescer(execution)
 		execution.clearActiveTool(event.ToolCallID)
 	}
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
@@ -573,6 +574,7 @@ func (m *Manager) handleStreamDisconnect(
 			return
 		}
 
+		m.flushMessageBuffer(execution)
 		m.flushAssistantHistory(execution)
 		m.persistExecutorRunning(context.Background(), updated)
 		m.publishStreamDisconnectError(execution, err)
@@ -583,6 +585,7 @@ func (m *Manager) handleStreamDisconnect(
 	// after promptDoneCh is signaled. Drain the partial assistant transcript
 	// here as well as at prompt setup; the shared buffer lock makes either
 	// path the single owner and prevents a later reset from dropping it.
+	m.flushMessageBuffer(execution)
 	m.flushAssistantHistory(execution)
 
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {

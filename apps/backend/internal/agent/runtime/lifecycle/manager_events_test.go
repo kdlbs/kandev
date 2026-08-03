@@ -176,6 +176,7 @@ func TestHandleAgentEvent_ProtocolMessageResumesAcrossToolCall(t *testing.T) {
 		Text:              "after tool",
 		ProtocolMessageID: "acp-message-1",
 	})
+	mgr.flushStreamCoalescer(execution)
 
 	messageEvents := streamEventsOfType(eventBus, "message_streaming")
 	if len(messageEvents) != 2 {
@@ -374,6 +375,76 @@ func TestHandleAgentEvent_LegacyThinkingFlushesBeforeProtocolThinking(t *testing
 	}
 	if events[0].Data.MessageID == events[1].Data.MessageID {
 		t.Fatalf("mixed legacy and protocol thinking shared Kandev ID %q", events[0].Data.MessageID)
+	}
+}
+
+func TestHandleAgentEvent_ProtocolThinkingBurstIsCoalescedBeforeCompletion(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	const chunkCount = 20
+	for index := 0; index < chunkCount; index++ {
+		text := "b"
+		if index == 0 {
+			text = "a"
+		}
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type:              "reasoning",
+			ReasoningText:     text,
+			ProtocolMessageID: "burst-thinking",
+		})
+	}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	var thinkingEvents []AgentStreamEventPayload
+	var streamed strings.Builder
+	for _, event := range eventBus.getStreamEvents() {
+		if event.Data == nil || event.Data.Type != "thinking_streaming" {
+			continue
+		}
+		thinkingEvents = append(thinkingEvents, event)
+		streamed.WriteString(event.Data.Text)
+	}
+	if got := len(thinkingEvents); got > 2 {
+		t.Fatalf("thinking publication count = %d, want at most 2 for %d chunks", got, chunkCount)
+	}
+	if got := streamed.String(); got != "abbbbbbbbbbbbbbbbbbb" {
+		t.Fatalf("coalesced thinking content = %q, want exact burst content", got)
+	}
+}
+
+func TestHandleAgentEvent_LegacyNewlineBurstIsCoalescedBeforeCompletion(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	const chunkCount = 20
+	var want strings.Builder
+	for index := 0; index < chunkCount; index++ {
+		text := "legacy chunk\n"
+		want.WriteString(text)
+		mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+			Type: "message_chunk",
+			Text: text,
+		})
+	}
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	messageEvents := streamEventsOfType(eventBus, "message_streaming")
+	if got := len(messageEvents); got > 2 {
+		t.Fatalf("message publication count = %d, want at most 2 for %d ID-less chunks", got, chunkCount)
+	}
+	var streamed strings.Builder
+	for _, event := range messageEvents {
+		streamed.WriteString(event.Data.Text)
+	}
+	if got := streamed.String(); got != want.String() {
+		t.Fatalf("coalesced legacy content = %q, want exact burst content", got)
 	}
 }
 
@@ -1029,6 +1100,7 @@ func TestHandleAgentEvent_SubagentToolCallDoesNotSplitStreaming(t *testing.T) {
 		Type: "message_chunk",
 		Text: "on the new PR.\n",
 	})
+	mgr.flushStreamCoalescer(execution)
 
 	var streamingEvents []AgentStreamEventPayload
 	for _, e := range eventBus.getStreamEvents() {

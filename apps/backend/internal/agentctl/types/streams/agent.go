@@ -291,6 +291,11 @@ type AgentEvent struct {
 	// lifecycle settlement without replacing the event's newer live options.
 	ConfigBaselineCandidate []ConfigOption `json:"config_baseline_candidate,omitempty"`
 
+	// OriginalConfigCandidate is the profile-settled model-adjacent state used
+	// once to capture a task session's immutable original configuration. It is
+	// emitted before runtime/workflow overrides are applied.
+	OriginalConfigCandidate []ConfigOption `json:"original_config_candidate,omitempty"`
+
 	// --- Session info fields ---
 
 	// SessionTitle is the agent-provided human-readable ACP session title.

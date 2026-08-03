@@ -187,6 +187,9 @@ type AgentStreamEventData struct {
 	// ConfigBaselineCandidate is an authoritative startup response snapshot.
 	// ConfigOptions remains the latest live provider state.
 	ConfigBaselineCandidate []streams.ConfigOption `json:"config_baseline_candidate,omitempty"`
+	// OriginalConfigCandidate is the profile-settled state captured before
+	// runtime/workflow overrides are applied.
+	OriginalConfigCandidate []streams.ConfigOption `json:"original_config_candidate,omitempty"`
 
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`

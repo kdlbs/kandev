@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconPlus, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
@@ -21,15 +22,43 @@ import {
   DEFAULT_AZURE_WORK_ITEM_QUERIES,
 } from "./azure-devops-workspace-defaults";
 
-type QueryKind = "Work item" | "Pull request";
+/**
+ * Wire discriminant for the two query kinds. These used to be the English
+ * phrases "Work item" / "Pull request", which made the same value both a
+ * `===` comparand and display copy; they are now identifiers, and the labels
+ * resolve through the key maps below.
+ */
+type QueryKind = "work-item" | "pull-request";
 
+/** Title-cased kind noun, e.g. "Work item query label 1". */
+const KIND_TITLE_KEYS: Record<QueryKind, string> = {
+  "work-item": "azuredevops:workItemKindTitle",
+  "pull-request": "azuredevops:pullRequestKindTitle",
+};
+
+/** Lower-cased kind noun for mid-sentence use, e.g. "Remove work item query 1". */
+const KIND_LOWER_KEYS: Record<QueryKind, string> = {
+  "work-item": "azuredevops:workItemKindLower",
+  "pull-request": "azuredevops:pullRequestKindLower",
+};
+
+/** Azure DevOps identity shorthand accepted by the creator/reviewer filters. */
+const AZURE_ME_TOKEN = "@me";
+
+/** Route these presets drive; a path, so it is interpolated rather than translated. */
+const AZURE_DEVOPS_ROUTE = "/azure-devops";
+
+// `label` is PERSISTED as part of `AzureDevOpsQueryPreset` and is editable in
+// the row below, so it must stay locale-neutral — the same contract as
+// `newPreset` in components/github/default-queries-section.tsx. The seeded WIQL
+// is Azure DevOps' query language, not copy.
 function newQuery(kind: QueryKind): AzureDevOpsQueryPreset {
   return {
     id: `query_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
     label: "New query",
     group: "inbox",
     filters:
-      kind === "Work item"
+      kind === "work-item"
         ? {
             wiql: "SELECT [System.Id] FROM WorkItems WHERE [System.TeamProject] = @project",
             top: 50,
@@ -59,21 +88,26 @@ function QueryGroupSelect({
   dirty: boolean;
   onChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Select value={value === "created" ? "created" : "inbox"} onValueChange={onChange}>
       <SelectTrigger
         className="h-11 w-full cursor-pointer sm:h-8"
-        aria-label={`${kind} query group ${index + 1}`}
+        aria-label={t("azuredevops:queryGroupAria", {
+          kind: t(KIND_TITLE_KEYS[kind]),
+          index: index + 1,
+        })}
         data-settings-dirty={dirty}
       >
         <SelectValue />
       </SelectTrigger>
+      {/* `value` is the persisted preset group; only the label is copy. */}
       <SelectContent>
         <SelectItem value="inbox" className="cursor-pointer">
-          Inbox
+          {t("azuredevops:groupInbox")}
         </SelectItem>
         <SelectItem value="created" className="cursor-pointer">
-          Created
+          {t("azuredevops:groupCreated")}
         </SelectItem>
       </SelectContent>
     </Select>
@@ -115,13 +149,17 @@ function RemoveQueryButton({
   index: number;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Button
       type="button"
       variant="ghost"
       size="icon"
       className="h-11 w-full cursor-pointer text-destructive sm:h-8 sm:w-8"
-      aria-label={`Remove ${kind.toLowerCase()} query ${index + 1}`}
+      aria-label={t("azuredevops:removeQueryAria", {
+        kind: t(KIND_LOWER_KEYS[kind]),
+        index: index + 1,
+      })}
       onClick={onRemove}
     >
       <IconTrash className="h-4 w-4" />
@@ -137,53 +175,56 @@ function WorkItemQueryRow({
   onPatchFilters,
   onRemove,
 }: QueryRowProps) {
+  const { t } = useTranslation();
+  const kind = t(KIND_TITLE_KEYS["work-item"]);
   return (
     <div
       className="grid grid-cols-2 gap-2 rounded-md border p-3 sm:grid-cols-[10rem_minmax(0,1fr)_5rem_7rem_auto] sm:items-end sm:p-2"
       data-settings-dirty={JSON.stringify(preset) !== JSON.stringify(baseline)}
       data-settings-dirty-level="container"
     >
-      <QueryField label="Label">
+      <QueryField label={t("azuredevops:label")}>
         <Input
           className="h-11 w-full sm:h-8"
           value={preset.label}
-          aria-label={`Work item query label ${index + 1}`}
+          aria-label={t("azuredevops:queryLabelAria", { kind, index: index + 1 })}
           data-settings-dirty={preset.label !== baseline?.label}
           onChange={(event) => onPatch({ label: event.target.value })}
         />
       </QueryField>
+      {/* WIQL is the Azure DevOps query language, not copy. */}
       <QueryField label="WIQL" className="col-span-2 row-start-2 sm:col-span-1 sm:row-auto">
         <Input
           className="h-11 w-full font-mono text-xs sm:h-8"
           value={stringFilter(preset, "wiql")}
-          aria-label={`Work item query WIQL ${index + 1}`}
+          aria-label={t("azuredevops:queryWiqlAria", { kind, index: index + 1 })}
           data-settings-dirty={
             stringFilter(preset, "wiql") !== (baseline ? stringFilter(baseline, "wiql") : undefined)
           }
           onChange={(event) => onPatchFilters({ wiql: event.target.value })}
         />
       </QueryField>
-      <QueryField label="Top">
+      <QueryField label={t("azuredevops:top")}>
         <Input
           type="number"
           min={1}
           max={200}
           className="h-11 w-full sm:h-8"
           value={numberFilter(preset, "top", 50)}
-          aria-label={`Work item query top ${index + 1}`}
+          aria-label={t("azuredevops:queryTopAria", { kind, index: index + 1 })}
           onChange={(event) => onPatchFilters({ top: Number(event.target.value) || 1 })}
         />
       </QueryField>
-      <QueryField label="Group">
+      <QueryField label={t("azuredevops:group")}>
         <QueryGroupSelect
-          kind="Work item"
+          kind="work-item"
           index={index}
           value={preset.group}
           dirty={preset.group !== baseline?.group}
           onChange={(group) => onPatch({ group })}
         />
       </QueryField>
-      <RemoveQueryButton kind="Work item" index={index} onRemove={onRemove} />
+      <RemoveQueryButton kind="work-item" index={index} onRemove={onRemove} />
     </div>
   );
 }
@@ -196,68 +237,73 @@ function PullRequestQueryRow({
   onPatchFilters,
   onRemove,
 }: QueryRowProps) {
+  const { t } = useTranslation();
+  const kind = t(KIND_TITLE_KEYS["pull-request"]);
+  const identityPlaceholder = t("azuredevops:identityIdPlaceholder", { token: AZURE_ME_TOKEN });
   return (
     <div
       className="grid grid-cols-2 gap-2 rounded-md border p-3 sm:grid-cols-[10rem_8rem_minmax(0,1fr)_minmax(0,1fr)_7rem_auto] sm:items-end sm:p-2"
       data-settings-dirty={JSON.stringify(preset) !== JSON.stringify(baseline)}
       data-settings-dirty-level="container"
     >
-      <QueryField label="Label">
+      <QueryField label={t("azuredevops:label")}>
         <Input
           className="h-11 w-full sm:h-8"
           value={preset.label}
-          aria-label={`Pull request query label ${index + 1}`}
+          aria-label={t("azuredevops:queryLabelAria", { kind, index: index + 1 })}
           data-settings-dirty={preset.label !== baseline?.label}
           onChange={(event) => onPatch({ label: event.target.value })}
         />
       </QueryField>
-      <QueryField label="Status">
+      <QueryField label={t("azuredevops:status")}>
         <Select
           value={stringFilter(preset, "status", "active")}
           onValueChange={(status) => onPatchFilters({ status })}
         >
           <SelectTrigger
             className="h-11 w-full cursor-pointer sm:h-8"
-            aria-label={`Pull request query status ${index + 1}`}
+            aria-label={t("azuredevops:queryStatusAria", { kind, index: index + 1 })}
           >
             <SelectValue />
           </SelectTrigger>
+          {/* `value` is the Azure DevOps pull-request status sent on the wire;
+              only the item label is copy. */}
           <SelectContent>
-            <SelectItem value="active">Active</SelectItem>
-            <SelectItem value="completed">Completed</SelectItem>
-            <SelectItem value="abandoned">Abandoned</SelectItem>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="active">{t("azuredevops:statusActive")}</SelectItem>
+            <SelectItem value="completed">{t("azuredevops:statusCompleted")}</SelectItem>
+            <SelectItem value="abandoned">{t("azuredevops:statusAbandoned")}</SelectItem>
+            <SelectItem value="all">{t("azuredevops:statusAll")}</SelectItem>
           </SelectContent>
         </Select>
       </QueryField>
-      <QueryField label="Creator" className="col-span-2 sm:col-span-1">
+      <QueryField label={t("azuredevops:creator")} className="col-span-2 sm:col-span-1">
         <Input
           className="h-11 w-full sm:h-8"
           value={stringFilter(preset, "creator")}
-          aria-label={`Pull request query creator ${index + 1}`}
-          placeholder="@me or identity ID"
+          aria-label={t("azuredevops:queryCreatorAria", { kind, index: index + 1 })}
+          placeholder={identityPlaceholder}
           onChange={(event) => onPatchFilters({ creator: event.target.value })}
         />
       </QueryField>
-      <QueryField label="Reviewer" className="col-span-2 sm:col-span-1">
+      <QueryField label={t("azuredevops:reviewer")} className="col-span-2 sm:col-span-1">
         <Input
           className="h-11 w-full sm:h-8"
           value={stringFilter(preset, "reviewer")}
-          aria-label={`Pull request query reviewer ${index + 1}`}
-          placeholder="@me or identity ID"
+          aria-label={t("azuredevops:queryReviewerAria", { kind, index: index + 1 })}
+          placeholder={identityPlaceholder}
           onChange={(event) => onPatchFilters({ reviewer: event.target.value })}
         />
       </QueryField>
-      <QueryField label="Group">
+      <QueryField label={t("azuredevops:group")}>
         <QueryGroupSelect
-          kind="Pull request"
+          kind="pull-request"
           index={index}
           value={preset.group}
           dirty={preset.group !== baseline?.group}
           onChange={(group) => onPatch({ group })}
         />
       </QueryField>
-      <RemoveQueryButton kind="Pull request" index={index} onRemove={onRemove} />
+      <RemoveQueryButton kind="pull-request" index={index} onRemove={onRemove} />
     </div>
   );
 }
@@ -273,13 +319,14 @@ function QueryEditor({
   baseline: AzureDevOpsQueryPreset[];
   onChange: (queries: AzureDevOpsQueryPreset[]) => void;
 }) {
+  const { t } = useTranslation();
   const patch = (index: number, values: Partial<AzureDevOpsQueryPreset>) =>
     onChange(
       queries.map((query, current) => (current === index ? { ...query, ...values } : query)),
     );
   const patchFilters = (index: number, values: Record<string, unknown>) =>
     patch(index, { filters: { ...queries[index].filters, ...values } });
-  const Row = kind === "Work item" ? WorkItemQueryRow : PullRequestQueryRow;
+  const Row = kind === "work-item" ? WorkItemQueryRow : PullRequestQueryRow;
   return (
     <div className="space-y-2">
       {queries.map((query, index) => (
@@ -300,7 +347,8 @@ function QueryEditor({
         className="h-11 w-full cursor-pointer sm:h-8 sm:w-auto"
         onClick={() => onChange([...queries, newQuery(kind)])}
       >
-        <IconPlus className="h-4 w-4" /> Add {kind === "Pull request" ? "PR" : "work item"} query
+        <IconPlus className="h-4 w-4" />{" "}
+        {kind === "pull-request" ? t("azuredevops:addPrQuery") : t("azuredevops:addWorkItemQuery")}
       </Button>
     </div>
   );
@@ -383,7 +431,7 @@ function validQueries(queries: AzureDevOpsQueryPreset[], kind: QueryKind): boole
     queries.every(
       (query) =>
         query.label.trim() &&
-        (kind === "Pull request"
+        (kind === "pull-request"
           ? stringFilter(query, "status", "active")
           : stringFilter(query, "wiql")),
     )
@@ -391,38 +439,40 @@ function validQueries(queries: AzureDevOpsQueryPreset[], kind: QueryKind): boole
 }
 
 export function AzureDevOpsDefaultQueriesSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const drafts = useQueryDrafts(workspaceId);
   const { toast } = useToast();
   const valid =
-    validQueries(drafts.pullRequests, "Pull request") &&
-    validQueries(drafts.workItems, "Work item");
+    validQueries(drafts.pullRequests, "pull-request") &&
+    validQueries(drafts.workItems, "work-item");
   const save = useCallback(async () => {
     try {
       await drafts.save();
-      toast({ description: "Azure DevOps default queries saved", variant: "success" });
+      toast({ description: t("azuredevops:defaultQueriesSaved"), variant: "success" });
     } catch (error) {
       toast({
-        description: error instanceof Error ? error.message : "Failed to save default queries",
+        description:
+          error instanceof Error ? error.message : t("azuredevops:failedToSaveDefaultQueries"),
         variant: "error",
       });
       throw error;
     }
-  }, [drafts, toast]);
+  }, [drafts, t, toast]);
 
   useSettingsSaveContributor({
     id: `azure-devops-default-queries:${workspaceId}`,
     revision: JSON.stringify([drafts.pullRequests, drafts.workItems]),
     isDirty: drafts.dirty,
     canSave: !drafts.loading && valid,
-    invalidReason: valid ? undefined : "Every default query needs a label and valid filters.",
+    invalidReason: valid ? undefined : t("azuredevops:defaultQueryInvalid"),
     save,
     discard: drafts.discard,
   });
 
   return (
     <SettingsSection
-      title="Default queries"
-      description="Query shortcuts shown on /azure-devops for pull requests and work items."
+      title={t("azuredevops:defaultQueries")}
+      description={t("azuredevops:defaultQueriesDescription", { path: AZURE_DEVOPS_ROUTE })}
       action={
         <Button
           type="button"
@@ -432,7 +482,7 @@ export function AzureDevOpsDefaultQueriesSection({ workspaceId }: { workspaceId:
           disabled={drafts.loading}
           onClick={drafts.reset}
         >
-          <IconRefresh className="h-4 w-4" /> Reset
+          <IconRefresh className="h-4 w-4" /> {t("common:reset")}
         </Button>
       }
     >
@@ -442,15 +492,15 @@ export function AzureDevOpsDefaultQueriesSection({ workspaceId }: { workspaceId:
             <Tabs defaultValue="pull-request">
               <TabsList className="w-full sm:w-auto">
                 <TabsTrigger value="pull-request" className="flex-1 cursor-pointer sm:flex-none">
-                  Pull requests
+                  {t("azuredevops:pullRequestsTab")}
                 </TabsTrigger>
                 <TabsTrigger value="work-item" className="flex-1 cursor-pointer sm:flex-none">
-                  Work items
+                  {t("azuredevops:workItemsTab")}
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="pull-request">
                 <QueryEditor
-                  kind="Pull request"
+                  kind="pull-request"
                   queries={drafts.pullRequests}
                   baseline={drafts.baseline.pullRequests}
                   onChange={drafts.setPullRequests}
@@ -458,7 +508,7 @@ export function AzureDevOpsDefaultQueriesSection({ workspaceId }: { workspaceId:
               </TabsContent>
               <TabsContent value="work-item">
                 <QueryEditor
-                  kind="Work item"
+                  kind="work-item"
                   queries={drafts.workItems}
                   baseline={drafts.baseline.workItems}
                   onChange={drafts.setWorkItems}

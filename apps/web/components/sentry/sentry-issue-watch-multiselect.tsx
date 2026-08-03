@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { levelBadgeClass, statusBadgeClass } from "./sentry-issue-common";
 import { LEVEL_OPTIONS, STATUS_OPTIONS } from "./sentry-issue-watch-form";
 import type { SentryLevel, SentryStatus } from "@/lib/types/sentry";
+import { useTranslation } from "react-i18next";
+import { resolveOptionLabel } from "@/lib/i18n/option-label";
 
 // LevelMultiSelect / StatusMultiSelect are toggle-badge pickers: click a badge
 // to add/remove it from the selection. A match means ANY selected value. Both
@@ -16,31 +18,38 @@ import type { SentryLevel, SentryStatus } from "@/lib/types/sentry";
 
 // BadgeMultiSelect renders a toggle-badge picker for any string-union option
 // set. `colorClass` resolves the active-state styling for a given option.
+//
+// `value` is the union member — the key, the selection identity, and what goes
+// on the wire. Only `labelKey` is copy, resolved here at render.
 function BadgeMultiSelect<T extends string>({
   options,
   selected,
   onToggle,
   colorClass,
 }: {
-  options: readonly T[];
+  options: readonly { value: T; labelKey: string }[];
   selected: T[];
   onToggle: (value: T) => void;
   colorClass: (value: T) => string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-1.5">
-      {options.map((value) => {
-        const active = selected.includes(value);
+      {options.map((option) => {
+        const active = selected.includes(option.value);
         return (
           <button
-            key={value}
+            key={option.value}
             type="button"
-            onClick={() => onToggle(value)}
+            onClick={() => onToggle(option.value)}
             aria-pressed={active}
             className="cursor-pointer"
           >
-            <Badge variant="outline" className={`uppercase ${active ? colorClass(value) : ""}`}>
-              {value}
+            <Badge
+              variant="outline"
+              className={`uppercase ${active ? colorClass(option.value) : ""}`}
+            >
+              {resolveOptionLabel(t, option)}
             </Badge>
           </button>
         );
@@ -94,7 +103,7 @@ export function ProjectMultiSelect({
   options,
   selected,
   onChange,
-  placeholder = "Select projects",
+  placeholder,
   disabled = false,
 }: {
   options: ProjectMultiSelectOption[];
@@ -103,6 +112,7 @@ export function ProjectMultiSelect({
   placeholder?: string;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const labelById = new Map(options.map((o) => [o.id, o.label]));
 
@@ -124,16 +134,16 @@ export function ProjectMultiSelect({
           <ProjectMultiSelectSummary
             selected={selected}
             labelById={labelById}
-            placeholder={placeholder}
+            placeholder={placeholder ?? t("sentry:selectProjects")}
           />
           <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-0">
         <Command>
-          <CommandInput placeholder="Search projects..." />
+          <CommandInput placeholder={t("sentry:searchProjects")} />
           <CommandList>
-            <CommandEmpty>No projects available.</CommandEmpty>
+            <CommandEmpty>{t("sentry:noProjectsAvailableSentence")}</CommandEmpty>
             {options.map((opt) => {
               const checked = selected.includes(opt.id);
               return (
@@ -161,11 +171,15 @@ function ProjectMultiSelectSummary({
   labelById: Map<string, string>;
   placeholder: string;
 }) {
+  const { t } = useTranslation();
   if (selected.length === 0) {
     return <span className="truncate text-muted-foreground">{placeholder}</span>;
   }
+  // One selection shows the project's own name — runtime data, never translated.
   if (selected.length === 1) {
     return <span className="truncate">{labelById.get(selected[0]) ?? selected[0]}</span>;
   }
-  return <span className="truncate">{selected.length} projects selected</span>;
+  return (
+    <span className="truncate">{t("sentry:projectsSelected", { count: selected.length })}</span>
+  );
 }

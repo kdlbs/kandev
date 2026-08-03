@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconRobot, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -9,18 +10,11 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { WorkflowStep } from "@/lib/types/http";
 import { useHealthyAgentProfiles } from "@/hooks/domains/settings/use-healthy-agent-profiles";
-import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useDebouncedCallback } from "@/hooks/use-debounce";
 import { cn } from "@/lib/utils";
 import {
-  ScriptEditor,
-  computeEditorHeight,
-} from "@/components/settings/profile-edit/script-editor";
-import {
   HelpTip,
   STEP_COLORS,
-  STEP_PROMPT_PLACEHOLDERS,
-  PROMPT_TEMPLATES,
   hasOnEnterAction,
   hasOnExitAction,
 } from "./workflow-pipeline-editor-helpers";
@@ -31,6 +25,8 @@ import {
   ChildrenCompletedSelect,
 } from "./workflow-pipeline-editor-step-actions";
 import { StepWipControls } from "./workflow-pipeline-editor-wip-controls";
+import { SessionConfigEditor, SessionConfigToggle } from "./workflow-session-config-editor";
+import { StepPromptSection } from "./workflow-step-prompt-section";
 import { isWorkflowStepDirty, isWorkflowStepValueDirty } from "./workflow-dirty-state";
 
 // --- StepAgentProfileSelect ---
@@ -46,17 +42,19 @@ function StepAgentProfileSelect({
   onUpdate: (updates: Partial<WorkflowStep>) => void;
   readOnly: boolean;
 }) {
+  const { t } = useTranslation();
   const healthyProfiles = useHealthyAgentProfiles(step.agent_profile_id);
+  const hasConditionalSessionConfig = hasOnEnterAction(step, "configure_session");
 
   return (
-    <div className="flex w-full min-w-0 items-center gap-1.5 sm:w-auto">
+    <div className="flex w-full min-w-0 flex-wrap items-center gap-2 sm:w-auto">
       <Select
         value={step.agent_profile_id || "none"}
         onValueChange={(value) => {
-          if (readOnly) return;
+          if (readOnly || hasConditionalSessionConfig) return;
           onUpdate({ agent_profile_id: value === "none" ? "" : value });
         }}
-        disabled={readOnly}
+        disabled={readOnly || hasConditionalSessionConfig}
       >
         <SelectTrigger
           className="h-8 w-full min-w-0 cursor-pointer sm:w-[220px]"
@@ -81,7 +79,20 @@ function StepAgentProfileSelect({
           ))}
         </SelectContent>
       </Select>
-      <HelpTip text="Override the agent profile for this step. A different profile creates a new session with fresh context when entering this step." />
+      <HelpTip
+        testId={`${step.id}-agent-profile-help`}
+        text={
+          hasConditionalSessionConfig
+            ? t("settings:removeConditionalSessionConfigBeforeProfile")
+            : t("settings:overrideAgentProfileHelp")
+        }
+      />
+      <SessionConfigToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+      />
     </div>
   );
 }
@@ -172,8 +183,6 @@ function StepConfigHeader({
   );
 }
 
-// --- StepAutoArchiveRow ---
-
 type StepAutoArchiveRowProps = {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
@@ -226,8 +235,6 @@ function StepAutoArchiveRow({ step, savedStep, onUpdate, readOnly }: StepAutoArc
     </div>
   );
 }
-
-// --- StepCheckboxRow ---
 
 type StepCheckboxRowProps = {
   id: string;
@@ -472,86 +479,6 @@ function StepTransitionsSection({
   );
 }
 
-// --- StepPromptSection ---
-
-type StepPromptSectionProps = {
-  step: WorkflowStep;
-  savedStep?: WorkflowStep;
-  localPrompt: string;
-  onLocalPromptChange: (prompt: string) => void;
-  debouncedUpdatePrompt: (prompt: string) => void;
-  readOnly: boolean;
-};
-
-function StepPromptSection({
-  step,
-  savedStep,
-  localPrompt,
-  onLocalPromptChange,
-  debouncedUpdatePrompt,
-  readOnly,
-}: StepPromptSectionProps) {
-  const { prompts } = useCustomPrompts();
-  return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-1.5">
-        <Label
-          htmlFor={`${step.id}-prompt`}
-          className="text-xs font-medium text-muted-foreground uppercase tracking-wider"
-        >
-          Step Prompt
-        </Label>
-        <HelpTip text="Custom instructions for the agent on this step. Use {{task_prompt}} to include the task description." />
-      </div>
-      {!readOnly && (
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <span className="text-[11px] text-muted-foreground/60">Templates:</span>
-          {PROMPT_TEMPLATES.map((template) => (
-            <button
-              key={template.label}
-              type="button"
-              onClick={() => {
-                onLocalPromptChange(template.prompt);
-                debouncedUpdatePrompt(template.prompt);
-              }}
-              className="text-[11px] px-2 py-0.5 rounded-md border border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors cursor-pointer"
-            >
-              {template.label}
-            </button>
-          ))}
-        </div>
-      )}
-      <div
-        className="rounded-md border overflow-hidden"
-        data-settings-dirty={!savedStep || localPrompt !== (savedStep.prompt ?? "")}
-      >
-        <ScriptEditor
-          value={localPrompt}
-          onChange={(v) => {
-            if (readOnly) return;
-            onLocalPromptChange(v);
-            debouncedUpdatePrompt(v);
-          }}
-          language="markdown"
-          height={computeEditorHeight(localPrompt)}
-          lineNumbers="off"
-          readOnly={readOnly}
-          placeholders={STEP_PROMPT_PLACEHOLDERS}
-          mentionPrompts={prompts}
-        />
-      </div>
-      <p className="text-[11px] text-muted-foreground/60">
-        Type {"{{"} for placeholders (
-        <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{task_prompt}}"}</code>{" "}
-        inserts the task description) or {"@"} to reference a saved prompt by name — its content is
-        attached as hidden context, and editing the saved prompt updates every step that references
-        it. Note: {"{{task_prompt}}"} only expands in the step prompt itself, not inside a
-        referenced saved prompt.
-      </p>
-    </div>
-  );
-}
-
 type StepConfigPanelProps = {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
@@ -608,6 +535,7 @@ export function StepConfigPanel({
           toggleOnEnterAction={actions.toggleOnEnterAction}
           readOnly={readOnly}
         />
+        <SessionConfigEditor {...{ step, savedStep, steps, onUpdate, readOnly }} />
         <StepTransitionsSection
           step={step}
           savedStep={savedStep}

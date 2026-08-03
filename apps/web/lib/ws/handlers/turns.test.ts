@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import { createSessionSlice } from "@/lib/state/slices/session/session-slice";
@@ -12,6 +12,7 @@ const TURN_STARTED = "session.turn.started";
 const TURN_COMPLETED = "session.turn.completed";
 const NOTIFICATION = "notification";
 const TURN_STARTED_AT = "2026-07-23T10:00:00.000Z";
+const TURN_COMPLETED_AT = "2026-07-23T10:01:00.000Z";
 
 function makeStore() {
   return create<SessionSlice>()(
@@ -48,7 +49,7 @@ function send(
 describe("session turn WebSocket handlers", () => {
   it("keeps a completed turn inactive when its delayed started event arrives", () => {
     const store = makeStore();
-    const completed = "2026-07-23T10:01:00.000Z";
+    const completed = TURN_COMPLETED_AT;
 
     send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, completed));
     send(store, TURN_STARTED, turn("turn-1", TURN_STARTED_AT));
@@ -63,7 +64,7 @@ describe("session turn WebSocket handlers", () => {
     const store = makeStore();
 
     send(store, TURN_STARTED, turn("turn-a", TURN_STARTED_AT));
-    send(store, TURN_STARTED, turn("turn-b", "2026-07-23T10:01:00.000Z"));
+    send(store, TURN_STARTED, turn("turn-b", TURN_COMPLETED_AT));
     send(store, TURN_COMPLETED, turn("turn-a", TURN_STARTED_AT, "2026-07-23T10:02:00.000Z"));
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-b");
@@ -71,7 +72,7 @@ describe("session turn WebSocket handlers", () => {
 
   it("tracks a normal turn from start through completion", () => {
     const store = makeStore();
-    const completed = "2026-07-23T10:01:00.000Z";
+    const completed = TURN_COMPLETED_AT;
 
     send(store, TURN_STARTED, turn("turn-1", TURN_STARTED_AT));
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-1");
@@ -79,5 +80,20 @@ describe("session turn WebSocket handlers", () => {
     send(store, TURN_COMPLETED, turn("turn-1", TURN_STARTED_AT, completed));
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
     expect(store.getState().turns.bySession[SESSION_ID][0].completed_at).toBe(completed);
+  });
+
+  it("flushes batched message updates before completing a turn", () => {
+    const store = makeStore();
+    const flush = vi.fn();
+    const handler = registerTurnsHandlers(store as never, { flush })[TURN_COMPLETED]!;
+
+    handler({
+      id: "complete-1",
+      type: NOTIFICATION,
+      action: TURN_COMPLETED,
+      payload: turn("turn-1", TURN_STARTED_AT, TURN_COMPLETED_AT),
+    } as never);
+
+    expect(flush).toHaveBeenCalledTimes(1);
   });
 });

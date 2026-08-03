@@ -665,7 +665,7 @@ func (s *Service) restartForConfigChange(rec *store.Record) error {
 	ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 	defer cancel()
 	if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-		if setErr := s.SetStatus(rec.ID, StatusError); setErr != nil {
+		if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
 			// The restart error stays the returned error (it is the primary
 			// signal), but a failed status write means the registry may show
 			// StatusActive with no process running — don't lose that.
@@ -1010,15 +1010,17 @@ func (s *Service) Disable(id string) error {
 const activateStartTimeout = 30 * time.Second
 
 // activate spawns rec's process (if not already running) and transitions it
-// to StatusActive. If the spawn fails, it best-effort transitions the
-// record to StatusError (ignoring an invalid-transition failure, e.g. from
-// "disabled") and returns the spawn error.
+// to StatusActive. If the spawn fails, it records the failure and transitions
+// the record to StatusError before returning the spawn error.
 func (s *Service) activate(rec *store.Record) error {
 	if s.runtime != nil && !s.runtime.Running(rec.ID) {
 		ctx, cancel := context.WithTimeout(context.Background(), activateStartTimeout)
 		defer cancel()
 		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
-			_ = s.SetStatus(rec.ID, StatusError)
+			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
+				s.log.Warn("plugins: could not persist activation failure",
+					zap.String("plugin_id", rec.ID), zap.Error(setErr))
+			}
 			return fmt.Errorf("plugins: start %q: %w", rec.ID, err)
 		}
 	}
@@ -1035,30 +1037,50 @@ func (s *Service) activate(rec *store.Record) error {
 // both for the runtime spawn/stop and the status transition, and only want
 // a single Refresh for the whole operation.
 func (s *Service) SetStatus(id string, status Status) error {
+	return s.setStatusAndDiagnostic(id, status, nil, false)
+}
+
+// setStatusAndDiagnostic applies a lifecycle transition together with its
+// persisted runtime diagnostic. allowSame is used only for repeated failure
+// reports (for example, a failed retry while the record is already in error);
+// public SetStatus keeps same-state transitions invalid.
+func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error, allowSame bool) error {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	rec, ok := s.registry.Get(id)
 	if !ok {
-		s.mu.Unlock()
 		return store.ErrNotFound
 	}
-	if !canTransition(rec.Status, status) {
-		s.mu.Unlock()
+	if rec.Status == status {
+		if !allowSame {
+			return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
+		}
+	} else if !canTransition(rec.Status, status) {
 		return &ErrInvalidTransition{ID: id, From: rec.Status, To: status}
 	}
 
-	updated, ok := s.registry.SetStatus(id, status)
+	lastError := rec.LastError
+	lastErrorAt := rec.LastErrorAt
+	if status == StatusActive {
+		lastError = ""
+		lastErrorAt = nil
+	}
+	if failure != nil {
+		lastError = normalizePluginError(failure)
+		now := time.Now().UTC()
+		lastErrorAt = &now
+	}
+
+	updated, ok := s.registry.SetRuntimeState(id, status, lastError, lastErrorAt)
 	if !ok {
-		s.mu.Unlock()
 		return store.ErrNotFound
 	}
 	if err := s.store.Save(updated); err != nil {
 		// Roll back the in-memory change so registry and disk stay in sync.
-		s.registry.SetStatus(id, rec.Status)
-		s.mu.Unlock()
+		s.registry.Add(rec)
 		return err
 	}
-	s.mu.Unlock()
 	return nil
 }
 
@@ -1068,12 +1090,12 @@ func (s *Service) SetStatus(id string, status Status) error {
 // health transitions. healthy=false drives active -> error; healthy=true
 // drives error -> active plus a Deliverer.Flush (the buffered-event
 // recovery replay). Restart count is persisted best-effort afterward.
-func (s *Service) handleStatusChange(id string, healthy bool) {
+func (s *Service) handleStatusChange(id string, healthy bool, reason error) {
 	newStatus := StatusError
 	if healthy {
 		newStatus = StatusActive
 	}
-	if err := s.SetStatus(id, newStatus); err != nil {
+	if err := s.setStatusAndDiagnostic(id, newStatus, reason, !healthy); err != nil {
 		s.log.Warn("plugins: health transition failed",
 			zap.String("plugin_id", id), zap.Bool("healthy", healthy), zap.Error(err))
 	} else {
@@ -1093,6 +1115,11 @@ func (s *Service) recordRestartCount(id string) {
 	if s.runtime == nil {
 		return
 	}
+	// Serialize this metadata write with lifecycle/diagnostic persistence so a
+	// restart callback cannot save a stale record over a concurrent Enable or
+	// recovery that just cleared LastError.
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	updated, ok := s.registry.SetRestartCount(id, s.runtime.RestartCount(id))
 	if !ok {
 		return
@@ -1122,7 +1149,15 @@ func (s *Service) StartActivePlugins(ctx context.Context) {
 		if err := s.runtime.Start(ctx, rec, s.hostForPlugin); err != nil {
 			s.log.Warn("plugins: failed to spawn active plugin at boot",
 				zap.String("plugin_id", rec.ID), zap.Error(err))
-			_ = s.SetStatus(rec.ID, StatusError)
+			if setErr := s.setStatusAndDiagnostic(rec.ID, StatusError, err, true); setErr != nil {
+				s.log.Warn("plugins: could not persist boot activation failure",
+					zap.String("plugin_id", rec.ID), zap.Error(setErr))
+			} else {
+				// The deliverer was refreshed before boot activation began, so
+				// reconcile it after an active plugin fails to spawn. Otherwise
+				// its worker would continue treating the plugin as active.
+				s.notifyDeliverer()
+			}
 		}
 	}
 }

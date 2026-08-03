@@ -293,17 +293,26 @@ type mockAgentManager struct {
 	// set_session_mode tracking (issue #1183). Records (sessionID, modeID) for
 	// every SetSessionModeBySessionID call. setSessionModeErr, when set, is
 	// returned to simulate "no running agent".
-	setSessionModeCalls      []sessionModeCall
-	setSessionModeErr        error
-	mcpModeCalls             []sessionModeCall
-	setSessionModelCalls     []sessionModelCall
-	setSessionModelSupported bool
-	setSessionModelErr       error
+	setSessionModeCalls       []sessionModeCall
+	setSessionModeErr         error
+	mcpModeCalls              []sessionModeCall
+	setSessionModelCalls      []sessionModelCall
+	setSessionModelSupported  bool
+	setSessionModelErr        error
+	setSessionConfigCalls     []sessionConfigCall
+	setSessionConfigSupported bool
+	setSessionConfigErr       error
 }
 
 type sessionModelCall struct {
 	SessionID string
 	ModelID   string
+}
+
+type sessionConfigCall struct {
+	SessionID string
+	ConfigID  string
+	Value     string
 }
 
 type sessionModeCall struct {
@@ -476,6 +485,16 @@ func (m *mockAgentManager) SetSessionModeBySessionID(_ context.Context, sessionI
 	defer m.mu.Unlock()
 	m.setSessionModeCalls = append(m.setSessionModeCalls, sessionModeCall{SessionID: sessionID, ModeID: modeID})
 	return m.setSessionModeErr
+}
+
+func (m *mockAgentManager) SetSessionConfigOptionBySessionID(_ context.Context, sessionID, configID, value string) error {
+	if !m.setSessionConfigSupported {
+		return fmt.Errorf("not supported")
+	}
+	m.mu.Lock()
+	m.setSessionConfigCalls = append(m.setSessionConfigCalls, sessionConfigCall{SessionID: sessionID, ConfigID: configID, Value: value})
+	m.mu.Unlock()
+	return m.setSessionConfigErr
 }
 
 func (m *mockAgentManager) SetMcpMode(_ context.Context, executionID, mode string) error {

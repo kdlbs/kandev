@@ -376,4 +376,82 @@ export const i18nGuardFiles = [
   "components/linear/linear-issue-watch-table.tsx",
   "components/linear/linear-issue-watchers-section.tsx",
   "components/linear/linear-settings.tsx",
+  // Settings → Integrations → Sentry: the page and the settings subtree of
+  // `components/sentry` — the connection section, the per-instance card and
+  // add/edit form, the Sentry-watcher section with its table, and the watch
+  // dialog with its filter/throttle/multiselect field modules. The issue task
+  // surface (`sentry-issue-button`, `sentry-issue-dialog`) and the quick-task
+  // launcher live in the same directory and are NOT migrated, which is why this
+  // is a file list rather than `components/sentry/**`.
+  //
+  // `sentry-issue-common.tsx` is deliberately absent. The settings subtree
+  // reaches it only for `levelBadgeClass` / `statusBadgeClass`, which return CSS
+  // class names and carry no copy; every string in that file belongs to the
+  // un-migrated issue dialog, so listing it would pull the task surface into
+  // this PR.
+  //
+  // The two `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them; the entries record that they are migrated, and only the pseudo-locale
+  // can prove it stays that way. `sentry-issue-watch-placeholders.ts` carries
+  // copy deliberately left in English because it is PERSISTED and sent to an
+  // agent verbatim — `DEFAULT_SENTRY_ISSUE_WATCH_PROMPT`, which must also keep
+  // matching `apps/backend/config/prompts/sentry-issue-watch-default.md`. The
+  // placeholder `example` values in the same file, and the option `value`s in
+  // `sentry-issue-watch-form.ts` (the `SentryLevel` / `SentryStatus` unions and
+  // Sentry's `statsPeriod` tokens), are identifiers rather than copy; the option
+  // labels there now travel as `labelKey` and resolve at render.
+  "app/settings/integrations/sentry/**/*.{ts,tsx}",
+  "components/sentry/sentry-instance-card.tsx",
+  "components/sentry/sentry-instance-form.tsx",
+  "components/sentry/sentry-issue-watch-dialog.tsx",
+  "components/sentry/sentry-issue-watch-filter-fields.tsx",
+  "components/sentry/sentry-issue-watch-form.ts",
+  "components/sentry/sentry-issue-watch-multiselect.tsx",
+  "components/sentry/sentry-issue-watch-placeholders.ts",
+  "components/sentry/sentry-issue-watch-table.tsx",
+  "components/sentry/sentry-issue-watch-throttle-field.tsx",
+  "components/sentry/sentry-issue-watchers-section.tsx",
+  "components/sentry/sentry-settings.tsx",
+  // Settings → Integrations → Azure DevOps: the page and the settings subtree of
+  // `components/azure-devops` — the connection card with its PAT help tooltip,
+  // the work-item / pull-request watch settings, the quick-action presets and
+  // the default-query editor. The board, work-item and pull-request task
+  // surfaces (`azure-devops-board*`, `azure-devops-results`, `-filters`,
+  // `-scope-bar`, `-task-*`, `-work-item-detail`, `-feedback-dialog`,
+  // `-save-view-dialog`, `-task-launcher`) live in the same directory and are
+  // NOT migrated, which is why this is a file list rather than
+  // `components/azure-devops/**`.
+  //
+  // `azure-devops-workspace-defaults.ts` holds no JSX, so `mode: "jsx-only"`
+  // never inspects it; the entry records that it has been reviewed, and only the
+  // pseudo-locale can prove it stays that way. Everything in it is deliberately
+  // left in English: the WIQL filters are Azure DevOps' query language, and the
+  // preset `label` / `hint` / `promptTemplate` records are PERSISTED to
+  // workspace settings and must keep matching the server-side defaults in
+  // `apps/backend/internal/azuredevops/workspace_settings.go`, which has no
+  // locale.
+  "app/settings/integrations/azure-devops/**/*.{ts,tsx}",
+  "components/azure-devops/azure-devops-default-queries.tsx",
+  "components/azure-devops/azure-devops-quick-actions.tsx",
+  "components/azure-devops/azure-devops-settings.tsx",
+  "components/azure-devops/azure-devops-watch-settings.tsx",
+  "components/azure-devops/azure-devops-workspace-defaults.ts",
+  // Shared preset-icon catalog rendered by the Azure DevOps quick actions. Also
+  // `.ts`-only, so the entry records the review rather than enforcing it; the
+  // icon `key`s are the persisted enum and only the labels are copy, which now
+  // travel as `labelKey` and resolve at render.
+  "components/integrations/action-preset-icons.ts",
+  // Settings → Integrations → Slack: the page and the whole of
+  // `components/slack`, which holds nothing else. `slack-settings-state.ts` is
+  // the form state and API actions split out of the component so it stays under
+  // the 600-line cap; it holds no JSX, so `mode: "jsx-only"` never inspects it
+  // and only the pseudo-locale can prove its toast/confirm copy stays migrated.
+  //
+  // Deliberately left in English, each a value the user must find or type
+  // verbatim rather than copy: the `xoxc-` / `xoxd-` token prefixes, the `d`
+  // cookie name, the `••••••••` mask, the `!kandev <instruction>` command
+  // example, and the six `{{Slack…}}` prompt tokens. All are interpolated as
+  // values so the pseudo-locale cannot turn them into dead pointers.
+  "app/settings/integrations/slack/**/*.{ts,tsx}",
+  "components/slack/**/*.{ts,tsx}",
 ];
