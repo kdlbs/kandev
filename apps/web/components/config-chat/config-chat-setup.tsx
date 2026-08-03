@@ -84,14 +84,17 @@ function Suggestions({ onSelect }: { onSelect: (prompt: string) => void }) {
         {t("configChat:tryAsking")}
       </h3>
       <div className="grid gap-2 sm:grid-cols-2">
-        {SUGGESTION_PROMPT_KEYS.map((key) => t(key)).map((prompt) => (
+        {/* Keyed by the CATALOG KEY, not the resolved prompt: a React key should
+            be a stable identity, and keying on translated copy remounts every
+            button on a locale switch. */}
+        {SUGGESTION_PROMPT_KEYS.map((key) => (
           <button
-            key={prompt}
+            key={key}
             type="button"
-            onClick={() => onSelect(prompt)}
+            onClick={() => onSelect(t(key))}
             className="min-h-11 rounded-md border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-primary/50 hover:bg-accent/50 hover:text-foreground"
           >
-            {prompt}
+            {t(key)}
           </button>
         ))}
       </div>
