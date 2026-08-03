@@ -2523,6 +2523,10 @@ func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, ses
 	if err != nil {
 		return false, err
 	}
+	// Detached teardown must not observe this operation as an in-flight
+	// cancellation. ScheduleTeardown starts a goroutine, so relying on the
+	// deferred release above makes the ordering scheduler-dependent.
+	endCancel()
 	if result.Changed && teardownClaimed {
 		result.ScheduleTeardown()
 	}
