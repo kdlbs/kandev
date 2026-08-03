@@ -95,6 +95,10 @@ regression covers both toolbar branches.
 - `cd apps && pnpm --filter @kandev/web run i18n:ratchet` — passed, 0 added / 7 modified files clean.
 - `cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts` — passed, 1 test in 13.7s.
 - `git diff --check` — passed.
+- PR fixup commit `1bb1b2539` addressed three review findings: the spec is now active, the held
+  request controller documents its `0 | 1` count, and the remount test isolates plugin actions.
+- Focused unit tests, typecheck, lint, diff check, and the task-switch E2E all passed again after the
+  fixup; all three review threads were replied to and resolved.
 
 ## Implementation Waves And Parallel Candidates
 

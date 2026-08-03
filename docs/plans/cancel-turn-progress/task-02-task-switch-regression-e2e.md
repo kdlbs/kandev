@@ -70,3 +70,5 @@ status/results in the same primary conversation.
 - Files changed: `apps/web/e2e/helpers/ws-drop.ts` and
   `apps/web/e2e/tests/chat/cancel-progress-task-switch.spec.ts`.
 - No blockers or external side effects found.
+- PR fixup commit `1bb1b2539` refined the held-count contract and isolated the component test's
+  plugin-actions dependency; the focused unit, typecheck, lint, diff, and E2E checks passed again.
