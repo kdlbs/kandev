@@ -147,11 +147,16 @@ func TestAppendSessionStateMessage_IncludesTaskEnvironmentID(t *testing.T) {
 }
 
 type fakeCancellationPendingProvider struct {
-	pending bool
+	pending  bool
+	revision uint64
 }
 
 func (p fakeCancellationPendingProvider) CancellationPending(string) bool {
 	return p.pending
+}
+
+func (p fakeCancellationPendingProvider) CancellationPendingSnapshot(string) (bool, uint64) {
+	return p.pending, p.revision
 }
 
 func TestAppendSessionStateMessage_IncludesCancellationPending(t *testing.T) {
@@ -159,7 +164,7 @@ func TestAppendSessionStateMessage_IncludesCancellationPending(t *testing.T) {
 	msgs := appendSessionStateMessageWithCancellation(
 		session.ID,
 		session,
-		fakeCancellationPendingProvider{pending: true},
+		fakeCancellationPendingProvider{pending: true, revision: 7},
 		nil,
 	)
 	if len(msgs) != 1 {
@@ -168,6 +173,9 @@ func TestAppendSessionStateMessage_IncludesCancellationPending(t *testing.T) {
 	payload := decodePayload(t, msgs[0].Payload)
 	if got, ok := payload["cancellation_pending"]; !ok || got != true {
 		t.Fatalf("cancellation_pending = %#v, want explicit true", payload["cancellation_pending"])
+	}
+	if got, ok := payload["cancellation_revision"]; !ok || got != float64(7) {
+		t.Fatalf("cancellation_revision = %#v, want 7", payload["cancellation_revision"])
 	}
 }
 

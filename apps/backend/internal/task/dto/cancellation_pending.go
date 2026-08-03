@@ -7,7 +7,10 @@ func EnrichCancellationPending(session *TaskSessionDTO, provider CancellationPen
 	if session == nil || provider == nil {
 		return
 	}
-	session.CancellationPending = provider.CancellationPending(session.ID)
+	session.CancellationPending, session.CancellationRevision = cancellationPendingSnapshot(
+		provider,
+		session.ID,
+	)
 }
 
 // EnrichCancellationPendingSummary is the summary DTO equivalent of
@@ -16,5 +19,18 @@ func EnrichCancellationPendingSummary(session *TaskSessionSummaryDTO, provider C
 	if session == nil || provider == nil {
 		return
 	}
-	session.CancellationPending = provider.CancellationPending(session.ID)
+	session.CancellationPending, session.CancellationRevision = cancellationPendingSnapshot(
+		provider,
+		session.ID,
+	)
+}
+
+func cancellationPendingSnapshot(
+	provider CancellationPendingProvider,
+	sessionID string,
+) (bool, uint64) {
+	if snapshotProvider, ok := provider.(CancellationPendingSnapshotProvider); ok {
+		return snapshotProvider.CancellationPendingSnapshot(sessionID)
+	}
+	return provider.CancellationPending(sessionID), 0
 }

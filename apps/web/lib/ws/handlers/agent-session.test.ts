@@ -247,12 +247,13 @@ describe("session.state_changed cancellation snapshot", () => {
         session_id: "s-1",
         new_state: "RUNNING",
         cancellation_pending: false,
+        cancellation_revision: 2,
       }),
     );
 
     expect(store.getState().upsertTaskSessionFromEvent).toHaveBeenCalledWith(
       "t-1",
-      expect.objectContaining({ cancellation_pending: false }),
+      expect.objectContaining({ cancellation_pending: false, cancellation_revision: 2 }),
     );
   });
 });
@@ -277,10 +278,12 @@ describe("session.cancellation_changed handler", () => {
       makeCancellationMessage({
         session_id: "s-1",
         cancellation_pending: true,
+        cancellation_revision: 1,
       }),
     );
 
     expect(store.getState().taskSessions.items["s-1"].cancellation_pending).toBe(true);
+    expect(store.getState().taskSessions.items["s-1"].cancellation_revision).toBe(1);
     expect(store.getState().taskSessions.items["s-2"].cancellation_pending).toBe(false);
   });
 
@@ -292,10 +295,36 @@ describe("session.cancellation_changed handler", () => {
       makeCancellationMessage({
         session_id: "unknown",
         cancellation_pending: true,
+        cancellation_revision: 1,
       }),
     );
 
     expect(store.getState().upsertTaskSessionFromEvent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a lower-revision live event", () => {
+    const store = createAppStore();
+    store.getState().setTaskSession({
+      id: "s-1",
+      task_id: "t-1",
+      state: "RUNNING",
+      cancellation_pending: false,
+      cancellation_revision: 2,
+      started_at: RECOVERABLE_ERROR_AT,
+      updated_at: RECOVERABLE_ERROR_AT,
+    } as TaskSession);
+
+    const handler = registerTaskSessionHandlers(store)[CANCELLATION_EVENT]!;
+    handler(
+      makeCancellationMessage({
+        session_id: "s-1",
+        cancellation_pending: true,
+        cancellation_revision: 1,
+      }),
+    );
+
+    expect(store.getState().taskSessions.items["s-1"].cancellation_pending).toBe(false);
+    expect(store.getState().taskSessions.items["s-1"].cancellation_revision).toBe(2);
   });
 });
 

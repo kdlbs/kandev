@@ -598,16 +598,13 @@ type Service struct {
 	// serialize their side effects, but they are not themselves cancellations;
 	// treating every mutex holder as a cancellation would make agent.boot_ready
 	// discard a legitimate boot signal while a stream frame is being persisted.
-	// Values are reference counts so duplicate cancellation requests waiting on
-	// the shared guard keep cancellation priority until the last request exits.
+	// Values hold the reference count, process-local transition revision, and
+	// publication queue for each session. Entries remain after the count reaches
+	// zero so a later operation cannot reuse an older revision. The single mutex
+	// makes each count transition and its queued publication one atomic state change; event-bus
+	// sends happen after releasing it so one slow bus cannot delay other sessions.
 	cancelOperationsMu sync.Mutex
-	cancelOperations   map[string]int
-	// cancelOperationsPublishMu guards the per-session publication queues. The
-	// queue bookkeeping is short-lived; the actual event-bus send happens
-	// outside this mutex so one slow bus cannot delay transitions for other
-	// sessions. Each session's queue drains in transition order.
-	cancelOperationsPublishMu     sync.Mutex
-	cancelOperationsPublishQueues map[string]*cancellationPublicationQueue
+	cancelOperations   map[string]*cancellationOperationState
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.

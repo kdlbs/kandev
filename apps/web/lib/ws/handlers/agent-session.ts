@@ -239,6 +239,8 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
     update.active_subagent_count = payload.active_subagent_count;
   if (payload.cancellation_pending !== undefined)
     update.cancellation_pending = payload.cancellation_pending;
+  if (payload.cancellation_revision !== undefined)
+    update.cancellation_revision = payload.cancellation_revision;
   return update;
 }
 
@@ -263,6 +265,7 @@ function upsertTaskSessionList(
     task_id: taskId,
     state: (newState ?? existing?.state) as TaskSessionState,
     cancellation_pending: existing?.cancellation_pending ?? false,
+    cancellation_revision: existing?.cancellation_revision ?? 0,
     started_at: existing?.started_at ?? "",
     updated_at: (sessionUpdate.updated_at as string | undefined) ?? existing?.updated_at ?? "",
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
@@ -386,12 +389,14 @@ function maybeAdoptSessionOnTransition(
 function sessionSeedFields(existing: TaskSession | undefined): {
   state: TaskSessionState;
   cancellation_pending: boolean;
+  cancellation_revision: number;
   started_at: string;
   updated_at: string;
 } {
   return {
     state: existing?.state ?? "CREATED",
     cancellation_pending: existing?.cancellation_pending ?? false,
+    cancellation_revision: existing?.cancellation_revision ?? 0,
     started_at: existing?.started_at ?? "",
     updated_at: existing?.updated_at ?? "",
   };
@@ -561,6 +566,7 @@ function applyForegroundActivity(
     task_id: taskId,
     state: existing.state,
     cancellation_pending: existing.cancellation_pending,
+    cancellation_revision: existing.cancellation_revision,
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     foreground_activity: payload.foreground_activity ?? null,
@@ -577,7 +583,12 @@ function applyCancellationPending(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any,
 ): void {
-  if (!payload?.session_id || typeof payload.cancellation_pending !== "boolean") return;
+  if (
+    !payload?.session_id ||
+    typeof payload.cancellation_pending !== "boolean" ||
+    typeof payload.cancellation_revision !== "number"
+  )
+    return;
   const sessionId = toSessionId(payload.session_id);
   const existing = store.getState().taskSessions.items[sessionId];
   if (!existing) return;
@@ -588,6 +599,7 @@ function applyCancellationPending(
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     cancellation_pending: payload.cancellation_pending,
+    cancellation_revision: payload.cancellation_revision,
   });
 }
 

@@ -4002,29 +4002,40 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 
 	s.cancelOperationsMu.Lock()
 	if s.cancelOperations == nil {
-		s.cancelOperations = make(map[string]int)
+		s.cancelOperations = make(map[string]*cancellationOperationState)
 	}
-	wasPending := s.cancelOperations[sessionID] > 0
-	s.cancelOperations[sessionID]++
+	state := s.cancelOperations[sessionID]
+	if state == nil {
+		state = &cancellationOperationState{}
+		s.cancelOperations[sessionID] = state
+	}
+	state.count++
+	startDrain := false
+	if state.count == 1 {
+		state.revision++
+		startDrain = s.enqueueCancellationPendingLocked(sessionID, state, true)
+	}
 	s.cancelOperationsMu.Unlock()
-	if !wasPending {
-		s.enqueueCancellationPending(sessionID, true)
+	if startDrain {
+		s.drainCancellationPublicationQueue(sessionID, state)
 	}
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			startDrain := false
 			s.cancelOperationsMu.Lock()
-			count := s.cancelOperations[sessionID]
-			cleared := count <= 1
-			if count <= 1 {
-				delete(s.cancelOperations, sessionID)
-			} else {
-				s.cancelOperations[sessionID] = count - 1
+			state := s.cancelOperations[sessionID]
+			if state != nil && state.count > 0 {
+				state.count--
+				if state.count == 0 {
+					state.revision++
+					startDrain = s.enqueueCancellationPendingLocked(sessionID, state, false)
+				}
 			}
 			s.cancelOperationsMu.Unlock()
-			if cleared {
-				s.enqueueCancellationPending(sessionID, false)
+			if startDrain {
+				s.drainCancellationPublicationQueue(sessionID, state)
 			}
 		})
 	}
@@ -4035,21 +4046,35 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 // scoped: a backend restart clears it because no cancellation work survives
 // the process restart.
 func (s *Service) CancellationPending(sessionID string) bool {
+	pending, _ := s.CancellationPendingSnapshot(sessionID)
+	return pending
+}
+
+// CancellationPendingSnapshot returns the pending projection and its
+// process-local transition revision from one critical section. Keeping these
+// values together prevents REST/boot hydration from observing a boolean from
+// one generation with the revision from another.
+func (s *Service) CancellationPendingSnapshot(sessionID string) (bool, uint64) {
 	if sessionID == "" {
-		return false
+		return false, 0
 	}
 	s.cancelOperationsMu.Lock()
 	defer s.cancelOperationsMu.Unlock()
-	return s.cancelOperations[sessionID] > 0
+	state := s.cancelOperations[sessionID]
+	if state == nil {
+		return false, 0
+	}
+	return state.count > 0, state.revision
 }
 
-func (s *Service) publishCancellationPending(sessionID string, pending bool) {
+func (s *Service) publishCancellationPending(sessionID string, pending bool, revision uint64) {
 	if s.eventBus == nil || sessionID == "" {
 		return
 	}
 	payload := map[string]interface{}{
-		"session_id":           sessionID,
-		"cancellation_pending": pending,
+		"session_id":            sessionID,
+		"cancellation_pending":  pending,
+		"cancellation_revision": revision,
 	}
 	if err := s.eventBus.Publish(context.Background(), events.TaskSessionCancellationChanged,
 		bus.NewEvent(events.TaskSessionCancellationChanged, "orchestrator", payload)); err != nil {
@@ -4057,62 +4082,65 @@ func (s *Service) publishCancellationPending(sessionID string, pending bool) {
 			s.logger.Warn("failed to publish cancellation state",
 				zap.String("session_id", sessionID),
 				zap.Bool("cancellation_pending", pending),
+				zap.Uint64("cancellation_revision", revision),
 				zap.Error(err))
 		}
 	}
 }
 
+type cancellationOperationState struct {
+	count        int
+	revision     uint64
+	publications cancellationPublicationQueue
+}
+
+type cancellationPublication struct {
+	pending  bool
+	revision uint64
+}
+
 type cancellationPublicationQueue struct {
-	pending    []bool
+	pending    []cancellationPublication
 	publishing bool
 }
 
-// enqueueCancellationPending keeps transition ordering per session without
-// holding the global queue mutex across the event-bus send. Calls for another
-// session can therefore enqueue and publish independently while a slow NATS
-// connection is draining this session's queue.
-func (s *Service) enqueueCancellationPending(sessionID string, pending bool) {
+// enqueueCancellationPendingLocked appends a transition while the count and
+// revision are still protected by cancelOperationsMu. The caller must drain
+// the queue after releasing that mutex when this returns true.
+func (s *Service) enqueueCancellationPendingLocked(
+	sessionID string,
+	state *cancellationOperationState,
+	pending bool,
+) bool {
 	if s.eventBus == nil || sessionID == "" {
-		return
+		return false
 	}
-
-	s.cancelOperationsPublishMu.Lock()
-	if s.cancelOperationsPublishQueues == nil {
-		s.cancelOperationsPublishQueues = make(map[string]*cancellationPublicationQueue)
-	}
-	queue := s.cancelOperationsPublishQueues[sessionID]
-	if queue == nil {
-		queue = &cancellationPublicationQueue{}
-		s.cancelOperationsPublishQueues[sessionID] = queue
-	}
-	queue.pending = append(queue.pending, pending)
+	queue := &state.publications
+	queue.pending = append(queue.pending, cancellationPublication{pending: pending, revision: state.revision})
 	if queue.publishing {
-		s.cancelOperationsPublishMu.Unlock()
-		return
+		return false
 	}
 	queue.publishing = true
-	s.cancelOperationsPublishMu.Unlock()
-
-	s.drainCancellationPublicationQueue(sessionID, queue)
+	return true
 }
 
 func (s *Service) drainCancellationPublicationQueue(
 	sessionID string,
-	queue *cancellationPublicationQueue,
+	state *cancellationOperationState,
 ) {
 	for {
-		s.cancelOperationsPublishMu.Lock()
+		s.cancelOperationsMu.Lock()
+		queue := &state.publications
 		if len(queue.pending) == 0 {
 			queue.publishing = false
-			delete(s.cancelOperationsPublishQueues, sessionID)
-			s.cancelOperationsPublishMu.Unlock()
+			s.cancelOperationsMu.Unlock()
 			return
 		}
-		pending := queue.pending[0]
+		publication := queue.pending[0]
 		queue.pending = queue.pending[1:]
-		s.cancelOperationsPublishMu.Unlock()
+		s.cancelOperationsMu.Unlock()
 
-		s.publishCancellationPending(sessionID, pending)
+		s.publishCancellationPending(sessionID, publication.pending, publication.revision)
 	}
 }
 
@@ -4126,7 +4154,8 @@ func (s *Service) isCancelInFlight(sessionID string) bool {
 	}
 	s.cancelOperationsMu.Lock()
 	defer s.cancelOperationsMu.Unlock()
-	return s.cancelOperations[sessionID] > 0
+	state := s.cancelOperations[sessionID]
+	return state != nil && state.count > 0
 }
 
 // reconcileCancelledTurn durably settles the cancelled session and its turn.
@@ -4304,7 +4333,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			// transient turn-close failure. Keep that retry eligible only while
 			// an active turn is still present; a settled second cancel must not
 			// re-run the source step's completion actions.
-			activeTurnID, turnErr := s.peekActiveTurnID(ctx, sessionID)
+			activeTurnID, turnErr := s.peekActiveTurnID(operationCtx, sessionID)
 			if turnErr != nil {
 				return fmt.Errorf("inspect active turn before cancel retry: %w", turnErr)
 			}

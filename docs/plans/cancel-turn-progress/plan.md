@@ -27,7 +27,9 @@ of truth.
 The existing `Service.cancelOperations` registry already tracks actual cancellation intent and the
 existing `cancelInFlight` guard already deduplicates lifecycle work. The revised implementation
 exposes that fact instead of adding another lifecycle state or a durable database marker. The Task
-01 store remains useful only as immediate optimistic feedback before backend acceptance.
+01 store remains useful only as immediate optimistic feedback before backend acceptance. Runtime
+transitions carry a process-local per-session revision so independent REST, boot, and WebSocket
+delivery can be ordered without relying on the database timestamp.
 
 ## Backend
 
@@ -37,13 +39,17 @@ exposes that fact instead of adding another lifecycle state or a durable databas
   of the public runtime projection; keep its reference-counted, per-session ownership separate from
   the broader `cancelInFlight` mutex.
 - `apps/backend/internal/orchestrator/task_operations.go`: expose
-  `CancellationPending(sessionID string) bool`; make `beginCancelInFlight` publish only the `0 -> 1`
-  and `1 -> 0` transitions; retain idempotent release and duplicate-request reference counting.
+  `CancellationPending(sessionID string) bool` and the atomic
+  `CancellationPendingSnapshot(sessionID string) (bool, uint64)` form; make
+  `beginCancelInFlight` publish only the `0 -> 1` and `1 -> 0` transitions; increment the
+  process-local revision and append the transition under the same critical section; drain each
+  session's queue outside the lock; retain idempotent release and duplicate-request reference
+  counting.
 - In `Service.CancelAgent`, authorize with the caller context and then use
   `context.WithoutCancel(ctx)` for the accepted cancellation, reconciliation, message, turn, and
   transition publications. This preserves page-disconnect behavior without removing the lifecycle
   manager's own ten-second cancel wait and escalation bounds.
-- Publish `{session_id, cancellation_pending}` on
+- Publish `{session_id, cancellation_pending, cancellation_revision}` on
   `events.TaskSessionCancellationChanged`. Event-publication failure is logged but never changes the
   cancellation result; the final deferred release must clear pending on every error path.
 
@@ -55,9 +61,10 @@ exposes that fact instead of adding another lifecycle state or a durable databas
 - `apps/backend/internal/gateway/websocket/task_notifications.go`: subscribe to the event and route
   it only through `Hub.BroadcastToSession`. It is semantic session traffic, not replaceable stream
   traffic and not a task-summary update.
-- `apps/backend/internal/task/dto/dto.go`: add non-omitempty `CancellationPending bool` fields to
-  both `TaskSessionDTO` and `TaskSessionSummaryDTO`; add a narrow `CancellationPendingProvider` and
-  enrichers that always write the provider result.
+- `apps/backend/internal/task/dto/dto.go`: add non-omitempty `CancellationPending bool` and
+  `CancellationRevision uint64` fields to both `TaskSessionDTO` and `TaskSessionSummaryDTO`; add a
+  narrow atomic snapshot provider alongside `CancellationPendingProvider` and enrichers that always
+  write the provider result.
 - `apps/backend/internal/task/handlers/task_handlers.go` and
   `task_http_handlers.go`: discover the provider from the orchestrator and enrich list/get session
   responses alongside foreground activity.
@@ -79,15 +86,15 @@ exposes that fact instead of adding another lifecycle state or a durable databas
 
 ### Session contracts and live updates
 
-- `apps/web/lib/types/http.ts`: add the backend-owned `cancellation_pending` field to `TaskSession`;
-  keep it optional only for partial in-memory/test rows while backend wire boundaries always emit an
-  explicit boolean.
-- `apps/web/lib/types/backend.ts`: add the cancellation field to the state-snapshot payload, define
-  `TaskSessionCancellationChangedPayload`, and register `session.cancellation_changed` in the
-  backend message map.
+- `apps/web/lib/types/http.ts`: add the backend-owned `cancellation_pending` and optional
+  `cancellation_revision` fields to `TaskSession`; backend wire boundaries emit both explicitly.
+- `apps/web/lib/types/backend.ts`: add both cancellation fields to the state-snapshot payload,
+  define the revision-bearing `TaskSessionCancellationChangedPayload`, and register
+  `session.cancellation_changed` in the backend message map.
 - `apps/web/lib/ws/handlers/agent-session.ts`: merge explicit true and false values carried by
-  `session.state_changed`; handle `session.cancellation_changed` by updating the existing session
-  row and its per-task list without changing coarse state or triggering task/Office lifecycle work.
+  `session.state_changed`; handle revision-bearing `session.cancellation_changed` by updating the
+  existing session row and its per-task list without changing coarse state or triggering task/Office
+  lifecycle work; reject lower-revision snapshots/events.
 - `apps/web/lib/ws/handlers/agent-session.test.ts`: cover explicit-false clearing, session isolation,
   an event arriving for an unloaded session, and state-snapshot/live-event convergence.
 
@@ -129,7 +136,8 @@ layouts. Because reload persistence changes user-visible behavior on compact scr
 - **Frontend reconciliation:** extend
   `apps/web/lib/ws/handlers/agent-session.test.ts` and
   `apps/web/components/task/chat/chat-input-toolbar.test.tsx` for hydration, live updates,
-  optimistic/backend union semantics, session isolation, and desktop/mobile rendering.
+  revision-aware delayed hydration, optimistic/backend union semantics, session isolation, and
+  desktop/mobile rendering.
 
 ## E2E Tests
 
@@ -165,6 +173,24 @@ records; revised Tasks 03-06 are the authoritative implementation evidence.
 - `git diff --check`: passed.
 - No schema migration, durable cancellation marker, cross-workspace broadcast, held WebSocket frame,
   or external side effect was added.
+
+## Review remediation results
+
+- RED: deterministic successor-generation ordering, waiting-state caller-cancellation, and delayed
+  REST hydration tests failed against the pre-fix implementation.
+- Green backend: `go test ./internal/orchestrator ./internal/task/dto ./internal/task/handlers
+  ./internal/backendapp ./internal/gateway/websocket -count=1` — 2,138 passed.
+- Race: full `go test -race ./internal/orchestrator -count=1` — 1,453 passed; cancellation-focused
+  race set — 5 passed.
+- Frontend: the five focused session/control suites — 134 passed; `pnpm run typecheck`, web lint,
+  and the i18n ratchet passed.
+- `git diff --check` — passed.
+
+The remediation adds a process-local per-session revision to every cancellation snapshot/event,
+atomically queues transitions with count changes, rejects lower-revision client merges, and routes
+the waiting-state retry through the detached accepted-operation context. No new mobile composition
+was introduced; the existing mobile reload E2E covers the shared control, so a new mobile E2E was not
+needed for this data-ordering-only change.
 
 ## Implementation Waves And Parallel Candidates
 

@@ -438,6 +438,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   state: TaskSessionState;
   /** Backend-owned runtime cancellation projection; API responses include it explicitly. */
   cancellation_pending?: boolean;
+  /** Process-local cancellation transition generation used to reject stale snapshots. */
+  cancellation_revision?: number;
   /** Fine-grained busy substate; background may outlive the foreground turn (ADR-0049). */
   foreground_activity?: ForegroundActivity | null;
   /** Compact pending-input projection used when this session's messages are unloaded. */

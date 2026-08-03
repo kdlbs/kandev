@@ -13,7 +13,9 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Acceptance
 
 - The frontend session contract hydrates and live-updates explicit true/false backend cancellation
-  state without changing coarse session state, task selection, or Office refetch behavior.
+  state plus its revision without changing coarse session state, task selection, or Office refetch
+  behavior.
+- Delayed REST/boot hydration with a lower revision cannot overwrite a newer live cancellation event.
 - The shared cancel control renders progress when either the short-lived optimistic request flag or
   backend `cancellation_pending` is true; backend true survives a fresh `StateProvider`, while both
   false render the retryable idle control.
@@ -29,8 +31,9 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 (cd apps && pnpm --filter @kandev/web run i18n:ratchet)
 ```
 
-Follow TDD: first hydrate a new store with `cancellation_pending=true` and deliver true/false live
-events against the existing code, then add the contract and effective-state union.
+Follow TDD: first hydrate a new store with `cancellation_pending=true` and deliver revisioned
+true/false live events against the existing code, then add the ordered merge contract and
+effective-state union.
 
 ## Files likely touched
 
@@ -73,7 +76,9 @@ Implemented the backend-owned session contract and shared desktop/mobile control
 - `git diff --check` — passed.
 
 The shared cancel control uses backend `true` OR the transient optimistic request flag, so backend
-state survives a fresh store while both cleared values remain retryable. The frontend wire type keeps
-the field optional for partial in-memory/test rows, while backend DTO and hydration boundaries always
-serialize it explicitly. No new copy, browser persistence, security boundary, or external side effect
-was introduced; desktop and compact mobile continue using the same `SubmitButton`.
+state survives a fresh store while both cleared values remain retryable. Session merges accept only
+the newest `cancellation_revision`, preventing delayed REST/boot snapshots from restoring stale
+progress. The frontend wire fields remain optional for partial in-memory/test rows, while backend DTO
+and hydration boundaries always serialize them explicitly. No new copy, browser persistence, security
+boundary, or external side effect was introduced; desktop and compact mobile continue using the same
+`SubmitButton`.

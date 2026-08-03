@@ -15,6 +15,19 @@ func (p fakeCancellationPendingProvider) CancellationPending(string) bool {
 	return p.pending
 }
 
+type fakeCancellationSnapshotProvider struct {
+	pending  bool
+	revision uint64
+}
+
+func (p fakeCancellationSnapshotProvider) CancellationPending(string) bool {
+	return p.pending
+}
+
+func (p fakeCancellationSnapshotProvider) CancellationPendingSnapshot(string) (bool, uint64) {
+	return p.pending, p.revision
+}
+
 func TestTaskSessionCancellationPendingSerializesExplicitFalse(t *testing.T) {
 	for name, value := range map[string]any{
 		"full":    TaskSessionDTO{},
@@ -28,6 +41,8 @@ func TestTaskSessionCancellationPendingSerializesExplicitFalse(t *testing.T) {
 			require.NoError(t, json.Unmarshal(encoded, &body))
 			require.Contains(t, body, "cancellation_pending")
 			require.Equal(t, false, body["cancellation_pending"])
+			require.Contains(t, body, "cancellation_revision")
+			require.Equal(t, float64(0), body["cancellation_revision"])
 		})
 	}
 }
@@ -44,4 +59,18 @@ func TestEnrichCancellationPendingWritesProviderValue(t *testing.T) {
 			require.Equal(t, pending, summary.CancellationPending)
 		})
 	}
+}
+
+func TestEnrichCancellationPendingWritesRevisionWithSnapshot(t *testing.T) {
+	full := &TaskSessionDTO{ID: "s1"}
+	summary := &TaskSessionSummaryDTO{ID: "s1"}
+	provider := fakeCancellationSnapshotProvider{pending: true, revision: 9}
+
+	EnrichCancellationPending(full, provider)
+	EnrichCancellationPendingSummary(summary, provider)
+
+	require.True(t, full.CancellationPending)
+	require.Equal(t, uint64(9), full.CancellationRevision)
+	require.True(t, summary.CancellationPending)
+	require.Equal(t, uint64(9), summary.CancellationRevision)
 }

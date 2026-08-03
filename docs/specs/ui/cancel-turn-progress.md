@@ -38,6 +38,9 @@ Cancellation progress is a backend runtime projection keyed by task-session ID:
 
 - `cancellation_pending: boolean` is `true` while the orchestrator has an accepted cancellation
   operation for the session and `false` otherwise.
+- `cancellation_revision: uint64` is a process-local per-session generation. It increments only on
+  the first accepted reference (`0 → 1`) and the final release (`1 → 0`); overlapping references do
+  not create extra generations. The backend reads the boolean and revision atomically.
 - The field is orthogonal to `TaskSession.state`; cancellation does not introduce a `CANCELLING`
   lifecycle state and the session remains `RUNNING` until the existing lifecycle reconciliation
   changes it.
@@ -53,16 +56,17 @@ Cancellation progress is a backend runtime projection keyed by task-session ID:
 - The existing `agent.cancel` WebSocket request remains
   `{ "session_id": string }`. Its success/error response continues to describe the completed
   cancellation attempt; request authorization and error codes do not change.
-- Full and summary task-session DTOs add the non-optional wire field
-  `cancellation_pending: boolean`. The frontend's in-memory `TaskSession` type may keep that
-  property optional for partial event/test rows, but backend DTO, boot, REST, and subscription
-  boundaries always serialize an explicit value.
+- Full and summary task-session DTOs add the non-optional wire fields
+  `cancellation_pending: boolean` and `cancellation_revision: uint64`. The frontend's in-memory
+  `TaskSession` type may keep both properties optional for partial event/test rows, but backend DTO,
+  boot, REST, and subscription boundaries always serialize explicit values.
 - Task-detail boot state and task-session REST responses include the field on every session row.
 - The initial session-subscription `session.state_changed` snapshot includes
-  `cancellation_pending`, including an explicit `false` value.
+  `cancellation_pending` and `cancellation_revision`, including explicit `false` and `0` values.
 - Live transitions use the semantic WebSocket notification `session.cancellation_changed` with
-  payload `{ "session_id": string, "cancellation_pending": boolean }`. It is delivered only to
-  clients subscribed to that session; task-summary and task-switcher traffic do not carry it.
+  payload `{ "session_id": string, "cancellation_pending": boolean, "cancellation_revision": number }`.
+  It is delivered only to clients subscribed to that session; task-summary and task-switcher traffic
+  do not carry it. Clients reject values whose revision is lower than the session's current revision.
 
 ## State machine
 

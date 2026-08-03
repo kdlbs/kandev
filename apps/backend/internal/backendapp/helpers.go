@@ -210,6 +210,16 @@ func appendSessionStateMessage(sessionID string, session *models.TaskSession, re
 	return appendSessionStateMessageWithCancellation(sessionID, session, nil, result)
 }
 
+func cancellationPendingSnapshot(
+	provider taskdto.CancellationPendingProvider,
+	sessionID string,
+) (bool, uint64) {
+	if snapshotProvider, ok := provider.(taskdto.CancellationPendingSnapshotProvider); ok {
+		return snapshotProvider.CancellationPendingSnapshot(sessionID)
+	}
+	return provider.CancellationPending(sessionID), 0
+}
+
 func appendSessionStateMessageWithCancellation(
 	sessionID string,
 	session *models.TaskSession,
@@ -223,9 +233,12 @@ func appendSessionStateMessageWithCancellation(
 		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"name":                     session.Name,
 		"cancellation_pending":     false,
+		"cancellation_revision":    uint64(0),
 	}
 	if cancellationProvider != nil {
-		payload["cancellation_pending"] = cancellationProvider.CancellationPending(sessionID)
+		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
+		payload["cancellation_pending"] = pending
+		payload["cancellation_revision"] = revision
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)

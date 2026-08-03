@@ -990,6 +990,31 @@ func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T
 	assert.Equal(t, "step2", task.WorkflowStepID, "a later retry should evaluate the settled cancellation")
 }
 
+func TestCancelAgent_SurvivesCallerCancellationDuringWaitingRetry(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-waiting-retry"
+	sessionID := "session-cancel-waiting-retry"
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	svc.agentManager = &cancelContextAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		cancel:           cancel,
+	}
+
+	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	activeTurn, err := turnService.GetActiveTurn(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Nil(t, activeTurn)
+}
+
 func TestCancelAgent_NonterminalTransitionReconcilesReviewState(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1185,6 +1210,9 @@ func TestCancellationPendingTracksReferencesAndPublishesTransitions(t *testing.T
 	endFirst := svc.beginCancelInFlight("session1")
 	require.True(t, svc.CancellationPending("session1"))
 	require.False(t, svc.CancellationPending("session2"))
+	pending, revision := svc.CancellationPendingSnapshot("session1")
+	require.True(t, pending)
+	require.Equal(t, uint64(1), revision)
 
 	endSecond := svc.beginCancelInFlight("session1")
 	require.True(t, svc.CancellationPending("session1"))
@@ -1194,11 +1222,55 @@ func TestCancellationPendingTracksReferencesAndPublishesTransitions(t *testing.T
 	require.True(t, svc.CancellationPending("session1"))
 	endSecond()
 	require.False(t, svc.CancellationPending("session1"))
+	pending, revision = svc.CancellationPendingSnapshot("session1")
+	require.False(t, pending)
+	require.Equal(t, uint64(2), revision)
 
 	events := cancellationPendingEvents(recorded)
 	require.Len(t, events, 2)
 	require.Equal(t, true, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(1), events[0].event.Data.(map[string]interface{})["cancellation_revision"])
 	require.Equal(t, false, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(2), events[1].event.Data.(map[string]interface{})["cancellation_revision"])
+}
+
+func TestCancellationPendingSuccessorGenerationPreservesTransitionOrder(t *testing.T) {
+	recorded := &recordingEventBus{}
+	svc := &Service{
+		eventBus: recorded,
+		cancelOperations: map[string]*cancellationOperationState{
+			"session1": {
+				count:    1,
+				revision: 1,
+				publications: cancellationPublicationQueue{
+					publishing: true,
+				},
+			},
+		},
+	}
+
+	state := svc.cancelOperations["session1"]
+	// Model the final release and successor admission in one critical section:
+	// the false transition must be queued before the successor's true transition
+	// while an earlier publication is still draining.
+	svc.cancelOperationsMu.Lock()
+	state.count--
+	state.revision++
+	require.False(t, svc.enqueueCancellationPendingLocked("session1", state, false))
+	state.count++
+	state.revision++
+	require.False(t, svc.enqueueCancellationPendingLocked("session1", state, true))
+	state.publications.publishing = false
+	svc.cancelOperationsMu.Unlock()
+
+	svc.drainCancellationPublicationQueue("session1", state)
+
+	events := cancellationPendingEvents(recorded)
+	require.Len(t, events, 2)
+	require.Equal(t, false, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(2), events[0].event.Data.(map[string]interface{})["cancellation_revision"])
+	require.Equal(t, true, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(3), events[1].event.Data.(map[string]interface{})["cancellation_revision"])
 }
 
 func TestCancelAgent_ClearsCancellationPendingOnError(t *testing.T) {

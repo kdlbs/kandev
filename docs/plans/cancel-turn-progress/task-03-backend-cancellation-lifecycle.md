@@ -14,6 +14,10 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 
 - `orchestrator.Service.CancellationPending(sessionID)` is true from the first accepted cancellation
   reference until the final reference settles, isolated by session and false outside that window.
+- `CancellationPendingSnapshot(sessionID)` returns the boolean and process-local revision from one
+  critical section; revisions advance only on first-begin and last-end transitions.
+- The transition publication queue is appended while the count/revision are mutated, so a successor
+  generation cannot publish `true` before its predecessor's `false`.
 - An accepted cancellation continues after the initiating request context is cancelled, while the
   existing lifecycle timeout/escalation and per-session deduplication remain intact.
 - Overlapping requests invoke the agent manager once and publish exactly one pending transition and
@@ -65,9 +69,10 @@ Implemented the runtime projection and accepted-operation context boundary.
 - Red: `cd apps/backend && go test ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_ClearsCancellationPendingOnError|TestCancelAgent_SurvivesCallerCancellation' -count=1` initially failed because the public provider and transition implementation were absent.
 - Green: `cd apps/backend && go test ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_ClearsCancellationPendingOnError|TestCancelAgent_SurvivesCallerCancellation' -count=1` — 3 passed.
 - Regression: `cd apps/backend && go test ./internal/orchestrator -run 'TestCancelAgent|TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight' -count=1` — 15 passed.
-- Race: `cd apps/backend && go test -race ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_ClearsCancellationPendingOnError|TestCancelAgent_SurvivesCallerCancellation|TestCancelAgent_DeduplicatesConcurrentCalls' -count=1` — 4 passed.
+- Race: `cd apps/backend && go test -race ./internal/orchestrator -run 'TestCancellationPending|TestCancelAgent_SurvivesCallerCancellation' -count=1` — 5 passed; full orchestrator race suite — 1,453 passed.
 - `git diff --check` — passed.
 
-The registry remains process-local and reference-counted; no schema, repository, metadata, external
-side effect, or new trust boundary was added. Event publication failures are logged and cannot change
-the cancellation result.
+The registry remains process-local and reference-counted; revisions are retained for the lifetime of
+the backend process so delayed snapshots/events cannot reuse an older identity. No schema, repository,
+metadata, external side effect, or new trust boundary was added. Event publication failures are logged
+and cannot change the cancellation result.

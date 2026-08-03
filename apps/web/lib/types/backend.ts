@@ -287,6 +287,8 @@ export type TaskSessionStateChangedPayload = {
   active_subagent_count?: number;
   /** Backend-owned cancellation projection carried by state snapshots. */
   cancellation_pending?: boolean;
+  /** Process-local cancellation transition generation carried by state snapshots. */
+  cancellation_revision?: number;
 };
 
 /**
@@ -304,6 +306,7 @@ export type TaskSessionActivityChangedPayload = {
 export type TaskSessionCancellationChangedPayload = {
   session_id: string;
   cancellation_pending: boolean;
+  cancellation_revision: number;
 };
 
 export type TaskSessionNotificationPayload = {

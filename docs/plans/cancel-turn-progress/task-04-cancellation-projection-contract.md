@@ -12,8 +12,9 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 
 ## Acceptance
 
-- Full and summary task-session DTOs always serialize `cancellation_pending`, including explicit
-  false, from the narrow orchestrator provider without a repository/schema write.
+- Full and summary task-session DTOs always serialize `cancellation_pending` and
+  `cancellation_revision`, including explicit false/zero, from the narrow orchestrator provider
+  without a repository/schema write.
 - Task-detail boot state, task-session REST list/get responses, and the initial session-subscription
   snapshot expose the provider's current value, so a fresh client is correct before another live
   transition occurs.
@@ -72,11 +73,11 @@ conversation.
 Implemented the runtime projection contract across DTO, REST, boot, subscription, and WebSocket
 boundaries.
 
-- `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -count=1` — 681 passed.
+- `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -count=1` — 685 passed.
 - `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -run 'Cancellation|CancelPending|SessionDataProvider|TaskEventBroadcaster_CancellationIsSessionScoped|AppendSessionStateMessage_IncludesCancellationPending' -count=1` — 11 passed.
 - `git diff --check` — passed.
 
-Full and summary DTOs serialize explicit `false`; task-detail/quick-chat boot state, REST list/get,
-and the initial session subscription all enrich from the orchestrator provider. Live transitions are
-session-scoped and publication errors are non-fatal. No schema migration, durable marker,
-cross-workspace broadcast, or external side effect was added.
+Full and summary DTOs serialize explicit `false`/`0`; task-detail/quick-chat boot state, REST list/get,
+and the initial session subscription all enrich the atomic boolean/revision snapshot from the
+orchestrator provider. Live transitions are session-scoped and publication errors are non-fatal. No
+schema migration, durable marker, cross-workspace broadcast, or external side effect was added.
