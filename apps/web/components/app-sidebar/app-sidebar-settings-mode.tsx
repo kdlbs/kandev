@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { usePathname } from "@/lib/routing/client-router";
 import { IconSettings, IconChevronLeft } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
@@ -16,6 +17,7 @@ import { SettingsTree } from "./sections/settings/settings-tree";
  * group is currently expanded.
  */
 export function AppSidebarSettingsMode() {
+  const { t } = useTranslation();
   const pathname = usePathname();
   const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
 
@@ -27,13 +29,15 @@ export function AppSidebarSettingsMode() {
       <button
         type="button"
         onClick={toggleSettingsMode}
-        aria-label="Close settings"
+        aria-label={t("sidebar:closeSettings")}
         data-testid="app-sidebar-settings-mode-close"
         className="group/close flex items-center gap-1.5 px-2 h-7 shrink-0 rounded-md text-foreground/70 hover:bg-muted/60 hover:text-foreground cursor-pointer transition-colors"
       >
         <IconSettings className="h-3.5 w-3.5 group-hover/close:hidden" />
         <IconChevronLeft className="h-3.5 w-3.5 hidden group-hover/close:block" />
-        <span className="text-[11px] font-semibold uppercase tracking-wider">Settings</span>
+        <span className="text-[11px] font-semibold uppercase tracking-wider">
+          {t("common:settings")}
+        </span>
       </button>
       <div className="flex-1 min-h-0 overflow-y-auto flex flex-col gap-0.5">
         <SettingsTree pathname={pathname} />

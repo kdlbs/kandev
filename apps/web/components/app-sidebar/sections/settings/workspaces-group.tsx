@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ComponentType } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconArrowsShuffle,
   IconBolt,
@@ -39,17 +40,25 @@ const INTEGRATIONS: Array<{ slug: string; label: string; icon: IntegrationIcon }
   { slug: "slack", label: "Slack", icon: IconBrandSlack },
 ];
 
-const ACTIVE_WORKSPACE_LABEL = (
-  <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
-    Active
-  </span>
-);
+// Rendered as components, not module-scope JSX constants: `t()` must resolve at
+// render so a locale switch reaches them (a module-scope value freezes at boot).
+function ActiveWorkspaceBadge() {
+  const { t } = useTranslation();
+  return (
+    <span className="shrink-0 rounded-full border border-primary/35 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium leading-none text-primary">
+      {t("sidebar:activeWorkspaceBadge")}
+    </span>
+  );
+}
 
-const ENABLED_LABEL = (
-  <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
-    Enabled
-  </span>
-);
+function EnabledBadge() {
+  const { t } = useTranslation();
+  return (
+    <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/10 px-1 py-0.5 text-[9px] font-medium leading-none text-emerald-600 dark:text-emerald-400">
+      {t("sidebar:enabledBadge")}
+    </span>
+  );
+}
 
 function WorkspaceIntegrationItems({
   workspaceId,
@@ -84,7 +93,7 @@ function WorkspaceIntegrationItems({
         key={href}
         href={href}
         label={label}
-        labelSuffix={enabled.has(slug) ? ENABLED_LABEL : undefined}
+        labelSuffix={enabled.has(slug) ? <EnabledBadge /> : undefined}
         icon={icon}
         isActive={pathname === href}
         depth={3}
@@ -122,6 +131,7 @@ function activeWorkspaceFirst<T extends { id: string }>(workspaces: T[], activeI
 }
 
 export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGroupProps) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const storeActiveWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const routeWorkspaceId =
@@ -143,7 +153,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
 
   return (
     <SettingsGroup
-      label="Workspaces"
+      label={t("common:workspaces")}
       icon={IconFolder}
       href={ROOT_HREF}
       isActive={pathname === ROOT_HREF}
@@ -163,7 +173,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
           <SettingsGroup
             key={workspace.id}
             label={workspace.name}
-            labelSuffix={workspaceIsActive ? ACTIVE_WORKSPACE_LABEL : undefined}
+            labelSuffix={workspaceIsActive ? <ActiveWorkspaceBadge /> : undefined}
             href={workspacePath}
             isActive={pathname === workspacePath}
             expanded={expandedWorkspaceId === workspace.id}
@@ -172,20 +182,20 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
           >
             <SettingsLeaf
               href={repositoriesPath}
-              label="Repositories"
+              label={t("sidebar:repositories")}
               icon={IconGitBranch}
               isActive={pathname === repositoriesPath}
               depth={2}
             />
             <SettingsLeaf
               href={workflowsPath}
-              label="Workflows"
+              label={t("workflows:workflows")}
               icon={IconArrowsShuffle}
               isActive={pathname === workflowsPath}
               depth={2}
             />
             <SettingsGroup
-              label="Integrations"
+              label={t("common:integrations")}
               icon={IconPlugConnected}
               href={integrationsPath}
               isActive={pathname === integrationsPath}
@@ -200,7 +210,7 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
             </SettingsGroup>
             <SettingsLeaf
               href={automationsPath}
-              label="Automations"
+              label={t("common:automations")}
               icon={IconBolt}
               isActive={pathname === automationsPath}
               depth={2}

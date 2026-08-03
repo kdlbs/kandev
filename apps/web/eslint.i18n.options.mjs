@@ -813,4 +813,42 @@ export const i18nGuardFiles = [
   "hooks/domains/system/use-desktop-updater.ts",
   "hooks/domains/system/use-kandev-restart.ts",
   "hooks/domains/system/use-self-update.ts",
+  // The app sidebar, the settings nav tree and the app status bar. These mount
+  // on EVERY screen, so their copy is what the pseudo-coverage spec sees wrapped
+  // around each settings page it walks — leaving them was why that oracle had
+  // never run green.
+  //
+  // Deliberately file globs, not `components/app-sidebar/**`. #2202 has landed,
+  // so `sections/settings/system-group.tsx` is migrated and already listed in
+  // the System block above — this directory is now covered in full, just by two
+  // entries rather than one.
+  //
+  // Do NOT tidy that into `components/app-sidebar/**`.
+  // `check-guard-allowlist.mjs` flags any entry that disappears while its path
+  // still exists, globs included, so swapping these seven for one broader glob
+  // reports seven removed entries and fails (verified by simulating it). A
+  // redundant broader glob *alongside* them would pass; removing them never
+  // does.
+  //
+  // The four `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them. They are listed because they were read and carry no copy (section
+  // ids, cookie names, drag geometry, a route predicate) — not because the rule
+  // can keep them that way.
+  "components/app-sidebar/*.{ts,tsx}",
+  "components/app-sidebar/sections/*.tsx",
+  "components/app-sidebar/sections/settings/account-group.tsx",
+  "components/app-sidebar/sections/settings/agents-group.tsx",
+  "components/app-sidebar/sections/settings/executors-group.tsx",
+  "components/app-sidebar/sections/settings/general-group.tsx",
+  "components/app-sidebar/sections/settings/settings-nav-primitives.tsx",
+  "components/app-sidebar/sections/settings/settings-tree.tsx",
+  "components/app-sidebar/sections/settings/workspaces-group.tsx",
+  "components/app-status-bar/**/*.{ts,tsx}",
+  "components/theme-toggle.tsx",
+  // The command palette's own copy. `group` doubles as the palette's Map key and
+  // its rendered heading, so it must be translated in lockstep across every
+  // producer; `components/task/recent-task-switcher-hooks.ts` is the other one
+  // and had its `group` converted here, but the rest of that file belongs to the
+  // components/task migration and is not listed.
+  "components/global-commands.tsx",
 ];

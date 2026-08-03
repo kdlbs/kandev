@@ -1,6 +1,7 @@
 "use client";
 
 import { IconLogout } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { Avatar, AvatarFallback } from "@kandev/ui/avatar";
 import {
   DropdownMenu,
@@ -40,6 +41,7 @@ export function CurrentUserChip({
   collapsed: boolean;
   className?: string;
 }) {
+  const { t } = useTranslation();
   const user = useAppStore((s) => s.auth.user);
   if (!user) return null;
 
@@ -70,7 +72,7 @@ export function CurrentUserChip({
           className="cursor-pointer"
         >
           <IconLogout className="h-4 w-4" />
-          Log out
+          {t("sidebar:logOut")}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
