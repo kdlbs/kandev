@@ -53,8 +53,10 @@ Cancellation progress is a backend runtime projection keyed by task-session ID:
 - The existing `agent.cancel` WebSocket request remains
   `{ "session_id": string }`. Its success/error response continues to describe the completed
   cancellation attempt; request authorization and error codes do not change.
-- Full and summary task-session DTOs add the non-optional field
-  `cancellation_pending: boolean`.
+- Full and summary task-session DTOs add the non-optional wire field
+  `cancellation_pending: boolean`. The frontend's in-memory `TaskSession` type may keep that
+  property optional for partial event/test rows, but backend DTO, boot, REST, and subscription
+  boundaries always serialize an explicit value.
 - Task-detail boot state and task-session REST responses include the field on every session row.
 - The initial session-subscription `session.state_changed` snapshot includes
   `cancellation_pending`, including an explicit `false` value.

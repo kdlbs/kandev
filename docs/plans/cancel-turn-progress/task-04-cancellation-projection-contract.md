@@ -1,7 +1,7 @@
 ---
 id: "04-cancellation-projection-contract"
 title: "Cancellation projection contract"
-status: pending
+status: completed
 wave: 2
 depends_on: ["03-backend-cancellation-lifecycle"]
 plan: "plan.md"
@@ -69,5 +69,14 @@ conversation.
 
 ## Results
 
-Pending. Record every exact command and outcome, `git diff --check`, and confirm there is no schema
-migration, durable marker, cross-workspace broadcast, or external side effect.
+Implemented the runtime projection contract across DTO, REST, boot, subscription, and WebSocket
+boundaries.
+
+- `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -count=1` — 676 passed.
+- `cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -run 'Cancellation|CancelPending|SessionDataProvider|TaskEventBroadcaster_CancellationIsSessionScoped|AppendSessionStateMessage_IncludesCancellationPending' -count=1` — 11 passed.
+- `git diff --check` — passed.
+
+Full and summary DTOs serialize explicit `false`; task-detail/quick-chat boot state, REST list/get,
+and the initial session subscription all enrich from the orchestrator provider. Live transitions are
+session-scoped and publication errors are non-fatal. No schema migration, durable marker,
+cross-workspace broadcast, or external side effect was added.

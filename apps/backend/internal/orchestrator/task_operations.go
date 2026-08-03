@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/editors/capabilities"
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -3998,25 +4000,69 @@ func (s *Service) beginCancelInFlight(sessionID string) func() {
 		return func() {}
 	}
 
+	s.cancelOperationsPublishMu.Lock()
 	s.cancelOperationsMu.Lock()
 	if s.cancelOperations == nil {
 		s.cancelOperations = make(map[string]int)
 	}
+	wasPending := s.cancelOperations[sessionID] > 0
 	s.cancelOperations[sessionID]++
 	s.cancelOperationsMu.Unlock()
+	if !wasPending {
+		s.publishCancellationPending(sessionID, true)
+	}
+	s.cancelOperationsPublishMu.Unlock()
 
 	var once sync.Once
 	return func() {
 		once.Do(func() {
+			s.cancelOperationsPublishMu.Lock()
 			s.cancelOperationsMu.Lock()
 			count := s.cancelOperations[sessionID]
+			cleared := count <= 1
 			if count <= 1 {
 				delete(s.cancelOperations, sessionID)
 			} else {
 				s.cancelOperations[sessionID] = count - 1
 			}
 			s.cancelOperationsMu.Unlock()
+			if cleared {
+				s.publishCancellationPending(sessionID, false)
+			}
+			s.cancelOperationsPublishMu.Unlock()
 		})
+	}
+}
+
+// CancellationPending reports whether at least one accepted cancellation
+// operation is active for sessionID. The projection is intentionally runtime
+// scoped: a backend restart clears it because no cancellation work survives
+// the process restart.
+func (s *Service) CancellationPending(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	s.cancelOperationsMu.Lock()
+	defer s.cancelOperationsMu.Unlock()
+	return s.cancelOperations[sessionID] > 0
+}
+
+func (s *Service) publishCancellationPending(sessionID string, pending bool) {
+	if s.eventBus == nil || sessionID == "" {
+		return
+	}
+	payload := map[string]interface{}{
+		"session_id":           sessionID,
+		"cancellation_pending": pending,
+	}
+	if err := s.eventBus.Publish(context.Background(), events.TaskSessionCancellationChanged,
+		bus.NewEvent(events.TaskSessionCancellationChanged, "orchestrator", payload)); err != nil {
+		if s.logger != nil {
+			s.logger.Warn("failed to publish cancellation state",
+				zap.String("session_id", sessionID),
+				zap.Bool("cancellation_pending", pending),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -4163,6 +4209,10 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
 	endCancel := s.beginCancelInFlight(sessionID)
 	defer endCancel()
+	// Once authorization and admission succeed, cancellation is accepted work.
+	// Keep it independent of the request context so a WebSocket disconnect does
+	// not leave the session stuck in RUNNING after the agent has been interrupted.
+	operationCtx := context.WithoutCancel(ctx)
 
 	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
 	// disable, so impatient users click it multiple times while the agent is
@@ -4188,7 +4238,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	defer unlockGuard()
 
 	// Fetch session for state updates and message creation
-	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	session, err := s.repo.GetTaskSession(operationCtx, sessionID)
 	if err != nil {
 		s.logger.Warn("failed to get session for cancel",
 			zap.String("session_id", sessionID),
@@ -4222,7 +4272,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// The agent manager routes the cancel to the right signal: ACP cancel for
 	// regular sessions, Ctrl-C via PTY stdin for passthrough sessions. Service
 	// stays protocol-agnostic; the seam is in lifecycle.Manager.CancelAgentBySessionID.
-	if err := s.agentManager.CancelAgent(ctx, sessionID); err != nil {
+	if err := s.agentManager.CancelAgent(operationCtx, sessionID); err != nil {
 		switch {
 		case errors.Is(err, lifecycle.ErrNoExecutionForSession):
 			// The session was live but there is no execution to cancel — the agent process
@@ -4249,14 +4299,14 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	// workflow completion is evaluated; a failure leaves the task on its
 	// current step so a retry can reconcile it safely.
 	if session != nil {
-		reconciled, err := s.reconcileCancelledTurn(ctx, session.TaskID, sessionID, session, cancelTurnCompletionEligible)
+		reconciled, err := s.reconcileCancelledTurn(operationCtx, session.TaskID, sessionID, session, cancelTurnCompletionEligible)
 		if err != nil {
 			return fmt.Errorf("reconcile cancelled turn: %w", err)
 		}
 		if reconciled != nil {
 			session = reconciled
 		}
-	} else if _, err := s.reconcileCancelledTurn(ctx, "", sessionID, nil, false); err != nil {
+	} else if _, err := s.reconcileCancelledTurn(operationCtx, "", sessionID, nil, false); err != nil {
 		return fmt.Errorf("reconcile cancelled turn: %w", err)
 	}
 
@@ -4267,7 +4317,7 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 			"variant":   "warning",
 		}
 		if err := s.messageCreator.CreateSessionMessage(
-			ctx,
+			operationCtx,
 			session.TaskID,
 			"Turn cancelled by user",
 			sessionID,

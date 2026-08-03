@@ -106,6 +106,7 @@ function mergeTaskSession(existing: TaskSession, incoming: TaskSession): TaskSes
   return {
     ...existing,
     ...incoming,
+    cancellation_pending: incoming.cancellation_pending ?? existing.cancellation_pending,
     agent_profile_snapshot: incoming.agent_profile_snapshot ?? existing.agent_profile_snapshot,
     worktree_id: incoming.worktree_id ?? existing.worktree_id,
     worktree_path: incoming.worktree_path ?? existing.worktree_path,

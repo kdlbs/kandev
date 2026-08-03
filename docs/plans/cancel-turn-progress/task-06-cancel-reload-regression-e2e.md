@@ -1,7 +1,7 @@
 ---
 id: "06-cancel-reload-regression-e2e"
 title: "Cancel reload regression"
-status: pending
+status: completed
 wave: 4
 depends_on: ["05-backend-owned-cancel-control"]
 plan: "plan.md"
@@ -63,5 +63,16 @@ task plus `plan.md` in the same primary conversation.
 
 ## Results
 
-Pending. Record every exact command and outcome, `git diff --check`, no-held-frame cleanup, and
-confirm that E2E touches only the isolated mock instance and creates no external side effects.
+Replaced request-held coverage with backend-accepted task navigation and reload coverage.
+
+- `cd apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=chromium e2e/tests/chat/cancel-progress-task-switch.spec.ts` — 1 passed (12.1s) after rebuilding the backend binary and Vite assets.
+- `cd apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=mobile-chrome e2e/tests/chat/mobile-cancel-progress-reload.spec.ts` — 1 passed (10.4s).
+- `cd apps/web && pnpm run typecheck` — passed.
+- `git diff --check` — passed.
+
+The first desktop attempt exposed that the E2E fixture was launching a stale backend binary; rebuilding
+`apps/backend/bin/kandev` and `apps/web/dist` made the new live event available. The first mobile
+attempt used the desktop keyboard helper; it was corrected to submit through the mobile button. Both
+final tests observe backend `cancellation_pending=true`, verify the disabled spinner after
+navigation/reload, and wait for the explicit `false` settle. The old held-frame helper was removed,
+and each run used only the isolated mock backend/workspace.

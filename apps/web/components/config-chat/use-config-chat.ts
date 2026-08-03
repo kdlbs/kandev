@@ -79,6 +79,7 @@ function registerStartedSession({
     id: toSessionId(response.session_id),
     task_id: toTaskId(response.task_id),
     state: "CREATED",
+    cancellation_pending: false,
     started_at: now,
     updated_at: now,
     agent_profile_id: toAgentProfileId(agentProfileId),

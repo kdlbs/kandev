@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/cancel-turn-progress.md
 created: 2026-08-03
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Backend-owned cancel-turn progress
@@ -79,7 +79,9 @@ exposes that fact instead of adding another lifecycle state or a durable databas
 
 ### Session contracts and live updates
 
-- `apps/web/lib/types/http.ts`: add non-optional `cancellation_pending: boolean` to `TaskSession`.
+- `apps/web/lib/types/http.ts`: add the backend-owned `cancellation_pending` field to `TaskSession`;
+  keep it optional only for partial in-memory/test rows while backend wire boundaries always emit an
+  explicit boolean.
 - `apps/web/lib/types/backend.ts`: add the cancellation field to the state-snapshot payload, define
   `TaskSessionCancellationChangedPayload`, and register `session.cancellation_changed` in the
   backend message map.
@@ -150,8 +152,19 @@ layouts. Because reload persistence changes user-visible behavior on compact scr
 
 ## Verification Results
 
-Pending. Tasks 01 and 02 below record the superseded frontend-only evidence; revised Tasks 03-06
-must replace this section with their exact command results before the plan is complete.
+The backend-owned package is complete. Superseded Tasks 01 and 02 below remain as historical
+records; revised Tasks 03-06 are the authoritative implementation evidence.
+
+- Backend lifecycle focused tests: 3 passed; cancellation regression set: 16 passed; race set: 4
+  passed.
+- Backend projection packages (`internal/task/dto`, `internal/task/handlers`, `internal/backendapp`,
+  `internal/gateway/websocket`): 676 passed.
+- Frontend focused contract/control/store tests: 104 passed; typecheck, lint, and i18n ratchet passed.
+- `make -C apps/backend test` and `make -C apps/backend build` completed without failures.
+- Desktop backend-owned switch/reload E2E: 1 passed; mobile-chrome reload E2E: 1 passed.
+- `git diff --check`: passed.
+- No schema migration, durable cancellation marker, cross-workspace broadcast, held WebSocket frame,
+  or external side effect was added.
 
 ## Implementation Waves And Parallel Candidates
 
@@ -164,13 +177,13 @@ Previous implementation record (completed, partially retained as optimistic beha
 
 Revised implementation, sequential dependency chain:
 
-- [ ] [task-03-backend-cancellation-lifecycle](task-03-backend-cancellation-lifecycle.md) — pending;
+- [x] [task-03-backend-cancellation-lifecycle](task-03-backend-cancellation-lifecycle.md) — completed;
   establishes runtime ownership and operation transitions.
-- [ ] [task-04-cancellation-projection-contract](task-04-cancellation-projection-contract.md) —
-  pending; depends on Task 03 and exposes hydration/live contracts.
-- [ ] [task-05-backend-owned-cancel-control](task-05-backend-owned-cancel-control.md) — pending;
+- [x] [task-04-cancellation-projection-contract](task-04-cancellation-projection-contract.md) —
+  completed; depends on Task 03 and exposes hydration/live contracts.
+- [x] [task-05-backend-owned-cancel-control](task-05-backend-owned-cancel-control.md) — completed;
   depends on Task 04 and consumes the backend projection.
-- [ ] [task-06-cancel-reload-regression-e2e](task-06-cancel-reload-regression-e2e.md) — pending;
+- [x] [task-06-cancel-reload-regression-e2e](task-06-cancel-reload-regression-e2e.md) — completed;
   depends on Task 05 and proves desktop/mobile navigation and reload behavior.
 
 These tasks are not parallel-safe: each changes or validates the contract established by the

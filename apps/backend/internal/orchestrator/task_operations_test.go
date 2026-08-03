@@ -1188,6 +1188,76 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	}
 }
 
+func TestCancellationPendingTracksReferencesAndPublishesTransitions(t *testing.T) {
+	recorded := &recordingEventBus{}
+	svc := &Service{eventBus: recorded}
+
+	endFirst := svc.beginCancelInFlight("session1")
+	require.True(t, svc.CancellationPending("session1"))
+	require.False(t, svc.CancellationPending("session2"))
+
+	endSecond := svc.beginCancelInFlight("session1")
+	require.True(t, svc.CancellationPending("session1"))
+	require.Len(t, cancellationPendingEvents(recorded), 1)
+
+	endFirst()
+	require.True(t, svc.CancellationPending("session1"))
+	endSecond()
+	require.False(t, svc.CancellationPending("session1"))
+
+	events := cancellationPendingEvents(recorded)
+	require.Len(t, events, 2)
+	require.Equal(t, true, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, false, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+}
+
+func TestCancelAgent_ClearsCancellationPendingOnError(t *testing.T) {
+	recorded := &recordingEventBus{}
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{cancelAgentErr: errors.New("cancel failed")}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.eventBus = recorded
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	require.Error(t, svc.CancelAgent(context.Background(), "session1"))
+	require.False(t, svc.CancellationPending("session1"))
+	require.Len(t, cancellationPendingEvents(recorded), 2)
+}
+
+func TestCancelAgent_SurvivesCallerCancellation(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:        true,
+		cancelAgentBlock:      make(chan struct{}),
+		cancelAgentEntered:    make(chan struct{}, 1),
+		cancelAgentContextErr: errors.New("cancel used caller context"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.CancelAgent(ctx, "session1")
+	}()
+	<-agentMgr.cancelAgentEntered
+	cancel()
+	close(agentMgr.cancelAgentBlock)
+
+	require.NoError(t, <-done)
+}
+
+func cancellationPendingEvents(recorded *recordingEventBus) []recordedEvent {
+	const subject = "task_session.cancellation_changed"
+	filtered := make([]recordedEvent, 0, len(recorded.events))
+	for _, event := range recorded.events {
+		if event.subject == subject {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
 // TestCancelAgent_TaskStateReconcile ensures cancel lands actively-working
 // kanban tasks in REVIEW (treated as finished work the user may want to
 // review). Office tasks and tasks already out of IN_PROGRESS / SCHEDULING

@@ -602,6 +602,10 @@ type Service struct {
 	// the shared guard keep cancellation priority until the last request exits.
 	cancelOperationsMu sync.Mutex
 	cancelOperations   map[string]int
+	// cancelOperationsPublishMu serializes the 0->1 and 1->0 transition
+	// publications so clients observe cancellation state changes in order even
+	// when overlapping requests begin and finish concurrently.
+	cancelOperationsPublishMu sync.Mutex
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.

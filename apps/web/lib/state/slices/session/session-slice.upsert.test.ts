@@ -79,6 +79,17 @@ describe("upsertTaskSessionFromEvent", () => {
     expect(session.repository_id).toBe("repo-1");
   });
 
+  it("preserves backend cancellation state across unrelated partial events", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ cancellation_pending: true }));
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "RUNNING" }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].cancellation_pending).toBe(true);
+  });
+
   it("seeds environmentIdBySessionId when task_environment_id is present", () => {
     const store = makeStore();
 

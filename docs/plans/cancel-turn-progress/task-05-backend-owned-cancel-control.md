@@ -1,7 +1,7 @@
 ---
 id: "05-backend-owned-cancel-control"
 title: "Backend-owned cancel control"
-status: pending
+status: completed
 wave: 3
 depends_on: ["04-cancellation-projection-contract"]
 plan: "plan.md"
@@ -64,5 +64,16 @@ same primary conversation.
 
 ## Results
 
-Pending. Record every exact command and outcome, `git diff --check`, and confirm that no new copy,
-browser persistence, security boundary, or external side effect was introduced.
+Implemented the backend-owned session contract and shared desktop/mobile control merge.
+
+- `cd apps && pnpm --filter @kandev/web test -- --run lib/ws/handlers/agent-session.test.ts components/task/chat/chat-input-toolbar.test.tsx lib/state/slices/ui/ui-slice.test.ts` — 3 files, 104 passed.
+- `cd apps/web && pnpm run typecheck` — passed.
+- `cd apps && pnpm --filter @kandev/web lint` — passed.
+- `cd apps && pnpm --filter @kandev/web run i18n:ratchet` — passed (0 added, 11 modified files clean).
+- `git diff --check` — passed.
+
+The shared cancel control uses backend `true` OR the transient optimistic request flag, so backend
+state survives a fresh store while both cleared values remain retryable. The frontend wire type keeps
+the field optional for partial in-memory/test rows, while backend DTO and hydration boundaries always
+serialize it explicitly. No new copy, browser persistence, security boundary, or external side effect
+was introduced; desktop and compact mobile continue using the same `SubmitButton`.

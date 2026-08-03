@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { render, screen, fireEvent, act, cleanup } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
+import type { TaskSession } from "@/lib/types/http";
 
 const responsiveMock = vi.hoisted(() => ({
   breakpoint: "desktop" as "mobile" | "tablet" | "compactDesktop" | "desktop",
@@ -108,6 +109,7 @@ import type { ChatInputToolbarProps } from "./chat-input-toolbar";
 
 const MOBILE_TOOLBAR_TEST_ID = "mobile-chat-input-toolbar";
 const CANCEL_AGENT_BUTTON_TEST_ID = "cancel-agent-button";
+const SESSION_TIMESTAMP = "2026-01-01T00:00:00Z";
 
 function deferred<T>() {
   let resolve!: (v: T) => void;
@@ -163,6 +165,71 @@ function renderFullToolbar(overrides: Partial<ChatInputToolbarProps> = {}) {
     </StateProvider>,
   );
 }
+
+function makeRunningSession(cancellationPending: boolean): TaskSession {
+  return {
+    id: "s1",
+    task_id: "t1",
+    state: "RUNNING",
+    cancellation_pending: cancellationPending,
+    started_at: SESSION_TIMESTAMP,
+    updated_at: SESSION_TIMESTAMP,
+  } as TaskSession;
+}
+
+describe("ChatInputToolbar backend cancellation state", () => {
+  it("renders backend-owned pending state after store hydration", () => {
+    render(
+      <StateProvider initialState={{ taskSessions: { items: { s1: makeRunningSession(true) } } }}>
+        <ChatInputToolbar
+          planModeEnabled={false}
+          onPlanModeChange={() => {}}
+          sessionId="s1"
+          taskId="t1"
+          taskDescription=""
+          isAgentBusy
+          isDisabled={false}
+          isSending={false}
+          onCancel={() => {}}
+          onSubmit={() => {}}
+          hasContent={false}
+        />
+      </StateProvider>,
+    );
+
+    const button = screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.querySelector('[role="status"]')).toBeTruthy();
+  });
+
+  it("uses backend pending state as the duplicate-click guard", () => {
+    const onCancel = vi.fn();
+
+    render(
+      <StateProvider initialState={{ taskSessions: { items: { s1: makeRunningSession(true) } } }}>
+        <ChatInputToolbar
+          planModeEnabled={false}
+          onPlanModeChange={() => {}}
+          sessionId="s1"
+          taskId="t1"
+          taskDescription=""
+          isAgentBusy
+          isDisabled={false}
+          isSending={false}
+          onCancel={onCancel}
+          onSubmit={() => {}}
+          hasContent={false}
+        />
+      </StateProvider>,
+    );
+
+    const button = screen.getByTestId(CANCEL_AGENT_BUTTON_TEST_ID) as HTMLButtonElement;
+    fireEvent.click(button);
+    expect(onCancel).not.toHaveBeenCalled();
+    expect(button.disabled).toBe(true);
+    expect(button.querySelector('[role="status"]')).toBeTruthy();
+  });
+});
 
 // The cancel button must disable itself while a cancel request is in flight.
 // Without this guard, an impatient user clicking it repeatedly while the agent

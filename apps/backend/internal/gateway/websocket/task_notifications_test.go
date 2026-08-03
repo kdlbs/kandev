@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/require"
 )
 
 func testLogger() *logger.Logger {
@@ -107,7 +108,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 62
+	const wantSubscriptions = 63
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)
@@ -214,5 +215,30 @@ func TestTaskEventBroadcaster_PreservesAllFields(t *testing.T) {
 	capturedJSON, _ := json.Marshal(capturedMap)
 	if string(origJSON) != string(capturedJSON) {
 		t.Errorf("event data was modified\noriginal: %s\ncaptured: %s", origJSON, capturedJSON)
+	}
+}
+
+func TestTaskEventBroadcaster_CancellationIsSessionScoped(t *testing.T) {
+	h := newTestHub(t)
+	first := newTestClient("first")
+	second := newTestClient("second")
+	registerTestClient(h, first)
+	registerTestClient(h, second)
+	h.SubscribeToSession(first, "session-1")
+	h.SubscribeToSession(second, "session-2")
+
+	msg, err := ws.NewNotification("session.cancellation_changed", map[string]any{
+		"session_id":           "session-1",
+		"cancellation_pending": true,
+	})
+	require.NoError(t, err)
+	b := &TaskEventBroadcaster{hub: h, logger: testLogger()}
+	require.NoError(t, b.routeBroadcast("session.cancellation_changed", msg.Payload, "session-1", "", msg))
+
+	if !clientReceived(first) {
+		t.Fatal("session subscriber did not receive cancellation notification")
+	}
+	if clientReceived(second) {
+		t.Fatal("cancellation notification crossed the session boundary")
 	}
 }

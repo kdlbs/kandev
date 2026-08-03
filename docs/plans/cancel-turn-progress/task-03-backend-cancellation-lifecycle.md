@@ -1,7 +1,7 @@
 ---
 id: "03-backend-cancellation-lifecycle"
 title: "Backend cancellation lifecycle"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -60,5 +60,14 @@ conversation.
 
 ## Results
 
-Pending. Record every exact command and outcome, `git diff --check`, and confirm that the change
-adds no persistent state, external side effect, or new trust boundary.
+Implemented the runtime projection and accepted-operation context boundary.
+
+- Red: `cd apps/backend && go test ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_ClearsCancellationPendingOnError|TestCancelAgent_SurvivesCallerCancellation' -count=1` initially failed because the public provider and transition implementation were absent.
+- Green: `cd apps/backend && go test ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_ClearsCancellationPendingOnError|TestCancelAgent_SurvivesCallerCancellation' -count=1` — 3 passed.
+- Regression: `cd apps/backend && go test ./internal/orchestrator -run 'TestCancelAgent|TestHandleAgentBootReady_DoesNotDrainWhileCancelInFlight' -count=1` — 15 passed.
+- Race: `cd apps/backend && go test -race ./internal/orchestrator -run 'TestCancellationPendingTracksReferencesAndPublishesTransitions|TestCancelAgent_ClearsCancellationPendingOnError|TestCancelAgent_SurvivesCallerCancellation|TestCancelAgent_DeduplicatesConcurrentCalls' -count=1` — 4 passed.
+- `git diff --check` — passed.
+
+The registry remains process-local and reference-counted; no schema, repository, metadata, external
+side effect, or new trust boundary was added. Event publication failures are logged and cannot change
+the cancellation result.

@@ -285,6 +285,8 @@ export type TaskSessionStateChangedPayload = {
   // live flips arrive on session.activity_changed.
   foreground_activity?: ForegroundActivity | null;
   active_subagent_count?: number;
+  /** Backend-owned cancellation projection carried by state snapshots. */
+  cancellation_pending?: boolean;
 };
 
 /**
@@ -297,6 +299,11 @@ export type TaskSessionActivityChangedPayload = {
   session_id: string;
   foreground_activity: ForegroundActivity | null;
   active_subagent_count: number;
+};
+
+export type TaskSessionCancellationChangedPayload = {
+  session_id: string;
+  cancellation_pending: boolean;
 };
 
 export type TaskSessionNotificationPayload = {
@@ -552,6 +559,10 @@ export type BackendMessageMap = OfficeBackendMessageMap &
     "session.activity_changed": BackendMessage<
       "session.activity_changed",
       TaskSessionActivityChangedPayload
+    >;
+    "session.cancellation_changed": BackendMessage<
+      "session.cancellation_changed",
+      TaskSessionCancellationChangedPayload
     >;
     "session.clarification_requested": BackendMessage<
       "session.clarification_requested",

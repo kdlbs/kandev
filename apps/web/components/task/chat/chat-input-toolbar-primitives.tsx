@@ -110,9 +110,13 @@ export function SubmitButton({
 }: SubmitButtonProps) {
   const showSendButton = !isAgentBusy || hasContent;
   const storeApi = useAppStoreApi();
-  const isCancelling = useAppStore((state) =>
-    sessionId ? (state.chatInput.cancellingBySessionId[sessionId] ?? false) : false,
-  );
+  const isCancelling = useAppStore((state) => {
+    if (!sessionId) return false;
+    return (
+      state.taskSessions.items[sessionId]?.cancellation_pending === true ||
+      state.chatInput.cancellingBySessionId[sessionId] === true
+    );
+  });
   const tooltipDescription = submitTooltipDescription(
     isAgentBusy,
     planModeEnabled,

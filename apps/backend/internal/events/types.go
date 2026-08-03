@@ -68,6 +68,9 @@ const (
 	// operator-facing composer and status indicator can distinguish
 	// "generating" from "waiting on spawned background work".
 	TaskSessionActivityChanged = "task_session.activity_changed"
+	// TaskSessionCancellationChanged fires when a cancellation request starts
+	// or the last overlapping request finishes for a session.
+	TaskSessionCancellationChanged = "task_session.cancellation_changed"
 	// TaskSessionErrorChanged is emitted when a recoverable agent error is
 	// created, replaced, or dismissed. It is a bounded status source; the
 	// error message itself is projected into the task summary rather than
