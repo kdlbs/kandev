@@ -3,10 +3,11 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -211,7 +212,9 @@ func TestReconcileSessionsOnStartup_MissingSessionDeadRowPrunedOnNotFound(t *tes
 	}
 
 	agentMgr := &mockAgentManager{
-		stopAgentWithReasonErr: lifecycle.ErrExecutionNotFound, // runtime already gone
+		// The runtime seam (lifecycleAdapter) normalizes the lifecycle not-found
+		// sentinel to runtimeapi.ErrNotFound before it reaches the orchestrator.
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
 		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
 			return models.ProcessLivenessDead
 		},
@@ -242,7 +245,7 @@ func TestReconcileSessionsOnStartup_MissingSessionDeadRowWithTokenRepaired(t *te
 	}
 
 	agentMgr := &mockAgentManager{
-		stopAgentWithReasonErr: lifecycle.ErrExecutionNotFound,
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
 		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
 			return models.ProcessLivenessDead
 		},
@@ -280,7 +283,7 @@ func TestReconcileSessionsOnStartup_MissingSessionUnknownRowPreservedOnNotFound(
 	}
 
 	agentMgr := &mockAgentManager{
-		stopAgentWithReasonErr: lifecycle.ErrExecutionNotFound,
+		stopAgentWithReasonErr: fmt.Errorf("stop agent: %w", runtimeapi.ErrNotFound),
 		rowLivenessFn: func(*models.ExecutorRunning) models.ProcessLiveness {
 			return models.ProcessLivenessUnknown
 		},

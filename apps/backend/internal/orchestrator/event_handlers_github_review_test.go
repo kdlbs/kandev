@@ -43,6 +43,13 @@ func TestBuildReviewTaskRequest_TruncatesTitle(t *testing.T) {
 			prTitle:   strings.Repeat("é", 100),
 			wantTrunc: true,
 		},
+		{
+			// Prefix "PR #42: " is 8 runes, so a 52-rune PR title yields exactly
+			// the 60-rune limit and must pass through untouched (boundary case).
+			name:      "exactly at limit unchanged",
+			prTitle:   strings.Repeat("a", taskservice.TaskTitleMaxLength-len("PR #42: ")),
+			wantExact: "PR #42: " + strings.Repeat("a", taskservice.TaskTitleMaxLength-len("PR #42: ")),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -52,6 +59,9 @@ func TestBuildReviewTaskRequest_TruncatesTitle(t *testing.T) {
 
 			if got := utf8.RuneCountInString(req.Title); got > taskservice.TaskTitleMaxLength {
 				t.Fatalf("title = %d runes, want ≤ %d", got, taskservice.TaskTitleMaxLength)
+			}
+			if !utf8.ValidString(req.Title) {
+				t.Fatalf("title %q is not valid UTF-8; byte-based truncation split a rune", req.Title)
 			}
 			if err := taskservice.ValidateTaskTitle(req.Title); err != nil {
 				t.Fatalf("ValidateTaskTitle: %v", err)
@@ -93,6 +103,13 @@ func TestBuildIssueTaskTitle_TruncatesTitle(t *testing.T) {
 			issueTitle: strings.Repeat("ü", 100),
 			wantTrunc:  true,
 		},
+		{
+			// Prefix "Issue #7: " is 10 runes, so a 50-rune issue title yields
+			// exactly the 60-rune limit and must pass through untouched.
+			name:       "exactly at limit unchanged",
+			issueTitle: strings.Repeat("b", taskservice.TaskTitleMaxLength-len("Issue #7: ")),
+			wantExact:  "Issue #7: " + strings.Repeat("b", taskservice.TaskTitleMaxLength-len("Issue #7: ")),
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -100,6 +117,9 @@ func TestBuildIssueTaskTitle_TruncatesTitle(t *testing.T) {
 
 			if n := utf8.RuneCountInString(got); n > taskservice.TaskTitleMaxLength {
 				t.Fatalf("title = %d runes, want ≤ %d", n, taskservice.TaskTitleMaxLength)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("title %q is not valid UTF-8; byte-based truncation split a rune", got)
 			}
 			if err := taskservice.ValidateTaskTitle(got); err != nil {
 				t.Fatalf("ValidateTaskTitle: %v", err)

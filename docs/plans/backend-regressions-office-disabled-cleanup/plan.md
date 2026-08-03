@@ -54,8 +54,11 @@ from "real failure". `handleMissingSessionOnStartup`
 `StopAgentWithReason` returns any error, including a legitimate not-found for a
 dead process. In the durable worker, `executeTaskResourceCleanupJob`
 (`task/service/resource_cleanup_jobs.go:396,413-419`) counts every failed stop —
-not-found included — as a `failedStops` entry, returns an error, and the job
-re-enters `retry_wait` forever. Confirmed-dead local runtimes are never pruned.
+not-found included — as a `failedStops` entry and returns an error, so the job
+re-enters `retry_wait` and exhausts its full retry budget (the documented
+eight-claim bound, whose eighth failed attempt becomes terminal `failed`) even
+though the runtime is already gone. Confirmed-dead local runtimes are never
+pruned and every cleanup for them burns the whole retry budget before failing.
 
 ## Backend Changes
 
@@ -75,9 +78,16 @@ re-enters `retry_wait` forever. Confirmed-dead local runtimes are never pruned.
 
 ## Tests (RED before GREEN)
 
-- **Task 01:** `scheduler/cron/routines_test.go` — a handler built from a
-  typed-nil `RoutineTicker` no-ops without panic; plus a `backendapp` wiring
-  assertion that `startCronScheduler` with a nil routines service ticks safely.
+- **Task 01:** Two complementary layers. Behavioral: `scheduler/cron/routines_test.go`
+  proves a handler built from a typed-nil `RoutineTicker` (the exact production
+  panic shape) takes the no-op branch on `Tick` without panicking. Static guard:
+  `backendapp/scheduler_wiring_test.go` asserts (via AST) that `startCronScheduler`
+  never passes the raw `routineSvc` pointer straight into `NewRoutinesHandler`,
+  so the nil-gating (`RoutineTicker` interface variable) cannot be dropped and
+  reintroduce the typed-nil interface. The backendapp check is intentionally
+  static — a runtime `startCronScheduler` test would require standing up the full
+  `*Repositories`/dispatcher graph for no additional behavioral coverage beyond
+  the handler test.
 - **Task 02:** `orchestrator/event_handlers_github_review_test.go` (and the issue
   builder test) — ASCII and multibyte over-limit titles keep the `PR #`/`Issue #`
   prefix, stay ≤60 runes, and end with `…`.
@@ -90,8 +100,10 @@ re-enters `retry_wait` forever. Confirmed-dead local runtimes are never pruned.
 
 ## Implementation Waves And Parallel Candidates
 
-Tasks touch disjoint packages (`backendapp`+`scheduler/cron`; `orchestrator`
-github handlers; `orchestrator`+`orchestrator/executor`+`task/service`). They
+Task 02 and Task 03 both modify `internal/orchestrator` (Task 02 the GitHub
+title builders, Task 03 the stop-error classification), so they are not
+package-disjoint — but their files and symbols are disjoint, so they do not
+collide. Task 01 is fully isolated in `backendapp`+`scheduler/cron`. All three
 share no schema, migration, generated contract, lockfile, or package config.
 
 - Wave 1 (parallel-safe): Task 01, Task 02.

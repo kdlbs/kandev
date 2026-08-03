@@ -23,7 +23,6 @@ import (
 	"go.uber.org/zap"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -1766,10 +1765,11 @@ func (s *Service) handleMissingSessionOnStartup(ctx context.Context, running *mo
 // stopReportsRuntimeAbsent reports whether a stop error means the runtime is
 // already gone (a typed not-found sentinel), as opposed to a transient failure.
 // Only a typed sentinel counts — a generic store/lookup error must never be
-// reinterpreted as an absent runtime.
+// reinterpreted as an absent runtime. The runtime seam (lifecycleAdapter)
+// normalizes the backend lifecycle not-found sentinel to runtimeapi.ErrNotFound,
+// so reconciliation depends only on the public runtime and executor sentinels.
 func stopReportsRuntimeAbsent(err error) bool {
-	return errors.Is(err, lifecycle.ErrExecutionNotFound) ||
-		errors.Is(err, runtimeapi.ErrNotFound) ||
+	return errors.Is(err, runtimeapi.ErrNotFound) ||
 		errors.Is(err, executor.ErrExecutionNotFound)
 }
 

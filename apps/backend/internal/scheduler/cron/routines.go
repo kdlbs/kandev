@@ -62,6 +62,10 @@ func isNilTicker(ticker RoutineTicker) bool {
 	if ticker == nil {
 		return true
 	}
+	// Every RoutineTicker implementation today is a pointer receiver, so Ptr is
+	// the only kind reached in practice; the remaining nil-able kinds are listed
+	// defensively so a future value/func/channel implementer can never smuggle a
+	// typed-nil past this guard and re-open the Office-disabled tick panic.
 	v := reflect.ValueOf(ticker)
 	switch v.Kind() {
 	case reflect.Ptr, reflect.Map, reflect.Chan, reflect.Func, reflect.Slice, reflect.Interface:
