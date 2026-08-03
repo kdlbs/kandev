@@ -33,6 +33,50 @@ func TestToolArgumentValidationRejectsUnknownTopLevelArgument(t *testing.T) {
 		content.Text)
 }
 
+func TestToolArgumentValidationNamesMissingWalkthroughStepProperty(t *testing.T) {
+	const rejectedValue = "private sibling value"
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "show_walkthrough_kandev", map[string]interface{}{
+		"steps": []interface{}{
+			map[string]interface{}{
+				"file":  "example.go",
+				"line":  1,
+				"title": rejectedValue,
+			},
+		},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	require.NotEmpty(t, result.Content)
+	content, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, content.Text, "/steps/0")
+	assert.Contains(t, content.Text, "keyword: required")
+	assert.Contains(t, content.Text, `missing: "text"`)
+	assert.NotContains(t, content.Text, rejectedValue)
+}
+
+func TestToolArgumentValidationNamesEveryMissingWalkthroughStepProperty(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "show_walkthrough_kandev", map[string]interface{}{
+		"steps": []interface{}{
+			map[string]interface{}{"line": 1},
+		},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+	require.NotEmpty(t, result.Content)
+	content, ok := result.Content[0].(mcp.TextContent)
+	require.True(t, ok)
+	assert.Contains(t, content.Text, `missing: "file", "text"`)
+}
+
 func TestToolArgumentValidation(t *testing.T) {
 	t.Run("accepts an empty object for a parameterless tool", func(t *testing.T) {
 		backend := &testBackend{
