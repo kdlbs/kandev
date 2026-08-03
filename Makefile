@@ -139,7 +139,7 @@ help:
 	@echo "  lint-web         Run ESLint"
 	@echo "  lint-architecture  Enforce architecture budgets and compatibility expiry"
 	@echo "  lint-format      Check formatting with Prettier (web/cli/packages)"
-	@echo "  dead-code-web    Find unused web files, exports, and dependencies"
+	@echo "  dead-code-workspaces Find unused TypeScript workspace files, exports, and dependencies"
 	@echo "  dead-code-go     Find unreachable Go functions (host config; verify other targets before deletion)"
 	@echo "  fmt              Format all code"
 	@echo "  fmt-backend      Format Go code"
@@ -577,9 +577,9 @@ lint-format:
 	@printf "$(CYAN)Checking formatting...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) run format:check
 
-.PHONY: dead-code-web
-dead-code-web:
-	@printf "$(CYAN)Auditing web dead code...$(RESET)\n"
+.PHONY: dead-code-workspaces
+dead-code-workspaces:
+	@printf "$(CYAN)Auditing TypeScript workspace dead code...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) run dead-code
 
 .PHONY: dead-code-go
