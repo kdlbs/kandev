@@ -23,10 +23,10 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts
-cd apps/web && pnpm e2e:run --host --project mobile-chrome -- tests/chat/mobile-cancel-progress-reload.spec.ts
-cd apps/web && pnpm run typecheck
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome -- tests/chat/mobile-cancel-progress-reload.spec.ts)
+(cd apps/web && pnpm run typecheck)
 ```
 
 Follow TDD: first forward the cancel request and prove the reloaded control loses progress without

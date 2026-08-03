@@ -23,10 +23,10 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web test -- --run lib/ws/handlers/agent-session.test.ts components/task/chat/chat-input-toolbar.test.tsx lib/state/slices/ui/ui-slice.test.ts
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web run i18n:ratchet
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web test -- --run lib/ws/handlers/agent-session.test.ts components/task/chat/chat-input-toolbar.test.tsx lib/state/slices/ui/ui-slice.test.ts)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web run i18n:ratchet)
 ```
 
 Follow TDD: first hydrate a new store with `cancellation_pending=true` and deliver true/false live

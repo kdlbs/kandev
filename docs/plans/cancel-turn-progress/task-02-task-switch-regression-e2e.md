@@ -26,8 +26,8 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run --host --project chromium -- tests/chat/cancel-progress-task-switch.spec.ts)
 ```
 
 Follow TDD: add and run the browser regression against the pre-fix control to demonstrate that the

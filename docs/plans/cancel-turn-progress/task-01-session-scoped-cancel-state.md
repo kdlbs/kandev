@@ -26,10 +26,10 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Verification
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web run i18n:ratchet
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice.test.ts components/task/chat/chat-input-toolbar.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web run i18n:ratchet)
 ```
 
 Follow TDD: first add the remount regression and confirm it fails because `SubmitButton` resets its

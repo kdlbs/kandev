@@ -23,7 +23,7 @@ spec: "../../specs/ui/cancel-turn-progress.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -run 'Cancellation|CancelPending|SessionDataProvider'
+(cd apps/backend && go test ./internal/task/dto ./internal/task/handlers ./internal/backendapp ./internal/gateway/websocket -run 'Cancellation|CancelPending|SessionDataProvider')
 make -C apps/backend test
 ```
 
