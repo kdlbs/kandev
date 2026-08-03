@@ -41,4 +41,11 @@ describe("containerTaskLabel", () => {
       ),
     ).toBe(taskID);
   });
+
+  // The untracked fallback is copy, not container data, so it is resolved
+  // through `t()` at the render site rather than returned from here.
+  it("returns null when the container carries no task labels", () => {
+    expect(containerTaskLabel(container())).toBeNull();
+    expect(containerTaskLabel(container({ "kandev.task_title": "  " }))).toBeNull();
+  });
 });

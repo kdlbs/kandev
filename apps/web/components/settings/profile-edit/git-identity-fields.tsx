@@ -3,6 +3,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import { AccordionContent, AccordionItem, AccordionTrigger } from "@kandev/ui/accordion";
+import { useTranslation } from "react-i18next";
 
 export type GitIdentityMode = "local" | "override";
 export type GitIdentityState = {
@@ -29,20 +30,21 @@ const RADIO_LABEL =
 const RADIO_ITEM = "mt-0.5 border border-muted-foreground/80 data-[state=checked]:border-primary";
 
 export function GitIdentityAccordionItem(props: GitIdentityFieldsProps) {
+  const { t } = useTranslation();
   const isLocal = props.mode === "local" && props.localGitIdentity.detected;
   const modeDirty = props.mode !== props.baselineMode;
   const nameDirty = props.mode === "override" && props.gitUserName !== props.baselineGitUserName;
   const emailDirty = props.mode === "override" && props.gitUserEmail !== props.baselineGitUserEmail;
   const description = props.localGitIdentity.detected
     ? `${props.localGitIdentity.userName} <${props.localGitIdentity.userEmail}>`
-    : "Local git user.name/user.email not detected on this machine";
-  const badgeLabel = gitIdentityBadgeLabel(props.mode, isLocal);
+    : t("executors:localGitIdentityNotDetected");
+  const badgeLabel = t(gitIdentityBadgeLabelKey(props.mode, isLocal));
 
   return (
     <AccordionItem value="git_identity" data-settings-dirty={modeDirty || nameDirty || emailDirty}>
       <AccordionTrigger>
         <div className="flex flex-1 items-center gap-2">
-          <span className="text-sm font-medium">Git Identity</span>
+          <span className="text-sm font-medium">{t("executors:gitIdentity")}</span>
           <Badge
             variant={isLocal ? "default" : "secondary"}
             className={isLocal ? "bg-green-600 px-1.5 py-0 text-[10px]" : "px-1.5 py-0 text-[10px]"}
@@ -54,7 +56,7 @@ export function GitIdentityAccordionItem(props: GitIdentityFieldsProps) {
       <AccordionContent className="h-auto">
         <div className="space-y-3 text-sm">
           <p className="text-xs text-muted-foreground">
-            Used by remote executors for commit author configuration.
+            {t("executors:usedByRemoteExecutorsForCommit")}
           </p>
           <RadioGroup
             value={props.mode}
@@ -67,15 +69,15 @@ export function GitIdentityAccordionItem(props: GitIdentityFieldsProps) {
               selected={props.mode === "local"}
               baselineSelected={props.baselineMode === "local"}
               disabled={!props.localGitIdentity.detected}
-              title="Use local git config"
+              title={t("executors:useLocalGitConfig")}
               description={description}
             />
             <IdentityModeOption
               value="override"
               selected={props.mode === "override"}
               baselineSelected={props.baselineMode === "override"}
-              title="Override identity"
-              description="Set a custom name and email for remote git commits."
+              title={t("executors:overrideIdentity")}
+              description={t("executors:setACustomNameAndEmail")}
             />
           </RadioGroup>
           {props.mode === "override" && <OverrideIdentityFields {...props} />}
@@ -85,9 +87,11 @@ export function GitIdentityAccordionItem(props: GitIdentityFieldsProps) {
   );
 }
 
-function gitIdentityBadgeLabel(mode: GitIdentityMode, isLocal: boolean): string {
-  if (isLocal) return "Auto-detect";
-  return mode === "local" ? "Not Configured" : "Custom";
+// Returns a catalog key, not copy: module scope, so a `t()` here would freeze
+// the badge at the boot locale.
+function gitIdentityBadgeLabelKey(mode: GitIdentityMode, isLocal: boolean): string {
+  if (isLocal) return "executors:gitIdentityAutoDetect";
+  return mode === "local" ? "executors:notConfigured" : "executors:gitIdentityCustom";
 }
 
 function IdentityModeOption({
@@ -120,20 +124,21 @@ function IdentityModeOption({
 }
 
 function OverrideIdentityFields(props: GitIdentityFieldsProps) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="space-y-1.5">
-        <Label htmlFor="remote-git-user-name">Git User Name</Label>
+        <Label htmlFor="remote-git-user-name">{t("executors:gitUserName")}</Label>
         <Input
           id="remote-git-user-name"
           value={props.gitUserName}
           onChange={(event) => props.onGitUserNameChange(event.target.value)}
-          placeholder="Jane Developer"
+          placeholder={t("executors:janeDeveloper")}
           data-settings-dirty={props.gitUserName !== props.baselineGitUserName}
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="remote-git-user-email">Git User Email</Label>
+        <Label htmlFor="remote-git-user-email">{t("executors:gitUserEmail")}</Label>
         <Input
           id="remote-git-user-email"
           value={props.gitUserEmail}

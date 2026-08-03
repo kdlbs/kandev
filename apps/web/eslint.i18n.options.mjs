@@ -64,6 +64,9 @@ export const noLiteralStringOptions = {
       // Example values shown in placeholders: emails, CSS functions,
       // inline JSON, and ALLCAPS filename stand-ins.
       "[\\w.+-]+@[\\w-]+\\.[\\w.-]+",
+      // Wildcard domain globs (`*.example.com`) are the value shape a network
+      // policy rule expects, not prose — the user types this pattern verbatim.
+      "^\\*\\.[a-z0-9][a-z0-9.-]*$",
       ".*(calc|env|url|var)\\(.*",
       "\\{.*\\}",
       "[A-Z][A-Z0-9_]*\\.[a-z]{2,4}",
@@ -561,4 +564,59 @@ export const i18nGuardFiles = [
   // and pins that contract for the sibling migration of the other eight routes,
   // which will land their copy on top of it.
   "components/settings/system/system-page-shell.tsx",
+  // Settings → Executors profile-editor tree: the executor detail route, the
+  // new-executor route, the profile editor and all of its cards.
+  //
+  // Note the SINGULAR `app/settings/executor/`. The plural
+  // `app/settings/executors/` is a different tree — the executor list, the
+  // typed create routes and the SSH connection pages — and is NOT migrated;
+  // it lands with the SSH follow-up. The two paths are one character apart.
+  //
+  // In `components/settings`, only the `profile-edit/` subtree and the two
+  // loose `executor-profile*` files are migrated, which is why those are
+  // listed individually rather than as `components/settings/**`. The
+  // similarly-named `profile-form-fields.tsx`, `cli-flags-field.tsx` and
+  // `agent-profile-*` belong to the AGENT profile editor and are a sibling
+  // task's migration.
+  //
+  // Four entries in `profile-edit/` hold no JSX, or none that carries copy, so
+  // `mode: "jsx-only"` never inspects them; the entries record that they were
+  // reviewed by eye and only the pseudo-locale can prove they stay that way.
+  // `executor-profile-baselines.ts` (the defaults/parsing table),
+  // `profile-runtime-sections.tsx` and `profile-env-vars-section.tsx` (pure
+  // prop-forwarding) genuinely carry none. `script-editor-completions.ts` is
+  // the Monaco completion provider: every token it emits is a shell/script
+  // identifier or comes from the placeholder API, so none of it is copy — only
+  // the editor's own chrome in `script-editor.tsx` is.
+  //
+  // Deliberately left in English, each a value rather than copy:
+  //   - The Docker/TLS placeholder values `ghp_...`, `/path/to/certs`,
+  //     `unix:///var/run/docker.sock`, `tcp://remote:2376 or ssh://user@host`,
+  //     `*.example.com` and `kandev/multi-agent:latest`, plus the whole
+  //     `DEFAULT_DOCKERFILE` — all are values the user types or Docker parses.
+  //   - `DELETE_CONFIRM_TOKEN` ("delete") in the executor delete dialog. It is
+  //     compared with `!==`, so the copy interpolates it instead; translating
+  //     it would make the dialog impossible to satisfy.
+  //   - The seeded executor names "Local Docker" / "Remote Docker" in
+  //     `executor/new`. They are PERSISTED as `payload.name` and rendered later
+  //     on surfaces this PR does not own, so a stored name must not depend on
+  //     the locale it was created in. The Select labels beside them are copy
+  //     and do go through `t()`.
+  //   - The `ERROR:` prefix `parseDockerLine` emits and matches with
+  //     `startsWith`, and every line of `docker build` stdout it forwards.
+  //
+  // One known residual, recorded rather than folded in: the exported
+  // `validateMcpPolicy` in `profile-edit/mcp-policy-card.tsx` still returns
+  // English ("Invalid JSON", "MCP policy must be a JSON object"). Its only
+  // callers are `app/settings/executors/{[profileId],new/[type]}/page.tsx` —
+  // the un-migrated plural tree — which pass the result straight back in as the
+  // card's `mcpPolicyError` prop and as `invalidReason`. Migrating it means
+  // changing that prop to a catalog key and resolving it in both callers, so it
+  // belongs to the SSH/executor-list PR that owns them. The executor route in
+  // THIS PR renders its own local MCP policy card, whose validator does return
+  // catalog keys, so no screen migrated here can reach the English strings.
+  "app/settings/executor/**/*.{ts,tsx}",
+  "components/settings/profile-edit/**/*.{ts,tsx}",
+  "components/settings/executor-profile-dialog.tsx",
+  "components/settings/executor-profiles-card.tsx",
 ];

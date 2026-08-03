@@ -19,6 +19,7 @@ import {
 } from "@kandev/ui/dialog";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const DefaultIcon = EXECUTOR_ICON_MAP.local;
@@ -62,6 +63,7 @@ export function ProfileHeader({
   description: string;
   actions?: ReactNode;
 }) {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <>
@@ -84,7 +86,7 @@ export function ProfileHeader({
             onClick={() => router.push(EXECUTORS_ROUTE)}
             className="w-full cursor-pointer sm:w-auto"
           >
-            Back to Executors
+            {t("executors:backToExecutors")}
           </Button>
         </div>
       </div>
@@ -94,19 +96,20 @@ export function ProfileHeader({
 }
 
 export function ProfileFormActions({ onDelete }: { onDelete: () => void }) {
+  const { t } = useTranslation();
   const router = useRouter();
   return (
     <div className="flex items-center justify-between">
       <Button variant="destructive" size="sm" onClick={onDelete} className="cursor-pointer">
         <IconTrash className="mr-1 h-4 w-4" />
-        Delete Profile
+        {t("executors:deleteProfile")}
       </Button>
       <Button
         variant="outline"
         onClick={() => router.push(EXECUTORS_ROUTE)}
         className="cursor-pointer"
       >
-        Cancel
+        {t("common:cancel")}
       </Button>
     </div>
   );
@@ -125,6 +128,7 @@ export function DeleteProfileDialog({
   deleting: boolean;
   relatedDockerContainerCount?: number;
 }) {
+  const { t } = useTranslation();
   const [removeRelatedContainers, setRemoveRelatedContainers] = useState<boolean | null>(null);
   const hasRelatedContainers = relatedDockerContainerCount > 0;
   const shouldRemoveRelatedContainers = hasRelatedContainers && (removeRelatedContainers ?? true);
@@ -138,14 +142,15 @@ export function DeleteProfileDialog({
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete Profile</DialogTitle>
-          <DialogDescription>Are you sure? This action cannot be undone.</DialogDescription>
+          <DialogTitle>{t("executors:deleteProfile")}</DialogTitle>
+          <DialogDescription>{t("executors:areYouSureThisActionCannot")}</DialogDescription>
         </DialogHeader>
         {hasRelatedContainers && (
           <div className="space-y-3 rounded-md border p-3">
             <p className="text-sm text-muted-foreground">
-              {relatedDockerContainerCount} related Docker{" "}
-              {relatedDockerContainerCount === 1 ? "container" : "containers"} will also be removed.
+              {t("executors:relatedDockerContainersRemoved", {
+                count: relatedDockerContainerCount,
+              })}
             </p>
             <div className="flex items-center gap-2">
               <Checkbox
@@ -154,14 +159,14 @@ export function DeleteProfileDialog({
                 onCheckedChange={(checked) => setRemoveRelatedContainers(checked === true)}
               />
               <Label htmlFor="remove-related-docker-containers" className="cursor-pointer text-sm">
-                Remove related Docker containers
+                {t("executors:removeRelatedDockerContainers")}
               </Label>
             </div>
           </div>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             variant="destructive"
@@ -171,7 +176,7 @@ export function DeleteProfileDialog({
             disabled={deleting}
             className="cursor-pointer"
           >
-            {deleting ? "Deleting..." : "Delete"}
+            {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>
         </DialogFooter>
       </DialogContent>

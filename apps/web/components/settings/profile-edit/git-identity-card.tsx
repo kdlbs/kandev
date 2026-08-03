@@ -3,6 +3,7 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
+import { useTranslation } from "react-i18next";
 
 type GitIdentityCardProps = {
   name: string;
@@ -17,26 +18,25 @@ export function GitIdentityCard({
   onNameChange,
   onEmailChange,
 }: GitIdentityCardProps) {
+  const { t } = useTranslation();
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Git Identity</CardTitle>
-        <CardDescription>
-          Optional author identity applied in remote executor environments.
-        </CardDescription>
+        <CardTitle>{t("executors:gitIdentity")}</CardTitle>
+        <CardDescription>{t("executors:optionalAuthorIdentityAppliedInRemote")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="git-user-name">Git User Name</Label>
+          <Label htmlFor="git-user-name">{t("executors:gitUserName")}</Label>
           <Input
             id="git-user-name"
             value={name}
             onChange={(e) => onNameChange(e.target.value)}
-            placeholder="Jane Developer"
+            placeholder={t("executors:janeDeveloper")}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="git-user-email">Git User Email</Label>
+          <Label htmlFor="git-user-email">{t("executors:gitUserEmail")}</Label>
           <Input
             id="git-user-email"
             value={email}
