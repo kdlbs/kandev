@@ -13,6 +13,7 @@ import { DiffWorkerPoolProvider } from "@/components/diff-worker-pool-provider";
 import { AppSidebar } from "@/components/app-sidebar/app-sidebar";
 import { AppStatusSurfaceProvider } from "@/components/app-status-bar/app-status-surface-provider";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
+import { QuickTerminalProvider } from "@/components/quick-terminal/quick-terminal-provider";
 import { ConfigChatProvider } from "@/components/config-chat/config-chat-provider";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { SidebarViewsSyncBridge } from "@/components/sidebar-views-sync-bridge";
@@ -86,14 +87,16 @@ export default async function RootLayout({
                     <CommandPanel />
                     <RecentTaskSwitcher />
                     <ConfigChatProvider>
-                      <QuickChatProvider>
-                        <div className="flex h-dvh min-h-0 w-full overflow-hidden">
-                          <AppSidebar />
-                          <AppStatusSurfaceProvider>
-                            <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-                          </AppStatusSurfaceProvider>
-                        </div>
-                      </QuickChatProvider>
+                      <QuickTerminalProvider>
+                        <QuickChatProvider>
+                          <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+                            <AppSidebar />
+                            <AppStatusSurfaceProvider>
+                              <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+                            </AppStatusSurfaceProvider>
+                          </div>
+                        </QuickChatProvider>
+                      </QuickTerminalProvider>
                     </ConfigChatProvider>
                   </CommandRegistryProvider>
                 </ToastProvider>

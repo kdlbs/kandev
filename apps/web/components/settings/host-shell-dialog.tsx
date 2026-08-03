@@ -7,6 +7,7 @@ import { PtyTerminalDialog } from "@/components/settings/pty-terminal-dialog";
 type Props = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  presentation?: "standard" | "quick";
   /** Optional callback when the user clicks Done (e.g. trigger a rescan). */
   onClose?: () => void;
   /**
@@ -20,18 +21,25 @@ type Props = {
  * Opens a PTY-backed terminal running the user's shell on the kandev host.
  * Used for ad-hoc setup commands that don't fit the install/login flows.
  */
-export function HostShellDialog({ open, onOpenChange, onClose, initialInput }: Props) {
+export function HostShellDialog({
+  open,
+  onOpenChange,
+  onClose,
+  initialInput,
+  presentation = "standard",
+}: Props) {
   const { t } = useTranslation();
   return (
     <PtyTerminalDialog
       open={open}
       onOpenChange={onOpenChange}
-      title={t("agents:hostTerminal")}
+      title={presentation === "quick" ? t("sidebar:quickTerminal") : t("agents:hostTerminal")}
       description={t("agents:hostTerminalDescription")}
       testIdPrefix="host-shell"
       startSession={startHostShell}
       onDone={onClose}
       initialInput={initialInput}
+      presentation={presentation}
     />
   );
 }

@@ -68,6 +68,7 @@ type Props = {
    * it - useful after Ctrl+C drops them into a shell and they want to retry.
    */
   command?: string[];
+  presentation?: "standard" | "quick";
 };
 
 function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAddon } {
@@ -249,11 +250,13 @@ function PtySessionView({
   testIdPrefix,
   initialInput,
   onDone,
+  presentation,
 }: {
   startSession: StartPtySession;
   testIdPrefix?: string;
   initialInput?: string;
   onDone: () => void;
+  presentation: "standard" | "quick";
 }) {
   const termContainerRef = useRef<HTMLDivElement | null>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -285,7 +288,11 @@ function PtySessionView({
       <div
         ref={termContainerRef}
         data-testid={`${testIdPrefix ?? "pty"}-terminal`}
-        className="h-[420px] rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
+        className={
+          presentation === "quick"
+            ? "min-h-0 flex-1 rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
+            : "h-[420px] rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
+        }
       />
       {status === "connecting" && (
         <p className="text-xs text-muted-foreground">{t("agents:startingSession")}</p>
@@ -298,7 +305,7 @@ function PtySessionView({
         </p>
       )}
       {status === "error" && error && <p className="text-xs text-destructive">{error}</p>}
-      <DialogFooter>
+      <DialogFooter className={presentation === "quick" ? "shrink-0" : undefined}>
         <Button
           type="button"
           onClick={onDone}
@@ -327,6 +334,7 @@ export function PtyTerminalDialog({
   onDone,
   initialInput,
   command,
+  presentation = "standard",
 }: Props) {
   const handleDone = () => {
     onDone?.();
@@ -335,9 +343,14 @@ export function PtyTerminalDialog({
 
   const cmdLine = command && command.length > 0 ? command.join(" ") : null;
 
+  const dialogClassName =
+    presentation === "quick"
+      ? "!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-3 overflow-hidden p-4 [padding-top:max(1rem,env(safe-area-inset-top))] [padding-bottom:max(1rem,env(safe-area-inset-bottom))] sm:!left-1/2 sm:!top-1/2 sm:!h-[85dvh] sm:!max-h-[85dvh] sm:!w-[min(1100px,calc(100vw-2rem))] sm:!max-w-none sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+      : "sm:max-w-[820px]";
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[820px]">
+      <DialogContent className={dialogClassName}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
@@ -359,6 +372,7 @@ export function PtyTerminalDialog({
             testIdPrefix={testIdPrefix}
             initialInput={initialInput}
             onDone={handleDone}
+            presentation={presentation}
           />
         )}
       </DialogContent>

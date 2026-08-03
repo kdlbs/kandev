@@ -9,6 +9,7 @@ import { DesktopCommandHost } from "@/components/desktop-command-host";
 import { GlobalCommands } from "@/components/global-commands";
 import { LogBufferBridge } from "@/components/log-buffer-bridge";
 import { QuickChatProvider } from "@/components/quick-chat/quick-chat-provider";
+import { QuickTerminalProvider } from "@/components/quick-terminal/quick-terminal-provider";
 import { RecentTaskSwitcher } from "@/components/task/recent-task-switcher";
 import { SessionFailureToastBridge } from "@/components/session-failure-toast-bridge";
 import { TaskDeletedToastBridge } from "@/components/task-deleted-toast-bridge";
@@ -66,14 +67,16 @@ export function AppShell({ children }: AppShellProps) {
                 <CommandPanel />
                 <RecentTaskSwitcher />
                 <ConfigChatProvider>
-                  <QuickChatProvider>
-                    <div className="flex h-dvh min-h-0 w-full overflow-hidden">
-                      <AppSidebar />
-                      <AppStatusSurfaceProvider>
-                        <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
-                      </AppStatusSurfaceProvider>
-                    </div>
-                  </QuickChatProvider>
+                  <QuickTerminalProvider>
+                    <QuickChatProvider>
+                      <div className="flex h-dvh min-h-0 w-full overflow-hidden">
+                        <AppSidebar />
+                        <AppStatusSurfaceProvider>
+                          <main className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</main>
+                        </AppStatusSurfaceProvider>
+                      </div>
+                    </QuickChatProvider>
+                  </QuickTerminalProvider>
                 </ConfigChatProvider>
               </CommandRegistryProvider>
             </ToastProvider>

@@ -10,8 +10,10 @@ import {
   IconLayoutKanban,
   IconMenu2,
   IconMessageCircle,
+  IconTerminal2,
   IconTimeline,
 } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { PageTopbar } from "@/components/page-topbar";
 import { KanbanDisplayDropdown } from "../kanban-display-dropdown";
 import { ReleaseNotesDialog } from "../release-notes/release-notes-dialog";
@@ -28,9 +30,9 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import { useReleaseNotes } from "@/hooks/use-release-notes";
 import { useSystemHealthIndicator } from "@/hooks/use-system-health-indicator";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
+import { useQuickTerminalLauncher } from "@/hooks/use-quick-terminal-launcher";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import type { ComponentProps, RefObject } from "react";
-import { useTranslation } from "react-i18next";
 
 type KanbanHeaderProps = {
   workspaceId?: string;
@@ -141,6 +143,38 @@ function useIsHeaderNarrow(ref: RefObject<HTMLElement | null>): boolean {
   return isNarrow;
 }
 
+function TabletQuickActions({ workspaceId }: { workspaceId?: string }) {
+  const { t } = useTranslation();
+  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
+  const handleOpenQuickTerminal = useQuickTerminalLauncher();
+  if (!workspaceId) return null;
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        onClick={handleOpenQuickTerminal}
+        className="!size-11 cursor-pointer"
+        aria-label={t("sidebar:quickTerminal")}
+        data-testid="tablet-quick-terminal-button"
+      >
+        <IconTerminal2 className="h-4 w-4" />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        onClick={handleOpenQuickChat}
+        className="cursor-pointer"
+        aria-label={t("sidebar:quickChat")}
+        data-testid="tablet-quick-chat-button"
+      >
+        <IconMessageCircle className="h-4 w-4" />
+      </Button>
+    </>
+  );
+}
+
 function TabletHeader({
   title,
   workspaceLabel,
@@ -172,7 +206,6 @@ function TabletHeader({
 }) {
   const { t } = useTranslation();
   const isHome = title === "Home";
-  const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
 
   return (
     <PageTopbar
@@ -199,18 +232,7 @@ function TabletHeader({
             currentPage={currentPage}
           />
           <TopbarMetrics size="lg" />
-          {workspaceId && (
-            <Button
-              variant="outline"
-              size="icon-lg"
-              onClick={handleOpenQuickChat}
-              className="cursor-pointer"
-              aria-label={t("common:commandQuickChat")}
-              data-testid="tablet-quick-chat-button"
-            >
-              <IconMessageCircle className="h-4 w-4" />
-            </Button>
-          )}
+          <TabletQuickActions workspaceId={workspaceId} />
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
