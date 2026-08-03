@@ -559,6 +559,45 @@ test.describe("Mobile kanban view", () => {
     });
   });
 
+  test("keeps the initial fallback step stable after a live task update", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Mobile Stable Fallback Workflow",
+    );
+    const todoStep = await apiClient.createWorkflowStep(workflow.id, "Todo", 0, {
+      is_start_step: true,
+    });
+    const planStep = await apiClient.createWorkflowStep(workflow.id, "Plan", 1);
+    await apiClient.createTask(seedData.workspaceId, "Stable Fallback Plan Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: planStep.id,
+    });
+    await apiClient.saveUserSettings({
+      workspace_id: seedData.workspaceId,
+      workflow_filter_id: workflow.id,
+    });
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+
+    await expect(mobile.boardNavigator).toContainText("Plan");
+    await expect(mobile.taskCardByTitle("Stable Fallback Plan Task")).toBeInViewport();
+
+    await apiClient.createTask(seedData.workspaceId, "Live Todo Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: todoStep.id,
+    });
+
+    await expect(mobile.taskCardByTitle("Live Todo Task")).toBeAttached();
+    await expect(mobile.boardNavigator).toContainText("Plan");
+    await expect(mobile.taskCardByTitle("Stable Fallback Plan Task")).toBeInViewport();
+    await expect(mobile.taskCardByTitle("Live Todo Task")).not.toBeInViewport();
+  });
+
   test("step drawer allows switching between workflow steps", async ({
     testPage,
     apiClient,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -182,6 +182,12 @@ function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: 
     () => resolveMobileColumnIndex(steps, tasks, storedStepId),
     [steps, tasks, storedStepId],
   );
+  const activeStepId = steps[activeIndex]?.id;
+
+  useEffect(() => {
+    if (!activeStepId || activeStepId === storedStepId) return;
+    setMobileKanbanActiveStep(workflowId, activeStepId);
+  }, [activeStepId, storedStepId, workflowId, setMobileKanbanActiveStep]);
 
   const setActiveIndex = useCallback(
     (index: number) => {
