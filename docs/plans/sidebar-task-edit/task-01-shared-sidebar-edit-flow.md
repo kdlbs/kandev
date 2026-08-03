@@ -70,7 +70,7 @@ Report the red test evidence, final files changed, exact commands and outcomes, 
 ## Results
 
 - RED evidence: before the production menu/controller wiring, the focused switcher run reported 2 expected missing-Edit failures and 16 passing tests.
-- GREEN evidence: `cd apps && pnpm --filter @kandev/web test -- components/task/task-switcher.test.tsx components/task/task-session-sidebar-edit.test.ts components/task/mobile/session-task-switcher-sheet.test.tsx` passed all 21 tests.
+- GREEN evidence: `cd apps && pnpm --filter @kandev/web test -- components/task/task-switcher.test.tsx components/task/task-session-sidebar-edit.test.ts components/task/mobile/session-task-switcher-sheet.test.tsx` passed all 23 tests, including the unresolved-source and missing-workflow guards added during PR review.
 - `cd apps/web && pnpm run typecheck` passed. The i18n checks passed from `apps/web` (`i18n:check` confirmed 1464 referenced keys and pseudo locale sync; `i18n:ratchet` reported zero added or modified violations). The original `cd apps && pnpm run i18n:check` path was corrected because the scripts are owned by `@kandev/web`.
 - Targeted ESLint across the changed task/sidebar files passed with no warnings, and `git diff --check` passed.
 - The actual implementation spans the shared switcher/context menu, shared edit controller/dialog, desktop sidebar hosts, mobile/tablet sheet host, locale files, and focused unit tests. Phone selection closes the drawer before opening the editor; tablet keeps the sheet mounted behind it. No duplicate task update/cache path was added.

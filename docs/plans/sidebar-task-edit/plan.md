@@ -75,7 +75,7 @@ Extend the shared sidebar `TaskSwitcher` single-task menu with an Edit callback,
 
 ## Verification Results
 
-- Focused unit tests followed Red-Green-Refactor: the pre-implementation run reported 2 expected Edit-menu failures with 16 passing tests; the final run passed 21 tests across the three focused files.
+- Focused unit tests followed Red-Green-Refactor: the pre-implementation run reported 2 expected Edit-menu failures with 16 passing tests; the final run passed 23 tests across the three focused files, including unresolved-source and missing-workflow guards added during PR review.
 - `cd apps/web && pnpm run typecheck` passed.
 - `cd apps/web && pnpm run i18n:check` and `pnpm run i18n:ratchet` passed after regenerating the pseudo locale.
 - Targeted ESLint for all changed frontend files passed with no warnings; `git diff --check` passed.
