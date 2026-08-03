@@ -9,13 +9,35 @@ The published docs have two audiences:
 
 Keep implementation detail in contributor pages. A user guide should explain the supported behavior and link here when internal context is useful.
 
+## Choose a content type
+
+Audience and content type are separate decisions. Keep the existing **Use Kandev** and **Contribute to Kandev** audience split, then choose one primary Diátaxis type for each page:
+
+- **Tutorial:** teach a beginner by leading them through one successful outcome.
+- **How-to guide:** help a reader complete a known task, including the relevant choices and recovery paths.
+- **Reference:** provide accurate, complete lookup information such as fields, commands, defaults, limits, or protocol contracts.
+- **Explanation:** build understanding of a concept, boundary, rationale, or trade-off.
+
+Keep one dominant type per page. A page can link to other types, but a long tutorial, procedure, reference inventory, and architectural explanation should not compete for ownership on the same page. When an existing page mixes types, preserve its slug first and split only when the sections have different reader goals, owners, or maintenance lifecycles.
+
 ## Write for scanning
 
-Readers should be able to complete the common path without reading a full
-reference. Prefer this structure:
+Readers should be able to reach a first result, complete a task, answer a lookup
+question, or understand a concept without reading a different kind of page. Let
+the content type determine the structure:
 
-1. Open with one sentence that says who the page is for and what it enables.
-2. Put the common path in a short numbered list near the top.
+- Tutorials lead with prerequisites and a linear first success.
+- How-to guides lead with the task, expected result, and focused steps.
+- Reference pages lead with scope and stable lookup headings; a minimal example
+  is optional and should not turn the page into a tutorial.
+- Explanation pages lead with the concept or question, then cover rationale,
+  boundaries, and trade-offs.
+
+Apply these scanning rules to every type:
+
+1. Open with one sentence that says who the page is for and what it enables,
+   explains, or defines.
+2. Put required steps, the lookup scope, or the central concept near the top.
 3. Use bullets for choices, limits, prerequisites, and consequences.
 4. Keep paragraphs to one idea and normally no more than three sentences.
 5. Link to the owning reference instead of repeating its detail.
@@ -38,9 +60,12 @@ Keep the detail concise, and link to the full reference when it grows.
 </details>
 ```
 
-Reference pages may be longer, but should still start with the most common
-configuration or request and progressively disclose the rest. Delete repeated
-explanations; one page should own each detailed contract.
+Reference pages may be longer, but should optimize for lookup: state their
+scope, exact contract, availability, and important limits before the exhaustive
+details. Use stable headings, field names, command names, and examples where
+they improve lookup. Move procedures and rationale to linked how-to or
+explanation pages. Delete repeated explanations; one page should own each
+detailed contract.
 
 ## Update an existing page
 
@@ -79,7 +104,7 @@ Place the indicator immediately after a descriptive heading that names the exper
 
 ## Add a page
 
-1. Search existing pages and choose **Use Kandev** or **Contribute to Kandev**.
+1. Search existing pages, choose **Use Kandev** or **Contribute to Kandev**, identify the page's primary content type, and record the audience and type in the PR body.
 2. Create a lowercase, kebab-case Markdown file in `docs/public/`. The filename becomes the stable route; `custom-executors.md` publishes as `/docs/custom-executors`.
 3. Add non-empty `title` and `description` frontmatter, then one level-one heading:
 
@@ -95,7 +120,7 @@ Place the indicator immediately after a descriptive heading that names the exper
 4. Add the slug, without `.md`, exactly once to `docs/public/meta.json` under the correct audience heading. Its position controls sidebar order. `README.md` is the maintenance guide and is not a published page.
 5. Add the page to at least one area in `docs/public/coverage.json`, with current implementation and test evidence.
 6. Link the page from the relevant overview and neighboring guides.
-7. Include a short common path, then only the prerequisites, exact configuration, limits, and related pages needed for that path. Put secondary detail in a disclosure or the owning reference page.
+7. Match the page structure to its type: a linear path for tutorials, focused steps for how-to guides, stable lookup sections for reference, and concepts or trade-offs for explanations. Put secondary detail in a disclosure or the owning page.
 
 The validator rejects missing frontmatter, pages absent from navigation or coverage, duplicate or unknown navigation entries, broken local files or heading fragments, missing assets, and site-root links.
 
@@ -164,4 +189,5 @@ Before review, confirm:
 - links resolve relative to their source file;
 - claims are supported by current code, tests, or workflows;
 - conditional support and platform limits are explicit;
+- the PR body states the audience and primary content type for each new or changed page;
 - source validation and, for publication-sensitive changes, the Landing build pass.

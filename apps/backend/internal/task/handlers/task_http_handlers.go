@@ -20,6 +20,7 @@ import (
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -134,9 +135,11 @@ func (h *TaskHandlers) httpListTasks(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "tasks not found")
 		return
 	}
-	taskDTOs := make([]dto.TaskDTO, 0, len(tasks))
-	for _, task := range tasks {
-		taskDTOs = append(taskDTOs, dto.FromTask(task))
+	taskDTOs, err := h.toTaskDTOsWithSessionInfo(c.Request.Context(), tasks)
+	if err != nil {
+		h.logger.Error("failed to enrich tasks with status summaries", zap.Error(err))
+		handleNotFound(c, h.logger, err, "tasks not found")
+		return
 	}
 	c.JSON(http.StatusOK, dto.ListTasksResponse{
 		Tasks: taskDTOs,
@@ -190,13 +193,9 @@ func (h *TaskHandlers) httpListTasksByWorkspace(c *gin.Context) {
 }
 
 // buildTaskDTOsWithSessionInfo converts tasks to DTOs enriched with primary
-// session IDs, session counts, and review status. Uses BatchGetSessionsForTasks
-// to derive the primary session ID and session count in a single round trip,
-// then calls GetPrimarySessionInfoForTasks for the executor type/name fields
-// — those are populated by a LEFT JOIN to the executors table inside that
-// method (the persisted ExecutorSnapshot JSON uses different keys), so the
-// batch loader alone can't supply them without a regression. Two queries
-// total, down from three pre-batch.
+// session IDs, session counts, review status, and the bounded task status
+// summary. Session and executor lookups remain batched; missing summary rows
+// are repaired lazily from the same batch-loaded authoritative inputs.
 func buildTaskDTOsWithSessionInfo(
 	ctx context.Context,
 	svc *service.Service,
@@ -219,10 +218,23 @@ func buildTaskDTOsWithSessionInfo(
 	if err != nil {
 		return nil, err
 	}
-	pendingActionsBySession, err := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
-	if err != nil {
-		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(err))
+	pendingActionsBySession, pendingErr := pendingActionsForInputCapableSessions(ctx, svc, sessionsByTask)
+	if pendingErr != nil {
+		log.Warn("failed to load pending actions for task list, using empty map", zap.Error(pendingErr))
 		pendingActionsBySession = map[string]models.TaskPendingAction{}
+	}
+	statusSummaries, summaryErr := svc.GetTaskStatusSummaries(ctx, taskIDs)
+	if summaryErr != nil {
+		log.Warn("failed to load task status summaries, using coarse task fields", zap.Error(summaryErr))
+		statusSummaries = map[string]*statussummary.TaskStatusSummary{}
+	}
+	if summaryErr == nil && pendingErr == nil {
+		statusSummaries, err = svc.HydrateMissingTaskStatusSummaries(
+			ctx, tasks, sessionsByTask, pendingActionsBySession, statusSummaries,
+		)
+		if err != nil {
+			log.Warn("failed to repair missing task status summaries", zap.Error(err))
+		}
 	}
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
@@ -255,6 +267,7 @@ func buildTaskDTOsWithSessionInfo(
 		)
 		taskDTO.TaskPendingAction = taskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
+		taskDTO.StatusSummary = statusSummaries[task.ID]
 		result = append(result, taskDTO)
 	}
 	return result, nil
@@ -692,6 +705,7 @@ type httpCreateTaskRequest struct {
 	WorkflowStepID    string                    `json:"workflow_step_id"`
 	Title             string                    `json:"title"`
 	Description       string                    `json:"description,omitempty"`
+	AutoTitle         bool                      `json:"auto_title,omitempty"`
 	Priority          string                    `json:"priority,omitempty"`
 	State             *v1.TaskState             `json:"state,omitempty"`
 	Repositories      []httpTaskRepositoryInput `json:"repositories,omitempty"`
@@ -832,6 +846,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		WorkflowStepID: body.WorkflowStepID,
 		Title:          title,
 		Description:    description,
+		AutoTitle:      body.AutoTitle,
 		Priority:       body.Priority,
 		State:          body.State,
 		Repositories:   convertToServiceRepos(repos),
@@ -864,7 +879,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		}
 	}
 
-	if !h.commitFreshBranch(c, task.ID, title, body.WorkspaceID, body.Repositories, repos) {
+	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
 		return
 	}
 	taskDTO := dto.FromTask(task)

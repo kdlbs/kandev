@@ -5,7 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Card, CardContent } from "@kandev/ui/card";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { createBudget } from "@/lib/api/domains/office-api";
 
 type Props = {

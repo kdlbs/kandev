@@ -28,7 +28,7 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Least-privilege default. The Linux `test` job and the Windows `test-windows`
+# Least-privilege default. The Linux static/test jobs and the Windows `test-windows`
 # job only read source and run tests — no PR/issue writes, no release ops.
 # `packages: read` is required for the Linux job to pull the kandev-ci
 # container image from GHCR (currently public; explicit grant keeps the
@@ -39,8 +39,8 @@ permissions:
   packages: read
 
 jobs:
-  test:
-    name: Run Backend Tests
+  static_checks:
+    name: Backend Static Checks
     runs-on: ubuntu-latest
     # Pre-baked image bundles Go, golangci-lint, go-licenses, Docker CLI, Node,
     # pnpm, and the Playwright base — see .github/docker/ci-base/Dockerfile.
@@ -58,6 +58,7 @@ jobs:
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       # actions/checkout under a container job marks the workspace as a safe
       # directory automatically, but subsequent `git` invocations from steps
@@ -69,19 +70,16 @@ jobs:
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Cache Go modules
-        # Homelab self-hosted runners (kept for future re-enablement; the
-        # `container:` above forces the job onto a github-hosted runner today,
-        # so this condition is dormant). If homelab is reactivated, split this
-        # job into a matrix where the homelab variant omits `container:`.
-        if: ${{ contains(runner.name, 'homelab') }}
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/go/pkg/mod
             ~/.cache/go-build
             ~/.cache/golangci-lint
-          key: go-${{ runner.os }}-${{ hashFiles('apps/backend/go.sum') }}
-          restore-keys: go-${{ runner.os }}-
+          key: go-static-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-static-${{ runner.os }}-
+            go-${{ runner.os }}-
 
       - name: Build
         run: go build -v ./cmd/kandev
@@ -144,27 +142,134 @@ jobs:
         shell: bash
         run: golangci-lint run ./... --new-from-rev="${BASE_SHA}" --timeout=5m
 
+  test_shards:
+    name: Backend Tests (${{ matrix.shard }}/2)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            index: 0
+          - shard: 2
+            index: 1
+    # Pre-baked image bundles Go and jq, so test shards can start immediately
+    # without repeating tool installation.
+    container: ghcr.io/kdlbs/kandev-ci:build-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/backend
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
+
+      - name: Mark workspace safe for git
+        shell: bash
+        working-directory: ${{ github.workspace }}
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - name: Cache Go modules
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-test-${{ matrix.shard }}-${{ runner.os }}-${{ hashFiles('apps/backend/go.mod', 'apps/backend/go.sum') }}
+          restore-keys: |
+            go-test-${{ matrix.shard }}-${{ runner.os }}-
+            go-${{ runner.os }}-
+
       - name: Run tests
+        env:
+          SHARD_INDEX: ${{ matrix.index }}
+          SHARD_NUMBER: ${{ matrix.shard }}
         run: |
-          set -o pipefail
-          go test -v -race -coverprofile=coverage.out -covermode=atomic -json ./... 2>&1 | tee test-results.json
+          set -euo pipefail
+
+          package_list="$(go list ./...)"
+          if [[ -z "${package_list}" ]]; then
+            echo "go list returned no backend packages"
+            exit 1
+          fi
+
+          mapfile -t all_packages <<<"${package_list}"
+          shard_packages=()
+          for package in "${all_packages[@]}"; do
+            # Stable hashing keeps package assignments unchanged when another
+            # package is added or removed.
+            checksum="$(cksum <<<"${package}")"
+            checksum="${checksum%% *}"
+            if (( checksum % 2 == SHARD_INDEX )); then
+              shard_packages+=("${package}")
+            fi
+          done
+
+          if (( ${#shard_packages[@]} == 0 )); then
+            echo "Shard ${SHARD_NUMBER}/2 selected no packages"
+            exit 1
+          fi
+
+          echo "Running ${#shard_packages[@]} packages in shard ${SHARD_NUMBER}/2"
+          # Keep complete JSON for reports/artifacts while limiting live output
+          # to compiler/process lines and package-level pass/fail summaries.
+          go test \
+            -race \
+            -coverprofile="coverage-${SHARD_NUMBER}.out" \
+            -covermode=atomic \
+            -json \
+            "${shard_packages[@]}" \
+            2>&1 \
+            | tee "test-results-${SHARD_NUMBER}.json" \
+            | jq --unbuffered -Rr '
+                . as $line
+                | (try fromjson catch null) as $event
+                | if $event == null then
+                    $line
+                  elif ($event.Test == null and ($event.Action == "pass" or $event.Action == "fail")) then
+                    "\($event.Action): \($event.Package) (\($event.Elapsed // 0)s)"
+                  else
+                    empty
+                  end
+              '
 
       - name: Generate test report
         uses: robherley/go-test-action@3856e4e57831b3b6d6d8d89f91747e5200c533f7 # v0
         if: always()
         with:
-          fromJSONFile: apps/backend/test-results.json
+          fromJSONFile: apps/backend/test-results-${{ matrix.shard }}.json
           omit: successful
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         if: always()
         with:
-          name: test-results
+          name: backend-test-results-${{ matrix.shard }}
           path: |
-            apps/backend/coverage.out
-            apps/backend/test-results.json
+            apps/backend/coverage-${{ matrix.shard }}.out
+            apps/backend/test-results-${{ matrix.shard }}.json
           retention-days: 30
+
+  test:
+    name: Run Backend Tests
+    runs-on: ubuntu-latest
+    needs: [static_checks, test_shards]
+    if: ${{ always() }}
+    steps:
+      - name: Require backend checks to pass
+        env:
+          STATIC_CHECKS_RESULT: ${{ needs.static_checks.result }}
+          TEST_SHARDS_RESULT: ${{ needs.test_shards.result }}
+        run: |
+          set -euo pipefail
+          if [[ "${STATIC_CHECKS_RESULT}" != "success" || "${TEST_SHARDS_RESULT}" != "success" ]]; then
+            echo "Static checks: ${STATIC_CHECKS_RESULT}"
+            echo "Test shards: ${TEST_SHARDS_RESULT}"
+            exit 1
+          fi
 
   postgres-boot:
     name: Backend Postgres
@@ -248,6 +353,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6

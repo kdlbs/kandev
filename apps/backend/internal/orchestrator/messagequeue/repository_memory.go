@@ -347,6 +347,69 @@ func (r *memoryRepository) UpdateContentAndMetadata(_ context.Context, sessionID
 	return ErrEntryNotFound
 }
 
+// MergeIntoAbove folds the source entry into the entry directly above it within
+// the same session, mirroring the sqlite repository's semantics. The target is
+// the entry with the greatest position strictly below the source's — the slice
+// may not be position-sorted after ReplaceSession. See
+// Repository.MergeIntoAbove for the merge rules and error mapping.
+func (r *memoryRepository) MergeIntoAbove(_ context.Context, sessionID, sourceID, queuedBy string) (*QueuedMessage, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	list, ok := r.entries[sessionID]
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	sourceIndex := -1
+	for i, m := range list {
+		if m.ID == sourceID {
+			sourceIndex = i
+			break
+		}
+	}
+	if sourceIndex < 0 {
+		return nil, ErrEntryNotFound
+	}
+	source := list[sourceIndex]
+
+	var target *QueuedMessage
+	for _, m := range list {
+		if m.Position >= source.Position {
+			continue
+		}
+		if target == nil || m.Position > target.Position {
+			target = m
+		}
+	}
+	if target == nil {
+		return nil, ErrNoMergeTarget
+	}
+	if !mergeAllowed(source, target, queuedBy) {
+		return nil, ErrNoMergeTarget
+	}
+
+	// Compute every merged value before mutating the target: mergeEntryMetadata
+	// can reject an over-cap reference union, and the target must stay untouched
+	// on that path so the failed merge is atomic (mirrors the sqlite
+	// repository's build-then-apply ordering).
+	content := joinMergeContent(target.Content, source.Content)
+	attachments := append(append([]MessageAttachment{}, target.Attachments...), source.Attachments...)
+	metadata, err := mergeEntryMetadata(target.Metadata, source.Metadata)
+	if err != nil {
+		return nil, err
+	}
+	target.Content = content
+	target.Attachments = attachments
+	target.Metadata = metadata
+	r.entries[sessionID] = append(list[:sourceIndex], list[sourceIndex+1:]...)
+	if len(r.entries[sessionID]) == 0 {
+		delete(r.entries, sessionID)
+		delete(r.nextPosition, sessionID)
+	}
+
+	merged := *target
+	return &merged, nil
+}
+
 func (r *memoryRepository) DeleteByID(_ context.Context, sessionID, entryID string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

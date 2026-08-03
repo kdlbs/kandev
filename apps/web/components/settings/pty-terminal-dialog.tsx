@@ -1,6 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+// The WebSocket error handler runs outside React, so it uses the module-level
+// `t`, which resolves at call time. Components in this file use the hook.
+import { t as translate } from "@/lib/i18n";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -146,7 +150,7 @@ function openSessionWebSocket(
   ws.binaryType = "arraybuffer";
   ws.onmessage = makeWsMessageHandler(term, setters);
   ws.onerror = () => {
-    setters.setError("Connection error");
+    setters.setError(translate("agents:ptyConnectionError"));
     setters.setStatus("error");
   };
   if (initialInput) {
@@ -256,6 +260,7 @@ function PtySessionView({
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const sessionIDRef = useRef<string | null>(null);
+  const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SessionStatus>("connecting");
   const [exitCode, setExitCode] = useState<number | null>(null);
@@ -283,11 +288,13 @@ function PtySessionView({
         className="h-[420px] rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
       />
       {status === "connecting" && (
-        <p className="text-xs text-muted-foreground">Starting session…</p>
+        <p className="text-xs text-muted-foreground">{t("agents:startingSession")}</p>
       )}
       {status === "exited" && (
         <p className="text-xs text-muted-foreground">
-          Session ended{exitCode != null ? ` (exit ${exitCode})` : ""}.
+          {exitCode != null
+            ? t("agents:sessionEndedWithCode", { code: exitCode })
+            : t("agents:sessionEnded")}
         </p>
       )}
       {status === "error" && error && <p className="text-xs text-destructive">{error}</p>}
@@ -298,7 +305,7 @@ function PtySessionView({
           className="cursor-pointer"
           data-testid={`${testIdPrefix ?? "pty"}-done`}
         >
-          Done
+          {t("agents:done")}
         </Button>
       </DialogFooter>
     </>

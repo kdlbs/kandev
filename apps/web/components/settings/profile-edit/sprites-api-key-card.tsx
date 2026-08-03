@@ -11,6 +11,7 @@ import { InlineSecretSelect } from "@/components/settings/profile-edit/inline-se
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { useTranslation } from "react-i18next";
 
 type SpritesApiKeyCardProps = {
   secretId: string | null;
@@ -25,6 +26,7 @@ export function SpritesApiKeyCard({
   onSecretIdChange,
   secrets,
 }: SpritesApiKeyCardProps) {
+  const { t } = useTranslation();
   const { status } = useSprites(secretId ?? undefined);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<SpritesTestResult | null>(null);
@@ -42,7 +44,7 @@ export function SpritesApiKeyCard({
         steps: [],
         total_duration_ms: 0,
         sprite_name: "",
-        error: "Failed to connect to backend",
+        error: t("executors:failedToConnectToBackend"),
       });
     } finally {
       setTesting(false);
@@ -57,11 +59,9 @@ export function SpritesApiKeyCard({
           <div>
             <CardTitle className="flex items-center gap-2">
               <IconSparkles className="h-5 w-5" />
-              API Key
+              {t("executors:apiKey")}
             </CardTitle>
-            <CardDescription>
-              Select the secret containing your Sprites.dev API token.
-            </CardDescription>
+            <CardDescription>{t("executors:selectTheSecretContainingYourSprites")}</CardDescription>
           </div>
           <ConnectionBadge secretId={secretId} status={status} />
         </div>
@@ -71,7 +71,7 @@ export function SpritesApiKeyCard({
           secretId={secretId}
           onSecretIdChange={onSecretIdChange}
           secrets={secrets}
-          label="Secret"
+          label={t("executors:secret")}
           isDirty={isDirty}
         />
         {secretId && (
@@ -94,20 +94,21 @@ function ConnectionBadge({
   secretId: string | null;
   status: ReturnType<typeof useSprites>["status"];
 }) {
+  const { t } = useTranslation();
   if (!secretId) {
-    return <Badge variant="secondary">Not Configured</Badge>;
+    return <Badge variant="secondary">{t("executors:notConfigured")}</Badge>;
   }
   if (status?.connected) {
     return (
       <Badge variant="default" className="bg-green-600">
-        Connected
+        {t("executors:connected")}
       </Badge>
     );
   }
   if (status?.token_configured) {
-    return <Badge variant="destructive">Disconnected</Badge>;
+    return <Badge variant="destructive">{t("executors:disconnected")}</Badge>;
   }
-  return <Badge variant="secondary">Checking...</Badge>;
+  return <Badge variant="secondary">{t("executors:checking")}</Badge>;
 }
 
 function ConnectionDetails({
@@ -121,6 +122,7 @@ function ConnectionDetails({
   testResult: SpritesTestResult | null;
   onTest: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <ConnectionStatusText status={status} />
@@ -136,7 +138,7 @@ function ConnectionDetails({
         ) : (
           <IconTestPipe className="mr-1.5 h-4 w-4" />
         )}
-        Test Connection
+        {t("executors:testConnection")}
       </Button>
       {testResult && <TestResultDisplay result={testResult} />}
     </>
@@ -144,21 +146,26 @@ function ConnectionDetails({
 }
 
 function ConnectionStatusText({ status }: { status: ReturnType<typeof useSprites>["status"] }) {
+  const { t } = useTranslation();
   if (status?.connected) {
-    const count = status.instance_count;
     return (
       <p className="text-sm text-muted-foreground">
-        Connected. {count} active sprite{count !== 1 ? "s" : ""}.
+        {t("executors:connectedActiveSprites", { count: status.instance_count })}
       </p>
     );
   }
   if (status?.token_configured) {
-    return <p className="text-sm text-muted-foreground">Token configured but unable to connect.</p>;
+    return (
+      <p className="text-sm text-muted-foreground">
+        {t("executors:tokenConfiguredButUnableToConnect")}
+      </p>
+    );
   }
-  return <p className="text-sm text-muted-foreground">Verifying connection...</p>;
+  return <p className="text-sm text-muted-foreground">{t("executors:verifyingConnection")}</p>;
 }
 
 function TestResultDisplay({ result }: { result: SpritesTestResult }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-md border p-3 space-y-2">
       <div className="flex items-center gap-2 text-sm font-medium">
@@ -167,7 +174,7 @@ function TestResultDisplay({ result }: { result: SpritesTestResult }) {
         ) : (
           <IconX className="h-4 w-4 text-red-600" />
         )}
-        {result.success ? "Connection test passed" : "Connection test failed"}
+        {result.success ? t("executors:connectionTestPassed") : t("executors:connectionTestFailed")}
         <span className="text-muted-foreground font-normal">({result.total_duration_ms}ms)</span>
       </div>
       {result.steps.map((step: SpritesTestStep) => (

@@ -227,7 +227,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/system/logs": () => (
     <SystemPageShell
       title="Logs"
-      description="Recent backend log output and downloadable log files."
+      description="Create a diagnostic ZIP with frontend and backend logs."
     >
       <LogViewer />
     </SystemPageShell>

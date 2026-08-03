@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { listActivity } from "@/lib/api/domains/office-api";
 import type { ActivityEntry } from "@/lib/state/slices/office/types";
 import { ActivityRow } from "./activity-row";

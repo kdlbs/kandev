@@ -12,6 +12,7 @@ import { ResetWatchDialog, useWatchResetController } from "@/components/watches/
 import { LinearIssueWatchTable } from "./linear-issue-watch-table";
 import { LinearIssueWatchDialog } from "./linear-issue-watch-dialog";
 import type { LinearIssueWatch } from "@/lib/types/linear";
+import { useTranslation } from "react-i18next";
 
 // LinearIssueWatchersSection lists watches across every workspace in a single
 // flat table on the install-wide settings page. The dialog's create flow asks
@@ -26,45 +27,46 @@ type RawActions = {
 };
 
 function useToastedActions({ create, update, remove, trigger, reset }: RawActions) {
+  const { t } = useTranslation();
   const { toast } = useToast();
 
   const wrappedCreate = useCallback(
     async (req: Parameters<typeof create>[0]) => {
       try {
         await create(req);
-        toast({ description: "Watcher created", variant: "success" });
+        toast({ description: t("linear:watcherCreated"), variant: "success" });
       } catch (err) {
-        toast({ description: `Create failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("linear:createFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [create, toast],
+    [create, t, toast],
   );
 
   const wrappedUpdate = useCallback(
     async (id: string, req: Parameters<typeof update>[1], rowWorkspaceId: string) => {
       try {
         await update(id, req, rowWorkspaceId);
-        toast({ description: "Watcher updated", variant: "success" });
+        toast({ description: t("linear:watcherUpdated"), variant: "success" });
       } catch (err) {
-        toast({ description: `Update failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("linear:updateFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [update, toast],
+    [update, t, toast],
   );
 
   const wrappedDelete = useCallback(
     async (w: LinearIssueWatch) => {
-      if (!confirm("Delete this Linear watcher?")) return;
+      if (!confirm(t("linear:deleteThisLinearWatcher"))) return;
       try {
         await remove(w.id, w.workspaceId);
-        toast({ description: "Watcher deleted", variant: "success" });
+        toast({ description: t("linear:watcherDeleted"), variant: "success" });
       } catch (err) {
-        toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("linear:deleteFailed", { error: String(err) }), variant: "error" });
       }
     },
-    [remove, toast],
+    [remove, t, toast],
   );
 
   const wrappedTrigger = useCallback(
@@ -72,14 +74,16 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
       try {
         const res = await trigger(w.id, w.workspaceId);
         const n = res?.newIssues ?? 0;
+        // "issue(s)" was an English plural hack: the count now selects a form,
+        // so a language with more than two can express them all.
         const description =
-          n > 0 ? `Found ${n} new issue(s) — tasks will appear shortly.` : "No new issues matched.";
+          n > 0 ? t("linear:foundNewIssues", { count: n }) : t("linear:noNewIssuesMatched");
         toast({ description, variant: "success" });
       } catch (err) {
-        toast({ description: `Check failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("linear:checkFailed", { error: String(err) }), variant: "error" });
       }
     },
-    [trigger, toast],
+    [trigger, t, toast],
   );
 
   const wrappedReset = useCallback(
@@ -90,16 +94,16 @@ function useToastedActions({ create, update, remove, trigger, reset }: RawAction
         toast({
           description:
             n > 0
-              ? `Reset complete — deleted ${n} task(s); next poll will re-import matches.`
-              : "Reset complete — next poll will re-import matches.",
+              ? t("linear:resetCompleteDeletedTasks", { count: n })
+              : t("linear:resetCompleteNoTasksDeleted"),
           variant: "success",
         });
       } catch (err) {
-        toast({ description: `Reset failed: ${String(err)}`, variant: "error" });
+        toast({ description: t("linear:resetFailed", { error: String(err) }), variant: "error" });
         throw err;
       }
     },
-    [reset, toast],
+    [reset, t, toast],
   );
 
   return {
@@ -122,6 +126,7 @@ function useEnabledDrafts(items: LinearIssueWatch[], update: RawActions["update"
 }
 
 export function LinearIssueWatchersSection() {
+  const { t } = useTranslation();
   const { items, loading, create, update, remove, trigger, previewReset, reset } =
     useLinearIssueWatches();
   const actions = useToastedActions({ create, update, remove, trigger, reset });
@@ -175,12 +180,12 @@ export function LinearIssueWatchersSection() {
   return (
     <SettingsSection
       icon={<IconBellRinging className="h-5 w-5" />}
-      title="Linear watchers"
-      description="Poll a Linear filter and auto-create a Kandev task for each newly-matching issue."
+      title={t("linear:linearWatchers")}
+      description={t("linear:linearWatchersDescription")}
       action={
         <Button size="sm" onClick={openCreate} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-1" />
-          New watcher
+          {t("linear:newWatcher")}
         </Button>
       }
     >
@@ -216,7 +221,7 @@ export function LinearIssueWatchersSection() {
         <ResetWatchDialog
           open
           onOpenChange={resetCtrl.onOpenChange}
-          integrationLabel="Linear watcher"
+          integrationLabel={t("linear:linearWatcher")}
           previewLoader={resetCtrl.previewLoader}
           onConfirm={resetCtrl.confirmReset}
         />

@@ -1,19 +1,27 @@
 "use client";
 
 import { useMemo } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { TaskCreateDialog } from "@/components/task-create-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { cacheAzureDevOpsTaskPullRequest } from "@/hooks/domains/azure-devops/use-azure-devops-task-pull-requests";
+import { cacheAzureDevOpsTaskWorkItem } from "@/hooks/domains/azure-devops/use-azure-devops-task-work-items";
 import { useRouter } from "@/lib/routing/client-router";
-import { associateAzureDevOpsPullRequest } from "@/lib/api/domains/azure-devops-api";
-import type { AzureDevOpsPullRequest, AzureDevOpsWorkItem } from "@/lib/types/azure-devops";
+import {
+  associateAzureDevOpsPullRequest,
+  associateAzureDevOpsWorkItem,
+} from "@/lib/api/domains/azure-devops-api";
+import type {
+  AzureDevOpsActionPreset,
+  AzureDevOpsPullRequest,
+  AzureDevOpsWorkItem,
+} from "@/lib/types/azure-devops";
 import type { Repository, Task, Workflow, WorkflowStep } from "@/lib/types/http";
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
 
 export type AzureDevOpsLaunchPayload =
-  | { kind: "work-item"; item: AzureDevOpsWorkItem }
-  | { kind: "pull-request"; pullRequest: AzureDevOpsPullRequest };
+  | { kind: "work-item"; item: AzureDevOpsWorkItem; action?: AzureDevOpsActionPreset }
+  | { kind: "pull-request"; pullRequest: AzureDevOpsPullRequest; action?: AzureDevOpsActionPreset };
 
 function plainText(value: string | undefined): string {
   if (!value) return "(no description)";
@@ -24,29 +32,59 @@ function plainText(value: string | undefined): string {
 function launchText(payload: AzureDevOpsLaunchPayload) {
   if (payload.kind === "work-item") {
     const item = payload.item;
+    const description = [
+      `Azure DevOps work item: ${item.id}`,
+      `URL: ${item.webUrl ?? item.apiUrl ?? ""}`,
+      "",
+      item.title,
+      "",
+      plainText(item.description),
+    ].join("\n");
     return {
-      title: truncateRemoteTaskTitle(`${item.type} ${item.id}: ${item.title}`),
-      description: [
-        `Azure DevOps work item: ${item.id}`,
-        `URL: ${item.webUrl ?? item.apiUrl ?? ""}`,
-        "",
+      title: truncateRemoteTaskTitle(
+        payload.action
+          ? `${payload.action.label}: ${item.title}`
+          : `${item.type} ${item.id}: ${item.title}`,
+      ),
+      description: actionDescription(
+        payload.action,
+        item.webUrl ?? item.apiUrl ?? "",
         item.title,
-        "",
-        plainText(item.description),
-      ].join("\n"),
+        description,
+      ),
     };
   }
   const pullRequest = payload.pullRequest;
+  const description = [
+    `Azure DevOps pull request: ${pullRequest.webUrl}`,
+    "",
+    pullRequest.title,
+    "",
+    plainText(pullRequest.description),
+  ].join("\n");
   return {
-    title: truncateRemoteTaskTitle(`Review PR ${pullRequest.id}: ${pullRequest.title}`),
-    description: [
-      `Azure DevOps pull request: ${pullRequest.webUrl}`,
-      "",
+    title: truncateRemoteTaskTitle(
+      payload.action
+        ? `${payload.action.label}: ${pullRequest.title}`
+        : `Review PR ${pullRequest.id}: ${pullRequest.title}`,
+    ),
+    description: actionDescription(
+      payload.action,
+      pullRequest.webUrl,
       pullRequest.title,
-      "",
-      plainText(pullRequest.description),
-    ].join("\n"),
+      description,
+    ),
   };
+}
+
+function actionDescription(
+  action: AzureDevOpsActionPreset | undefined,
+  url: string,
+  title: string,
+  fallback: string,
+): string {
+  if (!action?.promptTemplate.trim()) return fallback;
+  return action.promptTemplate.replaceAll("{{url}}", url).replaceAll("{{title}}", title);
 }
 
 function matchingRepository(
@@ -79,6 +117,7 @@ export function AzureDevOpsTaskLauncher({
 }) {
   const router = useRouter();
   const setTaskPullRequest = useAppStore((state) => state.setAzureDevOpsTaskPullRequest);
+  const setTaskWorkItem = useAppStore((state) => state.setAzureDevOpsTaskWorkItem);
   const launch = useMemo(() => {
     if (!payload) return null;
     const workflow = workflows.find((candidate) =>
@@ -96,6 +135,24 @@ export function AzureDevOpsTaskLauncher({
   }, [payload, repositories, steps, workflows]);
 
   const onSuccess = async (task: Task) => {
+    if (payload?.kind === "work-item" && workspaceId) {
+      if (!payload.item.project) {
+        toast.error("Failed to link Azure DevOps work item: project is missing.");
+      } else {
+        try {
+          const linked = await associateAzureDevOpsWorkItem(workspaceId, task.id, {
+            projectId: payload.item.project,
+            workItemId: payload.item.id,
+          });
+          cacheAzureDevOpsTaskWorkItem(workspaceId, task.id, linked);
+          setTaskWorkItem(task.id, linked);
+        } catch (error: unknown) {
+          toast.error(
+            error instanceof Error ? error.message : "Failed to link Azure DevOps work item.",
+          );
+        }
+      }
+    }
     if (payload?.kind === "pull-request" && workspaceId && launch?.repository) {
       try {
         const linked = await associateAzureDevOpsPullRequest(workspaceId, task.id, {

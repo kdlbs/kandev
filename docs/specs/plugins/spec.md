@@ -126,16 +126,29 @@ config_schema:
   required: ["bot_token_secret", "default_channel"]
 
 ui:                                            # Native frontend plugin (see "Frontend plugin runtime")
-  bundle: "ui/bundle.js"                       # ES module extracted alongside the package
-  styles: ["ui/plugin.css"]                    # optional stylesheets
+  bundle: "/ui/bundle.js"                      # root-relative ES module path
+  styles: ["/ui/plugin.css"]                   # optional root-relative stylesheets
 
 # Runtime fields managed by kandev (not authored):
 status: "active"
 version: "1.0.0"
 install_path: "~/.kandev/plugins/kandev-plugin-slack/1.0.0"
+signed: false
 installed_at: "2026-04-26T10:00:00Z"
 restart_count: 0
+last_error: null
+last_error_at: null
 ```
+
+`last_error` and `last_error_at` are host-managed runtime diagnostics. When a
+spawn, handshake, health check, restart, or install-path check moves a plugin to
+`error`, kandev stores a single-line diagnostic (bounded to 2048 bytes) and the
+UTC timestamp of the failure. Before persistence, kandev redacts credential-like
+values (including PATs, bearer tokens, and labeled passwords, tokens, secrets,
+or API keys) and replaces the host home path with `~`; arbitrary plugin stdout
+and untrusted subprocess details are never persisted verbatim. The diagnostic
+is bounded after redaction. A successful handshake and health check clears both
+fields. Existing records without these fields load as null.
 
 `capabilities.api_read` / `capabilities.api_write` gate the **Host data API** Host
 RPCs (both reads and writes live now) — the vocabulary is a list of
@@ -188,7 +201,9 @@ uploaded tarball:
 6. Kandev spawns the platform-matched binary via `hashicorp/go-plugin`, completes the
    handshake (§2 of GRPC-CONTRACT.md) — status `registered` while this is pending.
 7. Handshake succeeds → status `active`. Handshake/spawn failure → status `error`
-   (restart retried with backoff; see "State machine").
+   (restart retried with backoff; see "State machine"). The failure diagnostic is
+   persisted on the record so the operator can see why activation failed and
+   retry with **Enable**.
 
 Uninstall stops the subprocess and removes the record, all installed versions, and
 plugin state (no 24-hour grace period in v1). `POST /api/plugins/register` is removed;
@@ -506,8 +521,8 @@ components, and WebSocket handlers that run inside the kandev frontend (the
 Mattermost-webapp model), not iframes. The full contract lives in
 `docs/plans/plugins/PLUGIN-API.md`; summary:
 
-- **Manifest:** a plugin declares `ui.bundle` (a path inside the extracted package,
-  e.g. `ui/bundle.js`) and optional `ui.styles`.
+- **Manifest:** a plugin declares `ui.bundle` (a root-relative path inside the
+  extracted package, e.g. `/ui/bundle.js`) and optional root-relative `ui.styles`.
 - **Bundle delivery:** kandev serves the bundle at `GET /api/plugins/{id}/bundle`
   (and any assets under `GET /api/plugins/{id}/ui/*`) directly from the extracted
   package directory on local disk, forcing `Content-Type: text/javascript` and
@@ -556,8 +571,9 @@ Mattermost-webapp model), not iframes. The full contract lives in
 
 ```
 registered -> active -> disabled -> uninstalled
-                 |          |
-                 +-> error -+
+registered|active|disabled --failure--> error
+error --successful Enable/health recovery--> active
+error --Disable--> disabled
 ```
 
 | State | Meaning |
@@ -572,7 +588,13 @@ Health monitoring: kandev's go-plugin client calls `Ping()` on the plugin every 
 seconds (injectable). 3 consecutive failures -> `error` + inbox item + restart attempt
 with backoff. A subprocess crash (unexpected process exit) triggers an immediate
 restart with backoff (max 5 attempts, then `error`). Next successful handshake/`Ping`
--> `active`, queued events delivered in order.
+-> `active`, queued events delivered in order, and the persisted failure diagnostic
+is cleared. An operator can manually enable a plugin in `error` to retry its spawn
+and handshake; boot does not automatically retry a persisted `error` state. A
+manual Enable racing the final restart-exhaustion callback must complete without
+deadlock: the manager never waits for a stopping process while holding its
+process registry lock, so the final callback and replacement start can both
+complete.
 
 ## Permissions
 
@@ -604,8 +626,17 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 
 - **3 consecutive `Ping` failures (90s), or crash with restart attempts exhausted
   (max 5, backoff)**: status -> `error`. Events buffered (100, 5min TTL). Webhooks
-  return 503. Inbox item created.
-- **Buffer overflows (>100 events or >5min)**: oldest events dropped and logged.
+  return 503. Inbox item created and the bounded failure diagnostic is persisted
+  with its timestamp.
+- **Failed spawn/handshake, missing install path, or failed restart**: status ->
+  `error` with the bounded diagnostic persisted; the Plugins UI exposes **Enable**
+  as the manual retry action.
+- **Diagnostic safety**: persisted failure text is normalized, credential/path
+  redacted, and bounded before it is returned by plugin list/detail APIs. Plugin
+  stdout is not a durable diagnostic channel.
+- **Buffer overflows (>100 events or >5min)**: oldest events dropped. Kandev emits
+  at most one overflow warning per plugin per minute, aggregating the number of
+  dropped events since the previous warning.
 - **Plugin returns a gRPC error (or times out) on `DeliverEvent`**: retry up to 3 times
   with exponential backoff (5s, 15s, 45s). After exhaustion, event is logged as failed
   and dropped.
@@ -617,8 +648,9 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 
 ## Persistence guarantees
 
-- Plugin installation records (`id`, `version`, `install_path`, capabilities, status)
-  persist to disk under `~/.kandev/plugins/<id>/` and survive backend restarts.
+- Plugin installation records (`id`, `version`, `install_path`, capabilities, status,
+  `signed`, `last_error`, `last_error_at`) persist to disk as
+  `~/.kandev/plugins/<id>.yml` and survive backend restarts.
 - Extracted plugin packages persist at `~/.kandev/plugins/<id>/<version>/` until
   uninstall.
 - Plugin state in SQLite survives restarts.
@@ -666,7 +698,32 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
   plugin `error` while buffering events (up to 100 or 5 minutes), and creates an inbox
   item "Plugin kandev-plugin-slack is unreachable". **WHEN** a subsequent restart
   attempt succeeds and the handshake completes, **THEN** status returns to `active`
-  and buffered events are delivered in order.
+  and buffered events are delivered in order, with the persisted failure diagnostic
+  cleared.
+
+- **GIVEN** a plugin in `error` with a persisted `last_error`, **WHEN** the operator
+  opens Settings > Plugins, **THEN** the row shows the diagnostic and an **Enable**
+  action. **WHEN** the operator clicks **Enable** and the plugin starts successfully,
+  **THEN** status returns to `active`, the diagnostic fields are cleared, and normal
+  delivery resumes. **WHEN** the retry fails, **THEN** status remains `error`, the
+  client refetches the authoritative plugin record, and the new diagnostic replaces
+  the previous one in the row and detail views.
+
+- **GIVEN** restart exhaustion is entering its final unhealthy callback, **WHEN** an
+  operator concurrently clicks **Enable**, **THEN** the callback and Enable both
+  complete and the replacement process is either started or reports its own result;
+  neither operation waits forever on the other.
+
+- **GIVEN** a persisted diagnostic containing an unbroken long token, **WHEN** the
+  operator opens the plugin row or detail view on a phone, **THEN** the diagnostic
+  wraps inside its container and the page has no horizontal overflow. Recovery
+  actions have a minimum 44 CSS-pixel phone target.
+
+- **GIVEN** a plugin whose event ring buffer is full, **WHEN** additional events are
+  dropped, **THEN** kandev logs one warning for the first drop and suppresses further
+  warnings for that plugin for one minute while counting them. **WHEN** the next
+  warning is emitted, **THEN** it includes the aggregate number of drops since the
+  previous warning.
 
 - **GIVEN** a plugin whose manifest declares `secrets: false`, **WHEN** the plugin
   calls `Host.RevealSecret`, **THEN** kandev's server interceptor returns gRPC status
@@ -763,7 +820,9 @@ restart with backoff (max 5 attempts, then `error`). Next successful handshake/`
 - **Hot reload.** Upgrading a plugin requires a new install (new version directory);
   there is no in-place manifest or binary swap on a running process.
 - **Multi-instance plugins.** Each plugin ID maps to exactly one supervised subprocess.
-- **Rate limiting.** No per-plugin rate limits in v1. Misbehaving plugins can be disabled manually.
+- **Event admission rate limiting.** No per-plugin rate limits in v1. Misbehaving
+  plugins can be disabled manually. Diagnostic log aggregation is still required
+  for bounded event-buffer overflow warnings.
 - **Plugin database namespaces.** Plugins do not get their own SQLite schemas. KV state is sufficient for v1.
 - **Broader write surface.** The Host data API writes cover task create/update
   (conservative field mask) and sending a message to a task session. Deleting or

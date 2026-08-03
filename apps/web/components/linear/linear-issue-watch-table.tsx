@@ -13,6 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { LinearIssueWatch, LinearSearchFilter } from "@/lib/types/linear";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
+import { formatRelative } from "@/lib/i18n/formats";
 
 type LinearIssueWatchTableProps = {
   watches: LinearIssueWatch[];
@@ -27,21 +30,29 @@ type LinearIssueWatchTableProps = {
   onToggleEnabled: (watch: LinearIssueWatch) => void;
 };
 
-function formatLastPolled(dateStr?: string | null): string {
-  if (!dateStr) return "Never";
-  const diff = Date.now() - new Date(dateStr).getTime();
-  const minutes = Math.floor(diff / 60000);
-  if (minutes < 1) return "Just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
+// `t` is threaded in rather than read from a hook: this is a plain function, and
+// the guard never inspects a return value, so a literal here would survive lint.
+//
+// The bucket copy now comes from `formatRelative`, which owns the same
+// just-now/m/h/d ladder for every surface and reads the active app locale. Two
+// consequences, both deliberate and matching the Jira table: the first bucket
+// reads "just now" rather than "Just now" (it is shared with the rest of the
+// app), and an unparseable timestamp renders empty instead of "NaNm ago".
+function formatLastPolled(t: TFunction, dateStr?: string | null): string {
+  if (!dateStr) return t("linear:never");
+  return formatRelative(dateStr);
 }
 
 // summarizeFilter renders the structured filter as a short tag-style label
 // the user can scan at a glance. Falls back to "(any)" when somehow empty —
 // the backend rejects empty filters at create/update time, so this is just
 // defensive for forward-compat.
+//
+// Deliberately NOT translated. This is a filter *expression*, not prose: the
+// `team:` / `state:` / `assigned:` / `q:` prefixes are Linear filter field
+// names, the values are user data (a team key, a free-text query), and it is
+// rendered in a monospace column. It is the direct analogue of the Jira watch
+// table's column, which shows the raw JQL verbatim for the same reason.
 function summarizeFilter(filter: LinearSearchFilter | undefined): string {
   if (!filter) return "(any)";
   const parts: string[] = [];
@@ -69,6 +80,7 @@ function WatchActions({
   onReset: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-1">
       <Tooltip>
@@ -91,7 +103,7 @@ function WatchActions({
             )}
           </Button>
         </TooltipTrigger>
-        <TooltipContent>{watch.enabled ? "Pause" : "Enable"}</TooltipContent>
+        <TooltipContent>{watch.enabled ? t("linear:pause") : t("linear:enable")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -107,7 +119,7 @@ function WatchActions({
             <IconRefresh className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Check now</TooltipContent>
+        <TooltipContent>{t("linear:checkNow")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -116,7 +128,7 @@ function WatchActions({
             size="sm"
             className="h-7 w-7 p-0 cursor-pointer"
             data-testid="watch-reset-button"
-            aria-label="Reset watch"
+            aria-label={t("linear:resetWatch")}
             onClick={(e) => {
               e.stopPropagation();
               onReset(watch.id);
@@ -125,7 +137,7 @@ function WatchActions({
             <IconRestore className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Reset</TooltipContent>
+        <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -141,7 +153,7 @@ function WatchActions({
             <IconTrash className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("linear:delete")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -157,13 +169,14 @@ export function LinearIssueWatchTable({
   onReset,
   onToggleEnabled,
 }: LinearIssueWatchTableProps) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   const workspaceName = (id: string) => workspaces.find((w) => w.id === id)?.name ?? id;
 
   if (watches.length === 0) {
     return (
       <p className="text-sm text-muted-foreground py-4 text-center">
-        No Linear watchers configured. Create one to auto-create tasks from filtered issues.
+        {t("linear:noLinearWatchersConfiguredCreateOne")}
       </p>
     );
   }
@@ -172,12 +185,12 @@ export function LinearIssueWatchTable({
     <Table>
       <TableHeader>
         <TableRow>
-          {showWorkspace && <TableHead>Workspace</TableHead>}
-          <TableHead>Filter</TableHead>
-          <TableHead>Interval</TableHead>
-          <TableHead>Last Polled</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead className="text-right">Actions</TableHead>
+          {showWorkspace && <TableHead>{t("common:workspace")}</TableHead>}
+          <TableHead>{t("linear:filter")}</TableHead>
+          <TableHead>{t("linear:interval")}</TableHead>
+          <TableHead>{t("linear:lastPolled")}</TableHead>
+          <TableHead>{t("common:status")}</TableHead>
+          <TableHead className="text-right">{t("linear:actions")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -202,14 +215,16 @@ export function LinearIssueWatchTable({
               {summarizeFilter(watch.filter)}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {Math.round(watch.pollIntervalSeconds / 60)}m
+              {t("linear:intervalMinutes", {
+                count: Math.round(watch.pollIntervalSeconds / 60),
+              })}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {formatLastPolled(watch.lastPolledAt)}
+              {formatLastPolled(t, watch.lastPolledAt)}
             </TableCell>
             <TableCell>
               <Badge variant={watch.enabled ? "default" : "secondary"} className="text-xs">
-                {watch.enabled ? "Active" : "Paused"}
+                {watch.enabled ? t("linear:active") : t("linear:paused")}
               </Badge>
             </TableCell>
             <TableCell className="text-right">

@@ -36,6 +36,8 @@ import {
   type GitLabWatchForm,
   type GitLabWatchKind,
 } from "./watch-form";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type Watch = ReviewWatch | IssueWatch;
 type CreateRequest = CreateReviewWatchRequest | CreateIssueWatchRequest;
@@ -109,13 +111,14 @@ function useDialogData(workspaceId: string, workflowId: string) {
 }
 
 function FilterFields({ kind, form, setForm }: FormFieldsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
-      <SectionTitle>Match</SectionTitle>
+      <SectionTitle>{t("gitlab:match")}</SectionTitle>
       <div className="space-y-1.5">
-        <Label htmlFor={`${kind}-watch-projects`}>Project paths</Label>
+        <Label htmlFor={`${kind}-watch-projects`}>{t("gitlab:projectPaths")}</Label>
         <p className="text-xs text-muted-foreground">
-          Optional comma-separated namespace/project paths. Empty watches every accessible project.
+          {t("gitlab:optionalCommaSeparatedNamespaceProjectPaths")}
         </p>
         <Input
           id={`${kind}-watch-projects`}
@@ -123,29 +126,39 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
           onChange={(event) =>
             setForm((current) => ({ ...current, projectPaths: event.target.value }))
           }
+          // Sample namespace/project paths, i.e. the shape of the GitLab data the
+          // field accepts. Not copy — a translated "group" would stop being a
+          // usable example.
           placeholder="group/api, group/web"
         />
       </div>
       {kind === "issue" && (
         <div className="space-y-1.5">
-          <Label htmlFor="gitlab-watch-labels">Labels</Label>
+          <Label htmlFor="gitlab-watch-labels">{t("gitlab:labels")}</Label>
           <p className="text-xs text-muted-foreground">
-            Optional comma-separated GitLab labels that matching issues must include.
+            {t("gitlab:optionalCommaSeparatedGitlabLabelsThat")}
           </p>
           <Input
             id="gitlab-watch-labels"
             value={form.labels}
             onChange={(event) => setForm((current) => ({ ...current, labels: event.target.value }))}
+            // Sample GitLab label names — user data, like the labels the user
+            // will actually type here.
             placeholder="bug, priority::high"
           />
         </div>
       )}
       <div className="space-y-1.5">
-        <Label htmlFor={`${kind}-watch-query`}>GitLab query parameters</Label>
+        <Label htmlFor={`${kind}-watch-query`}>{t("gitlab:gitlabQueryParameters")}</Label>
         <p className="text-xs text-muted-foreground">
           {kind === "review"
-            ? "Leave empty to match merge requests requesting your review. Adding parameters explicitly replaces that reviewer constraint."
-            : "Optional GitLab API query parameters, such as state=opened&milestone=Next."}
+            ? t("gitlab:leaveEmptyToMatchMergeRequests")
+            : // The example is a literal GitLab API query string, so it is
+              // interpolated rather than written into the catalog — a translated
+              // (or pseudo-transliterated) copy of it would not parse.
+              t("gitlab:optionalGitlabApiQueryParametersSuch", {
+                example: "state=opened&milestone=Next",
+              })}
         </p>
         <Input
           id={`${kind}-watch-query`}
@@ -153,14 +166,16 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
           onChange={(event) =>
             setForm((current) => ({ ...current, customQuery: event.target.value }))
           }
+          // A literal GitLab API query parameter. It is submitted to GitLab
+          // verbatim, so it is protocol, not copy.
           placeholder="state=opened"
           className="font-mono text-xs"
         />
       </div>
       {kind === "review" && (
         <SelectField
-          label="Review scope"
-          description="Choose whether to include only direct reviewer requests or the broader compatible scope."
+          label={t("gitlab:reviewScope")}
+          description={t("gitlab:chooseWhetherToIncludeOnlyDirect")}
           value={form.reviewScope}
           onChange={(value) =>
             setForm((current) => ({
@@ -168,10 +183,10 @@ function FilterFields({ kind, form, setForm }: FormFieldsProps) {
               reviewScope: value as GitLabWatchForm["reviewScope"],
             }))
           }
-          placeholder="Direct requests"
+          placeholder={t("gitlab:directRequests")}
           items={[
-            { id: "user", label: "Direct requests" },
-            { id: "user_and_teams", label: "Direct and group-compatible requests" },
+            { id: "user", label: t("gitlab:directRequests") },
+            { id: "user_and_teams", label: t("gitlab:directAndGroupCompatibleRequests") },
           ]}
         />
       )}
@@ -186,24 +201,25 @@ type FormFieldsProps = {
 };
 
 function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
+  const { t } = useTranslation();
   const data = useDialogData(form.workspaceId, form.workflowId);
   return (
     <div className="space-y-4">
-      <SectionTitle>Task automation</SectionTitle>
+      <SectionTitle>{t("gitlab:taskAutomation")}</SectionTitle>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SelectField
-          label="Workflow"
-          description="Workflow that receives new tasks."
+          label={t("gitlab:workflow")}
+          description={t("gitlab:workflowThatReceivesNewTasks")}
           value={form.workflowId}
           onChange={(workflowId) =>
             setForm((current) => ({ ...current, workflowId, workflowStepId: "" }))
           }
-          placeholder="Select workflow"
+          placeholder={t("gitlab:selectWorkflow")}
           items={data.workflows.map((item) => ({ id: item.id, label: item.name }))}
         />
         <SelectField
-          label="Workflow step"
-          description="Initial step for each new task."
+          label={t("gitlab:workflowStep")}
+          description={t("gitlab:initialStepForEachNewTask")}
           value={form.workflowStepId}
           onChange={(workflowStepId) => setForm((current) => ({ ...current, workflowStepId }))}
           placeholder={stepPlaceholder(form.workflowId, data.stepsLoading, data.steps.length)}
@@ -222,8 +238,8 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
       />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SelectField
-          label="Agent profile"
-          description="Optional; otherwise uses the workflow step default."
+          label={t("gitlab:agentProfile")}
+          description={t("gitlab:optionalOtherwiseUsesTheWorkflowStep")}
           value={form.agentProfileId || STEP_DEFAULT}
           onChange={(value) =>
             setForm((current) => ({ ...current, agentProfileId: resolveProfileId(value) }))
@@ -235,8 +251,8 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
           ]}
         />
         <SelectField
-          label="Executor profile"
-          description="Optional; otherwise uses the workflow step default."
+          label={t("gitlab:executorProfile")}
+          description={t("gitlab:optionalOtherwiseUsesTheWorkflowStep")}
           value={form.executorProfileId || STEP_DEFAULT}
           onChange={(value) =>
             setForm((current) => ({ ...current, executorProfileId: resolveProfileId(value) }))
@@ -249,10 +265,8 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
         />
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor={`${kind}-watch-prompt`}>Task prompt</Label>
-        <p className="text-xs text-muted-foreground">
-          Prompt sent to the selected agent profile for each new match.
-        </p>
+        <Label htmlFor={`${kind}-watch-prompt`}>{t("gitlab:taskPrompt")}</Label>
+        <p className="text-xs text-muted-foreground">{t("gitlab:promptSentToTheSelectedAgent")}</p>
         <Textarea
           id={`${kind}-watch-prompt`}
           value={form.prompt}
@@ -265,13 +279,14 @@ function AutomationFields({ kind, form, setForm }: FormFieldsProps) {
 }
 
 function ScheduleFields({ kind, form, setForm }: FormFieldsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
-      <SectionTitle>Polling and cleanup</SectionTitle>
+      <SectionTitle>{t("gitlab:pollingAndCleanup")}</SectionTitle>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-1.5">
-          <Label htmlFor={`${kind}-watch-interval`}>Poll interval (seconds)</Label>
-          <p className="text-xs text-muted-foreground">Between 60 and 3600 seconds.</p>
+          <Label htmlFor={`${kind}-watch-interval`}>{t("gitlab:pollIntervalSeconds")}</Label>
+          <p className="text-xs text-muted-foreground">{t("gitlab:between60And3600Seconds")}</p>
           <Input
             id={`${kind}-watch-interval`}
             type="number"
@@ -284,9 +299,9 @@ function ScheduleFields({ kind, form, setForm }: FormFieldsProps) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor={`${kind}-watch-inflight`}>Maximum in-flight tasks</Label>
+          <Label htmlFor={`${kind}-watch-inflight`}>{t("gitlab:maximumInFlightTasks")}</Label>
           <p className="text-xs text-muted-foreground">
-            Optional cap; polling resumes when active tasks fall below it.
+            {t("gitlab:optionalCapPollingResumesWhenActive")}
           </p>
           <Input
             id={`${kind}-watch-inflight`}
@@ -296,13 +311,13 @@ function ScheduleFields({ kind, form, setForm }: FormFieldsProps) {
             onChange={(event) =>
               setForm((current) => ({ ...current, maxInflightTasks: event.target.value }))
             }
-            placeholder="No limit"
+            placeholder={t("gitlab:noLimit")}
           />
         </div>
       </div>
       <SelectField
-        label="Cleanup policy"
-        description="Controls task deletion when the GitLab item closes."
+        label={t("gitlab:cleanupPolicy")}
+        description={t("gitlab:controlsTaskDeletionWhenTheGitlab")}
         value={form.cleanupPolicy}
         onChange={(value) =>
           setForm((current) => ({
@@ -310,15 +325,22 @@ function ScheduleFields({ kind, form, setForm }: FormFieldsProps) {
             cleanupPolicy: value as GitLabWatchForm["cleanupPolicy"],
           }))
         }
-        placeholder="Auto"
+        placeholder={t("gitlab:auto")}
         items={[
-          { id: "auto", label: "Auto; keep engaged tasks" },
-          { id: "always", label: "Always delete" },
-          { id: "never", label: "Never delete" },
+          { id: "auto", label: t("gitlab:autoKeepEngagedTasks") },
+          { id: "always", label: t("gitlab:alwaysDelete") },
+          { id: "never", label: t("gitlab:neverDelete") },
         ]}
       />
     </div>
   );
+}
+
+function dialogTitle(t: TFunction, kind: GitLabWatchKind, editing: boolean): string {
+  if (kind === "review") {
+    return editing ? t("gitlab:editReviewWatch") : t("gitlab:createReviewWatch");
+  }
+  return editing ? t("gitlab:editIssueWatch") : t("gitlab:createIssueWatch");
 }
 
 export function GitLabWatchDialog({
@@ -330,6 +352,7 @@ export function GitLabWatchDialog({
   onCreate,
   onUpdate,
 }: GitLabWatchDialogProps) {
+  const { t } = useTranslation();
   const [form, setForm] = useState(() => makeWatchForm(kind, workspaceId));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -351,25 +374,27 @@ export function GitLabWatchDialog({
       }
       onOpenChange(false);
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "GitLab watch could not be saved");
+      setError(cause instanceof Error ? cause.message : t("gitlab:gitlabWatchCouldNotBeSaved"));
     } finally {
       setSaving(false);
     }
-  }, [onCreate, onOpenChange, onUpdate, payload, watch]);
-  const noun = kind === "review" ? "review" : "issue";
-  let saveLabel = "Create watch";
-  if (watch) saveLabel = "Update watch";
-  if (saving) saveLabel = "Saving...";
+  }, [onCreate, onOpenChange, onUpdate, payload, t, watch]);
+  let saveLabel = t("gitlab:createWatch");
+  if (watch) saveLabel = t("gitlab:updateWatch");
+  if (saving) saveLabel = t("gitlab:saving");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-none overflow-y-auto sm:max-h-[90vh] sm:w-[min(900px,calc(100vw-2rem))]">
         <DialogHeader>
-          <DialogTitle>
-            {watch ? "Edit" : "Create"} GitLab {noun} watch
-          </DialogTitle>
+          {/* Four whole sentences rather than "Edit"/"Create" + a `kind` noun:
+              `kind` is the wire discriminant and must never be translated, and
+              splicing a translated noun into a translated stem fixes English
+              word order. */}
+          <DialogTitle>{dialogTitle(t, kind, Boolean(watch))}</DialogTitle>
           <DialogDescription>
-            Automatically create workspace tasks for newly matching GitLab{" "}
-            {kind === "review" ? "merge requests" : "issues"}.
+            {kind === "review"
+              ? t("gitlab:reviewWatchDialogDescription")
+              : t("gitlab:issueWatchDialogDescription")}
           </DialogDescription>
         </DialogHeader>
         {error && (
@@ -389,7 +414,7 @@ export function GitLabWatchDialog({
             onClick={() => onOpenChange(false)}
             className="min-h-11 cursor-pointer sm:min-h-9"
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             onClick={() => void save()}

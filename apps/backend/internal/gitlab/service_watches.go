@@ -2,6 +2,7 @@ package gitlab
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -46,6 +47,51 @@ func (s *Service) CreateMRWatch(ctx context.Context, sessionID, taskID, reposito
 	}
 	s.publishWatchEvent(ctx, "mr_watch_created", w.ID, sessionID, taskID)
 	return w, nil
+}
+
+// EnsureMRWatch is the idempotent get-or-create counterpart to CreateMRWatch,
+// keyed by (sessionID, repositoryID, branch). Returns the existing row when
+// one is already present, backfilling mr_iid in place if it was previously
+// unknown (0) and a real iid is now available. Otherwise creates a new watch.
+// Safe to call repeatedly for the same (session, repository, branch) triple —
+// callers on the auto-link and on-demand-check paths call this on every push
+// without checking for an existing row themselves.
+func (s *Service) EnsureMRWatch(ctx context.Context, sessionID, taskID, repositoryID, projectPath string, iid int, branch string) (*MRWatch, error) {
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	existing, err := store.GetMRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch)
+	if err != nil {
+		return nil, err
+	}
+	if existing == nil {
+		w, createErr := s.CreateMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, iid, branch)
+		if createErr == nil {
+			return w, nil
+		}
+		// Lost the race with a concurrent EnsureMRWatch for the same triple
+		// (push detection and the on-demand check can both run for one
+		// session): the UNIQUE(session_id, repository_id, branch) constraint
+		// rejected our INSERT because the row we were about to create now
+		// exists. Re-read and return it — the caller's intent is satisfied.
+		// Any other failure is still reported.
+		if raced, getErr := store.GetMRWatchBySessionRepoAndBranch(ctx, sessionID, repositoryID, branch); getErr == nil && raced != nil {
+			return raced, nil
+		}
+		return nil, createErr
+	}
+	// Replace whenever the caller supplies a different, known iid — not just
+	// when the stored one was still unknown (<=0). A branch can be relinked
+	// to a replacement MR (the prior one closed and a new one opened), and
+	// without this the watch keeps polling the stale iid forever.
+	if iid > 0 && existing.MRIID != iid {
+		if err := store.UpdateMRWatchMRIID(ctx, existing.ID, iid); err != nil {
+			return nil, fmt.Errorf("update MR watch iid: %w", err)
+		}
+		existing.MRIID = iid
+	}
+	return existing, nil
 }
 
 // GetMRWatchBySession fetches the legacy single-repo watch.
@@ -171,6 +217,13 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 	if store == nil {
 		return nil, false, errStoreUnavailable
 	}
+	valid, err := s.watchMatchesTaskRepository(ctx, store, client, watch)
+	if err != nil {
+		return nil, false, err
+	}
+	if !valid {
+		return nil, false, nil
+	}
 	// If we don't yet know an iid, try to find it from the branch.
 	if watch.MRIID <= 0 {
 		mr, err := client.FindMRByBranch(ctx, watch.ProjectPath, watch.Branch)
@@ -197,7 +250,159 @@ func (s *Service) CheckMRWatch(ctx context.Context, watch *MRWatch) (*MRStatus, 
 	if notable {
 		s.publishMRFeedbackEvent(ctx, watch, status)
 	}
+	s.refreshTaskMRFromWatch(ctx, store, client, watch, status)
 	return status, notable, nil
+}
+
+// watchMatchesTaskRepository confirms watch.RepositoryID/ProjectPath still
+// identify the task's own GitLab repository before any GitLab request or
+// gitlab_task_mrs write. refreshTaskMRFromWatch's identity check only
+// validates the MR *returned by GitLab* against the watch's own (host,
+// project, iid) — that alone still lets a stale or mis-scoped watch (one
+// whose repository_id was never actually tied to this GitLab project) poll
+// and self-consistently upsert data anyway, since GetMRStatus itself only
+// cares about project path and iid, not repository_id.
+//
+// Returns (true, nil) when the watch is valid, or when the owning task is
+// orphaned (workspaceID == "", e.g. the task was deleted) — refreshing an
+// orphaned watch is already a benign no-op elsewhere in this file, so
+// identity is not re-litigated here. Returns (false, nil) — not an error —
+// only when ValidateTaskMRRepositoryIdentity returns the direct
+// ErrTaskMRRepositoryMismatch sentinel, a durable identity mismatch; the
+// watch is deleted rather than left to retry, since a mismatch is a
+// permanent fact, not a transient failure, and would otherwise poll forever
+// for nothing. Any other error — ErrTaskMRNotFound (the task/repository
+// link row itself is missing, which can be a transient race rather than a
+// proven mismatch) or a wrapped store/lookup failure — is propagated
+// instead of deleting the watch, so the poller's existing per-watch error
+// logging fires and retries on the next tick rather than destroying data on
+// what may be a recoverable condition.
+func (s *Service) watchMatchesTaskRepository(ctx context.Context, store *Store, client Client, watch *MRWatch) (bool, error) {
+	workspaceID, err := store.WorkspaceIDForTask(ctx, watch.TaskID)
+	if err != nil {
+		return false, err
+	}
+	if workspaceID == "" {
+		return true, nil
+	}
+	err = store.ValidateTaskMRRepositoryIdentity(
+		ctx, workspaceID, watch.TaskID, watch.RepositoryID, client.Host(), watch.ProjectPath,
+	)
+	if err == nil {
+		return true, nil
+	}
+	if !errors.Is(err, ErrTaskMRRepositoryMismatch) {
+		return false, err
+	}
+	s.logger.Warn("dropping MR watch whose repository no longer matches the task",
+		zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+	if delErr := store.DeleteMRWatch(ctx, watch.ID); delErr != nil {
+		s.logger.Warn("failed to delete mismatched MR watch",
+			zap.String("watch_id", watch.ID), zap.Error(delErr))
+	}
+	return false, nil
+}
+
+// refreshTaskMRFromWatch keeps gitlab_task_mrs in sync with every poll, not
+// just the ones the caller found "notable" — otherwise the topbar MR surface
+// (state, pipeline_state, approval_state, merge_status) only updates on a
+// pipeline/approval transition and misses everything else (title, merge
+// state, review comments' side effects, etc). Best-effort: a failure here
+// must not fail the poll cycle, since UpdateMRWatchTimestamps above already
+// recorded a successful check.
+func (s *Service) refreshTaskMRFromWatch(ctx context.Context, store *Store, client Client, watch *MRWatch, status *MRStatus) {
+	// A response that doesn't actually match this watch's (host, project,
+	// iid) — a client bug, or a mismatched mock in tests — must not create or
+	// overwrite a task-MR association. Same check the manual-link and
+	// auto-link paths already run before trusting a fetched MR.
+	if err := validateReturnedMRIdentity(status, client.Host(), watch.ProjectPath, watch.MRIID); err != nil {
+		s.logger.Warn("dropping MR watch refresh with mismatched identity",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+		return
+	}
+	workspaceID, err := store.WorkspaceIDForTask(ctx, watch.TaskID)
+	if err != nil {
+		// This is now the only path that refreshes gitlab_task_mrs on every
+		// poll, so a transient DB error here must be observable — unlike an
+		// empty workspaceID with no error (a benign orphaned-watch case,
+		// e.g. the task was deleted), which is not logged.
+		s.logger.Warn("failed to resolve workspace while refreshing task MR from watch",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+		return
+	}
+	if workspaceID == "" {
+		return
+	}
+	association := taskMRFromStatus(watch.TaskID, watch.RepositoryID, client.Host(), watch.ProjectPath, status)
+	// Loaded before the upsert so it reflects the row's state prior to this
+	// poll; a lookup failure isn't fatal to the refresh itself, but without a
+	// "previous" to compare against we can't tell whether anything visible
+	// changed, so this poll's update is published rather than silently
+	// dropped by a comparison against a stale nil.
+	previous, prevErr := store.GetTaskMR(ctx, watch.TaskID, watch.RepositoryID, watch.ProjectPath, watch.MRIID)
+	if prevErr != nil {
+		s.logger.Warn("failed to load existing task MR before refresh",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(prevErr))
+	}
+	if err := store.UpsertTaskMR(ctx, association); err != nil {
+		s.logger.Warn("failed to refresh task MR from watch",
+			zap.String("watch_id", watch.ID), zap.String("task_id", watch.TaskID), zap.Error(err))
+		return
+	}
+	if prevErr != nil || taskMRVisibleFieldsChanged(previous, association) {
+		s.publishTaskMRUpdated(ctx, workspaceID, association)
+	}
+}
+
+// taskMRVisibleFieldsChanged reports whether any user-visible field differs
+// between a task-MR association's previous and current state. Excludes
+// bookkeeping-only columns (id, timestamps) so a poll that re-fetches
+// identical MR data doesn't broadcast a gitlab.task_mr.updated event on every
+// tick — refreshTaskMRFromWatch runs on every poll, not just "notable"
+// pipeline/approval transitions, so without this filter the event fires far
+// more often than anything actually changed. previous == nil (first-ever
+// refresh for this association) always counts as changed.
+func taskMRVisibleFieldsChanged(previous, current *TaskMR) bool {
+	if previous == nil {
+		return true
+	}
+	return taskMRIdentityFieldsChanged(previous, current) || taskMRStatusFieldsChanged(previous, current)
+}
+
+// taskMRIdentityFieldsChanged compares the descriptive fields a poll can
+// revise (title, branches, author) — split out from taskMRStatusFieldsChanged
+// purely to keep taskMRVisibleFieldsChanged under the cyclomatic-complexity
+// budget; the two halves together are the full comparison.
+func taskMRIdentityFieldsChanged(previous, current *TaskMR) bool {
+	return previous.MRURL != current.MRURL ||
+		previous.MRTitle != current.MRTitle ||
+		previous.HeadBranch != current.HeadBranch ||
+		previous.BaseBranch != current.BaseBranch ||
+		previous.AuthorUsername != current.AuthorUsername
+}
+
+// taskMRStatusFieldsChanged compares the review/CI status fields a poll can
+// revise (state, approvals, pipeline, merge).
+func taskMRStatusFieldsChanged(previous, current *TaskMR) bool {
+	return previous.State != current.State ||
+		previous.ApprovalState != current.ApprovalState ||
+		previous.PipelineState != current.PipelineState ||
+		previous.MergeStatus != current.MergeStatus ||
+		previous.Draft != current.Draft ||
+		previous.ApprovalCount != current.ApprovalCount ||
+		previous.RequiredApprovals != current.RequiredApprovals ||
+		previous.PipelineJobsTotal != current.PipelineJobsTotal ||
+		previous.PipelineJobsPass != current.PipelineJobsPass ||
+		!timePtrEqual(previous.MergedAt, current.MergedAt) ||
+		!timePtrEqual(previous.ClosedAt, current.ClosedAt)
+}
+
+// timePtrEqual compares two *time.Time for equal instants, nil-safe.
+func timePtrEqual(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	return a.Equal(*b)
 }
 
 // --- Review Watch ---

@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -53,6 +54,117 @@ func TestPublishMCPAttachmentPublishesWithoutBlocking(t *testing.T) {
 	if got := len(m.updatesCh); got != 1 {
 		t.Fatalf("queued events = %d, want 1", got)
 	}
+}
+
+func TestSendErrorEventWithProviderErrorCarriesSafeDetails(t *testing.T) {
+	occurred := time.Date(2026, 8, 2, 15, 15, 44, 0, time.UTC)
+	m := &Manager{
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		logger:    newTestLogger(t),
+	}
+	m.SendErrorEventWithProviderError("provider failed", 7, &streams.ProviderError{
+		Source:     streams.ProviderErrorSourceOpenCodeStderr,
+		ModelID:    "kimi-k3",
+		Message:    "5-hour usage limit reached",
+		OccurredAt: occurred,
+	})
+
+	event := <-m.updatesCh
+	if event.PromptGeneration != 7 || event.Error != "provider failed" {
+		t.Fatalf("event = %+v", event)
+	}
+	if event.ProviderError == nil || event.ProviderError.ModelID != "kimi-k3" {
+		t.Fatalf("provider error = %+v", event.ProviderError)
+	}
+}
+
+func TestManagerReadStderrDeliversCleanedLinesToOptionalConsumer(t *testing.T) {
+	consumer := &stderrLineCapture{lines: make(chan string, 2)}
+	m := &Manager{
+		stderr:         io.NopCloser(strings.NewReader("\x1b[31mquota\x1b[0m\nplain\n")),
+		stderrConsumer: consumer,
+		logger:         newTestLogger(t),
+	}
+	m.wg.Add(1)
+	m.readStderr()
+
+	got := []string{<-consumer.lines, <-consumer.lines}
+	want := []string{"quota", "plain"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("consumer lines = %#v, want %#v", got, want)
+	}
+	if got := m.GetRecentStderr(); !slices.Equal(got, want) {
+		t.Fatalf("recent stderr = %#v, want %#v", got, want)
+	}
+}
+
+type stderrLineSanitizerFunc func(string) (string, bool)
+
+func (f stderrLineSanitizerFunc) SanitizeStderrLine(line string) (string, bool) {
+	return f(line)
+}
+
+func TestManagerProcessExitHelper(t *testing.T) {
+	if os.Getenv("KANDEV_MANAGER_PROCESS_EXIT_HELPER") != "1" {
+		return
+	}
+	fmt.Fprintln(os.Stderr, "workspace=https://opencode.ai/workspace/wrk_private")
+	os.Exit(7)
+}
+
+func TestManagerProcessExitUsesSanitizedStderr(t *testing.T) {
+	log, observed := newObservedTestLogger(t)
+	cmd := exec.Command(os.Args[0], "-test.run=TestManagerProcessExitHelper")
+	cmd.Env = append(os.Environ(), "KANDEV_MANAGER_PROCESS_EXIT_HELPER=1")
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatalf("stderr pipe: %v", err)
+	}
+	m := &Manager{
+		cmd:       cmd,
+		stderr:    stderr,
+		logger:    log,
+		doneCh:    make(chan struct{}),
+		updatesCh: make(chan adapter.AgentEvent, 1),
+		stderrSanitizer: stderrLineSanitizerFunc(func(string) (string, bool) {
+			return "OpenCode provider failure", true
+		}),
+		groupAliveFn: func(int) bool { return false },
+	}
+	m.status.Store(StatusRunning)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start process: %v", err)
+	}
+	m.wg.Add(2)
+	go m.readStderr()
+	m.waitForExit()
+	m.wg.Wait()
+
+	event := <-m.updatesCh
+	if strings.Contains(event.Error, "wrk_private") || strings.Contains(event.Error, "https://") {
+		t.Fatalf("exit error leaked raw stderr: %q", event.Error)
+	}
+	data := event.Data
+	if data == nil {
+		t.Fatal("event data is nil")
+	}
+	recent, ok := data["recent_stderr"].([]string)
+	if !ok || !slices.Equal(recent, []string{"OpenCode provider failure"}) {
+		t.Fatalf("recent stderr = %#v", data["recent_stderr"])
+	}
+	for _, entry := range observed.All() {
+		if strings.Contains(fmt.Sprint(entry.ContextMap()), "wrk_private") {
+			t.Fatalf("logger captured raw stderr: %v", entry.ContextMap())
+		}
+	}
+}
+
+type stderrLineCapture struct {
+	lines chan string
+}
+
+func (c *stderrLineCapture) ConsumeStderrLine(line string) {
+	c.lines <- line
 }
 
 func TestPublishMCPAttachmentAttemptCarriesBackendOwnedIdentity(t *testing.T) {

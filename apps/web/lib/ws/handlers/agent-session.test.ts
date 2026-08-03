@@ -337,13 +337,14 @@ describe("session.state_changed context window provenance", () => {
             efficiency: 36.8,
             source: "acp",
           },
+          context_compaction_count: 3,
         },
       }),
     );
 
     expect(setContextWindow).toHaveBeenCalledWith(
       "s-1",
-      expect.objectContaining({ source: "acp" }),
+      expect.objectContaining({ source: "acp", compactionCount: 3 }),
     );
   });
 

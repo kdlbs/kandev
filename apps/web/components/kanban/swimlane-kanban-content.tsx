@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DndContext,
   DragEndEvent,
@@ -25,6 +25,7 @@ import { MobileDropTargets } from "./mobile-drop-targets";
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
+import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
 import { compareTasksByCreatedDesc } from "@/lib/kanban/task-order";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
 import {
@@ -171,29 +172,30 @@ function useSwimlaneKanbanDnd({ tasks, workflowId, onMoveError }: SwimlaneKanban
   };
 }
 
-function getInitialColumnIndex(steps: WorkflowStep[], tasks: Task[]): number {
-  if (steps.length === 0) return 0;
-  const idx = steps.findIndex((step) => tasks.some((t) => t.workflowStepId === step.id));
-  return idx !== -1 ? idx : 0;
-}
-
 function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: Task[]) {
-  const [selection, setSelection] = useState(() => ({
-    workflowId,
-    index: getInitialColumnIndex(steps, tasks),
-  }));
+  const storedStepId = useAppStore(
+    (state) => state.mobileKanban.activeStepIdByWorkflowId[workflowId],
+  );
+  const setMobileKanbanActiveStep = useAppStore((state) => state.setMobileKanbanActiveStep);
 
-  // Derive clamped index — avoids calling setState in an effect
-  const activeIndex = useMemo(() => {
-    if (steps.length === 0) return 0;
-    if (selection.workflowId !== workflowId || selection.index >= steps.length) {
-      return getInitialColumnIndex(steps, tasks);
-    }
-    return selection.index;
-  }, [steps, tasks, selection, workflowId]);
+  const activeIndex = useMemo(
+    () => resolveMobileColumnIndex(steps, tasks, storedStepId),
+    [steps, tasks, storedStepId],
+  );
+  const activeStepId = steps[activeIndex]?.id;
+
+  useEffect(() => {
+    if (!activeStepId || activeStepId === storedStepId) return;
+    setMobileKanbanActiveStep(workflowId, activeStepId);
+  }, [activeStepId, storedStepId, workflowId, setMobileKanbanActiveStep]);
+
   const setActiveIndex = useCallback(
-    (index: number) => setSelection({ workflowId, index }),
-    [workflowId],
+    (index: number) => {
+      const stepId = steps[index]?.id;
+      if (!stepId) return;
+      setMobileKanbanActiveStep(workflowId, stepId);
+    },
+    [steps, workflowId, setMobileKanbanActiveStep],
   );
 
   return { activeIndex, setActiveIndex };

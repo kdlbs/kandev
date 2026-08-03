@@ -1,13 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import type { StoreApi } from "zustand";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useTheme } from "@/components/theme/app-theme";
 import {
   disablePlugin,
   enablePlugin,
+  getPlugin,
   installPluginFromUrl,
   installPluginUpload,
   listPlugins,
@@ -24,6 +25,9 @@ import type { PluginRecord, PluginStatus, SyncError } from "@/lib/types/plugins"
 import type { AppState } from "@/lib/state/store";
 
 function withStatus(plugin: PluginRecord, status: PluginStatus): PluginRecord {
+  if (status === "active") {
+    return { ...plugin, status, last_error: undefined, last_error_at: undefined };
+  }
   return { ...plugin, status };
 }
 
@@ -83,6 +87,13 @@ function useEnableDisableActions(upsertPlugin: (p: PluginRecord) => void) {
       upsertPlugin(updated);
       await loadIfActive(updated, storeApi, resolvedTheme, false);
     } catch (err) {
+      try {
+        const refreshed = await getPlugin(plugin.id, { cache: "no-store" });
+        upsertPlugin(refreshed);
+      } catch {
+        // Preserve the original Enable failure toast if the diagnostic refresh
+        // itself cannot reach the backend.
+      }
       toast.error(err instanceof Error ? err.message : `Failed to enable ${plugin.display_name}`);
     } finally {
       setBusyId(null);

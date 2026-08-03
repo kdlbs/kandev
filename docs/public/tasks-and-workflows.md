@@ -54,7 +54,12 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
   caption="A focused task is entered while its repository, agent profile, worktree isolation, and start mode remain visible for review."
 />
 
-1. Enter a concise title of up to 60 characters. Titles prefilled from a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the detailed context belongs in the description.
+1. When the title field is shown, enter a concise title of up to 60 characters. Titles prefilled from
+   a remote pull request, issue, or merge request are shortened with an ellipsis when needed; the
+   detailed context belongs in the description. If **Settings → General → Task Actions → Agent-generated
+   task titles** is enabled, the New Task dialog hides this field, requires a nonempty prompt, and uses
+   the prompt's first six words as a provisional title while the first eligible agent session chooses
+   the final title. The empty-description Plan Mode exception applies only when this setting is disabled.
 2. Select the workspace and workflow when Kandev cannot infer them. A regular non-ephemeral task must belong to a workflow.
 3. Select a source:
 
@@ -65,7 +70,7 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    | **None**   | Planning, research, or work outside Git           | Use a scratch workspace or an optional folder on the Kandev host. Git worktree execution and repository-aware Changes, branch, and pull-request features are unavailable.                                                                                                                                                                                                                                            |
 
 4. Select a compatible executor profile and agent profile. A workflow default agent profile locks the task-level agent selector. Executor and agent compatibility is validated before launch.
-5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. A nonempty description exposes the standard split actions.
+5. Enter the initial description. In the **New Task** dialog, an empty description changes the primary action to **Start Plan Mode**; the other dialog actions require a description. Agent-facing task MCP has different empty-description rules. When agent-generated task titles are enabled, every task and subtask action requires a nonempty prompt; the empty-description Plan Mode exception is disabled. A nonempty description exposes the standard split actions.
 6. Choose the applicable action:
    - **Start Plan Mode** is the primary empty-description action and creates the task through the plan-mode path.
    - **Start task** requires a nonempty description, creates the task, and starts its agent.
@@ -82,6 +87,22 @@ Creating a repository is available only in an unlocked, single-repository **New 
 
 <details>
 <summary>Advanced task creation: agent-created tasks, long transcripts, multiple sources, and attachments</summary>
+
+### Let the agent name new tasks
+
+Open **Settings → General → Task Actions → Agent-generated task titles** and choose **Save changes**.
+The setting is enabled by default; an explicitly saved **off** value remains off. When enabled, new task
+and subtask dialogs use the prompt as the source of the title: the prompt must contain text, and Kandev
+immediately displays its first six normalized words as a provisional title. The first eligible task-mode
+session to launch atomically claims the handoff, receives the `set_task_title_kandev` MCP tool, and is
+instructed to call it before doing any other work. Ask for a short title phrase targeting about six words
+in sentence case rather than a sentence or progress update. Later sessions do not receive the instruction
+or tool, even if the owner fails before renaming the task. If the agent never renames the task, the
+provisional title remains usable and can still be edited by a person.
+
+The setting affects only new task/subtask creation. Existing task edits keep the title field, and
+sessions for tasks created while the setting was disabled receive neither this instruction nor the
+tool. Config and Office sessions never receive the title tool.
 
 ### Choose the profile for tasks created by agents
 
@@ -222,7 +243,8 @@ New steps allow manual moves by default. **Show in command panel** also defaults
 | Setting                   | Effect                                                                                                                                                                                           |
 | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | **Start step**            | Makes this the normal starting step. Only one step per workflow should be selected. If none is selected, Kandev falls back to the first positional step.                                         |
-| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context.                                                          |
+| Agent profile             | Overrides the workflow/task profile when entering this step. A different profile creates a new session with fresh conversation context. The fixed profile override and original-session options are mutually exclusive. |
+| **Override original session options** | Keeps the original conversation tab while applying model and ACP configuration rules for the task's starting agent family. The options editor appears below WIP settings only when this is checked. |
 | **Auto-start agent**      | Starts an agent whenever a task enters the step.                                                                                                                                                 |
 | **Plan mode**             | Enables plan mode when the task enters the step.                                                                                                                                                 |
 | **Reset agent context**   | Starts with fresh conversation context on entry. It is disabled when the step has a profile override because the profile switch already creates a fresh session.                                 |
@@ -272,6 +294,36 @@ For example, a review step with `on_enter: auto_start_agent` and
 review turn completes, not during startup.
 
 Plan mode can be disabled when the turn completes and/or when the task exits the step. A step prompt is Markdown and can include `{{task_prompt}}` to insert the original task description.
+
+#### Override original session options
+
+Check **Override original session options** when a workflow should keep one
+conversation while changing its model settings between steps. For example, a
+task can start with session model **5.6 Sol** and switch to **5.6 Luna** for an
+implementation step. The options editor appears below WIP settings after the
+checkbox is enabled; selecting a fixed **Agent profile** disables this option.
+
+Add one rule per agent family; the rule is ignored when the task started with
+another family. The family picker lists only families represented by configured
+agent profiles, while existing persisted rules remain visible if capability
+data later becomes unavailable. The editor uses the same model and ACP option
+picker as the chat input, so provider-specific models and options are selected
+from the agent's advertised capabilities.
+
+Each rule can **Set** a model and any selected options, **Keep** the settings
+already active, or **Restore original** to reapply the immutable model and
+option values captured when the original session finished initializing, after
+profile settings were applied.
+Rules are best-effort: a rejected field produces a warning, while successful
+fields remain active and the step continues. The settings are applied before
+an auto-start prompt and persist as the session's runtime overrides.
+
+This behavior is mutually exclusive with the step's fixed **Agent profile**
+override. A fixed profile intentionally creates a separate session; conditional
+rules never activate or mutate that replacement tab. If an earlier rule may
+carry changed values into a later step, the editor shows a warning with **Keep**,
+**Restore**, and **Set new** choices. Read-only synced workflows display these
+rules and warnings but cannot edit them.
 
 ### Build a human gate
 

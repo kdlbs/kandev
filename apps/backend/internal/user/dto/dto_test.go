@@ -8,6 +8,21 @@ import (
 	"github.com/kandev/kandev/internal/user/models"
 )
 
+func TestUpdateUserSettingsRequestExposesAzureDevOpsBrowsePreferences(t *testing.T) {
+	field, ok := reflect.TypeFor[UpdateUserSettingsRequest]().FieldByName("AzureDevOpsBrowsePreferences")
+	if !ok || field.Tag.Get("json") != "azure_devops_browse_preferences,omitempty" {
+		t.Fatalf("Azure DevOps browse preferences patch field = %+v, want JSON preference field", field)
+	}
+}
+
+func TestFromUserSettingsMapsAzureDevOpsBrowsePreferences(t *testing.T) {
+	preferences := json.RawMessage(`{"project-1":{"teamId":"team-1"}}`)
+	settings := FromUserSettings(&models.UserSettings{AzureDevOpsBrowsePreferences: preferences})
+	if string(settings.AzureDevOpsBrowsePreferences) != string(preferences) {
+		t.Fatalf("AzureDevOpsBrowsePreferences = %s, want %s", settings.AzureDevOpsBrowsePreferences, preferences)
+	}
+}
+
 func TestTasksListShowDetailsDTO(t *testing.T) {
 	if !FromUserSettings(&models.UserSettings{TasksListShowDetails: true}).TasksListShowDetails {
 		t.Fatal("TasksListShowDetails = false, want true")
@@ -90,6 +105,36 @@ func TestFromUserSettingsIncludesArchiveConfirmation(t *testing.T) {
 		if dto.ConfirmTaskArchive != want {
 			t.Fatalf("ConfirmTaskArchive = %v, want %v", dto.ConfirmTaskArchive, want)
 		}
+	}
+}
+
+func TestAgentGeneratedTaskTitlesDTOAndPatchSemantics(t *testing.T) {
+	if !FromUserSettings(&models.UserSettings{AgentGeneratedTaskTitles: true}).AgentGeneratedTaskTitles {
+		t.Fatal("AgentGeneratedTaskTitles = false, want true")
+	}
+
+	var omitted UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{}`), &omitted); err != nil {
+		t.Fatalf("decode omitted request: %v", err)
+	}
+	if omitted.AgentGeneratedTaskTitles != nil {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want nil for omitted field", omitted.AgentGeneratedTaskTitles)
+	}
+
+	var explicit UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"agent_generated_task_titles":true}`), &explicit); err != nil {
+		t.Fatalf("decode explicit request: %v", err)
+	}
+	if explicit.AgentGeneratedTaskTitles == nil || !*explicit.AgentGeneratedTaskTitles {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want true", explicit.AgentGeneratedTaskTitles)
+	}
+
+	var disabled UpdateUserSettingsRequest
+	if err := json.Unmarshal([]byte(`{"agent_generated_task_titles":false}`), &disabled); err != nil {
+		t.Fatalf("decode explicit false request: %v", err)
+	}
+	if disabled.AgentGeneratedTaskTitles == nil || *disabled.AgentGeneratedTaskTitles {
+		t.Fatalf("AgentGeneratedTaskTitles = %#v, want false", disabled.AgentGeneratedTaskTitles)
 	}
 }
 

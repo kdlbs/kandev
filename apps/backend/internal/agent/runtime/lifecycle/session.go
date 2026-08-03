@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -293,122 +294,58 @@ func (sm *SessionManager) InitializeAndPrompt(
 	profileMode string,
 	profileConfigOptions map[string]string,
 ) error {
-	// Create session-level trace span to group all operations under one trace
-	_, sessionSpan := tracing.TraceSessionStart(
-		context.Background(), execution.TaskID, execution.SessionID, execution.ID,
+	// Preserve the legacy call contract for direct callers: its supplied
+	// configuration is the final runtime layer. The lifecycle manager uses the
+	// layered entry point below so profile settings can be snapshotted first.
+	return sm.InitializeAndPromptWithLayers(
+		ctx, execution, agentConfig, taskDescription, attachments, mcpServers,
+		markReady,
+		"", "", nil,
+		profileModel, profileMode, profileConfigOptions,
 	)
-	execution.SetSessionSpan(sessionSpan)
-	ctx = trace.ContextWithSpan(ctx, sessionSpan)
-	if execution.agentctl != nil {
-		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
-	}
+}
 
-	// Create short-lived init span so the init phase is visible in trace backends
-	// (the parent session span won't be exported until the session ends)
-	ctx, initSpan := tracing.TraceSessionInit(ctx, execution.TaskID, execution.SessionID, execution.ID)
-	defer initSpan.End()
-
-	rt := agentConfig.Runtime()
-	sm.logger.Info("initializing ACP session",
-		zap.String("execution_id", execution.ID),
-		zap.String("agentctl_url", execution.agentctl.BaseURL()),
-		zap.String("agent_type", agentConfig.ID()),
-		zap.String("existing_acp_session_id", execution.ACPSessionID),
-		zap.Bool("native_session_resume", rt.SessionConfig.NativeSessionResume))
-
-	// Connect WebSocket streams FIRST — agent operations now go over the stream
-	if sm.streamManager != nil {
-		updatesReady := make(chan struct{})
-		sm.streamManager.ConnectAll(execution, updatesReady)
-
-		// Wait for the updates stream to connect — required for agent operations
-		select {
-		case <-updatesReady:
-			sm.logger.Debug("updates stream ready")
-		case <-time.After(10 * time.Second):
-			return fmt.Errorf("timeout waiting for agent stream to connect")
-		}
-	}
-
-	// Use InitializeSession for configuration-driven session initialization
-	result, err := sm.InitializeSession(
-		ctx,
-		execution.agentctl,
-		agentConfig,
-		execution.ACPSessionID,
-		execution.WorkspacePath,
-		mcpServers,
-	)
+// InitializeAndPromptWithLayers performs ACP initialization with a distinct
+// profile layer and final runtime layer. The original effective snapshot is
+// published after the profile layer and before the runtime layer.
+func (sm *SessionManager) InitializeAndPromptWithLayers(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	taskDescription string,
+	attachments []MessageAttachment,
+	mcpServers []agentctltypes.McpServer,
+	markReady func(executionID string) error,
+	profileModel string,
+	profileMode string,
+	profileConfigOptions map[string]string,
+	runtimeModel string,
+	runtimeMode string,
+	runtimeConfigOptions map[string]string,
+) error {
+	ctx, result, err := sm.initializeACPConnection(ctx, execution, agentConfig, mcpServers)
 	if err != nil {
-		sm.logger.Error("session initialization failed",
-			zap.String("execution_id", execution.ID),
-			zap.Error(err))
 		return err
 	}
-
-	sm.logger.Info("ACP session initialized",
-		zap.String("execution_id", execution.ID),
-		zap.String("agent_name", result.AgentName),
-		zap.String("agent_version", result.AgentVersion),
-		zap.String("session_id", result.SessionID))
 
 	execution.ACPSessionID = result.SessionID
 	execution.sessionInitialized = true
 	providerDefaultConfig := execution.GetModelState()
-	finalConfigID := ""
+	finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied := sm.applyProfileSessionLayers(
+		ctx, execution, result.SessionID, profileModel, profileMode, profileConfigOptions,
+	)
 
-	// Apply profile model through the ACP session's advertised model-selection
-	// mechanism (best-effort). ACP is the only surface for model selection now;
-	// no --model CLI flag.
-	if profileModel != "" && execution.agentctl != nil {
-		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
-			sm.logger.Warn("failed to set profile model via ACP",
-				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel),
-				zap.Error(err))
-		} else {
-			finalConfigID = modelConfigIDFromState(execution.GetModelState())
-			sm.logger.Info("set profile model on ACP session",
-				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel))
-		}
-	}
+	// Capture the effective profile state before runtime overrides or workflow
+	// launch settings are applied. This event is intentionally separate from
+	// ConfigBaselineCandidate, which remains provider-default comparison data.
+	sm.publishOriginalConfigOptionsWithProfile(execution, result.SessionID, profileModelApplied, profileConfigOptionsApplied)
 
-	// Apply profile mode via ACP session/set_mode (best-effort).
-	if profileMode != "" && execution.agentctl != nil {
-		if err := execution.agentctl.SetMode(ctx, result.SessionID, profileMode); err != nil {
-			sm.logger.Warn("failed to set profile mode via ACP",
-				zap.String("execution_id", execution.ID),
-				zap.String("mode", profileMode),
-				zap.Error(err))
-		} else {
-			sm.logger.Info("set profile mode on ACP session",
-				zap.String("execution_id", execution.ID),
-				zap.String("mode", profileMode))
-		}
-	}
-
-	// Apply any dynamic ACP config options saved on the profile. Model and
-	// mode are handled above so their existing semantics stay unchanged.
-	for configID, value := range profileconfig.SanitizeConfigOptions(profileConfigOptions) {
-		if execution.agentctl == nil {
-			break
-		}
-		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
-			sm.logger.Warn("failed to set profile config option via ACP",
-				zap.String("execution_id", execution.ID),
-				zap.String("config_id", configID),
-				zap.String("value", value),
-				zap.Error(err))
-		} else {
-			finalConfigID = configID
-			sm.logger.Info("set profile config option on ACP session",
-				zap.String("execution_id", execution.ID),
-				zap.String("config_id", configID),
-				zap.String("value", value))
-		}
-	}
+	finalConfigID, runtimeFailures := sm.applyRuntimeSessionLayers(
+		ctx, execution, result.SessionID, finalConfigID,
+		profileModelApplied, profileModeApplied, runtimeModel, runtimeMode, runtimeConfigOptions,
+	)
 	sm.publishSettledConfigOptions(execution, result.SessionID, finalConfigID, providerDefaultConfig)
+	sm.publishWorkflowSessionConfigFailures(execution, result.SessionID, runtimeFailures)
 
 	// Publish session created event
 	if sm.eventPublisher != nil {
@@ -419,6 +356,157 @@ func (sm *SessionManager) InitializeAndPrompt(
 	sm.dispatchInitialPrompt(ctx, execution, agentConfig, taskDescription, attachments, markReady)
 
 	return nil
+}
+
+func (sm *SessionManager) initializeACPConnection(
+	ctx context.Context,
+	execution *AgentExecution,
+	agentConfig agents.Agent,
+	mcpServers []agentctltypes.McpServer,
+) (context.Context, *InitializeResult, error) {
+	_, sessionSpan := tracing.TraceSessionStart(
+		context.Background(), execution.TaskID, execution.SessionID, execution.ID,
+	)
+	execution.SetSessionSpan(sessionSpan)
+	ctx = trace.ContextWithSpan(ctx, sessionSpan)
+	if execution.agentctl != nil {
+		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
+	}
+	ctx, initSpan := tracing.TraceSessionInit(ctx, execution.TaskID, execution.SessionID, execution.ID)
+	defer initSpan.End()
+
+	rt := agentConfig.Runtime()
+	sm.logger.Info("initializing ACP session",
+		zap.String("execution_id", execution.ID), zap.String("agentctl_url", execution.agentctl.BaseURL()),
+		zap.String("agent_type", agentConfig.ID()), zap.String("existing_acp_session_id", execution.ACPSessionID),
+		zap.Bool("native_session_resume", rt.SessionConfig.NativeSessionResume))
+	if sm.streamManager != nil {
+		updatesReady := make(chan struct{})
+		sm.streamManager.ConnectAll(execution, updatesReady)
+		select {
+		case <-updatesReady:
+			sm.logger.Debug("updates stream ready")
+		case <-time.After(10 * time.Second):
+			return ctx, nil, fmt.Errorf("timeout waiting for agent stream to connect")
+		}
+	}
+	result, err := sm.InitializeSession(ctx, execution.agentctl, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
+	if err != nil {
+		sm.logger.Error("session initialization failed", zap.String("execution_id", execution.ID), zap.Error(err))
+		return ctx, nil, err
+	}
+	sm.logger.Info("ACP session initialized",
+		zap.String("execution_id", execution.ID), zap.String("agent_name", result.AgentName),
+		zap.String("agent_version", result.AgentVersion), zap.String("session_id", result.SessionID))
+	return ctx, result, nil
+}
+
+func (sm *SessionManager) applyProfileSessionLayers(
+	ctx context.Context,
+	execution *AgentExecution,
+	acpSessionID string,
+	profileModel string,
+	profileMode string,
+	profileConfigOptions map[string]string,
+) (string, string, string, map[string]string) {
+	if execution.agentctl == nil {
+		return "", "", "", nil
+	}
+	finalConfigID := ""
+	profileModelApplied := ""
+	profileModeApplied := ""
+	profileConfigOptionsApplied := make(map[string]string)
+	if profileModel != "" {
+		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
+			sm.logger.Warn("failed to set profile model via ACP",
+				zap.String("execution_id", execution.ID), zap.String("model", profileModel), zap.Error(err))
+		} else {
+			finalConfigID = modelConfigIDFromState(execution.GetModelState())
+			profileModelApplied = profileModel
+			sm.logger.Info("set profile model on ACP session",
+				zap.String("execution_id", execution.ID), zap.String("model", profileModel))
+		}
+	}
+	if profileMode != "" {
+		if err := execution.agentctl.SetMode(ctx, acpSessionID, profileMode); err != nil {
+			sm.logger.Warn("failed to set profile mode via ACP",
+				zap.String("execution_id", execution.ID), zap.String("mode", profileMode), zap.Error(err))
+		} else {
+			profileModeApplied = profileMode
+			sm.logger.Info("set profile mode on ACP session",
+				zap.String("execution_id", execution.ID), zap.String("mode", profileMode))
+		}
+	}
+	sanitizedOptions := profileconfig.SanitizeConfigOptions(profileConfigOptions)
+	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
+		value := sanitizedOptions[configID]
+		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
+			sm.logger.Warn("failed to set profile config option via ACP",
+				zap.String("execution_id", execution.ID), zap.String("config_id", configID),
+				zap.String("value", value), zap.Error(err))
+			continue
+		}
+		finalConfigID = configID
+		profileConfigOptionsApplied[configID] = value
+		sm.logger.Info("set profile config option on ACP session",
+			zap.String("execution_id", execution.ID), zap.String("config_id", configID), zap.String("value", value))
+	}
+	return finalConfigID, profileModelApplied, profileModeApplied, profileConfigOptionsApplied
+}
+
+func (sm *SessionManager) applyRuntimeSessionLayers(
+	ctx context.Context,
+	execution *AgentExecution,
+	acpSessionID string,
+	finalConfigID string,
+	profileModel string,
+	profileMode string,
+	runtimeModel string,
+	runtimeMode string,
+	runtimeConfigOptions map[string]string,
+) (string, []string) {
+	failed := make([]string, 0)
+	if execution.agentctl == nil {
+		return finalConfigID, failed
+	}
+	if runtimeModel != "" && runtimeModel != profileModel {
+		if err := execution.agentctl.SetModel(ctx, runtimeModel); err != nil {
+			failed = append(failed, "model")
+			sm.logger.Warn("failed to set runtime model via ACP",
+				zap.String("execution_id", execution.ID), zap.String("model", runtimeModel), zap.Error(err))
+		} else {
+			finalConfigID = modelConfigIDFromState(execution.GetModelState())
+		}
+	}
+	if runtimeMode != "" && runtimeMode != profileMode {
+		if err := execution.agentctl.SetMode(ctx, acpSessionID, runtimeMode); err != nil {
+			failed = append(failed, "mode")
+			sm.logger.Warn("failed to set runtime mode via ACP",
+				zap.String("execution_id", execution.ID), zap.String("mode", runtimeMode), zap.Error(err))
+		}
+	}
+	sanitizedOptions := profileconfig.SanitizeConfigOptions(runtimeConfigOptions)
+	for _, configID := range sortedConfigOptionKeys(sanitizedOptions) {
+		value := sanitizedOptions[configID]
+		if err := execution.agentctl.SetConfigOption(ctx, configID, value); err != nil {
+			failed = append(failed, configID)
+			sm.logger.Warn("failed to set runtime config option via ACP",
+				zap.String("execution_id", execution.ID), zap.String("config_id", configID),
+				zap.String("value", value), zap.Error(err))
+			continue
+		}
+		finalConfigID = configID
+	}
+	return finalConfigID, failed
+}
+
+func sortedConfigOptionKeys(options map[string]string) []string {
+	keys := make([]string, 0, len(options))
+	for key := range options {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (sm *SessionManager) publishSettledConfigOptions(
@@ -443,6 +531,83 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
 		Data:                    map[string]any{"config_options_settled": true},
 	})
+}
+
+func (sm *SessionManager) publishWorkflowSessionConfigFailures(
+	execution *AgentExecution,
+	acpSessionID string,
+	failures []string,
+) {
+	if sm.eventPublisher == nil || len(failures) == 0 {
+		return
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:      streams.EventTypeSessionModels,
+		SessionID: acpSessionID,
+		Data: map[string]any{
+			"workflow_session_config_failures": append([]string(nil), failures...),
+		},
+	})
+}
+
+// publishOriginalConfigOptions publishes the profile-settled model and option
+// values before any runtime override layer is applied. The orchestrator uses
+// the marker to write the task session's immutable original snapshot once.
+func (sm *SessionManager) publishOriginalConfigOptions(execution *AgentExecution, acpSessionID string) {
+	sm.publishOriginalConfigOptionsWithProfile(execution, acpSessionID, "", nil)
+}
+
+func (sm *SessionManager) publishOriginalConfigOptionsWithProfile(
+	execution *AgentExecution,
+	acpSessionID string,
+	profileModel string,
+	profileConfigOptions map[string]string,
+) {
+	if sm.eventPublisher == nil || execution == nil {
+		return
+	}
+	state := execution.GetModelState()
+	if state == nil {
+		return
+	}
+	options := make([]streams.ConfigOption, len(state.ConfigOptions))
+	copy(options, state.ConfigOptions)
+	currentModel := state.CurrentModelID
+	if profileModel != "" {
+		currentModel = profileModel
+	}
+	if currentModel != "" {
+		if !setConfigOptionValue(options, modelConfigOptionID, currentModel) {
+			options = append(options, streams.ConfigOption{ID: modelConfigOptionID, Category: modelConfigOptionID, CurrentValue: currentModel})
+		}
+	}
+	for configID, value := range profileconfig.SanitizeConfigOptions(profileConfigOptions) {
+		if !setConfigOptionValue(options, configID, value) {
+			options = append(options, streams.ConfigOption{ID: configID, CurrentValue: value})
+		}
+	}
+	if currentModel == "" && len(options) == 0 {
+		return
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:                    streams.EventTypeSessionModels,
+		SessionID:               acpSessionID,
+		CurrentModelID:          currentModel,
+		SessionModels:           state.Models,
+		ConfigOptions:           options,
+		OriginalConfigCandidate: options,
+		Data:                    map[string]any{"original_config_settled": true},
+	})
+}
+
+func setConfigOptionValue(options []streams.ConfigOption, configID, value string) bool {
+	for index := range options {
+		if options[index].ID == configID || (configID == modelConfigOptionID && options[index].Category == modelConfigOptionID) {
+			options[index].CurrentValue = value
+			return true
+		}
+	}
+	return false
 }
 
 func modelConfigIDFromState(state *CachedModelState) string {

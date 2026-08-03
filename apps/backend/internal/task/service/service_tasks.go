@@ -39,6 +39,11 @@ const (
 
 const defaultKandevTaskWorktreePathSegment = "/.kandev/tasks/"
 
+const (
+	titleNotPendingReason = "title_not_pending"
+	titleNotOwnerReason   = "title_not_owner"
+)
+
 // ErrSubtaskDepthExceeded is returned when a caller tries to create a
 // subtask of a kanban subtask (nesting depth > 1). Office task trees are
 // intentionally exempt.
@@ -53,6 +58,19 @@ var ErrInvalidTaskWorkflow = errors.New("invalid task workflow")
 // DeleteWorkflow) can treat a concurrent archive as a no-op instead of
 // aborting the whole operation.
 var ErrTaskAlreadyArchived = errors.New("task is already archived")
+
+// ErrAutoTitlePromptRequired is returned when prompt-first creation has no
+// prompt from which to derive a provisional title.
+var ErrAutoTitlePromptRequired = errors.New("description is required when auto_title is enabled")
+
+// ErrAutoTitleUnsupportedForOffice is returned when prompt-first title
+// generation is requested for an Office task. Office agents use a restricted
+// MCP surface that does not expose the one-shot title tool.
+var ErrAutoTitleUnsupportedForOffice = errors.New("auto_title is not supported for Office tasks")
+
+type pendingTaskTitleSetter interface {
+	SetTaskTitleIfPending(ctx context.Context, taskID, sessionID, title string) (bool, error)
+}
 
 type taskStopTarget struct {
 	sessionID   string
@@ -105,6 +123,9 @@ func isOfficeRequest(req *CreateTaskRequest) bool {
 // Ephemeral tasks (quick chat, config chat) must NOT have a workflow.
 func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*models.Task, error) {
 	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+		return nil, err
+	}
+	if err := prepareAutoTitle(req); err != nil {
 		return nil, err
 	}
 	if err := s.validateCreateTaskRequest(req); err != nil {
@@ -177,6 +198,38 @@ func (s *Service) CreateTask(ctx context.Context, req *CreateTaskRequest) (*mode
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return task, nil
+}
+
+func deriveProvisionalTaskTitle(description string) (string, error) {
+	words := strings.Fields(description)
+	if len(words) == 0 {
+		return "", ErrAutoTitlePromptRequired
+	}
+	if len(words) > 6 {
+		words = words[:6]
+	}
+	title := strings.Join(words, " ")
+	title = TruncateTaskTitle(title)
+	return title, nil
+}
+
+func prepareAutoTitle(req *CreateTaskRequest) error {
+	if !req.AutoTitle {
+		return nil
+	}
+	if isOfficeRequest(req) {
+		return ErrAutoTitleUnsupportedForOffice
+	}
+	title, err := deriveProvisionalTaskTitle(req.Description)
+	if err != nil {
+		return err
+	}
+	req.Title = title
+	if req.Metadata == nil {
+		req.Metadata = make(map[string]interface{})
+	}
+	req.Metadata[models.MetaKeyAgentTitlePending] = true
+	return nil
 }
 
 func (s *Service) pullTasksFromNewFeederWork(ctx context.Context, workflowID, feederStepID string) {
@@ -1141,9 +1194,6 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	var oldState *v1.TaskState
 	stateChanged := false
 
-	if req.Title != nil {
-		task.Title = *req.Title
-	}
 	if req.Description != nil {
 		task.Description = *req.Description
 	}
@@ -1165,6 +1215,13 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Metadata != nil {
 		task.Metadata = req.Metadata
 	}
+	if req.Title != nil {
+		task.Title = *req.Title
+		if task.Metadata != nil {
+			delete(task.Metadata, models.MetaKeyAgentTitlePending)
+			delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
+		}
+	}
 	parentCleared := false
 	if req.ParentID != nil && *req.ParentID != task.ParentID {
 		if err := s.resolveParentID(ctx, task, *req.ParentID); err != nil {
@@ -1179,6 +1236,10 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
+	// UpdateTask may have applied a conditional title/metadata patch because
+	// this snapshot was stale. Publish and return the row that actually won so
+	// callers never receive the provisional title or pending marker again.
+	task = s.reloadTaskAfterMutation(ctx, id, task, "update")
 
 	// Update task repositories if provided
 	if req.Repositories != nil {
@@ -1210,6 +1271,78 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	s.logger.Info("task updated", zap.String("task_id", task.ID))
 
 	return task, nil
+}
+
+func (s *Service) reloadTaskAfterMutation(ctx context.Context, id string, fallback *models.Task, operation string) *models.Task {
+	current, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		s.logger.Warn("failed to reload task after mutation",
+			zap.String("task_id", id), zap.String("operation", operation), zap.Error(err))
+		return fallback
+	}
+	if current != nil {
+		return current
+	}
+	return fallback
+}
+
+// SetPendingAgentTitle replaces a prompt-first provisional title exactly once.
+// Only the atomically claimed owner session may resolve it. A missing pending
+// marker is an idempotent no-op so a human rename or an earlier agent call
+// always wins a late request.
+func (s *Service) SetPendingAgentTitle(ctx context.Context, id, sessionID, title string) (*models.Task, bool, string, error) {
+	if err := s.authorizeTaskID(ctx, id); err != nil {
+		return nil, false, "", err
+	}
+	task, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, false, "", err
+	}
+	if !models.IsAgentTitlePending(task.Metadata) {
+		return task, false, titleNotPendingReason, nil
+	}
+	if !models.IsAgentTitleOwner(task.Metadata, sessionID) {
+		return task, false, titleNotOwnerReason, nil
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return nil, false, "", errors.New("title is required")
+	}
+	if err := validateTaskTitle(title); err != nil {
+		return nil, false, "", err
+	}
+	if setter, ok := s.tasks.(pendingTaskTitleSetter); ok {
+		accepted, err := setter.SetTaskTitleIfPending(ctx, id, sessionID, title)
+		if err != nil {
+			s.logger.Error("failed to set pending agent title", zap.String("task_id", id), zap.Error(err))
+			return nil, false, "", err
+		}
+		if !accepted {
+			current, getErr := s.tasks.GetTask(ctx, id)
+			if getErr != nil {
+				return nil, false, "", getErr
+			}
+			if !models.IsAgentTitlePending(current.Metadata) {
+				return current, false, titleNotPendingReason, nil
+			}
+			return current, false, titleNotOwnerReason, nil
+		}
+		// Reload the winning row so the response/event includes any ordinary
+		// task update that raced the conditional title write.
+		task = s.reloadTaskAfterMutation(ctx, id, task, "set pending agent title")
+		s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+		return task, true, "", nil
+	}
+	task.Title = title
+	delete(task.Metadata, models.MetaKeyAgentTitlePending)
+	delete(task.Metadata, models.MetaKeyAgentTitleOwnerSessionID)
+	task.UpdatedAt = time.Now().UTC()
+	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+		s.logger.Error("failed to set pending agent title", zap.String("task_id", id), zap.Error(err))
+		return nil, false, "", err
+	}
+	s.publishTaskEvent(ctx, events.TaskUpdated, task, nil)
+	return task, true, "", nil
 }
 
 // parentChainWalkLimit bounds the ancestor walk in resolveParentID so a

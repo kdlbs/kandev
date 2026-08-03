@@ -206,14 +206,11 @@ func Run(args []string, build BuildInfo) int {
 	}
 
 	// 2. Initialize logger
-	log, err := logger.NewLogger(logger.LoggingConfig{
-		Level:      cfg.Logging.Level,
-		Format:     cfg.Logging.Format,
-		OutputPath: cfg.Logging.OutputPath,
-		MaxSizeMB:  cfg.Logging.MaxSizeMB,
-		MaxBackups: cfg.Logging.MaxBackups,
-		MaxAgeDays: cfg.Logging.MaxAgeDays,
-		Compress:   cfg.Logging.Compress,
+	log, err := logger.NewBackendLogger(logger.BackendLoggingConfig{
+		HomeDir:      cfg.ResolvedHomeDir(),
+		Level:        cfg.Logging.Level,
+		Format:       cfg.Logging.Format,
+		ConsoleLevel: os.Getenv("KANDEV_CONSOLE_LOG_LEVEL"),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to initialize logger: %v\n", err)
@@ -547,6 +544,7 @@ func startAgentInfrastructure(
 	// orchestrator so review/issue watch events get turned into tasks.
 	if services.GitLab != nil {
 		orchestratorSvc.SetGitLabService(services.GitLab)
+		orchestratorSvc.SetGitLabMRLinkService(services.GitLab)
 		orchestratorSvc.SetGitLabCredentialResolver(services.GitLab)
 		services.GitLab.SetTaskDeleter(&taskDeleterAdapter{svc: services.Task})
 		services.GitLab.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
@@ -559,9 +557,11 @@ func startAgentInfrastructure(
 	// and workspace-scoped GitLab credential resolver are both configured.
 	workspaceSourceMaterializer.SetHostRepositoryCloner(orchestratorSvc)
 
-	// Azure DevOps v1 owns only connection-health polling. PR summaries are
-	// refreshed explicitly through their task association routes.
+	// Azure DevOps owns connection-health and work-item/pull-request watcher
+	// polling. Watch matches flow through the shared orchestrator coordinator.
 	if services.AzureDevOps != nil {
+		orchestratorSvc.SetAzureDevOpsService(services.AzureDevOps)
+		services.AzureDevOps.SetTaskSessionChecker(&taskSessionCheckerAdapter{repo: repos.Task})
 		azureLifecycle, lifecycleErr := azuredevopspkg.RegisterLifecycleCleanup(eventBus, services.AzureDevOps)
 		if lifecycleErr != nil {
 			log.Warn("Azure DevOps lifecycle cleanup unavailable", zap.Error(lifecycleErr))
@@ -697,6 +697,7 @@ func startGatewayAndServe(
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
 	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
 	// WS gateway per-user scoping (opt-in auth): connection auth on upgrade
@@ -827,6 +828,7 @@ func startGatewayAndServe(
 	})
 	storageComposition, err := provideStorageComposition(
 		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,
+		func(message string, err error) { log.Error(message, zap.Error(err)) },
 	)
 	if err != nil {
 		log.Error("Failed to initialize storage maintenance", zap.Error(err))
@@ -834,6 +836,11 @@ func startGatewayAndServe(
 	}
 	systemSvc.Storage = storageComposition.handler
 	systemSvc.StorageRuntime = storageComposition.runtime
+	if systemSvc.LogBundles != nil {
+		systemSvc.LogBundles.SetNotifier(gateway.Hub)
+		systemSvc.LogBundles.SetSessionProvider(newDiagnosticSessionProvider(services.Task))
+		systemSvc.LogBundles.SetACPExporter(newDiagnosticACPExporter(lifecycleMgr))
+	}
 	if systemSvc.Metrics != nil {
 		systemSvc.Metrics.SetBroadcaster(gateway.Hub.BroadcastToSystemMetrics)
 		gateway.Hub.SetSystemMetricsInterestTracker(systemSvc.Metrics)

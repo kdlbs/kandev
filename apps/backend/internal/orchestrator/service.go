@@ -200,6 +200,7 @@ type sessionExecutorStore interface {
 	UpdateSessionMetadata(ctx context.Context, sessionID string, metadata map[string]interface{}) error
 	SetSessionMetadataKey(ctx context.Context, sessionID, key string, value interface{}) error
 	SetSessionMetadataKeyIfAbsent(ctx context.Context, sessionID, key string, value interface{}) (bool, error)
+	UpdateSessionContextWindow(ctx context.Context, sessionID string, contextWindow map[string]interface{}) (int64, error)
 	SetSessionACPSessionID(ctx context.Context, sessionID, acpSessionID string) (bool, error)
 	// Executor running state
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
@@ -218,6 +219,10 @@ type sessionExecutorStore interface {
 	GetExecutor(ctx context.Context, id string) (*models.Executor, error)
 	// Task
 	GetTask(ctx context.Context, id string) (*models.Task, error)
+	// ClaimTaskTitleSession atomically assigns the first eligible session to a
+	// pending task title. The second return value reports a new claim rather
+	// than an idempotent same-owner observation.
+	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
@@ -244,6 +249,34 @@ type sessionExecutorStore interface {
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
+}
+
+// ClaimTaskTitleSession claims the first-turn generated-title handoff for a
+// task. The repository owns the compare-and-set; the orchestrator publishes a
+// task update only when this call creates a new owner.
+func (s *Service) ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error) {
+	if taskID == "" || sessionID == "" {
+		return false, nil
+	}
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	if !models.IsAgentTitlePending(task.Metadata) {
+		return false, nil
+	}
+	owned, newlyClaimed, err := s.repo.ClaimTaskTitleSession(ctx, taskID, sessionID)
+	if err != nil {
+		return false, err
+	}
+	if newlyClaimed {
+		claimedTask, reloadErr := s.repo.GetTask(ctx, taskID)
+		if reloadErr != nil {
+			return false, reloadErr
+		}
+		s.publishTaskUpdated(ctx, claimedTask)
+	}
+	return owned, nil
 }
 
 // Service is the main orchestrator service
@@ -399,6 +432,18 @@ type Service struct {
 	gitlabService      GitLabWatchService
 	gitlabReviewSource *GitLabReviewWatcherSource
 	gitlabIssueSource  *GitLabIssueWatcherSource
+	// Azure DevOps watcher service + sources for work-item and pull-request
+	// polling events. The integration publishes provider-native matches; the
+	// shared watcher coordinator owns task creation and throttling.
+	azureDevOpsService     AzureDevOpsWatchService
+	azureWorkItemSource    *AzureDevOpsWorkItemWatcherSource
+	azurePullRequestSource *AzureDevOpsPullRequestWatcherSource
+
+	// gitlabMRLinkService auto-links merge requests opened outside Kandev's
+	// Create-PR action, mirroring what githubService does for PRs. Separate
+	// from gitlabService (the review/issue watch surface) — see
+	// GitLabMRLinkService's doc comment.
+	gitlabMRLinkService GitLabMRLinkService
 
 	// Repository resolver for cloning + finding/creating repos for review tasks
 	repositoryResolver RepositoryResolver
@@ -533,10 +578,12 @@ type Service struct {
 	// / handleAgentBootReady (TryLock, skip if a cancel/interrupt owns it),
 	// or QueueAndInterruptForPeerMessage (blocking Lock — must wait rather
 	// than work around a busy lock with an unguarded insert; see its doc
-	// comment). All of these must go through the same per-session guard —
-	// a second, independent lock for any of them would defeat the mutual
-	// exclusion the others rely on to avoid racing each other's
-	// take-and-dispatch decision for the same session.
+	// comment), or an agent stream handler persisting output (blocking Lock so
+	// cancellation cannot commit while a stream side effect is in flight).
+	// All of these must go through the same per-session guard — a second,
+	// independent lock for any of them would defeat the mutual exclusion the
+	// others rely on to avoid racing each other's take-and-dispatch decision
+	// for the same session.
 	//
 	// Entries are reference-counted (acquireCancelInFlightGuard /
 	// releaseCancelInFlightGuard) and pruned once nobody holds a reference,
@@ -544,6 +591,16 @@ type Service struct {
 	// growing by one permanent entry per session ever created over a
 	// long-lived backend's lifetime.
 	cancelInFlight map[string]*cancelInFlightGuard
+
+	// cancelOperations tracks cancellation intent separately from the shared
+	// cancelInFlight mutex. Stream and lifecycle handlers use that mutex to
+	// serialize their side effects, but they are not themselves cancellations;
+	// treating every mutex holder as a cancellation would make agent.boot_ready
+	// discard a legitimate boot signal while a stream frame is being persisted.
+	// Values are reference counts so duplicate cancellation requests waiting on
+	// the shared guard keep cancellation priority until the last request exits.
+	cancelOperationsMu sync.Mutex
+	cancelOperations   map[string]int
 
 	// transientRetries tracks in-progress transient-provider-error (529
 	// Overloaded) retry loops. key: sessionID, value: *transientRetryEntry.
@@ -640,6 +697,7 @@ func NewService(
 		clarificationWatchdogTimeout: 15 * time.Second,
 		gitSnapshotCache:             newGitSnapshotCache(),
 	}
+	exec.SetOnContextWindowReset(s.clearContextWindowForReset)
 
 	// Wire executor state changes through the orchestrator so events are published
 	// (e.g. WebSocket notifications to the frontend). Must be set after service
@@ -1430,6 +1488,9 @@ func (s *Service) Start(ctx context.Context) error {
 
 	// Subscribe to GitLab integration events
 	s.subscribeGitLabEvents()
+
+	// Subscribe to Azure DevOps watcher events
+	s.subscribeAzureDevOpsEvents()
 
 	// Subscribe to JIRA integration events
 	s.subscribeJiraEvents()

@@ -669,6 +669,12 @@ export class SessionPage {
     return this.page.getByTestId(`pr-popover-tab-${owner}-${repo}-${prNumber}`);
   }
 
+  /** Unlink control for one PR association in the multi-PR popover. */
+  prMultiPopoverRemove(owner: string, repo: string, prNumber: number): Locator {
+    const activePopover = this.page.locator("[data-testid='pr-multi-popover']:visible").last();
+    return activePopover.getByTestId(`pr-popover-remove-${owner}-${repo}-${prNumber}`);
+  }
+
   /**
    * A specific bucket group inside the popover by kind.
    *
@@ -1226,7 +1232,7 @@ export class SessionPage {
 
   /** Prompt textarea inside the new session or handoff dialog. */
   newSessionPromptInput(): Locator {
-    return this.sessionLaunchDialog().locator("textarea");
+    return this.sessionLaunchDialog().getByTestId("task-description-input");
   }
 
   /** Start Agent button inside the new session or handoff dialog. */
@@ -1263,6 +1269,12 @@ export class SessionPage {
     await row.getByRole("button", { name: "Session actions" }).click();
     await this.handoffSubmenu().hover();
     await this.handoffProfileItem(profileId).click();
+  }
+
+  /** Open the New Agent dialog from the phone session controls. */
+  async openMobileNewSessionDialog(): Promise<void> {
+    await this.page.getByTestId("mobile-sessions-pill").tap();
+    await this.page.getByTestId("mobile-launch-session").tap();
   }
 
   /** Session tab in dockview by session label (e.g., "Session 1", "Session 2"). */

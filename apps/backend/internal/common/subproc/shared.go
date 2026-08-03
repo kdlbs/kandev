@@ -45,7 +45,7 @@ var (
 	// tests that swap the pool via SetCapForTest reuse the same names
 	// so the published gauges stay coherent across cap changes.
 	ghThrottle  = NewNamedThrottle("gh", resolveCap(ghMaxConcurrentEnv, defaultGHMaxConcurrent))
-	gitThrottle = NewNamedThrottle("git", resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent))
+	gitThrottle = NewNamedClassThrottle("git", resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent))
 )
 
 // GH returns the process-wide throttle gating gh subprocess execs.
@@ -81,11 +81,10 @@ func resolveCap(env string, def int) int {
 func resolveGHMaxConcurrent() int  { return resolveCap(ghMaxConcurrentEnv, defaultGHMaxConcurrent) }
 func resolveGitMaxConcurrent() int { return resolveCap(gitMaxConcurrentEnv, defaultGitMaxConcurrent) }
 
-// RunGit acquires a git slot, runs cmd, and releases the slot. Use
-// this anywhere we exec a git binary — calling cmd.Run() directly
-// bypasses the throttle. The caller owns cmd.Stdout/Stderr wiring.
-func RunGit(ctx context.Context, cmd *exec.Cmd) error {
-	release, err := gitThrottle.Acquire(ctx)
+// RunGitClass acquires a Git slot in class, runs cmd, and releases the slot.
+// The caller owns cmd.Stdout/Stderr wiring.
+func RunGitClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) error {
+	release, err := gitThrottle.AcquireClass(ctx, class)
 	if err != nil {
 		return err
 	}
@@ -93,9 +92,9 @@ func RunGit(ctx context.Context, cmd *exec.Cmd) error {
 	return cmd.Run()
 }
 
-// RunGitCombinedOutput is RunGit's CombinedOutput sibling.
-func RunGitCombinedOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
-	release, err := gitThrottle.Acquire(ctx)
+// RunGitCombinedOutputClass is RunGitClass's CombinedOutput sibling.
+func RunGitCombinedOutputClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) ([]byte, error) {
+	release, err := gitThrottle.AcquireClass(ctx, class)
 	if err != nil {
 		return nil, err
 	}
@@ -103,15 +102,90 @@ func RunGitCombinedOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
 	return cmd.CombinedOutput()
 }
 
-// RunGitOutput is RunGit's Output sibling. stderr ends up in
-// (*exec.ExitError).Stderr when set by the caller.
-func RunGitOutput(ctx context.Context, cmd *exec.Cmd) ([]byte, error) {
-	release, err := gitThrottle.Acquire(ctx)
+// RunGitOutputClass is RunGitClass's Output sibling. Stderr is captured in
+// (*exec.ExitError).Stderr only when cmd.Stderr is left nil; callers that set
+// cmd.Stderr must read it from their provided writer.
+func RunGitOutputClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) ([]byte, error) {
+	release, err := gitThrottle.AcquireClass(ctx, class)
 	if err != nil {
 		return nil, err
 	}
 	defer release()
 	return cmd.Output()
+}
+
+// RunGitCombinedAfterAcquire starts the execution timeout only after the
+// requested class receives a Git slot. The builder runs inside the slot so
+// command construction cannot consume the execution budget while queued.
+func RunGitCombinedAfterAcquire(
+	ctx context.Context,
+	class GitWorkClass,
+	execTimeout time.Duration,
+	build func(execCtx context.Context) *exec.Cmd,
+) ([]byte, error, error) {
+	release, err := gitThrottle.AcquireClass(ctx, class)
+	if err != nil {
+		return nil, wrapAdmissionError(err), nil
+	}
+	defer release()
+	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	defer cancel()
+	out, runErr := build(execCtx).CombinedOutput()
+	return out, runErr, execCtx.Err()
+}
+
+// RunGitOutputAfterAcquire is RunGitCombinedAfterAcquire's Output sibling.
+// The command is built only after admission, and stderr retains exec.Cmd's
+// standard Output behavior through *exec.ExitError.Stderr. The acquisition
+// context also owns the execution deadline; use
+// RunGitOutputAfterAcquireWithExecutionContext when those lifetimes differ.
+func RunGitOutputAfterAcquire(
+	ctx context.Context,
+	class GitWorkClass,
+	execTimeout time.Duration,
+	build func(execCtx context.Context) *exec.Cmd,
+) ([]byte, error, error) {
+	return RunGitOutputAfterAcquireWithExecutionContext(ctx, ctx, class, execTimeout, build)
+}
+
+// RunGitOutputAfterAcquireWithExecutionContext admits using acquireCtx, then
+// starts the command timeout from execBaseCtx only after a slot is granted.
+// This is useful for best-effort probes that need a bounded queue wait but
+// must not inherit the queue deadline as their execution deadline.
+func RunGitOutputAfterAcquireWithExecutionContext(
+	acquireCtx context.Context,
+	execBaseCtx context.Context,
+	class GitWorkClass,
+	execTimeout time.Duration,
+	build func(execCtx context.Context) *exec.Cmd,
+) ([]byte, error, error) {
+	release, err := gitThrottle.AcquireClass(acquireCtx, class)
+	if err != nil {
+		return nil, wrapAdmissionError(err), nil
+	}
+	defer release()
+	execCtx, cancel := withExecTimeout(execBaseCtx, execTimeout)
+	defer cancel()
+	out, runErr := build(execCtx).Output()
+	return out, runErr, execCtx.Err()
+}
+
+// RunGitAfterAcquire is RunGitCombinedAfterAcquire's plain Run sibling.
+func RunGitAfterAcquire(
+	ctx context.Context,
+	class GitWorkClass,
+	execTimeout time.Duration,
+	build func(execCtx context.Context) *exec.Cmd,
+) (error, error) {
+	release, err := gitThrottle.AcquireClass(ctx, class)
+	if err != nil {
+		return wrapAdmissionError(err), nil
+	}
+	defer release()
+	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	defer cancel()
+	runErr := build(execCtx).Run()
+	return runErr, execCtx.Err()
 }
 
 // RunGH / RunGHOutput / RunGHCombinedOutput mirror the git helpers but

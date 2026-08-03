@@ -13,7 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@kandev/ui/dialog";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import type { TaskPlanRevision } from "@/lib/types/http";
 import { formatPreciseTime } from "@/lib/utils";
 import { AgentLogo } from "@/components/agent-logo";

@@ -186,6 +186,7 @@ export type AppState = KanbanSlice & {
 
   // Azure DevOps slice
   azureDevOpsTaskPullRequests: (typeof defaultAzureDevOpsState)["azureDevOpsTaskPullRequests"];
+  azureDevOpsTaskWorkItems: (typeof defaultAzureDevOpsState)["azureDevOpsTaskWorkItems"];
 
   // JIRA slice
   jiraIssueWatches: (typeof defaultJiraState)["jiraIssueWatches"];
@@ -320,7 +321,7 @@ export type AppState = KanbanSlice & {
   setConnectionIssueSeverity: (
     severity: import("@/lib/types/connection").ConnectionIssueSeverity,
   ) => void;
-  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: UISliceTypes.MobileSessionPanel) => void;

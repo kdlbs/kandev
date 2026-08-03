@@ -4,14 +4,11 @@ package logger
 import (
 	"context"
 	"os"
-	"path/filepath"
 	"sync"
 
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
-
-	"github.com/kandev/kandev/internal/common/logger/buffer"
 )
 
 // Context keys for extracting values from context.
@@ -42,10 +39,12 @@ type LoggingConfig struct {
 
 // Logger wraps zap.Logger to provide structured logging with helper methods.
 type Logger struct {
-	zap     *zap.Logger
-	sugar   *zap.SugaredLogger
-	fields  []zap.Field
-	rotator *lumberjack.Logger // non-nil only when OutputPath is a file path
+	zap           *zap.Logger
+	sugar         *zap.SugaredLogger
+	fields        []zap.Field
+	rotator       *lumberjack.Logger // non-nil only when OutputPath is a file path
+	backend       *backendLoggerRuntime
+	backendLogDir string
 }
 
 var (
@@ -131,9 +130,7 @@ func NewLogger(cfg LoggingConfig) (*Logger, error) {
 	}
 
 	outputCore := zapcore.NewCore(encoder, writeSyncer, level)
-	bufferCore := buffer.NewCore(buffer.Default(), level)
-	core := zapcore.NewTee(outputCore, bufferCore)
-	zapLogger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+	zapLogger := zap.New(outputCore, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
 
 	return &Logger{
 		zap:     zapLogger,
@@ -177,6 +174,9 @@ func (l *Logger) Sync() error {
 // rotation cycle can complete cleanly.
 func (l *Logger) Close() error {
 	_ = l.zap.Sync()
+	if l.backend != nil {
+		return l.backend.Close()
+	}
 	if l.rotator != nil {
 		return l.rotator.Close()
 	}
@@ -189,10 +189,12 @@ func (l *Logger) Close() error {
 func (l *Logger) WithFields(fields ...zap.Field) *Logger {
 	z := l.zap.With(fields...)
 	return &Logger{
-		zap:     z,
-		sugar:   z.Sugar(),
-		fields:  append(l.fields, fields...),
-		rotator: l.rotator,
+		zap:           z,
+		sugar:         z.Sugar(),
+		fields:        append(l.fields, fields...),
+		rotator:       l.rotator,
+		backend:       l.backend,
+		backendLogDir: l.backendLogDir,
 	}
 }
 
@@ -248,9 +250,32 @@ func (l *Logger) Error(msg string, fields ...zap.Field) {
 	l.zap.Error(msg, fields...)
 }
 
+// DPanic logs a terminal development-panic entry. Backend loggers perform
+// their bounded drain and direct-stderr fallback before panicking.
+func (l *Logger) DPanic(msg string, fields ...zap.Field) {
+	if l.backend != nil {
+		l.backend.terminal("dpanic", msg)
+		panic(msg)
+	}
+	l.zap.DPanic(msg, fields...)
+}
+
+// Panic logs a terminal entry, drains backend sinks, then panics.
+func (l *Logger) Panic(msg string, fields ...zap.Field) {
+	if l.backend != nil {
+		l.backend.terminal("panic", msg)
+		panic(msg)
+	}
+	l.zap.Panic(msg, fields...)
+}
+
 // Fatal logs a message at fatal level with optional structured fields,
 // then calls os.Exit(1).
 func (l *Logger) Fatal(msg string, fields ...zap.Field) {
+	if l.backend != nil {
+		l.backend.terminal("fatal", msg)
+		os.Exit(1)
+	}
 	l.zap.Fatal(msg, fields...)
 }
 
@@ -264,28 +289,11 @@ func (l *Logger) Sugar() *zap.SugaredLogger {
 	return l.sugar
 }
 
-// BufferSnapshot returns a copy of the entries currently held in the
-// process-wide log ring buffer used by Improve Kandev reports.
-func (l *Logger) BufferSnapshot() []buffer.Entry {
-	return buffer.Default().Snapshot()
-}
-
-// LogDirectory returns the directory containing the rotating log file managed
-// by lumberjack, or empty string when the logger is writing to stdout/stderr
-// (no file rotation configured). Powers the System -> Logs page enumeration.
-func (l *Logger) LogDirectory() string {
-	if l == nil || l.rotator == nil || l.rotator.Filename == "" {
-		return ""
+// SinkStatistics returns loss and queue counters for the backend's asynchronous
+// file and stdout sinks. Legacy loggers return no sink statistics.
+func (l *Logger) SinkStatistics() []SinkStatistics {
+	if l == nil || l.backend == nil {
+		return nil
 	}
-	return filepath.Dir(l.rotator.Filename)
-}
-
-// LogFilename returns the base filename (no directory) of the active
-// lumberjack log, e.g. "kandev.log". Rotated files use the same base with a
-// timestamp suffix. Empty when no file logging is configured.
-func (l *Logger) LogFilename() string {
-	if l == nil || l.rotator == nil || l.rotator.Filename == "" {
-		return ""
-	}
-	return filepath.Base(l.rotator.Filename)
+	return l.backend.Stats()
 }

@@ -9,7 +9,6 @@ import { test, expect } from "../fixtures/test-base";
  */
 
 const BOOTSTRAP_URL = "**/api/v1/system/improve-kandev/bootstrap";
-const FRONTEND_LOG_URL = "**/api/v1/system/improve-kandev/bundle/frontend-log";
 const HEALTH_URL = "**/api/v1/system/health";
 
 type ForkStatus = "writable" | "ready" | "blocked_emu" | "unknown";
@@ -61,11 +60,7 @@ async function mockImproveKandevApis(
         issue_workflow_id: overrides.issueWorkflowId ?? seed.workflowId,
         branch: "main",
         bundle_dir: bundleDir,
-        bundle_files: {
-          metadata: `${bundleDir}/metadata.json`,
-          backend_log: `${bundleDir}/backend.log`,
-          frontend_log: `${bundleDir}/frontend.log`,
-        },
+        bundle_file: `${bundleDir}/diagnostic-bundle.zip`,
         github_login: overrides.github_login ?? "octocat",
         has_write_access: hasWrite,
         fork_status: forkStatus,
@@ -73,14 +68,6 @@ async function mockImproveKandevApis(
       }),
     });
   });
-
-  await page.route(FRONTEND_LOG_URL, (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ path: `${bundleDir}/frontend.log` }),
-    }),
-  );
 }
 
 test.describe("Improve Kandev dialog", () => {

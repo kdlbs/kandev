@@ -138,6 +138,7 @@ func (s *Server) setupRoutes() {
 		// Docker, Sprites — to seed the workspace with gitignored config
 		// after the in-container clone).
 		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+		api.POST("/workspace/diagnostics/:id", s.handleWorkspaceDiagnostics)
 		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
 		api.POST("/workspace/materialize-repository/remove", s.handleWorkspaceRemoveMaterializedRepository)
 
@@ -217,6 +218,9 @@ func (s *Server) setupRoutes() {
 	// expose this endpoint.
 	if acpDebugTailEnabled() {
 		s.router.GET("/api/v1/debug/acp/:session", s.handleACPRingTail)
+	}
+	if acpDebugExportEnabled() {
+		s.router.GET("/api/v1/debug/acp/:session/export", s.handleACPDebugExport)
 	}
 }
 
@@ -308,8 +312,8 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'config', or 'office'"})
+	if req.Mode != mcp.ModeTask && req.Mode != mcp.ModeTaskTitlePending && req.Mode != mcp.ModeConfig && req.Mode != mcp.ModeOffice {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid mode: must be 'task', 'task-title-pending', 'config', or 'office'"})
 		return
 	}
 	s.mcpServer.SetMode(req.Mode)

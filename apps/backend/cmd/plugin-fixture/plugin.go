@@ -152,8 +152,8 @@ type writeProbeRecord struct {
 // snapshotWriteProbeBestEffort exercises the write RPCs end to end: Host
 // CreateTask then, on success, Host SendMessage to the new task, writing the
 // result (task id, dispatch status, or the error) to write-probe.json.
-// Best-effort — the Host may deny the write when the fixture's manifest lacks
-// api_write, which is itself useful evidence.
+// Best-effort — the fixture manifest exercises the current api_write contract;
+// any permission or service error is still recorded as useful evidence.
 func (p *fixturePlugin) snapshotWriteProbeBestEffort(ctx context.Context) {
 	host := p.Host()
 	if host == nil {

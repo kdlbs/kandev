@@ -206,6 +206,10 @@ func (m *Manager) claimPromptCompletion(
 		if current != execution || current.promptGeneration != event.PromptGeneration {
 			return
 		}
+		if current.promptCompletionGeneration == event.PromptGeneration {
+			return
+		}
+		current.promptCompletionGeneration = event.PromptGeneration
 		claimed = true
 		claim.execution = current
 		if isError {
@@ -255,6 +259,9 @@ func (m *Manager) finishPromptCompletion(
 ) {
 	handleCompleteEventSignal(execution, event, isError)
 	if event.PromptGeneration == 0 || isError {
+		if isError {
+			setProviderError(execution, event.ProviderError)
+		}
 		m.handleCompleteEventMarkState(execution, event, isError)
 		if claim.locked {
 			execution.promptLifecycleMu.Unlock()
@@ -268,6 +275,18 @@ func (m *Manager) finishPromptCompletion(
 		m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentRunning, claim.runningPayload)
 	}
 	m.eventPublisher.publishAgentEventPayload(context.Background(), events.AgentReady, claim.readyPayload)
+}
+
+func setProviderError(execution *AgentExecution, providerError *streams.ProviderError) {
+	if execution == nil || providerError == nil || !providerError.Valid() {
+		return
+	}
+	copy := *providerError
+	if providerError.ResetAt != nil {
+		resetAt := *providerError.ResetAt
+		copy.ResetAt = &resetAt
+	}
+	execution.ProviderError = &copy
 }
 
 // handleCompleteEvent handles a "complete" agent event: flushes buffers, marks state, and signals SendPrompt.
@@ -372,6 +391,7 @@ func (m *Manager) handleToolCallEvent(execution *AgentExecution, event agentctl.
 // handleToolUpdateEvent stores completed tool results in session history.
 func (m *Manager) handleToolUpdateEvent(execution *AgentExecution, event agentctl.AgentEvent) {
 	if event.ParentToolCallID == "" && isTerminalToolUpdate(event) {
+		m.flushStreamCoalescer(execution)
 		execution.clearActiveTool(event.ToolCallID)
 	}
 	if m.historyManager != nil && execution.historyEnabled && execution.SessionID != "" && event.ToolStatus == toolStatusComplete {
@@ -554,6 +574,7 @@ func (m *Manager) handleStreamDisconnect(
 			return
 		}
 
+		m.flushMessageBuffer(execution)
 		m.flushAssistantHistory(execution)
 		m.persistExecutorRunning(context.Background(), updated)
 		m.publishStreamDisconnectError(execution, err)
@@ -564,6 +585,7 @@ func (m *Manager) handleStreamDisconnect(
 	// after promptDoneCh is signaled. Drain the partial assistant transcript
 	// here as well as at prompt setup; the shared buffer lock makes either
 	// path the single owner and prevents a later reset from dropping it.
+	m.flushMessageBuffer(execution)
 	m.flushAssistantHistory(execution)
 
 	if err := m.UpdateStatus(execution.ID, v1.AgentStatusFailed); err != nil {

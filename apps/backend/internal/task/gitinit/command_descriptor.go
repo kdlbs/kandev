@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"golang.org/x/sys/unix"
 )
 
@@ -27,7 +28,7 @@ func init() {
 
 // CommandContext creates a Git initialization command bound to targetDirectory.
 func CommandContext(ctx context.Context, _ string, targetDirectory *os.File) (*exec.Cmd, error) {
-	gitPath, err := exec.LookPath("git")
+	gitPath, err := subproc.GitExecutablePath()
 	if err != nil {
 		return nil, fmt.Errorf("find git: %w", err)
 	}
@@ -52,9 +53,9 @@ func runInheritedDirectory(gitPath string) int {
 		fmt.Fprintf(os.Stderr, "git init helper: enter inherited directory: %v\n", err)
 		return 1
 	}
-	if err := unix.Exec(
+	if err := subproc.ExecGit(
 		gitPath,
-		[]string{"git", "init", "--initial-branch=main"},
+		[]string{"init", "--initial-branch=main"},
 		withoutHelperEnvironment(os.Environ()),
 	); err != nil {
 		fmt.Fprintf(os.Stderr, "git init helper: execute git: %v\n", err)

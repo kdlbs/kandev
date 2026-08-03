@@ -28,6 +28,11 @@ const (
 	// Maximum message size allowed from peer
 	// Increased to support image attachments (base64 encoded images are ~33% larger)
 	maxMessageSize = 32 * 1024 * 1024 // 32MB
+
+	// Control frames (RPC responses and errors) use a separate bounded queue so
+	// high-volume session notifications cannot fill the queue and make a user
+	// action appear to time out.
+	controlSendBufferSize = 256
 )
 
 // Client represents a single WebSocket connection
@@ -41,6 +46,7 @@ type Client struct {
 	conn                    *websocket.Conn
 	hub                     *Hub
 	send                    chan []byte
+	controlSend             chan []byte
 	subscriptions           map[string]bool // Task IDs this client is subscribed to
 	sessionSubscriptions    map[string]bool // Session IDs this client is subscribed to
 	sessionFocus            map[string]bool // Session IDs this client has focused (a strict subset of subscriptions, conceptually — see hub_session_mode.go)
@@ -50,22 +56,47 @@ type Client struct {
 	mu                      sync.RWMutex
 	closed                  bool
 	logger                  *logger.Logger
+
+	// Replaceable session.message.updated traffic is scheduled separately from
+	// semantic notifications so one noisy session cannot fill the shared FIFO.
+	// Each session queue contains replaceable segments separated by semantic
+	// barriers. This prevents an update published after a barrier from overtaking
+	// that barrier while still allowing coalescing within the current segment.
+	replaceableByKey           map[queuedReplaceableKey]outboundNotification
+	replaceableBySession       map[string][]sessionNotificationQueueItem
+	replaceableCurrentByKey    map[replaceableNotificationKey]queuedReplaceableKey
+	replaceableSessionOrder    []string
+	replaceableRoundRobin      int
+	nextReplaceableSequence    uint64
+	scheduledSemantic          int
+	notificationWake           chan struct{}
+	replaceableReplacements    uint64
+	replaceableEvictions       uint64
+	replaceableRejected        uint64
+	droppedSemantic            uint64
+	replaceablePerSessionLimit int
+	replaceableGlobalLimit     int
 }
 
 // NewClient creates a new WebSocket client
 func NewClient(id string, identity authn.Identity, conn *websocket.Conn, hub *Hub, log *logger.Logger) *Client {
 	return &Client{
-		ID:                   id,
-		identity:             identity,
-		conn:                 conn,
-		hub:                  hub,
-		send:                 make(chan []byte, 256),
-		subscriptions:        make(map[string]bool),
-		sessionSubscriptions: make(map[string]bool),
-		sessionFocus:         make(map[string]bool),
-		userSubscriptions:    make(map[string]bool),
-		runSubscriptions:     make(map[string]bool),
-		logger:               log.WithFields(zap.String("client_id", id)),
+		ID:                      id,
+		identity:                identity,
+		conn:                    conn,
+		hub:                     hub,
+		send:                    make(chan []byte, 256),
+		controlSend:             make(chan []byte, controlSendBufferSize),
+		subscriptions:           make(map[string]bool),
+		sessionSubscriptions:    make(map[string]bool),
+		sessionFocus:            make(map[string]bool),
+		userSubscriptions:       make(map[string]bool),
+		runSubscriptions:        make(map[string]bool),
+		replaceableByKey:        make(map[queuedReplaceableKey]outboundNotification),
+		replaceableBySession:    make(map[string][]sessionNotificationQueueItem),
+		replaceableCurrentByKey: make(map[replaceableNotificationKey]queuedReplaceableKey),
+		notificationWake:        make(chan struct{}, 1),
+		logger:                  log.WithFields(zap.String("client_id", id)),
 	}
 }
 
@@ -162,6 +193,12 @@ func (c *Client) handleMessage(msg *ws.Message) {
 		return
 	case ws.ActionSessionFocus:
 		c.handleSessionFocus(msg)
+		return
+	case ws.ActionSessionGitRefresh:
+		c.handleSessionGitRefresh(msg)
+		return
+	case ws.ActionSessionDataRefresh:
+		c.handleSessionDataRefresh(msg)
 		return
 	case ws.ActionSessionUnfocus:
 		c.handleSessionUnfocus(msg)
@@ -317,15 +354,18 @@ func (c *Client) handleSessionSubscribe(msg *ws.Message) {
 		return
 	}
 
-	c.hub.SubscribeToSession(c, req.SessionID)
+	newMembership := c.hub.SubscribeToSession(c, req.SessionID)
 	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
 		"success":    true,
 		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
 
-	// Send initial session data (e.g., git status) if available
-	c.sendSessionData(req.SessionID)
+	// Send initial session data only when this client newly joins. Duplicate
+	// subscribe requests are acknowledgements, not snapshot replay commands.
+	if newMembership {
+		c.sendSessionData(req.SessionID)
+	}
 }
 
 // maySubscribeSession applies the per-user session scoping check, emitting the
@@ -383,9 +423,40 @@ func (c *Client) sendSessionData(sessionID string) {
 		zap.String("session_id", sessionID),
 		zap.Int("count", len(data)))
 
-	// Send each piece of session data as a notification
+	// Send each piece of session data as a notification. Snapshots are data
+	// traffic, not control traffic, so they must not consume the response queue.
 	for _, msg := range data {
-		c.sendMessage(msg)
+		payload, err := json.Marshal(msg)
+		if err != nil {
+			c.logger.Error("Failed to marshal session data", zap.Error(err))
+			continue
+		}
+		c.sendBytes(payload)
+	}
+}
+
+// sendSessionGitData sends the bounded git snapshot used by the diff detail
+// surface. The compatibility fallback may return the full legacy provider;
+// filter it at the transport boundary so this action remains git-only.
+func (c *Client) sendSessionGitData(sessionID string) {
+	ctx := context.Background()
+	data, err := c.hub.GetSessionGitData(ctx, sessionID)
+	if err != nil {
+		c.logger.Error("Failed to get session git data",
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return
+	}
+	for _, msg := range data {
+		if msg == nil || msg.Action != ws.ActionSessionGitEvent {
+			continue
+		}
+		payload, err := json.Marshal(msg)
+		if err != nil {
+			c.logger.Error("Failed to marshal session git data", zap.Error(err))
+			continue
+		}
+		c.sendBytes(payload)
 	}
 }
 
@@ -498,12 +569,9 @@ func (c *Client) handleSessionUnsubscribe(msg *ws.Message) {
 
 // handleSessionFocus handles session.focus — marks the session as actively
 // viewed by this client, lifting backend polling to fast mode for the workspace.
-//
-// Also pushes a fresh session data snapshot (git status, etc.) because the
-// session.subscribe frame is often absorbed by the sidebar's bulk subscribe
-// (ref-counted on the client) before the task-page hook can ask for it — so
-// without this, switching tasks leaves the Changes panel showing stale/empty
-// state until the next poll broadcast arrives.
+// It intentionally sends only the control acknowledgement. Snapshot/data
+// refreshes belong to explicit detail-surface requests and must not be replayed
+// on every focus transition.
 func (c *Client) handleSessionFocus(msg *ws.Message) {
 	var req SessionSubscribeRequest
 	if err := msg.ParsePayload(&req); err != nil {
@@ -524,8 +592,57 @@ func (c *Client) handleSessionFocus(msg *ws.Message) {
 		"session_id": req.SessionID,
 	})
 	c.sendMessage(resp)
+}
 
+// handleSessionDataRefresh explicitly requests a fresh detail snapshot without
+// changing subscription or focus state. Keeping this separate from focus
+// makes repeated tab activation cheap and keeps focus acknowledgements small.
+func (c *Client) handleSessionDataRefresh(msg *ws.Message) {
+	var req SessionSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.SessionID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+	if !c.maySubscribeSession(msg, req.SessionID) {
+		return
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"session_id": req.SessionID,
+	})
+	c.sendMessage(resp)
 	c.sendSessionData(req.SessionID)
+}
+
+// handleSessionGitRefresh explicitly requests only a fresh git-status
+// snapshot for an already-focused session. Unlike the legacy generic data
+// refresh, this does not replay session state, models, commands, or other
+// detail-independent data.
+func (c *Client) handleSessionGitRefresh(msg *ws.Message) {
+	var req SessionSubscribeRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+		return
+	}
+	if req.SessionID == "" {
+		c.sendError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+		return
+	}
+	if !c.maySubscribeSession(msg, req.SessionID) {
+		return
+	}
+
+	resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{
+		"success":    true,
+		"session_id": req.SessionID,
+	})
+	c.sendMessage(resp)
+	c.sendSessionGitData(req.SessionID)
 }
 
 // handleSessionUnfocus handles session.unfocus — releases the focus mark for
@@ -557,21 +674,55 @@ func (c *Client) sendMessage(msg *ws.Message) {
 		c.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	c.sendBytes(data)
+	c.sendControlBytes(data)
 }
 
 func (c *Client) sendBytes(data []byte) bool {
+	return c.enqueueNotification(newOutboundNotification(data, ""))
+}
+
+// sendNotification queues a pre-marshalled notification with its typed action
+// so the client scheduler can classify it once without reparsing the envelope.
+func (c *Client) sendNotification(data []byte, action string) bool {
+	return c.sendNotificationFrame(newOutboundNotification(data, action))
+}
+
+func (c *Client) sendNotificationFrame(frame outboundNotification) bool {
+	return c.enqueueNotification(frame)
+}
+
+// sendControlBytes queues a response/error separately from notifications.
+// Keeping this queue independent is enough to prevent a burst of stream
+// frames from dropping the ACK for a user action. It remains bounded so a
+// stalled peer cannot grow memory without limit.
+func (c *Client) sendControlBytes(data []byte) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.closed {
 		return false
 	}
-
+	if c.controlSend == nil {
+		// Keep zero-value/in-package test clients safe while all production
+		// clients use the dedicated control queue.
+		select {
+		case c.send <- data:
+			return true
+		default:
+			if c.logger != nil {
+				c.logger.Warn("Client control send buffer full; closing connection")
+			}
+			c.closeSendLocked()
+			return false
+		}
+	}
 	select {
-	case c.send <- data:
+	case c.controlSend <- data:
 		return true
 	default:
-		c.logger.Warn("Client send buffer full")
+		if c.logger != nil {
+			c.logger.Warn("Client control send buffer full; closing connection")
+		}
+		c.closeSendLocked()
 		return false
 	}
 }
@@ -589,11 +740,29 @@ func (c *Client) sendError(id, action, code, message string, details map[string]
 func (c *Client) closeSend() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.closeSendLocked()
+}
+
+func (c *Client) closeSendLocked() {
 	if c.closed {
 		return
 	}
 	c.closed = true
-	close(c.send)
+	if c.send != nil {
+		close(c.send)
+	}
+	if c.controlSend != nil {
+		close(c.controlSend)
+	}
+	if c.notificationWake != nil {
+		// The wake channel is deliberately left open: enqueueNotification checks
+		// closed while holding c.mu, so closing it here would create a
+		// send-on-closed race with a concurrent producer.
+		select {
+		case c.notificationWake <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // WritePump pumps messages from the hub to the WebSocket connection
@@ -606,32 +775,127 @@ func (c *Client) WritePump() {
 		}
 	}()
 
+	controlCh := c.controlSend
+	semanticCh := c.send
+	semanticSinceReplaceable := 0
+
+	writeMessage := func(message []byte) bool {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+			c.logger.Debug("failed to set write deadline", zap.Error(err))
+		}
+		if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			c.logger.Debug("failed to write websocket message", zap.Error(err))
+			return false
+		}
+		return true
+	}
+	writeClose := func() {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+			c.logger.Debug("failed to set write deadline", zap.Error(err))
+		}
+		if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
+			c.logger.Debug("failed to write close message", zap.Error(err))
+		}
+	}
+	writePing := func() bool {
+		if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
+			c.logger.Debug("failed to set write deadline", zap.Error(err))
+		}
+		if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			c.logger.Debug("failed to write websocket ping", zap.Error(err))
+			return false
+		}
+		return true
+	}
+
 	for {
+		// Correlated responses/errors always run first. A bounded semantic burst
+		// then gives each active session's replaceable queue a turn.
 		select {
-		case message, ok := <-c.send:
-			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
-				c.logger.Debug("failed to set write deadline", zap.Error(err))
-			}
-			if !ok {
-				// Hub closed the channel
-				if err := c.conn.WriteMessage(websocket.CloseMessage, []byte{}); err != nil {
-					c.logger.Debug("failed to write close message", zap.Error(err))
-				}
-				return
-			}
-
-			// Send each message in its own WebSocket frame
-			// (previously batched with newlines, but clients expect one JSON object per frame)
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
-				c.logger.Debug("failed to write websocket message", zap.Error(err))
-				return
-			}
-
 		case <-ticker.C:
-			if err := c.conn.SetWriteDeadline(time.Now().Add(writeWait)); err != nil {
-				c.logger.Debug("failed to set write deadline", zap.Error(err))
+			if !writePing() {
+				return
 			}
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+		default:
+		}
+		if controlCh != nil {
+			select {
+			case message, ok := <-controlCh:
+				if !ok {
+					controlCh = nil
+					continue
+				}
+				if !writeMessage(message) {
+					return
+				}
+				continue
+			default:
+			}
+		}
+
+		if semanticSinceReplaceable >= semanticPriorityBurst {
+			if frame, ok := c.popNextReplaceable(); ok {
+				semanticSinceReplaceable = 0
+				if !writeMessage(frame.data) {
+					return
+				}
+				continue
+			}
+		}
+
+		if semanticCh != nil {
+			select {
+			case message, ok := <-semanticCh:
+				if !ok {
+					semanticCh = nil
+					continue
+				}
+				semanticSinceReplaceable++
+				if !writeMessage(message) {
+					return
+				}
+				continue
+			default:
+			}
+		}
+
+		if frame, ok := c.popNextReplaceable(); ok {
+			semanticSinceReplaceable = 0
+			if !writeMessage(frame.data) {
+				return
+			}
+			continue
+		}
+
+		if controlCh == nil && semanticCh == nil && !c.hasReplaceable() {
+			writeClose()
+			return
+		}
+
+		c.mu.RLock()
+		wakeCh := c.notificationWake
+		c.mu.RUnlock()
+		select {
+		case message, ok := <-controlCh:
+			if !ok {
+				controlCh = nil
+				continue
+			}
+			if !writeMessage(message) {
+				return
+			}
+		case message, ok := <-semanticCh:
+			if !ok {
+				semanticCh = nil
+				continue
+			}
+			semanticSinceReplaceable++
+			if !writeMessage(message) {
+				return
+			}
+		case <-wakeCh:
+		case <-ticker.C:
+			if !writePing() {
 				return
 			}
 		}

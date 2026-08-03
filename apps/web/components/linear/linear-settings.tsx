@@ -29,6 +29,8 @@ import {
   listLinearTeams,
 } from "@/lib/api/domains/linear-api";
 import type { LinearConfig, LinearTeam, TestLinearConnectionResult } from "@/lib/types/linear";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { LinearIssueWatchersSection } from "./linear-issue-watchers-section";
 
 type FormState = {
@@ -37,6 +39,16 @@ type FormState = {
 };
 
 const emptyForm: FormState = { defaultTeamKey: "", secret: "" };
+
+// Not copy. The mask is a glyph run, `lin_api_...` is the literal shape of a
+// Linear personal API key, and the link is a Linear-owned URL — its visible
+// text is the same URL with the scheme trimmed. All four would be corrupted by
+// the pseudo-locale into something the user cannot match against Linear's own
+// UI, so they stay out of the catalog.
+const SECRET_MASK = "••••••••";
+const SECRET_EXAMPLE = "lin_api_...";
+const API_KEY_SETTINGS_URL = "https://linear.app/settings/account/security";
+const API_KEY_SETTINGS_LABEL = "linear.app/settings/account/security";
 
 function configToForm(cfg: LinearConfig | null): FormState {
   if (!cfg) return emptyForm;
@@ -60,35 +72,34 @@ function SecretField({
   update,
   hasSavedSecret,
 }: Omit<FieldsRowProps, "teams" | "loadingTeams">) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
       <Label htmlFor="linear-secret">
-        API key
+        {t("linear:apiKey")}
         {hasSavedSecret && (
-          <span className="text-xs text-muted-foreground ml-2">
-            (saved — leave blank to keep the current value)
-          </span>
+          <span className="text-xs text-muted-foreground ml-2">{t("linear:savedLeaveBlank")}</span>
         )}
       </Label>
       <Input
         id="linear-secret"
         data-testid="linear-secret-input"
         type="password"
-        placeholder={hasSavedSecret ? "••••••••" : "lin_api_..."}
+        placeholder={hasSavedSecret ? SECRET_MASK : SECRET_EXAMPLE}
         value={form.secret}
         data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
         disabled={loading}
       />
       <p className="text-xs text-muted-foreground">
-        Create a personal API key at{" "}
+        {t("linear:createPersonalApiKeyAt")}{" "}
         <a
           className="underline cursor-pointer"
-          href="https://linear.app/settings/account/security"
+          href={API_KEY_SETTINGS_URL}
           target="_blank"
           rel="noreferrer"
         >
-          linear.app/settings/account/security
+          {API_KEY_SETTINGS_LABEL}
         </a>
       </p>
     </div>
@@ -96,9 +107,10 @@ function SecretField({
 }
 
 function TeamSelector({ form, baseline, loading, update, teams, loadingTeams }: FieldsRowProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="linear-team">Default team (optional)</Label>
+      <Label htmlFor="linear-team">{t("linear:defaultTeamOptional")}</Label>
       <Select
         value={form.defaultTeamKey || "__none__"}
         onValueChange={(v) => update("defaultTeamKey", v === "__none__" ? "" : v)}
@@ -109,13 +121,17 @@ function TeamSelector({ form, baseline, loading, update, teams, loadingTeams }: 
           className="w-full"
           data-settings-dirty={form.defaultTeamKey !== baseline.defaultTeamKey}
         >
-          <SelectValue placeholder={loadingTeams ? "Loading teams…" : "Choose a team"} />
+          <SelectValue
+            placeholder={loadingTeams ? t("linear:loadingTeams") : t("linear:chooseATeam")}
+          />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__none__">No default</SelectItem>
-          {teams.map((t) => (
-            <SelectItem key={t.id} value={t.key}>
-              {t.name} ({t.key})
+          <SelectItem value="__none__">{t("linear:noDefault")}</SelectItem>
+          {/* Renamed from `t` so it cannot shadow the translation function
+              above; team names and keys are Linear API data, not copy. */}
+          {teams.map((team) => (
+            <SelectItem key={team.id} value={team.key}>
+              {team.name} ({team.key})
             </SelectItem>
           ))}
         </SelectContent>
@@ -124,15 +140,30 @@ function TeamSelector({ form, baseline, loading, update, teams, loadingTeams }: 
   );
 }
 
+// The identity and the org name are Linear API data, so they are interpolated
+// rather than written into the catalog — a locale (pseudo included) must not
+// rewrite the account the user is checking they connected as.
+//
+// Every field on the result is optional, so each interpolated value needs a
+// fallback: i18next leaves an unmatched placeholder in place, so a partial
+// response would render the literal "{{name}}" to the user rather than the
+// old template's "undefined".
+function testResultMessage(t: TFunction, result: TestLinearConnectionResult): string {
+  if (!result.ok) {
+    return t("linear:testFailed", { error: result.error || t("linear:unknownError") });
+  }
+  const name = result.displayName || result.email || result.userId || t("linear:unknownAccount");
+  return result.orgName
+    ? t("linear:connectedAsWithOrg", { name, org: result.orgName })
+    : t("linear:connectedAs", { name });
+}
+
 function TestResultAlert({ result }: { result: TestLinearConnectionResult | null }) {
+  const { t } = useTranslation();
   if (!result) return null;
   return (
     <Alert variant={result.ok ? "default" : "destructive"}>
-      <AlertDescription>
-        {result.ok
-          ? `Connected as ${result.displayName || result.email || result.userId}${result.orgName ? ` (${result.orgName})` : ""}`
-          : `Failed: ${result.error}`}
-      </AlertDescription>
+      <AlertDescription>{testResultMessage(t, result)}</AlertDescription>
     </Alert>
   );
 }
@@ -157,6 +188,7 @@ type ActionBarProps = {
 };
 
 function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -165,10 +197,10 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
         onClick={onTest}
         disabled={testing || loading || disableTest}
         className="cursor-pointer"
-        title={disableTest ? "Paste an API key to test the connection" : undefined}
+        title={disableTest ? t("linear:pasteAnApiKeyToTest") : undefined}
         data-testid="linear-test-button"
       >
-        {testing ? "Testing..." : "Test connection"}
+        {testing ? t("linear:testing") : t("linear:testConnection")}
       </Button>
       {hasConfig && (
         <Button
@@ -178,7 +210,7 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
           className="ml-auto cursor-pointer"
           data-testid="linear-delete-button"
         >
-          Remove configuration
+          {t("linear:removeConfiguration")}
         </Button>
       )}
     </div>
@@ -202,6 +234,7 @@ function useSettingsActions({
   setForm,
   setTestResult,
 }: SettingsActionsArgs) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -243,28 +276,28 @@ function useSettingsActions({
         JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
       );
       setTestResult(null);
-      toast({ description: "Linear configuration saved", variant: "success" });
+      toast({ description: t("linear:configurationSaved"), variant: "success" });
     } catch (err) {
-      toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      toast({ description: t("linear:saveFailed", { error: String(err) }), variant: "error" });
       throw err;
     } finally {
       setSaving(false);
     }
-  }, [workspaceId, form, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
+  }, [workspaceId, form, t, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
 
   const handleDelete = useCallback(async () => {
-    if (!confirm("Remove Linear configuration?")) return;
+    if (!confirm(t("linear:removeLinearConfigurationConfirm"))) return;
     try {
       await deleteLinearConfig({ workspaceId });
       setConfig(null);
       setBaselineConfig(null);
       setForm(emptyForm);
       setTestResult(null);
-      toast({ description: "Linear configuration removed", variant: "success" });
+      toast({ description: t("linear:configurationRemoved"), variant: "success" });
     } catch (err) {
-      toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
+      toast({ description: t("linear:deleteFailed", { error: String(err) }), variant: "error" });
     }
-  }, [workspaceId, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
+  }, [workspaceId, t, toast, setConfig, setBaselineConfig, setForm, setTestResult]);
 
   return { saving, testing, handleTest, handleSave, handleDelete };
 }
@@ -301,6 +334,7 @@ function useTeamsLoader(
 }
 
 function useLinearSettings(workspaceId: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [config, setConfig] = useState<LinearConfig | null>(null);
   const [baselineConfig, setBaselineConfig] = useState<LinearConfig | null>(null);
@@ -318,11 +352,14 @@ function useLinearSettings(workspaceId: string) {
       setBaselineConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
-      toast({ description: `Failed to load Linear config: ${String(err)}`, variant: "error" });
+      toast({
+        description: t("linear:failedToLoadConfig", { error: String(err) }),
+        variant: "error",
+      });
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, toast]);
+  }, [workspaceId, t, toast]);
 
   useEffect(() => {
     void load();
@@ -381,6 +418,7 @@ function EnabledPill() {
 }
 
 export function LinearConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const s = useLinearSettings(workspaceId);
   const baseline = configToForm(s.baselineConfig);
   const missingSecret = !s.config?.hasSecret && !s.form.secret;
@@ -394,7 +432,7 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
     revision,
     isDirty: dirty,
     canSave: !disableSave,
-    invalidReason: missingSecret ? "An API key is required." : undefined,
+    invalidReason: missingSecret ? t("linear:anApiKeyIsRequired") : undefined,
     save: s.handleSave,
     discard: s.discard,
   });
@@ -402,8 +440,8 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
   return (
     <SettingsSection
       icon={<IconHexagon className="h-5 w-5" />}
-      title="Linear integration"
-      description="Connect this workspace to Linear with a personal API key. Credentials are stored encrypted server-side for the selected workspace."
+      title={t("linear:linearIntegration")}
+      description={t("linear:linearIntegrationDescription")}
       action={<EnabledPill />}
     >
       <SettingsCard isDirty={dirty}>

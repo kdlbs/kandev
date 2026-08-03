@@ -9,6 +9,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -125,7 +127,27 @@ func (s *Service) DismissLastAgentError(ctx context.Context, sessionID, stamp st
 	if !updated {
 		return session, nil
 	}
-	return s.sessions.GetTaskSession(ctx, sessionID)
+	if s.eventBus != nil {
+		eventCtx := context.WithoutCancel(ctx)
+		eventData := map[string]interface{}{
+			"task_id":      session.TaskID,
+			"session_id":   sessionID,
+			"active":       false,
+			"stamp":        lastErr.Stamp(),
+			"dismissed_at": now.Format(time.RFC3339Nano),
+		}
+		if err := s.eventBus.Publish(eventCtx, events.TaskSessionErrorChanged, bus.NewEvent(
+			events.TaskSessionErrorChanged,
+			"task-service",
+			eventData,
+		)); err != nil {
+			s.logger.Warn("failed to publish task session error dismissal event",
+				zap.String("task_id", session.TaskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+	}
+	return s.sessions.GetTaskSession(context.WithoutCancel(ctx), sessionID)
 }
 
 // MarkSessionRead advances sessionID's Slack-style read cursor to messageID.

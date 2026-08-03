@@ -295,7 +295,11 @@ function extractContextWindow(store: StoreApi<AppState>, sessionId: string, payl
   ) as Record<string, unknown> | undefined;
   if (!metadata) return;
   const contextWindow = metadata.context_window;
-  const entry = parseContextWindowEntry(contextWindow, new Date().toISOString());
+  const entry = parseContextWindowEntry(
+    contextWindow,
+    new Date().toISOString(),
+    metadata.context_compaction_count,
+  );
   if (entry) store.getState().setContextWindow(sessionId, entry);
   else store.getState().clearContextWindow(sessionId);
 }

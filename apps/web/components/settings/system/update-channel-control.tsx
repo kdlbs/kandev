@@ -1,6 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { UpdatesChannel, UpdatesResponse } from "@/lib/types/system";
@@ -98,6 +99,7 @@ export function UpdateChannelControl({
   unsupportedReason,
   setDraft,
 }: UpdateChannelControlProps) {
+  const { t } = useTranslation();
   const reasonId = "system-updates-channel-reason";
   return (
     <div
@@ -106,13 +108,11 @@ export function UpdateChannelControl({
       data-settings-dirty={isDirty}
     >
       <div>
-        <div className="text-sm font-medium">Update channel</div>
-        <p className="text-xs text-muted-foreground">
-          Choose which releases this managed service checks and applies.
-        </p>
+        <div className="text-sm font-medium">{t("settings:updateChannel")}</div>
+        <p className="text-xs text-muted-foreground">{t("settings:updateChannelDescription")}</p>
       </div>
       <RadioGroup
-        aria-label="Update channel"
+        aria-label={t("settings:updateChannel")}
         value={draft}
         onValueChange={(value) => {
           if (editable && (value === "stable" || value === "nightly")) setDraft(value);
@@ -122,15 +122,15 @@ export function UpdateChannelControl({
       >
         <UpdateChannelOption
           channel="stable"
-          label="Stable"
-          description="Signed GitHub releases. Recommended for most users."
+          label={t("settings:updateChannelStable")}
+          description={t("settings:updateChannelStableDescription")}
           disabled={!editable}
           reasonId={!editable && unsupportedReason ? reasonId : undefined}
         />
         <UpdateChannelOption
           channel="nightly"
-          label="Nightly"
-          description="Install-wide prerelease builds from main via npm. Apply uses the exact version shown."
+          label={t("settings:updateChannelNightly")}
+          description={t("settings:updateChannelNightlyDescription")}
           disabled={!editable}
           reasonId={!editable && unsupportedReason ? reasonId : undefined}
         />

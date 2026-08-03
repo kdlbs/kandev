@@ -8,8 +8,10 @@ vi.mock("@/lib/ws/connection", () => ({
 }));
 
 import {
+  MergeReferenceOverflowError,
   QueueFullError,
   QueueEntryNotFoundError,
+  mergeQueuedEntry,
   queueMessage,
   rethrowQueueError,
   updateQueuedMessage,
@@ -75,6 +77,15 @@ describe("rethrowQueueError", () => {
         message: "Already drained",
       }),
     ).toThrow(QueueEntryNotFoundError);
+  });
+
+  it("maps merge_reference_overflow errors to MergeReferenceOverflowError", () => {
+    expect(() =>
+      rethrowQueueError({
+        code: "merge_reference_overflow",
+        message: "merge would exceed the per-message entity reference limit",
+      }),
+    ).toThrow(MergeReferenceOverflowError);
   });
 
   it("rethrows non-queue WS errors as plain Error instances", () => {
@@ -166,5 +177,59 @@ describe("queue reference payloads", () => {
       content: "reference kept",
       entity_references: [reference],
     });
+  });
+});
+
+describe("mergeQueuedEntry", () => {
+  it("forwards session, entry, and caller identity through message.queue.merge", async () => {
+    const request = vi.fn().mockResolvedValue({ entry_id: "q-a" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await mergeQueuedEntry({
+      session_id: "session-1",
+      entry_id: "q-b",
+      user_id: "user-1",
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.merge", {
+      session_id: "session-1",
+      entry_id: "q-b",
+      user_id: "user-1",
+    });
+  });
+
+  it("omits user_id when the caller identity is unknown", async () => {
+    const request = vi.fn().mockResolvedValue({ entry_id: "q-a" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await mergeQueuedEntry({ session_id: "session-1", entry_id: "q-b" });
+
+    expect(request).toHaveBeenCalledWith("message.queue.merge", {
+      session_id: "session-1",
+      entry_id: "q-b",
+    });
+  });
+
+  it("maps a drained-source rejection to QueueEntryNotFoundError", async () => {
+    const request = vi
+      .fn()
+      .mockRejectedValue({ code: "entry_not_found", message: "Already drained" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(
+      mergeQueuedEntry({ session_id: "session-1", entry_id: "q-b" }),
+    ).rejects.toBeInstanceOf(QueueEntryNotFoundError);
+  });
+
+  it("maps a reference-overflow rejection to MergeReferenceOverflowError", async () => {
+    const request = vi.fn().mockRejectedValue({
+      code: "merge_reference_overflow",
+      message: "merge would exceed the per-message entity reference limit",
+    });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await expect(
+      mergeQueuedEntry({ session_id: "session-1", entry_id: "q-b" }),
+    ).rejects.toBeInstanceOf(MergeReferenceOverflowError);
   });
 });

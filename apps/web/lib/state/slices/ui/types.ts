@@ -38,7 +38,8 @@ export type ConnectionState = {
 };
 
 export type MobileKanbanState = {
-  activeColumnIndex: number;
+  /** Last selected workflow step id, keyed by workflow id (phone board). */
+  activeStepIdByWorkflowId: Record<string, string>;
   isMenuOpen: boolean;
   isSearchOpen: boolean;
 };
@@ -215,7 +216,7 @@ export type UISliceActions = {
   setRightPanelActiveTab: (sessionId: string, tab: string) => void;
   setConnectionStatus: (status: ConnectionState["status"], error?: string | null) => void;
   setConnectionIssueSeverity: (severity: ConnectionIssueSeverity) => void;
-  setMobileKanbanColumnIndex: (index: number) => void;
+  setMobileKanbanActiveStep: (workflowId: string, stepId: string) => void;
   setMobileKanbanMenuOpen: (open: boolean) => void;
   setMobileKanbanSearchOpen: (open: boolean) => void;
   setMobileSessionPanel: (sessionId: string, panel: MobileSessionPanel) => void;

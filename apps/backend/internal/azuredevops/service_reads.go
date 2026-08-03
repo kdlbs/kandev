@@ -55,6 +55,12 @@ type branchClient interface {
 	ListBranches(ctx context.Context, projectID, repositoryID string) ([]Branch, error)
 }
 
+type workItemDetailClient interface {
+	GetWorkItemDetail(ctx context.Context, projectID string, id int) (*WorkItemDetail, error)
+	ListWorkItemComments(ctx context.Context, projectID string, id int, continuationToken string) (*WorkItemCommentPage, error)
+	GetCurrentIdentity(ctx context.Context) (*Identity, error)
+}
+
 func (s *Service) ListBranchesForWorkspace(
 	ctx context.Context, workspaceID, organization, projectID, repositoryID string,
 ) ([]Branch, error) {
@@ -103,6 +109,48 @@ func (s *Service) GetWorkItemForWorkspace(ctx context.Context, workspaceID, proj
 		return nil, err
 	}
 	return client.GetWorkItem(ctx, projectID, id)
+}
+
+func (s *Service) GetWorkItemDetailForWorkspace(ctx context.Context, workspaceID, projectID string, id int) (*WorkItemDetail, error) {
+	if strings.TrimSpace(projectID) == "" || id <= 0 {
+		return nil, fmt.Errorf("%w: project and positive work item id required", ErrInvalidConfig)
+	}
+	client, err := s.clientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	reader, ok := client.(workItemDetailClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: work item detail is unavailable", ErrNotConfigured)
+	}
+	return reader.GetWorkItemDetail(ctx, projectID, id)
+}
+
+func (s *Service) ListWorkItemCommentsForWorkspace(ctx context.Context, workspaceID, projectID string, id int, continuationToken string) (*WorkItemCommentPage, error) {
+	if strings.TrimSpace(projectID) == "" || id <= 0 {
+		return nil, fmt.Errorf("%w: project and positive work item id required", ErrInvalidConfig)
+	}
+	client, err := s.clientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	reader, ok := client.(workItemDetailClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: work item discussion is unavailable", ErrNotConfigured)
+	}
+	return reader.ListWorkItemComments(ctx, projectID, id, continuationToken)
+}
+
+func (s *Service) GetCurrentIdentityForWorkspace(ctx context.Context, workspaceID string) (*Identity, error) {
+	client, err := s.clientForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	reader, ok := client.(workItemDetailClient)
+	if !ok {
+		return nil, fmt.Errorf("%w: current identity is unavailable", ErrNotConfigured)
+	}
+	return reader.GetCurrentIdentity(ctx)
 }
 
 func (s *Service) ListPullRequestsForWorkspace(

@@ -9,6 +9,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -25,14 +26,16 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
-	TaskID             string `json:"task_id"`
-	SessionID          string `json:"session_id"`
-	AgentExecutionID   string `json:"agent_execution_id"`
-	AgentProfileID     string `json:"agent_profile_id"`
-	ExecutionProfileID string `json:"execution_profile_id,omitempty"`
-	ExitCode           *int   `json:"exit_code,omitempty"`
-	ErrorMessage       string `json:"error_message,omitempty"`
-	PromptGeneration   uint64 `json:"prompt_generation,omitempty"`
+	TaskID             string                 `json:"task_id"`
+	SessionID          string                 `json:"session_id"`
+	AgentExecutionID   string                 `json:"agent_execution_id"`
+	AgentID            string                 `json:"agent_id,omitempty"`
+	AgentProfileID     string                 `json:"agent_profile_id"`
+	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
+	ExitCode           *int                   `json:"exit_code,omitempty"`
+	ErrorMessage       string                 `json:"error_message,omitempty"`
+	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
+	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
 }
 
 // ACPSessionEventData contains data from ACP session events

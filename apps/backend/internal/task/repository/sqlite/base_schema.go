@@ -159,7 +159,29 @@ func (r *Repository) initCoreSchema() error {
 	if err := r.initTaskSchema(); err != nil {
 		return err
 	}
+	if err := r.initTaskStatusSummarySchema(); err != nil {
+		return err
+	}
 	return r.initCoreIndexes()
+}
+
+const taskStatusSummarySchemaDDL = `
+	CREATE TABLE IF NOT EXISTS task_status_summaries (
+		task_id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 0,
+		summary TEXT NOT NULL DEFAULT '{}',
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+
+	CREATE INDEX IF NOT EXISTS idx_task_status_summaries_workspace
+		ON task_status_summaries(workspace_id);
+`
+
+func (r *Repository) initTaskStatusSummarySchema() error {
+	_, err := r.db.Exec(taskStatusSummarySchemaDDL)
+	return err
 }
 
 // infraSchemaDDL is the concatenated CREATE TABLE block for infrastructure

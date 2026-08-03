@@ -218,4 +218,9 @@ A padded spec is worse than a short one — it hides the requirements behind cer
 - **Present tense, active voice.** "The agent resumes the turn" — not "the turn will be resumed by the agent".
 - **Concrete over abstract.** "Wakeups fire at most once per 60s per agent" is testable; "wakeups are rate-limited appropriately" is not.
 - **Assumptions visible.** If you infer behavior from current code, name the assumption and keep it in Open questions until confirmed.
-- **Approval gate.** Do not proceed to `/plan` or implementation until the user has approved the spec or explicitly asked to continue with named open questions.
+- **Review boundary.** When `/spec` is a standalone request, finish the spec
+  and return control without calling `ask_user_question_kandev` (or an
+  equivalent prompt) solely to request approval. When `/spec` is part of
+  `/spec-driven-development` or `/fix` planning, continue through the plan and
+  task files before the design-package handoff. A material open question that
+  prevents a safe plan is still a valid reason to ask for clarification.

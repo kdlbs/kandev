@@ -1,6 +1,8 @@
 "use client";
 
 import { useId } from "react";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconAlertCircle, IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
 import { Button } from "@kandev/ui/button";
@@ -245,23 +247,23 @@ function PermissionToggles({
   );
 }
 
-function capabilityStatusMessage(status: ModelConfig["status"]): string | null {
-  switch (status) {
-    case "probing":
-      return "Checking agent capabilities…";
-    case "auth_required":
-      return "Authentication required. Run the agent CLI in your terminal to authenticate, then refresh.";
-    case "not_installed":
-      return "Agent CLI not installed.";
-    case "failed":
-      return "Probe failed. Check agent logs for details.";
-    default:
-      return null;
-  }
+// The probe `status` values are the wire enum; only the messages are copy, so
+// they travel as catalog keys and resolve at render.
+const CAPABILITY_STATUS_KEYS: Record<string, string> = {
+  probing: "agents:capabilityProbing",
+  auth_required: "agents:capabilityAuthRequired",
+  not_installed: "agents:capabilityNotInstalled",
+  failed: "agents:capabilityProbeFailed",
+};
+
+function capabilityStatusMessage(t: TFunction, status: ModelConfig["status"]): string | null {
+  const key = status ? CAPABILITY_STATUS_KEYS[status] : undefined;
+  return key ? t(key) : null;
 }
 
 function CapabilityStatusMessage({ status }: { status: ModelConfig["status"] }) {
-  const msg = capabilityStatusMessage(status);
+  const { t } = useTranslation();
+  const msg = capabilityStatusMessage(t, status);
   if (!msg) return null;
   return (
     <p
@@ -283,6 +285,7 @@ function RefreshCapabilitiesButton({
   isLoading: boolean;
   error: string | null;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-2">
       <Tooltip>
@@ -299,7 +302,7 @@ function RefreshCapabilitiesButton({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          <p>Refresh agent capabilities (models + modes)</p>
+          <p>{t("agents:refreshCapabilitiesTooltip")}</p>
         </TooltipContent>
       </Tooltip>
       {error && (
@@ -310,7 +313,7 @@ function RefreshCapabilitiesButton({
             </div>
           </TooltipTrigger>
           <TooltipContent>
-            <p className="max-w-xs">Failed to refresh: {error}</p>
+            <p className="max-w-xs">{t("agents:failedToRefresh", { error })}</p>
           </TooltipContent>
         </Tooltip>
       )}
@@ -331,6 +334,7 @@ function ModelPicker({
   configOptions: SelectConfigOption[];
   onChange: (patch: Partial<ProfileFormData>) => void;
 }) {
+  const { t } = useTranslation();
   const modelConfig = configOptions.find(isModelConfigOption);
   const modelOptions = modelConfig
     ? configOptionToModelOptions(modelConfig)
@@ -358,8 +362,8 @@ function ModelPicker({
       onConfigChange={(configId, value) =>
         onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
       }
-      placeholder="Select a model..."
-      ariaLabel="Profile start model settings"
+      placeholder={t("agents:selectAModel")}
+      ariaLabel={t("agents:profileStartModelSettings")}
     />
   );
 }
@@ -433,6 +437,7 @@ function CapabilitiesRow({
   agentName,
   baselineProfile,
 }: CapabilitiesRowProps) {
+  const { t } = useTranslation();
   const hasModes = modes.length > 0;
   const configOptions = modelConfigOptions(modelConfig);
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
@@ -442,7 +447,7 @@ function CapabilitiesRow({
   if (isLoading && models.length === 0) {
     return (
       <div className={gapCls}>
-        <Label className={labelCls}>Start model</Label>
+        <Label className={labelCls}>{t("agents:startModel")}</Label>
         <Skeleton className="h-7 w-full" />
       </div>
     );
@@ -472,7 +477,7 @@ function CapabilitiesRow({
           data-settings-dirty={profileModelIsDirty(profile, baselineProfile)}
           data-settings-dirty-level="container"
         >
-          <Label className={labelCls}>Start model</Label>
+          <Label className={labelCls}>{t("agents:startModel")}</Label>
           <ModelPicker
             profile={profile}
             models={models}
@@ -488,7 +493,7 @@ function CapabilitiesRow({
             data-settings-dirty={profileModeIsDirty(profile, baselineProfile)}
             data-settings-dirty-level="container"
           >
-            <Label className={labelCls}>Start mode</Label>
+            <Label className={labelCls}>{t("agents:startMode")}</Label>
             <ModePicker
               profile={profile}
               modes={modes}
@@ -521,21 +526,22 @@ function NameField({
   onRemove?: () => void;
   baselineName?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4">
       <div className="flex-1 space-y-2">
-        <Label>Profile name</Label>
+        <Label>{t("agents:profileName")}</Label>
         <Input
           data-testid="profile-name-input"
           value={profile.name}
           onChange={(event) => onChange({ name: event.target.value })}
-          placeholder="Default profile"
+          placeholder={t("agents:defaultProfile")}
           data-settings-dirty={baselineName !== undefined && profile.name !== baselineName}
         />
       </div>
       {canRemove && onRemove && (
         <Button size="sm" variant="ghost" className="cursor-pointer" onClick={onRemove}>
-          Remove
+          {t("agents:remove")}
         </Button>
       )}
     </div>

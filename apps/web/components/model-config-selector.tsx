@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconCheck, IconChevronDown, IconChevronLeft, IconChevronRight } from "@tabler/icons-react";
 
 import { cn } from "@/lib/utils";
@@ -246,11 +247,12 @@ function ConfigOptionSubSelector({
   onBack: () => void;
   onChange?: (configId: string, value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-0 flex-col gap-2">
       <button
         type="button"
-        aria-label={`Back to model settings from ${option.name}`}
+        aria-label={t("agents:backToModelSettings", { name: option.name })}
         autoFocus
         className="flex min-h-9 w-full cursor-pointer items-center gap-2 rounded-md px-2 text-left text-xs/relaxed hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/35 focus-visible:outline-none"
         onClick={onBack}
@@ -336,6 +338,7 @@ function ModelConfigSelectorContent({
   onConfigBack,
   onConfigChange,
 }: ModelConfigSelectorContentProps) {
+  const { t } = useTranslation();
   const pendingFocusConfigId = useRef<string | null>(null);
   const triggerRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const showModelFilter = modelOptions.length > 5;
@@ -368,10 +371,10 @@ function ModelConfigSelectorContent({
   return (
     <>
       <Command>
-        {showModelFilter && <CommandInput placeholder="Filter models..." className="h-8" />}
+        {showModelFilter && <CommandInput placeholder={t("agents:filterModels")} className="h-8" />}
         <CommandList className="max-h-60">
-          <CommandEmpty>No models found.</CommandEmpty>
-          <CommandGroup heading="Model">
+          <CommandEmpty>{t("agents:noModelsFound")}</CommandEmpty>
+          <CommandGroup heading={t("agents:modelHeading")}>
             {modelOptions.map((model) => (
               <ModelRow
                 key={model.id}

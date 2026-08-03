@@ -17,11 +17,13 @@ export type ApiRequestOptions = {
 export class ApiError extends Error {
   readonly status: number;
   readonly body: unknown;
-  constructor(message: string, status: number, body: unknown) {
+  readonly retryAfterSeconds?: number;
+  constructor(message: string, status: number, body: unknown, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.body = body;
+    this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -59,7 +61,13 @@ async function throwFromResponse(response: Response): Promise<never> {
     const errVal = (body as { error?: unknown }).error;
     if (typeof errVal === "string") message = errVal;
   }
-  throw new ApiError(message, response.status, body);
+  const retryAfter = Number(response.headers.get("Retry-After"));
+  throw new ApiError(
+    message,
+    response.status,
+    body,
+    Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
+  );
 }
 
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {

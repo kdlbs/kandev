@@ -9,6 +9,7 @@ import {
   configureGitHubToken,
   copyGitHubWorkspaceSettings,
   createTaskPR,
+  deleteTaskPR,
   deletePRWatch,
   deleteGitHubAppRegistration,
   disconnectGitHubPersonal,
@@ -525,6 +526,20 @@ describe("task issue link helpers", () => {
 
     const call = fetchSpy.mock.calls.at(-1);
     expect(String(call?.[0])).toBe("http://api.test/api/v1/github/tasks/task-1/issue");
+    expect(call?.[1]?.method).toBe("DELETE");
+  });
+});
+
+describe("task PR association helpers", () => {
+  it("deletes a task PR association scoped to the workspace", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ deleted: true }));
+
+    await deleteTaskPR("association/1", "workspace/1");
+
+    const call = fetchSpy.mock.calls.at(-1);
+    expect(String(call?.[0])).toBe(
+      "http://api.test/api/v1/github/task-prs/association%2F1?workspace_id=workspace%2F1",
+    );
     expect(call?.[1]?.method).toBe("DELETE");
   });
 });

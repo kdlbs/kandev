@@ -25,6 +25,7 @@ export async function launchRestartableBackend({
   mode,
   stdio,
   supervisor,
+  onProcess,
 }: {
   command: string;
   args: string[];
@@ -35,9 +36,11 @@ export async function launchRestartableBackend({
   mode: string;
   stdio: StdioOptions;
   supervisor: ReturnType<typeof createProcessSupervisor>;
+  onProcess?: (proc: ChildProcess) => void;
 }): Promise<BackendSupervisorHandle> {
   if (!shouldUseSupervisor(env)) {
     const proc = spawn(command, args, { cwd, env, stdio });
+    onProcess?.(proc);
     supervisor.children.push(proc as ChildLike);
     attachBackendExitHandler(proc, supervisor);
     return { proc, control: null, env };
@@ -63,6 +66,7 @@ export async function launchRestartableBackend({
     });
   };
   const proc = child.start();
+  onProcess?.(proc);
   supervisor.children.push(proc as ChildLike);
   attachExit(proc);
 
@@ -70,6 +74,7 @@ export async function launchRestartableBackend({
     restarting = true;
     try {
       const next = await child.restart();
+      onProcess?.(next);
       supervisor.children.push(next as ChildLike);
       attachExit(next);
     } finally {

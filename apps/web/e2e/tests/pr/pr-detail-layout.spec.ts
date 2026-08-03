@@ -104,6 +104,12 @@ async function linkPR(apiClient: ApiClient, taskId: string): Promise<void> {
   });
 }
 
+function sessionTabWrapper(page: Page, sessionId: string) {
+  return page.locator(".dv-tab", {
+    has: page.getByTestId(`session-tab-${sessionId}`),
+  });
+}
+
 test.describe("PR Details layout panel", () => {
   test("keeps the Default panel beside Agent and syncs linked review content", async ({
     testPage,
@@ -168,5 +174,63 @@ test.describe("PR Details layout panel", () => {
         canonicalGroupId: null,
         keyedPanelIds: [],
       });
+  });
+
+  test("restores each task's selected center tab after a PR Details round trip", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await seedMockPR(apiClient);
+    const taskA = await createTaskWithSession(apiClient, seedData, "Active Agent PR round trip A");
+    const taskB = await createTaskWithSession(apiClient, seedData, "Active Agent PR round trip B");
+    await linkPR(apiClient, taskA.id);
+
+    const session = await openTask(testPage, taskA.id);
+    const agentTab = sessionTabWrapper(testPage, taskA.session_id!);
+    await expect(agentTab).toHaveClass(/dv-active-tab/);
+
+    // Make Agent the last selected center tab after explicitly visiting PR Details.
+    await session.prDetailTab().click();
+    await expect(session.prDetailPanel()).toBeVisible();
+    await session.clickSessionChatTab();
+    await expect(agentTab).toHaveClass(/dv-active-tab/);
+
+    await session.clickTaskInSidebar("Active Agent PR round trip B");
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
+      timeout: 15_000,
+    });
+    await session.waitForDockviewReady();
+
+    await session.clickTaskInSidebar("Active Agent PR round trip A");
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
+      timeout: 15_000,
+    });
+    await session.waitForDockviewReady();
+    await expect(agentTab).toHaveClass(/dv-active-tab/, { timeout: 15_000 });
+    await expect(testPage.getByTestId(`session-tab-${taskA.session_id}`)).toHaveCount(1);
+
+    // A deliberate PR Details selection remains deliberate across the same round trip.
+    await session.prDetailTab().click();
+    const reviewTab = testPage.locator(".dv-tab", { has: session.prDetailTab() });
+    await expect(reviewTab).toHaveClass(/dv-active-tab/);
+    await session.clickTaskInSidebar("Active Agent PR round trip B");
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskB.id), {
+      timeout: 15_000,
+    });
+    await session.waitForDockviewReady();
+    await session.clickTaskInSidebar("Active Agent PR round trip A");
+    await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
+      timeout: 15_000,
+    });
+    await session.waitForDockviewReady();
+    await expect(testPage.locator(".dv-tab", { has: session.prDetailTab() })).toHaveClass(
+      /dv-active-tab/,
+      {
+        timeout: 15_000,
+      },
+    );
+    await expect(agentTab).not.toHaveClass(/dv-active-tab/);
   });
 });

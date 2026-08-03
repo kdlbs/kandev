@@ -126,6 +126,7 @@ func TestListBranchesRejectsOrganizationMismatch(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set config: %v", err)
 	}
+	clientCalls = 0
 
 	_, err := service.ListBranchesForWorkspace(t.Context(), "ws-a", "other", "project", "repo")
 	if !errors.Is(err, ErrInvalidConfig) {
@@ -191,8 +192,54 @@ func TestConfigTestUsesSubmittedAndStoredCredentialsWithoutPersistence(t *testin
 	if err != nil || !res.OK {
 		t.Fatalf("stored probe: result=%+v err=%v", res, err)
 	}
-	if len(captures) != 2 || captures[0].pat != "submitted" || captures[1].pat != "stored" {
+	if len(captures) != 3 || captures[0].pat != "submitted" || captures[1].pat != "stored" || captures[2].pat != "stored" {
 		t.Fatalf("captured credentials: %+v", captures)
+	}
+}
+
+func TestSetConfigProbesImmediately(t *testing.T) {
+	probeCalls := 0
+	svc, _, _ := newTestService(t, func(*Config, string) Client {
+		probeCalls++
+		return &fakeClient{result: &TestConnectionResult{OK: true}}
+	})
+
+	config, err := svc.SetConfigForWorkspace(t.Context(), "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme",
+		PAT:             "pat",
+	})
+	if err != nil {
+		t.Fatalf("SetConfigForWorkspace() error = %v", err)
+	}
+	if probeCalls != 1 {
+		t.Fatalf("auth probe calls = %d, want 1", probeCalls)
+	}
+	if config.LastCheckedAt == nil || !config.LastOK || config.LastError != "" {
+		t.Fatalf("returned auth health = %+v, want current successful probe", config)
+	}
+}
+
+func TestSetConfigPersistsProbeFailure(t *testing.T) {
+	svc, store, secrets := newTestService(t, func(*Config, string) Client {
+		return &fakeClient{result: &TestConnectionResult{OK: false, Error: "401 unauthorized"}}
+	})
+
+	config, err := svc.SetConfigForWorkspace(t.Context(), "ws-a", &SetConfigRequest{
+		OrganizationURL: "https://dev.azure.com/acme",
+		PAT:             "pat",
+	})
+	if err != nil {
+		t.Fatalf("SetConfigForWorkspace() error = %v", err)
+	}
+	if config.LastCheckedAt == nil || config.LastOK || config.LastError != "401 unauthorized" {
+		t.Fatalf("returned auth health = %+v, want persisted probe failure", config)
+	}
+	if pat, err := secrets.Reveal(t.Context(), SecretKeyForWorkspace("ws-a")); err != nil || pat != "pat" {
+		t.Fatalf("stored PAT = %q, %v; want persisted credential", pat, err)
+	}
+	persisted, err := store.GetConfig(t.Context(), "ws-a")
+	if err != nil || persisted == nil || persisted.LastCheckedAt == nil || persisted.LastOK || persisted.LastError != "401 unauthorized" {
+		t.Fatalf("persisted auth health = %+v, %v", persisted, err)
 	}
 }
 
@@ -327,8 +374,12 @@ func TestSetConfigRestoresPATWhenStoreFails(t *testing.T) {
 	}
 }
 
-func TestSetConfigResetsHealthOnlyWhenCredentialsChange(t *testing.T) {
-	svc, store, _ := newTestService(t, nil)
+func TestSetConfigProbesOnlyWhenCredentialsChange(t *testing.T) {
+	probeCalls := 0
+	svc, store, _ := newTestService(t, func(*Config, string) Client {
+		probeCalls++
+		return &fakeClient{result: &TestConnectionResult{OK: true}}
+	})
 	ctx := context.Background()
 	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "old-pat",
@@ -359,13 +410,19 @@ func TestSetConfigResetsHealthOnlyWhenCredentialsChange(t *testing.T) {
 		t.Fatalf("update project: %v", err)
 	}
 	assertHealth(true, true)
+	if probeCalls != 1 {
+		t.Fatalf("auth probe calls after unchanged credentials = %d, want 1", probeCalls)
+	}
 
 	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
 		OrganizationURL: "https://dev.azure.com/other",
 	}); err != nil {
 		t.Fatalf("update organization: %v", err)
 	}
-	assertHealth(false, false)
+	assertHealth(true, true)
+	if probeCalls != 2 {
+		t.Fatalf("auth probe calls after organization change = %d, want 2", probeCalls)
+	}
 
 	setHealthy()
 	if _, err := svc.SetConfigForWorkspace(ctx, "ws-a", &SetConfigRequest{
@@ -373,7 +430,10 @@ func TestSetConfigResetsHealthOnlyWhenCredentialsChange(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("update PAT: %v", err)
 	}
-	assertHealth(false, false)
+	assertHealth(true, true)
+	if probeCalls != 3 {
+		t.Fatalf("auth probe calls after PAT change = %d, want 3", probeCalls)
+	}
 }
 
 func TestDeleteConfigLeavesStateWhenSecretDeleteFails(t *testing.T) {
@@ -424,6 +484,9 @@ func TestRecordAuthHealthIgnoresParentCancellation(t *testing.T) {
 		OrganizationURL: "https://dev.azure.com/acme", PAT: "pat",
 	}); err != nil {
 		t.Fatalf("seed config: %v", err)
+	}
+	if err := svc.Store().ResetAuthHealth(t.Context(), "ws-a"); err != nil {
+		t.Fatalf("reset health: %v", err)
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()

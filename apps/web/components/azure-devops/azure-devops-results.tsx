@@ -1,9 +1,24 @@
 "use client";
 
-import { IconExternalLink, IconMessageCircle, IconPlus } from "@tabler/icons-react";
+import {
+  IconChevronDown,
+  IconExternalLink,
+  IconMessageCircle,
+  IconPlus,
+} from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import type { AzureDevOpsPullRequest, AzureDevOpsWorkItem } from "@/lib/types/azure-devops";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@kandev/ui/dropdown-menu";
+import type {
+  AzureDevOpsActionPreset,
+  AzureDevOpsPullRequest,
+  AzureDevOpsWorkItem,
+} from "@/lib/types/azure-devops";
 
 function EmptyResult({ loading, error }: { loading: boolean; error: string | null }) {
   if (loading) return <div className="p-6 text-sm text-muted-foreground">Loading results...</div>;
@@ -16,16 +31,60 @@ function EmptyResult({ loading, error }: { loading: boolean; error: string | nul
   return <div className="p-6 text-sm text-muted-foreground">No matching results.</div>;
 }
 
+function TaskActionsMenu<T extends { id: number }>({
+  item,
+  itemLabel,
+  actions,
+  onSelect,
+}: {
+  item: T;
+  itemLabel: string;
+  actions: AzureDevOpsActionPreset[];
+  onSelect: (item: T, action: AzureDevOpsActionPreset) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="cursor-pointer"
+          aria-label={`Task actions for ${itemLabel} ${item.id}`}
+        >
+          <IconPlus className="h-4 w-4" /> Task <IconChevronDown className="h-3 w-3" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {actions.map((action) => (
+          <DropdownMenuItem key={action.id} onSelect={() => onSelect(item, action)}>
+            <span className="flex flex-col">
+              <span>{action.label}</span>
+              {action.hint && <span className="text-xs text-muted-foreground">{action.hint}</span>}
+            </span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export function AzureDevOpsWorkItemResults({
   items,
   loading,
   error,
   onStartTask,
+  onOpenDetail,
+  quickActions = [],
+  onQuickAction,
 }: {
   items: AzureDevOpsWorkItem[];
   loading: boolean;
   error: string | null;
   onStartTask: (item: AzureDevOpsWorkItem) => void;
+  onOpenDetail?: (item: AzureDevOpsWorkItem) => void;
+  quickActions?: AzureDevOpsActionPreset[];
+  onQuickAction?: (item: AzureDevOpsWorkItem, action: AzureDevOpsActionPreset) => void;
 }) {
   if (loading || error || items.length === 0)
     return <EmptyResult loading={loading} error={error} />;
@@ -33,7 +92,19 @@ export function AzureDevOpsWorkItemResults({
     <div className="divide-y" data-testid="azure-devops-work-item-results">
       {items.map((item) => (
         <div key={item.id} className="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-start">
-          <div className="min-w-0 flex-1 space-y-1">
+          <div
+            className="min-w-0 flex-1 cursor-pointer space-y-1"
+            role={onOpenDetail ? "button" : undefined}
+            tabIndex={onOpenDetail ? 0 : undefined}
+            onClick={() => onOpenDetail?.(item)}
+            onKeyDown={(event) => {
+              if (onOpenDetail && (event.key === "Enter" || event.key === " ")) {
+                event.preventDefault();
+                onOpenDetail(item);
+              }
+            }}
+            data-testid={`azure-work-item-row-${item.id}`}
+          >
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="font-mono">#{item.id}</span>
               <Badge variant="outline">{item.type}</Badge>
@@ -58,16 +129,25 @@ export function AzureDevOpsWorkItemResults({
                 </a>
               </Button>
             )}
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="cursor-pointer"
-              onClick={() => onStartTask(item)}
-            >
-              <IconPlus className="h-4 w-4" />
-              Start task
-            </Button>
+            {quickActions.length > 0 && onQuickAction ? (
+              <TaskActionsMenu
+                item={item}
+                itemLabel="work item"
+                actions={quickActions}
+                onSelect={onQuickAction}
+              />
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="cursor-pointer"
+                onClick={() => onStartTask(item)}
+              >
+                <IconPlus className="h-4 w-4" />
+                Start task
+              </Button>
+            )}
           </div>
         </div>
       ))}
@@ -85,12 +165,16 @@ export function AzureDevOpsPullRequestResults({
   error,
   onFeedback,
   onStartTask,
+  quickActions = [],
+  onQuickAction,
 }: {
   items: AzureDevOpsPullRequest[];
   loading: boolean;
   error: string | null;
   onFeedback: (pullRequest: AzureDevOpsPullRequest) => void;
   onStartTask: (pullRequest: AzureDevOpsPullRequest) => void;
+  quickActions?: AzureDevOpsActionPreset[];
+  onQuickAction?: (pullRequest: AzureDevOpsPullRequest, action: AzureDevOpsActionPreset) => void;
 }) {
   if (loading || error || items.length === 0)
     return <EmptyResult loading={loading} error={error} />;
@@ -124,16 +208,25 @@ export function AzureDevOpsPullRequestResults({
               <IconMessageCircle className="h-4 w-4" />
               Feedback
             </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="cursor-pointer"
-              onClick={() => onStartTask(pullRequest)}
-            >
-              <IconPlus className="h-4 w-4" />
-              Start task
-            </Button>
+            {quickActions.length > 0 && onQuickAction ? (
+              <TaskActionsMenu
+                item={pullRequest}
+                itemLabel="pull request"
+                actions={quickActions}
+                onSelect={onQuickAction}
+              />
+            ) : (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="cursor-pointer"
+                onClick={() => onStartTask(pullRequest)}
+              >
+                <IconPlus className="h-4 w-4" />
+                Start task
+              </Button>
+            )}
             <Button asChild variant="ghost" size="icon-sm" className="cursor-pointer">
               <a
                 href={pullRequest.webUrl}

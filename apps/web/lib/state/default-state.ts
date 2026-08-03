@@ -86,6 +86,7 @@ export const defaultState = {
   taskCIAutomation: defaultGitHubState.taskCIAutomation,
   taskMRs: defaultGitLabState.taskMRs,
   azureDevOpsTaskPullRequests: defaultAzureDevOpsState.azureDevOpsTaskPullRequests,
+  azureDevOpsTaskWorkItems: defaultAzureDevOpsState.azureDevOpsTaskWorkItems,
   gitlabReviewWatches: defaultGitLabState.gitlabReviewWatches,
   gitlabIssueWatches: defaultGitLabState.gitlabIssueWatches,
   gitlabMRWatches: defaultGitLabState.gitlabMRWatches,
@@ -134,6 +135,7 @@ function mergeCodeHostFields(
   | "gitlabStats"
   | "gitlabStatus"
   | "azureDevOpsTaskPullRequests"
+  | "azureDevOpsTaskWorkItems"
 > {
   return {
     taskMRs: { ...d.taskMRs, ...s.taskMRs },
@@ -146,6 +148,10 @@ function mergeCodeHostFields(
     azureDevOpsTaskPullRequests: {
       ...d.azureDevOpsTaskPullRequests,
       ...s.azureDevOpsTaskPullRequests,
+    },
+    azureDevOpsTaskWorkItems: {
+      ...d.azureDevOpsTaskWorkItems,
+      ...s.azureDevOpsTaskWorkItems,
     },
   };
 }

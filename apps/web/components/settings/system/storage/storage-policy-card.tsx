@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
+import { useTranslation } from "react-i18next";
 import { settingsWithDockerAcknowledgement } from "@/hooks/domains/system/use-storage-maintenance";
 import type { StorageCapabilities, StorageMaintenanceSettings } from "@/lib/types/system";
 import { DedicatedDockerDialog, ExternalGoCacheDialog } from "./storage-confirmation-dialogs";
@@ -35,6 +36,7 @@ function settingIsDirty<T>(
 }
 
 function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+  const { t } = useTranslation();
   const enabledDirty = settingIsDirty(settings, savedSettings, (value) => value.enabled);
   const intervalDirty = settingIsDirty(
     settings,
@@ -45,20 +47,20 @@ function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicyS
   return (
     <PolicySection
       sectionId="schedule"
-      title="Schedule"
-      description="Controls when automatic maintenance is allowed to start. Manual actions remain available when scheduling is off."
+      title={t("system:storageScheduleTitle")}
+      description={t("system:storageScheduleDescription")}
       isDirty={enabledDirty || intervalDirty || idleDirty}
     >
       <SettingRow
-        title="Scheduled maintenance"
-        description="Periodically reclaim disk space using the enabled resource rules."
-        help="When enabled, Kandev checks this policy at the configured interval and starts only after Kandev has been idle for the required period. Turning it off does not disable Analyze or Run now."
+        title={t("system:storageScheduledMaintenance")}
+        description={t("system:storageScheduledMaintenanceDescription")}
+        help={t("system:storageScheduledMaintenanceHelp")}
         control={
           <Switch
             checked={settings.enabled}
             disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, enabled })}
-            aria-label="Scheduled maintenance"
+            aria-label={t("system:storageScheduledMaintenance")}
             data-testid="storage-scheduling-enabled"
             data-settings-dirty={enabledDirty}
           />
@@ -66,8 +68,8 @@ function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicyS
       />
       <div className="grid min-w-0 grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
         <NumberField
-          label="Check every (hours)"
-          help="How often Kandev checks whether scheduled maintenance is due. A check that finds Kandev busy is skipped and tried again at the next interval."
+          label={t("system:storageCheckIntervalLabel")}
+          help={t("system:storageCheckIntervalHelp")}
           value={settings.check_interval_hours}
           min={1}
           max={168}
@@ -77,8 +79,8 @@ function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicyS
           isDirty={intervalDirty}
         />
         <NumberField
-          label="Require idle for (minutes)"
-          help="Scheduled cleanup starts only after no task, shell command, test, setup, cleanup, or image build has used managed resources for this long. Run now does not wait for this timer, but it still refuses to run while resources are active."
+          label={t("system:storageIdleLabel")}
+          help={t("system:storageIdleHelp")}
           value={settings.idle_for_minutes}
           min={1}
           max={1440}
@@ -93,6 +95,7 @@ function ScheduleSection({ settings, savedSettings, pending, onChange }: PolicyS
 }
 
 function WorkspaceSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+  const { t } = useTranslation();
   const workspacesDirty = settingIsDirty(
     settings,
     savedSettings,
@@ -107,28 +110,28 @@ function WorkspaceSection({ settings, savedSettings, pending, onChange }: Policy
   return (
     <PolicySection
       sectionId="workspaces"
-      title="Workspaces and containers"
-      description="Reclaim resources that Kandev can positively identify as no longer in use."
+      title={t("system:storageWorkspacesTitle")}
+      description={t("system:storageWorkspacesDescription")}
       isDirty={workspacesDirty || graceDirty || containersDirty}
     >
       <SettingRow
-        title="Orphan task workspaces"
-        description="Move confirmed orphan workspaces to quarantine."
-        help="Kandev only selects a task workspace after inventory confirms that no active task, environment, session, or protected worktree uses it. The workspace is moved to quarantine first, where it can be restored before permanent deletion."
+        title={t("system:storageOrphanWorkspaces")}
+        description={t("system:storageOrphanWorkspacesDescription")}
+        help={t("system:storageOrphanWorkspacesHelp")}
         control={
           <Switch
             checked={settings.workspaces.enabled}
             disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, workspaces: { enabled } })}
-            aria-label="Clean orphan task workspaces"
+            aria-label={t("system:storageCleanOrphanWorkspacesAria")}
             data-settings-dirty={workspacesDirty}
           />
         }
       />
       <div className="grid min-w-0 grid-cols-1 gap-3 py-3 sm:grid-cols-2">
         <NumberField
-          label="Wait before orphaning (hours)"
-          help="A workspace must be unused for at least this long before it can be classified as an orphan. Increasing this value keeps old workspaces longer before they enter quarantine."
+          label={t("system:storageOrphanGraceLabel")}
+          help={t("system:storageOrphanGraceHelp")}
           value={settings.orphan_grace_hours}
           min={24}
           max={2160}
@@ -139,15 +142,15 @@ function WorkspaceSection({ settings, savedSettings, pending, onChange }: Policy
         />
       </div>
       <SettingRow
-        title="Kandev containers"
-        description="Remove stopped, unused containers created and labeled by Kandev."
-        help="Only stopped containers labeled as Kandev-managed are considered, and inventory must confirm they are no longer needed. Running containers and unrelated Docker containers are never removed by this option."
+        title={t("system:storageKandevContainers")}
+        description={t("system:storageContainersDescription")}
+        help={t("system:storageContainersHelp")}
         control={
           <Switch
             checked={settings.kandev_containers.enabled}
             disabled={pending}
             onCheckedChange={(enabled) => onChange({ ...settings, kandev_containers: { enabled } })}
-            aria-label="Clean Kandev containers"
+            aria-label={t("system:storageCleanContainersAria")}
             data-settings-dirty={containersDirty}
           />
         }
@@ -169,22 +172,22 @@ function AdoptionField({
   pending: boolean;
   enabled: boolean;
 }) {
+  const { t } = useTranslation();
   let disabledReason: string | undefined;
-  if (pending) disabledReason = "Wait for the current storage action to finish.";
-  else if (!enabled) disabledReason = "Enable the managed Go cache first.";
-  else if (!path.trim()) disabledReason = "Enter an absolute cache path first.";
+  if (pending) disabledReason = t("system:storageActionPending");
+  else if (!enabled) disabledReason = t("system:storageEnableGoCacheFirst");
+  else if (!path.trim()) disabledReason = t("system:storageEnterCachePathFirst");
+  const fieldLabel = t("system:storageExternalGoCache");
   return (
     <div className="min-w-0 space-y-2 pt-3">
       <div className="flex items-center gap-1">
-        <Label htmlFor="storage-adoption-path">External Go cache</Label>
-        <StorageSettingHelp label="External Go cache">
-          Adoption gives Kandev explicit permission to rotate this existing cache. Kandev never
-          cleans a default user cache or another path unless you adopt that exact absolute path and
-          confirm the destructive access.
+        <Label htmlFor="storage-adoption-path">{fieldLabel}</Label>
+        <StorageSettingHelp label={fieldLabel}>
+          {t("system:storageExternalGoCacheHelp")}
         </StorageSettingHelp>
       </div>
       <p className="text-xs text-muted-foreground">
-        Optionally allow Kandev to maintain an existing host cache outside its managed path.
+        {t("system:storageExternalGoCacheDescription")}
       </p>
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
         <Input
@@ -202,7 +205,7 @@ function AdoptionField({
           onClick={onOpen}
           data-testid="storage-go-cache-adopt"
         >
-          Adopt cache
+          {t("system:storageAdoptCache")}
         </StorageActionButton>
       </div>
     </div>
@@ -223,6 +226,7 @@ function GoCacheSection({
   setAdoptionPath: (path: string) => void;
   onOpenAdoption: () => void;
 }) {
+  const { t } = useTranslation();
   const enabledDirty = settingIsDirty(settings, savedSettings, (value) => value.go_cache.enabled);
   const maxBytesDirty = settingIsDirty(
     settings,
@@ -232,14 +236,16 @@ function GoCacheSection({
   return (
     <PolicySection
       sectionId="go-cache"
-      title="Go build cache"
-      description="Use and trim a Kandev-owned cache for new host-local Go executions."
+      title={t("system:storageGoBuildCache")}
+      description={t("system:storageGoCacheSectionDescription")}
       isDirty={enabledDirty || maxBytesDirty}
     >
       <SettingRow
-        title="Managed Go cache"
-        description={`New host-local executions use ${capabilities.managed_go_cache_path}.`}
-        help="When enabled, Kandev gives new local task processes a dedicated Go build cache and may rotate it during maintenance when it exceeds the maximum. Turning this off stops using the managed cache for new executions but does not delete it."
+        title={t("system:storageManagedGoCache")}
+        description={t("system:storageManagedGoCacheDescription", {
+          path: capabilities.managed_go_cache_path,
+        })}
+        help={t("system:storageManagedGoCacheHelp")}
         control={
           <Switch
             checked={settings.go_cache.enabled}
@@ -247,7 +253,7 @@ function GoCacheSection({
             onCheckedChange={(enabled) =>
               onChange({ ...settings, go_cache: { ...settings.go_cache, enabled } })
             }
-            aria-label="Enable managed Go cache"
+            aria-label={t("system:storageEnableManagedGoCacheAria")}
             data-testid="storage-go-cache-enabled"
             data-settings-dirty={enabledDirty}
           />
@@ -255,8 +261,8 @@ function GoCacheSection({
       />
       <div className="grid min-w-0 grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
         <NumberField
-          label="Maximum cache size (GB)"
-          help="This is a cleanup trigger, not a hard quota. The cache may grow past this size while tasks are active. Maintenance rotates the owned cache into quarantine and recreates an empty cache after the limit is exceeded."
+          label={t("system:storageGoCacheMaxLabel")}
+          help={t("system:storageGoCacheMaxHelp")}
           value={bytesToGigabytes(settings.go_cache.max_bytes)}
           min={1}
           disabled={pending || !settings.go_cache.enabled}
@@ -296,15 +302,16 @@ function DockerBuildCacheSettings({
   disabledReason?: string;
   updateDocker: (docker: DockerSettings) => void;
 }) {
+  const { t } = useTranslation();
   const enabledDirty = docker.build_cache_enabled !== savedDocker.build_cache_enabled;
   const keepBytesDirty = docker.build_cache_keep_bytes !== savedDocker.build_cache_keep_bytes;
   const unusedHoursDirty = docker.build_cache_unused_hours !== savedDocker.build_cache_unused_hours;
   return (
     <>
       <SettingRow
-        title="Docker build cache"
-        description="Remove old build cache while retaining the configured amount."
-        help="Uses Docker's age and storage filters to remove old build cache. It does not run docker system prune, does not remove volumes globally, and remains disabled until the dedicated-daemon acknowledgment is confirmed."
+        title={t("system:storageDockerBuildCache")}
+        description={t("system:storageDockerBuildCacheDescription")}
+        help={t("system:storageDockerBuildCacheHelp")}
         control={
           <Switch
             checked={docker.build_cache_enabled}
@@ -312,7 +319,7 @@ function DockerBuildCacheSettings({
             onCheckedChange={(build_cache_enabled) =>
               updateDocker({ ...docker, build_cache_enabled })
             }
-            aria-label="Clean Docker build cache"
+            aria-label={t("system:storageCleanDockerBuildCacheAria")}
             data-testid="storage-docker-build-cache"
             data-settings-dirty={enabledDirty}
           />
@@ -320,8 +327,8 @@ function DockerBuildCacheSettings({
       />
       <div className="grid min-w-0 grid-cols-1 gap-3 py-3 sm:grid-cols-2">
         <NumberField
-          label="Build cache to retain (GB)"
-          help="Docker keeps approximately this much build cache when pruning eligible records. A larger value preserves more reusable build layers but reclaims less disk space."
+          label={t("system:storageBuildCacheKeepLabel")}
+          help={t("system:storageBuildCacheKeepHelp")}
           value={bytesToGigabytes(docker.build_cache_keep_bytes)}
           min={1}
           disabled={Boolean(disabledReason) || !docker.build_cache_enabled}
@@ -335,8 +342,8 @@ function DockerBuildCacheSettings({
           isDirty={keepBytesDirty}
         />
         <NumberField
-          label="Build cache must be unused for (hours)"
-          help="Only build cache records older than this unused-age threshold are eligible. Increasing it protects recent build layers for longer."
+          label={t("system:storageBuildCacheUnusedLabel")}
+          help={t("system:storageBuildCacheUnusedHelp")}
           value={docker.build_cache_unused_hours}
           min={24}
           max={2562047}
@@ -363,14 +370,15 @@ function DockerImageSettings({
   disabledReason?: string;
   updateDocker: (docker: DockerSettings) => void;
 }) {
+  const { t } = useTranslation();
   const enabledDirty = docker.unused_images_enabled !== savedDocker.unused_images_enabled;
   const hoursDirty = docker.unused_images_hours !== savedDocker.unused_images_hours;
   return (
     <>
       <SettingRow
-        title="Unused Docker images"
-        description="Remove old images that no container uses."
-        help="Removes an image only when no running or stopped container references it and it is older than the configured age. This is daemon-wide and therefore requires the dedicated-daemon acknowledgment."
+        title={t("system:storageUnusedDockerImages")}
+        description={t("system:storageUnusedImagesDescription")}
+        help={t("system:storageUnusedImagesHelp")}
         control={
           <Switch
             checked={docker.unused_images_enabled}
@@ -378,7 +386,7 @@ function DockerImageSettings({
             onCheckedChange={(unused_images_enabled) =>
               updateDocker({ ...docker, unused_images_enabled })
             }
-            aria-label="Clean unused Docker images"
+            aria-label={t("system:storageCleanUnusedImagesAria")}
             data-testid="storage-docker-unused-images"
             data-settings-dirty={enabledDirty}
           />
@@ -386,8 +394,8 @@ function DockerImageSettings({
       />
       <div className="grid min-w-0 grid-cols-1 gap-3 pt-3 sm:grid-cols-2">
         <NumberField
-          label="Image must be unused for (hours)"
-          help="An image must be unused by every container and older than this age before Kandev can remove it. Increasing the value keeps old images available for longer."
+          label={t("system:storageUnusedImagesHoursLabel")}
+          help={t("system:storageUnusedImagesHoursHelp")}
           value={docker.unused_images_hours}
           min={24}
           max={2562047}
@@ -409,32 +417,33 @@ function DockerSection({
   onChange,
   onOpenDedicated,
 }: PolicySectionProps & { onOpenDedicated: () => void }) {
+  const { t } = useTranslation();
   const dockerDirty = JSON.stringify(settings.docker) !== JSON.stringify(savedSettings.docker);
   const dedicatedDirty =
     settings.docker.dedicated_daemon_acknowledged !==
     savedSettings.docker.dedicated_daemon_acknowledged;
   const unavailable = capabilities.docker_available
     ? undefined
-    : "Docker is unavailable on the configured host.";
+    : t("system:storageDockerUnavailable");
   const disabledReason =
-    (pending ? "Wait for the current storage action to finish." : undefined) ??
+    (pending ? t("system:storageActionPending") : undefined) ??
     unavailable ??
     (!settings.docker.dedicated_daemon_acknowledged
-      ? "Acknowledge a dedicated Docker daemon first."
+      ? t("system:storageAcknowledgeDedicatedFirst")
       : undefined);
   const updateDocker = (docker: StorageMaintenanceSettings["docker"]) =>
     onChange({ ...settings, docker });
   return (
     <PolicySection
       sectionId="docker"
-      title="Docker cleanup"
-      description="Optional daemon-wide cleanup. Enable it only when this Docker daemon is dedicated to Kandev."
+      title={t("system:storageDockerTitle")}
+      description={t("system:storageDockerDescription")}
       isDirty={dockerDirty}
     >
       <SettingRow
-        title="Dedicated Docker daemon"
-        description="Confirm that unrelated workloads do not share this Docker daemon."
-        help="Build cache and image ownership cannot be attributed reliably to Kandev. This acknowledgment unlocks daemon-wide cleanup and should only be enabled when the configured Docker daemon is used exclusively by Kandev. Kandev never performs a volume-wide prune."
+        title={t("system:storageDedicatedDaemon")}
+        description={t("system:storageDedicatedDaemonDescription")}
+        help={t("system:storageDedicatedDaemonHelp")}
         control={
           <Switch
             checked={settings.docker.dedicated_daemon_acknowledged}
@@ -443,16 +452,14 @@ function DockerSection({
               if (checked) onOpenDedicated();
               else onChange(settingsWithDockerAcknowledgement(settings, false));
             }}
-            aria-label="Dedicated Docker daemon"
+            aria-label={t("system:storageDedicatedDaemon")}
             data-testid="storage-docker-dedicated"
             data-settings-dirty={dedicatedDirty}
           />
         }
       />
       {unavailable && (
-        <p className="py-2 text-xs text-amber-600">
-          Docker is unavailable; Docker cleanup options cannot run on this host.
-        </p>
+        <p className="py-2 text-xs text-amber-600">{t("system:storageDockerUnavailableNotice")}</p>
       )}
       <DockerBuildCacheSettings
         docker={settings.docker}
@@ -472,6 +479,7 @@ function DockerSection({
 }
 
 function QuarantineSection({ settings, savedSettings, pending, onChange }: PolicySectionProps) {
+  const { t } = useTranslation();
   const retentionDirty = settingIsDirty(
     settings,
     savedSettings,
@@ -480,14 +488,14 @@ function QuarantineSection({ settings, savedSettings, pending, onChange }: Polic
   return (
     <PolicySection
       sectionId="quarantine"
-      title="Quarantine safety"
-      description="Keep recoverable resources for a grace period before permanent deletion."
+      title={t("system:storageQuarantineSafetyTitle")}
+      description={t("system:storageQuarantineSafetyDescription")}
       isDirty={retentionDirty}
     >
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <NumberField
-          label="Keep quarantined items for (hours)"
-          help="Cleanup first moves orphan workspaces and rotated Go caches into Kandev's trash area instead of deleting them immediately. During this retention period you can restore an item. After the deadline, a later maintenance run may permanently delete it."
+          label={t("system:storageQuarantineRetentionLabel")}
+          help={t("system:storageQuarantineRetentionHelp")}
           value={settings.quarantine_retention_hours}
           min={24}
           max={2160}
@@ -511,6 +519,7 @@ export function StoragePolicyCard({
   onChange,
   onAdopt,
 }: Props) {
+  const { t } = useTranslation();
   const [dockerDialogOpen, setDockerDialogOpen] = useState(false);
   const [adoptionDialogOpen, setAdoptionDialogOpen] = useState(false);
   const savedAdoptionPath = savedSettings.go_cache.adopted_path;
@@ -528,10 +537,8 @@ export function StoragePolicyCard({
   return (
     <section className="min-w-0 space-y-4" data-testid="storage-policy-card">
       <div>
-        <h2 className="text-base font-medium">Maintenance policy</h2>
-        <p className="text-xs text-muted-foreground">
-          Choose what Kandev may reclaim automatically and the safety limits it must follow.
-        </p>
+        <h2 className="text-base font-medium">{t("system:storagePolicyTitle")}</h2>
+        <p className="text-xs text-muted-foreground">{t("system:storagePolicyDescription")}</p>
       </div>
       <div className="space-y-3">
         <ScheduleSection

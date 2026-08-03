@@ -119,7 +119,10 @@ Structured shell-command activity keeps the command, working directory, status, 
 
 The ring in the chat-input toolbar shows the active session's context-window use
 when the agent reports a trustworthy window size. Open it to see used and total
-tokens; it focuses on the active session's context window. For account-wide
+tokens; it focuses on the active session's context window. The hover also shows
+a session compaction count inferred from observed drops in used tokens. ACP does
+not report compaction events, so missing samples or provider resets can make the
+count approximate. For account-wide
 provider usage, install the [Provider Usage
 plugin](https://github.com/kdlbs/kandev-plugin-provider-usage), which adds a
 provider pill to the session top bar and can add a compact display to the global
@@ -157,6 +160,8 @@ Kandev hides the action instead of guessing when a repository is local-only, uns
 Select **Review** in the Changes header. Kandev builds a repository-aware file list by merging available uncommitted, cumulative committed, and linked-PR files. When a path occurs in more than one source, the uncommitted version wins deduplication.
 
 When a task has multiple linked pull requests, use the PR selector in the Changes diff header or Review toolbar to inspect one PR revision at a time. The selection is scoped to that task for the current app session. Switching PRs replaces only the remote PR contribution; uncommitted and committed sources keep their normal precedence. Selecting a file from a specific PR row opens that exact PR revision, even when a sibling PR changes the same path.
+
+When several pull requests are linked to a task, hover the PR control in the desktop top bar—or tap the PR status chip on mobile—to open the tabbed CI surface. Each PR tab has a **Remove from task** button. Removing a tab only detaches that Kandev task association; it does not close or modify the GitHub pull request, its branch or commits, the task repositories, or sibling PR associations. Explicitly linking that PR again restores the association.
 
 <DocsVideo
   webm="./media/feature-guides/diff-line-feedback.webm"

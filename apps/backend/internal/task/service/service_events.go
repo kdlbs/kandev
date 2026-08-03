@@ -82,6 +82,24 @@ func (s *Service) PublishTaskStateChanged(ctx context.Context, task *models.Task
 	s.publishTaskEvent(ctx, events.TaskStateChanged, task, &oldState)
 }
 
+// PublishAfterTaskEvents appends a task-scoped publication behind any task
+// events already being drained. Reentrant callers append without waiting,
+// preserving FIFO order without deadlocking the active publication.
+func (s *Service) PublishAfterTaskEvents(
+	ctx context.Context,
+	taskID, eventType string,
+	publish func(context.Context),
+) {
+	if publish == nil {
+		return
+	}
+	if taskID == "" {
+		publish(ctx)
+		return
+	}
+	s.enqueueTaskPublication(ctx, taskID, eventType, publish)
+}
+
 // PublishTaskDeleted publishes a task.deleted event for the given task.
 // Used by cascade-delete callers (HandoffService.DeleteTaskTree) that
 // bypass Service.DeleteTask and therefore would otherwise leave WS
@@ -160,6 +178,7 @@ func (s *Service) publishSessionsCancelled(
 			"agent_profile_id":         sess.AgentProfileID,
 			"agent_profile_snapshot":   sess.AgentProfileSnapshot,
 			"is_passthrough":           sess.IsPassthrough,
+			"is_primary":               sess.IsPrimary,
 			sessionEventFieldUpdatedAt: sess.UpdatedAt.Format(time.RFC3339Nano),
 			sessionEventFieldName:      sess.Name,
 		}

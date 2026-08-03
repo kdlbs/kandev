@@ -36,6 +36,7 @@ func provideStorageComposition(
 	lifecycleMgr *lifecycle.Manager,
 	worktreeMgr *worktree.Manager,
 	taskSvc *taskservice.Service,
+	logError func(string, error),
 ) (*storageComposition, error) {
 	rawSettings, err := systemsettings.NewStore(pool)
 	if err != nil {
@@ -89,7 +90,7 @@ func provideStorageComposition(
 	})
 	handler := storagepkg.NewHandler(storagepkg.HandlerConfig{
 		Settings: settings, Runs: store, Quarantine: store, Overview: cachedOverview,
-		Mutations: operations, OnSettingsChanged: runtime.ApplySettings,
+		Mutations: operations, OnSettingsChanged: runtime.ApplySettings, LogError: logError,
 	})
 	return &storageComposition{
 		handler: handler, runtime: runtime, workspaceRestorer: quarantine,
@@ -167,11 +168,18 @@ func (o *storageOverview) Capabilities(
 	ctx context.Context,
 	settings storagepkg.StorageMaintenanceSettings,
 ) storagepkg.Capabilities {
-	dockerAvailable := o.dockerClient.Ping(ctx) == nil
+	return o.SettingsCapabilities(ctx, settings)
+}
+
+func (o *storageOverview) SettingsCapabilities(
+	ctx context.Context,
+	settings storagepkg.StorageMaintenanceSettings,
+) storagepkg.Capabilities {
 	goPath := settings.GoCache.AdoptedPath
 	if goPath == "" {
 		goPath = filepath.Join(o.homeDir, "cache", "go-build")
 	}
+	dockerAvailable := o.dockerClient != nil && o.dockerClient.Ping(ctx) == nil
 	return storagepkg.Capabilities{
 		ManagedGoCachePath: goPath, GoCacheAdoptionAvailable: true,
 		DockerAvailable: dockerAvailable, DockerHost: o.dockerHost,

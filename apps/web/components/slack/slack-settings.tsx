@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { IconBrandSlack } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -10,68 +10,32 @@ import { Label } from "@kandev/ui/label";
 import { Separator } from "@kandev/ui/separator";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { useToast } from "@/components/toast-provider";
 import { SettingsSection } from "@/components/settings/settings-section";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSlackEnabled } from "@/hooks/domains/slack/use-slack-enabled";
-import {
-  IntegrationAuthStatusBanner,
-  type IntegrationAuthHealth,
-} from "@/components/integrations/auth-status-banner";
+import { IntegrationAuthStatusBanner } from "@/components/integrations/auth-status-banner";
 import { WorkspaceScopedSection } from "@/components/integrations/workspace-scoped-section";
 import { DraftedIntegrationEnabledControl } from "@/components/integrations/drafted-integration-enabled-control";
-import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
+import { type UtilityAgent } from "@/lib/api/domains/utility-api";
+import type { TestSlackConnectionResult } from "@/lib/types/slack";
 import {
-  getSlackConfig,
-  setSlackConfig,
-  deleteSlackConfig,
-  testSlackConnection,
-} from "@/lib/api/domains/slack-api";
-import { listUtilityAgents, type UtilityAgent } from "@/lib/api/domains/utility-api";
-import type { SlackConfig, TestSlackConnectionResult } from "@/lib/types/slack";
-
-const DEFAULT_PREFIX = "!kandev";
-const DEFAULT_POLL_INTERVAL_SECONDS = 30;
-const MIN_POLL_INTERVAL_SECONDS = 5;
-const MAX_POLL_INTERVAL_SECONDS = 600;
-
-type FormState = {
-  utilityAgentId: string;
-  commandPrefix: string;
-  pollIntervalSeconds: number;
-  token: string;
-  cookie: string;
-};
-
-const emptyForm: FormState = {
-  utilityAgentId: "",
-  commandPrefix: DEFAULT_PREFIX,
-  pollIntervalSeconds: DEFAULT_POLL_INTERVAL_SECONDS,
-  token: "",
-  cookie: "",
-};
-
-function configToForm(cfg: SlackConfig | null): FormState {
-  if (!cfg) return emptyForm;
-  return {
-    utilityAgentId: cfg.utilityAgentId,
-    commandPrefix: cfg.commandPrefix || DEFAULT_PREFIX,
-    pollIntervalSeconds: cfg.pollIntervalSeconds || DEFAULT_POLL_INTERVAL_SECONDS,
-    token: "",
-    cookie: "",
-  };
-}
-
-function configToHealth(config: SlackConfig | null): IntegrationAuthHealth | null {
-  if (!config?.hasToken || !config.hasCookie) return null;
-  if (!config.lastCheckedAt) return { ok: false, error: "", checkedAt: null };
-  return {
-    ok: !!config.lastOk,
-    error: config.lastError ?? "",
-    checkedAt: new Date(config.lastCheckedAt),
-  };
-}
+  DEFAULT_PREFIX,
+  DEFAULT_PREFIX_EXAMPLE,
+  DEFAULT_POLL_INTERVAL_SECONDS,
+  MAX_POLL_INTERVAL_SECONDS,
+  MIN_POLL_INTERVAL_SECONDS,
+  PROMPT_TOKENS,
+  SECRET_MASK,
+  SLACK_COOKIE_NAME,
+  SLACK_COOKIE_PLACEHOLDER,
+  SLACK_TOKEN_PLACEHOLDER,
+  SLACK_TOKEN_PREFIX,
+  UTILITY_AGENTS_ROUTE,
+  configToForm,
+  useSlackSettings,
+  type FormState,
+} from "./slack-settings-state";
 
 type SecretFieldsProps = {
   form: FormState;
@@ -90,21 +54,20 @@ function SecretFields({
   hasSavedCookie,
   update,
 }: SecretFieldsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div className="space-y-1.5">
         <Label htmlFor="slack-token">
-          Session token (xoxc-…)
+          {t("slack:sessionToken", { prefix: SLACK_TOKEN_PREFIX })}
           {hasSavedToken && (
-            <span className="text-xs text-muted-foreground ml-2">
-              (saved — leave blank to keep)
-            </span>
+            <span className="text-xs text-muted-foreground ml-2">{t("slack:savedLeaveBlank")}</span>
           )}
         </Label>
         <Input
           id="slack-token"
           type="password"
-          placeholder={hasSavedToken ? "••••••••" : "xoxc-..."}
+          placeholder={hasSavedToken ? SECRET_MASK : SLACK_TOKEN_PLACEHOLDER}
           value={form.token}
           data-settings-dirty={form.token !== baseline.token}
           onChange={(e) => update("token", e.target.value)}
@@ -113,25 +76,25 @@ function SecretFields({
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="slack-cookie">
-          d cookie value
+          {t("slack:cookieValue", { cookie: SLACK_COOKIE_NAME })}
           {hasSavedCookie && (
-            <span className="text-xs text-muted-foreground ml-2">
-              (saved — leave blank to keep)
-            </span>
+            <span className="text-xs text-muted-foreground ml-2">{t("slack:savedLeaveBlank")}</span>
           )}
         </Label>
         <Input
           id="slack-cookie"
           type="password"
-          placeholder={hasSavedCookie ? "••••••••" : "xoxd-..."}
+          placeholder={hasSavedCookie ? SECRET_MASK : SLACK_COOKIE_PLACEHOLDER}
           value={form.cookie}
           data-settings-dirty={form.cookie !== baseline.cookie}
           onChange={(e) => update("cookie", e.target.value)}
           disabled={loading}
         />
         <p className="text-xs text-muted-foreground">
-          Open Slack in your browser, copy the value of the `d` cookie and the `xoxc-` token from
-          local storage. Both are required.
+          {t("slack:credentialsHelp", {
+            cookie: SLACK_COOKIE_NAME,
+            prefix: SLACK_TOKEN_PREFIX,
+          })}
         </p>
       </div>
     </div>
@@ -147,10 +110,12 @@ type UtilityAgentPickerProps = {
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 };
 
-function utilityAgentPlaceholder(agents: UtilityAgent[], loading: boolean): string {
-  if (loading) return "Loading…";
-  if (agents.length === 0) return "Create one in Settings → Utility agents";
-  return "Choose a utility agent";
+type Translate = (key: string, values?: Record<string, unknown>) => string;
+
+function utilityAgentPlaceholder(t: Translate, agents: UtilityAgent[], loading: boolean): string {
+  if (loading) return t("slack:loadingEllipsis");
+  if (agents.length === 0) return t("slack:createUtilityAgentFirst");
+  return t("slack:chooseUtilityAgent");
 }
 
 function isAgentSelectable(a: UtilityAgent): boolean {
@@ -158,17 +123,19 @@ function isAgentSelectable(a: UtilityAgent): boolean {
   return a.enabled && !!a.agent_id && !!a.model;
 }
 
-function modelSuffix(a: UtilityAgent): string {
-  if (a.model) return ` (${a.model})`;
-  if (a.builtin) return " (uses default model)";
-  return "";
+// `name` and `model` are the agent record — data, so the label is assembled from
+// catalog messages that interpolate them rather than by concatenating copy.
+function utilityAgentBaseLabel(t: Translate, a: UtilityAgent): string {
+  if (a.model) return t("slack:agentWithModel", { name: a.name, model: a.model });
+  if (a.builtin) return t("slack:agentUsesDefaultModel", { name: a.name });
+  return a.name;
 }
 
-function utilityAgentLabel(a: UtilityAgent): string {
-  const base = `${a.name}${modelSuffix(a)}`;
+function utilityAgentLabel(t: Translate, a: UtilityAgent): string {
+  const base = utilityAgentBaseLabel(t, a);
   if (a.builtin) return base;
-  if (!a.enabled) return `${base} — disabled`;
-  if (!a.agent_id || !a.model) return `${base} — not configured`;
+  if (!a.enabled) return t("slack:agentDisabled", { agent: base });
+  if (!a.agent_id || !a.model) return t("slack:agentNotConfigured", { agent: base });
   return base;
 }
 
@@ -180,9 +147,10 @@ function UtilityAgentPicker({
   loadingAgents,
   update,
 }: UtilityAgentPickerProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="slack-utility-agent">Triage agent</Label>
+      <Label htmlFor="slack-utility-agent">{t("slack:triageAgent")}</Label>
       <Select
         value={form.utilityAgentId || ""}
         onValueChange={(v) => update("utilityAgentId", v)}
@@ -193,32 +161,42 @@ function UtilityAgentPicker({
           className="w-full"
           data-settings-dirty={form.utilityAgentId !== baseline.utilityAgentId}
         >
-          <SelectValue placeholder={utilityAgentPlaceholder(agents, loadingAgents)} />
+          <SelectValue placeholder={utilityAgentPlaceholder(t, agents, loadingAgents)} />
         </SelectTrigger>
         <SelectContent>
           {agents.map((a) => (
             <SelectItem key={a.id} value={a.id} disabled={!isAgentSelectable(a)}>
-              {utilityAgentLabel(a)}
+              {utilityAgentLabel(t, a)}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
       <p className="text-xs text-muted-foreground">
-        The utility agent that interprets each Slack message and creates the Kandev task. It runs
-        with Kandev MCP tools wired in (list_workspaces_kandev, create_task_kandev, …) so it picks
-        the destination Kandev workspace + workflow + repo from context. Built-in agents use your
-        default model from{" "}
-        <Link href="/settings/utility-agents" className="underline cursor-pointer">
-          Settings → Utility agents
-        </Link>
-        .
+        {/* The three MCP tool names are identifiers, so they are interpolated
+            rather than written into the catalog. */}
+        <Trans
+          i18nKey="slack:triageAgentHelp"
+          values={{ tools: "list_workspaces_kandev, create_task_kandev, …" }}
+        >
+          The utility agent that interprets each Slack message and creates the Kandev task. It runs
+          with Kandev MCP tools wired in ({"{{tools}}"}) so it picks the destination Kandev
+          workspace + workflow + repo from context. Built-in agents use your default model from{" "}
+          <Link href={UTILITY_AGENTS_ROUTE} className="underline cursor-pointer">
+            Settings → Utility agents
+          </Link>
+          .
+        </Trans>
       </p>
       <p className="text-xs text-muted-foreground">
-        Custom prompts can reference <code>{"{{SlackInstruction}}"}</code>,{" "}
-        <code>{"{{SlackThread}}"}</code>, <code>{"{{SlackPermalink}}"}</code>,{" "}
-        <code>{"{{SlackUser}}"}</code>, <code>{"{{SlackChannelID}}"}</code>, and{" "}
-        <code>{"{{SlackTS}}"}</code>. When at least one is used, your template owns the full prompt;
-        otherwise the default Slack-triage system prompt is prepended automatically.
+        {/* The six tokens are prompt syntax the backend substitutes, so they are
+            interpolated as one monospace run rather than written into the
+            catalog — six separate <code> children would make the tag indices
+            drift on any reflow. */}
+        <Trans i18nKey="slack:promptTokensHelp" values={{ tokens: PROMPT_TOKENS.join(", ") }}>
+          Custom prompts can reference <code>{"{{tokens}}"}</code>. When at least one is used, your
+          template owns the full prompt; otherwise the default Slack-triage system prompt is
+          prepended automatically.
+        </Trans>
       </p>
     </div>
   );
@@ -235,9 +213,10 @@ function PrefixField({
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="slack-prefix">Command prefix</Label>
+      <Label htmlFor="slack-prefix">{t("slack:commandPrefix")}</Label>
       <Input
         id="slack-prefix"
         type="text"
@@ -248,8 +227,9 @@ function PrefixField({
         disabled={loading}
       />
       <p className="text-xs text-muted-foreground">
-        Messages you write in Slack starting with this prefix become Kandev tasks. Default:{" "}
-        <code>{DEFAULT_PREFIX} &lt;instruction&gt;</code>.
+        {/* Not a <Trans>: the example contains literal angle brackets, which
+            html-parse-stringify would read as a tag inside the message. */}
+        {t("slack:commandPrefixHelp")} <code>{DEFAULT_PREFIX_EXAMPLE}</code>.
       </p>
     </div>
   );
@@ -266,9 +246,10 @@ function PollIntervalField({
   loading: boolean;
   update: <K extends keyof FormState>(key: K, value: FormState[K]) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="slack-poll-interval">Polling interval (seconds)</Label>
+      <Label htmlFor="slack-poll-interval">{t("slack:pollingInterval")}</Label>
       <Input
         id="slack-poll-interval"
         type="number"
@@ -284,25 +265,40 @@ function PollIntervalField({
         disabled={loading}
       />
       <p className="text-xs text-muted-foreground">
-        How often Slack is checked for new <code>{form.commandPrefix || DEFAULT_PREFIX}</code>{" "}
-        messages. Lower = more responsive, higher = fewer Slack API calls. Range:{" "}
-        {MIN_POLL_INTERVAL_SECONDS}–{MAX_POLL_INTERVAL_SECONDS}s. Default:{" "}
-        {DEFAULT_POLL_INTERVAL_SECONDS}s.
+        <Trans
+          i18nKey="slack:pollingIntervalHelp"
+          values={{
+            prefix: form.commandPrefix || DEFAULT_PREFIX,
+            min: MIN_POLL_INTERVAL_SECONDS,
+            max: MAX_POLL_INTERVAL_SECONDS,
+            fallback: DEFAULT_POLL_INTERVAL_SECONDS,
+          }}
+        >
+          How often Slack is checked for new <code>{"{{prefix}}"}</code> messages. Lower = more
+          responsive, higher = fewer Slack API calls. Range: {"{{min}}"}–{"{{max}}"}s. Default:{" "}
+          {"{{fallback}}"}s.
+        </Trans>
       </p>
     </div>
   );
 }
 
+// `displayName` / `userId` / `teamName` all come from the Slack API — data, so
+// they are interpolated into the message rather than concatenated around it.
+function testResultMessage(t: Translate, result: TestSlackConnectionResult): string {
+  if (!result.ok) return t("slack:testFailed", { error: result.error });
+  const name = result.displayName || result.userId;
+  return result.teamName
+    ? t("slack:connectedAsWithTeam", { name, team: result.teamName })
+    : t("slack:connectedAs", { name });
+}
+
 function TestResultAlert({ result }: { result: TestSlackConnectionResult | null }) {
+  const { t } = useTranslation();
   if (!result) return null;
-  const teamSuffix = result.teamName ? ` (${result.teamName})` : "";
   return (
     <Alert variant={result.ok ? "default" : "destructive"}>
-      <AlertDescription>
-        {result.ok
-          ? `Connected as ${result.displayName || result.userId}${teamSuffix}`
-          : `Failed: ${result.error}`}
-      </AlertDescription>
+      <AlertDescription>{testResultMessage(t, result)}</AlertDescription>
     </Alert>
   );
 }
@@ -311,9 +307,11 @@ function UnsupportedWarning() {
   return (
     <Alert>
       <AlertDescription className="text-xs">
-        <strong>Browser session auth (unsupported):</strong> Slack rotates session cookies often, so
-        you may need to reconnect when authentication expires. Bot installs and user OAuth are on
-        the roadmap.
+        <Trans i18nKey="slack:unsupportedAuthWarning">
+          <strong>Browser session auth (unsupported):</strong> Slack rotates session cookies often,
+          so you may need to reconnect when authentication expires. Bot installs and user OAuth are
+          on the roadmap.
+        </Trans>
       </AlertDescription>
     </Alert>
   );
@@ -338,6 +336,7 @@ function ActionBar({
   onTest,
   onDelete,
 }: ActionBarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -346,9 +345,9 @@ function ActionBar({
         onClick={onTest}
         disabled={testing || loading || disableTest}
         className="cursor-pointer"
-        title={disableTest ? "Paste a token and cookie to test the connection" : undefined}
+        title={disableTest ? t("slack:pasteCredentialsToTest") : undefined}
       >
-        {testing ? "Testing..." : "Test connection"}
+        {testing ? t("slack:testing") : t("slack:testConnection")}
       </Button>
       {hasConfig && (
         <Button
@@ -358,192 +357,11 @@ function ActionBar({
           disabled={deleting}
           className="ml-auto cursor-pointer"
         >
-          {deleting ? "Removing..." : "Remove configuration"}
+          {deleting ? t("slack:removing") : t("slack:removeConfiguration")}
         </Button>
       )}
     </div>
   );
-}
-
-function useUtilityAgentsLoader() {
-  const [agents, setAgents] = useState<UtilityAgent[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    listUtilityAgents({ cache: "no-store" })
-      .then((res) => {
-        if (!cancelled) setAgents(res.agents ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setAgents([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-  return { agents: agents ?? [], loadingAgents: agents === null };
-}
-
-type SettingsActionsArgs = {
-  workspaceId: string;
-  form: FormState;
-  setConfig: (cfg: SlackConfig | null) => void;
-  setForm: Dispatch<SetStateAction<FormState>>;
-  setTestResult: (r: TestSlackConnectionResult | null) => void;
-};
-
-function useSettingsActions({
-  workspaceId,
-  form,
-  setConfig,
-  setForm,
-  setTestResult,
-}: SettingsActionsArgs) {
-  const { toast } = useToast();
-  const [saving, setSaving] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-
-  const handleTest = useCallback(async () => {
-    setTesting(true);
-    setTestResult(null);
-    try {
-      const res = await testSlackConnection(
-        {
-          authMethod: "cookie",
-          utilityAgentId: form.utilityAgentId,
-          commandPrefix: form.commandPrefix,
-          pollIntervalSeconds: form.pollIntervalSeconds,
-          token: form.token || undefined,
-          cookie: form.cookie || undefined,
-        },
-        { workspaceId },
-      );
-      setTestResult(res);
-    } catch (err) {
-      setTestResult({ ok: false, error: String(err) });
-    } finally {
-      setTesting(false);
-    }
-  }, [workspaceId, form, setTestResult]);
-
-  const handleSave = useCallback(async () => {
-    const submitted = form;
-    setSaving(true);
-    try {
-      const saved = await setSlackConfig(
-        {
-          authMethod: "cookie",
-          utilityAgentId: form.utilityAgentId,
-          commandPrefix: form.commandPrefix,
-          pollIntervalSeconds: form.pollIntervalSeconds,
-          token: form.token || undefined,
-          cookie: form.cookie || undefined,
-        },
-        { workspaceId },
-      );
-      setConfig(saved);
-      setForm((current) =>
-        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
-      );
-      setTestResult(null);
-      toast({ description: "Slack configuration saved", variant: "success" });
-    } catch (err) {
-      toast({ description: `Save failed: ${String(err)}`, variant: "error" });
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  }, [workspaceId, form, toast, setConfig, setForm, setTestResult]);
-
-  const handleDelete = useCallback(async () => {
-    if (!confirm("Remove Slack configuration?")) return;
-    setDeleting(true);
-    try {
-      await deleteSlackConfig({ workspaceId });
-      setConfig(null);
-      setForm(emptyForm);
-      setTestResult(null);
-      toast({ description: "Slack configuration removed", variant: "success" });
-    } catch (err) {
-      toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
-    } finally {
-      setDeleting(false);
-    }
-  }, [workspaceId, toast, setConfig, setForm, setTestResult]);
-
-  return { saving, testing, deleting, handleTest, handleSave, handleDelete };
-}
-
-function useSlackSettings(workspaceId: string) {
-  const { toast } = useToast();
-  const [config, setConfig] = useState<SlackConfig | null>(null);
-  const [form, setForm] = useState<FormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
-  const [testResult, setTestResult] = useState<TestSlackConnectionResult | null>(null);
-  const health = configToHealth(config);
-  const { agents, loadingAgents } = useUtilityAgentsLoader();
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const cfg = await getSlackConfig({ workspaceId });
-      setConfig(cfg);
-      setForm(configToForm(cfg));
-    } catch (err) {
-      toast({ description: `Failed to load Slack config: ${String(err)}`, variant: "error" });
-    } finally {
-      setLoading(false);
-    }
-  }, [workspaceId, toast]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  // Background refresh so the auth-health banner picks up new probe results.
-  useEffect(() => {
-    const id = setInterval(() => {
-      getSlackConfig({ workspaceId })
-        .then((cfg) => setConfig(cfg))
-        .catch(() => {
-          /* transient failures are fine — next tick retries */
-        });
-    }, INTEGRATION_STATUS_REFRESH_MS);
-    return () => clearInterval(id);
-  }, [workspaceId]);
-
-  const update = useCallback(
-    <K extends keyof FormState>(key: K, value: FormState[K]) =>
-      setForm((prev) => ({ ...prev, [key]: value })),
-    [],
-  );
-  const discard = useCallback(() => setForm(configToForm(config)), [config]);
-
-  const { saving, testing, deleting, handleTest, handleSave, handleDelete } = useSettingsActions({
-    workspaceId,
-    form,
-    setConfig,
-    setForm,
-    setTestResult,
-  });
-
-  return {
-    config,
-    form,
-    loading,
-    saving,
-    testing,
-    deleting,
-    testResult,
-    health,
-    agents,
-    loadingAgents,
-    update,
-    discard,
-    handleTest,
-    handleSave,
-    handleDelete,
-  };
 }
 
 function EnabledPill() {
@@ -552,6 +370,7 @@ function EnabledPill() {
 }
 
 export function SlackConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const s = useSlackSettings(workspaceId);
   const baseline = configToForm(s.config);
   const missingSecrets =
@@ -562,8 +381,8 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
   const revision = JSON.stringify(s.form);
   const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
   let invalidReason: string | undefined;
-  if (missingSecrets) invalidReason = "A session token and cookie are required.";
-  else if (missingAgent) invalidReason = "A triage agent is required.";
+  if (missingSecrets) invalidReason = t("slack:secretsRequired");
+  else if (missingAgent) invalidReason = t("slack:triageAgentRequired");
 
   useSettingsSaveContributor({
     id: `slack-config:${workspaceId}`,
@@ -578,8 +397,8 @@ export function SlackConnectionSection({ workspaceId }: { workspaceId: string })
   return (
     <SettingsSection
       icon={<IconBrandSlack className="h-5 w-5" />}
-      title="Slack integration"
-      description="Capture Slack threads as tasks for the selected workspace. Type !kandev <instruction> in any thread you can see and the configured utility agent creates the task."
+      title={t("slack:integrationTitle")}
+      description={t("slack:integrationDescription", { example: DEFAULT_PREFIX_EXAMPLE })}
       action={<EnabledPill />}
     >
       <SettingsCard isDirty={dirty}>

@@ -150,7 +150,7 @@ func TestBuildAgentCommand_UsesManagedNPMRuntimes(t *testing.T) {
 		{
 			name:  "opencode",
 			agent: agents.NewOpenCodeACP(),
-			want:  "npx --yes --prefer-offline opencode-ai acp",
+			want:  "npx --yes --prefer-offline opencode-ai acp --print-logs --log-level ERROR",
 		},
 		{
 			name:  "copilot",

@@ -44,7 +44,7 @@ func TestWaitForPromptRPCAfterUserCancel_AbortReleasesWhenRPCStuck(t *testing.T)
 	a.promptTurn = turn
 	close(turn.abortCh)
 
-	err := a.waitForPromptRPCAfterUserCancel(turn)
+	err := a.waitForPromptRPCAfterUserCancel(turn, "")
 	if !errors.Is(err, errPromptAbandonedAfterCancel) {
 		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
 	}
@@ -85,7 +85,7 @@ func TestWaitForPromptRPCAfterUserCancel_CompletesAfterAbort(t *testing.T) {
 
 		done := make(chan error, 1)
 		go func() {
-			done <- a.waitForPromptRPCAfterUserCancel(turn)
+			done <- a.waitForPromptRPCAfterUserCancel(turn, "")
 		}()
 
 		// Wait until the goroutine is blocked inside the inner select.
@@ -148,7 +148,7 @@ func TestWaitForPromptRPCAfterUserCancel_CancelsPromptCtxOnTimeout(t *testing.T)
 	turn.abortCh = make(chan struct{})
 
 	close(turn.abortCh)
-	if err := a.waitForPromptRPCAfterUserCancel(turn); !errors.Is(err, errPromptAbandonedAfterCancel) {
+	if err := a.waitForPromptRPCAfterUserCancel(turn, ""); !errors.Is(err, errPromptAbandonedAfterCancel) {
 		t.Fatalf("expected errPromptAbandonedAfterCancel, got %v", err)
 	}
 	if !errors.Is(context.Cause(ctx), ErrTurnCancelNotAcknowledged) {

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -167,7 +166,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 	// All args validated: flags in securityutil.IsKnownSafeGitFlag whitelist, branch names via securityutil.IsValidBranchName
 	// regex, commit SHAs via securityutil.LooksLikeCommitSHA pattern, args after "--" separator skipped.
 	// This defense-in-depth validation prevents injection of arbitrary commands.
-	cmd := exec.CommandContext(ctx, "git", args...) // lgtm[go/command-injection]
+	cmd := subproc.NewGitCommand(ctx, args...)
 	cmd.Dir = g.workDir
 	cmd.Env = filterGitEnv(g.environmentValues())
 
@@ -177,7 +176,7 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 
 	g.logger.Debug("executing git command", zap.Strings("args", args))
 
-	err := subproc.RunGit(ctx, cmd)
+	err := subproc.RunGitClass(ctx, subproc.GitInteractive, cmd)
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		if output != "" {

@@ -91,9 +91,8 @@ instance and app store.
 
 Plugins are distributed as a signed-or-unsigned tarball and installed by URL,
 manual upload, or filesystem sideload/sync — there is no manifest-paste
-registration step and no credentials to issue. The whole system sits behind
-the `plugins` feature flag (Settings > System > Feature Toggles), off by
-default in production. See [Plugins](plugins.md) for the operator-facing
+registration step and no credentials to issue. Plugins are part of the base
+product and are not a runtime feature toggle. See [Plugins](plugins.md) for the operator-facing
 install/operate flow, [Authoring a plugin](plugins-authoring.md) for the
 build tutorial and SDK reference, and the [Plugin manifest
 reference](plugins-manifest.md) for the complete `manifest.yaml` schema.
@@ -102,7 +101,34 @@ reference](plugins-manifest.md) for the complete `manifest.yaml` schema.
 
 Create backend ownership and validation before a web form. Web settings require the appropriate domain client/hook, `src/settings-routes.tsx`, page/components, and sidebar or general navigation. Add a global state slice only when multiple surfaces or WebSocket hydration require it.
 
-Wire runtime feature flags through every enforcement layer in one change. Add the default to `profiles.yaml` and `FeaturesConfig`, register its environment variable and runtime behavior in `internal/runtimeflags/registry.go`, and gate backend construction, handlers, or other call sites. Mirror the field in the frontend feature types, use `useFeature` for client surfaces, and call `notFound()` from the server layout or page when a guessed URL must remain unavailable. Add backend and frontend tests for both states. A flag is incomplete if any layer can expose or execute the feature while it is disabled. Do not turn an internal package or environment variable into a public setting without first defining its compatibility contract and support status.
+Wire a release toggle through every enforcement layer in one change:
+
+1. Add a `KANDEV_FEATURES_*` entry to `profiles.yaml` with `prod`, `dev`, and
+   `e2e` set to `false` until the rollout is ready.
+2. Add the typed `FeaturesConfig` field with explicit `mapstructure` and `json`
+   tags, then add one metadata/read/apply registration in
+   `internal/runtimeflags/registry.go`. The registry owns the binding; do not
+   add a parallel per-flag map or switch.
+3. Gate backend construction, handlers, HTTP/WS/MCP actions, background jobs,
+   and agent prompt paths at their narrow composition boundary. The disabled
+   path must fail closed before deriving data, writing state, or dispatching
+   work, while existing readable data remains inert.
+4. Add the field to the frontend `defaultFeatureFlags` declaration, use
+   `useFeature` for client surfaces, and call `notFound()` from the server
+   layout or page when a guessed URL must remain unavailable.
+5. Add backend and frontend tests for enabled and disabled behavior, including
+   legacy behavior while the flag is off. Shared refactors, migrations, and
+   data reads are not automatically protected by a feature flag.
+
+For rollout, merge with the flag off, enable it on one install through an
+admin override or explicit environment and restart, then promote the `prod`
+default after observation. Remove the live flag only after it is permanent,
+and move its key and environment variable to the append-only retired identities
+in `internal/runtimeflags/registry.go`. Never reuse either identity for
+different behavior. A flag is incomplete if any layer can expose or execute
+the feature while it is disabled. Do not turn an internal package or
+environment variable into a public setting without first defining its
+compatibility contract and support status.
 
 Workbench changes must preserve task/session/repository selection, dock-layout restoration, reconnect behavior, and the separate mobile layout. Test unavailable dependencies, invalid credentials, save/test failures, keyboard access, and narrow viewports.
 

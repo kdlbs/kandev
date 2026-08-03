@@ -40,9 +40,13 @@ Product-wide capabilities that are not tied to a single feature area.
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
 | [i18n](platform/i18n.md) | building |
 | [plugins](plugins/spec.md) | draft |
+| [plugins — authoring experience](plugins/authoring-experience.md) | draft |
 | [plugins — marketplace](plugins/marketplace.md) | building |
 | [semantic-notifications](platform/notifications.md) | shipped |
 | [workspace-git-status](platform/workspace-git-status.md) | shipped |
+| [git-subprocess-admission](platform/git-subprocess-admission.md) | building |
+| [bounded-task-status-delivery](platform/bounded-task-status-delivery.md) | approved |
+| [diagnostic-logging](platform/diagnostic-logging.md) | approved |
 
 ## tasks/ — task & workflow model
 
@@ -74,8 +78,11 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [parent-child-task-stop](tasks/parent-child-task-stop.md) | shipped |
 | [mcp-task-agent-profile-default](tasks/mcp-task-agent-profile-default/spec.md) | shipped |
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
+| [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
+| [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
+| [conditional-session-settings](workflow-session-settings/spec.md) | approved |
 
 ## agents/ — agent governance
 
@@ -136,7 +143,9 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [sidebar-task-completion-icons](ui/sidebar-task-completion-icons.md) | shipped |
 | [slash-command-composer](ui/slash-command-composer.md) | shipped |
 | [entity-reference-composer](ui/entity-reference-composer.md) | draft |
+| [agent-launch-prompt-composer](ui/agent-launch-prompt-composer.md) | shipped |
 | [mermaid-rendering](ui/mermaid-rendering.md) | shipped |
+| [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
 | [app-status-bar](ui/app-status-bar.md) | shipped |
@@ -154,6 +163,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | archived; superseded by embedded-vscode-executor-availability |
 | [ws-connectivity-warning](ui/ws-connectivity-warning.md) | approved |
+| [context-compaction-count](context-compaction-count/spec.md) | approved |
 | [context-window reset freshness](context-window-reset-freshness/spec.md) | shipped |
 
 ## system-page/ — operational diagnostics & maintenance UI
@@ -174,7 +184,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 |---|---|
 | [npm-nightly-channel](npm-nightly-channel/spec.md) | shipped |
 | [agent-resume-runtime-recovery](agent-resume-runtime-recovery/spec.md) | shipped |
-| [agent-stall-recovery](agent-stall-recovery/spec.md) | draft |
+| [agent-stall-recovery](agent-stall-recovery/spec.md) | approved |
 | [mcp-session-observability](mcp-session-observability/spec.md) | approved |
 | [auth](auth/spec.md) | building |
 | [create-local-repository](create-local-repository/spec.md) | shipped |

@@ -38,6 +38,81 @@ test.describe("Workflow settings", () => {
     }
   });
 
+  test("configures the original session with the shared model settings picker", async ({
+    testPage,
+    backend,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const available = await testPage.request.get(`${backend.baseUrl}/api/v1/agents/available`);
+    expect(available.ok()).toBe(true);
+    const availablePayload = (await available.json()) as {
+      agents?: Array<{
+        name: string;
+        model_config?: { config_options?: Array<{ id: string }> };
+      }>;
+    };
+    const agent = availablePayload.agents?.find((item) =>
+      item.model_config?.config_options?.some((option) => option.id === "effort"),
+    );
+    expect(agent).toBeDefined();
+
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Conditional Session Settings",
+    );
+    const workStep = await apiClient.createWorkflowStep(workflow.id, "Work", 0, {
+      is_start_step: true,
+    });
+
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+    const card = await page.findWorkflowCard("Conditional Session Settings");
+    await expect(card).toBeVisible();
+    await page.selectStep(card, "Work");
+
+    const agentProfileHelpId = `${workStep.id}-agent-profile-help`;
+    const originalSessionHelpId = `${workStep.id}-override-original-session-help`;
+    const helpOrder = await card
+      .locator(`[data-testid="${agentProfileHelpId}"], [data-testid="${originalSessionHelpId}"]`)
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute("data-testid")));
+    expect(helpOrder).toEqual([agentProfileHelpId, originalSessionHelpId]);
+
+    await card.getByLabel("Override original session options").click();
+    const editor = card.getByTestId(`${workStep.id}-session-config-editor`);
+    await expect(editor.getByTestId("session-config-rule-0")).toBeVisible();
+    await expect(page.stepAgentProfileSelect(card)).toBeDisabled();
+
+    const settings = editor.getByRole("button", { name: `Settings for ${agent!.name}` });
+    await settings.click();
+    await testPage.getByText("Mock Smart", { exact: true }).click();
+    await testPage.getByTestId("config-option-trigger-effort").click();
+    await testPage.getByRole("button", { name: "High", exact: true }).click();
+    await testPage.keyboard.press("Escape");
+    await prCapture.screenshot("desktop-original-session-editor", {
+      caption: "Workflow step editor with a conditional original-session model and effort rule.",
+    });
+
+    await page.saveChanges();
+    const { steps } = await apiClient.listWorkflowSteps(workflow.id);
+    expect(steps.find((step) => step.id === workStep.id)?.events?.on_enter).toEqual([
+      {
+        type: "configure_session",
+        config: {
+          rules: [
+            {
+              agent_name: agent!.name,
+              operation: "set",
+              model: "mock-smart",
+              config_options: { effort: "high" },
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("creates a workflow from template only after Save", async ({
     testPage,
     apiClient,

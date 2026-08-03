@@ -367,6 +367,20 @@ func (s *Service) RemoveEntry(ctx context.Context, sessionID, entryID string) er
 	return nil
 }
 
+// MergeIntoAbove folds the entry identified by entryID into the entry directly
+// above it within the same session. See Repository.MergeIntoAbove for the merge
+// rules and error mapping (ErrEntryNotFound / ErrNoMergeTarget).
+func (s *Service) MergeIntoAbove(ctx context.Context, sessionID, entryID, queuedBy string) (*QueuedMessage, error) {
+	merged, err := s.repo.MergeIntoAbove(ctx, sessionID, entryID, queuedBy)
+	if err != nil {
+		return nil, err
+	}
+	s.logger.Info("queued entry merged into entry above",
+		zap.String("session_id", sessionID),
+		zap.String("entry_id", merged.ID))
+	return merged, nil
+}
+
 // CancelAll clears every queued entry for a session. Returns the number of
 // rows removed.
 func (s *Service) CancelAll(ctx context.Context, sessionID string) (int, error) {

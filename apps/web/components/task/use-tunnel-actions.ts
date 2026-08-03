@@ -2,7 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { startTunnel, stopTunnel } from "@/lib/api/domains/port-api";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 
 export function useTunnelActions(
   sessionId: string,

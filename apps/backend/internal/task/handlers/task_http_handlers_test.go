@@ -432,6 +432,68 @@ func TestHTTPCreateTask_ProjectIDReachesOfficePath(t *testing.T) {
 	assert.Equal(t, "wf-office", repo.captured.WorkflowID, "office workflow should be auto-resolved")
 }
 
+func TestHTTPCreateTaskAutoTitleUsesPromptWordsAndPendingMarker(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	svc.SetWorkflowStepGetter(repo)
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id":"ws-1",
+		"workflow_id":"wf-1",
+		"workflow_step_id":"step-1",
+		"auto_title":true,
+		"description":"  Add\n a better   task title for this request  "
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code, "body: %s", rec.Body.String())
+	require.NotNil(t, repo.captured)
+	assert.Equal(t, "Add a better task title for", repo.captured.Title)
+	assert.True(t, models.IsAgentTitlePending(repo.captured.Metadata))
+}
+
+func TestHTTPCreateTaskAutoTitleRequiresPrompt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	log := newTestLogger(t)
+	repo := &captureCreateTaskRepo{}
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/tasks", strings.NewReader(`{
+		"workspace_id":"ws-1",
+		"workflow_id":"wf-1",
+		"auto_title":true,
+		"description":"   "
+	}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	h.httpCreateTask(c)
+
+	assert.Equal(t, http.StatusBadRequest, rec.Code, "body: %s", rec.Body.String())
+	assert.Nil(t, repo.captured)
+}
+
 func TestHTTPCreateTaskRejectsOverlongTitle(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	log := newTestLogger(t)

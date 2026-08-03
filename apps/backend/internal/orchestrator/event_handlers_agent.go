@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -232,6 +233,7 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		return
 	}
+
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
 			zap.String("task_id", data.TaskID),
@@ -278,7 +280,6 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	} else {
 		s.setSessionWaitingForInput(ctx, data.TaskID, data.SessionID, session)
 	}
-
 	// Drain any orphaned queued message. handleAgentReady drains on turn-end,
 	// but a session that crashed mid-turn (or never started its first turn)
 	// won't fire agent.ready — leaving e.g. workflow auto-start prompts stuck
@@ -1293,6 +1294,28 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
+		return
+	}
+	if s.eventBus != nil {
+		eventData := map[string]interface{}{
+			"task_id":            data.TaskID,
+			"session_id":         data.SessionID,
+			"active":             true,
+			"message":            lastErr.Message,
+			"occurred_at":        lastErr.OccurredAt.Format(time.RFC3339Nano),
+			"stamp":              lastErr.Stamp(),
+			"agent_execution_id": lastErr.AgentExecutionID,
+		}
+		if err := s.eventBus.Publish(ctx, events.TaskSessionErrorChanged, bus.NewEvent(
+			events.TaskSessionErrorChanged,
+			"orchestrator",
+			eventData,
+		)); err != nil {
+			s.logger.Warn("failed to publish task session error event",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(err))
+		}
 	}
 }
 
@@ -1330,6 +1353,7 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		"is_auth_error":    authErr,
 		"resume_corrupted": resumeCorrupted,
 	}
+	applyProviderQuotaMetadata(meta, data)
 
 	// Include cached auth methods so the frontend can show login options.
 	if authErr {
@@ -1354,6 +1378,38 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
 	}
+}
+
+// applyProviderQuotaMetadata promotes only a validated OpenCode terminal
+// diagnostic to the specialized recovery surface. Generic prose and provider
+// diagnostics from other agents retain the existing error card.
+func applyProviderQuotaMetadata(meta map[string]interface{}, data watcher.AgentEventData) bool {
+	if data.AgentID != "opencode-acp" || data.ProviderError == nil ||
+		data.ProviderError.Source != streams.ProviderErrorSourceOpenCodeStderr ||
+		!data.ProviderError.Valid() {
+		return false
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:      routingerr.PhaseStreaming,
+		ProviderID: data.AgentID,
+		Stderr:     data.ProviderError.Message,
+	})
+	if classified.Code != routingerr.CodeQuotaLimited || classified.Confidence != routingerr.ConfHigh {
+		return false
+	}
+
+	meta["failure_kind"] = "provider_quota_limited"
+	meta["provider_name"] = "OpenCode"
+	if modelID := routingerr.Sanitize(data.ProviderError.ModelID); modelID != "" {
+		meta["model_id"] = modelID
+	}
+	if resetAt := data.ProviderError.ResetAt; resetAt != nil && !resetAt.IsZero() {
+		meta["reset_at"] = resetAt.UTC().Format(time.RFC3339)
+	}
+	if details := routingerr.Sanitize(data.ProviderError.Message); details != "" {
+		meta["error_output"] = details
+	}
+	return true
 }
 
 // isOfficeSession resolves Office ownership through the session's task.

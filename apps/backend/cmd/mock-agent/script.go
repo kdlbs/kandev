@@ -40,6 +40,11 @@ func executeCommand(e *emitter, fullPrompt, line string) {
 		text := extractStringArg(line, "e2e:thinking(")
 		e.thought(text)
 
+	case strings.HasPrefix(line, "e2e:reasoning_burst(") || strings.HasPrefix(line, "e2e:reasoning-burst("):
+		if count, ok := parseReasoningBurstCommand(line); ok {
+			emitReasoningBurst(e, count)
+		}
+
 	case strings.HasPrefix(line, "e2e:delay("):
 		ms := extractIntArg(line, "e2e:delay(")
 		fixedDelay(ms)

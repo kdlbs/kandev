@@ -184,3 +184,28 @@ error.
 3. **Event-specific workflow-step transitions in the same change.** Deferred
    because today's task PR automation contract is boolean task-level options.
    Step selection needs its own workflow interaction and UI design.
+
+## Amendment: message-queue-merge agent carve-out
+
+**Date:** 2026-08-01
+
+The `message.queue.merge` action (fold one queued message into the message above
+it) is the single controlled exception to this ADR's rule that agent-,
+workflow-, and server-owned entries are reserved for backend dispatch paths and
+clients may only create, edit, and remove user-owned entries.
+
+MergeIntoAbove permits folding an agent-owned source into the agent-owned target
+above it only when both rows carry the same non-empty `sender_task_id` metadata,
+and the caller must have session access. This preserves the reserved row's
+provenance — the merged entry keeps the target's identity, sender kind, and
+queued-by of `agent` — so the operation consolidates additive one-way prompts
+from a single inter-task agent without letting clients move, delete, or reorder
+agent-owned rows outside that exact fold. The caller identity is not the gate
+for agent merges (matching how the entry's ownership belongs to the sending
+task, not the UI user); the identical-sender-task gate is. All other merge paths
+remain strictly user-owned: a user-kind source merges only into a user-kind
+target whose `queued_by` equals the caller's identity.
+
+Workflow- and server-owned rows remain entirely non-mergeable, and the reference-
+overflow guard (a merge is rejected atomically when the combined entity
+references exceed the per-message cap) applies to every sender kind.

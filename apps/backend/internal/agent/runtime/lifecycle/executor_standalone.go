@@ -12,6 +12,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 // StandaloneExecutor implements Runtime for standalone agentctl execution.
@@ -46,6 +47,12 @@ func (r *StandaloneExecutor) Name() executor.Name {
 
 func (r *StandaloneExecutor) HealthCheck(ctx context.Context) error {
 	return r.ctl.Health(ctx)
+}
+
+// SubprocessAdmission returns the admission snapshot from the host agentctl
+// control server for backend diagnostics.
+func (r *StandaloneExecutor) SubprocessAdmission(ctx context.Context) (subproc.Snapshot, error) {
+	return r.ctl.SubprocessAdmission(ctx)
 }
 
 func (r *StandaloneExecutor) waitForReady(ctx context.Context) error {

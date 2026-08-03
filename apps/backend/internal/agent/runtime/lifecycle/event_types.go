@@ -10,18 +10,20 @@ import (
 
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
-	AgentExecutionID   string     `json:"agent_execution_id"`
-	TaskID             string     `json:"task_id"`
-	SessionID          string     `json:"session_id,omitempty"`
-	AgentProfileID     string     `json:"agent_profile_id"`
-	ExecutionProfileID string     `json:"execution_profile_id,omitempty"`
-	ContainerID        string     `json:"container_id,omitempty"`
-	Status             string     `json:"status"`
-	StartedAt          time.Time  `json:"started_at"`
-	FinishedAt         *time.Time `json:"finished_at,omitempty"`
-	ErrorMessage       string     `json:"error_message,omitempty"`
-	ExitCode           *int       `json:"exit_code,omitempty"`
-	PromptGeneration   uint64     `json:"prompt_generation,omitempty"`
+	AgentExecutionID   string                 `json:"agent_execution_id"`
+	TaskID             string                 `json:"task_id"`
+	SessionID          string                 `json:"session_id,omitempty"`
+	AgentID            string                 `json:"agent_id,omitempty"`
+	AgentProfileID     string                 `json:"agent_profile_id"`
+	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
+	ContainerID        string                 `json:"container_id,omitempty"`
+	Status             string                 `json:"status"`
+	StartedAt          time.Time              `json:"started_at"`
+	FinishedAt         *time.Time             `json:"finished_at,omitempty"`
+	ErrorMessage       string                 `json:"error_message,omitempty"`
+	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
+	ExitCode           *int                   `json:"exit_code,omitempty"`
+	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
@@ -116,17 +118,18 @@ func (p PrepareCompletedEventPayload) GetSessionID() string {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type             string      `json:"type"`
-	ACPSessionID     string      `json:"acp_session_id,omitempty"`
-	Text             string      `json:"text,omitempty"`
-	ToolCallID       string      `json:"tool_call_id,omitempty"`
-	ToolName         string      `json:"tool_name,omitempty"`
-	ToolTitle        string      `json:"tool_title,omitempty"`
-	ToolStatus       string      `json:"tool_status,omitempty"`
-	Error            string      `json:"error,omitempty"`
-	SessionStatus    string      `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
-	PromptGeneration uint64      `json:"prompt_generation,omitempty"`
-	Data             interface{} `json:"data,omitempty"`
+	Type             string                 `json:"type"`
+	ACPSessionID     string                 `json:"acp_session_id,omitempty"`
+	Text             string                 `json:"text,omitempty"`
+	ToolCallID       string                 `json:"tool_call_id,omitempty"`
+	ToolName         string                 `json:"tool_name,omitempty"`
+	ToolTitle        string                 `json:"tool_title,omitempty"`
+	ToolStatus       string                 `json:"tool_status,omitempty"`
+	Error            string                 `json:"error,omitempty"`
+	ProviderError    *streams.ProviderError `json:"provider_error,omitempty"`
+	SessionStatus    string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
+	Data             interface{}            `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.
@@ -184,6 +187,9 @@ type AgentStreamEventData struct {
 	// ConfigBaselineCandidate is an authoritative startup response snapshot.
 	// ConfigOptions remains the latest live provider state.
 	ConfigBaselineCandidate []streams.ConfigOption `json:"config_baseline_candidate,omitempty"`
+	// OriginalConfigCandidate is the profile-settled state captured before
+	// runtime/workflow overrides are applied.
+	OriginalConfigCandidate []streams.ConfigOption `json:"original_config_candidate,omitempty"`
 
 	// Session info (from "session_info" event)
 	SessionTitle     string         `json:"session_title,omitempty"`
@@ -264,17 +270,23 @@ func (p GitEventPayload) GetSessionID() string {
 }
 
 type GitStatusData struct {
-	Branch          string      `json:"branch"`
-	RemoteBranch    string      `json:"remote_branch,omitempty"`
-	HeadCommit      string      `json:"head_commit,omitempty"`
-	BaseCommit      string      `json:"base_commit,omitempty"`
-	Modified        []string    `json:"modified"`
-	Added           []string    `json:"added"`
-	Deleted         []string    `json:"deleted"`
-	Untracked       []string    `json:"untracked"`
-	Renamed         []string    `json:"renamed"`
-	Ahead           int         `json:"ahead"`
-	Behind          int         `json:"behind"`
+	Branch       string   `json:"branch"`
+	RemoteBranch string   `json:"remote_branch,omitempty"`
+	HeadCommit   string   `json:"head_commit,omitempty"`
+	BaseCommit   string   `json:"base_commit,omitempty"`
+	Modified     []string `json:"modified"`
+	Added        []string `json:"added"`
+	Deleted      []string `json:"deleted"`
+	Untracked    []string `json:"untracked"`
+	Renamed      []string `json:"renamed"`
+	Ahead        int      `json:"ahead"`
+	Behind       int      `json:"behind"`
+	// RemoteAhead/RemoteBehind compare against this branch's own upstream
+	// (@{upstream}), unlike Ahead/Behind which are relative to the base
+	// branch and never reach zero just because the branch was pushed. Push
+	// detection (event_handlers_git.go) reads RemoteAhead, not Ahead.
+	RemoteAhead     int         `json:"remote_ahead"`
+	RemoteBehind    int         `json:"remote_behind"`
 	Files           interface{} `json:"files,omitempty"`
 	BranchAdditions int         `json:"branch_additions,omitempty"`
 	BranchDeletions int         `json:"branch_deletions,omitempty"`

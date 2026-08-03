@@ -215,6 +215,7 @@ type Repos struct {
 	TaskEnvironments  repository.TaskEnvironmentRepository
 	Reviews           repository.ReviewRepository
 	ResourceCleanups  repository.TaskResourceCleanupRepository
+	StatusSummaries   repository.TaskStatusSummaryRepository
 }
 
 // Service provides task business logic
@@ -235,11 +236,14 @@ type Service struct {
 	taskEnvironments            repository.TaskEnvironmentRepository
 	reviews                     repository.ReviewRepository
 	resourceCleanups            repository.TaskResourceCleanupRepository
+	statusSummaries             repository.TaskStatusSummaryRepository
+	statusSummaryPRs            TaskStatusSummaryPRReader
 	eventBus                    bus.EventBus
 	logger                      *logger.Logger
 	discoveryConfig             RepositoryDiscoveryConfig
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
+	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
 	branchMaterializer          BranchMaterializer
 	workspaceSourceMaterializer WorkspaceSourceMaterializer
@@ -316,6 +320,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		taskEnvironments:      repos.TaskEnvironments,
 		reviews:               repos.Reviews,
 		resourceCleanups:      repos.ResourceCleanups,
+		statusSummaries:       repos.StatusSummaries,
 		eventBus:              eventBus,
 		logger:                log,
 		discoveryConfig:       discoveryConfig,
@@ -364,6 +369,20 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetContextWindowResetter wires the guarded context-window reset callback
+// owned by the orchestrator. It is optional for isolated task-service users;
+// those callers fall back to clearing the session metadata directly.
+func (s *Service) SetContextWindowResetter(resetter func(context.Context, string) error) {
+	s.contextWindowResetter = resetter
+}
+
+func (s *Service) resetContextWindow(ctx context.Context, sessionID string) error {
+	if s.contextWindowResetter != nil {
+		return s.contextWindowResetter(ctx, sessionID)
+	}
+	return s.sessions.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyContextWindow, nil)
 }
 
 func (s *Service) SetTaskResourceCleanupActivityGate(gate TaskResourceCleanupActivityGate) {

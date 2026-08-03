@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 )
@@ -91,14 +92,21 @@ func (f *branchFetcher) checkCooldown(repoPath string) (BranchRefreshResult, boo
 }
 
 func (f *branchFetcher) runFetch(ctx context.Context, repoPath string) BranchRefreshResult {
-	fetchCtx, cancel := context.WithTimeout(ctx, branchFetchTimeout)
-	defer cancel()
-
-	cmd := newNonInteractiveGitFetchCmd(fetchCtx, repoPath)
-	output, err := cmd.CombinedOutput()
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		branchFetchTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return newNonInteractiveGitFetchCmd(execCtx, repoPath)
+		},
+	)
 	res := BranchRefreshResult{FetchedAt: time.Now()}
-	if err != nil {
-		res.Err = fmt.Errorf("git fetch: %w", err)
+	if runErr != nil || execCtxErr != nil {
+		effectiveErr := runErr
+		if effectiveErr == nil {
+			effectiveErr = execCtxErr
+		}
+		res.Err = fmt.Errorf("git fetch: %w", effectiveErr)
 		if f.logger != nil {
 			// Avoid logging raw git output: it can contain remote URLs with
 			// embedded credentials or other sensitive data. Surface only the
@@ -106,7 +114,7 @@ func (f *branchFetcher) runFetch(ctx context.Context, repoPath string) BranchRef
 			f.logger.Warn("branch refresh fetch failed",
 				zap.String("path", repoPath),
 				zap.Int("output_bytes", len(output)),
-				zap.Error(err))
+				zap.Error(res.Err))
 		}
 	}
 	return res
@@ -117,7 +125,7 @@ func (f *branchFetcher) runFetch(ctx context.Context, repoPath string) BranchRef
 // manager. Auth prompts are disabled so missing credentials surface as fast
 // failures rather than hanging the dropdown.
 func newNonInteractiveGitFetchCmd(ctx context.Context, repoPath string) *exec.Cmd {
-	cmd := exec.CommandContext(ctx, "git", "-C", repoPath, "fetch", "--all", "--prune", "--no-tags")
+	cmd := subproc.NewGitCommand(ctx, "-C", repoPath, "fetch", "--all", "--prune", "--no-tags")
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0",
 		"GCM_INTERACTIVE=Never",

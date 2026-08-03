@@ -214,21 +214,10 @@ export class WebSocketClient {
   }
 
   /**
-   * Re-send a `session.focus` frame for an already-focused session WITHOUT
-   * touching the focus ref-count. The backend's focus handler pushes a fresh
-   * live git-status snapshot as a side effect (see `handleSessionFocus` →
-   * `sendSessionData` → `appendLiveGitStatusMessage`, which forces a
-   * `GetGitStatusMultiFresh` query that bypasses the workspace poll cache).
-   *
-   * This is the deterministic recovery for the focus-gated polling race: the
-   * agent edits a file, but if the workspace is still in slow poll mode (the
-   * focus→fast push lost a race with agentctl startup) the next
-   * `session.git.event` may be up to 30s away. Components that become visible
-   * and need fresh diff data (the diff panel becoming the active tab) call
-   * this to pull the latest git status immediately.
-   *
-   * No-op when the session isn't currently focused (the regular focus frame,
-   * sent on 0→1, already pushed fresh data).
+   * Request a fresh git snapshot for an already-focused session without
+   * changing its focus ref-count. Focus itself is intentionally ACK-only;
+   * explicit git refresh keeps tab activation from replaying session data during
+   * ordinary task switching.
    */
   refreshSessionData(sessionId: string) {
     if (this.status !== "connected") return;
@@ -236,7 +225,7 @@ export class WebSocketClient {
     this.send({
       id: generateUUID(),
       type: "request",
-      action: "session.focus",
+      action: "session.git.refresh",
       payload: { session_id: sessionId },
     });
   }

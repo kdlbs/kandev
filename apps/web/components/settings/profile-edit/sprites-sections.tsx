@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { useTranslation } from "react-i18next";
 
 function PolicyRuleRow({
   rule,
@@ -24,6 +25,7 @@ function PolicyRuleRow({
   onUpdate: (index: number, field: keyof NetworkPolicyRule, val: string) => void;
   onRemove: (index: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <TableRow
       data-settings-dirty={!baselineRule || JSON.stringify(rule) !== JSON.stringify(baselineRule)}
@@ -49,11 +51,11 @@ function PolicyRuleRow({
           <SelectContent>
             <SelectItem value="allow">
               <Badge variant="default" className="bg-green-600">
-                Allow
+                {t("executors:allow")}
               </Badge>
             </SelectItem>
             <SelectItem value="deny">
-              <Badge variant="destructive">Deny</Badge>
+              <Badge variant="destructive">{t("executors:deny")}</Badge>
             </SelectItem>
           </SelectContent>
         </Select>
@@ -62,7 +64,7 @@ function PolicyRuleRow({
         <Input
           value={rule.include ?? ""}
           onChange={(e) => onUpdate(index, "include", e.target.value)}
-          placeholder="Optional pattern"
+          placeholder={t("executors:optionalPattern")}
           className="text-sm"
           data-settings-dirty={!baselineRule || rule.include !== baselineRule.include}
         />
@@ -92,13 +94,14 @@ function PolicyRulesTable({
   onUpdate: (index: number, field: keyof NetworkPolicyRule, val: string) => void;
   onRemove: (index: number) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Domain</TableHead>
-          <TableHead className="w-[120px]">Action</TableHead>
-          <TableHead>Include</TableHead>
+          <TableHead>{t("executors:domain")}</TableHead>
+          <TableHead className="w-[120px]">{t("executors:action")}</TableHead>
+          <TableHead>{t("executors:include")}</TableHead>
           <TableHead className="w-[60px]" />
         </TableRow>
       </TableHeader>
@@ -129,6 +132,7 @@ export function NetworkPoliciesCard({
   baselineRules,
   onRulesChange,
 }: NetworkPoliciesCardProps) {
+  const { t } = useTranslation();
   const addRule = useCallback(() => {
     onRulesChange([...rules, { domain: "", action: "allow" }]);
   }, [rules, onRulesChange]);
@@ -154,10 +158,8 @@ export function NetworkPoliciesCard({
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle>Network Policies</CardTitle>
-            <CardDescription>
-              Define network access rules applied when a sprite is created for this profile.
-            </CardDescription>
+            <CardTitle>{t("executors:networkPolicies")}</CardTitle>
+            <CardDescription>{t("executors:defineNetworkAccessRulesAppliedWhen")}</CardDescription>
           </div>
           <Button
             type="button"
@@ -167,13 +169,15 @@ export function NetworkPoliciesCard({
             className="cursor-pointer"
           >
             <IconPlus className="mr-1 h-3.5 w-3.5" />
-            Add Rule
+            {t("executors:addRule")}
           </Button>
         </div>
       </CardHeader>
       <CardContent>
         {rules.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No network policy rules configured.</p>
+          <p className="text-sm text-muted-foreground">
+            {t("executors:noNetworkPolicyRulesConfigured")}
+          </p>
         ) : (
           <PolicyRulesTable
             rules={rules}

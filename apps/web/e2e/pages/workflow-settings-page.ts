@@ -124,8 +124,8 @@ export class WorkflowSettingsPage {
   }
 
   /** Save every dirty workflow contributor through the route-level action. */
-  async saveChanges(): Promise<void> {
-    await this.submitSaveChanges();
+  async saveChanges(touch = false): Promise<void> {
+    await this.submitSaveChanges(touch);
     await expect
       .poll(
         async () =>

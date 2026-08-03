@@ -45,6 +45,7 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionSessionSetPlanMode, h.wsSetPlanMode)
 	d.RegisterFunc(ws.ActionSessionRename, h.wsRenameSession)
 	d.RegisterFunc(ws.ActionGitHubCheckSessionPR, h.wsCheckSessionPR)
+	d.RegisterFunc(ws.ActionGitLabCheckSessionMR, h.wsCheckSessionMR)
 }
 
 // WS handlers
@@ -290,29 +291,48 @@ func (h *Handlers) wsRespondToPermission(ctx context.Context, msg *ws.Message) (
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
 
-type wsCheckSessionPRRequest struct {
+type wsCheckSessionAssociationRequest struct {
 	TaskID    string `json:"task_id"`
 	SessionID string `json:"session_id"`
 }
 
-func (h *Handlers) wsCheckSessionPR(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
-	var req wsCheckSessionPRRequest
-	if err := msg.ParsePayload(&req); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
-	}
+// wsCheckSessionAssociation is the shared body for the "check session has a
+// linked PR/MR" WS handlers (github.check_session_pr, gitlab.check_session_mr).
+// The two providers differ only in which Service method answers the check and
+// the label used in logs/errors.
+func (h *Handlers) wsCheckSessionAssociation(
+	ctx context.Context, msg *ws.Message, req wsCheckSessionAssociationRequest,
+	check func(context.Context, string, string) (bool, error), label string,
+) (*ws.Message, error) {
 	if req.TaskID == "" || req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id and session_id are required", nil)
 	}
 
-	found, err := h.service.CheckSessionPR(ctx, req.TaskID, req.SessionID)
+	found, err := check(ctx, req.TaskID, req.SessionID)
 	if err != nil {
-		h.logger.Error("failed to check session PR",
+		h.logger.Error("failed to check "+label,
 			zap.String("task_id", req.TaskID),
 			zap.String("session_id", req.SessionID),
 			zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check session PR", nil)
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check "+label, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"found": found})
+}
+
+func (h *Handlers) wsCheckSessionPR(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsCheckSessionAssociationRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	return h.wsCheckSessionAssociation(ctx, msg, req, h.service.CheckSessionPR, "session PR")
+}
+
+func (h *Handlers) wsCheckSessionMR(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var req wsCheckSessionAssociationRequest
+	if err := msg.ParsePayload(&req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	return h.wsCheckSessionAssociation(ctx, msg, req, h.service.CheckSessionMR, "session MR")
 }
 
 type wsGetTaskSessionStatusRequest struct {

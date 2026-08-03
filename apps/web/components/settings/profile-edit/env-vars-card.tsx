@@ -9,6 +9,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { ProfileEnvVar } from "@/lib/types/http";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { useTranslation } from "react-i18next";
 
 export type EnvVarRow = {
   key: string;
@@ -51,6 +52,7 @@ function ValueOrSecretInput({
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   baselineRow?: EnvVarRow;
 }) {
+  const { t } = useTranslation();
   if (row.mode === "value") {
     return (
       <Input
@@ -68,7 +70,7 @@ function ValueOrSecretInput({
         className="flex-[3] text-xs"
         data-settings-dirty={!baselineRow || row.secretId !== baselineRow.secretId}
       >
-        <SelectValue placeholder="Select secret..." />
+        <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
         {secrets.map((s) => (
@@ -96,6 +98,7 @@ function EnvVarRowComponent({
   onRemove: (index: number) => void;
   baselineRow?: EnvVarRow;
 }) {
+  const { t } = useTranslation();
   return (
     <li
       className="flex items-center gap-2"
@@ -118,8 +121,8 @@ function EnvVarRowComponent({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="value">Value</SelectItem>
-          <SelectItem value="secret">Secret</SelectItem>
+          <SelectItem value="value">{t("executors:value")}</SelectItem>
+          <SelectItem value="secret">{t("executors:secret")}</SelectItem>
         </SelectContent>
       </Select>
       <ValueOrSecretInput
@@ -136,7 +139,9 @@ function EnvVarRowComponent({
         onClick={() => onRemove(index)}
         className="h-8 w-8 shrink-0 cursor-pointer"
         data-testid={`env-var-remove-${index}`}
-        aria-label={`Remove ${row.key || "env var"}`}
+        aria-label={
+          row.key ? t("executors:removeEnvVarNamed", { key: row.key }) : t("executors:removeEnvVar")
+        }
       >
         <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
       </Button>
@@ -157,6 +162,7 @@ function DraftValueInput({
   onEnter: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   setDraft: React.Dispatch<React.SetStateAction<EnvVarRow>>;
 }) {
+  const { t } = useTranslation();
   if (draft.mode === "value") {
     return (
       <Input
@@ -173,7 +179,7 @@ function DraftValueInput({
   return (
     <Select value={draft.secretId} onValueChange={(v) => setDraft((d) => ({ ...d, secretId: v }))}>
       <SelectTrigger id={valueId} className="text-xs" data-testid="env-var-new-secret-select">
-        <SelectValue placeholder="Select secret..." />
+        <SelectValue placeholder={t("executors:selectSecret")} />
       </SelectTrigger>
       <SelectContent>
         {secrets.map((s) => (
@@ -193,6 +199,7 @@ function EnvVarAddForm({
   onAdd: (row: EnvVarRow) => void;
   secrets: { id: string; name: string }[];
 }) {
+  const { t } = useTranslation();
   const uid = useId();
   const keyId = `${uid}-key`;
   const modeId = `${uid}-mode`;
@@ -224,7 +231,7 @@ function EnvVarAddForm({
     <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
       <div className="flex-[2] space-y-1">
         <Label className="text-xs" htmlFor={keyId}>
-          Key
+          {t("executors:key")}
         </Label>
         <Input
           id={keyId}
@@ -238,7 +245,7 @@ function EnvVarAddForm({
       </div>
       <div className="space-y-1">
         <Label className="text-xs" htmlFor={modeId}>
-          Mode
+          {t("executors:mode")}
         </Label>
         <Select
           value={draft.mode}
@@ -250,14 +257,14 @@ function EnvVarAddForm({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="value">Value</SelectItem>
-            <SelectItem value="secret">Secret</SelectItem>
+            <SelectItem value="value">{t("executors:value")}</SelectItem>
+            <SelectItem value="secret">{t("executors:secret")}</SelectItem>
           </SelectContent>
         </Select>
       </div>
       <div className="flex-[3] space-y-1">
         <Label className="text-xs" htmlFor={valueId}>
-          {draft.mode === "value" ? "Value" : "Secret"}
+          {draft.mode === "value" ? t("executors:value") : t("executors:secret")}
         </Label>
         <DraftValueInput
           draft={draft}
@@ -277,7 +284,7 @@ function EnvVarAddForm({
         data-testid="env-var-add-button"
       >
         <IconPlus className="h-3.5 w-3.5 mr-1" />
-        Add
+        {t("executors:add")}
       </Button>
     </div>
   );
@@ -300,11 +307,12 @@ function EnvVarsFieldBody({
   onUpdate,
   onRemove,
 }: EnvVarsFieldProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-3" data-testid="env-vars-field">
       {rows.length === 0 ? (
         <p className="text-xs italic text-muted-foreground" data-testid="env-vars-empty">
-          No environment variables configured. Add one below.
+          {t("executors:noEnvironmentVariablesConfiguredAddOne")}
         </p>
       ) : (
         <ul className="space-y-2" data-testid="env-vars-list">
@@ -345,6 +353,7 @@ export function useEnvVarRows(initialEnvVars?: ProfileEnvVar[]) {
 }
 
 export function EnvVarsCard(props: EnvVarsFieldProps) {
+  const { t } = useTranslation();
   const isDirty =
     props.baselineRows !== undefined &&
     JSON.stringify(rowsToEnvVars(props.rows)) !== JSON.stringify(rowsToEnvVars(props.baselineRows));
@@ -353,15 +362,14 @@ export function EnvVarsCard(props: EnvVarsFieldProps) {
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>
-            <CardTitle>Environment Variables</CardTitle>
+            <CardTitle>{t("executors:environmentVariables")}</CardTitle>
             <CardDescription>
-              Injected into the execution environment. Use Secret mode for tokens and API keys;
-              literal values are stored in the profile JSON.
+              {t("executors:injectedIntoTheExecutionEnvironmentUse")}
             </CardDescription>
           </div>
           {props.rows.length > 0 && (
             <span className="text-[10px] text-muted-foreground" data-testid="env-vars-count">
-              {props.rows.length} configured
+              {t("executors:envVarsConfiguredCount", { count: props.rows.length })}
             </span>
           )}
         </div>

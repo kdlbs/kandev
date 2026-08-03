@@ -1,5 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { autoSelectBranch, shouldShowTaskTitleField } from "./task-create-dialog-helpers";
+import {
+  autoSelectBranch,
+  buildCreateTaskPayload,
+  shouldShowTaskTitleField,
+  validateCreateInputs,
+} from "./task-create-dialog-helpers";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
 beforeEach(() => {
@@ -125,4 +130,46 @@ describe("shouldShowTaskTitleField", () => {
       expect(shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted)).toBe(expected);
     },
   );
+});
+
+describe("auto-title creation helpers", () => {
+  const base = {
+    workspaceId: "ws-1",
+    effectiveWorkflowId: "wf-1",
+    repositories: [{ key: "repo-1", repositoryId: "repo-1", branch: "main" }],
+    agentProfileId: "agent-1",
+    noRepository: false,
+  };
+
+  it("requires a prompt instead of a title when auto-title mode is enabled", () => {
+    expect(
+      validateCreateInputs({ ...base, trimmedTitle: "", trimmedDescription: "", autoTitle: true }),
+    ).toBe(false);
+    expect(
+      validateCreateInputs({
+        ...base,
+        trimmedTitle: "",
+        trimmedDescription: "Describe the work",
+        autoTitle: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("omits the manual title and opts into backend provisional naming", () => {
+    const payload = buildCreateTaskPayload({
+      workspaceId: "ws-1",
+      effectiveWorkflowId: "wf-1",
+      trimmedTitle: "ignored",
+      trimmedDescription: "Fix the login flow",
+      repositoriesPayload: [],
+      agentProfileId: "agent-1",
+      executorId: "executor-1",
+      executorProfileId: "profile-1",
+      withAgent: true,
+      autoTitle: true,
+    });
+
+    expect(payload).toMatchObject({ auto_title: true });
+    expect(payload).not.toHaveProperty("title");
+  });
 });

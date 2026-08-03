@@ -105,6 +105,14 @@ const KEEP_LITERAL =
  * more specific paths must come first.
  */
 const NAMESPACE_RULES = [
+  // Settings -> Executors profile-editor tree. Note the singular
+  // `app/settings/executor/`: the plural `app/settings/executors/` is the
+  // separate list/create route tree and stays on the `settings` namespace.
+  [/^app\/settings\/executor\//, "executors"],
+  [
+    /^components\/settings\/(profile-edit\/|executor-profile-dialog|executor-profiles-card)/,
+    "executors",
+  ],
   [/^(app|components)\/settings\//, "settings"],
   [/^app\/office\//, "office"],
   [/^components\/app-sidebar\//, "sidebar"],

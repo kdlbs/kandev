@@ -1,11 +1,45 @@
 package backendapp
 
 import (
+	"encoding/json"
 	"testing"
 
 	userdto "github.com/kandev/kandev/internal/user/dto"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 )
+
+func TestMapUserSettingsStateIncludesAzureDevOpsBrowsePreferences(t *testing.T) {
+	preferences := json.RawMessage(`{"workspace-1":{"mode":"board","filters":{"projectId":"project-2"},"board":{"teamId":"team-2","boardId":"board-2","focusedColumnId":"done"}}}`)
+	state := mapUserSettingsState(userdto.UserSettingsResponse{
+		Settings: userdto.UserSettingsDTO{AzureDevOpsBrowsePreferences: preferences},
+	}, "workspace-1")
+
+	encoded, err := json.Marshal(state)
+	if err != nil {
+		t.Fatalf("marshal boot settings: %v", err)
+	}
+	var payload struct {
+		Loaded      bool `json:"loaded"`
+		Preferences map[string]struct {
+			Mode    string `json:"mode"`
+			Filters struct {
+				ProjectID string `json:"projectId"`
+			} `json:"filters"`
+			Board struct {
+				TeamID  string `json:"teamId"`
+				BoardID string `json:"boardId"`
+			} `json:"board"`
+		} `json:"azureDevOpsBrowsePreferences"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatalf("decode boot settings: %v", err)
+	}
+
+	preference := payload.Preferences["workspace-1"]
+	if !payload.Loaded || preference.Mode != "board" || preference.Filters.ProjectID != "project-2" || preference.Board.TeamID != "team-2" || preference.Board.BoardID != "board-2" {
+		t.Fatalf("Azure browse preferences missing from loaded boot settings: %s", encoded)
+	}
+}
 
 func TestMapUserSettingsStateIncludesPortableTaskAndSidebarSettings(t *testing.T) {
 	state := mapUserSettingsState(userdto.UserSettingsResponse{

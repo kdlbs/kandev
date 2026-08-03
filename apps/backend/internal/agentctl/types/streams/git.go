@@ -32,6 +32,10 @@ type GitStatusUpdate struct {
 	Renamed []string `json:"renamed"`
 
 	// Ahead is the number of commits ahead of the base branch (origin/main).
+	// This is a "how much unreviewed work is on this branch" measure (the
+	// Changes panel's Push/Pull badge), not a push-state signal: it does not
+	// reach zero just because the branch was pushed, since pushing doesn't
+	// move the base branch. Push-state logic must use RemoteAhead instead.
 	Ahead int `json:"ahead"`
 
 	// Behind is the number of commits behind the base branch (origin/main).
@@ -42,6 +46,18 @@ type GitStatusUpdate struct {
 
 	// RemoteBranch is the tracked remote branch (e.g., "origin/main").
 	RemoteBranch string `json:"remote_branch,omitempty"`
+
+	// RemoteAhead is the number of local commits not yet present on this
+	// branch's own upstream (@{upstream}) — what `git push` would send.
+	// Unlike Ahead (relative to the base branch), this reaches zero once a
+	// push settles, which is what push-detection logic needs to observe a
+	// push. Always 0 when RemoteBranch is empty (no upstream configured yet).
+	RemoteAhead int `json:"remote_ahead"`
+
+	// RemoteBehind is the number of commits on the upstream not yet present
+	// locally — what `git pull` would fetch. Always 0 when RemoteBranch is
+	// empty.
+	RemoteBehind int `json:"remote_behind"`
 
 	// HeadCommit is the current HEAD commit SHA.
 	HeadCommit string `json:"head_commit,omitempty"`

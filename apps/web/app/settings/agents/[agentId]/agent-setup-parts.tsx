@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import {
   AlertDialog,
@@ -61,19 +62,18 @@ export function AgentHeader({
   savedAgent,
   onDelete,
 }: AgentHeaderProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between gap-6">
       <div>
         <div className="flex flex-wrap items-center gap-2">
           <h2 className="text-2xl font-bold">{displayName}</h2>
           <span className="text-xs text-muted-foreground border border-muted-foreground/30 rounded-full px-2 py-1">
-            {matchedPath ?? "Installation not detected"}
+            {matchedPath ?? t("agents:installationNotDetected")}
           </span>
         </div>
         <p className="text-sm text-muted-foreground mt-1">
-          {isCreateMode
-            ? "Create a new profile for this agent."
-            : "Configure profiles and defaults for this agent."}
+          {isCreateMode ? t("agents:createProfileIntro") : t("agents:configureProfilesIntro")}
         </p>
       </div>
       {savedAgent?.tui_config && onDelete && (
@@ -81,21 +81,20 @@ export function AgentHeader({
           <AlertDialogTrigger asChild>
             <Button variant="destructive" size="sm" className="cursor-pointer">
               <IconTrash className="h-4 w-4 mr-2" />
-              Delete Agent
+              {t("agents:deleteAgent")}
             </Button>
           </AlertDialogTrigger>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Delete {displayName}?</AlertDialogTitle>
-              <AlertDialogDescription>
-                This will permanently remove the agent and all its profiles. This action cannot be
-                undone.
-              </AlertDialogDescription>
+              <AlertDialogTitle>
+                {t("agents:deleteAgentTitle", { name: displayName })}
+              </AlertDialogTitle>
+              <AlertDialogDescription>{t("agents:deleteAgentDescription")}</AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+              <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
               <AlertDialogAction onClick={onDelete} className="cursor-pointer">
-                Delete
+                {t("agents:delete")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -221,15 +220,18 @@ export function ProfilesCard({
   onRemoveProfile,
   onToastError,
 }: ProfilesCardProps) {
+  const { t } = useTranslation();
   return (
     <SettingsCard isDirty={isAgentDirty}>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>
-          {isCreateMode ? `Create ${displayName} Profile` : `${displayName} Profiles`}
+          {isCreateMode
+            ? t("agents:createAgentProfileTitle", { name: displayName })
+            : t("agents:agentProfilesTitle", { name: displayName })}
         </CardTitle>
         <Button size="sm" variant="outline" onClick={onAddProfile} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-2" />
-          Add profile
+          {t("agents:addProfile")}
         </Button>
       </CardHeader>
       <CardContent className="space-y-4">

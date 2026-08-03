@@ -70,29 +70,29 @@ Connect Kandev to the tools your team already uses — pull issues into the kanb
 
 ## Supported ACP Agents
 
-| Agent | Launch |
+| Agent | Package / command |
 |:-------:|:----------:|
-| **Claude Code** | `npx --yes --prefer-offline @agentclientprotocol/claude-agent-acp` |
-| **Codex** | `npx --yes --prefer-offline @agentclientprotocol/codex-acp` |
-| **GitHub Copilot** | `npx --yes --prefer-offline @github/copilot --acp` |
-| **Gemini CLI** | `npx --yes --prefer-offline @google/gemini-cli --acp` |
-| **Amp** | `npx -y amp-acp` |
-| **Auggie** | `npx -y @augmentcode/auggie --acp` |
-| **OpenCode** | `npx --yes --prefer-offline opencode-ai acp` |
-| **Cursor** | `cursor-agent acp` *(requires Cursor Pro)* |
-| **Devin** | `devin acp` *(install Devin CLI from Devin Desktop or standalone installer)* |
-| **Qwen** | `npx -y @qwen-code/qwen-code --acp` |
-| **Factory Droid** | `npx -y droid exec --output-format acp` |
-| **iFlow (beta)** | `npx -y @iflow-ai/iflow-cli --experimental-acp` |
-| **Kilocode** | `npx -y @kilocode/cli acp` |
-| **Pi** | `npx -y pi-acp` |
-| **Kimi** | `kimi acp` *(install Kimi CLI from Moonshot AI)* |
-| **Kiro** | `kiro-cli-chat acp` *(install Kiro CLI from AWS)* |
-| **Qoder** | `qodercli --acp` *(install Qoder CLI)* |
-| **Trae** | `traecli acp serve` *(install Trae IDE CLI)* |
-| **Oh My Pi** | `omp acp` *(install `bun install -g @oh-my-pi/pi-coding-agent`)* |
-| **Grok** | `grok --no-auto-update agent stdio` *(install `npm install -g @xai-official/grok`)* |
-| **Hermes** | `hermes acp` *(install with the official Hermes installer)* |
+| **Claude Code** | `@agentclientprotocol/claude-agent-acp` |
+| **Codex** | `@agentclientprotocol/codex-acp` |
+| **GitHub Copilot** | `@github/copilot` |
+| **Gemini CLI** | `@google/gemini-cli` |
+| **Amp** | `amp-acp` |
+| **Auggie** | `@augmentcode/auggie` |
+| **OpenCode** | `opencode-ai` |
+| **Cursor** | `cursor-agent` *(requires Cursor Pro)* |
+| **Devin** | `devin` *(install Devin CLI from Devin Desktop or standalone installer)* |
+| **Qwen** | `@qwen-code/qwen-code` |
+| **Factory Droid** | `droid` |
+| **iFlow (beta)** | `@iflow-ai/iflow-cli` |
+| **Kilocode** | `@kilocode/cli` |
+| **Pi** | `pi-acp` |
+| **Kimi** | `kimi` *(install Kimi CLI from Moonshot AI)* |
+| **Kiro** | `kiro-cli-chat` *(install Kiro CLI from AWS)* |
+| **Qoder** | `qodercli` *(install Qoder CLI)* |
+| **Trae** | `traecli` *(install Trae IDE CLI)* |
+| **Oh My Pi** | `omp` *(install `@oh-my-pi/pi-coding-agent` with Bun)* |
+| **Grok** | `grok` *(install `@xai-official/grok` with npm)* |
+| **Hermes** | `hermes` *(install with the official Hermes installer)* |
 
 > All agents communicate via [ACP](https://agentclientprotocol.com) (Agent Client Protocol). Some agents support ACP natively, while others use ACP adapter packages that bridge their native protocols. **CLI Passthrough mode** is available when an integration provides a passthrough command. If your agent isn't supported yet, open an issue or submit a PR with the integration. See [Adding a New Agent CLI](docs/add-agent-cli.md) for a step-by-step guide.
 

@@ -1,7 +1,7 @@
 ---
 status: building
 created: 2026-07-14
-updated: 2026-07-29
+updated: 2026-08-02
 owner: cfl
 ---
 
@@ -23,6 +23,13 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
 - The page presents storage analysis and maintenance policy as separate full-width sections.
   Analysis and cleanup state replaces the label and icon inside the action button that started it
   instead of appearing as detached page status.
+- On first load, maintenance policy, maintenance history, quarantine, and storage analysis load as
+  independent sections. A cold filesystem or Docker scan keeps only Storage analysis in its loading
+  state; policy controls, persisted run history, and the database-backed quarantine list render as
+  soon as their own requests finish.
+- Each independently loaded section surfaces its own loading and failure state. A failed or slow
+  analysis never replaces already available policy, history, or quarantine content with a page-wide
+  loading or error state.
 - User-facing storage totals and editable size limits are shown in GB. The frontend converts those
   values to and from the byte-based API without changing the persisted data model.
 - Maintenance settings use separate cards grouped by scope: schedule, workspaces and containers,
@@ -36,6 +43,12 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   bytes, the managed Go cache, the service user's default Go cache when it is a distinct path,
   Kandev-managed container count and writable-layer bytes, Docker image-layer bytes, Docker build
   cache, and unused Docker images.
+- Storage analysis shows a total counted size derived from the available non-overlapping top-level
+  measurements: total task workspaces, quarantine, managed and distinct user Go caches,
+  Kandev-managed container writable layers, Docker image layers, and Docker build cache. Active and
+  candidate workspace bytes and unused-image bytes remain visible subset measurements and are not
+  added again. If any top-level measurement is unavailable, the total is visibly identified as
+  partial rather than presented as complete host disk usage.
 - A successful storage analysis is reused for 15 minutes. Opening or refreshing the Storage page,
   saving policy settings, and adopting an external Go cache consume that cached snapshot instead of
   starting another filesystem or Docker scan. Manual **Analyze** always bypasses the cache and
@@ -84,6 +97,9 @@ reclaim that space without maintaining cron or systemd configuration outside Kan
   the actual automatic deletion occurs on the first successful scheduled maintenance run after
   that time. When scheduling is disabled, it says that automatic deletion is off and names full
   manual **Run now** or an explicit quarantine action as the available cleanup paths.
+- The Quarantine section shows the sum of `size_bytes` for every currently listed restorable entry.
+  Its total is derived from the independently loaded quarantine list and does not wait for or depend
+  on the Storage analysis snapshot.
 - Scheduled and full manual maintenance runs permanently delete eligible quarantine entries.
   Resource-specific manual runs do not delete unrelated quarantine entries.
 - **Clear eligible** permanently deletes every active quarantine entry whose retention deadline has
@@ -317,6 +333,9 @@ All routes are under the existing authenticated System route group.
 GET    /api/v1/system/storage
        -> { settings, capabilities, summary, analyzed_at, last_run }
 
+GET    /api/v1/system/storage/settings
+       -> { settings, capabilities }
+
 PATCH  /api/v1/system/storage/settings
        body: {
          settings: complete StorageMaintenanceSettings object,
@@ -365,6 +384,11 @@ DELETE /api/v1/system/storage/quarantine
 `capabilities` reports the managed Go path, whether Go-cache adoption is available, Docker
 availability, configured Docker host, and whether host-global Docker cleanup is allowed. API
 responses never expose secret environment values.
+
+`GET /storage/settings` is the lightweight policy-read contract. It reads persisted settings and
+capabilities without requesting an overview snapshot or invoking filesystem, Go-cache, quarantine,
+or Docker analysis providers. `GET /storage` remains backward compatible and continues to return
+the complete scan-backed overview contract.
 
 `analyzed_at` is the RFC 3339 timestamp of the successful analysis that produced `summary`.
 `GET /storage` reuses that snapshot for 15 minutes. `POST /storage/analyze` bypasses the freshness
@@ -492,6 +516,9 @@ the configured restore window.
   ambiguous-state, or Git worktree-pruning failure keeps the affected entry and reports the error.
 - Docker list/usage failure marks Docker analysis unavailable. Docker prune failure records the
   daemon error and does not affect other providers.
+- A policy, history, quarantine, or analysis read failure is isolated to that section. Other
+  successful section responses remain visible and usable, and retrying or completing one section
+  does not discard newer data already returned by another.
 - Loss of the dedicated-daemon acknowledgment between analysis and cleanup cancels host-global
   Docker operations.
 - Failure to persist a run or cleanup intent prevents its destructive operation from starting.
@@ -521,6 +548,11 @@ the configured restore window.
   daemon, **THEN** no destructive storage cleanup runs and the Storage page shows scheduling off.
 - **GIVEN** scheduling is disabled, **WHEN** the user selects **Analyze**, **THEN** the page shows
   reclaimable bytes without changing any filesystem or Docker resource.
+- **GIVEN** the first Storage analysis after backend startup is still scanning, **WHEN** the
+  lightweight policy, history, and quarantine requests complete, **THEN** those three sections are
+  visible and usable while only Storage analysis continues to show progress.
+- **GIVEN** one Storage section request fails, **WHEN** another section request succeeds, **THEN**
+  the successful section renders its current data and the failed section shows its own error state.
 - **GIVEN** a successful storage snapshot is less than 15 minutes old, **WHEN** the user refreshes
   the page or saves policy settings, **THEN** the same summary and `analyzed_at` are returned without
   invoking the storage providers again.
@@ -546,6 +578,11 @@ the configured restore window.
 - **GIVEN** task roots include active, recent orphan, and grace-eligible orphan directories,
   **WHEN** storage analysis runs, **THEN** total workspace bytes include every classified task root
   while active and reclaimable bytes remain separate subsets.
+- **GIVEN** all analysis providers return measurements, **WHEN** Storage analysis renders its total,
+  **THEN** it sums the non-overlapping top-level measurements once and does not add active,
+  candidate, or unused-image subset bytes again.
+- **GIVEN** one top-level analysis measurement is unavailable, **WHEN** Storage analysis renders its
+  total, **THEN** it sums the available measurements and identifies the result as partial.
 - **GIVEN** archived or deleted tasks retain ready environment or active worktree rows for recovery,
   **WHEN** storage analysis or cleanup classifies their old directories, **THEN** those historical
   rows do not protect the directories from normal orphan grace and quarantine rules unless a live
@@ -562,6 +599,9 @@ the configured restore window.
 - **GIVEN** protected and eligible quarantine entries, **WHEN** the Storage page renders, **THEN**
   each row shows its exact `delete_after` timestamp and protected-or-eligible status, and the page
   states whether automatic scheduled cleanup is enabled.
+- **GIVEN** multiple restorable quarantine entries, **WHEN** the independently loaded Quarantine
+  section renders, **THEN** its total equals the sum of every listed entry's `size_bytes` without
+  waiting for Storage analysis.
 - **GIVEN** protected and eligible quarantine entries, **WHEN** the user confirms **Clear eligible**
   with `DELETE ELIGIBLE`, **THEN** every eligible entry is permanently deleted, protected entries
   remain, and the completed job reports both groups.
@@ -645,3 +685,4 @@ the configured restore window.
 - [Original Storage maintenance implementation](../../plans/storage-maintenance/plan.md)
 - [Storage overview cache and settings follow-up](../../plans/storage-overview-cache/plan.md)
 - [Quarantine lifecycle follow-up](../../plans/quarantine-lifecycle/plan.md)
+- [Progressive Storage loading and totals](../../plans/storage-progressive-loading/plan.md)

@@ -1,17 +1,23 @@
 // Runtime feature-flag state. The shape mirrors the backend's
 // /api/v1/features response (FeaturesConfig in
-// apps/backend/internal/common/config/config.go). Every flag is a boolean,
-// keyed by feature name. New flags are additive — keep this shape stable.
+// apps/backend/internal/common/config/config.go). New flags are additive:
+// declare the all-off default once and derive the names and state from it.
 // See docs/decisions/0007-runtime-feature-flags.md.
 
-export type FeatureFlags = {
-  office: boolean;
-  appStatusBar: boolean;
-  auth: boolean;
-  claudeBackgroundPromptHandoff: boolean;
-};
+export const defaultFeatureFlags = {
+  // New release toggles start disabled in every frontend state. The SSR layer
+  // overwrites this with the backend's effective values after startup.
+  office: false,
+  appStatusBar: false,
+  auth: false,
+  claudeBackgroundPromptHandoff: false,
+} as const;
 
-export type FeatureName = keyof FeatureFlags;
+export type FeatureName = keyof typeof defaultFeatureFlags;
+
+export type FeatureFlags = {
+  [K in FeatureName]: boolean;
+};
 
 export type FeaturesSliceState = {
   features: FeatureFlags;

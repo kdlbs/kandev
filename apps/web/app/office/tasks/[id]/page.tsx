@@ -13,7 +13,6 @@ import {
   type TaskDecisionDTO,
 } from "@/lib/api/domains/office-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
-import { getWebSocketClient } from "@/lib/ws/connection";
 import { OfficeSimplePane } from "@/components/task/simple/OfficeSimplePane";
 import { TaskAdvancedMode } from "./task-advanced-mode";
 import { IssueDetailSkeleton } from "./task-detail-skeleton";
@@ -28,6 +27,7 @@ import type {
 } from "./types";
 import type { ActivityEntry, OfficeTask } from "@/lib/state/slices/office/types";
 import type { TaskSession as ApiTaskSession } from "@/lib/types/http";
+import { useSessionLiveSyncSubscriptions } from "./use-session-live-sync";
 
 type IssueDetailPageProps = {
   params: Promise<{ id: string }>;
@@ -225,13 +225,11 @@ function useSessionLiveSync({
   );
 
   const connectionStatus = useAppStore((s) => s.connection.status);
-  useEffect(() => {
-    if (connectionStatus !== "connected" || baseSessions.length === 0 || !task) return;
-    const client = getWebSocketClient();
-    if (!client) return;
-    const unsubs = baseSessions.map((s) => client.subscribeSession(s.id));
-    return () => unsubs.forEach((u) => u());
-  }, [connectionStatus, baseSessions, task]);
+  useSessionLiveSyncSubscriptions({
+    connectionStatus,
+    taskId: task?.id ?? null,
+    sessionIds: baseSessions.map((session) => session.id),
+  });
 
   // Refetch the task + comments whenever session state actually changes.
   // The dep is intentionally the joined session-state key (and the

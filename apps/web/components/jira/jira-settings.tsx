@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
-import { IconTicket, IconCode } from "@tabler/icons-react";
+import { IconTicket } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -34,17 +34,17 @@ import type {
   JiraInstanceType,
   TestJiraConnectionResult,
 } from "@/lib/types/jira";
+import { useTranslation } from "react-i18next";
+import {
+  CookieExpiry,
+  SecretHelp,
+  secretCopy,
+  secretPlaceholder,
+} from "@/components/jira/jira-secret-help";
 
-// Session cookies are HttpOnly so document.cookie can't read them, but
-// DevTools → Application → Cookies surfaces them in plain text. Users copy
-// the Value cell of a single row; the backend wraps it under both
-// cloud.session.token and tenant.session.token so a single paste works for
-// password accounts and SSO tenants.
-const COOKIE_INSTRUCTIONS = `Open DevTools (Cmd+Opt+I / Ctrl+Shift+I) on your Atlassian tab →
-Application tab → Storage → Cookies → https://*.atlassian.net →
-find the row named "cloud.session.token" (or "tenant.session.token"
-on SSO tenants) → copy the Value cell → paste it below.
-Don't include the cookie name or any "=" — just the token value.`;
+// Cloud sites live under this domain; shown as an example, not as prose, so it
+// is interpolated rather than written into the catalog.
+const ATLASSIAN_CLOUD_DOMAIN = "*.atlassian.net";
 
 type FormState = {
   siteUrl: string;
@@ -110,10 +110,11 @@ type InstanceFieldsProps = FieldsRowProps & {
 };
 
 function InstanceFields({ form, baseline, loading, setForm }: InstanceFieldsProps) {
+  const { t } = useTranslation();
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
-        <Label htmlFor="jira-instance">Instance type</Label>
+        <Label htmlFor="jira-instance">{t("jira:instanceType")}</Label>
         <Select
           value={form.instanceType}
           onValueChange={(v) => {
@@ -138,18 +139,18 @@ function InstanceFields({ form, baseline, loading, setForm }: InstanceFieldsProp
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="cloud">Atlassian Cloud</SelectItem>
-            <SelectItem value="server">Server / Data Center</SelectItem>
+            <SelectItem value="cloud">{t("jira:atlassianCloud")}</SelectItem>
+            <SelectItem value="server">{t("jira:serverDataCenter")}</SelectItem>
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
           {form.instanceType === "cloud"
-            ? "Sites hosted at *.atlassian.net."
-            : "Self-hosted Jira (Server or Data Center)."}
+            ? t("jira:sitesHostedAt", { domain: ATLASSIAN_CLOUD_DOMAIN })
+            : t("jira:selfHostedJiraServerOrDataCenter")}
         </p>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="jira-project">Default project key (optional)</Label>
+        <Label htmlFor="jira-project">{t("jira:defaultProjectKeyOptional")}</Label>
         <Input
           id="jira-project"
           data-testid="jira-project-input"
@@ -167,11 +168,12 @@ function InstanceFields({ form, baseline, loading, setForm }: InstanceFieldsProp
 }
 
 function SiteFields({ form, baseline, loading, update }: FieldsRowProps) {
+  const { t } = useTranslation();
   const placeholder =
     form.instanceType === "server" ? "https://jira.your-company.com" : "https://acme.atlassian.net";
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="jira-site">Site URL</Label>
+      <Label htmlFor="jira-site">{t("jira:siteUrl")}</Label>
       <Input
         id="jira-site"
         data-testid="jira-site-input"
@@ -186,11 +188,12 @@ function SiteFields({ form, baseline, loading, update }: FieldsRowProps) {
 }
 
 function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
+  const { t } = useTranslation();
   const showEmail = form.instanceType === "cloud" && form.authMethod === "api_token";
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <div className="space-y-1.5">
-        <Label htmlFor="jira-auth">Authentication method</Label>
+        <Label htmlFor="jira-auth">{t("jira:authenticationMethod")}</Label>
         <Select
           value={form.authMethod}
           onValueChange={(v) => update("authMethod", v as JiraAuthMethod)}
@@ -206,18 +209,18 @@ function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
           <SelectContent>
             {form.instanceType === "cloud" ? (
               <>
-                <SelectItem value="api_token">API token (recommended)</SelectItem>
-                <SelectItem value="session_cookie">Browser session cookie</SelectItem>
+                <SelectItem value="api_token">{t("jira:apiTokenRecommended")}</SelectItem>
+                <SelectItem value="session_cookie">{t("jira:browserSessionCookie")}</SelectItem>
               </>
             ) : (
-              <SelectItem value="pat">Personal Access Token</SelectItem>
+              <SelectItem value="pat">{t("jira:personalAccessToken")}</SelectItem>
             )}
           </SelectContent>
         </Select>
       </div>
       {showEmail ? (
         <div className="space-y-1.5">
-          <Label htmlFor="jira-email">Email</Label>
+          <Label htmlFor="jira-email">{t("jira:email")}</Label>
           <Input
             id="jira-email"
             data-testid="jira-email-input"
@@ -237,73 +240,7 @@ function AuthFields({ form, baseline, loading, update }: FieldsRowProps) {
   );
 }
 
-function SessionSnippet() {
-  const [show, setShow] = useState(false);
-  return (
-    <div className="text-xs text-muted-foreground space-y-2">
-      <button
-        type="button"
-        onClick={() => setShow((v) => !v)}
-        className="inline-flex items-center gap-1 underline cursor-pointer"
-      >
-        <IconCode className="h-3 w-3" />
-        {show ? "Hide" : "Show"} how to copy the session token
-      </button>
-      {show && (
-        <pre className="bg-muted rounded p-3 text-[11px] overflow-x-auto whitespace-pre-wrap">
-          <code>{COOKIE_INSTRUCTIONS}</code>
-        </pre>
-      )}
-    </div>
-  );
-}
-
 type SecretFieldProps = FieldsRowProps & { hasSavedSecret: boolean };
-
-// SECRET_COPY centralizes the field label and empty-state placeholder per
-// auth method. Keyed by JiraAuthMethod so adding a new method causes the
-// type system to flag the missing entry.
-const SECRET_COPY: Record<JiraAuthMethod, { label: string; placeholder: string }> = {
-  api_token: { label: "API token", placeholder: "paste API token here" },
-  pat: { label: "Personal Access Token", placeholder: "paste personal access token here" },
-  session_cookie: { label: "Session token value", placeholder: "paste cloud.session.token value" },
-};
-
-function secretPlaceholder(method: JiraAuthMethod, hasSavedSecret: boolean): string {
-  return hasSavedSecret ? "••••••••" : SECRET_COPY[method].placeholder;
-}
-
-function formatExpiry(expiresAt: string): { label: string; tone: "ok" | "warn" | "danger" } {
-  const diffMs = new Date(expiresAt).getTime() - Date.now();
-  if (Number.isNaN(diffMs)) return { label: "Expiry unknown", tone: "warn" };
-  if (diffMs <= 0) return { label: "Cookie expired — paste a fresh one", tone: "danger" };
-  const hours = diffMs / (60 * 60 * 1000);
-  if (hours < 24) {
-    const h = Math.max(1, Math.round(hours));
-    return { label: `Cookie expires in ${h}h`, tone: "danger" };
-  }
-  const days = Math.round(hours / 24);
-  return {
-    label: `Cookie expires in ${days} day${days === 1 ? "" : "s"}`,
-    tone: days < 7 ? "warn" : "ok",
-  };
-}
-
-const TONE_CLASSES: Record<"ok" | "warn" | "danger", string> = {
-  ok: "text-muted-foreground",
-  warn: "text-amber-600 dark:text-amber-400",
-  danger: "text-destructive",
-};
-
-function CookieExpiry({ expiresAt }: { expiresAt: string }) {
-  const { label, tone } = formatExpiry(expiresAt);
-  const absolute = new Date(expiresAt).toLocaleString();
-  return (
-    <p className={`text-xs ${TONE_CLASSES[tone]}`} title={absolute}>
-      {label}
-    </p>
-  );
-}
 
 type SecretFieldPropsWithExpiry = SecretFieldProps & { secretExpiresAt?: string | null };
 
@@ -315,24 +252,23 @@ function SecretField({
   hasSavedSecret,
   secretExpiresAt,
 }: SecretFieldPropsWithExpiry) {
+  const { t } = useTranslation();
   const method = form.authMethod;
   const siteUrl = form.siteUrl.replace(/\/+$/, "");
   const patHref = siteUrl ? `${siteUrl}/secure/ViewProfile.jspa` : undefined;
   return (
     <div className="space-y-1.5">
       <Label htmlFor="jira-secret">
-        {SECRET_COPY[method].label}
+        {secretCopy(t)[method].label}
         {hasSavedSecret && (
-          <span className="text-xs text-muted-foreground ml-2">
-            (saved — leave blank to keep the current value)
-          </span>
+          <span className="text-xs text-muted-foreground ml-2">{t("jira:savedLeaveBlank")}</span>
         )}
       </Label>
       <Input
         id="jira-secret"
         data-testid="jira-secret-input"
         type="password"
-        placeholder={secretPlaceholder(method, hasSavedSecret)}
+        placeholder={secretPlaceholder(t, method, hasSavedSecret)}
         value={form.secret}
         data-settings-dirty={form.secret !== baseline.secret}
         onChange={(e) => update("secret", e.target.value)}
@@ -341,55 +277,24 @@ function SecretField({
       {method === "session_cookie" && hasSavedSecret && secretExpiresAt && (
         <CookieExpiry expiresAt={secretExpiresAt} />
       )}
-      {method === "api_token" && (
-        <p className="text-xs text-muted-foreground">
-          Create a token at{" "}
-          <a
-            className="underline cursor-pointer"
-            href="https://id.atlassian.com/manage-profile/security/api-tokens"
-            target="_blank"
-            rel="noreferrer"
-          >
-            id.atlassian.com/manage-profile/security/api-tokens
-          </a>
-        </p>
-      )}
-      {method === "pat" && (
-        <p className="text-xs text-muted-foreground">
-          Create a Personal Access Token from your Jira profile
-          {patHref ? (
-            <>
-              {" "}
-              (
-              <a
-                className="underline cursor-pointer"
-                href={patHref}
-                target="_blank"
-                rel="noreferrer"
-              >
-                {patHref}
-              </a>
-              ){" "}
-            </>
-          ) : (
-            " "
-          )}
-          → Personal Access Tokens. Required scopes: read & write.
-        </p>
-      )}
-      {method === "session_cookie" && <SessionSnippet />}
+      <SecretHelp method={method} patHref={patHref} />
     </div>
   );
 }
 
 function TestResultAlert({ result }: { result: TestJiraConnectionResult | null }) {
+  const { t } = useTranslation();
   if (!result) return null;
   return (
     <Alert variant={result.ok ? "default" : "destructive"}>
       <AlertDescription>
+        {/* Both values are Jira's own reply — an account name and an upstream
+            error message — so they travel through `values`, never the catalog. */}
         {result.ok
-          ? `Connected as ${result.displayName || result.email || result.accountId}`
-          : `Failed: ${result.error}`}
+          ? t("jira:connectedAs", {
+              name: result.displayName || result.email || result.accountId,
+            })
+          : t("jira:testFailed", { error: result.error })}
       </AlertDescription>
     </Alert>
   );
@@ -415,6 +320,7 @@ type ActionBarProps = {
 };
 
 function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete }: ActionBarProps) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button
@@ -423,10 +329,10 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
         onClick={onTest}
         disabled={testing || loading || disableTest}
         className="cursor-pointer"
-        title={disableTest ? "Paste a token to test the connection" : undefined}
+        title={disableTest ? t("jira:pasteATokenToTestTheConnection") : undefined}
         data-testid="jira-test-button"
       >
-        {testing ? "Testing..." : "Test connection"}
+        {testing ? t("jira:testingConnection") : t("jira:testConnection")}
       </Button>
       {hasConfig && (
         <Button
@@ -436,7 +342,7 @@ function ActionBar({ testing, loading, hasConfig, disableTest, onTest, onDelete 
           className="ml-auto cursor-pointer"
           data-testid="jira-delete-button"
         >
-          Remove configuration
+          {t("jira:removeConfiguration")}
         </Button>
       )}
     </div>
@@ -459,7 +365,77 @@ function useJiraConfigRefresh(workspaceId: string, setConfig: (cfg: JiraConfig |
   }, [workspaceId, setConfig]);
 }
 
+type JiraConfigMutationDeps = {
+  workspaceId: string;
+  form: FormState;
+  setConfig: Dispatch<SetStateAction<JiraConfig | null>>;
+  setForm: Dispatch<SetStateAction<FormState>>;
+  setTestResult: (result: TestJiraConnectionResult | null) => void;
+  setSaving: (saving: boolean) => void;
+};
+
+// The two callbacks that write the config and then re-seed the form, split out of
+// useJiraSettings to keep each hook inside the function-length limit.
+function useJiraConfigMutations({
+  workspaceId,
+  form,
+  setConfig,
+  setForm,
+  setTestResult,
+  setSaving,
+}: JiraConfigMutationDeps) {
+  const { t } = useTranslation();
+  const { toast } = useToast();
+
+  const handleSave = useCallback(async () => {
+    const submitted = form;
+    setSaving(true);
+    try {
+      const saved = await setJiraConfig(
+        {
+          siteUrl: form.siteUrl,
+          email: form.email,
+          authMethod: form.authMethod,
+          instanceType: form.instanceType,
+          defaultProjectKey: form.defaultProjectKey,
+          secret: form.secret || undefined,
+        },
+        { workspaceId },
+      );
+      setConfig(saved);
+      setForm((current) =>
+        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
+      );
+      // Clear any inline test result from the previous credentials so the
+      // alert reflects only the currently-saved state.
+      setTestResult(null);
+      toast({ description: t("jira:jiraConfigurationSaved"), variant: "success" });
+    } catch (err) {
+      toast({ description: t("jira:saveFailed", { error: String(err) }), variant: "error" });
+      throw err;
+    } finally {
+      setSaving(false);
+    }
+  }, [workspaceId, form, setConfig, setForm, setTestResult, setSaving, t, toast]);
+
+  const handleDelete = useCallback(async () => {
+    if (!confirm(t("jira:removeJiraConfiguration"))) return;
+    try {
+      await deleteJiraConfig({ workspaceId });
+      setConfig(null);
+      setForm(emptyForm);
+      setTestResult(null);
+      toast({ description: t("jira:jiraConfigurationRemoved"), variant: "success" });
+    } catch (err) {
+      toast({ description: t("jira:deleteFailed", { error: String(err) }), variant: "error" });
+    }
+  }, [workspaceId, setConfig, setForm, setTestResult, t, toast]);
+
+  return { handleSave, handleDelete };
+}
+
 function useJiraSettings(workspaceId: string) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [config, setConfig] = useState<JiraConfig | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm);
@@ -476,11 +452,14 @@ function useJiraSettings(workspaceId: string) {
       setConfig(cfg);
       setForm(configToForm(cfg));
     } catch (err) {
-      toast({ description: `Failed to load Jira config: ${String(err)}`, variant: "error" });
+      toast({
+        description: t("jira:failedToLoadJiraConfig", { error: String(err) }),
+        variant: "error",
+      });
     } finally {
       setLoading(false);
     }
-  }, [workspaceId, toast]);
+  }, [workspaceId, t, toast]);
 
   useEffect(() => {
     void load();
@@ -507,49 +486,14 @@ function useJiraSettings(workspaceId: string) {
     }
   }, [workspaceId, form]);
 
-  const handleSave = useCallback(async () => {
-    const submitted = form;
-    setSaving(true);
-    try {
-      const saved = await setJiraConfig(
-        {
-          siteUrl: form.siteUrl,
-          email: form.email,
-          authMethod: form.authMethod,
-          instanceType: form.instanceType,
-          defaultProjectKey: form.defaultProjectKey,
-          secret: form.secret || undefined,
-        },
-        { workspaceId },
-      );
-      setConfig(saved);
-      setForm((current) =>
-        JSON.stringify(current) === JSON.stringify(submitted) ? configToForm(saved) : current,
-      );
-      // Clear any inline test result from the previous credentials so the
-      // alert reflects only the currently-saved state.
-      setTestResult(null);
-      toast({ description: "Jira configuration saved", variant: "success" });
-    } catch (err) {
-      toast({ description: `Save failed: ${String(err)}`, variant: "error" });
-      throw err;
-    } finally {
-      setSaving(false);
-    }
-  }, [workspaceId, form, toast]);
-
-  const handleDelete = useCallback(async () => {
-    if (!confirm("Remove Jira configuration?")) return;
-    try {
-      await deleteJiraConfig({ workspaceId });
-      setConfig(null);
-      setForm(emptyForm);
-      setTestResult(null);
-      toast({ description: "Jira configuration removed", variant: "success" });
-    } catch (err) {
-      toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
-    }
-  }, [workspaceId, toast]);
+  const { handleSave, handleDelete } = useJiraConfigMutations({
+    workspaceId,
+    form,
+    setConfig,
+    setForm,
+    setTestResult,
+    setSaving,
+  });
   const discard = useCallback(() => setForm(configToForm(config)), [config]);
 
   return {
@@ -594,6 +538,7 @@ function savedSecretMatches(config: JiraConfig | null, form: FormState): boolean
 }
 
 export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation();
   const s = useJiraSettings(workspaceId);
   const baseline = configToForm(s.config);
   const savedSecretMatchesMode = savedSecretMatches(s.config, s.form);
@@ -604,10 +549,12 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   const disableTest = missingSecret;
   const revision = JSON.stringify(s.form);
   const dirty = !s.loading && revision !== JSON.stringify(configToForm(s.config));
+  // Assigned rather than returned from a helper, but the guard would not see it
+  // either way — `invalidReason` is a plain string, never a JSX literal.
   let invalidReason: string | undefined;
-  if (!s.form.siteUrl) invalidReason = "A Jira site URL is required.";
-  else if (emailRequired && !s.form.email) invalidReason = "An email address is required.";
-  else if (missingSecret) invalidReason = "A credential is required.";
+  if (!s.form.siteUrl) invalidReason = t("jira:aJiraSiteUrlIsRequired");
+  else if (emailRequired && !s.form.email) invalidReason = t("jira:anEmailAddressIsRequired");
+  else if (missingSecret) invalidReason = t("jira:aCredentialIsRequired");
 
   useSettingsSaveContributor({
     id: `jira-config:${workspaceId}`,
@@ -622,8 +569,8 @@ export function JiraConnectionSection({ workspaceId }: { workspaceId: string }) 
   return (
     <SettingsSection
       icon={<IconTicket className="h-5 w-5" />}
-      title="Jira integration"
-      description="Connect this workspace to Atlassian Cloud or a self-hosted Jira Server / Data Center instance. Credentials are stored encrypted server-side for the selected workspace."
+      title={t("jira:jiraIntegration")}
+      description={t("jira:connectThisWorkspaceToAtlassianCloud")}
       action={<JiraEnabledControl />}
     >
       <SettingsCard isDirty={dirty}>

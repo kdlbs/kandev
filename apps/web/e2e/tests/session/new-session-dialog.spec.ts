@@ -3,6 +3,8 @@ import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const PROMPT_NAME = "e2e-new-agent-prompt";
+const PROMPT_CONTENT = "Inspect the failing flow and add a regression test.";
 
 /**
  * Tests for the New Session Dialog UI flow.
@@ -10,6 +12,15 @@ const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
  * dialog opens, environment info is shown, session is created, and a new tab appears.
  */
 test.describe("New session dialog", () => {
+  test.afterEach(async ({ apiClient }) => {
+    const { prompts } = await apiClient.listPrompts();
+    for (const prompt of prompts) {
+      if (!prompt.builtin && prompt.name === PROMPT_NAME) {
+        await apiClient.deletePrompt(prompt.id);
+      }
+    }
+  });
+
   test("opens dialog from + menu and shows environment info", async ({
     testPage,
     apiClient,
@@ -133,6 +144,65 @@ test.describe("New session dialog", () => {
     // 9. Verify the backend has two sessions
     const { sessions: allSessions } = await apiClient.listTaskSessions(task.id);
     expect(allSessions).toHaveLength(2);
+  });
+
+  test("selects a saved prompt without submitting, then launches explicitly", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await apiClient.createPrompt(PROMPT_NAME, PROMPT_CONTENT);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Saved Prompt New Agent Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          return DONE_STATES.includes(sessions[0]?.state ?? "");
+        },
+        { timeout: 30_000 },
+      )
+      .toBe(true);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("simple mock response", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    await session.openNewSessionDialog();
+    await expect(session.newSessionDialog()).toBeVisible({ timeout: 5_000 });
+
+    const prompt = session.newSessionPromptInput();
+    await prompt.pressSequentially("@e2e-new");
+    await expect(testPage.getByText(/Mention tasks, files, prompts/i)).toBeVisible();
+    await expect(testPage.getByRole("option", { name: new RegExp(PROMPT_NAME) })).toBeVisible();
+
+    await prompt.press("Enter");
+    await expect(prompt).toHaveValue(PROMPT_CONTENT);
+    await expect(session.newSessionDialog()).toBeVisible();
+    expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);
+
+    await session.newSessionStartButton().click();
+    await expect(session.newSessionDialog()).not.toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 30_000,
+      })
+      .toBe(2);
   });
 
   test("second session reuses same task environment", async ({ testPage, apiClient, seedData }) => {

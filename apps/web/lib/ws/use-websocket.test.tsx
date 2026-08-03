@@ -21,7 +21,9 @@ vi.mock("@/lib/ws/client", () => ({
   },
 }));
 
-vi.mock("@/lib/ws/router", () => ({ registerWsHandlers: vi.fn(() => ({})) }));
+vi.mock("@/lib/ws/router", () => ({
+  registerWsHandlers: vi.fn(() => ({ handlers: {}, dispose: vi.fn() })),
+}));
 vi.mock("@/lib/ws/connection", () => ({ setWebSocketClient: vi.fn() }));
 vi.mock("@/lib/debug/log", () => ({ createDebugLogger: () => vi.fn() }));
 

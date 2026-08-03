@@ -1,7 +1,12 @@
 import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
-import type { GitHubRateLimitUpdate, TaskCIAutomationOptions, TaskPR } from "@/lib/types/github";
+import type {
+  GitHubRateLimitUpdate,
+  TaskCIAutomationOptions,
+  TaskPR,
+  TaskPRDeletedEvent,
+} from "@/lib/types/github";
 
 export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
@@ -9,6 +14,12 @@ export function registerGitHubHandlers(store: StoreApi<AppState>): WsHandlers {
       const pr = message.payload as TaskPR;
       if (pr.task_id) {
         store.getState().setTaskPR(pr.task_id, pr);
+      }
+    },
+    "github.task_pr.deleted": (message) => {
+      const deleted = message.payload as TaskPRDeletedEvent;
+      if (deleted.task_id && deleted.association_id) {
+        store.getState().removeTaskPR(deleted.task_id, deleted.association_id);
       }
     },
     "github.task_ci_options.updated": (message) => {

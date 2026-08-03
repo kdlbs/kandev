@@ -8,6 +8,7 @@ import { formatFindingAsMarkdown } from "@/lib/review/format";
 import type { TaskReviewFinding } from "@/lib/types/review";
 import type { Message } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { generateUUID } from "@/lib/utils";
 
 type Params = {
   taskId: string | null | undefined;
@@ -55,6 +56,7 @@ export function useSendFindingToAgent({ taskId, sessionId }: Params) {
           {
             task_id: taskId,
             session_id: sessionId,
+            client_message_id: generateUUID(),
             content,
             has_review_comments: true,
             ...(planMode ? { plan_mode: true } : {}),

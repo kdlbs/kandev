@@ -52,6 +52,21 @@ async function seedBigConversation(apiClient: ApiClient, seedData: SeedData): Pr
       { timeout: 60_000, message: "Waiting for the boot turn to persist" },
     )
     .toBe(true);
+
+  // A mock-agent text reply is persisted before the session reaches its idle
+  // state. Wait for that transition before adding the long history, otherwise
+  // the boot turn can still mutate the same transcript while pagination is
+  // under test.
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((session) => session.id === sessionId)?.state;
+      },
+      { timeout: 60_000, message: "Waiting for the boot turn to become idle" },
+    )
+    .toBe("WAITING_FOR_INPUT");
+
   await apiClient.seedSessionMessage(sessionId, { type: "message", content: INITIAL_PROMPT });
   await apiClient.seedAgentMessages(sessionId, FILLER_COUNT);
   return task.id;

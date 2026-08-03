@@ -46,6 +46,17 @@ function preservePrimaryExecutorFields(
   }
 }
 
+function preserveOmittedStatusSummary(
+  existing: KanbanTask,
+  merged: KanbanTask,
+  nextTask: KanbanTask,
+  payload: TaskEventPayload,
+): void {
+  if (!hasPayloadField(payload, "status_summary") && nextTask.statusSummary === undefined) {
+    merged.statusSummary = existing.statusSummary;
+  }
+}
+
 function mergeTaskUpdate(
   existing: KanbanTask | undefined,
   nextTask: KanbanTask,
@@ -93,6 +104,7 @@ function mergeTaskUpdate(
   ) {
     merged.activeSubagentCount = existing.activeSubagentCount;
   }
+  preserveOmittedStatusSummary(existing, merged, nextTask, payload);
   return merged;
 }
 
@@ -341,8 +353,53 @@ function redirectAwayFromRemovedTask(taskId: string): void {
 type TaskUpdatedMessage = Parameters<NonNullable<WsHandlers["task.updated"]>>[0];
 type TaskCreatedMessage = Parameters<NonNullable<WsHandlers["task.created"]>>[0];
 type TaskStateChangedMessage = Parameters<NonNullable<WsHandlers["task.state_changed"]>>[0];
+type TaskStatusSummaryUpdatedMessage = Parameters<
+  NonNullable<WsHandlers["task.status_summary.updated"]>
+>[0];
 type TaskUpsertMessage = TaskCreatedMessage | TaskStateChangedMessage;
 type TaskUpsertAction = "task.created" | "task.state_changed";
+
+function updateTaskStatusSummaryInBothKanbans(
+  state: AppState,
+  message: TaskStatusSummaryUpdatedMessage,
+): AppState {
+  const { task_id: taskId, status_summary: nextSummary } = message.payload;
+  const shouldReplace = (task: KanbanTask): boolean => {
+    const current = task.statusSummary;
+    return !current || nextSummary.revision > current.revision;
+  };
+  const updateTask = (task: KanbanTask): KanbanTask =>
+    shouldReplace(task) ? { ...task, statusSummary: nextSummary } : task;
+
+  let next = state;
+  if (state.kanban.tasks.some((task) => task.id === taskId && shouldReplace(task))) {
+    next = {
+      ...next,
+      kanban: {
+        ...next.kanban,
+        tasks: next.kanban.tasks.map((task) => (task.id === taskId ? updateTask(task) : task)),
+      },
+    };
+  }
+
+  const snapshots = Object.entries(next.kanbanMulti.snapshots);
+  const changedSnapshots = snapshots.filter(([, snapshot]) =>
+    snapshot.tasks.some((task) => task.id === taskId && shouldReplace(task)),
+  );
+  if (changedSnapshots.length === 0) return next;
+
+  const nextSnapshots = { ...next.kanbanMulti.snapshots };
+  for (const [workflowId, snapshot] of changedSnapshots) {
+    nextSnapshots[workflowId] = {
+      ...snapshot,
+      tasks: snapshot.tasks.map((task) => (task.id === taskId ? updateTask(task) : task)),
+    };
+  }
+  return {
+    ...next,
+    kanbanMulti: { ...next.kanbanMulti, snapshots: nextSnapshots },
+  };
+}
 
 function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessage): void {
   // Ephemeral tasks never reach the Kanban board, but quick chats are shared
@@ -505,6 +562,9 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     },
     "task.state_changed": (message) => {
       handleTaskUpsert("task.state_changed", store, message);
+    },
+    "task.status_summary.updated": (message) => {
+      store.setState((state) => updateTaskStatusSummaryInBothKanbans(state, message));
     },
   };
 }

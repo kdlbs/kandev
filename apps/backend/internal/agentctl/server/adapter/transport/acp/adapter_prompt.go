@@ -134,7 +134,7 @@ func (a *Adapter) sendPrompt(
 		})
 	}()
 
-	if waitErr := a.waitForPromptRPCAfterUserCancel(turn); waitErr != nil {
+	if waitErr := a.waitForPromptRPCAfterUserCancel(turn, sessionID); waitErr != nil {
 		promptSpan.RecordError(waitErr)
 		promptSpan.End()
 		a.clearPromptTraceCtx(turn)

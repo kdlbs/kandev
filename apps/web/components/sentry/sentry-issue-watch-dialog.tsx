@@ -27,7 +27,8 @@ import {
 import { listSentryInstances, listSentryOrganizations } from "@/lib/api/domains/sentry-api";
 import { WatcherRepositoryFields } from "@/components/watcher-repository-fields";
 import { clearWorkspaceScopedForm } from "@/lib/watcher-repository-default";
-import { SENTRY_ISSUE_WATCH_PLACEHOLDERS } from "./sentry-issue-watch-placeholders";
+import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+import { sentryIssueWatchPlaceholders } from "./sentry-issue-watch-placeholders";
 import { MaxInflightTasksField } from "./sentry-issue-watch-throttle-field";
 import { SelectField, FilterFields, type FormSetter } from "./sentry-issue-watch-filter-fields";
 import {
@@ -44,6 +45,8 @@ import type {
   SentryIssueWatch,
   UpdateSentryIssueWatchRequest,
 } from "@/lib/types/sentry";
+import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
 type Props = {
   open: boolean;
@@ -79,7 +82,12 @@ function useFormData(workspaceId: string) {
   return { workflows, agentProfiles: filteredAgentProfiles, allExecutorProfiles };
 }
 
-function PlaceholdersHelp() {
+// `placeholders` comes from PromptField rather than being rebuilt here: this
+// renders inside PromptField, which already needs the same array for
+// ScriptEditor, so recomputing it would run the whole table twice per locale
+// change for no benefit.
+function PlaceholdersHelp({ placeholders }: { placeholders: ScriptPlaceholder[] }) {
+  const { t } = useTranslation();
   return (
     <TooltipProvider>
       <Tooltip>
@@ -87,9 +95,9 @@ function PlaceholdersHelp() {
           <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground/50 hover:text-muted-foreground cursor-help shrink-0" />
         </TooltipTrigger>
         <TooltipContent className="max-w-xs" align="start">
-          <p className="text-xs font-medium mb-1">Available placeholders:</p>
+          <p className="text-xs font-medium mb-1">{t("sentry:availablePlaceholders")}</p>
           <ul className="text-xs space-y-0.5">
-            {SENTRY_ISSUE_WATCH_PLACEHOLDERS.map((p) => (
+            {placeholders.map((p) => (
               <li key={p.key}>
                 <code className="text-[10px] bg-white/15 px-1 rounded">{`{{${p.key}}}`}</code>{" "}
                 <span className="opacity-70">{p.description}</span>
@@ -103,14 +111,23 @@ function PlaceholdersHelp() {
 }
 
 function PromptField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
+  // Memoized because ScriptEditor keys its completion-provider registration on
+  // `placeholders` identity. This used to be a module-scope const, so it was
+  // stable for free; now that it is built from `t`, a fresh array on every
+  // render would re-register the provider on every keystroke. The tooltip below
+  // shares this array rather than building its own.
+  const placeholders = useMemo(() => sentryIssueWatchPlaceholders(t), [t]);
   return (
     <div className="space-y-1.5">
       <div className="flex items-center gap-1.5">
-        <Label>Task Prompt</Label>
-        <PlaceholdersHelp />
+        <Label>{t("sentry:taskPrompt")}</Label>
+        <PlaceholdersHelp placeholders={placeholders} />
       </div>
       <p className="text-xs text-muted-foreground">
-        The prompt sent to the agent for each new issue. Type {"{{"} to insert placeholders.
+        {/* The `{{` token is passed as a value so it never reaches the catalog,
+            where i18next would interpolate it away. */}
+        {t("sentry:promptFieldHelp", { token: "{{" })}
       </p>
       <div className="rounded-md border border-border overflow-hidden">
         <ScriptEditor
@@ -119,7 +136,7 @@ function PromptField({ value, onChange }: { value: string; onChange: (v: string)
           language="markdown"
           height={computeEditorHeight(value)}
           lineNumbers="off"
-          placeholders={SENTRY_ISSUE_WATCH_PLACEHOLDERS}
+          placeholders={placeholders}
         />
       </div>
     </div>
@@ -135,14 +152,15 @@ function WorkspacePicker({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
   return (
     <SelectField
-      label="Workspace"
-      description="Tasks created by this watcher land in the selected workspace."
+      label={t("common:workspace")}
+      description={t("sentry:workspaceHelp")}
       value={value}
       onChange={onChange}
-      placeholder="Select workspace"
+      placeholder={t("sentry:selectWorkspace")}
       items={workspaces.map((w) => ({ id: w.id, label: w.name }))}
       disabled={disabled}
     />
@@ -193,14 +211,15 @@ function InstancePicker({
   onChange: (v: string) => void;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   const noInstances = instances.length === 0;
   return (
     <SelectField
-      label="Sentry instance"
-      description="Which Sentry instance this watcher polls. Immutable after creation."
+      label={t("sentry:sentryInstance")}
+      description={t("sentry:sentryInstanceHelp")}
       value={value}
       onChange={onChange}
-      placeholder={noInstances ? "No Sentry instances in this workspace" : "Select an instance"}
+      placeholder={noInstances ? t("sentry:noInstancesInWorkspace") : t("sentry:selectAnInstance")}
       items={instances.map((i) => ({ id: i.id, label: i.name }))}
       disabled={disabled || noInstances}
     />
@@ -208,22 +227,23 @@ function InstancePicker({
 }
 
 function AutomationFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  const { t } = useTranslation();
   const { workflows, agentProfiles, allExecutorProfiles } = useFormData(form.workspaceId);
   const { steps, loading: stepsLoading } = useWorkflowSteps(form.workflowId);
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          label="Workflow"
-          description="Tasks are created in this workflow."
+          label={t("sentry:workflow")}
+          description={t("sentry:workflowHelp")}
           value={form.workflowId}
           onChange={(v) => setForm((p) => ({ ...p, workflowId: v, workflowStepId: "" }))}
-          placeholder="Select workflow"
+          placeholder={t("sentry:selectWorkflow")}
           items={workflows.map((w) => ({ id: w.id, label: w.name }))}
         />
         <SelectField
-          label="Workflow Step"
-          description="Initial step for new tasks."
+          label={t("sentry:workflowStep")}
+          description={t("sentry:workflowStepHelp")}
           value={form.workflowStepId}
           onChange={(v) => setForm((p) => ({ ...p, workflowStepId: v }))}
           placeholder={stepPlaceholder(form.workflowId, stepsLoading, steps.length)}
@@ -242,19 +262,19 @@ function AutomationFields({ form, setForm }: { form: FormState; setForm: FormSet
       />
       <div className="grid grid-cols-2 gap-4">
         <SelectField
-          label="Agent Profile"
-          description="Optional — falls back to step default."
+          label={t("sentry:agentProfile")}
+          description={t("sentry:fallsBackToStepDefault")}
           value={form.agentProfileId}
           onChange={(v) => setForm((p) => ({ ...p, agentProfileId: v }))}
-          placeholder="(use step default)"
+          placeholder={t("sentry:useStepDefault")}
           items={agentProfiles.map((p) => ({ id: p.id, label: p.label }))}
         />
         <SelectField
-          label="Executor Profile"
-          description="Optional — falls back to step default."
+          label={t("sentry:executorProfile")}
+          description={t("sentry:fallsBackToStepDefault")}
           value={form.executorProfileId}
           onChange={(v) => setForm((p) => ({ ...p, executorProfileId: v }))}
-          placeholder="(use step default)"
+          placeholder={t("sentry:useStepDefault")}
           items={allExecutorProfiles.map((p) => ({ id: p.id, label: p.name }))}
         />
       </div>
@@ -263,13 +283,12 @@ function AutomationFields({ form, setForm }: { form: FormState; setForm: FormSet
 }
 
 function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSetter }) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="space-y-1.5">
-        <Label>Poll Interval (seconds)</Label>
-        <p className="text-xs text-muted-foreground">
-          How often to re-run the search. Minimum 60s, maximum 3600s.
-        </p>
+        <Label>{t("sentry:pollIntervalSeconds")}</Label>
+        <p className="text-xs text-muted-foreground">{t("sentry:pollIntervalHelp")}</p>
         <Input
           type="number"
           value={form.pollInterval}
@@ -281,8 +300,8 @@ function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSette
       <MaxInflightTasksField form={form} setForm={setForm} />
       <div className="flex items-center justify-between">
         <div>
-          <Label>Enabled</Label>
-          <p className="text-xs text-muted-foreground">Pause or resume polling.</p>
+          <Label>{t("sentry:enabled")}</Label>
+          <p className="text-xs text-muted-foreground">{t("sentry:enabledHelp")}</p>
         </div>
         <Switch
           checked={form.enabled}
@@ -294,9 +313,11 @@ function SettingsFields({ form, setForm }: { form: FormState; setForm: FormSette
   );
 }
 
-function savingLabel(saving: boolean, isEdit: boolean): string {
-  if (saving) return "Saving…";
-  return isEdit ? "Update" : "Create";
+// `t` is threaded in rather than read from a hook: this is a plain function, so
+// a literal here would be invisible to the JSX-only guard.
+function savingLabel(t: TFunction, saving: boolean, isEdit: boolean): string {
+  if (saving) return t("sentry:saving");
+  return isEdit ? t("sentry:update") : t("sentry:create");
 }
 
 // useWatchOrgs loads the org list for the org dropdown and auto-selects the
@@ -342,6 +363,7 @@ export function SentryIssueWatchDialog({
   onCreate,
   onUpdate,
 }: Props) {
+  const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces.activeId);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>(() => makeEmptyForm(workspaceId ?? ""));
@@ -388,12 +410,10 @@ export function SentryIssueWatchDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-full max-w-full sm:w-[800px] sm:max-w-none max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{watch ? "Edit Sentry Watcher" : "Create Sentry Watcher"}</DialogTitle>
-          <DialogDescription>
-            Poll Sentry with a structured filter and auto-create a Kandev task for each
-            newly-matching issue. Optionally bind a repository so each task runs against that
-            codebase, or leave it unset to run with no repository.
-          </DialogDescription>
+          <DialogTitle>
+            {watch ? t("sentry:editSentryWatcher") : t("sentry:createSentryWatcher")}
+          </DialogTitle>
+          <DialogDescription>{t("sentry:watchDialogDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-5">
           <WorkspacePicker
@@ -423,10 +443,10 @@ export function SentryIssueWatchDialog({
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} className="cursor-pointer">
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button onClick={handleSave} disabled={saving || !canSave} className="cursor-pointer">
-            {savingLabel(saving, !!watch)}
+            {savingLabel(t, saving, !!watch)}
           </Button>
         </DialogFooter>
       </DialogContent>

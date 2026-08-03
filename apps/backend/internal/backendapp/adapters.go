@@ -433,6 +433,14 @@ func (a *lifecycleAdapter) SetSessionModelBySessionID(ctx context.Context, sessi
 	return a.mgr.SetSessionModelBySessionID(ctx, sessionID, modelID)
 }
 
+// SetSessionConfigOptionBySessionID applies an ACP dynamic session option.
+// Workflow conditional configuration uses this optional seam so older agent
+// manager test doubles and non-ACP providers can fail closed without widening
+// the executor launch contract.
+func (a *lifecycleAdapter) SetSessionConfigOptionBySessionID(ctx context.Context, sessionID, configID, value string) error {
+	return a.mgr.SetSessionConfigOptionBySessionID(ctx, sessionID, configID, value)
+}
+
 // SetSessionModeBySessionID applies a session permission mode via ACP session/set_mode.
 func (a *lifecycleAdapter) SetSessionModeBySessionID(ctx context.Context, sessionID, modeID string) error {
 	return a.mgr.SetSessionModeBySessionID(ctx, sessionID, modeID)

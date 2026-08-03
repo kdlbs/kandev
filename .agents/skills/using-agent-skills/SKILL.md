@@ -27,6 +27,7 @@ Task arrives
 |-- Test strategy or coverage gaps? --------> /tdd or /e2e in the current conversation
 |-- Add debug logs? ------------------------> /debug
 |-- Add Jira/Linear-style integration? -----> /add-integration
+|-- Add/roll out/promote/graduate/remove a runtime feature flag or release toggle? -> /runtime-feature-flags
 |-- Validate implementation? ----------------> /tdd plus exact task-defined tests/E2E
 |-- Need local QA/review/simplification? ----> only on explicit user request or PR finding
 |-- Improve skills/agents/commands? --------> /harness-improvement

@@ -42,8 +42,8 @@ Options:
   --port           Port for the Go backend (the URL kandev opens on in
                    start/run). Alias for --backend-port. Also reads
                    KANDEV_PORT or KANDEV_BACKEND_PORT.
-  --verbose, -v    Show info logs from backend + web.
-  --debug          Show debug logs + agent message dumps.
+  --verbose, -v    Show backend info logs on stdout (also retained in its file).
+  --debug          Retain backend debug logs in its file + agent message dumps.
   --headless       Skip opening the browser. Used by service units.
   --help, -h       Show help.
 

@@ -251,6 +251,7 @@ test.describe("Mobile sidebar task actions", () => {
     expect(menuOverflow.scrollHeight).toBeGreaterThan(menuOverflow.clientHeight);
     for (const actionName of [
       "Pin",
+      "Edit",
       "Rename",
       "Duplicate",
       "Archive",
@@ -265,6 +266,86 @@ test.describe("Mobile sidebar task actions", () => {
     await archiveItem.scrollIntoViewIfNeeded();
     await expect(archiveItem).toBeInViewport();
     await expect(diffStats).toBeVisible();
+  });
+
+  test("edits a started task from the phone drawer and closes the drawer", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const task = await apiClient.createTask(seedData.workspaceId, "Phone sidebar edit target", {
+      description: "Phone prompt stays locked",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.updateTaskState(task.id, "IN_PROGRESS");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await testPage.getByTestId("mobile-session-menu").tap();
+
+    const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = drawer
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Phone sidebar edit target" });
+    await taskRow.getByRole("button", { name: "Task actions" }).tap();
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).tap();
+
+    await expect(drawer).toBeHidden();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog.getByTestId("task-title-input")).toBeEnabled();
+    await expect(dialog.getByTestId("task-description-input")).toBeDisabled();
+    await expect(dialog.getByTestId("task-description-input")).toHaveValue(
+      "Phone prompt stays locked",
+    );
+    await prCapture.screenshot("phone-sidebar-task-edit-dialog", {
+      caption: "Phone sidebar task editor with started-task prompt locked",
+    });
+    await dialog.getByTestId("task-title-input").fill("Phone sidebar edit updated");
+    await dialog.getByRole("button", { name: "Update", exact: true }).tap();
+
+    await expect(dialog).toHaveCount(0);
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).title)
+      .toBe("Phone sidebar edit updated");
+  });
+
+  test("keeps the tablet task sheet behind the sidebar editor", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await testPage.setViewportSize({ width: 820, height: 900 });
+    const task = await apiClient.seedTask(seedData.workspaceId, "Tablet sidebar edit target", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await testPage.goto(`/t/${task.task_id}`);
+    await expect(testPage.getByTestId("tablet-task-layout")).toBeVisible();
+    await testPage.evaluate(
+      "window.__KANDEV_E2E_STORE__?.getState().setMobileSessionTaskSwitcherOpen(true)",
+    );
+
+    const sheet = testPage.getByRole("dialog", { name: "Tasks" });
+    const taskRow = sheet
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Tablet sidebar edit target" });
+    await taskRow.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Edit", exact: true }).click();
+
+    const editor = testPage
+      .getByRole("dialog")
+      .filter({ has: testPage.getByTestId("task-title-input") });
+    await expect(editor.getByTestId("task-title-input")).toBeVisible();
+    await expect(sheet).toBeVisible();
+    await prCapture.screenshot("tablet-sidebar-task-edit-dialog", {
+      caption: "Tablet sidebar task editor with task sheet retained",
+    });
+    await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+    await expect(editor).toHaveCount(0);
+    await expect(sheet).toBeVisible();
   });
 
   test("opens create subtask from the mobile task actions menu", async ({

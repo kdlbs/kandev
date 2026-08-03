@@ -5,7 +5,6 @@ import (
 	"context"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -280,24 +279,20 @@ func carryForwardFileDiff(fi types.FileInfo, filePath string, update *types.GitS
 // pipe-based reads. Slot is acquired before Start; if Start fails we
 // release immediately, else release runs after Wait.
 func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool) {
-	cctx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
+	release, err := subproc.AcquireGit(ctx, gitWorkClass(ctx))
+	if err != nil {
+		return "", false
+	}
+	defer release()
+	execCtx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(cctx, "git", args...)
+	cmd := subproc.NewGitCommand(execCtx, args...)
 	cmd.Dir = workDir
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", false
 	}
-	release, err := subproc.Git().Acquire(cctx)
-	if err != nil {
-		_ = stdout.Close()
-		return "", false
-	}
-	// release() is idempotent (sync.Once inside the throttle), so a defer
-	// covers every return path — including ones added later between Start
-	// and the explicit end-of-function release.
-	defer release()
 	if err := cmd.Start(); err != nil {
 		_ = stdout.Close()
 		return "", false

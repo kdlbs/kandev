@@ -280,7 +280,7 @@ healthcheck:
   start_period: 15s
 ```
 
-Container logs go to stdout/stderr by default. If configuration sends logs to a file, place that path on persistent storage and account for Kandev's file rotation settings.
+The backend writes its daily files to `/data/logs/backend-logs.log` on the persistent volume and prints the path at startup. Each daily file accepts at most 256 MiB, and Kandev retains the current UTC day plus the two preceding days. `docker logs` shows the bounded stdout stream; use **Settings > System > Logs** for a frontend+backend diagnostic ZIP.
 
 ## Upgrade and remove
 

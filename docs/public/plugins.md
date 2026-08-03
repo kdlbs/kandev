@@ -116,12 +116,16 @@ Either path runs the same pipeline:
 3. Parse and validate `manifest.yaml` **before any code runs**: schema, `id`
    pattern, the `categories` and UI-surface enums, and that
    `runtime.executables` contains an entry for the host's OS/arch.
-4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the
-   installation.
+4. Extract to `~/.kandev/plugins/<id>/<version>/` and record the installation
+   in `~/.kandev/plugins/<id>.yml`.
 5. Spawn the platform-matched binary and complete the go-plugin handshake.
    Status is `registered` while this is pending, `active` once the
    handshake succeeds, or `error` if spawn/handshake fails (the operator can
-   retry via **Enable**).
+   retry via **Enable**). The record keeps a bounded, single-line diagnostic
+   and its failure timestamp so the reason is visible in Settings > Plugins.
+   Before persistence, credential-like values such as PATs, bearer tokens,
+   labeled secrets/API keys, and the host home path are redacted; plugin stdout
+   is not stored verbatim.
 
 A successful install that failed to spawn returns HTTP 201 with a
 `warning` field rather than failing outright — the package is installed,
@@ -169,9 +173,20 @@ binary an operator hasn't explicitly approved via install or Sync.
 
 - **Disable** stops the subprocess. Config and state are preserved; no
   events or webhooks are delivered while disabled.
-- **Enable** respawns the subprocess and re-completes the handshake.
+- **Enable** respawns the subprocess and re-completes the handshake. It is also
+  the manual recovery action for an `error` plugin; the Settings row and detail
+  page show the last failure diagnostic when one is available. A successful
+  retry clears the diagnostic, while a failed retry re-reads the plugin record
+  so the row/detail immediately shows the replacement reason and keeps the
+  plugin in `error`.
 - **Uninstall** stops the subprocess and deletes the plugin's package,
   registration record, and all persisted state — there is no grace period.
+
+When a plugin is in `error`, its declared events remain buffered in the bounded
+100-event/5-minute ring buffer. If that buffer overflows, kandev drops the
+oldest event and emits at most one warning per plugin per minute, reporting the
+number of drops accumulated since the previous warning instead of writing one
+log line per dropped event.
 
 ## Per-plugin settings
 
@@ -192,8 +207,8 @@ A plugin can also render its own UI inline on this page — at the top, above th
 settings form — via the `plugin-settings` slot, for example a live
 integration-health card ("CLI installed ✅ v0.45.2", "API token ✅
 authenticated"). This is owner-scoped, so a plugin's card only ever appears on
-its own settings page. See [Named
-slots](plugins-authoring.md#named-slots) in the authoring guide.
+its own settings page. See [supported named
+slots](plugins-authoring.md#supported-named-slots) in the authoring guide.
 
 <details>
 <summary>Package signing, storage, and security details</summary>
@@ -212,7 +227,7 @@ identically to an unsigned one; signing is not required in v1.
 
 ```
 ~/.kandev/plugins/
-├── <id>.yml                    # registration record (status, install_path, signed, ...)
+├── <id>.yml                    # registration record (signed, status, install_path, last_error, last_error_at, ...)
 ├── <id>.config.yml             # operator-editable config (PATCH /api/plugins/{id})
 └── <id>/
     ├── <version>/              # extracted package (InstallPath)
@@ -223,6 +238,11 @@ identically to an unsigned one; signing is not required in v1.
 ```
 
 </details>
+
+Each `<id>.yml` registration record stores the installed package metadata and
+host-managed runtime fields, including `signed`, `last_error`, and
+`last_error_at`. The diagnostic fields are empty until a runtime failure is
+recorded and are cleared after successful recovery.
 
 ## Security posture
 
@@ -235,8 +255,8 @@ identically to an unsigned one; signing is not required in v1.
   it declared in its manifest: `state` gates the state RPCs, `secrets` gates
   the plugin-owned secret RPCs, and each read-only data accessor (tasks,
   sessions, workspaces, workflows, agent profiles, repositories) is gated
-  individually via `api_read:<resource>` (write access, `api_write:<resource>`,
-  is reserved but not yet implemented). An undeclared capability returns gRPC
+  individually via `api_read:<resource>` and `api_write:<resource>` for the
+  implemented task/message Host writes. An undeclared capability returns gRPC
   `PermissionDenied` with a message naming the missing capability, checked by
   a server interceptor before the handler runs. `GetConfig` and `EmitEvent`
   are the only ungated RPCs — a plugin can always read its own config

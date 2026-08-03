@@ -21,34 +21,49 @@ import {
   computeEditorHeight,
 } from "@/components/settings/profile-edit/script-editor";
 import type { ScriptPlaceholder } from "@/components/settings/profile-edit/script-editor-completions";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 
-const JIRA_PROMPT_PLACEHOLDERS: ScriptPlaceholder[] = [
-  {
-    key: "key",
-    description: "Jira ticket key",
-    example: "PROJ-123",
-    executor_types: [],
-  },
-  {
-    key: "url",
-    description: "URL of the Jira ticket",
-    example: "https://company.atlassian.net/browse/PROJ-123",
-    executor_types: [],
-  },
-  {
-    key: "title",
-    description: "Ticket summary",
-    example: "Login button broken on Safari",
-    executor_types: [],
-  },
-  {
-    key: "description",
-    description: "Ticket description",
-    example: "Repro: open Safari, click login…",
-    executor_types: [],
-  },
-];
+// A function rather than a const because `description` is copy — it is shown in
+// the editor's completion list — and a module-scope `t()` would freeze it at the
+// boot locale. `key` is the interpolation token and each `example` is sample
+// Jira data; both are identifiers and stay out of the catalog.
+function jiraPromptPlaceholders(t: TFunction): ScriptPlaceholder[] {
+  return [
+    {
+      key: "key",
+      description: t("jira:presetPlaceholderTicketKey"),
+      example: "PROJ-123",
+      executor_types: [],
+    },
+    {
+      key: "url",
+      description: t("jira:presetPlaceholderTicketUrl"),
+      example: "https://company.atlassian.net/browse/PROJ-123",
+      executor_types: [],
+    },
+    {
+      key: "title",
+      description: t("jira:presetPlaceholderTicketSummary"),
+      example: "Login button broken on Safari",
+      executor_types: [],
+    },
+    {
+      key: "description",
+      description: t("jira:presetPlaceholderTicketDescription"),
+      example: "Repro: open Safari, click login…",
+      executor_types: [],
+    },
+  ];
+}
 
+// The My Jira page these presets appear on. A route, not copy.
+const MY_JIRA_ROUTE = "/jira";
+
+// `label` is PERSISTED to user settings as part of `JiraStoredPreset`, and the
+// row below is immediately editable, so it must stay locale-neutral: a preset
+// seeded in one locale and saved unedited would keep that locale's text forever.
+// Same contract as `newPreset` in components/github/action-presets-section.tsx.
 function newPreset(): JiraStoredPreset {
   return {
     id: `preset_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`,
@@ -60,9 +75,10 @@ function newPreset(): JiraStoredPreset {
 }
 
 function IconSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={onChange}>
-      <SelectTrigger className="!h-8 py-0.5 text-sm cursor-pointer" aria-label="Icon">
+      <SelectTrigger className="!h-8 py-0.5 text-sm cursor-pointer" aria-label={t("jira:icon")}>
         <SelectValue>
           {createElement(iconForPresetKey(value), { className: "h-4 w-4" })}
         </SelectValue>
@@ -74,7 +90,7 @@ function IconSelect({ value, onChange }: { value: string; onChange: (v: string) 
             <SelectItem key={choice.key} value={choice.key} className="cursor-pointer">
               <span className="flex items-center gap-2">
                 <ChoiceIcon className="h-3.5 w-3.5" />
-                {choice.label}
+                {t(choice.labelKey)}
               </span>
             </SelectItem>
           );
@@ -99,6 +115,7 @@ function PresetRow({
   onPatch: (patch: Partial<JiraStoredPreset>) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   const fieldIsDirty = <K extends keyof JiraStoredPreset>(field: K) =>
     !savedPreset || preset[field] !== savedPreset[field];
   const isDirty = !savedPreset || JSON.stringify(preset) !== JSON.stringify(savedPreset);
@@ -111,7 +128,7 @@ function PresetRow({
     >
       <div className="flex items-end gap-2 p-2">
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-muted-foreground">Icon</span>
+          <span className="text-[10px] text-muted-foreground">{t("jira:icon")}</span>
           <div
             data-settings-dirty={fieldIsDirty("icon")}
             className="rounded-md border border-transparent"
@@ -120,22 +137,22 @@ function PresetRow({
           </div>
         </div>
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-muted-foreground">Label</span>
+          <span className="text-[10px] text-muted-foreground">{t("jira:label")}</span>
           <Input
             className="h-8 w-40"
             value={preset.label}
             data-settings-dirty={fieldIsDirty("label")}
-            placeholder="Label"
+            placeholder={t("jira:label")}
             onChange={(e) => onPatch({ label: e.target.value })}
           />
         </div>
         <div className="flex flex-col gap-0.5 flex-1">
-          <span className="text-[10px] text-muted-foreground">Hint</span>
+          <span className="text-[10px] text-muted-foreground">{t("jira:hint")}</span>
           <Input
             className="h-8"
             value={preset.hint}
             data-settings-dirty={fieldIsDirty("hint")}
-            placeholder="Hint (optional)"
+            placeholder={t("jira:hintOptional")}
             onChange={(e) => onPatch({ hint: e.target.value })}
           />
         </div>
@@ -145,43 +162,77 @@ function PresetRow({
           className="h-8 cursor-pointer text-xs"
           onClick={onToggle}
         >
-          {expanded ? "Hide prompt" : "Edit prompt"}
+          {expanded ? t("jira:hidePrompt") : t("jira:editPrompt")}
         </Button>
         <Button
           variant="ghost"
           size="icon"
           className="h-8 w-8 cursor-pointer text-destructive"
           onClick={onRemove}
-          aria-label="Remove"
+          aria-label={t("jira:remove")}
         >
           <IconTrash className="h-3.5 w-3.5" />
         </Button>
       </div>
       {expanded && (
-        <div className="px-2 pb-2 space-y-1">
-          <div
-            className="rounded-md border overflow-hidden"
-            data-settings-dirty={fieldIsDirty("prompt_template")}
-          >
-            <ScriptEditor
-              value={preset.prompt_template}
-              onChange={(v) => onPatch({ prompt_template: v })}
-              language="markdown"
-              height={computeEditorHeight(preset.prompt_template)}
-              lineNumbers="off"
-              placeholders={JIRA_PROMPT_PLACEHOLDERS}
-            />
-          </div>
-          <p className="text-[11px] text-muted-foreground/60">
-            Type {"{{"} to see available placeholders.{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{key}}"}</code>,{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code>,{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code>, and{" "}
-            <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{description}}"}</code>{" "}
-            are substituted when the action runs.
-          </p>
-        </div>
+        <PresetPromptEditor
+          preset={preset}
+          isDirty={fieldIsDirty("prompt_template")}
+          onPatch={onPatch}
+        />
       )}
+    </div>
+  );
+}
+
+function PresetPromptEditor({
+  preset,
+  isDirty,
+  onPatch,
+}: {
+  preset: JiraStoredPreset;
+  isDirty: boolean;
+  onPatch: (patch: Partial<JiraStoredPreset>) => void;
+}) {
+  const { t } = useTranslation();
+  // Memoized because `ScriptEditor` keys its Monaco completion-provider
+  // registration on `placeholders` identity. This used to be a module-scope
+  // const, so it was stable for free; now that it is built from `t`, a fresh
+  // array on every render would re-register the provider on every keystroke.
+  const placeholders = useMemo(() => jiraPromptPlaceholders(t), [t]);
+  return (
+    <div className="px-2 pb-2 space-y-1">
+      <div className="rounded-md border overflow-hidden" data-settings-dirty={isDirty}>
+        <ScriptEditor
+          value={preset.prompt_template}
+          onChange={(v) => onPatch({ prompt_template: v })}
+          language="markdown"
+          height={computeEditorHeight(preset.prompt_template)}
+          lineNumbers="off"
+          placeholders={placeholders}
+        />
+      </div>
+      <p className="text-[11px] text-muted-foreground/60">
+        {/* The five `{{…}}` tokens are passed as values, never written into the
+            catalog, where i18next would interpolate them away. */}
+        <Trans
+          i18nKey="jira:presetPromptPlaceholderHelp"
+          values={{
+            token: "{{",
+            key: "{{key}}",
+            url: "{{url}}",
+            title: "{{title}}",
+            description: "{{description}}",
+          }}
+        >
+          Type {"{{token}}"} to see available placeholders.{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{key}}"}</code>,{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{url}}"}</code>,{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{title}}"}</code>, and{" "}
+          <code className="bg-muted px-1 py-0.5 rounded text-[10px]">{"{{description}}"}</code> are
+          substituted when the action runs.
+        </Trans>
+      </p>
     </div>
   );
 }
@@ -220,6 +271,7 @@ function usePresetDraft() {
 }
 
 export function TaskPresetsSection() {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const { draft, baseline, setDraft, dirty, save, reset, discard, loaded } = usePresetDraft();
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -243,12 +295,14 @@ export function TaskPresetsSection() {
   const handleSave = useCallback(async () => {
     try {
       await save();
-      toast({ description: "Task presets saved", variant: "success" });
+      toast({ description: t("jira:taskPresetsSaved"), variant: "success" });
     } catch {
-      toast({ description: "Failed to save task presets", variant: "error" });
+      toast({ description: t("jira:failedToSaveTaskPresets"), variant: "error" });
+      // Signals failure to the settings save coordinator, which only records the
+      // contributor id — this message never reaches a user, so it is not copy.
       throw new Error("Failed to save task presets");
     }
-  }, [save, toast]);
+  }, [save, t, toast]);
 
   useSettingsSaveContributor({
     id: "jira-task-presets",
@@ -261,8 +315,10 @@ export function TaskPresetsSection() {
 
   return (
     <SettingsSection
-      title="Task presets"
-      description="Prompts shown on /jira when starting a task from a ticket."
+      title={t("jira:taskPresets")}
+      // `/jira` is an in-app route, so it is interpolated rather than written
+      // into the catalog where a locale could turn it into a dead link.
+      description={t("jira:taskPresetsDescription", { route: MY_JIRA_ROUTE })}
       action={
         <div className="flex gap-2">
           <Button
@@ -273,7 +329,7 @@ export function TaskPresetsSection() {
             className="cursor-pointer"
           >
             <IconRefresh className="h-3.5 w-3.5 mr-1" />
-            Reset
+            {t("common:reset")}
           </Button>
         </div>
       }
@@ -292,7 +348,7 @@ export function TaskPresetsSection() {
         ))}
         <Button size="sm" variant="outline" onClick={add} className="cursor-pointer">
           <IconPlus className="h-3.5 w-3.5 mr-1" />
-          Add preset
+          {t("jira:addPreset")}
         </Button>
       </SettingsCard>
     </SettingsSection>

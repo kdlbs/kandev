@@ -51,6 +51,26 @@ func (s *Server) listWorkspacesHandler() server.ToolHandlerFunc {
 	}
 }
 
+func (s *Server) getDiagnosticBundleHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		source, err := req.RequireString("source")
+		if err != nil || (source != "backend" && source != "frontend" && source != "all") {
+			return mcp.NewToolResultError("source must be backend, frontend, or all"), nil
+		}
+		payload := map[string]string{
+			"source": source, "task_id": s.taskID, "session_id": s.sessionID,
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(
+			ctx, ws.ActionMCPGetDiagnosticBundle, payload, &result,
+		); err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) listWorkflowsHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		workspaceID, err := req.RequireString("workspace_id")

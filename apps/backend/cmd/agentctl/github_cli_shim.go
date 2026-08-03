@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/githubauth"
 )
 
@@ -118,8 +119,8 @@ func resolveGitHubCLIRepository(
 	if raw = strings.TrimSpace(getenv("GH_REPO")); raw != "" {
 		return parseGitHubCLIRepository(raw, defaultHost)
 	}
-	cmd := exec.CommandContext(ctx, "git", "remote", "get-url", "origin")
-	output, err := cmd.Output()
+	cmd := subproc.NewGitCommand(ctx, "remote", "get-url", "origin")
+	output, err := subproc.RunGitOutputClass(ctx, subproc.GitInteractive, cmd)
 	if err != nil {
 		return nil, nil
 	}

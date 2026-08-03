@@ -617,6 +617,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	m.setRuntimeInterest(execution.SessionID, true)
 
 	// Persist executors_running row in lockstep with the in-memory Add so the
 	// DB never holds an execution_id the store doesn't know about. This is the

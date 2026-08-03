@@ -24,6 +24,12 @@ func (s *Service) CopyConfigToWorkspace(
 	if err := validateWorkspaceID(targetWorkspaceID); err != nil {
 		return nil, err
 	}
+	if err := s.authorizeWorkspaceAccess(ctx, sourceWorkspaceID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeWorkspaceAccess(ctx, targetWorkspaceID); err != nil {
+		return nil, err
+	}
 	if sourceWorkspaceID == targetWorkspaceID {
 		return nil, ErrSameWorkspace
 	}

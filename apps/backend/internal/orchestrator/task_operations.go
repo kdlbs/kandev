@@ -270,7 +270,7 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// EnsureSessionForAgent so runs + advanced-mode reuse one row.
 	// prepareSessionForStart also propagates any inherited workspace
 	// environment (inherit_parent / shared_group) onto the new session.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		s.logger.Error("failed to prepare session",
 			zap.String("task_id", taskID),
@@ -282,7 +282,9 @@ func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentPr
 	// transitions through updateTaskSessionState which broadcasts; the prepare
 	// path writes the row directly, so without this the per-task session list
 	// stays empty until a manual reload.
-	s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
+	}
 
 	if launchWorkspace {
 		// Launch workspace infrastructure (agentctl) in the background so the WS response
@@ -471,15 +473,24 @@ func (s *Service) StartCreatedSession(
 	if err != nil {
 		return nil, fmt.Errorf("failed to reload task after on_turn_start: %w", err)
 	}
+	configMode := false
+	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
+		configMode = true
+	}
+	titleOwner := false
+	if !configMode {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, taskID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
+	}
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, taskID, sessionID, dbTask.WorkflowStepID,
 		planMode, task.IsEphemeral, session.IsPassthrough,
 	)
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
-	configMode := false
-	if cm, ok := session.Metadata["config_mode"].(bool); ok && cm {
-		configMode = true
+	if configMode {
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
 	}
 
@@ -490,19 +501,11 @@ func (s *Service) StartCreatedSession(
 	// Passthrough profiles skip the wrap: the prompt is typed straight into the
 	// agent CLI's TTY and the user sees it verbatim — they don't want a wall of
 	// MCP-tool boilerplate prepended to "hello".
-	if (effectivePrompt != "" || len(attachments) > 0) && !session.IsPassthrough {
-		referenceContext := EntityReferenceContext(references)
-		if isOfficeTask {
-			effectivePrompt = sysprompt.InjectOfficeContext(
-				taskID, sessionID, effectivePrompt,
-				referenceContext, promptReferenceContext,
-			)
-		} else {
-			effectivePrompt = sysprompt.InjectKandevContextWithOptions(taskID, sessionID, effectivePrompt, sysprompt.KandevContextOptions{
-				RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
-				IncludeCoordinatorTaskControls: !configMode,
-			}, referenceContext, promptReferenceContext)
-		}
+	if effectivePrompt != "" || len(attachments) > 0 {
+		effectivePrompt = s.wrapCreatedSessionPrompt(
+			ctx, effectivePrompt, taskID, sessionID, session, dbTask,
+			isOfficeTask, configMode, titleOwner, references, promptReferenceContext,
+		)
 	}
 
 	executorID := session.ExecutorID
@@ -533,6 +536,38 @@ func (s *Service) StartCreatedSession(
 	go s.ensureSessionPRWatch(context.Background(), taskID, execution.SessionID, execution.WorktreeBranch)
 
 	return execution, nil
+}
+
+// wrapCreatedSessionPrompt adds the first-turn context for a prepared session.
+// Passthrough sessions intentionally receive only the short pending-title
+// instruction; structured sessions receive the normal task or Office block.
+func (s *Service) wrapCreatedSessionPrompt(
+	ctx context.Context,
+	prompt, taskID, sessionID string,
+	session *models.TaskSession,
+	dbTask *models.Task,
+	isOfficeTask, configMode, titleOwner bool,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+) string {
+	referenceContext := EntityReferenceContext(references)
+	switch {
+	case session.IsPassthrough:
+		if !configMode && titleOwner {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+		}
+		return prompt
+	case isOfficeTask:
+		return sysprompt.InjectOfficeContext(
+			taskID, sessionID, prompt, referenceContext, promptReferenceContext,
+		)
+	default:
+		return sysprompt.InjectKandevContextWithOptions(taskID, sessionID, prompt, sysprompt.KandevContextOptions{
+			RequiresCompletionSignal:       s.WorkflowStepRequiresCompletionSignal(ctx, dbTask.WorkflowStepID),
+			IncludeCoordinatorTaskControls: !configMode,
+			IncludeTaskTitleTool:           !configMode && titleOwner,
+		}, referenceContext, promptReferenceContext)
+	}
 }
 
 // handleSessionLaunchFailure covers launch and resume failures that have not
@@ -763,6 +798,19 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			return nil, err
 		}
 	}
+	workflowSessionConfigStepID := workflowStepID
+	// Manual starts often omit workflow_step_id because the task is already
+	// bound to its current step. Resolve that canonical step before profile
+	// selection and launch-layer session configuration so a start-step rule is
+	// applied before the first prompt as well.
+	if workflowSessionConfigStepID == "" {
+		if dbTask, taskErr := s.repo.GetTask(ctx, taskID); taskErr != nil {
+			s.logger.Warn("failed to fetch task for workflow step fallback",
+				zap.String("task_id", taskID), zap.Error(taskErr))
+		} else if dbTask != nil {
+			workflowSessionConfigStepID = dbTask.WorkflowStepID
+		}
+	}
 
 	// Office tasks do NOT transition through SCHEDULING / IN_PROGRESS on
 	// every run. Their lifecycle status (todo / in_review / done /
@@ -832,9 +880,21 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// Prepare session first so we have the sessionID for config context injection.
 	// For office tasks, replace the per-launch PrepareSession with the per-(task,
 	// agent) EnsureSessionForAgent so runs reuse one row across turns.
-	sessionID, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, sessionCreated, err := s.prepareSessionForStart(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
 		return nil, err
+	}
+	// Seed a matching conditional session configuration before lifecycle
+	// startup. The ACP manager applies this durable runtime layer after the
+	// selected profile and before the first prompt, preserving the original
+	// session tab.
+	s.applyWorkflowSessionConfigBeforeLaunchForStep(ctx, taskID, sessionID, workflowSessionConfigStepID)
+	// Surface the newly created session before LaunchPreparedSession performs
+	// potentially slow environment setup (for example, a Docker health check).
+	// The frontend adopts this CREATED session and can render
+	// executor.prepare.progress events while the launch request is still pending.
+	if sessionCreated {
+		s.publishSessionCreatedEvent(ctx, taskID, sessionID, workflowStepID)
 	}
 
 	// When the workflow step overrode the caller's profile, tag the session
@@ -856,6 +916,10 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// strictly less harmful than leaking hidden <kandev-system> content into
 	// a real passthrough session's PTY.
 	isPassthrough := s.resolveIsPassthroughForLaunch(ctx, sessionID)
+	launchSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to reload launch session: %w", err)
+	}
 
 	effectivePrompt, planModeActive, promptReferenceContext := s.applyWorkflowAndPlanMode(
 		ctx, effectivePrompt, task.ID, sessionID, workflowStepID,
@@ -864,9 +928,16 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	// Inject config context for config-mode sessions (dedicated settings chat)
 	configMode := false
-	if cm, ok := task.Metadata["config_mode"].(bool); ok && cm {
+	if cm, ok := launchSession.Metadata["config_mode"].(bool); ok && cm {
 		configMode = true
 		effectivePrompt = sysprompt.InjectConfigContext(sessionID, effectivePrompt)
+	}
+	titleOwner := false
+	if !configMode && !isOfficeTask {
+		titleOwner, err = s.ClaimTaskTitleSession(ctx, task.ID, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to claim first-turn task title: %w", err)
+		}
 	}
 
 	// Wrap the first prompt with the Kandev MCP system block (task/session IDs +
@@ -887,14 +958,15 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	// while the task is already bound to a signal-gated step in the DB.
 	if effectivePrompt != "" || len(attachments) > 0 {
 		effectivePrompt = s.applyLaunchPromptContext(ctx, launchPromptContext{
-			prompt:           effectivePrompt,
-			taskID:           task.ID,
-			sessionID:        sessionID,
-			isOfficeTask:     isOfficeTask,
-			isPassthrough:    skipKandevMCPWrap,
-			configMode:       configMode,
-			referenceContext: promptReferenceContext,
-			spawnOrigin:      opts.SpawnOrigin,
+			prompt:               effectivePrompt,
+			taskID:               task.ID,
+			sessionID:            sessionID,
+			isOfficeTask:         isOfficeTask,
+			isPassthrough:        skipKandevMCPWrap,
+			configMode:           configMode,
+			referenceContext:     promptReferenceContext,
+			includeTaskTitleTool: !configMode && titleOwner,
+			spawnOrigin:          opts.SpawnOrigin,
 		})
 	}
 
@@ -934,17 +1006,45 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	return execution, nil
 }
 
+func (s *Service) applyWorkflowSessionConfigBeforeLaunchForStep(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	workflowStepID string,
+) {
+	if s.workflowStepGetter == nil || workflowStepID == "" {
+		return
+	}
+	workflowStep, err := s.workflowStepGetter.GetStep(ctx, workflowStepID)
+	if err != nil {
+		s.logger.Warn("failed to load workflow step for session configuration",
+			zap.String("task_id", taskID), zap.String("step_id", workflowStepID), zap.Error(err))
+		return
+	}
+	if workflowStep == nil {
+		return
+	}
+	preparedSession, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Warn("failed to reload session for session configuration",
+			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	s.applyWorkflowSessionConfigBeforeLaunch(ctx, taskID, preparedSession, workflowStep)
+}
+
 // launchPromptContext carries what the first turn of a launch needs in order to
 // compose its system context.
 type launchPromptContext struct {
-	prompt           string
-	taskID           string
-	sessionID        string
-	isOfficeTask     bool
-	isPassthrough    bool
-	configMode       bool
-	referenceContext string
-	spawnOrigin      *SpawnOrigin
+	prompt               string
+	taskID               string
+	sessionID            string
+	isOfficeTask         bool
+	isPassthrough        bool
+	configMode           bool
+	includeTaskTitleTool bool
+	referenceContext     string
+	spawnOrigin          *SpawnOrigin
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch
@@ -955,7 +1055,11 @@ type launchPromptContext struct {
 // applySpawnOriginText for why they skip the MCP block entirely.
 func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptContext) string {
 	if p.isPassthrough {
-		return applySpawnOriginText(p.prompt, p.spawnOrigin)
+		prompt := applySpawnOriginText(p.prompt, p.spawnOrigin)
+		if p.includeTaskTitleTool {
+			return sysprompt.PendingTaskTitlePassthroughInstruction() + "\n\n" + prompt
+		}
+		return prompt
 	}
 	// Spawner attribution is built here, not by the MCP handler that filled
 	// SpawnOrigin: the injectors below strip every <kandev-system> block they do
@@ -970,6 +1074,7 @@ func (s *Service) applyLaunchPromptContext(ctx context.Context, p launchPromptCo
 	return sysprompt.InjectKandevContextWithOptions(p.taskID, p.sessionID, prompt, sysprompt.KandevContextOptions{
 		RequiresCompletionSignal:       s.StepRequiresCompletionSignal(ctx, p.taskID),
 		IncludeCoordinatorTaskControls: !p.configMode,
+		IncludeTaskTitleTool:           p.includeTaskTitleTool,
 	}, p.referenceContext, spawnContext)
 }
 
@@ -1086,13 +1191,13 @@ func validateOfficeLaunchEnv(taskID string, env map[string]string) error {
 func (s *Service) prepareSessionForStart(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
-	sessionID, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+) (string, bool, error) {
+	sessionID, created, err := s.createStartSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	s.propagateInheritedEnvironment(ctx, task, sessionID)
-	return sessionID, nil
+	return sessionID, created, nil
 }
 
 // resolveIsPassthroughForLaunch reloads the session snapshot to decide
@@ -1119,18 +1224,19 @@ func (s *Service) resolveIsPassthroughForLaunch(ctx context.Context, sessionID s
 func (s *Service) createStartSession(
 	ctx context.Context, task *v1.Task,
 	agentProfileID, executorID, executorProfileID, workflowStepID string,
-) (string, error) {
+) (string, bool, error) {
 	dbTask, err := s.repo.GetTask(ctx, task.ID)
 	if err == nil && dbTask != nil && dbTask.IsFromOffice && dbTask.AssigneeAgentProfileID != "" {
-		session, ensureErr := s.executor.EnsureSessionForAgent(
+		session, created, ensureErr := s.executor.EnsureSessionForAgentWithCreation(
 			ctx, task, dbTask.AssigneeAgentProfileID, agentProfileID, executorID, executorProfileID,
 		)
 		if ensureErr != nil {
-			return "", ensureErr
+			return "", false, ensureErr
 		}
-		return session.ID, nil
+		return session.ID, created, nil
 	}
-	return s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	sessionID, err := s.executor.PrepareSession(ctx, task, agentProfileID, executorID, executorProfileID, workflowStepID)
+	return sessionID, err == nil, err
 }
 
 // moveTaskToWorkflowStep moves a task to the target workflow step if provided and different from current.
@@ -1648,6 +1754,11 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return err
 	}
 
+	// Apply conditional session settings after a manual resume and before the
+	// step prompt. The helper reloads the session so a resume-created runtime
+	// state cannot be overwritten by the stale request snapshot.
+	s.applyWorkflowSessionConfigOnEnter(ctx, taskID, session, step)
+
 	stepPlanMode := step.HasOnEnterAction(wfmodels.OnEnterEnablePlanMode)
 	_, err = s.PromptTask(ctx, taskID, sessionID, effectivePrompt, "", stepPlanMode, nil, false)
 	if err != nil {
@@ -1914,6 +2025,9 @@ func (s *Service) startAgentOnPreparedWorkspace(ctx context.Context, sessionID s
 	task, err := s.scheduler.GetTask(launchCtx, session.TaskID)
 	if err != nil {
 		return fmt.Errorf("failed to get task for prepared session: %w", err)
+	}
+	if _, err := s.ClaimTaskTitleSession(launchCtx, session.TaskID, sessionID); err != nil {
+		return fmt.Errorf("failed to claim first-turn task title: %w", err)
 	}
 	if _, err = s.executor.LaunchPreparedSession(launchCtx, task, sessionID, executor.LaunchOptions{
 		AgentProfileID: session.AgentProfileID,
@@ -2398,6 +2512,9 @@ func coordinatorStopSessionID(session *models.TaskSession) string {
 }
 
 func (s *Service) stopTaskSessionForCoordinator(ctx context.Context, taskID, sessionID string) (bool, error) {
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
+
 	lock, release := s.acquireCancelInFlightGuard(sessionID)
 	lock.Lock()
 
@@ -2446,6 +2563,12 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 	result, err := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
 	if err != nil {
 		return result, false, fmt.Errorf("coordinator stop: session %q: %w", sessionID, err)
+	}
+	if result.Changed {
+		// Cancellation takes effect before detached runtime teardown. Tombstone
+		// the execution immediately so buffered agent frames cannot recreate
+		// session output after the coordinator has acknowledged the stop.
+		s.markExecutionFailed(sessionID, result.ExecutionID)
 	}
 	teardownClaimed := result.Changed && s.claimExecutionTeardown(
 		sessionID,
@@ -3865,20 +3988,50 @@ func (s *Service) acquireCancelInFlightGuard(sessionID string) (*sync.Mutex, fun
 	return &guard.mu, release
 }
 
-// isCancelInFlight reports whether sessionID's cancelInFlight guard is
-// currently held by someone else, without itself claiming it — a
-// TryLock-then-immediately-Unlock peek rather than a real acquisition. The
-// guard entry this creates to perform the peek is released (and pruned if
-// nothing else references it) before this returns, so a passive readiness
-// probe never leaves permanent state behind.
+// beginCancelInFlight records that a cancellation operation for sessionID is
+// active (or waiting to claim the shared per-session guard). This is separate
+// from cancelInFlight itself: stream handlers also hold that mutex while
+// persisting output, but must not make boot-ready handling mistake their work
+// for a cancellation. The returned release function is idempotent so callers
+// can safely use it with both explicit and deferred cleanup.
+func (s *Service) beginCancelInFlight(sessionID string) func() {
+	if sessionID == "" {
+		return func() {}
+	}
+
+	s.cancelOperationsMu.Lock()
+	if s.cancelOperations == nil {
+		s.cancelOperations = make(map[string]int)
+	}
+	s.cancelOperations[sessionID]++
+	s.cancelOperationsMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.cancelOperationsMu.Lock()
+			count := s.cancelOperations[sessionID]
+			if count <= 1 {
+				delete(s.cancelOperations, sessionID)
+			} else {
+				s.cancelOperations[sessionID] = count - 1
+			}
+			s.cancelOperationsMu.Unlock()
+		})
+	}
+}
+
+// isCancelInFlight reports whether an actual cancellation operation for
+// sessionID is active or waiting on the shared guard. It deliberately does
+// not inspect the guard mutex itself because stream/lifecycle handlers also
+// use that mutex for non-cancelling side effects.
 func (s *Service) isCancelInFlight(sessionID string) bool {
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	defer release()
-	if lock.TryLock() {
-		lock.Unlock()
+	if sessionID == "" {
 		return false
 	}
-	return true
+	s.cancelOperationsMu.Lock()
+	defer s.cancelOperationsMu.Unlock()
+	return s.cancelOperations[sessionID] > 0
 }
 
 // CancelAgent interrupts the current agent turn without terminating the process,
@@ -3895,6 +4048,8 @@ func (s *Service) CancelAgent(ctx context.Context, sessionID string) error {
 	}
 
 	s.logger.Debug("cancelling agent turn", zap.String("session_id", sessionID))
+	endCancel := s.beginCancelInFlight(sessionID)
+	defer endCancel()
 
 	// Deduplicate concurrent retries. The UI's cancel button has no in-flight
 	// disable, so impatient users click it multiple times while the agent is

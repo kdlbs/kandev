@@ -26,37 +26,19 @@
  * Usage:
  *   node scripts/check-new-code-i18n.mjs [--base <ref-or-sha>]
  *
- * With no --base it uses `git merge-base HEAD origin/main`. CI passes the PR's
- * base SHA explicitly, matching the Prettier step in frontend-tests.yml.
+ * With no --base it uses `git merge-base HEAD origin/main`, which is the right
+ * answer on every checkout shape — including CI's `refs/pull/N/merge`, where it
+ * resolves to the merge ref's base-side parent. Prefer passing no --base. An
+ * explicit one is floored at that same fork point (see lib/git-base.mjs), because
+ * a base sha captured when a PR opened goes stale the moment main moves.
  */
 import path from "node:path";
 
 import { ESLint } from "eslint";
 
+import { changedFiles, webDiff } from "./lib/changed-files.mjs";
 import { lineInRanges, parseAddedLineRanges } from "./lib/diff-ranges.mjs";
-import { git, REPO_ROOT, resolveBase, toPosixPath, WEB_DIR } from "./lib/git-base.mjs";
-
-const WEB_PREFIX = "apps/web/";
-
-/** Only UI source. Tests build fixtures out of literals on purpose. */
-function isCandidate(repoPath) {
-  if (!repoPath.startsWith(WEB_PREFIX)) return false;
-  const rel = repoPath.slice(WEB_PREFIX.length);
-  if (!/\.tsx?$/.test(rel)) return false;
-  if (/\.(test|spec)\.tsx?$/.test(rel)) return false;
-  if (rel.startsWith("e2e/") || rel.startsWith("scripts/")) return false;
-  return /^(components|app|hooks|lib|src)\//.test(rel);
-}
-
-function changedFiles(base, filter) {
-  // --find-renames explicitly: rename detection defaults on since Git 2.9, but a
-  // repo with diff.renames=false would report a moved file as ADDED, and an
-  // added file is judged whole — demanding a full migration for a plain git mv.
-  return git(["diff", "--name-only", "--find-renames", `--diff-filter=${filter}`, base])
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(isCandidate);
-}
+import { REPO_ROOT, resolveBase, toPosixPath, WEB_DIR } from "./lib/git-base.mjs";
 
 const resolved = resolveBase();
 if (resolved.skip) {
@@ -79,16 +61,7 @@ if (targets.length === 0) {
 }
 
 // Line attribution only matters for modified files; added files are judged whole.
-//
-// Scoped to apps/web rather than to the individual files, because narrowing the
-// pathspec to only the NEW path of a rename hides the matching deletion and git
-// then reports the whole file as added — which would demand a full migration for
-// a pure `git mv`. Keeping both sides in scope lets rename detection pair them,
-// so a pure rename yields no hunks and reports nothing.
-const addedRanges =
-  modified.length === 0
-    ? new Map()
-    : parseAddedLineRanges(git(["diff", "--unified=0", "--find-renames", base, "--", WEB_PREFIX]));
+const addedRanges = modified.length === 0 ? new Map() : parseAddedLineRanges(webDiff(base));
 
 const eslint = new ESLint({
   cwd: WEB_DIR,

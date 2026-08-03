@@ -8,13 +8,13 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"unicode"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/common/securityutil"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"go.uber.org/zap"
 )
 
@@ -521,9 +521,8 @@ func clearMaterializedQuarantine(root *os.Root) error {
 }
 
 func materializeGitOutput(ctx context.Context, args ...string) (string, error) {
-	// codeql[go/command-injection] git is fixed; HTTP locators and refs are validated before checkout and matching probes.
-	cmd := exec.CommandContext(ctx, "git", args...) // #nosec G204 -- git is fixed and arguments are validated; no shell.
-	output, err := cmd.CombinedOutput()
+	cmd := subproc.NewGitCommand(ctx, args...)
+	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
 	if err != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()

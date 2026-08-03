@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { IconLoader2, IconLock, IconSettings } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
@@ -50,13 +51,14 @@ function InstalledAgentIdentity({
   loginAvailable: boolean;
   onAuthClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
         <AgentLogo agentName={agent.name} size={20} className="shrink-0" />
         <h4 className="min-w-0 truncate font-medium">{displayName}</h4>
         {agent.supports_mcp && <Badge variant="secondary">MCP</Badge>}
-        {configured && <Badge variant="outline">Configured</Badge>}
+        {configured && <Badge variant="outline">{t("agents:configured")}</Badge>}
         <div className="ml-auto flex shrink-0 items-center gap-1">
           {probing && (
             <Tooltip>
@@ -64,12 +66,12 @@ function InstalledAgentIdentity({
                 <span
                   data-testid={`probing-icon-${agent.name}`}
                   className="flex items-center text-muted-foreground cursor-help"
-                  aria-label="Checking authentication"
+                  aria-label={t("agents:checkingAuthentication")}
                 >
                   <IconLoader2 className="h-3.5 w-3.5 animate-spin" />
                 </span>
               </TooltipTrigger>
-              <TooltipContent>Checking agent capabilities and authentication...</TooltipContent>
+              <TooltipContent>{t("agents:checkingCapabilitiesAndAuth")}</TooltipContent>
             </Tooltip>
           )}
           {authRequired && (
@@ -80,15 +82,15 @@ function InstalledAgentIdentity({
                   onClick={onAuthClick}
                   data-testid={`auth-icon-${agent.name}`}
                   className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-amber-500 cursor-pointer hover:bg-amber-500/10"
-                  aria-label="Authentication required"
+                  aria-label={t("agents:authenticationRequired")}
                 >
                   <IconLock className="h-3.5 w-3.5" />
                 </button>
               </TooltipTrigger>
               <TooltipContent>
                 {loginAvailable
-                  ? "Authentication required - click to open login terminal"
-                  : "Authentication required - click to open a shell and sign in"}
+                  ? t("agents:authRequiredOpenLoginTerminal")
+                  : t("agents:authRequiredOpenShell")}
               </TooltipContent>
             </Tooltip>
           )}
@@ -98,7 +100,7 @@ function InstalledAgentIdentity({
         className="text-xs text-muted-foreground line-clamp-2 min-h-[2rem]"
         title={agent.matched_path ?? undefined}
       >
-        {agent.matched_path ? `Detected at ${agent.matched_path}` : ""}
+        {agent.matched_path ? t("agents:detectedAt", { path: agent.matched_path }) : ""}
       </p>
     </div>
   );
@@ -122,6 +124,7 @@ export function InstalledAgentCard({
   onUpdate,
   onAuthComplete,
 }: Props) {
+  const { t } = useTranslation();
   const configured = Boolean(savedAgent && savedAgent.profiles.length > 0);
   const hasAgentRecord = Boolean(savedAgent);
   const [loginOpen, setLoginOpen] = useState(false);
@@ -164,7 +167,7 @@ export function InstalledAgentCard({
               }
             >
               <IconSettings className="mr-2 h-4 w-4" />
-              {hasAgentRecord ? "Create new profile" : "Setup Profile"}
+              {hasAgentRecord ? t("agents:createNewProfile") : t("agents:setupProfile")}
             </Link>
           </Button>
           {runtimeUpdate?.supported && onPreview && onUpdate && (

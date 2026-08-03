@@ -1,6 +1,9 @@
 import type { RefObject } from "react";
 import type { SummarizeSessionResult } from "@/hooks/use-summarize-session";
 
+type PromptValueTarget = { value: string } | { setValue: (value: string) => void };
+type PromptValueRef = RefObject<PromptValueTarget | null>;
+
 export type SummaryToastFn = (opts: {
   title: string;
   description?: string;
@@ -19,16 +22,25 @@ export function applySummarizeSessionResult({
   toast,
 }: {
   result: SummarizeSessionResult;
-  promptRef: RefObject<HTMLTextAreaElement | null>;
+  promptRef: PromptValueRef;
   setContextValue: (v: string) => void;
   setHasPrompt: (v: boolean) => void;
   toast: SummaryToastFn;
 }) {
+  const setPromptValue = (value: string): boolean => {
+    const target = promptRef.current;
+    if (!target) return false;
+    if ("setValue" in target) {
+      target.setValue(value);
+    } else {
+      target.value = value;
+    }
+    return true;
+  };
+
   if (result.summary === null) {
     setContextValue("blank");
-    if (promptRef.current) {
-      promptRef.current.value = "";
-    }
+    setPromptValue("");
     setHasPrompt(false);
     toast({
       title: "Summarize failed",
@@ -40,8 +52,7 @@ export function applySummarizeSessionResult({
     return;
   }
 
-  if (promptRef.current) {
-    promptRef.current.value = sanitizePromptText(result.summary);
+  if (setPromptValue(sanitizePromptText(result.summary))) {
     setHasPrompt(true);
   }
 }

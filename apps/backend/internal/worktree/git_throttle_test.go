@@ -29,13 +29,13 @@ func TestRunGitCmd_SaturatedThrottleBlocks(t *testing.T) {
 	defer restore()
 
 	// Saturate the pool out-of-band so the next runGitCmd is forced to
-	// wait. Holding the slots via gitThrottle.Acquire (the same pool
+	// wait. Holding the slots via class-aware AcquireGit (the same pool
 	// runGitCmd uses) is the cleanest way to set this up without timing
 	// against a real subprocess. Capture each release so the slots are
 	// returned to the pool when the test ends — keeps the package-wide
 	// gitThrottle clean for any subsequent test in the same run.
 	for i := 0; i < cap; i++ {
-		release, err := subproc.Git().Acquire(context.Background())
+		release, err := subproc.AcquireGit(context.Background(), subproc.GitLifecycle)
 		if err != nil {
 			t.Fatalf("pre-saturate acquire %d: %v", i, err)
 		}
@@ -50,6 +50,22 @@ func TestRunGitCmd_SaturatedThrottleBlocks(t *testing.T) {
 	err := runGitCmd(cctx, exec.Command("sh", "-c", "true"))
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected DeadlineExceeded once cap=%d saturated, got %v", cap, err)
+	}
+}
+
+func TestRunGitCmd_LifecycleAdmission(t *testing.T) {
+	restore := setGitThrottleCapForTest(1)
+	defer restore()
+	hold, err := subproc.AcquireGit(context.Background(), subproc.GitLifecycle)
+	if err != nil {
+		t.Fatalf("hold lifecycle slot: %v", err)
+	}
+	defer hold()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := runGitCmd(ctx, exec.Command("sh", "-c", "true")); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("runGitCmd error = %v, want context.DeadlineExceeded", err)
 	}
 }
 
@@ -72,6 +88,10 @@ func TestRunGitCmd_RunsToCompletionWhenCapacityAvailable(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func setGitThrottleCapForTest(cap int) func() {
+	return subproc.Git().SetCapForTest(cap)
 }
 
 func TestNewNonInteractiveGitCmd_EnablesLongPathsPerCommand(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/gin-gonic/gin"
@@ -38,12 +39,23 @@ type OrchestratorService interface {
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
 }
 
+type taskTitleSessionClaimer interface {
+	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (bool, error)
+}
+
 // MessageHandlers handles WebSocket requests for messages
 type MessageHandlers struct {
 	service            *service.Service
 	orchestrator       OrchestratorService
 	logger             *logger.Logger
 	referenceValidator entityrefs.SubmissionValidator
+	messageIDMu        sync.Mutex
+	messageIDGates     map[string]*messageIDGate
+}
+
+type messageIDGate struct {
+	mu   sync.Mutex
+	refs int
 }
 
 // NewMessageHandlers creates a new MessageHandlers instance
@@ -62,6 +74,18 @@ func NewMessageHandlers(
 		handlers.referenceValidator = validators[0]
 	}
 	return handlers
+}
+
+func (h *MessageHandlers) claimTaskTitleSession(ctx context.Context, task *models.Task, taskID, sessionID string) (bool, error) {
+	if task == nil || task.IsFromOffice {
+		return false, nil
+	}
+	titleOwner := models.IsAgentTitleOwner(task.Metadata, sessionID)
+	claimer, ok := h.orchestrator.(taskTitleSessionClaimer)
+	if !ok {
+		return titleOwner, nil
+	}
+	return claimer.ClaimTaskTitleSession(ctx, taskID, sessionID)
 }
 
 // RegisterMessageRoutes registers message HTTP + WebSocket handlers
@@ -236,6 +260,8 @@ func (h *MessageHandlers) httpListMessages(c *gin.Context) {
 type wsAddMessageRequest struct {
 	TaskID            string                 `json:"task_id"`
 	TaskSessionID     string                 `json:"session_id"`
+	MessageID         string                 `json:"message_id,omitempty"`
+	ClientMessageID   string                 `json:"client_message_id,omitempty"`
 	Content           string                 `json:"content"`
 	AuthorID          string                 `json:"author_id,omitempty"`
 	Model             string                 `json:"model,omitempty"`
@@ -252,9 +278,43 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
 	req.Content = strings.TrimSpace(req.Content)
+	req.MessageID = strings.TrimSpace(req.MessageID)
+	req.ClientMessageID = strings.TrimSpace(req.ClientMessageID)
+	if req.ClientMessageID == "" {
+		req.ClientMessageID = req.MessageID
+	}
 
 	if errMsg := validateAddMessageRequest(req); errMsg != "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, errMsg, nil)
+	}
+	unlockMessageID := h.lockMessageID(req.ClientMessageID)
+	defer unlockMessageID()
+
+	// A response can be lost after the message is committed. Resolve a replay
+	// before checking the live session state or running turn-start hooks so a
+	// retry is a read, not a second prompt.
+	if req.ClientMessageID != "" {
+		existing, err := h.service.GetMessage(ctx, req.ClientMessageID)
+		switch {
+		case err == nil && existing != nil:
+			// The turn-start hook may switch the task's primary session before
+			// the message is persisted. A retried request still belongs to the
+			// same authorized task even when its original session_id is no
+			// longer the persisted message's session.
+			if (existing.TaskID != "" && existing.TaskID != req.TaskID) ||
+				existing.AuthorType != models.MessageAuthorUser {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "client_message_id is already used", nil)
+			}
+			apiMsg := existing.ToAPI()
+			response, responseErr := ws.NewResponse(msg.ID, msg.Action, apiMsg)
+			if responseErr != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to encode response", nil)
+			}
+			return response, nil
+		case err != nil && !errors.Is(err, sql.ErrNoRows):
+			h.logger.Error("failed to check idempotent message", zap.String("message_id", req.ClientMessageID), zap.Error(err))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to check message", nil)
+		}
 	}
 
 	// Check session state — may block the message or flag it as a create-start
@@ -262,6 +322,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	if wsErr != nil {
 		return wsErr, nil
 	}
+	wasCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
 	if len(req.EntityReferences) > 0 {
 		if sessionResp.Session.IsPassthrough || h.referenceValidator == nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Invalid entity references", nil)
@@ -313,6 +374,7 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		return wsErr, nil
 	}
 	isCreatedSession := sessionResp.Session.State == models.TaskSessionStateCreated
+	startCreatedSession := isCreatedSession || wasCreatedSession
 
 	// Build metadata with attachments, plan mode, review comments, and context files
 	meta := orchestrator.NewUserMessageMeta().
@@ -338,13 +400,18 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// the agent CLI's TTY and the user sees it verbatim — they don't want a
 	// wall of MCP-tool boilerplate prepended to "hello".
 	storedContent := orchestrator.AppendEntityReferenceContext(req.Content, req.EntityReferences)
-	if isCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
+	if startCreatedSession && !sessionResp.Session.IsPassthrough && (req.Content != "" || len(req.Attachments) > 0) {
 		task, err := h.service.GetTask(ctx, req.TaskID)
 		if err != nil {
 			h.logger.Error("failed to resolve first-turn MCP capabilities", zap.String("task_id", req.TaskID), zap.Error(err))
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to get task", nil)
 		}
 		configMode, _ := sessionResp.Session.Metadata["config_mode"].(bool)
+		titleOwner, claimErr := h.claimTaskTitleSession(ctx, task, req.TaskID, req.TaskSessionID)
+		if claimErr != nil {
+			h.logger.Error("failed to claim first-turn task title", zap.String("task_id", req.TaskID), zap.String("session_id", req.TaskSessionID), zap.Error(claimErr))
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to claim task title", nil)
+		}
 		requiresSignal := h.orchestrator != nil && h.orchestrator.StepRequiresCompletionSignal(ctx, req.TaskID)
 		referenceContext := orchestrator.EntityReferenceContext(req.EntityReferences)
 		if task.IsFromOffice {
@@ -353,19 +420,27 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 			storedContent = sysprompt.InjectKandevContextWithOptions(req.TaskID, req.TaskSessionID, storedContent, sysprompt.KandevContextOptions{
 				RequiresCompletionSignal:       requiresSignal,
 				IncludeCoordinatorTaskControls: !configMode,
+				IncludeTaskTitleTool:           !configMode && titleOwner,
 			}, referenceContext)
 		}
 	}
 	req.Content = storedContent
 
-	message, err := h.service.CreateMessage(ctx, &service.CreateMessageRequest{
+	createRequest := &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
 		TaskID:        req.TaskID,
 		Content:       storedContent,
 		AuthorType:    "user",
 		AuthorID:      req.AuthorID,
 		Metadata:      meta.ToMap(),
-	})
+	}
+	var message *models.Message
+	var err error
+	if req.ClientMessageID != "" {
+		message, err = h.service.CreateMessageIdempotent(ctx, req.ClientMessageID, createRequest)
+	} else {
+		message, err = h.service.CreateMessage(ctx, createRequest)
+	}
 	if err != nil {
 		h.logger.Error("failed to create message", zap.Error(err))
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to create message", nil)
@@ -381,10 +456,43 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 	// This runs async so the WS request can respond immediately.
 	// Use context.WithoutCancel so the prompt continues even if the WebSocket client disconnects.
 	if h.orchestrator != nil {
-		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, isCreatedSession)
+		h.dispatchPromptAsync(ctx, req, sessionResp.Session.AgentProfileID, startCreatedSession)
 	}
 
 	return response, nil
+}
+
+// lockMessageID serializes acceptance for one caller-owned message ID. The
+// database primary key still closes races across process boundaries, but this
+// gate keeps same-process retries from running mutable session hooks twice
+// before the first insert commits.
+func (h *MessageHandlers) lockMessageID(id string) func() {
+	if id == "" {
+		return func() {}
+	}
+
+	h.messageIDMu.Lock()
+	if h.messageIDGates == nil {
+		h.messageIDGates = make(map[string]*messageIDGate)
+	}
+	gate := h.messageIDGates[id]
+	if gate == nil {
+		gate = &messageIDGate{}
+		h.messageIDGates[id] = gate
+	}
+	gate.refs++
+	h.messageIDMu.Unlock()
+
+	gate.mu.Lock()
+	return func() {
+		gate.mu.Unlock()
+		h.messageIDMu.Lock()
+		gate.refs--
+		if gate.refs == 0 && h.messageIDGates[id] == gate {
+			delete(h.messageIDGates, id)
+		}
+		h.messageIDMu.Unlock()
+	}
 }
 
 func (h *MessageHandlers) resolveSessionAfterTurnStart(
@@ -450,6 +558,9 @@ func validateAddMessageRequest(req wsAddMessageRequest) string {
 	// Content can be empty if there are attachments (image-only messages)
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return "content or attachments are required"
+	}
+	if len(req.ClientMessageID) > 128 {
+		return "client_message_id is too long"
 	}
 	if err := validateAttachments(req.Attachments); err != nil {
 		return err.Error()

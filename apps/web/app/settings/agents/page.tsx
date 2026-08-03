@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
   IconAlertTriangle,
@@ -66,13 +67,14 @@ function CopyButton({
   copiedValue: string | null;
   onCopy: (text: string) => void;
 }) {
+  const { t } = useTranslation();
   const isCopied = copiedValue === text;
   return (
     <Button
       variant="ghost"
       size="sm"
       className="h-7 w-7 p-0 cursor-pointer shrink-0"
-      aria-label={isCopied ? "Copied" : "Copy install command"}
+      aria-label={isCopied ? t("agents:copied") : t("agents:copyInstallCommand")}
       onClick={() => onCopy(text)}
     >
       {isCopied ? (
@@ -123,6 +125,7 @@ function ToolInstallCard({
   copiedValue: string | null;
   onCopy: (text: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Card className="border-dashed">
       <CardContent className="py-4 flex flex-col gap-2">
@@ -132,7 +135,7 @@ function ToolInstallCard({
           {tool.available && (
             <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
               <IconCheck className="h-3.5 w-3.5" />
-              Installed
+              {t("agents:installed")}
             </span>
           )}
         </div>
@@ -211,13 +214,12 @@ function InstalledAgentsHeader({
   onOpenTuiDialog: () => void;
   onRescan: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div>
-        <h3 className="text-lg font-semibold">Installed Agents</h3>
-        <p className="text-sm text-muted-foreground">
-          Agents detected on this machine are ready to configure.
-        </p>
+        <h3 className="text-lg font-semibold">{t("agents:installedAgents")}</h3>
+        <p className="text-sm text-muted-foreground">{t("agents:installedAgentsDescription")}</p>
       </div>
       <div className="flex w-full flex-wrap gap-2 sm:w-auto">
         <Button
@@ -228,11 +230,11 @@ function InstalledAgentsHeader({
           data-testid="open-host-shell"
         >
           <IconTerminal2 className="h-4 w-4 mr-2" />
-          Terminal
+          {t("agents:terminal")}
         </Button>
         <Button variant="outline" size="sm" onClick={onOpenTuiDialog} className="cursor-pointer">
           <IconPlus className="h-4 w-4 mr-2" />
-          Add TUI Agent
+          {t("agents:addTuiAgent")}
         </Button>
         <Button
           variant="outline"
@@ -246,7 +248,7 @@ function InstalledAgentsHeader({
           ) : (
             <IconRefresh className="h-4 w-4 mr-2" />
           )}
-          Rescan
+          {t("agents:rescan")}
         </Button>
       </div>
     </div>
@@ -268,6 +270,7 @@ function InstalledAgentsSection({
   setTuiDialogOpen,
   handleRescan,
 }: InstalledAgentsSectionProps) {
+  const { t } = useTranslation();
   const [shellOpen, setShellOpen] = useState(false);
 
   return (
@@ -293,11 +296,11 @@ function InstalledAgentsSection({
           <CardContent className="py-8 text-center">
             <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
               {discoveryLoading ? (
-                <span>Scanning for installed agents...</span>
+                <span>{t("agents:scanningForInstalledAgents")}</span>
               ) : (
                 <>
                   <IconAlertTriangle className="h-4 w-4" />
-                  No installed agents were detected. Install one below, then click Rescan.
+                  {t("agents:noInstalledAgentsDetected")}
                 </>
               )}
             </div>
@@ -341,18 +344,16 @@ function SuggestInstallSection({
   installJobs: Record<string, InstallJob>;
   onInstall: (name: string) => void;
 }) {
-  const notInstalledTools = tools.filter((t) => !t.available);
+  const { t } = useTranslation();
+  const notInstalledTools = tools.filter((tool) => !tool.available);
   if (notInstalledAgents.length === 0 && notInstalledTools.length === 0) return null;
 
   return (
     <div className="space-y-4">
       <Separator />
       <div>
-        <h3 className="text-lg font-semibold">Available to Install</h3>
-        <p className="text-sm text-muted-foreground">
-          Click Install to run the agent&apos;s install script on the kandev host. Progress streams
-          live; you can start multiple installs in parallel.
-        </p>
+        <h3 className="text-lg font-semibold">{t("agents:availableToInstall")}</h3>
+        <p className="text-sm text-muted-foreground">{t("agents:availableToInstallDescription")}</p>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
@@ -379,6 +380,7 @@ type AgentProfilesSectionProps = {
 };
 
 function AgentProfilesSection({ savedAgents }: AgentProfilesSectionProps) {
+  const { t } = useTranslation();
   if (!savedAgents.some((agent: Agent) => agent.profiles.length > 0)) {
     return null;
   }
@@ -387,8 +389,8 @@ function AgentProfilesSection({ savedAgents }: AgentProfilesSectionProps) {
     <div className="space-y-4">
       <Separator />
       <div>
-        <h3 className="text-lg font-semibold">Agent Profiles</h3>
-        <p className="text-sm text-muted-foreground">Manage existing profiles by agent.</p>
+        <h3 className="text-lg font-semibold">{t("agents:agentProfiles")}</h3>
+        <p className="text-sm text-muted-foreground">{t("agents:agentProfilesDescription")}</p>
       </div>
 
       <div className="space-y-2">
@@ -586,14 +588,13 @@ export default function AgentsSettingsPage() {
     startUpdate,
   } = useAgentPageState();
   const { copiedValue, copy } = useCopyCommand();
+  const { t } = useTranslation();
 
   return (
     <div className="space-y-8">
       <div>
-        <h2 className="text-2xl font-bold">Agents</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Discover installed agents, install new ones, and manage their profiles.
-        </p>
+        <h2 className="text-2xl font-bold">{t("common:agents")}</h2>
+        <p className="text-sm text-muted-foreground mt-1">{t("agents:pageDescription")}</p>
       </div>
 
       <Separator />

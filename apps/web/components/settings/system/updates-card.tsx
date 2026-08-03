@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -102,17 +103,17 @@ function canShowServiceApply(showApply: boolean, channelPending: boolean, checki
 }
 
 function ChannelPendingNotice({ pending, saving }: { pending: boolean; saving: boolean }) {
+  const { t } = useTranslation();
   if (!pending) return null;
   return (
     <p className="text-xs text-muted-foreground" data-testid="system-updates-channel-pending">
-      {saving
-        ? "Saving channel change before checking or applying an update."
-        : "Save channel changes before checking or applying an update."}
+      {saving ? t("settings:updateChannelSavingNotice") : t("settings:updateChannelUnsavedNotice")}
     </p>
   );
 }
 
 export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesCardProps = {}) {
+  const { t } = useTranslation();
   const { updates, check, saveChannel, error: updatesError } = useUpdates();
   const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reloadDocument });
   const desktopUpdater = useDesktopUpdater();
@@ -163,7 +164,11 @@ export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesC
         <VersionGrid
           current={view.current}
           latest={channelPending ? "-" : view.latest}
-          latestLabel={channel.draft === "nightly" ? "Latest nightly" : "Latest release"}
+          latestLabel={
+            channel.draft === "nightly"
+              ? t("settings:updateChannelLatestNightly")
+              : t("settings:updateChannelLatestRelease")
+          }
         />
         <LastChecked checkedAt={checkedAtForChannel(channelPending, updates?.latest_checked_at)} />
         <UpdateActions

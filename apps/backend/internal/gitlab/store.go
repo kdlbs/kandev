@@ -111,7 +111,7 @@ const createTablesSQL = `
 		last_approval_state TEXT DEFAULT '',
 		created_at DATETIME NOT NULL,
 		updated_at DATETIME NOT NULL,
-		UNIQUE(session_id, repository_id)
+		UNIQUE(session_id, repository_id, branch)
 	);
 	CREATE INDEX IF NOT EXISTS idx_gitlab_mr_watches_task_id ON gitlab_mr_watches(task_id);
 
@@ -216,7 +216,106 @@ func (s *Store) createTables() error {
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
-	return s.migrateWatchColumns()
+	if err := s.migrateWatchColumns(); err != nil {
+		return err
+	}
+	if err := s.migrateMRWatchUniqueKey(); err != nil {
+		return err
+	}
+	return s.ensureMRWatchIndexes()
+}
+
+// ensureMRWatchIndexes re-creates gitlab_mr_watches' indexes after
+// migrateMRWatchUniqueKey. The rebuild DROPs the old table, and SQLite drops
+// a table's indexes with it, so the index created by createTablesSQL earlier
+// in this same call is gone by the time the rebuild finishes — leaving the
+// table unindexed until the next process start. github.Store.initSchema
+// avoids this by running its index creation after the equivalent
+// migratePRTablesForMultiRepo rebuild; this is the same ordering.
+func (s *Store) ensureMRWatchIndexes() error {
+	if _, err := s.db.Exec(
+		`CREATE INDEX IF NOT EXISTS idx_gitlab_mr_watches_task_id ON gitlab_mr_watches(task_id)`,
+	); err != nil {
+		return fmt.Errorf("recreate gitlab_mr_watches indexes: %w", err)
+	}
+	return nil
+}
+
+// migrateMRWatchUniqueKey rebuilds gitlab_mr_watches to drop the legacy
+// UNIQUE(session_id, repository_id) constraint and replace it with
+// UNIQUE(session_id, repository_id, branch), so one session can hold a watch
+// per branch on the same repository (multi-branch tasks) instead of
+// colliding on the second branch's insert. SQLite can't ALTER TABLE DROP
+// CONSTRAINT, so this uses the same copy-and-rename rebuild as
+// github.Store.migratePRTablesForMultiRepo. Idempotent: only runs when the
+// legacy constraint string is found in sqlite_master, so fresh DBs and
+// already-migrated DBs are no-ops.
+func (s *Store) migrateMRWatchUniqueKey() error {
+	return s.rebuildIfHasLegacyConstraint(
+		"gitlab_mr_watches",
+		"UNIQUE(session_id, repository_id)\n",
+		`CREATE TABLE gitlab_mr_watches_new (
+			id TEXT PRIMARY KEY,
+			session_id TEXT NOT NULL,
+			task_id TEXT NOT NULL,
+			repository_id TEXT NOT NULL DEFAULT '',
+			project_path TEXT NOT NULL,
+			mr_iid INTEGER NOT NULL,
+			branch TEXT NOT NULL,
+			last_checked_at DATETIME,
+			last_note_at DATETIME,
+			last_pipeline_state TEXT DEFAULT '',
+			last_approval_state TEXT DEFAULT '',
+			created_at DATETIME NOT NULL,
+			updated_at DATETIME NOT NULL,
+			UNIQUE(session_id, repository_id, branch)
+		)`,
+		`INSERT INTO gitlab_mr_watches_new (
+			id, session_id, task_id, repository_id, project_path, mr_iid, branch,
+			last_checked_at, last_note_at, last_pipeline_state, last_approval_state,
+			created_at, updated_at
+		) SELECT
+			id, session_id, task_id, COALESCE(repository_id, ''), project_path, mr_iid, branch,
+			last_checked_at, last_note_at, last_pipeline_state, last_approval_state,
+			created_at, updated_at
+		FROM gitlab_mr_watches`,
+	)
+}
+
+// rebuildIfHasLegacyConstraint checks the table's stored CREATE statement in
+// sqlite_master for the literal legacyConstraint substring; if present, runs
+// the table rebuild (create new, copy data, drop old, rename) inside a
+// transaction. No-op when the legacy substring is absent — fresh installs
+// already use the new schema and previously-migrated databases skip too.
+// Mirrors github.Store.rebuildIfHasLegacyConstraint.
+func (s *Store) rebuildIfHasLegacyConstraint(table, legacyConstraint, createNew, copyData string) error {
+	var existingSQL string
+	row := s.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`, table)
+	if err := row.Scan(&existingSQL); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if !strings.Contains(existingSQL, legacyConstraint) {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, stmt := range []string{
+		createNew,
+		copyData,
+		"DROP TABLE " + table,
+		"ALTER TABLE " + table + "_new RENAME TO " + table,
+	} {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("rebuild %s: %w", table, err)
+		}
+	}
+	return tx.Commit()
 }
 
 func (s *Store) migrateConfigRevision() error {
@@ -410,6 +509,25 @@ func (s *Store) UpsertTaskMR(ctx context.Context, tm *TaskMR) error {
 		return errors.New("upsert task MR returned no row")
 	}
 	return rows.Scan(&tm.ID, &tm.CreatedAt, &tm.UpdatedAt)
+}
+
+// GetTaskMR returns one task-MR association keyed by
+// (task_id, repository_id, project_path, mr_iid), or nil when none exists.
+// Used to compare against an incoming refresh before deciding whether it
+// actually changed anything worth publishing.
+func (s *Store) GetTaskMR(ctx context.Context, taskID, repositoryID, projectPath string, iid int) (*TaskMR, error) {
+	var tm TaskMR
+	err := s.ro.GetContext(ctx, &tm, `
+		SELECT `+taskMRSelectCols+` FROM gitlab_task_mrs
+		WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?
+		LIMIT 1`, taskID, repositoryID, projectPath, iid)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &tm, nil
 }
 
 // ListTaskMRsByTask returns every MR association for a task, oldest first.

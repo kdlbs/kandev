@@ -8,7 +8,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconCheck, IconCopy, IconLoader2, IconX } from "@tabler/icons-react";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { probeSSHAgents, probeSSHShells } from "@/lib/api/domains/ssh-api";
 import type { SSHAgentReadinessRow } from "@/lib/types/http-ssh";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";

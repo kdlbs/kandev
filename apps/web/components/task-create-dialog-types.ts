@@ -321,6 +321,8 @@ export type DialogFormState = {
 export type SubmitHandlersDeps = {
   isSessionMode: boolean;
   isEditMode: boolean;
+  /** Create-mode opt-in: derive a provisional title from the prompt. */
+  autoTitle?: boolean;
   isPassthroughProfile: boolean;
   taskName: string;
   workspaceId: string | null;
@@ -408,6 +410,8 @@ export type DialogFormBodyProps = {
   isSessionMode: boolean;
   isCreateMode: boolean;
   isEditMode: boolean;
+  /** Create-mode opt-in: hide the manual title field and use the prompt. */
+  autoTitle?: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
   workspaceId: string | null;

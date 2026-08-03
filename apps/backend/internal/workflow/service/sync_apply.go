@@ -156,6 +156,16 @@ func (s *Service) updateSyncedWorkflow(ctx context.Context, wf *taskmodels.Workf
 			posToID[sp.Position] = uuid.New().String()
 		}
 	}
+	// Validate the complete desired step set before mutating workflow fields or
+	// persisting any step. A malformed later step must leave the synced workflow
+	// untouched so the next sync can retry after the source is fixed.
+	for _, sp := range pw.Steps {
+		step := s.stepFromPortable(wf.ID, sp, posToID)
+		if err := models.ValidateWorkflowStep(step); err != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("workflow %q: invalid step %q: %v", wf.Name, sp.Name, err))
+			return
+		}
+	}
 
 	changed, err := s.applyWorkflowFields(ctx, wf, pw)
 	if err != nil {

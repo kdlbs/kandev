@@ -3150,6 +3150,48 @@ func TestService_CreateMessage(t *testing.T) {
 	}
 }
 
+func TestService_CreateMessageIdempotentReturnsCommittedMessage(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+
+	setupTestTask(t, repo)
+	sessionID := setupTestSession(t, repo)
+	turnID := setupTestTurn(t, repo, sessionID, "task-123", "turn-idempotent")
+	request := &CreateMessageRequest{
+		TaskSessionID: sessionID,
+		TaskID:        "task-123",
+		TurnID:        turnID,
+		Content:       "the original prompt",
+		AuthorType:    "user",
+	}
+
+	first, err := svc.CreateMessageIdempotent(ctx, "client-message-1", request)
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+
+	retry := *request
+	retry.Content = "the retry should not be stored"
+	second, err := svc.CreateMessageIdempotent(ctx, "client-message-1", &retry)
+	if err != nil {
+		t.Fatalf("retry create: %v", err)
+	}
+	if second.ID != first.ID || second.Content != first.Content {
+		t.Fatalf("retry returned %+v, want original %+v", second, first)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 1 {
+		t.Fatalf("published events = %d, want 1", len(events))
+	}
+
+	messages, err := repo.ListMessages(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("list messages: %v", err)
+	}
+	if len(messages) != 1 {
+		t.Fatalf("stored messages = %d, want 1", len(messages))
+	}
+}
+
 func TestService_CreateAgentMessage(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()

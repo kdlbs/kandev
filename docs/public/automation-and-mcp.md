@@ -170,6 +170,17 @@ Task mode currently registers these tool groups:
 | Relationships and workspace sources | List related tasks, add a mixed repository/folder source batch to an idle task, use the legacy one-branch tool, and change a repository's diff base.                                                                                                               |
 | Workflow signal                     | Signal step completion when an auto-advance step explicitly requires that signal.                                                                                                                                                                                  |
 
+When **Settings → General → Task Actions → Agent-generated task titles** is enabled (the default; an
+explicitly saved **off** value remains off), a task-mode session for a newly created task or subtask can
+expose `set_task_title_kandev`. The first eligible session to launch atomically claims the handoff and is
+prompted to call it before any other work, even though the task already has a provisional title from the
+prompt. Use a short title phrase targeting about six words in sentence case rather than a sentence or
+progress update.
+The tool is omitted for ordinary tasks, tasks created while the setting was disabled, config sessions,
+Office sessions, and every later session on the task—even if the owner fails before renaming it. A human
+rename wins if it happens first; a late owner call returns `title_not_pending`, while a non-owner call
+returns `title_not_owner`, without changing the title.
+
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.

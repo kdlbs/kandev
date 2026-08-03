@@ -1068,6 +1068,75 @@ func TestToolCallFromCompletedExecutionDoesNotCreateMessage(t *testing.T) {
 		"stale completed-execution tool calls must be dropped before message side effects")
 }
 
+type blockingToolCallMessageCreator struct {
+	mockMessageCreator
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (m *blockingToolCallMessageCreator) CreateToolCallMessage(
+	context.Context,
+	string, string, string, string, string, string, string, *streams.NormalizedPayload,
+) error {
+	close(m.entered)
+	<-m.release
+	m.toolCallWrites++
+	return nil
+}
+
+func TestAgentStreamEventWaitsForCancellationGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "")
+
+	creator := &blockingToolCallMessageCreator{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.messageCreator = creator
+
+	lock, releaseGuard := svc.acquireCancelInFlightGuard("s1")
+	lock.Lock()
+
+	eventDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+			TaskID:      "t1",
+			SessionID:   "s1",
+			ExecutionID: "exec-1",
+			Data: &lifecycle.AgentStreamEventData{
+				Type:       agentEventToolCall,
+				ToolCallID: "tool-1",
+				ToolStatus: "running",
+			},
+		})
+		close(eventDone)
+	}()
+
+	select {
+	case <-creator.entered:
+		t.Fatal("stream side effect bypassed the cancellation guard")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	lock.Unlock()
+	releaseGuard()
+
+	select {
+	case <-creator.entered:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not proceed after cancellation guard release")
+	}
+	close(creator.release)
+	select {
+	case <-eventDone:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not finish")
+	}
+	require.Equal(t, 1, creator.toolCallWrites)
+}
+
 func TestToolCallStreamFromCompletedExecutionDoesNotSaveAgentText(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2696,6 +2765,53 @@ func TestHandleSessionModelsEventCapturesSettledConfigBaselineOnce(t *testing.T)
 	require.Len(t, eb.events, 2)
 	lastPayload := eb.events[1].event.Data.(lifecycle.SessionModelsEventPayload)
 	require.Equal(t, baseline, lastPayload.ConfigBaseline)
+}
+
+func TestHandleSessionModelsEventCapturesOriginalEffectiveConfigurationOnce(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "s1", models.SessionMetaKeyOrigin, models.SessionOriginTaskInitial))
+	svc := &Service{logger: testLogger(), repo: repo, eventBus: &recordingEventBus{}}
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-sol",
+			OriginalConfigCandidate: []streams.ConfigOption{
+				{Type: "select", ID: "reasoning_effort", CurrentValue: "high"},
+				{Type: "toggle", ID: "fast_mode", CurrentValue: "on"},
+			},
+			Data: map[string]any{"original_config_settled": true},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	original, ok := models.LoadOriginalSessionEffectiveConfiguration(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", original.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
+
+	svc.handleSessionModelsEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			CurrentModelID: "gpt-5.6-luna",
+			OriginalConfigCandidate: []streams.ConfigOption{
+				{ID: "reasoning_effort", CurrentValue: "low"},
+			},
+			Data: map[string]any{"original_config_settled": true},
+		},
+	})
+
+	updated, err = repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	original, ok = models.LoadOriginalSessionEffectiveConfiguration(updated.Metadata)
+	require.True(t, ok)
+	require.Equal(t, "gpt-5.6-sol", original.Model)
+	require.Equal(t, map[string]string{"reasoning_effort": "high"}, original.ConfigOptions)
 }
 
 func TestHandleSessionModelsEventStoresBaselineCandidateAndPublishesLiveState(t *testing.T) {

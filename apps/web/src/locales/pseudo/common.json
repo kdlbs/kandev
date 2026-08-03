@@ -1,7 +1,11 @@
 {
   "agents": "Àĝēńţś",
   "automations": "Àũţōḿàţĩōńś",
+  "contextCompactions": "Ćōḿƥàćţĩōńś",
+  "contextCompactionCountHelp": "Ķàńďēv ĩńƒēŕś ţĥĩś ćōũńţ ƒŕōḿ ōƀśēŕvēď ćōńţēxţ ũśàĝē ďŕōƥś. Ḿĩśśĩńĝ śàḿƥĺēś ōŕ ƥŕōvĩďēŕ ŕēśēţś ćàń ḿàķē ĩţ àƥƥŕōxĩḿàţē.",
+  "aboutContextCompactionCount": "Àƀōũţ ĩńƒēŕŕēď ćōḿƥàćţĩōń ćōũńţ",
   "cancel": "Ćàńćēĺ",
+  "edit": "Ēďĩţ",
   "createAWorkspaceToConfigureThisIntegration": "Ćŕēàţē à ŵōŕķśƥàćē ţō ćōńƒĩĝũŕē ţĥĩś ĩńţēĝŕàţĩōń.",
   "dAgo": "{{diffDay}}ď àĝō",
   "executors": "Ēxēćũţōŕś",
@@ -27,5 +31,15 @@
   "status": "Śţàţũś",
   "system": "Śŷśţēḿ",
   "workspace": "Ŵōŕķśƥàćē",
-  "workspaces": "Ŵōŕķśƥàćēś"
+  "workspaces": "Ŵōŕķśƥàćēś",
+  "title": "Ţĩţĺē",
+  "subtaskTitle": "Śũƀţàśķ ţĩţĺē",
+  "presetIconEye": "Ēŷē",
+  "presetIconMessage": "Ḿēśśàĝē",
+  "presetIconTool": "Ţōōĺ",
+  "presetIconCode": "Ćōďē",
+  "presetIconSearch": "Śēàŕćĥ",
+  "presetIconBug": "Ɓũĝ",
+  "presetIconSparkle": "Śƥàŕķĺē",
+  "presetIconCheck": "Ćĥēćķ"
 }

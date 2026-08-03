@@ -2,8 +2,10 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
+import { Card, CardContent } from "@kandev/ui/card";
 import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconCheck, IconPlayerPlay, IconRefresh } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import {
   useStorageMaintenance,
   type StorageBusyState,
@@ -66,6 +68,7 @@ function StorageActions({
   controller: ReturnType<typeof useStorageMaintenance>;
   disabledReason?: string;
 }) {
+  const { t } = useTranslation();
   const analysisActive =
     controller.analysisJob?.state === "queued" || controller.analysisJob?.state === "running";
   const cleanupActive =
@@ -73,11 +76,8 @@ function StorageActions({
   return (
     <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="min-w-0 sm:max-w-xl">
-        <p className="text-sm font-medium">Reclaim disk space safely</p>
-        <p className="text-xs text-muted-foreground">
-          Analyze for a read-only snapshot, or run the enabled cleanup rules when you want to
-          recover space immediately.
-        </p>
+        <p className="text-sm font-medium">{t("system:storageActionsTitle")}</p>
+        <p className="text-xs text-muted-foreground">{t("system:storageActionsDescription")}</p>
       </div>
       <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
         <div data-testid="storage-analyze-control">
@@ -85,7 +85,7 @@ function StorageActions({
             variant="outline"
             className="w-full sm:w-44"
             disabledReason={
-              disabledReason ?? (analysisActive ? "Storage analysis is still running." : undefined)
+              disabledReason ?? (analysisActive ? t("system:storageAnalysisRunning") : undefined)
             }
             onClick={() => void controller.analyze()}
             data-testid="storage-analyze"
@@ -93,10 +93,10 @@ function StorageActions({
           >
             <StorageJobButtonContent
               job={controller.analysisJob}
-              idleLabel="Analyze"
-              activeLabel="Analyzing..."
-              successLabel="Analysis complete"
-              failedLabel="Analysis failed"
+              idleLabel={t("system:storageAnalyze")}
+              activeLabel={t("system:storageAnalyzing")}
+              successLabel={t("system:storageAnalysisComplete")}
+              failedLabel={t("system:storageAnalysisFailed")}
               idleIcon={<IconRefresh className="size-4" />}
             />
           </StorageActionButton>
@@ -105,7 +105,7 @@ function StorageActions({
           <StorageActionButton
             className="w-full sm:w-44"
             disabledReason={
-              disabledReason ?? (cleanupActive ? "Storage cleanup is still running." : undefined)
+              disabledReason ?? (cleanupActive ? t("system:storageCleanupRunning") : undefined)
             }
             onClick={() => void controller.runNow()}
             data-testid="storage-run-now"
@@ -113,10 +113,10 @@ function StorageActions({
           >
             <StorageJobButtonContent
               job={controller.cleanupJob}
-              idleLabel="Run now"
-              activeLabel="Cleaning..."
-              successLabel="Cleanup complete"
-              failedLabel="Cleanup failed"
+              idleLabel={t("system:storageRunNow")}
+              activeLabel={t("system:storageCleaning")}
+              successLabel={t("system:storageCleanupComplete")}
+              failedLabel={t("system:storageCleanupFailed")}
               idleIcon={<IconPlayerPlay className="size-4" />}
             />
           </StorageActionButton>
@@ -131,6 +131,7 @@ function StorageActionFeedback({
 }: {
   controller: ReturnType<typeof useStorageMaintenance>;
 }) {
+  const { t } = useTranslation();
   if (controller.busy) {
     return (
       <StorageBusyFeedback busy={controller.busy} onRunAnyway={() => void controller.runAnyway()} />
@@ -140,7 +141,7 @@ function StorageActionFeedback({
   return (
     <Alert variant="destructive" data-testid="storage-error">
       <IconAlertTriangle className="size-4" />
-      <AlertTitle>Storage action failed</AlertTitle>
+      <AlertTitle>{t("system:storageActionFailed")}</AlertTitle>
       <AlertDescription className="break-words">{controller.error}</AlertDescription>
     </Alert>
   );
@@ -153,27 +154,29 @@ function StorageBusyFeedback({
   busy: StorageBusyState;
   onRunAnyway: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <Alert variant="destructive" data-testid="storage-busy">
       <IconAlertTriangle className="size-4" />
-      <AlertTitle>Storage cleanup found active Kandev work</AlertTitle>
+      <AlertTitle>{t("system:storageBusyTitle")}</AlertTitle>
       <AlertDescription className="break-words">
-        <p>Cleanup may disrupt the following work:</p>
+        <p>{t("system:storageBusyIntro")}</p>
         <ul className="mt-2 list-disc space-y-1 pl-5">
+          {/* Resource labels are rendered by the API, not the catalog. */}
           {busy.resources.map((resource) => (
             <li key={resource.kind}>{resource.label}</li>
           ))}
         </ul>
         {busy.forceAvailable && (
           <>
-            <p className="mt-3">Running cleanup anyway may disrupt this active work.</p>
+            <p className="mt-3">{t("system:storageBusyForceHint")}</p>
             <StorageActionButton
               variant="outline"
               className="mt-3 w-full sm:w-auto"
               onClick={onRunAnyway}
               data-testid="storage-run-anyway"
             >
-              <IconPlayerPlay className="size-4" /> Run anyway
+              <IconPlayerPlay className="size-4" /> {t("system:storageRunAnyway")}
             </StorageActionButton>
           </>
         )}
@@ -187,19 +190,33 @@ function serializeSettings(settings: Settings | null): string {
 }
 
 function policyPendingAction(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
-  return action === "load" || action === "save" || action === "adopt";
+  return action === "save" || action === "adopt";
 }
 
-function policyBlockedReason(action: ReturnType<typeof useStorageMaintenance>["pendingAction"]) {
-  if (action === "adopt") return "Wait for Go cache adoption to finish.";
-  if (action === "load") return "Wait for storage settings to finish loading.";
+function policyBlockedReason(
+  t: (key: string) => string,
+  action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
+  loading: boolean,
+) {
+  if (action === "adopt") return t("system:storageAdoptionPending");
+  if (loading) return t("system:storagePolicyLoadingBlock");
+  return undefined;
+}
+
+function storageActionDisabledReason(
+  t: (key: string) => string,
+  action: ReturnType<typeof useStorageMaintenance>["pendingAction"],
+) {
+  if (action) return t("system:storageActionPending");
   return undefined;
 }
 
 function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenance>) {
+  const { t } = useTranslation();
   const [draft, setDraft] = useState<Settings | null>(null);
   const previousServerSettings = useRef<Settings | null>(null);
-  const savedSettings = controller.overview?.settings ?? null;
+  const savedSettings = controller.policy?.settings ?? controller.overview?.settings ?? null;
+  const policyLoading = controller.loading?.policy ?? !savedSettings;
 
   useEffect(() => {
     if (!savedSettings) return;
@@ -216,7 +233,7 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
     previousServerSettings.current = savedSettings;
   }, [savedSettings]);
 
-  const invalidReason = policyBlockedReason(controller.pendingAction);
+  const invalidReason = policyBlockedReason(t, controller.pendingAction, policyLoading);
   useSettingsSaveContributor({
     id: "system:storage-policy",
     revision: serializeSettings(draft),
@@ -242,13 +259,125 @@ function useStoragePolicyDraft(controller: ReturnType<typeof useStorageMaintenan
   return { draft, setDraft, savedSettings };
 }
 
-export function StorageMaintenanceSettings() {
-  const controller = useStorageMaintenance();
-  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
+function StoragePolicyState({ loading, error }: { loading: boolean; error?: string | null }) {
+  const { t } = useTranslation();
+  if (!loading && !error) return null;
+  return (
+    <Card data-testid="storage-policy-state">
+      <CardContent className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+        {loading && <Spinner className="size-4" data-testid="storage-policy-spinner" />}
+        <span>{loading ? t("settings:loading") : t("system:storageSectionUnavailable")}</span>
+        {error && <span className="break-words text-destructive">{error}</span>}
+      </CardContent>
+    </Card>
+  );
+}
+
+function StoragePrimarySections({
+  controller,
+  disabledReason,
+  draft,
+  setDraft,
+  savedSettings,
+}: {
+  controller: ReturnType<typeof useStorageMaintenance>;
+  disabledReason?: string;
+  draft: Settings | null;
+  setDraft: (settings: Settings | null) => void;
+  savedSettings: Settings | null;
+}) {
   const controlsPending = policyPendingAction(controller.pendingAction);
-  const actionDisabledReason = controller.pendingAction
-    ? "Wait for the current storage action to finish."
-    : undefined;
+  const policyLoading = controller.loading?.policy ?? !savedSettings;
+  const capabilities = controller.policy?.capabilities ?? controller.overview?.capabilities;
+  return (
+    <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
+      <StorageOverviewCard
+        overview={controller.overview}
+        settings={savedSettings ?? undefined}
+        loading={controller.loading?.overview}
+        error={controller.sectionErrors?.overview}
+        disabledReason={disabledReason}
+        onRunGoCache={() => void controller.runNow(["go_cache"])}
+      />
+      <StoragePolicyState loading={policyLoading} error={controller.sectionErrors?.policy} />
+      {draft && savedSettings && capabilities && (
+        <StoragePolicyCard
+          settings={draft}
+          savedSettings={savedSettings}
+          capabilities={capabilities}
+          pending={controlsPending}
+          onChange={setDraft}
+          onAdopt={controller.adopt}
+        />
+      )}
+    </div>
+  );
+}
+
+function StorageQuarantineSection({
+  controller,
+  disabledReason,
+  savedSettings,
+}: {
+  controller: ReturnType<typeof useStorageMaintenance>;
+  disabledReason?: string;
+  savedSettings: Settings | null;
+}) {
+  const deleteJobActive =
+    controller.deleteJob?.state === "queued" || controller.deleteJob?.state === "running";
+  return (
+    <StorageQuarantineCard
+      entries={controller.quarantine}
+      loading={controller.loading?.quarantine}
+      error={controller.sectionErrors?.quarantine}
+      deleteJobId={controller.deleteJob?.id}
+      deleteJobActive={deleteJobActive}
+      disabledReason={disabledReason}
+      schedulingEnabled={savedSettings?.enabled ?? false}
+      checkIntervalHours={savedSettings?.check_interval_hours ?? 24}
+      onRestore={controller.restore}
+      onDelete={controller.permanentlyDelete}
+      onClearEligible={controller.clearEligible}
+      onForceClearAll={controller.forceClearAll}
+    />
+  );
+}
+
+function StoragePageSections({
+  controller,
+  disabledReason,
+}: {
+  controller: ReturnType<typeof useStorageMaintenance>;
+  disabledReason?: string;
+}) {
+  const { draft, setDraft, savedSettings } = useStoragePolicyDraft(controller);
+  return (
+    <>
+      <StoragePrimarySections
+        controller={controller}
+        disabledReason={disabledReason}
+        draft={draft}
+        setDraft={setDraft}
+        savedSettings={savedSettings}
+      />
+      <StorageRunHistory
+        runs={controller.runs}
+        loading={controller.loading?.runs}
+        error={controller.sectionErrors?.runs}
+      />
+      <StorageQuarantineSection
+        controller={controller}
+        disabledReason={disabledReason}
+        savedSettings={savedSettings}
+      />
+    </>
+  );
+}
+
+export function StorageMaintenanceSettings() {
+  const { t } = useTranslation();
+  const controller = useStorageMaintenance();
+  const actionDisabledReason = storageActionDisabledReason(t, controller.pendingAction);
 
   return (
     <div className="min-w-0 space-y-6" data-testid="storage-settings-page">
@@ -256,38 +385,7 @@ export function StorageMaintenanceSettings() {
 
       <StorageActionFeedback controller={controller} />
 
-      <div className="min-w-0 space-y-4" data-testid="storage-primary-sections">
-        <StorageOverviewCard
-          overview={controller.overview}
-          disabledReason={actionDisabledReason}
-          onRunGoCache={() => void controller.runNow(["go_cache"])}
-        />
-        {draft && savedSettings && controller.overview && (
-          <StoragePolicyCard
-            settings={draft}
-            savedSettings={savedSettings}
-            capabilities={controller.overview.capabilities}
-            pending={controlsPending}
-            onChange={setDraft}
-            onAdopt={controller.adopt}
-          />
-        )}
-      </div>
-      <StorageRunHistory runs={controller.runs} />
-      <StorageQuarantineCard
-        entries={controller.quarantine}
-        deleteJobId={controller.deleteJob?.id}
-        deleteJobActive={
-          controller.deleteJob?.state === "queued" || controller.deleteJob?.state === "running"
-        }
-        disabledReason={actionDisabledReason}
-        schedulingEnabled={controller.overview?.settings.enabled ?? false}
-        checkIntervalHours={controller.overview?.settings.check_interval_hours ?? 24}
-        onRestore={controller.restore}
-        onDelete={controller.permanentlyDelete}
-        onClearEligible={controller.clearEligible}
-        onForceClearAll={controller.forceClearAll}
-      />
+      <StoragePageSections controller={controller} disabledReason={actionDisabledReason} />
     </div>
   );
 }

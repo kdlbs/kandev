@@ -140,7 +140,7 @@ See [Configuration](configuration.md) for exact YAML and `KANDEV_` names. Import
 | `KANDEV_LOG_LEVEL` | `info` | Backend log threshold |
 | `KANDEV_DATABASE_DRIVER` | `sqlite` by default | Set `postgres` for an external database |
 
-Kubernetes detection makes the default log format JSON. Logs remain on stdout unless `logging.outputPath` is changed.
+Kubernetes detection makes the default log format JSON. Kandev writes daily files under `/data/logs/`, caps each day at 256 MiB, and emits warn-and-above to stdout by default; ensure the home path is persistent if the three-day file history must survive pod replacement.
 
 ### PostgreSQL
 

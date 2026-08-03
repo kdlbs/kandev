@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -14,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/sysprompt"
@@ -36,7 +36,7 @@ func isConfigModeSession(session *models.TaskSession) bool {
 // resolveTaskSessionMCPMode derives restricted MCP access from canonical task
 // ownership and session purpose. Config mode wins because those sessions need
 // config tools even if their backing task is Office-owned.
-func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession) (string, error) {
+func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string, session *models.TaskSession, allowTitleTool bool) (string, error) {
 	if isConfigModeSession(session) {
 		return McpModeConfig, nil
 	}
@@ -46,6 +46,9 @@ func (e *Executor) resolveTaskSessionMCPMode(ctx context.Context, taskID string,
 	}
 	if task != nil && task.IsFromOffice {
 		return McpModeOffice, nil
+	}
+	if allowTitleTool && task != nil && models.IsAgentTitleOwner(task.Metadata, session.ID) {
+		return McpModeTaskTitlePending, nil
 	}
 	return "", nil
 }
@@ -203,9 +206,13 @@ func (e *Executor) stopStartedExecutionIfSessionTerminal(
 	return terminalState, true
 }
 
-// startAgentProcessAsync starts the agent subprocess and transitions the task to IN_PROGRESS on success.
+// startAgentProcessAsync starts the agent subprocess and transitions its session
+// to RUNNING before reconciling the owning task to IN_PROGRESS on success.
 func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string) {
 	e.runAgentProcessAsync(ctx, taskID, sessionID, agentExecutionID, func(updCtx context.Context) {
+		if !e.markSessionRunningAfterProcessStart(updCtx, taskID, sessionID) {
+			return
+		}
 		if updateErr := e.writeTaskInProgressForRuntime(updCtx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to update task state to IN_PROGRESS after agent start",
 				zap.String("task_id", taskID),
@@ -213,6 +220,45 @@ func (e *Executor) startAgentProcessAsync(ctx context.Context, taskID, sessionID
 				zap.Error(updateErr))
 		}
 	}, true, false)
+}
+
+// markSessionRunningAfterProcessStart records that a successfully started
+// process is active. Agent stream events may settle a fast turn before this
+// callback runs, so only a still-STARTING session may move to RUNNING.
+func (e *Executor) markSessionRunningAfterProcessStart(ctx context.Context, taskID, sessionID string) bool {
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		e.logger.Warn("failed to load session after agent start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return false
+	}
+	if session == nil {
+		e.logger.Warn("session missing after agent start",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return false
+	}
+
+	switch session.State {
+	case models.TaskSessionStateRunning:
+		return true
+	case models.TaskSessionStateStarting:
+		changed, finalState, transitionErr := e.transitionSessionState(
+			ctx, taskID, sessionID, models.TaskSessionStateRunning, "",
+		)
+		if transitionErr != nil {
+			e.logger.Warn("failed to mark session running after agent start",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(transitionErr))
+			return false
+		}
+		return changed || finalState == models.TaskSessionStateRunning
+	default:
+		return false
+	}
 }
 
 func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentExecutionID string) {
@@ -537,8 +583,8 @@ func repositoryCloneURL(repo *models.Repository) string {
 	if repo.LocalPath == "" {
 		return ""
 	}
-	cmd := exec.Command("git", "-C", repo.LocalPath, "remote", "get-url", "origin")
-	out, err := cmd.Output()
+	cmd := subproc.NewGitCommand(context.Background(), "-C", repo.LocalPath, "remote", "get-url", "origin")
+	out, err := subproc.RunGitOutputClass(context.Background(), subproc.GitLifecycle, cmd)
 	if err != nil {
 		return ""
 	}
@@ -597,6 +643,23 @@ func (e *Executor) ExecuteWithFullProfile(ctx context.Context, task *v1.Task, ag
 	if err != nil {
 		return nil, err
 	}
+	dbTask, err := e.repo.GetTask(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load task before title claim: %w", err)
+	}
+	session, err := e.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("load session before title claim: %w", err)
+	}
+	if (dbTask == nil || !dbTask.IsFromOffice) && !isConfigModeSession(session) {
+		if claimer, ok := e.repo.(interface {
+			ClaimTaskTitleSession(context.Context, string, string) (bool, bool, error)
+		}); ok {
+			if _, _, err := claimer.ClaimTaskTitleSession(ctx, task.ID, sessionID); err != nil {
+				return nil, fmt.Errorf("claim first-turn task title: %w", err)
+			}
+		}
+	}
 
 	// Launch the agent for the prepared session.
 	execution, err := e.LaunchPreparedSession(ctx, task, sessionID, LaunchOptions{
@@ -646,10 +709,17 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 	// Resolve agent profile to get model and other settings for snapshot
 	agentProfileSnapshot, isPassthrough := e.resolveAgentProfileSnapshot(ctx, agentProfileID)
 
-	// Determine if this new session should become primary.
-	// Only the first session for a task is primary by default; subsequent sessions
-	// leave the existing primary unchanged so the user's explicit choice is preserved.
-	existingSessions, _ := e.repo.ListTaskSessions(ctx, task.ID)
+	// Determine whether this is the task's first session and whether it should
+	// become primary. The immutable origin marker follows creation order, not
+	// primary-session ownership, because a later user-selected primary must not
+	// change which conversation workflow rules treat as the original.
+	existingSessions, err := e.repo.ListTaskSessions(ctx, task.ID)
+	if err != nil {
+		e.logger.Error("failed to list task sessions before creating initial session",
+			zap.String("task_id", task.ID), zap.Error(err))
+		return "", fmt.Errorf("list task sessions: %w", err)
+	}
+	isTaskInitialSession := len(existingSessions) == 0
 	hasPrimary := false
 	for _, s := range existingSessions {
 		if s.IsPrimary {
@@ -657,7 +727,13 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 			break
 		}
 	}
-	isFirstSession := !hasPrimary
+	isPrimarySession := !hasPrimary
+	if isTaskInitialSession {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[models.SessionMetaKeyOrigin] = models.SessionOriginTaskInitial
+	}
 
 	// Create agent session in database. WorkspacePath is propagated from task
 	// metadata for repo-less tasks where the user picked a starting folder.
@@ -675,7 +751,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 		StartedAt:            now,
 		UpdatedAt:            now,
 		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            isFirstSession,
+		IsPrimary:            isPrimarySession,
 		IsPassthrough:        isPassthrough,
 		Metadata:             metadata,
 	}
@@ -705,7 +781,7 @@ func (e *Executor) PrepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	// Set primary flag only for the first session (no existing primary).
 	// Subsequent sessions do not override the established primary.
-	if isFirstSession {
+	if isPrimarySession {
 		if err := e.repo.SetSessionPrimary(ctx, sessionID); err != nil {
 			e.logger.Warn("failed to update primary session flag",
 				zap.String("task_id", task.ID),
@@ -786,7 +862,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 	if opts.McpMode == "" {
-		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session)
+		opts.McpMode, err = e.resolveTaskSessionMCPMode(ctx, task.ID, session, opts.StartAgent)
 		if err != nil {
 			return nil, err
 		}

@@ -128,7 +128,17 @@ describe("generateUUID", () => {
     expect(stub).toHaveBeenCalledOnce();
   });
 
-  it("falls back to Math.random UUID when crypto.randomUUID is undefined (HTTP/non-secure)", () => {
+  it("uses crypto.getRandomValues when randomUUID is unavailable", () => {
+    const getRandomValues = vi.fn((bytes: Uint8Array) => {
+      bytes.fill(0x11);
+      return bytes;
+    });
+    vi.stubGlobal("crypto", { getRandomValues });
+    expect(generateUUID()).toBe("11111111-1111-4111-9111-111111111111");
+    expect(getRandomValues).toHaveBeenCalledOnce();
+  });
+
+  it("falls back to a UUID-shaped value when Web Crypto is unavailable", () => {
     vi.stubGlobal("crypto", {});
     const id = generateUUID();
     expect(id).toMatch(UUID_V4_REGEX);

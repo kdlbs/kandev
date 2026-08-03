@@ -8,29 +8,21 @@ import (
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
-// TestHandleSessionFocus_PushesSessionDataSnapshot verifies that session.focus
-// pushes a fresh session-data snapshot to the focusing client, not just
-// session.subscribe. This closes the "sidebar bulk-subscribe absorbs the
-// task-page subscribe" gap — when the ref-counted client-side subscribe skips
-// the frame, focus is the only signal the backend still receives on task open.
-func TestHandleSessionFocus_PushesSessionDataSnapshot(t *testing.T) {
+// TestHandleSessionFocus_IsAckOnly verifies that session.focus only changes
+// polling interest and acknowledges the request. Detail surfaces fetch their
+// snapshot explicitly; replaying the full session stream on every focus event
+// made task switching compete with control responses on the same connection.
+func TestHandleSessionFocus_IsAckOnly(t *testing.T) {
 	h := newTestHub(t)
 
 	const sessionID = "sess-focus-1"
-	snapshot, err := ws.NewNotification("session.git.event", map[string]any{
-		"session_id": sessionID,
-		"type":       "status_update",
-	})
-	if err != nil {
-		t.Fatalf("build snapshot: %v", err)
-	}
 	var provided bool
 	h.SetSessionDataProvider(func(_ context.Context, sid string) ([]*ws.Message, error) {
 		if sid != sessionID {
 			t.Errorf("provider called with sid=%q, want %q", sid, sessionID)
 		}
 		provided = true
-		return []*ws.Message{snapshot}, nil
+		return nil, nil
 	})
 
 	c := newTestClient("c-focus")
@@ -41,31 +33,27 @@ func TestHandleSessionFocus_PushesSessionDataSnapshot(t *testing.T) {
 
 	c.handleSessionFocus(msg)
 
-	if !provided {
-		t.Fatal("session data provider was not invoked on focus")
+	if provided {
+		t.Fatal("session data provider should not be invoked on focus")
 	}
 
-	// handleSessionFocus is synchronous and sendMessage writes to the buffered
-	// send channel without blocking, so both frames are already queued by the
-	// time we get here. A non-blocking select fails fast if the invariant
-	// breaks in the future.
-	var sawSnapshot bool
-	for i := range 2 {
-		select {
-		case data := <-c.send:
-			var m ws.Message
-			if err := json.Unmarshal(data, &m); err != nil {
-				t.Fatalf("decode frame: %v", err)
-			}
-			if m.Type == ws.MessageTypeNotification && m.Action == "session.git.event" {
-				sawSnapshot = true
-			}
-		default:
-			t.Fatalf("expected focus frame %d, none in buffer", i+1)
+	// The ACK is a control frame, not a replayed session notification.
+	select {
+	case data := <-c.send:
+		var response ws.Message
+		if err := json.Unmarshal(data, &response); err != nil {
+			t.Fatalf("decode ACK: %v", err)
 		}
+		if response.Type != ws.MessageTypeResponse || response.Action != "session.focus" {
+			t.Fatalf("unexpected focus response: %+v", response)
+		}
+	default:
+		t.Fatal("expected focus ACK in control queue")
 	}
-	if !sawSnapshot {
-		t.Error("expected a session.git.event notification after focus, got none")
+	select {
+	case <-c.send:
+		t.Fatal("unexpected session-data replay after focus")
+	default:
 	}
 }
 
@@ -91,6 +79,165 @@ func TestHandleSessionFocus_NoProviderDoesNotCrash(t *testing.T) {
 	select {
 	case <-c.send:
 		t.Error("unexpected extra frame when provider is nil")
+	default:
+	}
+}
+
+func TestHandleSessionDataRefresh_ReplaysExplicitSnapshot(t *testing.T) {
+	h := newTestHub(t)
+	const sessionID = "sess-refresh-1"
+	provided := false
+	h.SetSessionDataProvider(func(_ context.Context, sid string) ([]*ws.Message, error) {
+		if sid != sessionID {
+			t.Errorf("provider called with sid=%q, want %q", sid, sessionID)
+		}
+		provided = true
+		return []*ws.Message{{
+			Type:    ws.MessageTypeNotification,
+			Action:  "session.git.event",
+			Payload: json.RawMessage(`{"session_id":"sess-refresh-1"}`),
+		}}, nil
+	})
+
+	c := newTestClient("c-refresh")
+	c.hub = h
+	c.controlSend = make(chan []byte, 16)
+
+	payload, _ := json.Marshal(SessionSubscribeRequest{SessionID: sessionID})
+	msg := &ws.Message{ID: "req-refresh", Type: ws.MessageTypeRequest, Action: ws.ActionSessionDataRefresh, Payload: payload}
+	c.handleSessionDataRefresh(msg)
+
+	if !provided {
+		t.Fatal("session data provider should be invoked by explicit refresh")
+	}
+	select {
+	case data := <-c.controlSend:
+		var response ws.Message
+		if err := json.Unmarshal(data, &response); err != nil {
+			t.Fatalf("decode refresh ACK: %v", err)
+		}
+		if response.Type != ws.MessageTypeResponse || response.Action != ws.ActionSessionDataRefresh {
+			t.Fatalf("unexpected refresh response: %+v", response)
+		}
+	default:
+		t.Fatal("expected refresh ACK in control queue")
+	}
+	select {
+	case data := <-c.send:
+		var notification ws.Message
+		if err := json.Unmarshal(data, &notification); err != nil {
+			t.Fatalf("decode refreshed session data: %v", err)
+		}
+		if notification.Action != "session.git.event" {
+			t.Fatalf("unexpected refreshed data: %+v", notification)
+		}
+	default:
+		t.Fatal("expected explicit session-data notification")
+	}
+}
+
+func TestHandleSessionGitRefresh_SendsOnlyGitData(t *testing.T) {
+	h := newTestHub(t)
+	const sessionID = "sess-git-refresh-1"
+	h.SetSessionGitDataProvider(func(_ context.Context, sid string) ([]*ws.Message, error) {
+		if sid != sessionID {
+			t.Errorf("provider called with sid=%q, want %q", sid, sessionID)
+		}
+		return []*ws.Message{
+			{Type: ws.MessageTypeNotification, Action: ws.ActionSessionStateChanged},
+			{Type: ws.MessageTypeNotification, Action: ws.ActionSessionGitEvent},
+		}, nil
+	})
+
+	c := newTestClient("c-git-refresh")
+	c.hub = h
+	c.controlSend = make(chan []byte, 16)
+	payload, _ := json.Marshal(SessionSubscribeRequest{SessionID: sessionID})
+	c.handleSessionGitRefresh(&ws.Message{
+		ID:      "req-git-refresh",
+		Type:    ws.MessageTypeRequest,
+		Action:  ws.ActionSessionGitRefresh,
+		Payload: payload,
+	})
+
+	select {
+	case data := <-c.controlSend:
+		var response ws.Message
+		if err := json.Unmarshal(data, &response); err != nil {
+			t.Fatalf("decode refresh ACK: %v", err)
+		}
+		if response.Action != ws.ActionSessionGitRefresh {
+			t.Fatalf("unexpected refresh response: %+v", response)
+		}
+	default:
+		t.Fatal("expected refresh ACK")
+	}
+	select {
+	case data := <-c.send:
+		var notification ws.Message
+		if err := json.Unmarshal(data, &notification); err != nil {
+			t.Fatalf("decode git notification: %v", err)
+		}
+		if notification.Action != ws.ActionSessionGitEvent {
+			t.Fatalf("unexpected refresh data: %+v", notification)
+		}
+	default:
+		t.Fatal("expected git notification")
+	}
+	select {
+	case data := <-c.send:
+		t.Fatalf("unexpected non-git refresh data: %s", data)
+	default:
+	}
+}
+
+func TestHandleSessionSubscribe_DuplicateDoesNotReplaySnapshot(t *testing.T) {
+	h := newTestHub(t)
+	const sessionID = "sess-subscribe-1"
+	providerCalls := 0
+	h.SetSessionDataProvider(func(_ context.Context, sid string) ([]*ws.Message, error) {
+		if sid != sessionID {
+			t.Errorf("provider called with sid=%q, want %q", sid, sessionID)
+		}
+		providerCalls++
+		return []*ws.Message{{
+			Type:    ws.MessageTypeNotification,
+			Action:  "session.git.event",
+			Payload: json.RawMessage(`{"session_id":"sess-subscribe-1"}`),
+		}}, nil
+	})
+
+	c := newTestClient("c-subscribe")
+	c.hub = h
+	c.controlSend = make(chan []byte, 16)
+	payload, _ := json.Marshal(SessionSubscribeRequest{SessionID: sessionID})
+
+	for index := 1; index <= 2; index++ {
+		c.handleSessionSubscribe(&ws.Message{
+			ID:      "req-subscribe-" + string(rune('0'+index)),
+			Type:    ws.MessageTypeRequest,
+			Action:  ws.ActionSessionSubscribe,
+			Payload: payload,
+		})
+	}
+	if providerCalls != 1 {
+		t.Fatalf("session data provider calls = %d, want 1", providerCalls)
+	}
+	for index := 0; index < 2; index++ {
+		select {
+		case <-c.controlSend:
+		default:
+			t.Fatal("expected subscribe acknowledgement")
+		}
+	}
+	select {
+	case <-c.send:
+	default:
+		t.Fatal("expected one initial session snapshot")
+	}
+	select {
+	case <-c.send:
+		t.Fatal("duplicate subscribe replayed session snapshot")
 	default:
 	}
 }

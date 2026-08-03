@@ -113,6 +113,30 @@ func createStep(t *testing.T, svc *Service, step *models.WorkflowStep) {
 	require.NoError(t, err)
 }
 
+func TestCreateStepRejectsConfigureSessionWithProfile(t *testing.T) {
+	svc, db := setupTestService(t)
+	insertWorkflow(t, db, "wf-1", "Test Workflow")
+
+	step := &models.WorkflowStep{
+		WorkflowID:     "wf-1",
+		Name:           "Work",
+		AgentProfileID: "profile-1",
+		Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
+			Type: models.OnEnterConfigureSession,
+			Config: map[string]interface{}{"rules": []interface{}{
+				map[string]interface{}{"agent_name": "codex", "operation": "keep"},
+			}}},
+		}},
+	}
+
+	err := svc.CreateStep(context.Background(), step)
+	require.ErrorContains(t, err, "cannot be combined with agent_profile_id")
+
+	steps, err := svc.repo.ListStepsByWorkflow(context.Background(), "wf-1")
+	require.NoError(t, err)
+	require.Empty(t, steps)
+}
+
 // TestListTemplates_FiltersHidden verifies that templates marked
 // `hidden: true` in their embedded YAML are excluded from the picker shown by
 // the create-workflow dialog and the settings UI.
@@ -453,6 +477,37 @@ func TestCreateStepsFromTemplate_NormalizesDuplicateStartSteps(t *testing.T) {
 	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-1")
 	require.NoError(t, err)
 	assert.Equal(t, []string{"Latest Start"}, startStepNames(steps))
+}
+
+func TestCreateStepsFromTemplateRejectsInvalidConfigureSession(t *testing.T) {
+	svc, db := setupTestService(t)
+	ctx := context.Background()
+
+	insertWorkflow(t, db, "wf-1", "Test Workflow")
+	err := svc.repo.CreateTemplate(ctx, &models.WorkflowTemplate{
+		ID:   "invalid-session-config",
+		Name: "Invalid Session Config",
+		Steps: []models.StepDefinition{{
+			ID:             "work",
+			Name:           "Work",
+			Position:       0,
+			AgentProfileID: "profile-1",
+			Events: models.StepEvents{OnEnter: []models.OnEnterAction{{
+				Type: models.OnEnterConfigureSession,
+				Config: map[string]interface{}{"rules": []interface{}{
+					map[string]interface{}{"agent_name": "codex", "operation": "keep"},
+				}},
+			}}},
+		}},
+	})
+	require.NoError(t, err)
+
+	err = svc.CreateStepsFromTemplate(ctx, "wf-1", "invalid-session-config")
+	require.ErrorContains(t, err, "cannot be combined with agent_profile_id")
+
+	steps, err := svc.repo.ListStepsByWorkflow(ctx, "wf-1")
+	require.NoError(t, err)
+	require.Empty(t, steps)
 }
 
 func findStepByName(steps []*models.WorkflowStep, name string) *models.WorkflowStep {

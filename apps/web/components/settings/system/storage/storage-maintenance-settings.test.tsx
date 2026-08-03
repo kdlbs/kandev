@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
 }));
 const IDLE_PERIOD_TEST_ID = "storage-idle-period";
 const SAVE_BUTTON_NAME = "Save changes";
+const ANALYZE_TEST_ID = "storage-analyze";
 
 vi.mock("@/hooks/domains/system/use-storage-maintenance", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/hooks/domains/system/use-storage-maintenance")>()),
@@ -117,7 +118,7 @@ describe("StorageMaintenanceSettings", () => {
 
     render(<StorageMaintenanceSettings />, { wrapper: Providers });
 
-    const analyzeButton = screen.getByTestId("storage-analyze");
+    const analyzeButton = screen.getByTestId(ANALYZE_TEST_ID);
     expect(analyzeButton.textContent?.trim()).toBe("Analysis complete");
     expect(analyzeButton.getAttribute("data-job-state")).toBe("succeeded");
     expect(screen.queryByTestId("storage-analysis-job")).toBeNull();
@@ -137,7 +138,7 @@ describe("StorageMaintenanceSettings", () => {
 
     render(<StorageMaintenanceSettings />, { wrapper: Providers });
 
-    const analyzeButton = screen.getByTestId("storage-analyze") as HTMLButtonElement;
+    const analyzeButton = screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement;
     expect(analyzeButton.textContent?.trim()).toBe("Analyzing...");
     expect(analyzeButton.disabled).toBe(true);
   });
@@ -283,7 +284,7 @@ describe("StorageMaintenanceSettings pending policy", () => {
       mocks.useStorageMaintenance.mockReturnValue(currentController);
       render(<StorageMaintenanceSettings />, { wrapper: Providers });
 
-      expect((screen.getByTestId("storage-analyze") as HTMLButtonElement).disabled).toBe(true);
+      expect((screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement).disabled).toBe(true);
       expect((screen.getByTestId("storage-run-now") as HTMLButtonElement).disabled).toBe(true);
       fireEvent.change(screen.getByTestId(IDLE_PERIOD_TEST_ID), { target: { value: "31" } });
       expect(
@@ -291,6 +292,19 @@ describe("StorageMaintenanceSettings pending policy", () => {
       ).toBe(false);
     },
   );
+
+  it("keeps section actions enabled while policy is loading", () => {
+    mocks.useStorageMaintenance.mockReturnValue({
+      ...controller(overview),
+      loading: { policy: true, overview: false, runs: false, quarantine: false },
+      sectionErrors: { policy: null, overview: null, runs: null, quarantine: null },
+    });
+
+    render(<StorageMaintenanceSettings />, { wrapper: Providers });
+
+    expect((screen.getByTestId(ANALYZE_TEST_ID) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByTestId("storage-run-now") as HTMLButtonElement).disabled).toBe(false);
+  });
 
   it("blocks Go cache adoption while a save is pending", () => {
     mocks.useStorageMaintenance.mockReturnValue({

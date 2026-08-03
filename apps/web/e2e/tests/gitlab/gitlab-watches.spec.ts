@@ -81,7 +81,8 @@ test.describe("GitLab watch controls", () => {
       /delete 1 task/i,
     );
     await testPage.getByTestId("reset-watch-dialog-confirm").click();
-    await expect(testPage.getByText(/Review watch reset; 1 task\(s\) deleted/)).toBeVisible();
+    // Singular form: the toast is an i18next `_one`/`_other` plural, not "task(s)".
+    await expect(testPage.getByText(/Review watch reset; 1 task deleted/)).toBeVisible();
     await kanban.goto();
     await expect(kanban.taskCardByTitle(taskTitle)).toHaveCount(1, {
       timeout: 20_000,

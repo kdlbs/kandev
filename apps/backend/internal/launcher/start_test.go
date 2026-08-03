@@ -2,11 +2,58 @@ package launcher
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestResolveLogThresholdsByMode(t *testing.T) {
+	t.Setenv("KANDEV_LOG_LEVEL", "")
+	tests := []struct {
+		name        string
+		options     Options
+		wantFile    string
+		wantConsole string
+	}{
+		{name: "normal", wantFile: "info", wantConsole: "warn"},
+		{name: "debug", options: Options{Debug: true}, wantFile: "debug", wantConsole: "warn"},
+		{name: "verbose", options: Options{Verbose: true}, wantFile: "info", wantConsole: "info"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := resolveLogLevel(test.options); got != test.wantFile {
+				t.Fatalf("file level = %q, want %q", got, test.wantFile)
+			}
+			if got := resolveConsoleLogLevel(test.options); got != test.wantConsole {
+				t.Fatalf("console level = %q, want %q", got, test.wantConsole)
+			}
+		})
+	}
+	t.Setenv("KANDEV_LOG_LEVEL", "error")
+	if got := resolveLogLevel(Options{Debug: true}); got != "error" {
+		t.Fatalf("explicit file override = %q", got)
+	}
+	if os.Getenv("KANDEV_LOG_LEVEL") != "error" {
+		t.Fatal("test environment changed unexpectedly")
+	}
+}
+
+func TestBackendEnvCarriesIndependentThresholds(t *testing.T) {
+	env := backendEnv(portConfig{BackendPort: 1234, AgentctlPort: 5678}, "debug", "warn", true)
+	joined := strings.Join(env, "\n")
+	for _, expected := range []string{
+		"KANDEV_LOG_LEVEL=debug",
+		"KANDEV_CONSOLE_LOG_LEVEL=warn",
+		"KANDEV_DEBUG_AGENT_MESSAGES=true",
+	} {
+		if !strings.Contains(joined, expected) {
+			t.Fatalf("backend environment missing %q", expected)
+		}
+	}
+}
 
 func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 	oldExecutablePath := executablePath
@@ -62,6 +109,7 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	})
 
 	var events []string
+	var launchedQuiet bool
 	newSupervisorFn = func() *processSupervisor {
 		events = append(events, "new-supervisor")
 		return newSupervisor()
@@ -71,11 +119,12 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 		_ []string,
 		_ string,
 		_ []string,
-		_ bool,
+		quiet bool,
 		_ portConfig,
 		_ string,
 		_ *processSupervisor,
 	) (*restartableBackend, func(), error) {
+		launchedQuiet = quiet
 		events = append(events, "launch-backend")
 		exitCh := make(chan int, 1)
 		exitCh <- 0
@@ -107,5 +156,8 @@ func TestRunManagedAppAttachesSignalsBeforeBackendLaunch(t *testing.T) {
 	want := []string{"new-supervisor", "attach-signals", "launch-backend", "wait-health"}
 	if !reflect.DeepEqual(events, want) {
 		t.Fatalf("events = %v, want %v", events, want)
+	}
+	if launchedQuiet {
+		t.Fatal("backend stdout was not forwarded")
 	}
 }

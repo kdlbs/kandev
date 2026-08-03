@@ -1,11 +1,13 @@
 "use client";
 
 import { cloneElement, isValidElement, useState } from "react";
+import { useTranslation } from "react-i18next";
 import {
   IconBrandGitlab,
   IconBrandSentry,
   IconCopy,
   IconCircleDot,
+  IconEdit,
   IconGitPullRequest,
   IconLink,
   IconPencil,
@@ -52,6 +54,7 @@ type ContextMenuProps = {
   stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];
   children: React.ReactElement<{ menuOpen?: boolean }>;
+  onEditTask?: (task: TaskSwitcherItem) => void;
   onRenameTask?: (taskId: string, currentTitle: string) => void;
   onArchiveTask?: (taskId: string) => void;
   onCreateSubtask?: (taskId: string, taskTitle: string) => void;
@@ -85,6 +88,7 @@ export function TaskItemWithContextMenu({
   stepsByWorkflowId,
   steps,
   children,
+  onEditTask,
   onRenameTask,
   onArchiveTask,
   onCreateSubtask,
@@ -128,6 +132,7 @@ export function TaskItemWithContextMenu({
           workflows={workflows}
           stepsByWorkflowId={stepsByWorkflowId}
           steps={steps}
+          onEditTask={onEditTask}
           onRenameTask={onRenameTask}
           onArchiveTask={onArchiveTask}
           onCreateSubtask={onCreateSubtask}
@@ -170,6 +175,7 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
     workflows,
     stepsByWorkflowId,
     steps,
+    onEditTask,
     onRenameTask,
     onArchiveTask,
     onCreateSubtask,
@@ -221,23 +227,17 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
 
   // Acting on a lone selected row (Pin / Delete) must drop it from the selection
   // so later plain clicks navigate instead of toggling.
-  const withClear = (handler?: (id: string) => void) =>
-    actingOnSelection && onClearSelection && handler
-      ? (id: string) => {
-          onClearSelection();
-          handler(id);
-        }
-      : handler;
-  const onDelete = withClear(onDeleteTask);
-  const onDetach = withClear(onDetachTask);
+  const onDelete = withSelectionClear(actingOnSelection, onClearSelection, onDeleteTask);
+  const onDetach = withSelectionClear(actingOnSelection, onClearSelection, onDetachTask);
   return (
     <>
       <TaskPinItem
         taskId={task.id}
         isPinned={isPinned}
         disabled={isDeleting}
-        onTogglePin={withClear(onTogglePin)}
+        onTogglePin={withSelectionClear(actingOnSelection, onClearSelection, onTogglePin)}
       />
+      <TaskEditItem task={task} disabled={isDeleting} onEditTask={onEditTask} />
       <TaskRenameItem task={task} disabled={isDeleting} onRenameTask={onRenameTask} />
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
       <ContextMenuItem disabled>
@@ -273,6 +273,18 @@ function TaskContextMenuItems(props: TaskContextMenuItemsProps) {
       <TaskDeleteItem taskId={task.id} isDeleting={isDeleting} onDeleteTask={onDelete} />
     </>
   );
+}
+
+function withSelectionClear(
+  actingOnSelection: boolean,
+  onClearSelection: (() => void) | undefined,
+  handler: ((id: string) => void) | undefined,
+) {
+  if (!actingOnSelection || !onClearSelection || !handler) return handler;
+  return (id: string) => {
+    onClearSelection();
+    handler(id);
+  };
 }
 
 /** Reduced menu shown when 2+ tasks are selected — only bulk-valid actions. */
@@ -431,6 +443,25 @@ function TaskRenameItem({
     <ContextMenuItem disabled={disabled} onSelect={() => onRenameTask(task.id, task.title)}>
       <IconPencil className="mr-2 h-4 w-4" />
       Rename
+    </ContextMenuItem>
+  );
+}
+
+function TaskEditItem({
+  task,
+  disabled,
+  onEditTask,
+}: {
+  task: TaskSwitcherItem;
+  disabled?: boolean;
+  onEditTask?: (task: TaskSwitcherItem) => void;
+}) {
+  const { t } = useTranslation();
+  if (!onEditTask || task.isArchived || !task.workflowId || !task.workflowStepId) return null;
+  return (
+    <ContextMenuItem disabled={disabled} onSelect={() => onEditTask(task)}>
+      <IconEdit className="mr-2 h-4 w-4" />
+      {t("common:edit")}
     </ContextMenuItem>
   );
 }

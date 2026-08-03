@@ -32,6 +32,7 @@ type UserSettingsDTO struct {
 	ReviewAutoMarkOnScroll          bool                                `json:"review_auto_mark_on_scroll"`
 	ConfirmTaskArchive              bool                                `json:"confirm_task_archive"`
 	UnreadDivider                   bool                                `json:"unread_divider"`
+	AgentGeneratedTaskTitles        bool                                `json:"agent_generated_task_titles"`
 	MCPTaskAgentProfileDefault      string                              `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar           bool                                `json:"show_anchored_prompt_bar"`
 	ShowScrollToLastPrompt          bool                                `json:"show_scroll_to_last_prompt"`
@@ -53,6 +54,7 @@ type UserSettingsDTO struct {
 	GitHubSavedPresets              json.RawMessage                     `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets       json.RawMessage                     `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets              json.RawMessage                     `json:"gitlab_saved_presets,omitempty"`
+	AzureDevOpsBrowsePreferences    json.RawMessage                     `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID           string                              `json:"default_utility_agent_id"`
 	DefaultUtilityModel             string                              `json:"default_utility_model"`
 	KeyboardShortcuts               map[string]interface{}              `json:"keyboard_shortcuts,omitempty"`
@@ -98,6 +100,7 @@ type UpdateUserSettingsRequest struct {
 	ReviewAutoMarkOnScroll          *bool                              `json:"review_auto_mark_on_scroll,omitempty"`
 	ConfirmTaskArchive              *bool                              `json:"confirm_task_archive,omitempty"`
 	UnreadDivider                   *bool                              `json:"unread_divider,omitempty"`
+	AgentGeneratedTaskTitles        *bool                              `json:"agent_generated_task_titles,omitempty"`
 	MCPTaskAgentProfileDefault      *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowAnchoredPromptBar           *bool                              `json:"show_anchored_prompt_bar,omitempty"`
 	ShowScrollToLastPrompt          *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
@@ -119,6 +122,7 @@ type UpdateUserSettingsRequest struct {
 	GitHubSavedPresets              NullableRawMessage                 `json:"github_saved_presets,omitempty"`
 	GitHubDefaultQueryPresets       NullableRawMessage                 `json:"github_default_query_presets,omitempty"`
 	GitLabSavedPresets              NullableRawMessage                 `json:"gitlab_saved_presets,omitempty"`
+	AzureDevOpsBrowsePreferences    NullableRawMessage                 `json:"azure_devops_browse_preferences,omitempty"`
 	DefaultUtilityAgentID           *string                            `json:"default_utility_agent_id,omitempty"`
 	DefaultUtilityModel             *string                            `json:"default_utility_model,omitempty"`
 	KeyboardShortcuts               *map[string]interface{}            `json:"keyboard_shortcuts,omitempty"`
@@ -225,6 +229,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ReviewAutoMarkOnScroll:          settings.ReviewAutoMarkOnScroll,
 		ConfirmTaskArchive:              settings.ConfirmTaskArchive,
 		UnreadDivider:                   settings.UnreadDivider,
+		AgentGeneratedTaskTitles:        settings.AgentGeneratedTaskTitles,
 		MCPTaskAgentProfileDefault:      models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowAnchoredPromptBar:           settings.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:          settings.ShowScrollToLastPrompt,
@@ -246,6 +251,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		GitHubSavedPresets:              settings.GitHubSavedPresets,
 		GitHubDefaultQueryPresets:       settings.GitHubDefaultQueryPresets,
 		GitLabSavedPresets:              settings.GitLabSavedPresets,
+		AzureDevOpsBrowsePreferences:    settings.AzureDevOpsBrowsePreferences,
 		DefaultUtilityAgentID:           settings.DefaultUtilityAgentID,
 		DefaultUtilityModel:             settings.DefaultUtilityModel,
 		KeyboardShortcuts:               settings.KeyboardShortcuts,

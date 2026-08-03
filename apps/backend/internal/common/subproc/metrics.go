@@ -27,7 +27,48 @@ var (
 	subprocWaiters           = expvar.NewMap("subproc_waiters")
 	subprocAcquireTotal      = expvar.NewMap("subproc_acquire_total")
 	subprocAcquireWaitMillis = expvar.NewMap("subproc_acquire_wait_millis_total")
+	subprocClassInflight     = expvar.NewMap("subproc_class_inflight")
+	subprocClassWaiters      = expvar.NewMap("subproc_class_waiters")
+	subprocClassAcquireTotal = expvar.NewMap("subproc_class_acquire_total")
+	subprocClassWaitMillis   = expvar.NewMap("subproc_class_acquire_wait_millis_total")
 )
+
+func classMetricKey(pool string, class GitWorkClass) string {
+	return "pool=" + pool + ";class=" + string(class)
+}
+
+func addClassInflight(pool string, class GitWorkClass, delta int64) {
+	if pool != "" {
+		subprocClassInflight.Add(classMetricKey(pool, class), delta)
+	}
+}
+
+func addClassWaiters(pool string, class GitWorkClass, delta int64) {
+	if pool != "" {
+		subprocClassWaiters.Add(classMetricKey(pool, class), delta)
+	}
+}
+
+func addClassAcquire(pool string, class GitWorkClass, waited time.Duration) {
+	if pool == "" {
+		return
+	}
+	key := classMetricKey(pool, class)
+	subprocClassAcquireTotal.Add(key, 1)
+	if waited > 0 && waited.Milliseconds() > 0 {
+		subprocClassWaitMillis.Add(key, waited.Milliseconds())
+	}
+}
+
+func classSnapshot(pool string, class GitWorkClass) ClassSnapshot {
+	key := classMetricKey(pool, class)
+	return ClassSnapshot{
+		Inflight:          metricInt(subprocClassInflight, key),
+		Waiters:           metricInt(subprocClassWaiters, key),
+		AcquireTotal:      metricInt(subprocClassAcquireTotal, key),
+		AcquireWaitMillis: metricInt(subprocClassWaitMillis, key),
+	}
+}
 
 // publishCap sets the gauge for the configured cap. Called once at
 // NewNamedThrottle and again from SetCapForTest. The cap is published

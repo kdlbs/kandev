@@ -42,14 +42,21 @@ Skip public docs when the change is:
 4. If no public docs exist but the behavior is user-facing, add or propose the smallest useful public page/section.
    When adding a page, include `title` and `description` frontmatter and list its page slug or path without the `.md` extension in `docs/public/meta.json` exactly once, for example `cli`. See `docs/public/README.md`.
 5. If the change only updates implementation intent or architectural history, update specs/plans/ADRs instead.
-6. Keep public docs task-oriented and scan-friendly:
-   - Start with the common path, expected result, and only the prerequisites it needs.
+6. Classify each public page by its primary Diátaxis content type:
+   - **Tutorial:** teach a beginner by leading them through one successful outcome.
+   - **How-to guide:** help a reader complete a known task, with focused steps, choices, and recovery paths.
+   - **Reference:** provide accurate, complete lookup information such as fields, commands, defaults, limits, or protocol contracts.
+   - **Explanation:** build understanding of a concept, boundary, rationale, or trade-off.
+   Keep one dominant type per page. Link to another page when a long section changes from learning to procedure, lookup, or explanation; do not force every page into a generic tutorial-shaped opening.
+7. Keep public docs task-oriented and scan-friendly:
+   - Tutorials should lead with prerequisites and a linear first success; how-to guides should lead with the task, expected result, and only the prerequisites it needs.
+   - Reference pages should lead with scope and the contract readers need to look up; explanation pages should lead with the question or concept and why it matters.
    - Use short paragraphs (one idea, normally three sentences or fewer) and bullets for choices, limits, and consequences.
    - Prefer a link to the page that owns a detailed contract over repeating it.
    - Use native `<details>` / `<summary>` disclosures for non-essential edge cases, exhaustive option lists, and advanced configuration. Keep required steps, security warnings, destructive effects, and eligibility limits visible.
    - Use tables only for genuine comparisons, not narrative text.
-7. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
-8. Note docs impact in the PR body.
+8. Preserve internal links inside `docs/public/**` where possible. Link to source-only raw docs only when the raw note is intentionally not published.
+9. Note docs impact and the page's primary content type in the PR body.
 
 ## Validation
 

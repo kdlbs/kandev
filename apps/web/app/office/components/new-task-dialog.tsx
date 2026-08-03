@@ -6,7 +6,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Textarea } from "@kandev/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogFooter, DialogTitle } from "@kandev/ui/dialog";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast/sonner";
 import { useAppStore } from "@/components/state-provider";
 import { createTask } from "@/lib/api/domains/kanban-api";
 import { useIssueDraft, type IssueDraft } from "./new-task-draft";

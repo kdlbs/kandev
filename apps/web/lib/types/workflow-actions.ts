@@ -11,7 +11,31 @@
  */
 
 // On Enter action types
-export type OnEnterActionType = "enable_plan_mode" | "auto_start_agent" | "reset_agent_context";
+export type OnEnterActionType =
+  | "enable_plan_mode"
+  | "auto_start_agent"
+  | "reset_agent_context"
+  | "configure_session";
+
+export type ConfigureSessionOperation = "set" | "keep" | "restore_original";
+
+export type ConfigureSessionSetRule = {
+  agent_name: string;
+  operation: "set";
+  model?: string;
+  config_options?: Record<string, string>;
+};
+
+export type ConfigureSessionCarryRule = {
+  agent_name: string;
+  operation: "keep" | "restore_original";
+};
+
+export type ConfigureSessionRule = ConfigureSessionSetRule | ConfigureSessionCarryRule;
+
+export type ConfigureSessionActionConfig = {
+  rules: ConfigureSessionRule[];
+};
 
 // On Turn Start action types
 export type OnTurnStartActionType = "move_to_next" | "move_to_previous" | "move_to_step";
@@ -72,7 +96,8 @@ export type OnEnterAction =
         queue_if_busy?: boolean;
       };
     }
-  | { type: "reset_agent_context" };
+  | { type: "reset_agent_context" }
+  | { type: "configure_session"; config: ConfigureSessionActionConfig };
 
 export type OnTurnStartAction =
   | { type: "move_to_next"; config?: TransitionConfig }

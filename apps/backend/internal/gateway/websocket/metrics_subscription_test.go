@@ -92,6 +92,14 @@ func TestHandleSystemMetricsSubscribe(t *testing.T) {
 		t.Fatalf("subscribe calls=%d, want 1", len(rec.subs))
 	}
 	select {
+	case data := <-c.controlSend:
+		var got ws.Message
+		if err := json.Unmarshal(data, &got); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		if got.Type != ws.MessageTypeResponse || got.Action != ws.ActionSystemMetricsSubscribe {
+			t.Fatalf("unexpected response type/action: %s %s", got.Type, got.Action)
+		}
 	case data := <-c.send:
 		var got ws.Message
 		if err := json.Unmarshal(data, &got); err != nil {

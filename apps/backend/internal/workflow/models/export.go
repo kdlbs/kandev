@@ -223,13 +223,8 @@ func (s StepPortable) PullFromStepID(posToID map[int]string) string {
 // an import would "succeed" with an inert action. See issue #1183. This mirrors
 // the embedded-YAML loader's allow-list check.
 func validateOnEnterActions(step StepPortable) error {
-	for _, a := range step.Events.OnEnter {
-		if a.Type != OnEnterSetSessionMode {
-			continue
-		}
-		if mode, _ := a.Config["mode"].(string); mode == "" {
-			return fmt.Errorf("step %q on_enter: set_session_mode requires a non-empty string \"mode\" config", step.Name)
-		}
+	if err := ValidateStepEvents(step.Events, step.AgentProfile != nil); err != nil {
+		return fmt.Errorf("step %q on_enter: %w", step.Name, err)
 	}
 	return nil
 }
