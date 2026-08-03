@@ -90,6 +90,13 @@ describe("looksLikeCopy", () => {
     ["repositoryName", false],
     ["move_to_next", false],
     ["px-1 py-0.5", false],
+    // A catalog reference. Re-pointing a t() call reports the OLD key as a
+    // removed literal, because the key is itself a StringLiteral.
+    ["workspaces:noScriptsYet", false],
+    ["common:requestFailed", false],
+    // Guard: prose containing a colon is still copy.
+    ["Supported patterns:", true],
+    ["Note: this cannot be undone", true],
   ])("classifies %j as copy=%s", (value, expected) => {
     expect(looksLikeCopy(value)).toBe(expected);
   });

@@ -116,6 +116,12 @@ export function looksLikeCopy(value) {
   if (/^(https?|file|ssh|git):\/\//.test(value)) return false; // URLs
   if (/^[a-z][a-zA-Z0-9]*$/.test(value)) return false; // camelCase identifier
   if (/^[a-z0-9]+([-_][a-z0-9]+)+$/.test(value)) return false; // kebab/snake token
+  // A `namespace:key` catalog reference. Swapping one `t()` key for another
+  // registers as a removed literal, because the key is itself a StringLiteral —
+  // so every migration that re-points a call site reports its own old key. It is
+  // an identifier, never copy, and leaving it in reads alarmingly to someone
+  // expecting a clean run.
+  if (/^[a-z][a-zA-Z0-9]*:[a-zA-Z0-9_]+$/.test(value)) return false;
   return true;
 }
 

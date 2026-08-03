@@ -54,11 +54,32 @@ function catalogValues() {
   return out;
 }
 
-function sideOf(ref, repoPath) {
+/** The committed content of a path at `ref`, or "" if absent there. */
+function committedSide(ref, repoPath) {
   try {
     return git(["show", `${ref}:${repoPath}`], { quiet: true });
   } catch {
     return ""; // Absent on that side (added or deleted).
+  }
+}
+
+/**
+ * The CURRENT content of a path — working tree, not `HEAD`.
+ *
+ * This side must not be `git show HEAD:…`. `changedFiles` diffs the base against
+ * the working tree, so it lists files you have edited but not committed; reading
+ * the "after" side from HEAD compared those files against themselves and found
+ * nothing. The result was a no-op that printed a tick WITH THE CORRECT FILE
+ * COUNT, which is what made it convincing — and the natural workflow (finish,
+ * run checks, commit) walks straight into it.
+ *
+ * A missing file is a deletion, so its strings all count as removed.
+ */
+function workingTreeSide(repoPath) {
+  try {
+    return fs.readFileSync(path.join(REPO_ROOT, repoPath), "utf8");
+  } catch {
+    return "";
   }
 }
 
@@ -78,8 +99,8 @@ const files = [
 const findings = [];
 let unparseable = 0;
 for (const repoPath of files) {
-  const before = literals(sideOf(base, repoPath), repoPath);
-  const after = literals(sideOf("HEAD", repoPath), repoPath) ?? new Set();
+  const before = literals(committedSide(base, repoPath), repoPath);
+  const after = literals(workingTreeSide(repoPath), repoPath) ?? new Set();
   if (before === null) {
     unparseable += 1;
     continue;
@@ -93,6 +114,15 @@ for (const repoPath of files) {
 }
 
 if (unparseable) console.log(`ℹ ${unparseable} file(s) could not be parsed on the base side.`);
+
+// A tick over nothing is the shape of every silent no-op this check has had.
+// Say plainly that there was nothing to compare rather than reporting a verdict.
+if (files.length === 0) {
+  console.log(
+    `↷ no changed .ts/.tsx under ${WEB_PREFIX} between ${base.slice(0, 9)} and the working tree — nothing to compare.`,
+  );
+  process.exit(0);
+}
 
 if (findings.length === 0) {
   console.log(
