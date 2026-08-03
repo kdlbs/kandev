@@ -1,4 +1,3 @@
-import { t } from "@/lib/i18n";
 import type { WorkflowStep } from "@/lib/types/http";
 import type {
   ConfigureSessionOperation,
@@ -13,7 +12,6 @@ export type SessionConfigCarryWarning = {
   sourceStepName: string;
   model?: string;
   configOptions: Record<string, string>;
-  message: string;
 };
 
 type CarryState = "original" | "changed";
@@ -130,12 +128,6 @@ function carryWarning(agentName: string, source: ChangedSource): SessionConfigCa
     sourceStepName: source.step.name,
     model: source.rule.operation === "set" ? source.rule.model : undefined,
     configOptions: source.rule.operation === "set" ? { ...(source.rule.config_options ?? {}) } : {},
-    // `stepName` and `agentName` are user/wire data and stay interpolated
-    // values; only the surrounding sentence is copy.
-    message: t("workflows:sessionConfigCarryForwardWarningMessage", {
-      stepName: source.step.name,
-      agentName,
-    }),
   };
 }
 

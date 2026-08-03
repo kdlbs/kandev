@@ -1,6 +1,5 @@
 "use client";
 
-import { formatDistanceToNow } from "date-fns";
 import { Trans, useTranslation } from "react-i18next";
 import {
   IconAlertTriangle,
@@ -14,6 +13,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { useTick } from "@/components/integrations/auth-status-banner";
 import type { TFunction } from "i18next";
+import { formatRelative } from "@/lib/i18n/formats";
 import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
 
 type SyncState = "waiting" | "ok" | "failed";
@@ -31,7 +31,9 @@ function StateIcon({ state }: { state: SyncState }) {
 
 function lastSyncedLabel(t: TFunction, config: WorkflowSyncConfig): string {
   if (config.last_synced_at) {
-    const when = formatDistanceToNow(new Date(config.last_synced_at), { addSuffix: true });
+    // `formatRelative` routes its buckets through i18next; date-fns'
+    // `formatDistanceToNow` would render English inside a translated sentence.
+    const when = formatRelative(config.last_synced_at);
     return config.last_ok
       ? t("workflows:lastSynced", { when })
       : t("workflows:lastAttempt", { when });
@@ -45,7 +47,7 @@ function MetadataLine({ config }: { config: WorkflowSyncConfig }) {
   const parts = [
     t("workflows:directoryLine", { path: config.path || t("workflows:repositoryRoot") }),
     config.poll_enabled
-      ? t("workflows:everySeconds", { seconds: config.interval_seconds })
+      ? t("workflows:everySeconds", { count: config.interval_seconds })
       : t("workflows:autoSyncOff"),
     lastSyncedLabel(t, config),
   ];

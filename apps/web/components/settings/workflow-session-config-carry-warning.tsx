@@ -33,7 +33,14 @@ export function SessionConfigCarryWarningPanel({
             key={`${warning.agentName}-${warning.sourceStepId}`}
             className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between"
           >
-            <span className="min-w-0 text-xs text-muted-foreground">{warning.message}</span>
+            <span className="min-w-0 text-xs text-muted-foreground">
+              {/* Resolved here rather than in the analyzer so the sentence
+                  follows a locale switch; the step and agent names are data. */}
+              {t("workflows:sessionConfigCarryForwardWarningMessage", {
+                stepName: warning.sourceStepName,
+                agentName: warning.agentName,
+              })}
+            </span>
             <div className="flex shrink-0 flex-wrap gap-1.5">
               <Button
                 type="button"

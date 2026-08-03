@@ -47,6 +47,46 @@ describe("WorkflowSyncStatusCard", () => {
     ).toBeTruthy();
   });
 
+  // The interval is a count, so it goes through i18next plural selection rather
+  // than being interpolated as an opaque value.
+  it("selects the singular interval form for one second", () => {
+    render(
+      <WorkflowSyncStatusCard
+        config={config({ interval_seconds: 1 })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText("Directory .kandev/workflows · every 1s · waiting for first sync…"),
+    ).toBeTruthy();
+  });
+
+  // `formatRelative` routes its buckets through i18next; date-fns would render
+  // English inside a translated sentence.
+  it("renders the last-sync time through the locale-aware relative formatter", () => {
+    const threeHoursAgo = new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString();
+    render(
+      <WorkflowSyncStatusCard
+        config={config({ last_synced_at: threeHoursAgo })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/last synced 3h ago$/)).toBeTruthy();
+  });
+
+  it("labels a failed attempt separately from a successful sync", () => {
+    render(
+      <WorkflowSyncStatusCard
+        config={config({ last_ok: false, last_synced_at: new Date().toISOString() })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/last attempt just now$/)).toBeTruthy();
+  });
+
   it("labels an empty directory as the repository root and reports auto-sync off", () => {
     render(
       <WorkflowSyncStatusCard

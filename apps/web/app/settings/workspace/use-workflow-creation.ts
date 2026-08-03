@@ -12,9 +12,11 @@ import {
   type Workspace,
 } from "@/lib/types/http";
 
-// Seeded step definitions for a workflow created without a template. These
-// names are PERSISTED as the workflow's step names, so they deliberately stay
-// English — translating them would write localized values into the database.
+// Seeded step definitions used whenever no template supplies default steps —
+// the Custom option, and any template whose `default_steps` is absent or empty.
+// These names are PERSISTED as the workflow's step names, so they deliberately
+// stay English — translating them would write localized values into the
+// database.
 export const DEFAULT_CUSTOM_STEPS: StepDefinition[] = [
   { name: "Todo", position: 0, color: "bg-slate-500" },
   { name: "In Progress", position: 1, color: "bg-blue-500" },
