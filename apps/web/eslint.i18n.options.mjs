@@ -619,4 +619,13 @@ export const i18nGuardFiles = [
   "components/settings/profile-edit/**/*.{ts,tsx}",
   "components/settings/executor-profile-dialog.tsx",
   "components/settings/executor-profiles-card.tsx",
+  // The two hooks the Agents routes reach for install/update and capability
+  // probing. Both are `.ts` with no JSX, and both carried copy the lint count
+  // could never report: a thrown `Error` and an async `setError` fallback. Each
+  // surfaces inside an already-translated wrapper (`unableToStartUpdate`,
+  // `failedToRefresh`), so the English payload rendered *inside* accented copy —
+  // the shape the pseudo-locale is easiest to skim past. Only the pseudo-locale
+  // can prove they stay migrated.
+  "hooks/domains/settings/use-agent-runtime-updates.ts",
+  "hooks/domains/settings/use-dynamic-models.ts",
 ];
