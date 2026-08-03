@@ -85,7 +85,7 @@ describe("built-in layout profiles", () => {
       getBuiltInLayoutProfile(DEFAULT_LAYOUT_ID).layout.columns[0].groups[0].panels.map(
         (panel) => panel.id,
       ),
-    ).toEqual(["chat", "pr-detail"]);
+    ).toEqual(["chat"]);
   });
 });
 

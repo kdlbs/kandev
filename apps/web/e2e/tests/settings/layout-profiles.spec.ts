@@ -213,10 +213,12 @@ test.describe("Task layout profile defaults", () => {
     test.setTimeout(120_000);
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.open();
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toHaveCount(0);
+    await layouts.addPanel("PR Details");
     await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toBeVisible();
     await layouts.selectPanel("PR Details");
     await prCapture.screenshot("default-pr-details-agent-group", {
-      caption: "Default layout puts PR Details beside Agent in the center pane",
+      caption: "The layout editor adds PR Details beside Agent in the center pane",
     });
 
     await layouts.actions.getByRole("button", { name: "Move tab to split" }).click();
