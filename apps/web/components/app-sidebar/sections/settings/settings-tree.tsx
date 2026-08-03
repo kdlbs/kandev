@@ -91,13 +91,13 @@ export function SettingsTree({ pathname }: { pathname: string }) {
       />
       <SettingsLeaf
         href={VOICE_MODE_HREF}
-        label={t("sidebar:voiceMode")}
+        label={t("settings:voiceMode")}
         icon={IconMicrophone}
         isActive={pathname === VOICE_MODE_HREF}
       />
       <SettingsLeaf
         href={UTILITY_HREF}
-        label={t("sidebar:utilityAgents")}
+        label={t("settings:utilityAgents")}
         icon={IconWand}
         isActive={pathname === UTILITY_HREF}
       />

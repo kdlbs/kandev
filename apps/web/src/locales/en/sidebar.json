@@ -68,10 +68,8 @@
   "tasks": "Tasks",
   "toggleTheme": "Toggle theme",
   "unsavedFilterChanges": "Unsaved filter changes",
-  "utilityAgents": "Utility Agents",
   "viewAll": "All",
   "viewLabel": "View: {{name}}",
-  "voiceMode": "Voice Mode",
   "whatsNew": "What's new",
   "work": "Work",
   "workspaceFallback": "Workspace"
