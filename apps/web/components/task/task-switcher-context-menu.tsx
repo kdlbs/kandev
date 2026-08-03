@@ -7,6 +7,7 @@ import {
   IconBrandSentry,
   IconCopy,
   IconCircleDot,
+  IconEdit,
   IconGitPullRequest,
   IconLink,
   IconPencil,
@@ -459,7 +460,7 @@ function TaskEditItem({
   if (!onEditTask || task.isArchived || !task.workflowId || !task.workflowStepId) return null;
   return (
     <ContextMenuItem disabled={disabled} onSelect={() => onEditTask(task)}>
-      <IconPencil className="mr-2 h-4 w-4" />
+      <IconEdit className="mr-2 h-4 w-4" />
       {t("common:edit")}
     </ContextMenuItem>
   );

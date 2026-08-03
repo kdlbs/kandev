@@ -36,6 +36,15 @@ describe("buildSidebarTaskEditTarget", () => {
     expect(buildSidebarTaskEditTarget({ id: "task-1" }, sourceTask())).toBeNull();
   });
 
+  it("returns no target when the source task cannot be resolved", () => {
+    expect(
+      buildSidebarTaskEditTarget(
+        { id: "task-1", workflowId: "workflow-1", workflowStepId: "step-1" },
+        null,
+      ),
+    ).toBeNull();
+  });
+
   it("falls back to the sidebar step when the source task has no step", () => {
     expect(
       buildSidebarTaskEditTarget(

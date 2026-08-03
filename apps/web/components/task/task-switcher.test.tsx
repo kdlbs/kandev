@@ -385,6 +385,27 @@ describe("TaskSwitcher — edit menu", () => {
     fireEvent.contextMenu(screen.getByText(editableTask.title));
     expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
+
+  it("omits edit when a task lacks workflow metadata", () => {
+    const task = item("No workflow task");
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [task] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={vi.fn()}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(task.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+  });
 });
 
 describe("TaskSwitcher — external issue link menu", () => {
