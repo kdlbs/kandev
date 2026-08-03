@@ -101,7 +101,7 @@ function SessionConfigRuleHeader({
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
       <Label className="text-xs font-medium text-muted-foreground sm:w-24">
-        {t("settings:whenAgentIs")}
+        {t("workflows:whenAgentIs")}
       </Label>
       <Select
         value={rule.agent_name}
@@ -120,7 +120,7 @@ function SessionConfigRuleHeader({
           className="min-h-10 w-full cursor-pointer sm:flex-1"
           data-testid={`session-config-agent-${index}`}
         >
-          <SelectValue placeholder={t("settings:chooseAgentFamily")} />
+          <SelectValue placeholder={t("workflows:chooseAgentFamily")} />
         </SelectTrigger>
         <SelectContent>
           {choices.map((choice) => (
@@ -144,9 +144,9 @@ function SessionConfigRuleHeader({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="set">{t("settings:setSettings")}</SelectItem>
-          <SelectItem value="keep">{t("settings:keepCurrent")}</SelectItem>
-          <SelectItem value="restore_original">{t("settings:restoreOriginal")}</SelectItem>
+          <SelectItem value="set">{t("workflows:setSettings")}</SelectItem>
+          <SelectItem value="keep">{t("workflows:keepCurrent")}</SelectItem>
+          <SelectItem value="restore_original">{t("workflows:restoreOriginal")}</SelectItem>
         </SelectContent>
       </Select>
       <Button
@@ -156,7 +156,7 @@ function SessionConfigRuleHeader({
         className="min-h-10 cursor-pointer self-end text-destructive hover:text-destructive sm:self-auto"
         onClick={onRemove}
         disabled={readOnly}
-        aria-label={t("settings:removeAgentCondition", { index: index + 1 })}
+        aria-label={t("workflows:removeAgentCondition", { index: index + 1 })}
       >
         <IconTrash className="h-4 w-4" />
       </Button>
@@ -209,13 +209,13 @@ function SessionConfigRuleSettings({
             })
           }
           disabled={readOnly}
-          placeholder={t("settings:chooseModelAndSessionSettings")}
-          ariaLabel={t("settings:settingsForAgent", { agent: rule.agent_name })}
+          placeholder={t("workflows:chooseModelAndSessionSettings")}
+          ariaLabel={t("workflows:settingsForAgent", { agent: rule.agent_name })}
           triggerClassName="min-h-11 w-full sm:min-h-10"
         />
       ) : (
         <p className="rounded-md border border-border/60 p-2 text-xs text-muted-foreground">
-          {t("settings:sessionConfigModelOptionsUnavailable")}
+          {t("workflows:sessionConfigModelOptionsUnavailable")}
         </p>
       )}
     </div>

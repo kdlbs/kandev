@@ -50,7 +50,7 @@ describe("TurnCompleteSelect cancel completion policy", () => {
     expect(screen.getByTestId("step-1-cancel-completion-help").getAttribute("aria-label")).toBe(
       "More information",
     );
-    expect(screen.queryByText("settings:runCompletionActionsWhenTurnCancelledHelp")).toBeNull();
+    expect(screen.queryByText("workflows:runCompletionActionsWhenTurnCancelledHelp")).toBeNull();
     fireEvent.click(checkbox);
     expect(onUpdate).toHaveBeenCalledWith({ cancel_triggers_turn_complete: true });
   });

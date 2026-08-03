@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { t } from "@/lib/i18n";
 import { useToast } from "@/components/toast-provider";
 import { useRouter } from "@/lib/routing/client-router";
 import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
@@ -121,9 +122,12 @@ function useWorkflowSyncForm() {
 type SyncToast = { description: string; variant?: "success" | "error" | "default" };
 
 function syncOutcomeToast(error: string | undefined, warnings: string[] | undefined): SyncToast {
-  if (error) return { description: `Sync failed: ${error}`, variant: "error" };
-  if (warnings?.length) return { description: "Sync completed with warnings", variant: "default" };
-  return { description: "Workflow sync completed", variant: "success" };
+  if (error)
+    return { description: t("workflows:syncFailedWithError", { error }), variant: "error" };
+  if (warnings?.length) {
+    return { description: t("workflows:syncCompletedWithWarnings"), variant: "default" };
+  }
+  return { description: t("workflows:workflowSyncCompleted"), variant: "success" };
 }
 
 type InitialLoadDeps = {
@@ -153,7 +157,7 @@ function useWorkflowSyncInitialLoad(
       .catch((err) => {
         if (cancelled) return;
         toast({
-          description: `Failed to load workflow sync config: ${String(err)}`,
+          description: t("workflows:failedToLoadSyncConfig", { error: String(err) }),
           variant: "error",
         });
       })
@@ -194,10 +198,10 @@ export function useWorkflowSync(workspaceId: string) {
       const saved = await setWorkflowSyncConfig(payload, { workspaceId });
       setConfig(saved);
       reset(saved);
-      toast({ description: "Workflow sync configuration saved", variant: "success" });
+      toast({ description: t("workflows:syncConfigSaved"), variant: "success" });
       return true;
     } catch (err) {
-      toast({ description: `Save failed: ${String(err)}`, variant: "error" });
+      toast({ description: t("workflows:saveFailed", { error: String(err) }), variant: "error" });
       return false;
     } finally {
       setSaving(false);
@@ -205,22 +209,23 @@ export function useWorkflowSync(workspaceId: string) {
   }, [workspaceId, form, toast, reset]);
 
   const handleDelete = useCallback(async () => {
-    if (
-      !confirm("Remove workflow sync configuration? This will not delete already-synced workflows.")
-    ) {
+    if (!confirm(t("workflows:removeSyncConfirm"))) {
       return false;
     }
     try {
       await deleteWorkflowSyncConfig({ workspaceId });
       setConfig(null);
       reset(null);
-      toast({ description: "Workflow sync removed — synced workflows are editable again" });
+      toast({ description: t("workflows:syncRemoved") });
       // Released workflows lose their read-only state server-side; reload the
       // page data so the cards unlock without a manual refresh.
       router.refresh();
       return true;
     } catch (err) {
-      toast({ description: `Delete failed: ${String(err)}`, variant: "error" });
+      toast({
+        description: t("workflows:syncRemoveFailed", { error: String(err) }),
+        variant: "error",
+      });
       return false;
     }
   }, [workspaceId, toast, reset, router]);
@@ -238,7 +243,10 @@ export function useWorkflowSync(workspaceId: string) {
         router.refresh();
       }
     } catch (err) {
-      toast({ description: `Sync failed: ${String(err)}`, variant: "error" });
+      toast({
+        description: t("workflows:syncFailedWithError", { error: String(err) }),
+        variant: "error",
+      });
     } finally {
       setSyncing(false);
     }

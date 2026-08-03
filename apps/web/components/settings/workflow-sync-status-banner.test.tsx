@@ -1,0 +1,90 @@
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import type { WorkflowSyncConfig } from "@/lib/types/workflow-sync";
+import { WorkflowSyncStatusCard } from "./workflow-sync-status-banner";
+
+/**
+ * The headline is a `<Trans>` whose `<1>` addresses the bold `<span>`
+ * positionally, so a prettier reflow can silently reassemble it into empty
+ * fragments without failing anything (see docs/i18n.md). The assertions below
+ * reconstruct the whole sentence and check the repo slug is inside the bold
+ * element, which is what a drifted index would break.
+ *
+ * The metadata line is the other shape worth pinning: it is joined from three
+ * separately-translated parts, and the repo path / interval are values.
+ */
+
+function config(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncConfig {
+  return {
+    repo_owner: "kdlbs",
+    repo_name: "kandev",
+    branch: "main",
+    path: ".kandev/workflows",
+    interval_seconds: 300,
+    poll_enabled: true,
+    last_ok: true,
+    last_synced_at: null,
+    last_error: "",
+    last_warnings: [],
+    ...overrides,
+  } as WorkflowSyncConfig;
+}
+
+describe("WorkflowSyncStatusCard", () => {
+  afterEach(cleanup);
+
+  it("keeps the repository slug inside the bold span of the headline", () => {
+    render(<WorkflowSyncStatusCard config={config()} syncing={false} onSyncNow={vi.fn()} />);
+    const slug = screen.getByText("kdlbs/kandev");
+    expect(slug.className).toContain("font-semibold");
+    expect(slug.parentElement?.textContent).toBe("Syncing from kdlbs/kandev");
+  });
+
+  it("joins the metadata parts while auto-sync is on and no sync has run", () => {
+    render(<WorkflowSyncStatusCard config={config()} syncing={false} onSyncNow={vi.fn()} />);
+    expect(
+      screen.getByText("Directory .kandev/workflows · every 300s · waiting for first sync…"),
+    ).toBeTruthy();
+  });
+
+  it("labels an empty directory as the repository root and reports auto-sync off", () => {
+    render(
+      <WorkflowSyncStatusCard
+        config={config({ path: "", poll_enabled: false })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Directory (repository root) · auto-sync off · not synced yet — use Sync now",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("falls back to a generic message when a failed sync carries no error text", () => {
+    render(
+      <WorkflowSyncStatusCard
+        config={config({
+          last_ok: false,
+          last_synced_at: new Date().toISOString(),
+          last_error: "",
+        })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("Sync failed")).toBeTruthy();
+  });
+
+  it("renders backend warnings verbatim — they are server text, not catalog copy", () => {
+    render(
+      <WorkflowSyncStatusCard
+        config={config({ last_warnings: ["skipped bad-workflow.yml: invalid step id"] })}
+        syncing={false}
+        onSyncNow={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("skipped bad-workflow.yml: invalid step id")).toBeTruthy();
+  });
+});

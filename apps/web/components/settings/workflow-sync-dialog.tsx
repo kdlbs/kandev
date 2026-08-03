@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -12,13 +13,11 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
+import type { TFunction } from "i18next";
 import type {
   WorkflowSyncController,
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
-
-const HELP_TEXT =
-  "The directory should contain workflow export files (.yml/.yaml/.json) in the kandev_workflow format — the same format produced by workflow export.";
 
 type RepoUrlFieldProps = {
   url: string;
@@ -32,9 +31,10 @@ type RepoUrlFieldProps = {
 // branch, and directory. The resolved target is echoed underneath so the
 // structured fields stay visible to the user.
 function RepoUrlField({ url, invalid, resolved, onChange }: RepoUrlFieldProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="workflow-sync-url">Repository link</Label>
+      <Label htmlFor="workflow-sync-url">{t("workflows:repositoryLink")}</Label>
       <Input
         id="workflow-sync-url"
         data-testid="workflow-sync-url-input"
@@ -44,10 +44,10 @@ function RepoUrlField({ url, invalid, resolved, onChange }: RepoUrlFieldProps) {
         aria-invalid={invalid}
       />
       {invalid ? (
-        <p className="text-xs text-destructive">Not a recognized GitHub repository link.</p>
+        <p className="text-xs text-destructive">{t("workflows:notARecognizedGitHubLink")}</p>
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="workflow-sync-resolved">
-          {resolved || "Paste a GitHub link — /tree/… links carry the branch and directory too."}
+          {resolved || t("workflows:pasteGitHubLinkHint")}
         </p>
       )}
     </div>
@@ -64,6 +64,7 @@ type FieldsProps = {
 // from the pasted link (or defaults to main) and is echoed in the resolved
 // summary under the link input.
 function PollFields({ form, update }: FieldsProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
       <div className="flex flex-wrap items-center gap-3">
@@ -75,12 +76,12 @@ function PollFields({ form, update }: FieldsProps) {
           className="cursor-pointer"
         />
         <Label htmlFor="workflow-sync-poll-toggle" className="cursor-pointer">
-          Auto-sync
+          {t("workflows:autoSync")}
         </Label>
         {form.poll_enabled && (
           <div className="ml-auto flex items-center gap-2">
             <Label htmlFor="workflow-sync-interval" className="sr-only">
-              Poll interval (seconds)
+              {t("workflows:pollIntervalSeconds")}
             </Label>
             <Input
               id="workflow-sync-interval"
@@ -91,14 +92,12 @@ function PollFields({ form, update }: FieldsProps) {
               value={form.interval_seconds}
               onChange={(e) => update("interval_seconds", Number(e.target.value) || 0)}
             />
-            <span className="text-xs text-muted-foreground">seconds</span>
+            <span className="text-xs text-muted-foreground">{t("workflows:seconds")}</span>
           </div>
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        {form.poll_enabled
-          ? "Checks the repository on this interval (minimum 60s)."
-          : "Syncs only run when you press Sync now."}
+        {form.poll_enabled ? t("workflows:pollEnabledHint") : t("workflows:pollDisabledHint")}
       </p>
     </div>
   );
@@ -114,6 +113,7 @@ type WorkflowSyncDialogProps = {
 // itself after a successful save or removal; failures keep it open with the
 // error surfaced via toast.
 export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDialogProps) {
+  const { t } = useTranslation();
   const hasConfig = !!sync.config;
   const intervalInvalid =
     sync.form.poll_enabled &&
@@ -126,7 +126,13 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
     !sync.form.repo_owner.trim() ||
     !sync.form.repo_name.trim();
   const resolved = sync.form.repo_owner
-    ? `Syncing ${sync.form.repo_owner}/${sync.form.repo_name} @ ${sync.form.branch || "main"} — directory ${sync.form.path || "(repository root)"}.`
+    ? t("workflows:syncResolvedTarget", {
+        owner: sync.form.repo_owner,
+        repo: sync.form.repo_name,
+        // `main` is git's default branch name, not copy.
+        branch: sync.form.branch || "main",
+        directory: sync.form.path || t("workflows:repositoryRoot"),
+      })
     : "";
 
   const handleSave = async () => {
@@ -140,10 +146,8 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="workflow-sync-dialog">
         <DialogHeader>
-          <DialogTitle>GitHub Sync</DialogTitle>
-          <DialogDescription>
-            Automatically sync workflow definitions from a GitHub repository into this workspace.
-          </DialogDescription>
+          <DialogTitle>{t("workflows:githubSync")}</DialogTitle>
+          <DialogDescription>{t("workflows:githubSyncDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <RepoUrlField
@@ -153,7 +157,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
             onChange={sync.setUrlInput}
           />
           <PollFields form={sync.form} update={sync.update} />
-          <p className="text-xs text-muted-foreground">{HELP_TEXT}</p>
+          <p className="text-xs text-muted-foreground">{t("workflows:syncDirectoryHelp")}</p>
         </div>
         <DialogFooter>
           {hasConfig && (
@@ -165,7 +169,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
               className="sm:mr-auto cursor-pointer"
               data-testid="workflow-sync-remove"
             >
-              Remove
+              {t("workflows:remove")}
             </Button>
           )}
           <Button
@@ -176,7 +180,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
             data-testid="workflow-sync-save"
             data-dialog-default-action
           >
-            {saveLabel(sync.saving, hasConfig)}
+            {saveLabel(t, sync.saving, hasConfig)}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -184,7 +188,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
   );
 }
 
-function saveLabel(saving: boolean, hasConfig: boolean): string {
-  if (saving) return "Saving...";
-  return hasConfig ? "Update" : "Save";
+function saveLabel(t: TFunction, saving: boolean, hasConfig: boolean): string {
+  if (saving) return t("workflows:saving");
+  return hasConfig ? t("workflows:update") : t("workflows:save");
 }

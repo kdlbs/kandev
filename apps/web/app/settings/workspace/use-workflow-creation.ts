@@ -12,6 +12,9 @@ import {
   type Workspace,
 } from "@/lib/types/http";
 
+// Seeded step definitions for a workflow created without a template. These
+// names are PERSISTED as the workflow's step names, so they deliberately stay
+// English — translating them would write localized values into the database.
 export const DEFAULT_CUSTOM_STEPS: StepDefinition[] = [
   { name: "Todo", position: 0, color: "bg-slate-500" },
   { name: "In Progress", position: 1, color: "bg-blue-500" },
@@ -113,6 +116,7 @@ export function useWorkflowCreation({
     const workflow: Workflow = {
       id: toWorkflowId(tempId),
       workspace_id: toWorkspaceId(workspace.id),
+      // Persisted workflow name; the fallback is data, not copy.
       name: newWorkflowName.trim() || template?.name || "New Workflow",
       description: template?.description,
       workflow_template_id: template?.id,

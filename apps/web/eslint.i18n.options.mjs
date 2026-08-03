@@ -628,4 +628,90 @@ export const i18nGuardFiles = [
   // can prove they stay migrated.
   "hooks/domains/settings/use-agent-runtime-updates.ts",
   "hooks/domains/settings/use-dynamic-models.ts",
+  // Settings → Workspace → Workflows: the workflow editor end to end — the
+  // route, the list and its reorder/import/export chrome, the workflow card,
+  // the pipeline/step editor with its WIP and transition controls, the
+  // session-config editor and rule cards, the replay-cycle diagnostic, and the
+  // GitHub-sync and export/import dialogs. Copy lives in a new `workflows`
+  // namespace; the 27 workflow-editor keys that already sat in `settings` moved
+  // there in this PR so the surface is not split across two catalogs.
+  //
+  // The closure was re-derived from the route's imports rather than from the
+  // string counter. `components/workflow-selector-row.tsx` is deliberately
+  // ABSENT: the counter attributed it here, but the only path to it from this
+  // route runs through the settings save provider into the config-chat →
+  // quick-chat → task-create-dialog tree, so it belongs to the task-create
+  // surface, not this one. Same for `components/task-create-dialog-*` and
+  // `components/task/chat/messages/workflow-step-message-badge.tsx`.
+  //
+  // `components/integrations/auth-status-banner.tsx` is also deliberately
+  // absent. This surface reaches it only for `useTick`, the shared 30s
+  // re-render hook, which carries no copy; every literal in that file belongs to
+  // the integration status banner, so listing it would pull an un-migrated
+  // component into this PR. It is the same call as `sentry-issue-common.tsx`
+  // above.
+  //
+  // The `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects them;
+  // the entries record that they are migrated (toast titles, the sync
+  // `confirm()`, thrown save/order errors, and the carry-forward warning
+  // sentence all reach the user) and only the pseudo-locale can prove it stays
+  // that way.
+  //
+  // Deliberately left in English, because each is PERSISTED rather than
+  // rendered: the seeded `New Step` name in `workflow-card-actions.ts` and
+  // `workflow-step-mutations.ts`, the `New Workflow` fallback and the
+  // `DEFAULT_CUSTOM_STEPS` names (`Todo` / `In Progress` / `Review` / `Done`) in
+  // `use-workflow-creation.ts`, and the three `PROMPT_TEMPLATES` bodies in
+  // `workflow-pipeline-editor-helpers.tsx` — the template button writes its
+  // prompt into `WorkflowStep.prompt`, which is stored and sent to the agent
+  // verbatim. Translating any of them would write a localized string into the
+  // database. Same reasoning as the Jira/Linear/Sentry default watch prompts.
+  //
+  // Also English by design: the `kandev_workflow` YAML sample in the import
+  // dialog (a wire format), the GitHub repository-link example, git's default
+  // branch name `main`, the `{{task_prompt}}` substitution token, and the
+  // `step_complete_kandev` MCP tool name — all interpolated as values so the
+  // pseudo-locale cannot turn them into dead pointers.
+  //
+  // Wire values stay wire values, with only their labels as copy resolved at
+  // render from a catalog key: the step `color` Tailwind classes
+  // (`STEP_COLORS`), the transition action `type`s (`move_to_next` and
+  // friends), the capability `key`s in `step-capability-icons.tsx`, the replay
+  // diagnostic's `promptSource` / `trigger` / `actionKind`, the sync `state`
+  // union, and the `configure_session` rule `operation`s. Workflow and step
+  // NAMES are user data throughout and are always interpolated as values,
+  // never built into a message by concatenation.
+  "app/settings/workspace/[id]/workflows/**/*.{ts,tsx}",
+  "app/settings/workspace/use-workflow-creation.ts",
+  "app/settings/workspace/workspace-workflows-client.tsx",
+  "app/settings/workspace/workspace-workflows-dialogs.tsx",
+  "components/settings/use-workflow-draft-contributor.ts",
+  "components/settings/workflow-card-actions.ts",
+  "components/settings/workflow-card-dialogs.tsx",
+  "components/settings/workflow-card-header-actions.tsx",
+  "components/settings/workflow-card.tsx",
+  "components/settings/workflow-cycle-diagnostic.tsx",
+  "components/settings/workflow-export-dialog.tsx",
+  "components/settings/workflow-pipeline-editor-helpers.tsx",
+  "components/settings/workflow-pipeline-editor-panels.tsx",
+  "components/settings/workflow-pipeline-editor-step-actions.tsx",
+  "components/settings/workflow-pipeline-editor-wip-controls.tsx",
+  "components/settings/workflow-pipeline-editor.tsx",
+  "components/settings/workflow-section-actions.tsx",
+  "components/settings/workflow-session-config-carry-warning.tsx",
+  "components/settings/workflow-session-config-editor.tsx",
+  "components/settings/workflow-session-config-rule-card.tsx",
+  "components/settings/workflow-step-mutations.ts",
+  "components/settings/workflow-step-prompt-section.tsx",
+  "components/settings/workflow-sync-dialog.tsx",
+  "components/settings/workflow-sync-section.tsx",
+  "components/settings/workflow-sync-status-banner.tsx",
+  "components/settings/workflow-synced-badge.tsx",
+  "hooks/domains/settings/use-workflow-sync.ts",
+  "lib/workflows/session-config-carry-analysis.ts",
+  // Shared with the task board's `components/task/workflow-stepper.tsx`, which
+  // is not migrated. The guard is per-file, so that surface is unaffected; the
+  // icons render here on every pipeline node, so leaving them would have left
+  // plain English inside a card this PR claims is done.
+  "components/step-capability-icons.tsx",
 ];

@@ -16,6 +16,7 @@
   "mAgo": "{{diffMin}}m ago",
   "plugins": "Plugins",
   "prompts": "Prompts",
+  "requestFailed": "Request failed",
   "reset": "Reset",
   "resetting": "Resetting\u2026",
   "resetWatchChecking": "Checking how many tasks would be deleted\u2026",

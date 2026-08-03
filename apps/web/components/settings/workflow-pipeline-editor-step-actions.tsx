@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
@@ -120,12 +121,13 @@ export function TurnStartSelect({
   setOnTurnStartTransition,
   readOnly,
 }: StepSelectProps & { setOnTurnStartTransition: (t: string) => void }) {
+  const { t } = useTranslation();
   const transitionType = getOnTurnStartTransitionType(step);
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium">On Turn Start</Label>
-        <HelpTip text="Runs when a user sends a message. Use for review cycles (e.g., move back to In Progress on feedback)." />
+        <Label className="text-xs font-medium">{t("workflows:onTurnStartLabel")}</Label>
+        <HelpTip text={t("workflows:onTurnStartHelp")} />
       </div>
       <Select
         value={transitionType}
@@ -143,13 +145,13 @@ export function TurnStartSelect({
             getOnTurnStartTransitionType,
           )}
         >
-          <SelectValue placeholder="Select action" />
+          <SelectValue placeholder={t("workflows:selectAction")} />
         </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
-          <SelectItem value="none">Do nothing</SelectItem>
-          <SelectItem value="move_to_next">Move to next step</SelectItem>
-          <SelectItem value="move_to_previous">Move to previous step</SelectItem>
-          <SelectItem value="move_to_step">Move to specific step</SelectItem>
+          <SelectItem value="none">{t("workflows:doNothing")}</SelectItem>
+          <SelectItem value="move_to_next">{t("workflows:moveToNextStep")}</SelectItem>
+          <SelectItem value="move_to_previous">{t("workflows:moveToPreviousStep")}</SelectItem>
+          <SelectItem value="move_to_step">{t("workflows:moveToSpecificStep")}</SelectItem>
         </SelectContent>
       </Select>
       {transitionType === "move_to_step" && (
@@ -178,7 +180,7 @@ export function TurnStartSelect({
                   ?.step_id ?? "",
             )}
           >
-            <SelectValue placeholder="Select step" />
+            <SelectValue placeholder={t("workflows:selectStep")} />
           </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
             {otherSteps.map((s) => (
@@ -218,6 +220,7 @@ function TurnCompleteTargetSelect({
   onUpdate,
   readOnly,
 }: StepSelectProps) {
+  const { t } = useTranslation();
   const updateTarget = (stepId: string) => {
     if (readOnly) return;
     const currentEvents = step.events ?? {};
@@ -237,7 +240,7 @@ function TurnCompleteTargetSelect({
         className="w-full h-8"
         data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTurnCompleteTargetStepId)}
       >
-        <SelectValue placeholder="Select step" />
+        <SelectValue placeholder={t("workflows:selectStep")} />
       </SelectTrigger>
       <SelectContent position="popper" side="bottom" align="start">
         {otherSteps.map((candidate) => (
@@ -263,12 +266,13 @@ export function TurnCompleteSelect({
   planModeEnabled,
   readOnly,
 }: TurnCompleteSelectProps) {
+  const { t } = useTranslation();
   const transitionType = getTransitionType(step);
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium">On Turn Complete</Label>
-        <HelpTip text="Runs after the agent finishes a turn. Use to auto-advance tasks through the pipeline." />
+        <Label className="text-xs font-medium">{t("workflows:onTurnCompleteLabel")}</Label>
+        <HelpTip text={t("workflows:onTurnCompleteHelp")} />
       </div>
       <Select
         value={transitionType}
@@ -282,13 +286,13 @@ export function TurnCompleteSelect({
           className="w-full h-8"
           data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTransitionType)}
         >
-          <SelectValue placeholder="Select action" />
+          <SelectValue placeholder={t("workflows:selectAction")} />
         </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
-          <SelectItem value="none">Do nothing (wait for user)</SelectItem>
-          <SelectItem value="move_to_next">Move to next step</SelectItem>
-          <SelectItem value="move_to_previous">Move to previous step</SelectItem>
-          <SelectItem value="move_to_step">Move to specific step</SelectItem>
+          <SelectItem value="none">{t("workflows:doNothingWaitForUser")}</SelectItem>
+          <SelectItem value="move_to_next">{t("workflows:moveToNextStep")}</SelectItem>
+          <SelectItem value="move_to_previous">{t("workflows:moveToPreviousStep")}</SelectItem>
+          <SelectItem value="move_to_step">{t("workflows:moveToSpecificStep")}</SelectItem>
         </SelectContent>
       </Select>
       {transitionType === "move_to_step" && (
@@ -313,9 +317,9 @@ export function TurnCompleteSelect({
             data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, hasDisablePlanMode)}
           />
           <Label htmlFor={`${step.id}-disable-plan`} className="text-sm">
-            Disable plan mode on complete
+            {t("workflows:disablePlanModeOnComplete")}
           </Label>
-          <HelpTip text="Turn off plan mode after the agent finishes a turn, even when the task remains in this step." />
+          <HelpTip text={t("workflows:disablePlanModeOnCompleteHelp")} />
         </div>
       )}
       {transitionType !== "none" && (
@@ -352,6 +356,7 @@ export function ChildrenCompletedSelect({
   setChildrenCompletedTransition,
   readOnly,
 }: ChildrenCompletedSelectProps) {
+  const { t } = useTranslation();
   const transitionType = getChildrenCompletedTransitionType(step);
   const configuredTargetStepId =
     (step.events?.on_children_completed?.find((a) => a.type === "move_to_step")?.config
@@ -361,11 +366,11 @@ export function ChildrenCompletedSelect({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-1.5">
-        <Label className="text-xs font-medium">When Child Tasks Complete</Label>
+        <Label className="text-xs font-medium">{t("workflows:whenChildTasksComplete")}</Label>
         <HelpTip
           testId={`${step.id}-children-completed-help`}
-          ariaLabel="How child task completion transitions work"
-          text="Use this on a parent task step. When every active direct child task is COMPLETED, FAILED, or CANCELLED, Kandev runs this transition once. Archived and ephemeral child tasks are ignored. Grandchildren do not count here, and nothing runs if the parent has no child tasks."
+          ariaLabel={t("workflows:childrenCompletedHelpAria")}
+          text={t("workflows:childrenCompletedHelp")}
         />
       </div>
       <Select
@@ -388,14 +393,14 @@ export function ChildrenCompletedSelect({
             getChildrenCompletedTransitionType,
           )}
         >
-          <SelectValue placeholder="Select action" />
+          <SelectValue placeholder={t("workflows:selectAction")} />
         </SelectTrigger>
         <SelectContent position="popper" side="bottom" align="start">
-          <SelectItem value="none">Do nothing</SelectItem>
-          <SelectItem value="move_to_next">Move to next step</SelectItem>
-          <SelectItem value="move_to_previous">Move to previous step</SelectItem>
+          <SelectItem value="none">{t("workflows:doNothing")}</SelectItem>
+          <SelectItem value="move_to_next">{t("workflows:moveToNextStep")}</SelectItem>
+          <SelectItem value="move_to_previous">{t("workflows:moveToPreviousStep")}</SelectItem>
           <SelectItem value="move_to_step" disabled={!defaultTargetStepId}>
-            Move to specific step
+            {t("workflows:moveToSpecificStep")}
           </SelectItem>
         </SelectContent>
       </Select>
@@ -425,7 +430,7 @@ export function ChildrenCompletedSelect({
                   ?.config?.step_id ?? "",
             )}
           >
-            <SelectValue placeholder="Select step" />
+            <SelectValue placeholder={t("workflows:selectStep")} />
           </SelectTrigger>
           <SelectContent position="popper" side="bottom" align="start">
             {otherSteps.map((s) => (
@@ -442,6 +447,10 @@ export function ChildrenCompletedSelect({
     </div>
   );
 }
+
+// The MCP tool name the agent calls; an identifier, not copy, so it is
+// interpolated as a value rather than living in the catalog.
+const STEP_COMPLETE_TOOL = "step_complete_kandev";
 
 // --- ExplicitCompletionToggle ---
 // ADR 0015: when checked, on_turn_complete transitions only fire after the
@@ -483,9 +492,11 @@ export function ExplicitCompletionToggle({
         htmlFor={`${step.id}-require-signal`}
         className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm md:min-h-0"
       >
-        {t("settings:waitForAgentCompletionSignal")}
+        {t("workflows:waitForAgentCompletionSignal")}
       </Label>
-      <HelpTip text="Only auto-advance once the agent calls step_complete_kandev. Otherwise turn-end is treated as completion." />
+      <HelpTip
+        text={t("workflows:waitForAgentCompletionSignalHelp", { tool: STEP_COMPLETE_TOOL })}
+      />
     </div>
   );
 }
@@ -521,11 +532,11 @@ export function CancelCompletionToggle({
         data-testid={`${step.id}-cancel-completion-label`}
         className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm md:min-h-0"
       >
-        {t("settings:runCompletionActionsWhenTurnCancelled")}
+        {t("workflows:runCompletionActionsWhenTurnCancelled")}
       </Label>
       <HelpTip
         testId={`${step.id}-cancel-completion-help`}
-        text={t("settings:runCompletionActionsWhenTurnCancelledHelp")}
+        text={t("workflows:runCompletionActionsWhenTurnCancelledHelp")}
       />
     </div>
   );

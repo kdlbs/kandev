@@ -152,6 +152,14 @@ const SCREENS: Array<{ name: string; url: string; allow?: string[] }> = [
   // The Sentry run also surfaced `components/integrations/auth-status-banner.tsx`
   // ("Authenticated", "· checked <relative>") and `@kandev/ui`'s built-in dialog
   // "Close" label — both shared, both out of scope for a per-integration PR.
+  //
+  // NOT YET, for the same reason: "settings — workspace workflows"
+  // (`/settings/workspace/:id/workflows`). The workflow editor's own copy is
+  // fully migrated and was verified with this oracle against a live instance,
+  // but the route expands the same un-migrated Workspaces branch of the settings
+  // nav. It also renders the workspace's own name and its workflow/step names,
+  // which are user data — so the entry needs the nav migrated first, not an
+  // allowlist.
 ];
 
 /**
