@@ -126,7 +126,12 @@ COMMIT := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo unknown)
 
 LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime=$(BUILD_TIME)
 
-.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint fmt vet check-make-shells help
+# Force the application module's Go version; go run otherwise selects the
+# analyzer module's minimum toolchain before go/packages loads this module.
+DEADCODE_VERSION ?= v0.48.0
+DEADCODE_GO_TOOLCHAIN ?= go1.26.0
+
+.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
 
 ## Default target
 all: build
@@ -340,6 +345,11 @@ proto:
 lint:
 	@echo "Running linter..."
 	golangci-lint run ./...
+
+## Report unreachable functions in the production Go program.
+deadcode:
+	@echo "Scanning for unreachable Go functions..."
+	GOTOOLCHAIN=$(DEADCODE_GO_TOOLCHAIN) $(GO) run golang.org/x/tools/cmd/deadcode@$(DEADCODE_VERSION) -tags fts5 ./...
 
 ## Format code
 fmt:

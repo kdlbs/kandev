@@ -139,6 +139,8 @@ help:
 	@echo "  lint-web         Run ESLint"
 	@echo "  lint-architecture  Enforce architecture budgets and compatibility expiry"
 	@echo "  lint-format      Check formatting with Prettier (web/cli/packages)"
+	@echo "  dead-code-web    Find unused web files, exports, and dependencies"
+	@echo "  dead-code-go     Find unreachable production Go functions"
 	@echo "  fmt              Format all code"
 	@echo "  fmt-backend      Format Go code"
 	@echo "  fmt-web          Format web/cli/packages with Prettier, then ESLint --fix (web)"
@@ -574,6 +576,16 @@ lint-architecture:
 lint-format:
 	@printf "$(CYAN)Checking formatting...$(RESET)\n"
 	@cd $(APPS_DIR) && $(PNPM) run format:check
+
+.PHONY: dead-code-web
+dead-code-web:
+	@printf "$(CYAN)Auditing web dead code...$(RESET)\n"
+	@cd $(APPS_DIR) && $(PNPM) run dead-code
+
+.PHONY: dead-code-go
+dead-code-go:
+	@printf "$(CYAN)Auditing Go dead code...$(RESET)\n"
+	@$(MAKE) -C $(BACKEND_DIR) deadcode
 
 .PHONY: fmt
 fmt: fmt-backend fmt-web
