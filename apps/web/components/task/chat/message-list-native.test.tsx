@@ -18,13 +18,21 @@ function Harness({
   itemCount,
   anchoredBarOffsetPx,
   dividerKey = DIVIDER_KEY,
+  onDividerScroll,
 }: {
   itemCount: number;
   anchoredBarOffsetPx: number;
   dividerKey?: string | null;
+  onDividerScroll?: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
-  useScrollToDividerOrBottom(scrollRef, itemCount, dividerKey, anchoredBarOffsetPx);
+  useScrollToDividerOrBottom(
+    scrollRef,
+    itemCount,
+    dividerKey,
+    anchoredBarOffsetPx,
+    onDividerScroll,
+  );
   return (
     <div ref={scrollRef}>
       <div id="msg-m1" />
@@ -53,6 +61,15 @@ describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
 
     expect(scrollIntoView).toHaveBeenCalledTimes(2);
     expect(scrollIntoView).toHaveBeenLastCalledWith({ block: "start" });
+  });
+
+  it("resynchronizes auto-scroll state after placing the divider", () => {
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const onDividerScroll = vi.fn();
+
+    render(<Harness itemCount={2} anchoredBarOffsetPx={0} onDividerScroll={onDividerScroll} />);
+
+    expect(onDividerScroll).toHaveBeenCalledTimes(1);
   });
 
   it("never re-scrolls once the reader has started scrolling, even if the anchored bar's height changes afterward", () => {

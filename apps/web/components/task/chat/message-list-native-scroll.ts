@@ -160,9 +160,18 @@ function useAutoScroll(params: {
   isWorking: boolean;
   sessionId: string | null;
   enabled: boolean;
+  hasUnreadDivider: boolean;
   isProgrammaticScrollLocked: () => boolean;
 }) {
-  const { scrollRef, messages, isWorking, sessionId, enabled, isProgrammaticScrollLocked } = params;
+  const {
+    scrollRef,
+    messages,
+    isWorking,
+    sessionId,
+    enabled,
+    hasUnreadDivider,
+    isProgrammaticScrollLocked,
+  } = params;
   const storeApi = useAppStoreApi();
   const isNearBottomRef = useRef(true);
   const prevIsWorkingRef = useRef(isWorking);
@@ -172,6 +181,9 @@ function useAutoScroll(params: {
     if (!el) return;
     isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100;
   }, [scrollRef]);
+  const markNotNearBottom = useCallback(() => {
+    isNearBottomRef.current = false;
+  }, []);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -205,7 +217,7 @@ function useAutoScroll(params: {
       isWorking &&
       !prevIsWorkingRef.current &&
       shouldAutoScrollToBottom({
-        isNearBottom: true,
+        isNearBottom: !hasUnreadDivider,
         isProgrammaticScrollLocked: isProgrammaticScrollLocked(),
         hasPendingLayoutRestore: useDockviewStore.getState().pendingChatScrollTop !== null,
       }) &&
@@ -218,7 +230,7 @@ function useAutoScroll(params: {
       }
     }
     prevIsWorkingRef.current = isWorking;
-  }, [isWorking, scrollRef, enabled, isProgrammaticScrollLocked]);
+  }, [hasUnreadDivider, isWorking, scrollRef, enabled, isProgrammaticScrollLocked]);
 
   // Auto-scroll on new messages if near bottom (unless disabled, locked, or a
   // layout rebuild scroll restore is pending).
@@ -239,7 +251,7 @@ function useAutoScroll(params: {
 
   useCatchUpOnReEnable(scrollRef, messages, enabled, isNearBottomRef);
 
-  return { isNearBottomRef, resyncIsNearBottom };
+  return { isNearBottomRef, resyncIsNearBottom, markNotNearBottom };
 }
 
 /**
@@ -477,6 +489,7 @@ export function useNativeScrollManagement(params: {
   isWorking: boolean;
   sessionId: string | null;
   enabled: boolean;
+  hasUnreadDivider: boolean;
   hasMore: boolean;
   isLoadingMore: boolean;
   loadMore: () => Promise<number>;
@@ -488,18 +501,20 @@ export function useNativeScrollManagement(params: {
     isWorking,
     sessionId,
     enabled,
+    hasUnreadDivider,
     hasMore,
     isLoadingMore,
     loadMore,
   } = params;
   const programmaticScrollLockRef = useRef(false);
   const isProgrammaticScrollLocked = useCallback(() => programmaticScrollLockRef.current, []);
-  const { isNearBottomRef, resyncIsNearBottom } = useAutoScroll({
+  const { isNearBottomRef, resyncIsNearBottom, markNotNearBottom } = useAutoScroll({
     scrollRef,
     messages,
     isWorking,
     sessionId,
     enabled,
+    hasUnreadDivider,
     isProgrammaticScrollLocked,
   });
   const runGuardedScroll = useProgrammaticScrollGuard(
@@ -512,5 +527,5 @@ export function useNativeScrollManagement(params: {
   const sentinelRef = useLazyLoadSentinel(scrollRef, hasMore, isLoadingMore, loadMore);
   useInitialScrollPosition(scrollRef, items.length, sessionId, enabled, isNearBottomRef);
 
-  return { handleScrollToMessage, sentinelRef };
+  return { handleScrollToMessage, sentinelRef, resyncIsNearBottom, markNotNearBottom };
 }

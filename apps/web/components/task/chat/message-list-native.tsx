@@ -194,6 +194,7 @@ export function useScrollToDividerOrBottom(
   itemCount: number,
   dividerBeforeItemKey: string | null | undefined,
   anchoredBarOffsetPx: number,
+  onDividerScroll?: () => void,
 ) {
   const isUserScrollingRef = useRef(false);
   useEffect(() => {
@@ -239,6 +240,7 @@ export function useScrollToDividerOrBottom(
         const dividerEl = el.querySelector<HTMLElement>(`[id="msg-${dividerBeforeItemKey}"]`);
         if (dividerEl) {
           dividerEl.scrollIntoView({ block: "start" });
+          onDividerScroll?.();
           didScrollToDivider.current = true;
           didInitialScroll.current = true;
           return;
@@ -254,7 +256,7 @@ export function useScrollToDividerOrBottom(
     }
     el.scrollTop = el.scrollHeight;
     didInitialScroll.current = true;
-  }, [itemCount, dividerBeforeItemKey, anchoredBarOffsetPx]);
+  }, [itemCount, dividerBeforeItemKey, anchoredBarOffsetPx, onDividerScroll]);
 }
 
 /** Sentinel, status/footer, and transcript rows — everything below the
@@ -343,6 +345,7 @@ function NativeMessageListBody({
  * via {@link useNativeScrollManagement}.
  */
 export const NativeMessageList = memo(
+  // eslint-disable-next-line max-lines-per-function -- coordinates transcript hooks and list rendering; each concern is factored into a hook or child component.
   forwardRef<MessageListHandle, MessageListProps>(function NativeMessageList(
     {
       items,
@@ -381,13 +384,14 @@ export const NativeMessageList = memo(
     const streamingMessageId = getStreamingAgentMessageId(messages);
     const lastTurnGroupId = useMemo(() => getLastTurnGroupId(items), [items]);
     const autoScrollEnabled = useTranscriptAutoScrollEnabled(sessionId);
-    const { handleScrollToMessage, sentinelRef } = useNativeScrollManagement({
+    const { handleScrollToMessage, sentinelRef, markNotNearBottom } = useNativeScrollManagement({
       scrollRef,
       items,
       messages,
       isWorking,
       sessionId,
       enabled: autoScrollEnabled,
+      hasUnreadDivider: Boolean(dividerBeforeItemKey),
       hasMore,
       isLoadingMore,
       loadMore,
@@ -396,7 +400,13 @@ export const NativeMessageList = memo(
     useEffect(() => {
       scrollRef.current?.style.setProperty("--anchored-bar-h", `${anchoredBarOffsetPx}px`);
     }, [anchoredBarOffsetPx]);
-    useScrollToDividerOrBottom(scrollRef, items.length, dividerBeforeItemKey, anchoredBarOffsetPx);
+    useScrollToDividerOrBottom(
+      scrollRef,
+      items.length,
+      dividerBeforeItemKey,
+      anchoredBarOffsetPx,
+      markNotNearBottom,
+    );
     useImperativeHandle(ref, () => ({ scrollToMessage: handleScrollToMessage }), [
       handleScrollToMessage,
     ]);
