@@ -6,23 +6,18 @@ import {
   resolveCanonicalReviewParams,
   resolveConditionalReviewPanelAction,
   syncCanonicalReviewPanel,
+  type ConditionalReviewPanelOptions,
 } from "./dockview-review-panel-sync";
 
 const CENTER_GROUP_ID = "group-center";
 const SESSION_PANEL_ID = "session:session-a";
 const PR_KEY = "kandev/kandev/42";
 
-const syncWithOptions = syncCanonicalReviewPanel as unknown as (
+const syncWithOptions = (
   api: DockviewApi,
   next: ReturnType<typeof resolveCanonicalReviewParams>,
-  options: {
-    sessionId: string;
-    centerGroupId: string;
-    isRestoringLayout: boolean;
-    isMaximized: boolean;
-    wasOffered: boolean;
-  },
-) => boolean;
+  options: ConditionalReviewPanelOptions,
+) => syncCanonicalReviewPanel(api, next, options);
 
 function makeApi(
   panel?: { params?: Record<string, unknown>; groupId?: string },
@@ -57,7 +52,10 @@ function makeApi(
         ...(reviewPanel ? [reviewPanel] : []),
         { id: SESSION_PANEL_ID, group: { id: sessionGroupId } },
       ],
-      groups: [{ id: sessionGroupId }],
+      groups: [
+        { id: sessionGroupId },
+        ...(sessionGroupId === CENTER_GROUP_ID ? [] : [{ id: CENTER_GROUP_ID }]),
+      ],
       addPanel,
       removePanel: vi.fn(),
     } as unknown as DockviewApi,
@@ -142,10 +140,25 @@ describe("resolveConditionalReviewPanelAction", () => {
       resolveConditionalReviewPanelAction({
         isRestoringLayout: false,
         isMaximized: false,
+        reviewsLoaded: true,
         wasOffered: false,
         ...input,
       }),
     ).toBe(expected);
+  });
+
+  it("waits for review hydration before removing an automatic panel", () => {
+    expect(
+      resolveConditionalReviewPanelAction({
+        hasReview: false,
+        panelExists: true,
+        autoAddedForReview: true,
+        reviewsLoaded: false,
+        isRestoringLayout: false,
+        isMaximized: false,
+        wasOffered: true,
+      }),
+    ).toBe("none");
   });
 });
 
@@ -165,6 +178,7 @@ describe("syncCanonicalReviewPanel", () => {
       syncWithOptions(api, resolveCanonicalReviewParams([githubPR], []), {
         sessionId: "session-a",
         centerGroupId: CENTER_GROUP_ID,
+        reviewsLoaded: true,
         isRestoringLayout: false,
         isMaximized: false,
         wasOffered: false,
@@ -186,6 +200,24 @@ describe("syncCanonicalReviewPanel", () => {
     );
   });
 
+  it("falls back to the configured center group when Agent is in a side group", () => {
+    const { api, addPanel } = makeApi(undefined, "group-right-top");
+
+    expect(
+      syncWithOptions(api, resolveCanonicalReviewParams([githubPR], []), {
+        sessionId: "session-a",
+        centerGroupId: CENTER_GROUP_ID,
+        reviewsLoaded: true,
+        isRestoringLayout: false,
+        isMaximized: false,
+        wasOffered: false,
+      }),
+    ).toBe(true);
+    expect(addPanel).toHaveBeenCalledWith(
+      expect.objectContaining({ position: { referenceGroup: CENTER_GROUP_ID } }),
+    );
+  });
+
   it("does not add while restoring, maximized, or dismissed", () => {
     for (const options of [
       { isRestoringLayout: true, isMaximized: false, wasOffered: false },
@@ -197,6 +229,7 @@ describe("syncCanonicalReviewPanel", () => {
         syncWithOptions(api, resolveCanonicalReviewParams([githubPR], []), {
           sessionId: "session-a",
           centerGroupId: CENTER_GROUP_ID,
+          reviewsLoaded: true,
           ...options,
         }),
       ).toBe(false);

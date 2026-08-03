@@ -5,7 +5,8 @@ import type { DockviewApi } from "dockview-react";
 import { prTaskKey } from "@/components/github/pr-utils";
 import { mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
-import { getPrimaryTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { getPrimaryTaskPR, useTaskPR } from "@/hooks/domains/github/use-task-pr";
+import { t } from "@/lib/i18n";
 import { markPRPanelOffered, wasPRPanelOffered } from "@/lib/local-storage";
 import { focusOrAddPanel } from "@/lib/state/dockview-layout-builders";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -49,11 +50,13 @@ export function resolveConditionalReviewPanelAction(params: {
   hasReview: boolean;
   panelExists: boolean;
   autoAddedForReview: boolean;
+  reviewsLoaded: boolean;
   isRestoringLayout: boolean;
   isMaximized: boolean;
   wasOffered: boolean;
 }): ConditionalReviewPanelAction {
   if (!params.hasReview) {
+    if (params.autoAddedForReview && !params.reviewsLoaded) return "none";
     if (params.autoAddedForReview) return "remove";
     return params.panelExists ? "sync" : "none";
   }
@@ -62,9 +65,10 @@ export function resolveConditionalReviewPanelAction(params: {
   return "add";
 }
 
-type ConditionalReviewPanelOptions = {
+export type ConditionalReviewPanelOptions = {
   sessionId: string;
   centerGroupId: string;
+  reviewsLoaded: boolean;
   isRestoringLayout: boolean;
   isMaximized: boolean;
   wasOffered: boolean;
@@ -91,7 +95,7 @@ function addConditionalReviewPanel(
     {
       id: "pr-detail",
       component: "pr-detail",
-      title: "PR Details",
+      title: t("common:prDetails"),
       position: {
         referenceGroup: resolveReviewPanelTargetGroup(
           api,
@@ -117,6 +121,22 @@ function syncExistingReviewPanel(
   return true;
 }
 
+function resolveReviewPanelAction(
+  panel: ReturnType<DockviewApi["getPanel"]>,
+  next: CanonicalReviewParams,
+  options?: ConditionalReviewPanelOptions,
+): ConditionalReviewPanelAction {
+  return resolveConditionalReviewPanelAction({
+    hasReview: !!next.provider,
+    panelExists: !!panel,
+    autoAddedForReview: panel?.params?.autoAddedForReview === true,
+    reviewsLoaded: options?.reviewsLoaded ?? true,
+    isRestoringLayout: options?.isRestoringLayout ?? false,
+    isMaximized: options?.isMaximized ?? false,
+    wasOffered: options?.wasOffered ?? false,
+  });
+}
+
 /**
  * Synchronize the canonical PR Details panel and, when options are supplied,
  * manage the conditional panel shown for a linked review.
@@ -131,14 +151,7 @@ export function syncCanonicalReviewPanel(
   options?: ConditionalReviewPanelOptions,
 ): boolean {
   const panel = api.getPanel("pr-detail");
-  const action = resolveConditionalReviewPanelAction({
-    hasReview: !!next.provider,
-    panelExists: !!panel,
-    autoAddedForReview: panel?.params?.autoAddedForReview === true,
-    isRestoringLayout: options?.isRestoringLayout ?? false,
-    isMaximized: options?.isMaximized ?? false,
-    wasOffered: options?.wasOffered ?? false,
-  });
+  const action = resolveReviewPanelAction(panel, next, options);
 
   if (action === "remove") {
     panel?.api.close();
@@ -161,8 +174,13 @@ function reviewIdentity(params: CanonicalReviewParams): string {
 export function useSyncReviewPanel() {
   const appStore = useAppStoreApi();
   const taskId = useAppStore((state) => state.tasks.activeTaskId);
+  const { loaded: githubReviewsLoaded } = useTaskPR(taskId);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const gitlabReviewsLoaded = useAppStore((state) =>
+    workspaceId ? Object.hasOwn(state.taskMRs.byWorkspaceId, workspaceId) : false,
+  );
+  const reviewsLoaded = githubReviewsLoaded && gitlabReviewsLoaded;
   const identity = useAppStore((state) => {
     if (!taskId || !workspaceId) return "none";
     return reviewIdentity(
@@ -203,6 +221,7 @@ export function useSyncReviewPanel() {
           {
             sessionId,
             centerGroupId: dockview.centerGroupId,
+            reviewsLoaded,
             isRestoringLayout: dockview.isRestoringLayout,
             isMaximized: dockview.preMaximizeLayout !== null,
             wasOffered: wasPRPanelOffered(sessionId),
@@ -222,6 +241,7 @@ export function useSyncReviewPanel() {
     identity,
     isMaximized,
     isRestoringLayout,
+    reviewsLoaded,
     sessionId,
     taskId,
     workspaceId,

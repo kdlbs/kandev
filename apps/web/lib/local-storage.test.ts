@@ -115,6 +115,16 @@ describe("PR panel offered storage", () => {
     expect(wasPRPanelOffered("session-a")).toBe(true);
     expect(wasPRPanelOffered("session-b")).toBe(false);
   });
+
+  it("clears the offered flag via cleanupTaskStorage", () => {
+    markPRPanelOffered("session-a");
+    markPRPanelOffered("session-b");
+
+    cleanupTaskStorage("task-a", ["session-a"]);
+
+    expect(wasPRPanelOffered("session-a")).toBe(false);
+    expect(wasPRPanelOffered("session-b")).toBe(true);
+  });
 });
 
 describe("global sidebar width storage", () => {

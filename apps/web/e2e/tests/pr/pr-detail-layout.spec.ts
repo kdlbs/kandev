@@ -170,7 +170,6 @@ test.describe("PR Details layout panel", () => {
       });
 
     await linkPR(apiClient, task.id);
-    await testPage.waitForTimeout(500);
     await expect
       .poll(() => readReviewLayout(testPage))
       .toMatchObject({
