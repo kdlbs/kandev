@@ -3,6 +3,7 @@ package handlers
 import (
 	"errors"
 	"fmt"
+	"mime/multipart"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 )
 
 const maxAttachmentRequestBytes int64 = service.MaxAttachmentBytes + 4*1024*1024
+const attachmentMultipartMaxMemory = 1 << 20
 
 // AttachmentHandlers exposes the authenticated staging/download/delete API.
 type AttachmentHandlers struct {
@@ -53,14 +55,15 @@ func (h *AttachmentHandlers) upload(c *gin.Context) {
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxAttachmentRequestBytes)
-	if err := c.Request.ParseMultipartForm(32 << 20); err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "request body too large") || strings.Contains(strings.ToLower(err.Error()), "multipart: message too large") {
+	if err := c.Request.ParseMultipartForm(attachmentMultipartMaxMemory); err != nil {
+		if isAttachmentRequestTooLarge(err) {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "attachment exceeds maximum size"})
 			return
 		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "multipart upload is required"})
 		return
 	}
+	defer func() { _ = c.Request.MultipartForm.RemoveAll() }()
 	workspaceID := strings.TrimSpace(c.PostForm("workspace_id"))
 	if workspaceID == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "workspace_id is required"})
@@ -103,6 +106,11 @@ func (h *AttachmentHandlers) upload(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, h.service.Descriptor(attachment))
+}
+
+func isAttachmentRequestTooLarge(err error) bool {
+	var maxBytesErr *http.MaxBytesError
+	return errors.As(err, &maxBytesErr) || errors.Is(err, multipart.ErrMessageTooLarge)
 }
 
 func attachmentKind(mimeType string) string {
