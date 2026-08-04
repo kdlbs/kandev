@@ -34,6 +34,41 @@ test.describe("i18n language switcher", () => {
     });
   });
 
+  test("switching to Simplified Chinese persists through reload and can restore English", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.goto(APPEARANCE_URL);
+
+    const select = testPage.getByLabel("Display language");
+    await expect(select).toBeVisible({ timeout: 10_000 });
+    await select.click();
+    await testPage.getByRole("option", { name: "简体中文" }).click();
+
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "zh-cn", { timeout: 10_000 });
+    await expect(testPage.getByLabel("显示语言")).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () => {
+        const cookies = await testPage.context().cookies();
+        return cookies.find((cookie) => cookie.name === "kandev_locale")?.value;
+      })
+      .toBe("zh-cn");
+
+    await prCapture.screenshot("simplified-chinese-locale-desktop", {
+      caption: "Settings > General > Appearance with Simplified Chinese active",
+    });
+
+    await testPage.reload();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "zh-cn", { timeout: 10_000 });
+    await expect(testPage.getByLabel("显示语言")).toBeVisible({ timeout: 10_000 });
+
+    const selectAfter = testPage.getByLabel("显示语言");
+    await selectAfter.click();
+    await testPage.getByRole("option", { name: "English" }).click();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
+    await expect(testPage.getByLabel("Display language")).toBeVisible({ timeout: 10_000 });
+  });
+
   test("switching to pseudo re-renders accented copy and survives reload", async ({
     testPage,
     prCapture,

@@ -16,18 +16,21 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import {
+  discoverRealLocales,
+  formatParityIssue,
+  readLocaleNamespaces,
+  realLocaleParityIssues,
+} from "./lib/i18n-catalogs.mjs";
+
 const ROOT = path.resolve(import.meta.dirname, "..");
 const LOCALES = path.join(ROOT, "src", "locales");
 const STRICT_ORPHANS = process.argv.includes("--strict-orphans");
 
 function readCatalog(locale) {
-  const dir = path.join(LOCALES, locale);
   const out = new Map(); // "ns:key" -> value
-  if (!fs.existsSync(dir)) return out;
-  for (const file of fs.readdirSync(dir).filter((f) => f.endsWith(".json"))) {
-    const ns = file.replace(/\.json$/, "");
-    const entries = JSON.parse(fs.readFileSync(path.join(dir, file), "utf8"));
-    for (const [key, value] of Object.entries(entries)) out.set(`${ns}:${key}`, value);
+  for (const [namespace, messages] of readLocaleNamespaces(LOCALES, locale)) {
+    for (const [key, value] of messages) out.set(`${namespace}:${key}`, value);
   }
   return out;
 }
@@ -101,6 +104,11 @@ const enKeys = new Set(en.keys());
 const pseudoKeys = new Set(pseudo.keys());
 const pseudoMissing = [...enKeys].filter((k) => !pseudoKeys.has(k));
 const pseudoExtra = [...pseudoKeys].filter((k) => !enKeys.has(k));
+const sourceNamespaces = readLocaleNamespaces(LOCALES, "en");
+const realLocales = discoverRealLocales(LOCALES);
+const realLocaleIssues = realLocales.flatMap((locale) =>
+  realLocaleParityIssues(sourceNamespaces, readLocaleNamespaces(LOCALES, locale), locale),
+);
 
 let failed = false;
 
@@ -122,6 +130,12 @@ if (pseudoMissing.length || pseudoExtra.length) {
   );
 }
 
+if (realLocaleIssues.length) {
+  failed = true;
+  console.error(`\n✖ ${realLocaleIssues.length} real-locale catalog parity issue(s):`);
+  for (const issue of realLocaleIssues) console.error(`  ${formatParityIssue(issue)}`);
+}
+
 if (orphans.length) {
   const label = STRICT_ORPHANS ? "✖" : "⚠";
   console[STRICT_ORPHANS ? "error" : "warn"](
@@ -135,7 +149,7 @@ if (orphans.length) {
 if (!failed) {
   console.log(
     `✓ i18n keys OK — ${used.size} key(s) referenced, ${en.size} en entr(ies), ` +
-      `${orphans.length} orphan(s), pseudo in sync.`,
+      `${orphans.length} orphan(s), pseudo and ${realLocales.join(", ") || "no real locales"} in sync.`,
   );
 }
 process.exit(failed ? 1 : 0);

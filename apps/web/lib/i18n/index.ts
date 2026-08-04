@@ -18,28 +18,42 @@ import { writeLocaleCookie } from "./cookie";
  */
 export const DEFAULT_LOCALE = "en";
 export const DEFAULT_NAMESPACE = "common";
-export const SUPPORTED_LOCALES = ["en", "pseudo"] as const;
+export const SUPPORTED_LOCALES = ["en", "zh-cn", "pseudo"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Human-readable labels for the language switcher. */
 export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   en: "English",
+  "zh-cn": "简体中文",
   pseudo: "Pseudo (QA)",
 };
 
-export function isSupportedLocale(value: unknown): value is SupportedLocale {
-  return typeof value === "string" && (SUPPORTED_LOCALES as readonly string[]).includes(value);
-}
-
-/** Coerce any value to a supported locale, defaulting to `en`. */
-export function normalizeLocale(value: unknown): SupportedLocale {
-  return isSupportedLocale(value) ? value : DEFAULT_LOCALE;
+/** Canonicalize locale input the same way the Go shell does (trim + lower). */
+function canonicalLocale(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 /**
- * Locales offered in the language switcher. The `pseudo` QA locale is hidden in
- * production builds.
+ * Whether `value` names a shipped locale. Accepts case variants such as
+ * `zh-CN`; prefer `normalizeLocale` when you need the canonical id to pass on.
  */
+export function isSupportedLocale(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  return (SUPPORTED_LOCALES as readonly string[]).includes(canonicalLocale(value));
+}
+
+/**
+ * Coerce any value to a supported canonical locale, defaulting to `en`.
+ * Case-insensitive so a hand-edited `zh-CN` cookie matches the backend.
+ */
+export function normalizeLocale(value: unknown): SupportedLocale {
+  if (typeof value !== "string") return DEFAULT_LOCALE;
+  const canonical = canonicalLocale(value);
+  return (SUPPORTED_LOCALES as readonly string[]).includes(canonical)
+    ? (canonical as SupportedLocale)
+    : DEFAULT_LOCALE;
+}
+
 /**
  * Locales offered by the switcher. The pseudo QA locale is hidden in production.
  *
@@ -87,6 +101,7 @@ function ensureInitialized(locale: SupportedLocale) {
   if (initialized) return;
   void i18next.use(initReactI18next).init({
     lng: locale,
+    lowerCaseLng: true,
     fallbackLng: DEFAULT_LOCALE,
     defaultNS: DEFAULT_NAMESPACE,
     ns: knownNamespaces(),

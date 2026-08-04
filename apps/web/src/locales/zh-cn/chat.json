@@ -1,0 +1,17 @@
+{
+  "collapseMessage": "折叠消息",
+  "editQueuedMessage": "编辑排队中的消息",
+  "expandMessage": "展开消息",
+  "failedToMergeQueuedMessages": "合并排队中的消息失败。",
+  "mergeReferenceOverflow": "这些排队中的消息包含过多实体引用，无法合并。",
+  "mergeWithAbove": "与上方消息合并",
+  "removeQueuedMessage": "移除排队中的消息",
+  "technicalDetails": "技术详情",
+  "providerQuotaTitle": "{{provider}} 使用额度已达上限",
+  "providerQuotaModel": "模型：{{model}}",
+  "providerQuotaReset": "容量将于 {{resetAt}} 恢复。",
+  "providerQuotaResetUnknown": "请在提供商恢复可用容量后重试。",
+  "providerQuotaProviderFallback": "提供商",
+  "turnGroupToolCalls_one": "次工具调用",
+  "turnGroupToolCalls_other": "次工具调用"
+}

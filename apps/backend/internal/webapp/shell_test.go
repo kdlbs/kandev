@@ -110,6 +110,7 @@ func TestRenderShellSetsHTMLLangFromLocale(t *testing.T) {
 		wantLang string
 	}{
 		{name: "default when empty", locale: "", wantLang: `lang="en"`},
+		{name: "supported simplified chinese", locale: "zh-cn", wantLang: `lang="zh-cn"`},
 		{name: "supported pseudo", locale: "pseudo", wantLang: `lang="pseudo"`},
 		{name: "unknown coerces to en", locale: "klingon", wantLang: `lang="en"`},
 	}
@@ -160,6 +161,8 @@ func TestNormalizeLocale(t *testing.T) {
 
 	for _, tc := range []struct{ in, want string }{
 		{"en", "en"},
+		{"zh-cn", "zh-cn"},
+		{"zh-CN", "zh-cn"},
 		{"pseudo", "pseudo"},
 		{"", "en"},
 		{"fr", "en"},

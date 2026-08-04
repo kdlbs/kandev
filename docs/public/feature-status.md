@@ -74,6 +74,7 @@ Released builds can lag this page. Check **Settings > System > About** or `kande
 | Language servers | Limited | Current built-in mapping covers TypeScript/JavaScript, Go, Rust, and Python. Auto-start/installation default off, and subprocesses run on the backend host rather than inside Docker, SSH, or Sprites runtimes. |
 | Integrated shell terminals | Dependency-bound | Create, reopen, rename, and terminate are shipped. Shell settings affect new terminals, and executor/task-environment availability controls where the PTY runs. |
 | Prompts, keyboard shortcuts, notifications, appearance, and task actions | Supported | These are normal settings surfaces. Browser notification permission, custom command validity, and local shell/editor availability still apply to their effects. |
+| Web UI localization | Limited | **Settings > General > Appearance** offers English and 简体中文. The selection persists across reloads, but localization migration is incremental: currently externalized surfaces use the selected language while unmigrated surfaces remain in English. |
 
 </details>
 
