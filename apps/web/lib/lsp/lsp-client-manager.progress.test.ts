@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createLspManagerHarness, FakeWebSocket } from "./lsp-client-manager.test-harness";
+import { LSP_IDLE_TIMEOUT } from "./lsp-client-config";
 import type { LspProgressToken } from "./lsp-progress";
 
 const mocks = vi.hoisted(() => ({
@@ -43,14 +44,15 @@ type InitializeRequest = {
 function beginInitialization(
   sessionId = SESSION_ID,
   workspacePath = WORKSPACE_PATH,
-): { initialize: InitializeRequest; socket: FakeWebSocket } {
-  lspClientManager.connect(sessionId, LANGUAGE);
+): { initialize: InitializeRequest; release: () => void; socket: FakeWebSocket } {
+  const release = lspClientManager.connect(sessionId, LANGUAGE);
   const socket = FakeWebSocket.instances.at(-1);
   if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
   socket.open();
   socket.emitMessage(JSON.stringify({ status: "ready", workspacePath }));
   return {
     initialize: JSON.parse(socket.sent[0]) as InitializeRequest,
+    release,
     socket,
   };
 }
@@ -221,5 +223,54 @@ describe("LSP progress token and generation ownership", () => {
       hasReportedProgress: false,
     });
     expect(progress).toBe(lspClientManager.getProgress(SESSION_ID, LANGUAGE));
+  });
+});
+
+describe("LSP progress-aware idle cleanup", () => {
+  it("keeps a released connection alive until initialization finishes", async () => {
+    vi.useFakeTimers();
+    try {
+      const { initialize, release, socket } = beginInitialization();
+      release();
+
+      await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT + 1);
+
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "starting" });
+
+      completeInitialization(socket, initialize.id);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "ready" });
+
+      await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT + 1);
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a released ready connection alive until reported work finishes", async () => {
+    const { initialize, release, socket } = beginInitialization();
+    completeInitialization(socket, initialize.id);
+    await vi.waitFor(() => {
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "ready" });
+    });
+    emitProgress(socket, initialize.params.workDoneToken, {
+      kind: "begin",
+      title: "Importing project",
+    });
+
+    vi.useFakeTimers();
+    try {
+      release();
+      await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT + 1);
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+
+      emitProgress(socket, initialize.params.workDoneToken, { kind: "end" });
+      await vi.advanceTimersByTimeAsync(LSP_IDLE_TIMEOUT + 1);
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

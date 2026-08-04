@@ -48,6 +48,11 @@ export { toLspLanguage } from "./lsp-json-rpc";
 // ---------------------------------------------------------------------------
 
 type ChangeListener = (key: string) => void;
+
+function hasActiveLspWork(progress: LspProgressSnapshot): boolean {
+  return progress.initializingSince !== null || progress.active.length > 0;
+}
+
 class LSPClientManager {
   private connections = new Map<string, ManagedLspConnection>();
   private connectionGeneration = 0;
@@ -259,7 +264,7 @@ class LSPClientManager {
         conn,
         rpc,
         () => this.isCurrentConnection(conn),
-        () => this.notifyChange(key),
+        () => this.handleProgressChange(conn),
       );
 
       // Handle server requests
@@ -287,7 +292,7 @@ class LSPClientManager {
       const progress = finishLspInitialization(conn.progress);
       if (progress !== conn.progress) {
         conn.progress = progress;
-        this.notifyChange(key);
+        this.handleProgressChange(conn);
       }
       conn.serverCapabilities = initResult?.capabilities ?? null;
       rpc.sendNotification("initialized", {});
@@ -494,17 +499,45 @@ class LSPClientManager {
 
   private decrementRef(conn: ManagedLspConnection) {
     if (!this.isCurrentConnection(conn)) return;
-    const { key } = conn;
     conn.refCount--;
-    if (conn.refCount <= 0) {
-      conn.idleTimer = setTimeout(() => {
-        const wasCurrent = this.isCurrentConnection(conn);
-        this.cleanupConnection(conn);
-        if (!wasCurrent) return;
-        this.statuses.delete(key);
-        this.notifyChange(key);
-      }, LSP_IDLE_TIMEOUT);
+    if (conn.refCount <= 0) this.scheduleIdleCleanup(conn);
+  }
+
+  private handleProgressChange(conn: ManagedLspConnection): void {
+    if (!this.isCurrentConnection(conn)) return;
+    this.notifyChange(conn.key);
+    if (conn.refCount > 0) return;
+    if (hasActiveLspWork(conn.progress)) {
+      this.clearIdleTimer(conn);
+      return;
     }
+    this.scheduleIdleCleanup(conn);
+  }
+
+  private scheduleIdleCleanup(conn: ManagedLspConnection): void {
+    if (
+      !this.isCurrentConnection(conn) ||
+      conn.refCount > 0 ||
+      hasActiveLspWork(conn.progress) ||
+      conn.idleTimer
+    ) {
+      return;
+    }
+    conn.idleTimer = setTimeout(() => {
+      conn.idleTimer = null;
+      if (!this.isCurrentConnection(conn) || conn.refCount > 0 || hasActiveLspWork(conn.progress)) {
+        return;
+      }
+      this.cleanupConnection(conn);
+      this.statuses.delete(conn.key);
+      this.notifyChange(conn.key);
+    }, LSP_IDLE_TIMEOUT);
+  }
+
+  private clearIdleTimer(conn: ManagedLspConnection): void {
+    if (!conn.idleTimer) return;
+    clearTimeout(conn.idleTimer);
+    conn.idleTimer = null;
   }
 
   private isCurrentConnection(conn: ManagedLspConnection): boolean {
@@ -512,6 +545,7 @@ class LSPClientManager {
   }
 
   private cleanupConnection(conn: ManagedLspConnection) {
+    this.clearIdleTimer(conn);
     for (const d of conn.providerDisposables) d.dispose();
     conn.providerDisposables = [];
     conn.rpc?.dispose();
