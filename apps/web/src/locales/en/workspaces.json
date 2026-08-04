@@ -56,7 +56,7 @@
   "selectEnvironmentSecret": "Select a secret",
   "missingSecretReference": "Missing secret reference",
   "noEnvironmentSecrets": "No environment secrets configured.",
-  "noAvailableEnvironmentSecrets": "No Global or workspace secrets are available.",
+  "noAvailableEnvironmentSecrets": "No Global or Workspace secrets are available.",
   "addEnvironmentSecret": "Add environment secret",
   "removeEnvironmentSecret": "Remove environment secret {{key}}",
   "environmentSecretKeyInvalid": "Use a valid POSIX environment key.",
