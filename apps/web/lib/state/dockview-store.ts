@@ -208,6 +208,7 @@ type DockviewStore = {
   setUserDefaultLayout: (layout: LayoutState | null) => void;
   activeFilePath: string | null;
   activeFileRepo: string | null;
+  activePanelComponent: string | null;
   pendingChatScrollTop: number | null;
   setPendingChatScrollTop: (value: number | null) => void;
   /** Saved layout from before a manual maximize. Null when not maximized. */
@@ -1033,34 +1034,59 @@ function resetToEffectiveDefault(set: StoreSet, get: StoreGet): void {
   });
 }
 
-type ActiveFileState = Pick<DockviewStore, "activeFilePath" | "activeFileRepo">;
+type ActiveFileState = Pick<
+  DockviewStore,
+  "activeFilePath" | "activeFileRepo" | "activePanelComponent"
+>;
+
+function inferPanelComponent(panelId: string): string | null {
+  if (panelId === "preview:file-editor" || panelId.startsWith("file:")) return "file-editor";
+  if (panelId === "preview:file-diff" || panelId.startsWith("diff:file:")) return "diff-viewer";
+  return null;
+}
+
+function activeFileState(
+  activeFilePath: string | null,
+  activeFileRepo: string | null,
+  activePanelComponent: string | null,
+): ActiveFileState {
+  return { activeFilePath, activeFileRepo, activePanelComponent };
+}
 
 function resolveActiveFile(api: DockviewApi, panelId: string | undefined): ActiveFileState {
-  if (!panelId) return { activeFilePath: null, activeFileRepo: null };
-  const params = api.getPanel(panelId)?.params as Record<string, unknown> | undefined;
+  if (!panelId) return activeFileState(null, null, null);
+  const panel = api.getPanel(panelId);
+  const activePanelComponent = panel?.api.component ?? inferPanelComponent(panelId);
+  const params = panel?.params as Record<string, unknown> | undefined;
   const panelPath = typeof params?.path === "string" ? params.path : null;
   let panelRepo: string | null = null;
   if (typeof params?.repo === "string") panelRepo = params.repo;
   else if (typeof params?.repositoryName === "string") panelRepo = params.repositoryName;
-  if (panelPath) return { activeFilePath: panelPath, activeFileRepo: panelRepo };
+  if (panelPath) return activeFileState(panelPath, panelRepo, activePanelComponent);
 
   // Legacy bare-path panel IDs did not encode repository scope. Modern
   // file/diff panels resolve through params above.
   if (panelId.startsWith("file:")) {
-    return { activeFilePath: panelId.slice(5), activeFileRepo: null };
+    return activeFileState(panelId.slice(5), null, activePanelComponent);
   }
   if (panelId.startsWith("diff:file:")) {
-    return { activeFilePath: panelId.slice("diff:file:".length), activeFileRepo: null };
+    return activeFileState(panelId.slice("diff:file:".length), null, activePanelComponent);
   }
-  return { activeFilePath: null, activeFileRepo: null };
+  return activeFileState(null, null, activePanelComponent);
 }
 
 export const useDockviewStore = create<DockviewStore>((set, get) => ({
   api: null,
   activeFilePath: null,
   activeFileRepo: null,
+  activePanelComponent: null,
   setApi: (api) => {
-    set({ api, activeFilePath: null, activeFileRepo: null });
+    set({
+      api,
+      activeFilePath: null,
+      activeFileRepo: null,
+      activePanelComponent: null,
+    });
     if (typeof window !== "undefined") {
       // Exposed for E2E tests to assert on panel/group placement. Harmless in
       // prod; the DockviewApi is already reachable via the store in devtools.

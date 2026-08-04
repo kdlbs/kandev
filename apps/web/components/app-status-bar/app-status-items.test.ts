@@ -9,6 +9,7 @@ describe("resolveActiveLspStatusItem", () => {
         activeSessionId: "session-1",
         activeFilePath: "app/src/main/kotlin/Main.kt",
         editorProvider: "monaco",
+        hasMountedMonacoEditor: true,
       }),
     ).toEqual({
       sessionId: "session-1",
@@ -23,6 +24,7 @@ describe("resolveActiveLspStatusItem", () => {
         activeSessionId: "session-1",
         activeFilePath: "src/Main.kt",
         editorProvider: "monaco",
+        hasMountedMonacoEditor: true,
       }),
     ).toBeNull();
     expect(
@@ -31,6 +33,7 @@ describe("resolveActiveLspStatusItem", () => {
         activeSessionId: "session-1",
         activeFilePath: null,
         editorProvider: "monaco",
+        hasMountedMonacoEditor: true,
       }),
     ).toBeNull();
     expect(
@@ -39,6 +42,7 @@ describe("resolveActiveLspStatusItem", () => {
         activeSessionId: "session-1",
         activeFilePath: "README.md",
         editorProvider: "monaco",
+        hasMountedMonacoEditor: true,
       }),
     ).toBeNull();
   });
@@ -50,6 +54,19 @@ describe("resolveActiveLspStatusItem", () => {
         activeSessionId: "session-1",
         activeFilePath: "src/Main.kt",
         editorProvider: "codemirror",
+        hasMountedMonacoEditor: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("hides until the active file panel has mounted Monaco", () => {
+    expect(
+      resolveActiveLspStatusItem({
+        placement: "status_bar",
+        activeSessionId: "session-1",
+        activeFilePath: "src/Main.kt",
+        editorProvider: "monaco",
+        hasMountedMonacoEditor: false,
       }),
     ).toBeNull();
   });

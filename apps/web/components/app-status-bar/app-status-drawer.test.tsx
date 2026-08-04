@@ -6,6 +6,7 @@ import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
 import { AppStatusDrawer } from "./app-status-drawer";
 import {
@@ -39,7 +40,27 @@ const LEFT_PLUGIN_ID = "drawer-left";
 const RIGHT_PLUGIN_ID = "drawer-right";
 
 function renderPhoneLspDrawer() {
-  useDockviewStore.setState({ activeFilePath: "src/Main.kt", activeFileRepo: "app" });
+  const path = "src/Main.kt";
+  const repo = "app";
+  useDockviewStore.setState({
+    activeFilePath: path,
+    activeFileRepo: repo,
+    activePanelComponent: "file-editor",
+    openFiles: new Map([
+      [
+        buildRepoScopedItemId(path, repo),
+        {
+          path,
+          repo,
+          name: "Main.kt",
+          content: "fun main() = Unit",
+          originalContent: "fun main() = Unit",
+          originalHash: "hash",
+          isDirty: false,
+        },
+      ],
+    ]),
+  });
   render(
     <StateProvider
       initialState={{
@@ -97,12 +118,21 @@ function renderConnectionOnlyDrawer() {
   );
 }
 
+function resetActiveFile() {
+  useDockviewStore.setState({
+    activeFilePath: null,
+    activeFileRepo: null,
+    activePanelComponent: null,
+    openFiles: new Map(),
+  });
+}
+
 describe("AppStatusDrawer", () => {
   afterEach(() => {
     cleanup();
     pluginRegistry.unregisterPlugin(LEFT_PLUGIN_ID);
     pluginRegistry.unregisterPlugin(RIGHT_PLUGIN_ID);
-    useDockviewStore.setState({ activeFilePath: null, activeFileRepo: null });
+    resetActiveFile();
     lspHooks.useLspStatus.mockReset();
   });
 

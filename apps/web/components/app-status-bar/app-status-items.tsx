@@ -10,6 +10,7 @@ import type { EffectiveLspStatusPlacement } from "@/lib/lsp/lsp-status-placement
 import { usePluginRegistry, type PluginSlotRegistration } from "@/lib/plugins/registry";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 import { useEditorResolverStore, type EditorProvider } from "@/lib/state/editor-resolver-store";
 import { ConnectionStatusItem } from "./connection-status-item";
 import { LspStatusItem } from "./lsp-status-item";
@@ -44,7 +45,21 @@ export function useAppStatusItems(
   const registryVersion = registry.getVersion();
   const lspPlacement = useLspStatusPlacement();
   const activeFilePath = useDockviewStore((state) => state.activeFilePath);
+  const activeFileRepo = useDockviewStore((state) => state.activeFileRepo);
+  const activePanelComponent = useDockviewStore((state) => state.activePanelComponent);
+  const activeFileBuffer = useDockviewStore((state) => {
+    if (!activeFilePath) return null;
+    return (
+      state.openFiles.get(buildRepoScopedItemId(activeFilePath, activeFileRepo ?? undefined)) ??
+      null
+    );
+  });
   const codeEditorProvider = useEditorResolverStore((state) => state.providers["code-editor"]);
+  const hasMountedMonacoEditor =
+    activePanelComponent === "file-editor" &&
+    codeEditorProvider === "monaco" &&
+    activeFileBuffer !== null &&
+    !activeFileBuffer.isBinary;
   const metricsEnabled = useAppStore(
     (state) => state.userSettings.systemMetricsDisplay.showInTopbar,
   );
@@ -55,8 +70,15 @@ export function useAppStatusItems(
         activeSessionId: context.activeSessionId,
         activeFilePath,
         editorProvider: codeEditorProvider,
+        hasMountedMonacoEditor,
       }),
-    [activeFilePath, codeEditorProvider, context.activeSessionId, lspPlacement],
+    [
+      activeFilePath,
+      codeEditorProvider,
+      context.activeSessionId,
+      hasMountedMonacoEditor,
+      lspPlacement,
+    ],
   );
 
   return useMemo(() => {
@@ -83,15 +105,18 @@ export function resolveActiveLspStatusItem({
   activeSessionId,
   activeFilePath,
   editorProvider,
+  hasMountedMonacoEditor,
 }: {
   placement: EffectiveLspStatusPlacement;
   activeSessionId: string | null;
   activeFilePath: string | null;
   editorProvider: EditorProvider;
+  hasMountedMonacoEditor: boolean;
 }): ActiveLspStatusItem | null {
   if (
     placement !== "status_bar" ||
     editorProvider !== "monaco" ||
+    !hasMountedMonacoEditor ||
     !activeSessionId ||
     !activeFilePath
   ) {

@@ -24,7 +24,7 @@ type KotlinSeedData = {
 type CreateKotlinTaskOptions = {
   title: string;
   fileCount?: number;
-  fileContents?: string[];
+  fileContents?: Array<string | Buffer>;
   filePaths?: string[];
   extensions?: string[];
   executorProfileId?: string;

@@ -286,8 +286,12 @@ test.describe("LSP file intelligence", () => {
       });
       const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
         title: "Kotlin LSP Status Bar Placement",
-        filePaths: ["Main.kt", "README.md"],
-        fileContents: ['package e2e\n\nfun main() = println("status")\n', "# Unsupported editor\n"],
+        filePaths: ["Main.kt", "README.md", "Binary.kt"],
+        fileContents: [
+          'package e2e\n\nfun main() = println("status")\n',
+          "# Unsupported editor\n",
+          Buffer.from([0x00, 0x01, 0x02, 0xff]),
+        ],
       });
       await openDesktopFile(testPage, task.session, task.filePaths[0]);
 
@@ -321,6 +325,13 @@ test.describe("LSP file intelligence", () => {
         "title",
         "Double-click to keep this tab open",
       );
+
+      await task.session.clickTab("Files");
+      const binaryNode = task.session.fileTreeNode(task.filePaths[2]);
+      await expect(binaryNode).toBeVisible({ timeout: 15_000 });
+      await binaryNode.click();
+      await expect(testPage.getByText("Binary file", { exact: true })).toBeVisible();
+      await expect(statusItem).toHaveCount(0);
 
       await openDesktopFile(testPage, task.session, task.filePaths[1]);
       await expect(statusItem).toHaveCount(0);

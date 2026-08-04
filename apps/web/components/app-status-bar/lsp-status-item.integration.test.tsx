@@ -1,13 +1,16 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { StateProvider } from "@/components/state-provider";
 import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
-import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useDockviewStore, type FileEditorState } from "@/lib/state/dockview-store";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
 import { useEditorResolverStore } from "@/lib/state/editor-resolver-store";
 import { AppStatusBar } from "./app-status-bar";
 import { APP_STATUS_LSP_ID } from "./app-status-bar-order";
+
+const ACTIVE_KOTLIN_PATH = "src/Main.kt";
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({
@@ -31,11 +34,48 @@ vi.mock("@/hooks/use-lsp", () => ({
 
 afterEach(() => {
   cleanup();
-  useDockviewStore.setState({ activeFilePath: null, activeFileRepo: null });
+  useDockviewStore.setState({
+    activeFilePath: null,
+    activeFileRepo: null,
+    activePanelComponent: null,
+    openFiles: new Map(),
+  });
   useEditorResolverStore.setState((state) => ({
     providers: { ...state.providers, "code-editor": "monaco" },
   }));
 });
+
+function activateFile(
+  path: string,
+  {
+    repo = "app",
+    component = "file-editor",
+    loaded = true,
+    isBinary = false,
+  }: {
+    repo?: string;
+    component?: string;
+    loaded?: boolean;
+    isBinary?: boolean;
+  } = {},
+) {
+  const file: FileEditorState = {
+    path,
+    repo,
+    name: path.split("/").pop() ?? path,
+    content: "fun main() = Unit",
+    originalContent: "fun main() = Unit",
+    originalHash: "hash",
+    isDirty: false,
+    isBinary,
+  };
+  useDockviewStore.setState({
+    activeFilePath: path,
+    activeFileRepo: repo,
+    activePanelComponent: component,
+    openFiles: loaded ? new Map([[buildRepoScopedItemId(path, repo), file]]) : new Map(),
+  });
+}
 
 function renderBar(location: "toolbar" | "status_bar") {
   return render(
@@ -63,7 +103,7 @@ function renderBar(location: "toolbar" | "status_bar") {
 
 describe("active-editor LSP status item integration", () => {
   it("renders the supported active file only for status-bar placement", () => {
-    useDockviewStore.setState({ activeFilePath: "src/Main.kt", activeFileRepo: "app" });
+    activateFile(ACTIVE_KOTLIN_PATH);
     renderBar("status_bar");
 
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeTruthy();
@@ -71,12 +111,12 @@ describe("active-editor LSP status item integration", () => {
   });
 
   it("hides for toolbar placement and when the active panel becomes unsupported", () => {
-    useDockviewStore.setState({ activeFilePath: "src/Main.kt", activeFileRepo: "app" });
+    activateFile(ACTIVE_KOTLIN_PATH);
     const rendered = renderBar("toolbar");
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
 
     rendered.unmount();
-    useDockviewStore.setState({ activeFilePath: "README.md", activeFileRepo: null });
+    activateFile("README.md");
     renderBar("status_bar");
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
   });
@@ -85,10 +125,27 @@ describe("active-editor LSP status item integration", () => {
     useEditorResolverStore.setState((state) => ({
       providers: { ...state.providers, "code-editor": "codemirror" },
     }));
-    useDockviewStore.setState({ activeFilePath: "src/Main.kt", activeFileRepo: "app" });
+    activateFile(ACTIVE_KOTLIN_PATH);
 
     renderBar("status_bar");
 
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
+  });
+
+  it("tracks whether the active panel has mounted a Monaco text editor", () => {
+    activateFile(ACTIVE_KOTLIN_PATH, { loaded: false });
+    renderBar("status_bar");
+    const lspItem = () => document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`);
+
+    expect(lspItem()).toBeNull();
+
+    act(() => activateFile(ACTIVE_KOTLIN_PATH));
+    expect(lspItem()).toBeTruthy();
+
+    act(() => activateFile(ACTIVE_KOTLIN_PATH, { isBinary: true }));
+    expect(lspItem()).toBeNull();
+
+    act(() => activateFile(ACTIVE_KOTLIN_PATH, { component: "diff-viewer" }));
+    expect(lspItem()).toBeNull();
   });
 });
