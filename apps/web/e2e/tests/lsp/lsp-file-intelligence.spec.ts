@@ -157,7 +157,7 @@ test.describe("LSP file intelligence", () => {
       "aria-valuenow",
       "42",
     );
-    await expect(projectProgress).toContainText(/Elapsed \d+s/);
+    await expect(projectProgress).toContainText(/Elapsed \d+ sec/);
     await expect(surface.getByTestId("lsp-lifecycle-action")).toHaveAttribute(
       "data-lsp-action",
       "stop",
@@ -205,7 +205,7 @@ test.describe("LSP file intelligence", () => {
     await expect(projectProgress).toContainText(
       "Waiting for the language server to respond to the LSP initialize request.",
     );
-    await expect(projectProgress).toContainText(/Elapsed \d+s/);
+    await expect(projectProgress).toContainText(/Elapsed \d+ sec/);
     await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveCount(0);
     await expect(projectProgress).not.toContainText(/ETA|time remaining/i);
     await expect(surface.getByTestId("lsp-lifecycle-action")).toHaveAttribute(
