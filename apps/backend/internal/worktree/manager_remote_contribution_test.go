@@ -100,6 +100,61 @@ func TestCreateWorktree_RemoteContributionRejectsStaleHead(t *testing.T) {
 	}
 }
 
+func TestCreateWorktree_RemoteContributionReuseAllowsLocalCommits(t *testing.T) {
+	contributionURL := "https://github.com/contributor/widget.git"
+	sourceBare, sourceSHA := initContributionSource(t)
+	repoPath := initContributionTarget(t)
+	runGit(t, repoPath, "config", "url.file://"+sourceBare+".insteadOf", contributionURL)
+	binding := testRemoteContribution(sourceSHA, contributionURL)
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+
+	first, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-reuse",
+		SessionID:          "session-reuse",
+		RepositoryID:       "repo-target",
+		RepositoryPath:     repoPath,
+		BaseBranch:         binding.BaseBranch,
+		CheckoutBranch:     binding.HeadBranch,
+		RemoteContribution: &binding,
+		TaskDirName:        "task-reuse",
+		RepoName:           "widget",
+	})
+	if err != nil {
+		t.Fatalf("initial Create() failed: %v", err)
+	}
+
+	runGit(t, first.Path, "config", "user.email", "test@example.com")
+	runGit(t, first.Path, "config", "user.name", "Test User")
+	writeTestFile(t, filepath.Join(first.Path, "agent-change.txt"), "agent change\n")
+	runGit(t, first.Path, "add", "agent-change.txt")
+	runGit(t, first.Path, "commit", "-m", "agent contribution")
+	localSHA := strings.TrimSpace(runGit(t, first.Path, "rev-parse", "HEAD"))
+
+	reused, err := mgr.Create(context.Background(), CreateRequest{
+		TaskID:             "task-reuse",
+		SessionID:          "session-reuse",
+		RepositoryID:       "repo-target",
+		RepositoryPath:     repoPath,
+		BaseBranch:         binding.BaseBranch,
+		CheckoutBranch:     binding.HeadBranch,
+		RemoteContribution: &binding,
+		TaskDirName:        "task-reuse",
+		RepoName:           "widget",
+	})
+	if err != nil {
+		t.Fatalf("reuse Create() failed after local commit: %v", err)
+	}
+	if reused.ID != first.ID {
+		t.Fatalf("reused worktree ID = %q, want %q", reused.ID, first.ID)
+	}
+	if got := strings.TrimSpace(runGit(t, reused.Path, "rev-parse", "HEAD")); got != localSHA {
+		t.Fatalf("reused worktree HEAD = %q, want local commit %q", got, localSHA)
+	}
+}
+
 func testRemoteContribution(headSHA, sourceURL string) models.RemoteContribution {
 	return models.RemoteContribution{
 		Version:      models.RemoteContributionVersion,

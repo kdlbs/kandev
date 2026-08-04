@@ -127,6 +127,63 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 	}
 }
 
+func TestGitOperatorRemoteContributionPullsFromSourceRemote(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	targetDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+
+	sourceRoot := t.TempDir()
+	sourceBare := filepath.Join(sourceRoot, "source.git")
+	sourceWork := filepath.Join(sourceRoot, "source-work")
+	runGit(t, sourceRoot, "init", "--bare", "--initial-branch=main", sourceBare)
+	runGit(t, sourceRoot, "clone", targetDir, sourceWork)
+	runGit(t, sourceWork, "config", "user.email", "test@test.com")
+	runGit(t, sourceWork, "config", "user.name", "Test User")
+	runGit(t, sourceWork, "checkout", "-b", "feature/contribution")
+	writeFile(t, sourceWork, "source-change.txt", "source change\n")
+	runGit(t, sourceWork, "add", "source-change.txt")
+	runGit(t, sourceWork, "commit", "-m", "source contribution")
+	sourceSHA := strings.TrimSpace(runGit(t, sourceWork, "rev-parse", "HEAD"))
+	runGit(t, sourceWork, "remote", "add", "source", sourceBare)
+	runGit(t, sourceWork, "push", "source", "main", "feature/contribution")
+
+	sourceURL := "https://github.com/contributor/widget.git"
+	runGit(t, repoDir, "config", "url.file://"+sourceBare+".insteadOf", sourceURL)
+	runGit(t, repoDir, "checkout", "-b", "feature/contribution")
+	binding := &taskmodels.RemoteContribution{
+		Version:      taskmodels.RemoteContributionVersion,
+		Provider:     taskmodels.RemoteContributionProviderGitHub,
+		Kind:         taskmodels.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        taskmodels.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/contribution",
+		HeadSHA:      sourceSHA,
+		SourceRepository: taskmodels.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: sourceURL,
+		},
+		CollaborationAllowed: true,
+	}
+	runGit(t, repoDir, "remote", "add", binding.ContributionRemoteName(), sourceURL)
+
+	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+	operator.setRemoteContribution(binding)
+	result, err := operator.Pull(context.Background(), false)
+	if err != nil {
+		t.Fatalf("Pull returned error: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("Pull failed: %+v", result)
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD")); got != sourceSHA {
+		t.Fatalf("pulled HEAD = %q, want source SHA %q", got, sourceSHA)
+	}
+	if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != targetDir {
+		t.Fatalf("origin URL = %q, want target %q", got, targetDir)
+	}
+}
+
 func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	defer cleanup()

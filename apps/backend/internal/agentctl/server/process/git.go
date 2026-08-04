@@ -349,10 +349,21 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 		return result, nil
 	}
 
-	// Use upstream branch if set, otherwise fall back to default (main/master).
-	// This handles local branches that haven't been pushed to the remote yet.
+	remote := "origin"
 	pullBranch := branch
-	if upstream := g.getUpstreamRef(ctx); upstream == "" {
+	if g.remoteContributionErr != nil {
+		result.Error = g.remoteContributionErr.Error()
+		return result, nil
+	}
+	if g.remoteContribution != nil {
+		if err := g.validateContributionRemote(ctx); err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
+		remote = g.remoteContribution.ContributionRemoteName()
+		pullBranch = g.remoteContribution.HeadBranch
+	} else if upstream := g.getUpstreamRef(ctx); upstream == "" {
+		// Use the default branch when the local branch has no upstream.
 		if defaultBranch := g.getDefaultRemoteBranch(ctx); defaultBranch != "" {
 			pullBranch = defaultBranch
 		}
@@ -360,9 +371,9 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 
 	var args []string
 	if rebase {
-		args = []string{"pull", "--rebase", "origin", pullBranch}
+		args = []string{"pull", "--rebase", remote, pullBranch}
 	} else {
-		args = []string{"pull", "origin", pullBranch}
+		args = []string{"pull", remote, pullBranch}
 	}
 
 	output, err := g.runGitCommand(ctx, args...)
@@ -383,7 +394,7 @@ func (g *GitOperator) Pull(ctx context.Context, rebase bool) (*GitOperationResul
 	}
 
 	result.Success = true
-	g.logger.Info("pull completed", zap.String("branch", pullBranch), zap.Bool("rebase", rebase))
+	g.logger.Info("pull completed", zap.String("branch", pullBranch), zap.String("remote", remote), zap.Bool("rebase", rebase))
 	return result, nil
 }
 

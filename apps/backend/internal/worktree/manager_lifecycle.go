@@ -152,10 +152,8 @@ func (m *Manager) validateReusableContribution(ctx context.Context, req CreateRe
 	if err != nil {
 		return err
 	}
-	headCmd := m.newNonInteractiveGitCmd(ctx, existing.Path, "rev-parse", "--verify", "HEAD^{commit}")
-	head, err := runGitCmdOutput(ctx, headCmd)
-	if err != nil || !strings.EqualFold(strings.TrimSpace(string(head)), req.RemoteContribution.HeadSHA) {
-		return fmt.Errorf("existing contribution worktree head does not match the validated source")
+	if err := m.validateContributionAncestor(ctx, existing.Path, req.RemoteContribution.HeadSHA, "HEAD"); err != nil {
+		return fmt.Errorf("existing contribution worktree is not based on the validated source: %w", err)
 	}
 	if err := m.setUpstreamIfExistsRemote(ctx, existing.Path, existing.Branch, remoteName, req.RemoteContribution.HeadBranch); err != nil {
 		return err
@@ -1147,10 +1145,9 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	}
 	if exists && req.RemoteContribution != nil {
-		branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "rev-parse", "--verify", "refs/heads/"+existing.Branch+"^{commit}")
-		branchHead, branchErr := runGitCmdOutput(ctx, branchCmd)
-		if branchErr != nil || !strings.EqualFold(strings.TrimSpace(string(branchHead)), req.RemoteContribution.HeadSHA) {
-			return nil, fmt.Errorf("existing contribution branch head does not match the validated source")
+		branchRef := "refs/heads/" + existing.Branch
+		if err := m.validateContributionAncestor(ctx, req.RepositoryPath, req.RemoteContribution.HeadSHA, branchRef); err != nil {
+			return nil, fmt.Errorf("existing contribution branch is not based on the validated source: %w", err)
 		}
 	}
 

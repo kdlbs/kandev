@@ -57,6 +57,14 @@ func (m *Manager) materializeRemoteContribution(ctx context.Context, repoPath st
 	return remoteName, remoteRef, nil
 }
 
+func (m *Manager) validateContributionAncestor(ctx context.Context, repoPath, expectedSHA, descendantRef string) error {
+	cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "merge-base", "--is-ancestor", expectedSHA, descendantRef)
+	if err := runGitCmd(ctx, cmd); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (m *Manager) addContributionWorktree(
 	ctx context.Context, req CreateRequest, worktreePath, startPoint, remoteName string,
 ) (string, string, error) {
