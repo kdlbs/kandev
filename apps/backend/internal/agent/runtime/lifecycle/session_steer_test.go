@@ -27,13 +27,20 @@ type capturedPrompt struct {
 // promptProbe captures every agent.prompt frame the mock receives so a test can
 // assert the wire-level generation and steer flag.
 type promptProbe struct {
-	mu   sync.Mutex
-	seen []capturedPrompt
-	ch   chan capturedPrompt
+	mu           sync.Mutex
+	seen         []capturedPrompt
+	ch           chan capturedPrompt
+	dropSteerAck bool // when set, steer frames get no response (simulates a stalled ack)
 }
 
 func newPromptProbe() *promptProbe {
 	return &promptProbe{ch: make(chan capturedPrompt, 8)}
+}
+
+func (p *promptProbe) setDropSteerAck(drop bool) {
+	p.mu.Lock()
+	p.dropSteerAck = drop
+	p.mu.Unlock()
 }
 
 func (p *promptProbe) install(mock *mockAgentServer) {
@@ -47,9 +54,13 @@ func (p *promptProbe) install(mock *mockAgentServer) {
 			_ = msg.ParsePayload(&payload)
 			cp := capturedPrompt{payload.Text, payload.PromptGeneration, payload.Steer}
 			p.mu.Lock()
+			drop := p.dropSteerAck && payload.Steer
 			p.seen = append(p.seen, cp)
 			p.mu.Unlock()
 			p.ch <- cp
+			if drop {
+				return nil // no response — the client's RPC waits until its deadline
+			}
 		}
 		return mock.defaultHandler(msg)
 	}
@@ -395,6 +406,52 @@ func TestSendPromptSteer_GenerationCannotCompleteBetweenReadAndDispatch(t *testi
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("predecessor waiter did not wake after the completion")
+	}
+}
+
+// TestSendPromptSteer_StalledAckReleasesLockWithinTimeout proves the steer never
+// pins promptLifecycleMu on a stalled agent: with the agent never acknowledging
+// the steer, the bounded dispatch returns within steerDispatchTimeout and the
+// predecessor's completion (which needs the same lock) is still claimed after.
+func TestSendPromptSteer_StalledAckReleasesLockWithinTimeout(t *testing.T) {
+	h := newSteerHarness(t)
+	firstDone := h.startForegroundTurn(t, 1)
+
+	prev := steerDispatchTimeout
+	steerDispatchTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { steerDispatchTimeout = prev })
+	h.probe.setDropSteerAck(true)
+
+	steerReturned := make(chan error, 1)
+	go func() {
+		_, err := h.mgr.sessionManager.SendPromptSteerWithDispatchCallback(
+			h.ctx, h.exec, "steer", false, nil, true, nil,
+		)
+		steerReturned <- err
+	}()
+
+	select {
+	case err := <-steerReturned:
+		if err == nil {
+			t.Fatal("stalled steer returned nil; expected the bounded dispatch to error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("steer did not return within the dispatch timeout — lifecycle lock pinned")
+	}
+
+	// The lock was released: the predecessor's completion can still be claimed.
+	h.mgr.handleAgentEvent(h.exec, agentctl.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+		Data:             map[string]any{"stop_reason": "end_turn"},
+	})
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatalf("predecessor returned error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("predecessor completion wedged — steer did not release promptLifecycleMu")
 	}
 }
 
