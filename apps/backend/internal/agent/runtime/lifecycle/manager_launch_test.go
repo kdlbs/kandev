@@ -1658,6 +1658,29 @@ type launchRegistrationGateReader struct {
 	release    chan struct{}
 }
 
+type launchRegistrationWriter struct {
+	upserted chan struct{}
+	deleted  atomic.Int32
+}
+
+func (*launchRegistrationWriter) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
+	return nil, models.ErrExecutorRunningNotFound
+}
+
+func (w *launchRegistrationWriter) UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error {
+	close(w.upserted)
+	return nil
+}
+
+func (w *launchRegistrationWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
+	w.deleted.Add(1)
+	return nil
+}
+
+func (*launchRegistrationWriter) RepairExecutorRunningDead(context.Context, string) error {
+	return nil
+}
+
 func (r *launchRegistrationGateReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
 	if r.reads.Add(1) == 1 {
 		return &models.TaskSession{ID: id, State: models.TaskSessionStateStarting}, nil
@@ -1693,6 +1716,8 @@ func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
 		release:    make(chan struct{}),
 	}
 	mgr.SetExecutorProfileReader(reader)
+	writer := &launchRegistrationWriter{upserted: make(chan struct{})}
+	mgr.SetExecutorRunningWriter(writer)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -1715,6 +1740,11 @@ func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
 	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); !exists {
 		t.Fatal("execution must be registered before the final session validation")
 	}
+	select {
+	case <-writer.upserted:
+	default:
+		t.Fatal("executor-running row must be durable before the final session validation")
+	}
 	close(reader.release)
 
 	err := <-errCh
@@ -1726,6 +1756,9 @@ func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
 	}
 	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); exists {
 		t.Fatal("terminal session runtime must be removed after registration race")
+	}
+	if got := writer.deleted.Load(); got != 1 {
+		t.Fatalf("executor-running delete count = %d, want 1", got)
 	}
 }
 

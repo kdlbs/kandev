@@ -1247,24 +1247,18 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
-	// Close the check-then-Add race with task deletion. If deletion happened
-	// after the pre-registration read, its cleanup inventory either observed
-	// this Add or this second read observes the deleted/terminal session. In
-	// the latter case, remove our entry before rolling the runtime back.
+	// Make the execution visible to durable cleanup before the final session
+	// read. This closes the precheck -> Add -> persist gap: deletion cleanup can
+	// now inventory the row, while a deletion that already ran is caught below.
+	m.persistExecutorRunning(ctx, execution)
+
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
-		m.executionStore.Remove(execution.ID)
-		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during execution registration")
+		m.rollbackRegisteredLaunch(rt, execInstance, execution, "session ended during execution registration")
 		return err
 	}
 	m.setRuntimeInterest(execution.SessionID, true)
 
 	m.persistRuntimeSecrets(ctx, execInstance, execution)
-
-	// Persist executors_running in lockstep with Add — see persistence.go for the
-	// invariant. Carries forward resume_token / metadata from a prior row so the
-	// lifecycle write doesn't clobber data the orchestrator's narrow CAS updates
-	// wrote earlier (e.g., context_window from a previous run).
-	m.persistExecutorRunning(ctx, execution)
 
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
@@ -1321,6 +1315,26 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		execution.agentctl.Close()
 	}
 	execution.EndSessionSpan()
+}
+
+// rollbackRegisteredLaunch removes both sides of an execution registration
+// before stopping its runtime. This path intentionally deletes the durable row
+// without the normal resume-token repair: the owning session was just proven
+// terminal or absent, so leaving a repaired row would expose a phantom runtime.
+func (m *Manager) rollbackRegisteredLaunch(rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
+	m.executionStore.Remove(execution.ID)
+	if m.runningWriter != nil && execution.SessionID != "" {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := m.runningWriter.DeleteExecutorRunningBySessionID(cleanupCtx, execution.SessionID); err != nil &&
+			!errors.Is(err, models.ErrExecutorRunningNotFound) {
+			m.logger.Warn("failed to delete executor-running row during launch rollback",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Error(err))
+		}
+		cancel()
+	}
+	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, reason)
 }
 
 // SetExecutionDescription updates the task description stored in an execution's metadata.

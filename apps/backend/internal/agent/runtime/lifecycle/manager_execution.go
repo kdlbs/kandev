@@ -622,18 +622,14 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	// Persist before the final session read so concurrent deletion cleanup can
+	// inventory this execution even if it started between Add and validation.
+	m.persistExecutorRunning(ctx, execution)
 	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
-		m.executionStore.Remove(execution.ID)
-		m.rollbackLaunchExecution(ctx, rt, runtimeInstance, execution, "session ended during execution registration")
+		m.rollbackRegisteredLaunch(rt, runtimeInstance, execution, "session ended during execution registration")
 		return nil, err
 	}
 	m.setRuntimeInterest(execution.SessionID, true)
-
-	// Persist executors_running row in lockstep with the in-memory Add so the
-	// DB never holds an execution_id the store doesn't know about. This is the
-	// structural fix for the divergence bug — pre-refactor, the orchestrator
-	// wrote the row later via a full-row UPDATE that could race with the store.
-	m.persistExecutorRunning(ctx, execution)
 
 	// Persist agentctl auth token only after the execution is tracked, so a
 	// race-lost rollback never leaves an orphaned secret in the store.
