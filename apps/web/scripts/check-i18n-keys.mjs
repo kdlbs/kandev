@@ -9,7 +9,7 @@
  *   - every `t("ns:key")` / `<Trans i18nKey="ns:key">` in source has a catalog
  *     entry  -> missing keys are an ERROR (they would render as the raw key)
  *   - every catalog entry is referenced somewhere -> orphans are a WARNING
- *   - `en` and `pseudo` have the same key sets -> drift is an ERROR
+ *   - every committed locale has the same key set as `en` -> drift is an ERROR
  *
  * Usage: node scripts/check-i18n-keys.mjs [--strict-orphans]
  */
@@ -77,7 +77,12 @@ for (const file of sourceFiles()) {
     if (NAMESPACES.has(m[1].split(":")[0])) referencedLiterals.add(m[1]);
   }
 }
-const pseudo = readCatalog("pseudo");
+const translatedLocales = fs
+  .readdirSync(LOCALES, { withFileTypes: true })
+  .filter((entry) => entry.isDirectory() && entry.name !== "en")
+  .map((entry) => entry.name)
+  .sort();
+const translations = new Map(translatedLocales.map((locale) => [locale, readCatalog(locale)]));
 
 /** Plural keys live as `key_one` / `key_other`; the source references `key`. */
 function isSatisfied(catalog, key) {
@@ -98,9 +103,14 @@ const orphans = [...en.keys()]
   .sort();
 
 const enKeys = new Set(en.keys());
-const pseudoKeys = new Set(pseudo.keys());
-const pseudoMissing = [...enKeys].filter((k) => !pseudoKeys.has(k));
-const pseudoExtra = [...pseudoKeys].filter((k) => !enKeys.has(k));
+const catalogDrift = translatedLocales.map((locale) => {
+  const localeKeys = new Set(translations.get(locale).keys());
+  return {
+    locale,
+    missing: [...enKeys].filter((k) => !localeKeys.has(k)),
+    extra: [...localeKeys].filter((k) => !enKeys.has(k)),
+  };
+});
 
 let failed = false;
 
@@ -113,13 +123,16 @@ if (missing.length) {
   if (missing.length > 40) console.error(`  … and ${missing.length - 40} more`);
 }
 
-if (pseudoMissing.length || pseudoExtra.length) {
-  failed = true;
-  console.error(
-    `\n✖ pseudo catalog is out of sync with en ` +
-      `(${pseudoMissing.length} missing, ${pseudoExtra.length} extra).` +
-      `\n  Run: pnpm run i18n:pseudo`,
-  );
+for (const { locale, missing: localeMissing, extra: localeExtra } of catalogDrift) {
+  if (localeMissing.length || localeExtra.length) {
+    failed = true;
+    const hint = locale === "pseudo" ? "\n  Run: pnpm run i18n:pseudo" : "";
+    console.error(
+      `\n✖ ${locale} catalog is out of sync with en ` +
+        `(${localeMissing.length} missing, ${localeExtra.length} extra).` +
+        hint,
+    );
+  }
 }
 
 if (orphans.length) {
@@ -135,7 +148,7 @@ if (orphans.length) {
 if (!failed) {
   console.log(
     `✓ i18n keys OK — ${used.size} key(s) referenced, ${en.size} en entr(ies), ` +
-      `${orphans.length} orphan(s), pseudo in sync.`,
+      `${orphans.length} orphan(s), ${translatedLocales.join(", ")} in sync.`,
   );
 }
 process.exit(failed ? 1 : 0);

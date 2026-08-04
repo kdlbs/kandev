@@ -1,0 +1,5 @@
+{
+  "webapp.assetReadFailed": "无法读取 Web 资源。",
+  "webapp.devServerUnavailable": "Vite 开发服务器不可用。",
+  "webapp.shellUnavailable": "Kandev Web 应用不可用。"
+}

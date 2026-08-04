@@ -44,6 +44,7 @@ const LocaleCookie = "kandev_locale"
 // with SUPPORTED_LOCALES in apps/web/lib/i18n/index.ts.
 var supportedLocales = map[string]bool{
 	"en":     true,
+	"zh-CN":  true,
 	"pseudo": true,
 }
 
@@ -76,14 +77,28 @@ func load() {
 	})
 }
 
-// Supported reports whether locale has a committed catalog.
-func Supported(locale string) bool { return supportedLocales[locale] }
+func canonicalLocale(locale string) (string, bool) {
+	for candidate := range supportedLocales {
+		if strings.EqualFold(candidate, locale) {
+			return candidate, true
+		}
+	}
+	return "", false
+}
+
+// Supported reports whether locale has a committed catalog. Locale tags are
+// matched case-insensitively because Accept-Language parsing normalizes case,
+// while committed catalogs retain canonical BCP 47 casing (for example zh-CN).
+func Supported(locale string) bool {
+	_, ok := canonicalLocale(locale)
+	return ok
+}
 
 // Normalize returns locale when it is supported, otherwise DefaultLocale. Used
 // for both `<html lang>` and message lookup so they can never disagree.
 func Normalize(locale string) string {
-	if supportedLocales[locale] {
-		return locale
+	if canonical, ok := canonicalLocale(locale); ok {
+		return canonical
 	}
 	return DefaultLocale
 }
@@ -95,16 +110,18 @@ func FromRequest(r *http.Request) string {
 	if r == nil {
 		return DefaultLocale
 	}
-	if cookie, err := r.Cookie(LocaleCookie); err == nil && Supported(cookie.Value) {
-		return cookie.Value
+	if cookie, err := r.Cookie(LocaleCookie); err == nil {
+		if locale, ok := canonicalLocale(cookie.Value); ok {
+			return locale
+		}
 	}
 	for _, tag := range parseAcceptLanguage(r.Header.Get("Accept-Language")) {
-		if Supported(tag) {
-			return tag
+		if locale, ok := canonicalLocale(tag); ok {
+			return locale
 		}
 		// Match "en-GB" against the "en" catalog.
 		if base := strings.SplitN(tag, "-", 2)[0]; Supported(base) {
-			return base
+			return Normalize(base)
 		}
 	}
 	return DefaultLocale

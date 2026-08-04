@@ -11,6 +11,8 @@ func TestNormalize(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct{ in, want string }{
 		{"en", "en"},
+		{"zh-CN", "zh-CN"},
+		{"zh-cn", "zh-CN"},
 		{"pseudo", "pseudo"},
 		{"", "en"},
 		{"fr", "en"},
@@ -32,6 +34,9 @@ func TestTranslatesAndFallsBack(t *testing.T) {
 	// externalization oracle.
 	if pseudo := T("pseudo", "webapp.shellUnavailable"); pseudo == en {
 		t.Fatalf("pseudo message should differ from en, both %q", en)
+	}
+	if zhCN := T("zh-CN", "webapp.shellUnavailable"); zhCN != "Kandev Web 应用不可用。" {
+		t.Fatalf("zh-CN catalog did not resolve the key, got %q", zhCN)
 	}
 	// An unknown locale falls back to en rather than erroring or blanking.
 	if got := T("klingon", "webapp.shellUnavailable"); got != en {
@@ -111,11 +116,11 @@ func TestTfPseudoLocaleKeepsPlaceholderValues(t *testing.T) {
 
 func TestCatalogsHaveMatchingKeys(t *testing.T) {
 	t.Parallel()
-	// Every en key must exist in pseudo, otherwise the QA locale silently shows
-	// English and stops proving that a string was externalized.
-	for _, key := range Keys() {
-		if T("pseudo", key) == key {
-			t.Fatalf("pseudo catalog is missing key %q", key)
+	for _, locale := range []string{"pseudo", "zh-CN"} {
+		for _, key := range Keys() {
+			if T(locale, key) == key {
+				t.Fatalf("%s catalog is missing key %q", locale, key)
+			}
 		}
 	}
 }
@@ -142,6 +147,15 @@ func TestFromRequest(t *testing.T) {
 		}
 	})
 
+	t.Run("locale cookie is case insensitive", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.AddCookie(&http.Cookie{Name: LocaleCookie, Value: "zh-cn"})
+		if got := FromRequest(r); got != "zh-CN" {
+			t.Fatalf("got %q, want zh-CN", got)
+		}
+	})
+
 	t.Run("accept-language honored by q-value", func(t *testing.T) {
 		t.Parallel()
 		r := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -157,6 +171,15 @@ func TestFromRequest(t *testing.T) {
 		r.Header.Set("Accept-Language", "en-GB")
 		if got := FromRequest(r); got != "en" {
 			t.Fatalf("got %q, want en", got)
+		}
+	})
+
+	t.Run("accept-language selects canonical zh-CN", func(t *testing.T) {
+		t.Parallel()
+		r := httptest.NewRequest(http.MethodGet, "/", nil)
+		r.Header.Set("Accept-Language", "zh-CN, en;q=0.8")
+		if got := FromRequest(r); got != "zh-CN" {
+			t.Fatalf("got %q, want zh-CN", got)
 		}
 	})
 

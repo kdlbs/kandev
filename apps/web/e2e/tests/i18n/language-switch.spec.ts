@@ -65,4 +65,37 @@ test.describe("i18n language switcher", () => {
     await testPage.getByRole("option", { name: /English|Ēńĝĺĩśĥ/ }).click();
     await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
   });
+
+  test("switching to Simplified Chinese re-renders copy and survives reload", async ({
+    testPage,
+    prCapture,
+  }) => {
+    await testPage.goto(APPEARANCE_URL);
+
+    const select = testPage.getByLabel("Display language");
+    await expect(select).toBeVisible({ timeout: 10_000 });
+    await select.click();
+    await testPage.getByRole("option", { name: "简体中文" }).click();
+
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "zh-CN", {
+      timeout: 10_000,
+    });
+    await expect(testPage.getByLabel("显示语言")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByText("选择 Kandev 界面使用的语言")).toBeVisible();
+
+    await prCapture.screenshot("simplified-chinese-locale-desktop", {
+      caption: "Settings > General > Appearance rendered in Simplified Chinese",
+    });
+
+    await testPage.reload();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "zh-CN", {
+      timeout: 10_000,
+    });
+    await expect(testPage.getByLabel("显示语言")).toBeVisible({ timeout: 10_000 });
+
+    const selectAfter = testPage.getByLabel("显示语言");
+    await selectAfter.click();
+    await testPage.getByRole("option", { name: "English" }).click();
+    await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
+  });
 });

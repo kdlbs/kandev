@@ -6,7 +6,8 @@ import { writeLocaleCookie } from "./cookie";
 /**
  * i18n runtime for the Kandev web SPA (i18next).
  *
- * `en` is the source locale; `pseudo` is a QA-only accented/padded locale used
+ * `en` is the source locale; `zh-CN` is the Simplified Chinese catalog; and
+ * `pseudo` is a QA-only accented/padded locale used
  * to visually prove every string was externalized (any plain-ASCII text on
  * screen under `pseudo` is a literal that was never routed through `t`).
  * `pseudo` is filtered out of the language switcher in production builds, but
@@ -18,12 +19,13 @@ import { writeLocaleCookie } from "./cookie";
  */
 export const DEFAULT_LOCALE = "en";
 export const DEFAULT_NAMESPACE = "common";
-export const SUPPORTED_LOCALES = ["en", "pseudo"] as const;
+export const SUPPORTED_LOCALES = ["en", "zh-CN", "pseudo"] as const;
 export type SupportedLocale = (typeof SUPPORTED_LOCALES)[number];
 
 /** Human-readable labels for the language switcher. */
 export const LOCALE_LABELS: Record<SupportedLocale, string> = {
   en: "English",
+  "zh-CN": "简体中文",
   pseudo: "Pseudo (QA)",
 };
 
@@ -33,7 +35,11 @@ export function isSupportedLocale(value: unknown): value is SupportedLocale {
 
 /** Coerce any value to a supported locale, defaulting to `en`. */
 export function normalizeLocale(value: unknown): SupportedLocale {
-  return isSupportedLocale(value) ? value : DEFAULT_LOCALE;
+  if (typeof value !== "string") return DEFAULT_LOCALE;
+  return (
+    SUPPORTED_LOCALES.find((candidate) => candidate.toLowerCase() === value.toLowerCase()) ??
+    DEFAULT_LOCALE
+  );
 }
 
 /**
