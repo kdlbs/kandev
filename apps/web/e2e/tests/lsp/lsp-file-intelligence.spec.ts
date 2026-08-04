@@ -415,11 +415,12 @@ test.describe("LSP file intelligence", () => {
     const editor = testPage.locator(".monaco-editor:visible");
     await editor.click();
     await testPage.keyboard.press("Control+Space");
-    await expectFakeLspEvent(
+    const manualCompletion = await expectFakeLspEvent(
       backend,
       (event) => event.event === "message" && event.method === "textDocument/completion",
       "completion request",
     );
+    expect(manualCompletion.params?.context).toEqual({ triggerKind: 1 });
     await expect(testPage.locator(".suggest-widget")).toContainText("fakeGreeting");
     await testPage.keyboard.press("Escape");
 
@@ -541,6 +542,29 @@ test.describe("LSP file intelligence", () => {
       "document change",
     );
     await expectFakeLspMarkerCount(testPage, 1);
+
+    await testPage.keyboard.type(".");
+    const triggeredCompletion = await expectFakeLspEvent(
+      backend,
+      (event) => {
+        const context = event.params?.context as
+          | { triggerKind?: number; triggerCharacter?: string }
+          | undefined;
+        return (
+          event.event === "message" &&
+          event.method === "textDocument/completion" &&
+          context?.triggerKind === 2 &&
+          context.triggerCharacter === "."
+        );
+      },
+      "trigger-character completion request",
+    );
+    expect(triggeredCompletion.params?.context).toEqual({
+      triggerKind: 2,
+      triggerCharacter: ".",
+    });
+    await testPage.keyboard.press("Escape");
+    await testPage.keyboard.press("Control+Z");
 
     await performLspAction(testPage, "stop");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled");

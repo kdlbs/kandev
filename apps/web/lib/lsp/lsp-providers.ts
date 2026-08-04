@@ -56,6 +56,14 @@ function toLspPosition(lineNumber: number, column: number) {
   return { line: lineNumber - 1, character: column - 1 };
 }
 
+function toLspCompletionContext(context: languages.CompletionContext) {
+  if (context.triggerKind === 1 && context.triggerCharacter) {
+    return { triggerKind: 2, triggerCharacter: context.triggerCharacter };
+  }
+  if (context.triggerKind === 2) return { triggerKind: 3 };
+  return { triggerKind: 1 };
+}
+
 function normalizeDefinitionLocation(definition: LspDefinition): LspLocation {
   if ("targetUri" in definition) {
     return { uri: definition.targetUri, range: definition.targetSelectionRange };
@@ -164,13 +172,14 @@ function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
   return monaco.languages.registerCompletionItemProvider(lang, {
     triggerCharacters: [".", ":", "<", '"', "'", "/", "@", "#", " "],
-    provideCompletionItems: async (model, position, _context, token) => {
+    provideCompletionItems: async (model, position, context, token) => {
       const uri = getDocumentUri(model);
       if (!uri) return { suggestions: [] };
       try {
         const result = await rpc.sendRequest("textDocument/completion", {
           textDocument: { uri },
           position: toLspPosition(position.lineNumber, position.column),
+          context: toLspCompletionContext(context),
         });
         if (token.isCancellationRequested) return { suggestions: [] };
         const items = Array.isArray(result)

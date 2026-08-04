@@ -18,6 +18,15 @@ type DefinitionProvider = {
   ) => Promise<unknown>;
 };
 
+type CompletionProvider = {
+  provideCompletionItems: (
+    model: unknown,
+    position: { lineNumber: number; column: number },
+    context: { triggerKind: number; triggerCharacter?: string },
+    token: { isCancellationRequested: boolean },
+  ) => Promise<unknown>;
+};
+
 type MonacoLocation = {
   uri: { toString: () => string };
   range: {
@@ -48,6 +57,7 @@ const rpc = { sendRequest: vi.fn() };
 const ensureModelsExist = vi.fn();
 const getModelUri = vi.fn((uri: string) => uri);
 let definitionProvider: DefinitionProvider;
+let completionProvider: CompletionProvider;
 
 function disposable() {
   return { dispose: vi.fn() };
@@ -75,7 +85,10 @@ beforeEach(() => {
   vi.resetAllMocks();
   getModelUri.mockImplementation((uri: string) => uri);
   const languages = {
-    registerCompletionItemProvider: vi.fn(() => disposable()),
+    registerCompletionItemProvider: vi.fn((_language: string, provider: CompletionProvider) => {
+      completionProvider = provider;
+      return disposable();
+    }),
     registerHoverProvider: vi.fn(() => disposable()),
     registerDefinitionProvider: vi.fn((_language: string, provider: DefinitionProvider) => {
       definitionProvider = provider;
@@ -96,6 +109,58 @@ beforeEach(() => {
     getDocumentUri: () => SOURCE_URI,
     getModelUri,
     ensureModelsExist,
+  });
+});
+
+describe("LSP completion provider", () => {
+  it("forwards trigger-character context using LSP enum values", async () => {
+    rpc.sendRequest.mockResolvedValue([]);
+
+    await completionProvider.provideCompletionItems(
+      {},
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 1, triggerCharacter: "." },
+      { isCancellationRequested: false },
+    );
+
+    expect(rpc.sendRequest).toHaveBeenCalledWith("textDocument/completion", {
+      textDocument: { uri: SOURCE_URI },
+      position: { line: 2, character: 6 },
+      context: { triggerKind: 2, triggerCharacter: "." },
+    });
+  });
+
+  it("forwards explicit invocations without a trigger character", async () => {
+    rpc.sendRequest.mockResolvedValue([]);
+
+    await completionProvider.provideCompletionItems(
+      {},
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 0 },
+      { isCancellationRequested: false },
+    );
+
+    expect(rpc.sendRequest).toHaveBeenCalledWith("textDocument/completion", {
+      textDocument: { uri: SOURCE_URI },
+      position: { line: 2, character: 6 },
+      context: { triggerKind: 1 },
+    });
+  });
+
+  it("maps incomplete-result retriggers to the LSP enum", async () => {
+    rpc.sendRequest.mockResolvedValue([]);
+
+    await completionProvider.provideCompletionItems(
+      {},
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 2 },
+      { isCancellationRequested: false },
+    );
+
+    expect(rpc.sendRequest).toHaveBeenCalledWith(
+      "textDocument/completion",
+      expect.objectContaining({ context: { triggerKind: 3 } }),
+    );
   });
 });
 
