@@ -778,9 +778,13 @@ func (h *GitHandlers) wsGitCommits(ctx context.Context, msg *ws.Message) (*ws.Me
 func (h *GitHandlers) computeGitCommits(ctx context.Context, req *GitCommitsRequest) (interface{}, error) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		// "Not ready" errors map to ready:false so the client retries; any
-		// other error (DB failure, etc.) propagates as a real error.
-		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
+		// "Not ready" errors map to ready:false so the client retries; a
+		// terminal session (cancelled/completed/failed) also maps to
+		// ready:false since it will never gain an execution. Any other error
+		// (DB failure, etc.) propagates as a real error.
+		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) ||
+			errors.Is(err, lifecycle.ErrSessionTerminal) ||
+			isSessionNotReadyError(err) {
 			return map[string]any{"commits": []any{}, "ready": false}, nil
 		}
 		return nil, fmt.Errorf("failed to get execution for session %s: %w", req.SessionID, err)
@@ -852,7 +856,9 @@ func (h *GitHandlers) wsCumulativeDiff(ctx context.Context, msg *ws.Message) (*w
 func (h *GitHandlers) computeCumulativeDiff(ctx context.Context, req *CumulativeDiffRequest) (interface{}, error) {
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, req.SessionID)
 	if err != nil {
-		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) || isSessionNotReadyError(err) {
+		if errors.Is(err, lifecycle.ErrSessionWorkspaceNotReady) ||
+			errors.Is(err, lifecycle.ErrSessionTerminal) ||
+			isSessionNotReadyError(err) {
 			return map[string]any{"cumulative_diff": nil, "ready": false}, nil
 		}
 		return nil, fmt.Errorf("failed to get execution for session %s: %w", req.SessionID, err)

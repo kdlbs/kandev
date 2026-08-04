@@ -1326,7 +1326,7 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	case models.TaskSessionStateCancelled,
 		models.TaskSessionStateCompleted,
 		models.TaskSessionStateFailed:
-		return fmt.Errorf("verify session before registering execution: session %q is %s", sessionID, session.State)
+		return fmt.Errorf("verify session before registering execution: session %q is %s: %w", sessionID, session.State, ErrSessionTerminal)
 	default:
 		return nil
 	}

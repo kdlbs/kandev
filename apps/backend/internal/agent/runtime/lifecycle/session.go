@@ -231,10 +231,21 @@ func (sm *SessionManager) loadSession(
 		zap.String("session_id", sessionID))
 
 	if err := client.LoadSession(ctx, sessionID, mcpServers); err != nil {
-		sm.logger.Error("ACP session/load failed",
-			zap.String("agent_type", agentConfig.ID()),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
+		// A cancelled/expired context here is caller teardown (WS disconnect,
+		// session already gone) rather than an agent or transport fault, so it
+		// does not warrant an ERROR + stacktrace. The caller still classifies
+		// it as a transport-dead load and skips the session/new fallback.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			sm.logger.Warn("ACP session/load aborted by context",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		} else {
+			sm.logger.Error("ACP session/load failed",
+				zap.String("agent_type", agentConfig.ID()),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 		return "", fmt.Errorf("session/load failed: %w", err)
 	}
 
