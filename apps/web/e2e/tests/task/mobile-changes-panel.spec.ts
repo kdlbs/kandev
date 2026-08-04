@@ -311,6 +311,13 @@ test.describe("Mobile changes panel", () => {
     git.createFile("overlap-mobile.txt", "local change LOCAL_CHANGE_MARKER");
 
     await openMobileChangesPanel(testPage);
+
+    // Wait for the local status refresh triggered by createFile before opening
+    // the PR section. Otherwise that refresh can remount the overlapping PR row
+    // while Playwright is dispatching the tap.
+    await expect(testPage.getByTestId("file-row-overlap-mobile.txt")).toBeVisible({
+      timeout: 20_000,
+    });
     await expandSection(testPage, "pr-changes-section");
 
     const prFilesList = testPage.getByTestId("pr-files-list");
