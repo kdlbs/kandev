@@ -43,7 +43,7 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
-import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
+import { LSP_LANGUAGE_OPTIONS, lspLanguageDisplayLabel } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
 
 /**
@@ -76,6 +76,7 @@ function LspLanguageCard({
   language: (typeof LSP_LANGUAGE_OPTIONS)[number];
 }) {
   const { t } = useTranslation();
+  const languageLabel = lspLanguageDisplayLabel(language, (key, options) => t(key, options));
   const autoInstallSupported = language.autoInstallSupported;
   const autoStartDirty =
     lspAutoStartLanguages.includes(language.id) !== baselineLspAutoStart.includes(language.id);
@@ -90,7 +91,7 @@ function LspLanguageCard({
       data-testid={`lsp-language-card-${language.id}`}
     >
       <div>
-        <div className="text-sm font-medium text-foreground">{language.label}</div>
+        <div className="text-sm font-medium text-foreground">{languageLabel}</div>
         <div className="text-xs text-muted-foreground">{language.binary}</div>
       </div>
       <div className="flex items-center justify-between">
@@ -100,7 +101,7 @@ function LspLanguageCard({
           onCheckedChange={(checked) => toggleAutoStart(language.id, checked === true)}
           data-settings-dirty={autoStartDirty}
           data-testid={`lsp-auto-start-${language.id}`}
-          aria-label={t("settings:autoStartLanguageServer", { language: language.label })}
+          aria-label={t("settings:autoStartLanguageServer", { language: languageLabel })}
         />
       </div>
       <div className="flex items-center gap-2">

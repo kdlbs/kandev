@@ -4,7 +4,8 @@
  * Almost everything here is data rather than copy. `id` keys the auto-start and
  * auto-install sets, the server-config map, and `LSP_DEFAULT_CONFIGS` — a
  * sentinel, never translated. `label` is a language name, `binary` an executable
- * name, and `docsUrl` a URL, so all three are shown verbatim.
+ * name, and `docsUrl` a URL, so all three are shown verbatim. Qualifiers such as
+ * `experimental` are metadata and are localized at render time.
  *
  * Only `installHintKey` is prose, and it is a catalog KEY: this table is
  * evaluated once at import, so a `t()` here would resolve before a locale is
@@ -25,7 +26,18 @@ export type LspLanguageOption = {
   installHintKey: string;
   installHintValues: Record<string, string>;
   autoInstallSupported: boolean;
+  experimental?: boolean;
 };
+
+type LabelTranslator = (key: string, options?: Record<string, unknown>) => string;
+
+export function lspLanguageDisplayLabel(
+  language: LspLanguageOption,
+  translate: LabelTranslator,
+): string {
+  if (!language.experimental) return language.label;
+  return translate("settings:lspLanguageExperimental", { language: language.label });
+}
 
 export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
   {
@@ -72,11 +84,12 @@ export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [
   },
   {
     id: "kotlin",
-    label: "Kotlin (experimental)",
+    label: "Kotlin",
     binary: "kotlin-lsp",
     docsUrl: "https://kotlinlang.org/docs/kotlin-lsp.html",
     installHintKey: "settings:lspInstallHintKotlin",
     installHintValues: { binary: "kotlin-lsp", path: "PATH" },
     autoInstallSupported: false,
+    experimental: true,
   },
 ];

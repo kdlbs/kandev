@@ -167,6 +167,7 @@
   "lspInstallHintPython": "Installs {{package}} via {{manager}} into {{dir}}",
   "lspInstallHintRust": "Downloads the {{binary}} binary from GitHub releases into {{dir}}",
   "lspInstallHintTypescript": "Installs {{server}} and {{runtime}} via {{manager}} into {{dir}}",
+  "lspLanguageExperimental": "{{language}} (experimental)",
   "makesAgentctlValuesAvailableToPlugins": "Makes agentctl values available to plugins and other consumers. The built-in status bar remains host-only.",
   "makeTheOriginalDefaultLayoutThe": "Make the original Default layout the starting layout for new tasks.",
   "makeTheSelectedSplit40Pixels": "Make the selected split 40 pixels narrower.",

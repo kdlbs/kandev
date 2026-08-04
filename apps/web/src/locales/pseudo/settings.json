@@ -167,6 +167,7 @@
   "lspInstallHintPython": "Ĩńśţàĺĺś {{package}} vĩà {{manager}} ĩńţō {{dir}}",
   "lspInstallHintRust": "Ďōŵńĺōàďś ţĥē {{binary}} ƀĩńàŕŷ ƒŕōḿ ĜĩţĤũƀ ŕēĺēàśēś ĩńţō {{dir}}",
   "lspInstallHintTypescript": "Ĩńśţàĺĺś {{server}} àńď {{runtime}} vĩà {{manager}} ĩńţō {{dir}}",
+  "lspLanguageExperimental": "{{language}} (ēxƥēŕĩḿēńţàĺ)",
   "makesAgentctlValuesAvailableToPlugins": "Ḿàķēś àĝēńţćţĺ vàĺũēś àvàĩĺàƀĺē ţō ƥĺũĝĩńś àńď ōţĥēŕ ćōńśũḿēŕś. Ţĥē ƀũĩĺţ-ĩń śţàţũś ƀàŕ ŕēḿàĩńś ĥōśţ-ōńĺŷ.",
   "makeTheOriginalDefaultLayoutThe": "Ḿàķē ţĥē ōŕĩĝĩńàĺ Ďēƒàũĺţ ĺàŷōũţ ţĥē śţàŕţĩńĝ ĺàŷōũţ ƒōŕ ńēŵ ţàśķś.",
   "makeTheSelectedSplit40Pixels": "Ḿàķē ţĥē śēĺēćţēď śƥĺĩţ 40 ƥĩxēĺś ńàŕŕōŵēŕ.",
