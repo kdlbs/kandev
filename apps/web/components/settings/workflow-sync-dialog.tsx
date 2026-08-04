@@ -19,6 +19,9 @@ import type {
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
 
+const WORKFLOW_EXPORT_FORMAT = "kandev_workflow";
+const WORKFLOW_EXPORT_EXTENSIONS = ".yml/.yaml/.json";
+
 type RepoUrlFieldProps = {
   url: string;
   invalid: boolean;
@@ -157,7 +160,12 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
             onChange={sync.setUrlInput}
           />
           <PollFields form={sync.form} update={sync.update} />
-          <p className="text-xs text-muted-foreground">{t("workflows:syncDirectoryHelp")}</p>
+          <p className="text-xs text-muted-foreground">
+            {t("workflows:syncDirectoryHelp", {
+              format: WORKFLOW_EXPORT_FORMAT,
+              extensions: WORKFLOW_EXPORT_EXTENSIONS,
+            })}
+          </p>
         </div>
         <DialogFooter>
           {hasConfig && (

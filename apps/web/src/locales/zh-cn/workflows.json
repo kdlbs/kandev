@@ -188,7 +188,7 @@
   "stepPromptUsageHint": "输入 {{open}} 可使用占位符（{{taskPrompt}} 会插入任务描述），或输入 @ 引用已保存的提示词。其内容会作为隐藏上下文附加；编辑已保存的提示词时，所有引用该提示词的步骤都会更新。注意：{{taskPrompt}} 只会在步骤提示词本身展开，不会在所引用的已保存提示词中展开。",
   "syncCompletedWithWarnings": "同步完成，但有警告",
   "syncConfigSaved": "工作流同步配置已保存",
-  "syncDirectoryHelp": "目录应包含 kandev_workflow 格式的工作流导出文件（.yml/.yaml/.json）— 与工作流导出产生的格式相同。",
+  "syncDirectoryHelp": "目录应包含 {{format}} 格式的工作流导出文件（{{extensions}}）— 与工作流导出产生的格式相同。",
   "synced": "已同步",
   "syncedBadgeTooltip": "只读 - 由 {{source}} 的工作流同步管理。请在同步仓库中编辑或移除。",
   "syncedReadOnlyReason": "由工作流同步管理 — 请在同步仓库中编辑或移除",

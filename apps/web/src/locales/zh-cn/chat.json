@@ -12,6 +12,6 @@
   "providerQuotaReset": "容量将于 {{resetAt}} 恢复。",
   "providerQuotaResetUnknown": "请在提供商恢复可用容量后重试。",
   "providerQuotaProviderFallback": "提供商",
-  "turnGroupToolCalls_one": "次工具调用",
-  "turnGroupToolCalls_other": "次工具调用"
+  "turnGroupToolCalls_one": "{{count}} 次工具调用",
+  "turnGroupToolCalls_other": "{{count}} 次工具调用"
 }

@@ -24,6 +24,8 @@ import {
 import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 import { Trans, useTranslation } from "react-i18next";
 
+const SPRITES_TOKEN_ENV_VAR = "SPRITES_API_TOKEN";
+
 export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   const { t } = useTranslation();
   const { status } = useSprites(secretId);
@@ -79,9 +81,13 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
             </p>
           ) : (
             <p>
-              <Trans i18nKey="settings:configureSpritesApiToken">
-                Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable
-                in the executor profile, referencing a secret with your Sprites.dev API token.
+              <Trans
+                i18nKey="settings:configureSpritesApiToken"
+                values={{ envVar: SPRITES_TOKEN_ENV_VAR }}
+              >
+                Configure a <code className="text-xs">{SPRITES_TOKEN_ENV_VAR}</code> environment
+                variable in the executor profile, referencing a secret with your Sprites.dev API
+                token.
               </Trans>
             </p>
           )}

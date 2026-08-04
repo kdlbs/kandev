@@ -35,6 +35,6 @@
   "providerQuotaReset": "Ćàƥàćĩţŷ ŕēśēţś {{resetAt}}.",
   "providerQuotaResetUnknown": "Ţŕŷ àĝàĩń ŵĥēń ţĥē ƥŕōvĩďēŕ ḿàķēś ćàƥàćĩţŷ àvàĩĺàƀĺē.",
   "providerQuotaProviderFallback": "Ƥŕōvĩďēŕ",
-  "turnGroupToolCalls_one": "ţōōĺ ćàĺĺ",
-  "turnGroupToolCalls_other": "ţōōĺ ćàĺĺś"
+  "turnGroupToolCalls_one": "{{count}} ţōōĺ ćàĺĺ",
+  "turnGroupToolCalls_other": "{{count}} ţōōĺ ćàĺĺś"
 }

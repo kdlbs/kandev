@@ -35,6 +35,6 @@
   "providerQuotaReset": "Capacity resets {{resetAt}}.",
   "providerQuotaResetUnknown": "Try again when the provider makes capacity available.",
   "providerQuotaProviderFallback": "Provider",
-  "turnGroupToolCalls_one": "tool call",
-  "turnGroupToolCalls_other": "tool calls"
+  "turnGroupToolCalls_one": "{{count}} tool call",
+  "turnGroupToolCalls_other": "{{count}} tool calls"
 }
