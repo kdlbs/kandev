@@ -728,8 +728,27 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "timeout")
 }
 
-// handlePromptWithResume attempts to resume a session and retry a prompt when the
-// initial prompt fails with ErrExecutionNotFound.
+// handlePromptWithResume attempts to resume a session and retry a prompt once
+// when the initial prompt fails with a recoverable, pre-dispatch error:
+//
+//   - executor.ErrExecutionNotFound: no live execution is tracked for the
+//     session (e.g. after a lazy backend restart).
+//   - orchestrator.ErrAgentNotReadyForPrompt: ensureSessionRunning's post-resume
+//     readiness wait (agentPromptReadyTimeout, 30s) expired — the exact error
+//     class behind "agent not ready after resume: ... context deadline
+//     exceeded". ensureSessionRunning already reaps a stuck execution on this
+//     error internally, and a fresh resume typically completes in a few
+//     seconds (ACP re-initialize + session/load), well inside a second
+//     attempt's own budget. Without this retry, a merely-slow-to-recover
+//     resume surfaced "Request timed out. The agent may be processing a
+//     complex task. Please try again." to the user on the very first hiccup,
+//     even though the backend's own self-healing would have succeeded
+//     silently one attempt later.
+//
+// Both error classes are guaranteed pre-dispatch: promptTask returns them
+// from ensureSessionRunning, before executor.PromptWithDispatchCallback ever
+// runs, so retrying here cannot double-send a prompt the agent already
+// accepted.
 func (h *MessageHandlers) handlePromptWithResume(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -737,7 +756,8 @@ func (h *MessageHandlers) handlePromptWithResume(
 	attachments []v1.MessageAttachment,
 	origErr error,
 ) error {
-	if !errors.Is(origErr, executor.ErrExecutionNotFound) {
+	if !errors.Is(origErr, executor.ErrExecutionNotFound) &&
+		!errors.Is(origErr, orchestrator.ErrAgentNotReadyForPrompt) {
 		return origErr
 	}
 	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
