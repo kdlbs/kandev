@@ -244,7 +244,7 @@ function CommitDetailErrorState({
         onClick={() => void onRetry()}
       >
         <IconRefresh className="h-4 w-4" />
-        {t("common:retry")}
+        {t("system:featureTogglesRetry")}
       </Button>
     </div>
   );
