@@ -49,10 +49,18 @@ type Runner struct {
 
 	stderrWG sync.WaitGroup
 
-	// Frames received that aren't responses to our outstanding request.
-	// The protocol callback reads from this channel to process
-	// notifications and agent-initiated requests.
-	oob chan Frame
+	// Frames received that aren't responses to our outstanding request:
+	// notifications and agent-initiated requests. The queue is unbounded
+	// because nothing drains it while Request waits for a response, and a
+	// session/load replay emits one notification per history entry. With a
+	// bounded queue the read loop blocks on the first frame past the limit
+	// and never reaches the response that follows the replay, so the request
+	// hangs until its deadline. Memory is bounded in practice by the size of
+	// the session being replayed.
+	oobMu     sync.Mutex
+	oobBuf    []Frame
+	oobClosed bool
+	oobWake   chan struct{}
 	// responses[id] is closed by the read loop when a response with that
 	// id is recorded; the mu-protected map stores the frame itself.
 	mu         sync.Mutex
@@ -126,7 +134,7 @@ func NewRunner(ctx context.Context, jsonlPath string, cfg RunConfig) (*Runner, e
 		stdin:       stdin,
 		stdout:      stdout,
 		framer:      NewFramer(stdin, stdout),
-		oob:         make(chan Frame, 32),
+		oobWake:     make(chan struct{}, 1),
 		pending:     map[int]chan Frame{},
 		shutdownCh:  make(chan struct{}),
 		watchStopCh: make(chan struct{}),
@@ -246,43 +254,112 @@ func (r *Runner) Request(ctx context.Context, frame Frame) (Frame, error) {
 // method-not-found so the session doesn't hang.
 func (r *Runner) DrainOOBUntil(ctx context.Context, handler func(Frame) bool) error {
 	for {
-		select {
-		case frame, ok := <-r.oob:
-			if !ok {
-				return io.EOF
-			}
-			// If this is an agent-initiated request, auto-reply so it
-			// doesn't block waiting for us.
-			if frame.Method() != "" && frame.ID() != nil {
-				reply := NewMethodNotFound(frame.ID(), frame.Method())
-				_ = r.rec.Sent(reply)
-				_ = r.framer.Write(reply)
-			}
-			if handler != nil && handler(frame) {
-				return nil
-			}
-		case <-ctx.Done():
-			return ctx.Err()
+		// NextOOB already auto-replies to agent-initiated requests so the
+		// session does not hang waiting on us.
+		frame, err := r.NextOOB(ctx)
+		if err != nil {
+			return err
 		}
+		if handler != nil && handler(frame) {
+			return nil
+		}
+	}
+}
+
+// pushOOB appends a frame to the unbounded out-of-band queue. It never blocks,
+// so the read loop always stays free to reach the response that follows a
+// replay burst.
+func (r *Runner) pushOOB(frame Frame) {
+	r.oobMu.Lock()
+	if r.oobClosed {
+		r.oobMu.Unlock()
+		return
+	}
+	r.oobBuf = append(r.oobBuf, frame)
+	r.oobMu.Unlock()
+	signal(r.oobWake)
+}
+
+// popOOB removes the oldest queued frame. ok is false when the queue is empty;
+// closed reports that no further frames will arrive.
+func (r *Runner) popOOB() (frame Frame, ok bool, closed bool) {
+	r.oobMu.Lock()
+	defer r.oobMu.Unlock()
+	if len(r.oobBuf) == 0 {
+		return nil, false, r.oobClosed
+	}
+	frame = r.oobBuf[0]
+	// Release the popped slot. Re-slicing alone keeps the whole backing array
+	// reachable, so a drained replay burst would stay pinned for the Runner's
+	// lifetime; a channel receive used to zero the slot for us.
+	r.oobBuf[0] = nil
+	r.oobBuf = r.oobBuf[1:]
+	if len(r.oobBuf) == 0 {
+		r.oobBuf = nil
+	}
+	return frame, true, false
+}
+
+// closeOOB marks the queue drained-and-finished and wakes any waiter. Frames
+// already queued stay readable, matching what a closed channel used to offer.
+func (r *Runner) closeOOB() {
+	r.oobMu.Lock()
+	r.oobClosed = true
+	r.oobMu.Unlock()
+	signal(r.oobWake)
+}
+
+// oobFinished reports that the child is gone and every queued frame has been
+// consumed, so a caller waiting for more will wait forever.
+func (r *Runner) oobFinished() bool {
+	r.oobMu.Lock()
+	defer r.oobMu.Unlock()
+	return r.oobClosed && len(r.oobBuf) == 0
+}
+
+// wakeNextOOBWaiter passes the wake token on when work remains. oobWake holds a
+// single coalesced token, so a consumer that takes it has to re-arm or a second
+// waiter sleeps with frames still queued (or misses the close entirely).
+func (r *Runner) wakeNextOOBWaiter() {
+	r.oobMu.Lock()
+	pending := len(r.oobBuf) > 0 || r.oobClosed
+	r.oobMu.Unlock()
+	if pending {
+		signal(r.oobWake)
+	}
+}
+
+// signal delivers a non-blocking wake token, dropping it when one is pending.
+func signal(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
 	}
 }
 
 // NextOOB returns the next out-of-band frame, blocking until one is
 // available or the context is cancelled.
 func (r *Runner) NextOOB(ctx context.Context) (Frame, error) {
-	select {
-	case frame, ok := <-r.oob:
-		if !ok {
+	for {
+		frame, ok, closed := r.popOOB()
+		if ok {
+			r.wakeNextOOBWaiter()
+			if frame.Method() != "" && frame.ID() != nil {
+				reply := NewMethodNotFound(frame.ID(), frame.Method())
+				_ = r.rec.Sent(reply)
+				_ = r.framer.Write(reply)
+			}
+			return frame, nil
+		}
+		if closed {
+			r.wakeNextOOBWaiter()
 			return nil, io.EOF
 		}
-		if frame.Method() != "" && frame.ID() != nil {
-			reply := NewMethodNotFound(frame.ID(), frame.Method())
-			_ = r.rec.Sent(reply)
-			_ = r.framer.Write(reply)
+		select {
+		case <-r.oobWake:
+		case <-ctx.Done():
+			return nil, ctx.Err()
 		}
-		return frame, nil
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	}
 }
 
@@ -324,7 +401,7 @@ func (r *Runner) Close(reason string) {
 
 		r.readLoopWG.Wait()
 		r.stderrWG.Wait()
-		close(r.oob)
+		r.closeOOB()
 
 		meta := map[string]any{"exit_code": exitCode}
 		if reason != "" {
@@ -391,20 +468,10 @@ func (r *Runner) readLoop() {
 		}
 
 		// Anything else (notifications, agent-initiated requests,
-		// orphaned responses) goes out of band. Block rather than drop,
-		// so session/update chunks and agent-initiated requests are
-		// never lost — this is a debug tool, correctness beats throughput.
-		select {
-		case r.oob <- frame:
-		case <-r.shutdownCh:
-			r.mu.Lock()
-			for id, ch := range r.pending {
-				close(ch)
-				delete(r.pending, id)
-			}
-			r.mu.Unlock()
-			return
-		}
+		// orphaned responses) goes out of band. The queue is unbounded and
+		// never drops, so session/update chunks and agent-initiated requests
+		// survive a replay burst without stalling this loop.
+		r.pushOOB(frame)
 	}
 }
 

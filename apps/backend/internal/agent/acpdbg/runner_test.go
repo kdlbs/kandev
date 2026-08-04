@@ -53,7 +53,11 @@ func TestRunnerContextCancellationKillsProcessTree(t *testing.T) {
 	waitForProcessGone(t, pid)
 }
 
-func TestRunnerCloseUnblocksFullOOBQueue(t *testing.T) {
+// TestRunnerCloseFailsPendingRequest pins that shutdown returns promptly and
+// hands every waiting caller an error, with out-of-band frames still queued.
+// It was written when a bounded queue could block the read loop; the queue is
+// unbounded now, so what it still guards is the pending-request teardown.
+func TestRunnerCloseFailsPendingRequest(t *testing.T) {
 	const frame = `{"jsonrpc":"2.0","method":"session/update"}`
 	cmd := fmt.Sprintf("for i in $(seq 1 40); do printf '%%s\\n' '%s'; done; sleep 30", frame)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -68,9 +72,6 @@ func TestRunnerCloseUnblocksFullOOBQueue(t *testing.T) {
 	t.Cleanup(func() {
 		cancel()
 		runner.tree.kill(runner.cmd)
-		for len(runner.oob) > 0 {
-			<-runner.oob
-		}
 		runner.Close("test cleanup")
 	})
 
@@ -84,7 +85,7 @@ func TestRunnerCloseUnblocksFullOOBQueue(t *testing.T) {
 		requestDone <- err
 	}()
 	waitForPendingRequest(t, runner)
-	waitForOOBQueue(t, runner)
+	waitForOOBQueue(t, runner, 40)
 	cancel()
 	closed := make(chan struct{})
 	go func() {
@@ -95,7 +96,7 @@ func TestRunnerCloseUnblocksFullOOBQueue(t *testing.T) {
 	select {
 	case <-closed:
 	case <-time.After(3 * time.Second):
-		t.Fatal("Runner.Close remained blocked on a full OOB queue")
+		t.Fatal("Runner.Close did not return after cancellation with OOB frames queued")
 	}
 	select {
 	case err := <-requestDone:
@@ -129,16 +130,25 @@ func waitForPIDFile(t *testing.T, path string) int {
 	}
 }
 
-func waitForOOBQueue(t *testing.T, runner *Runner) {
+// waitForOOBQueue blocks until at least want frames are queued out of band. The
+// queue is unbounded, so there is no "full" state to wait for; callers pass the
+// number of frames the fixture emits, which also proves none were dropped.
+func waitForOOBQueue(t *testing.T, runner *Runner, want int) {
 	t.Helper()
 	deadline := time.NewTimer(3 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
-	for len(runner.oob) < cap(runner.oob) {
+	for {
+		runner.oobMu.Lock()
+		queued := len(runner.oobBuf)
+		runner.oobMu.Unlock()
+		if queued >= want {
+			return
+		}
 		select {
 		case <-deadline.C:
-			t.Fatalf("timed out waiting for OOB queue to fill: %d/%d", len(runner.oob), cap(runner.oob))
+			t.Fatalf("timed out waiting for %d OOB frames, got %d", want, queued)
 		case <-ticker.C:
 		}
 	}
