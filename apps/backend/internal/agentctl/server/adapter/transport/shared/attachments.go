@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -134,6 +135,55 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 	return saved, nil
 }
 
+// SaveAttachmentStream writes one claimed attachment without buffering its
+// contents in memory. The caller owns src and must close it.
+func (m *AttachmentManager) SaveAttachmentStream(att v1.MessageAttachment, src io.Reader) (SavedAttachment, error) {
+	if src == nil {
+		return SavedAttachment{}, fmt.Errorf("attachment stream is nil")
+	}
+	if m.workDir == "" || m.sessionID == "" {
+		return SavedAttachment{}, fmt.Errorf("workDir or sessionID not set")
+	}
+	if !isSafeAttachmentComponent(m.sessionID) {
+		return SavedAttachment{}, fmt.Errorf("invalid sessionID")
+	}
+	if att.SizeBytes < 0 {
+		return SavedAttachment{}, fmt.Errorf("attachment size is invalid")
+	}
+
+	dir, err := safeAttachmentPath(m.workDir, ".kandev", "attachments", m.sessionID)
+	if err != nil {
+		return SavedAttachment{}, err
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return SavedAttachment{}, fmt.Errorf("create attachments dir: %w", err)
+	}
+
+	name := att.Name
+	if name == "" {
+		name = m.generateName(att)
+	}
+	name = filepath.Base(name)
+	if !isSafeAttachmentComponent(name) {
+		return SavedAttachment{}, fmt.Errorf("invalid attachment name")
+	}
+
+	name, absPath, err := writeUniqueAttachmentStream(dir, name, make(map[string]bool), src, att.SizeBytes)
+	if err != nil {
+		return SavedAttachment{}, err
+	}
+	relPath := filepath.Join(".kandev", "attachments", m.sessionID, name)
+	saved := SavedAttachment{
+		RelPath:  relPath,
+		AbsPath:  absPath,
+		Name:     name,
+		MimeType: att.MimeType,
+		Type:     att.Type,
+	}
+	m.logger.Debug("saved streamed attachment", zap.String("path", relPath), zap.Int64("size", att.SizeBytes))
+	return saved, nil
+}
+
 // Cleanup removes the session's attachment directory.
 // Safe to call multiple times or with empty sessionID (no-op).
 func (m *AttachmentManager) Cleanup() {
@@ -214,6 +264,48 @@ func writeUniqueAttachmentFile(dir, name string, used map[string]bool, data []by
 		if writeErr != nil {
 			_ = os.Remove(absPath)
 			return "", absPath, writeErr
+		}
+		if closeErr != nil {
+			_ = os.Remove(absPath)
+			return "", absPath, closeErr
+		}
+		return candidate, absPath, nil
+	}
+}
+
+func writeUniqueAttachmentStream(dir, name string, used map[string]bool, src io.Reader, expectedSize int64) (string, string, error) {
+	ext := filepath.Ext(name)
+	base := strings.TrimSuffix(name, ext)
+	for i := 1; ; i++ {
+		candidate := name
+		if i > 1 {
+			candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
+		}
+		if used[candidate] {
+			continue
+		}
+
+		absPath, err := safeAttachmentPath(dir, candidate)
+		if err != nil {
+			return "", "", err
+		}
+		file, err := os.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, os.ErrExist) {
+			used[candidate] = true
+			continue
+		}
+		if err != nil {
+			return "", absPath, err
+		}
+
+		written, copyErr := io.Copy(file, io.LimitReader(src, expectedSize+1))
+		closeErr := file.Close()
+		if copyErr == nil && written != expectedSize {
+			copyErr = fmt.Errorf("attachment size mismatch: wrote %d bytes, expected %d", written, expectedSize)
+		}
+		if copyErr != nil {
+			_ = os.Remove(absPath)
+			return "", absPath, copyErr
 		}
 		if closeErr != nil {
 			_ = os.Remove(absPath)

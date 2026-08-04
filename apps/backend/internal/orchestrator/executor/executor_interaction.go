@@ -386,7 +386,7 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 	}
 	attachMgr := agentctlshared.NewAttachmentManager(workDir, e.logger.Zap())
 	attachMgr.SetSessionID(session.ID)
-	saved, err := attachMgr.SaveAttachments(attachments)
+	saved, err := e.savePassthroughAttachments(ctx, session, attachMgr, attachments)
 	if err != nil {
 		return "", fmt.Errorf("save passthrough attachments: %w", err)
 	}
@@ -404,6 +404,49 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 		return attachmentPrompt, nil
 	}
 	return prompt + "\n\n" + attachmentPrompt, nil
+}
+
+func (e *Executor) savePassthroughAttachments(
+	ctx context.Context,
+	session *models.TaskSession,
+	attachMgr *agentctlshared.AttachmentManager,
+	attachments []v1.MessageAttachment,
+) ([]agentctlshared.SavedAttachment, error) {
+	var saved []agentctlshared.SavedAttachment
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" && attachment.Data == "" {
+			if e.attachmentReader == nil {
+				return nil, fmt.Errorf("attachment reader is unavailable for %q", attachment.AttachmentID)
+			}
+			reader, name, mimeType, sizeBytes, err := e.attachmentReader.OpenClaimed(
+				ctx, attachment.AttachmentID, session.TaskID, session.ID,
+			)
+			if err != nil {
+				return nil, fmt.Errorf("open attachment %q: %w", attachment.AttachmentID, err)
+			}
+			materialized := attachment
+			materialized.Name = name
+			materialized.MimeType = mimeType
+			materialized.SizeBytes = sizeBytes
+			streamed, saveErr := attachMgr.SaveAttachmentStream(materialized, reader)
+			closeErr := reader.Close()
+			if saveErr != nil {
+				return nil, fmt.Errorf("write attachment %q: %w", attachment.AttachmentID, saveErr)
+			}
+			if closeErr != nil {
+				return nil, fmt.Errorf("close attachment %q: %w", attachment.AttachmentID, closeErr)
+			}
+			saved = append(saved, streamed)
+			continue
+		}
+
+		inline, inlineErr := attachMgr.SaveAttachments([]v1.MessageAttachment{attachment})
+		if inlineErr != nil {
+			return nil, inlineErr
+		}
+		saved = append(saved, inline...)
+	}
+	return saved, nil
 }
 
 func (e *Executor) passthroughAttachmentWorkspace(ctx context.Context, session *models.TaskSession) string {

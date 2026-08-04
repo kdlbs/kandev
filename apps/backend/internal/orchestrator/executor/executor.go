@@ -654,6 +654,7 @@ type GitLabCredentialResolver interface {
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager      AgentManagerClient
+	attachmentReader  lifecycle.AttachmentReader
 	repo              executorStore
 	secretStore       secrets.SecretStore
 	shellPrefs        ShellPreferenceProvider
@@ -837,6 +838,12 @@ func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logge
 		retryLimit:   3,
 		retryDelay:   5 * time.Second,
 	}
+}
+
+// SetAttachmentReader wires the backend attachment store used to stream
+// claimed descriptors into passthrough workspaces.
+func (e *Executor) SetAttachmentReader(reader lifecycle.AttachmentReader) {
+	e.attachmentReader = reader
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.
