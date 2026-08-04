@@ -15,6 +15,8 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxNativeAttachmentBytes int64 = 8 << 20
+
 // Prompt sends a prompt to the agent.
 // If pending context is set (from SetPendingContext), it will be prepended to the message.
 // Attachments (images) are converted to ACP ImageBlocks and included in the prompt.
@@ -263,9 +265,14 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 			continue
 		}
 		if att.AttachmentID != "" && att.Data == "" && (att.Type == contentTypeImage || att.Type == contentTypeAudio) {
-			if data, ok := a.loadMaterializedAttachmentData(att); ok {
+			data, saved, ok := a.loadMaterializedAttachmentData(att)
+			switch {
+			case ok:
 				att.Data = data
-			} else {
+			case len(saved) > 0:
+				contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, false)))
+				continue
+			default:
 				a.logger.Warn("failed to load materialized prompt attachment",
 					zap.String("attachment_id", att.AttachmentID), zap.String("name", att.Name))
 			}
@@ -296,19 +303,23 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 	return contentBlocks
 }
 
-func (a *Adapter) loadMaterializedAttachmentData(att v1.MessageAttachment) (string, bool) {
+func (a *Adapter) loadMaterializedAttachmentData(att v1.MessageAttachment) (string, []shared.SavedAttachment, bool) {
 	if a.attachMgr == nil {
-		return "", false
+		return "", nil, false
 	}
 	saved, err := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
 	if err != nil || len(saved) == 0 {
-		return "", false
+		return "", nil, false
+	}
+	info, err := os.Stat(saved[0].AbsPath)
+	if err != nil || info.Size() > maxNativeAttachmentBytes {
+		return "", saved, false
 	}
 	data, err := os.ReadFile(saved[0].AbsPath)
 	if err != nil {
-		return "", false
+		return "", saved, false
 	}
-	return base64.StdEncoding.EncodeToString(data), true
+	return base64.StdEncoding.EncodeToString(data), saved, true
 }
 
 func buildAttachmentFallbackBlock(att v1.MessageAttachment) acp.ContentBlock {

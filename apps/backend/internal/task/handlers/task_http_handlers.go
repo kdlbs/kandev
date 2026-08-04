@@ -885,7 +885,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		return
 	}
 	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
-		rollbackCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 		defer cancel()
 		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))

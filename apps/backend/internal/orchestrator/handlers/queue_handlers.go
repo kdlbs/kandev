@@ -364,6 +364,7 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	}
 	var previous *messagequeue.QueuedMessage
 	var releaseClaims QueueAttachmentReleaser
+	var newlyAdded []messagequeue.MessageAttachment
 	if h.attachmentClaimer != nil {
 		var err error
 		previous, err = h.queueService.GetEntry(ctx, req.SessionID, req.EntryID)
@@ -373,14 +374,15 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 		}
-		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); err != nil {
+		newlyAdded = newlyAddedQueueAttachments(previous.Attachments, req.Attachments)
+		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
 		releaseClaims, _ = h.attachmentClaimer.(QueueAttachmentReleaser)
 	}
 	if err := h.queueService.UpdateMessageWithMetadata(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy); err != nil {
 		if releaseClaims != nil && previous != nil {
-			if releaseErr := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); releaseErr != nil {
+			if releaseErr := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(newlyAdded)); releaseErr != nil {
 				h.logger.Warn("failed to release attachments after queue update failure", zap.Error(releaseErr))
 			}
 		}
@@ -398,6 +400,25 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 	}
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+func newlyAddedQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
+	retained := make(map[string]struct{}, len(previous))
+	for _, attachment := range previous {
+		if attachment.AttachmentID != "" {
+			retained[attachment.AttachmentID] = struct{}{}
+		}
+	}
+	var newlyAdded []messagequeue.MessageAttachment
+	for _, attachment := range replacement {
+		if attachment.AttachmentID == "" {
+			continue
+		}
+		if _, ok := retained[attachment.AttachmentID]; !ok {
+			newlyAdded = append(newlyAdded, attachment)
+		}
+	}
+	return newlyAdded
 }
 
 func supersededQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
