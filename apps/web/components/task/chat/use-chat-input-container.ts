@@ -90,11 +90,14 @@ function getInputPlaceholder(
   steerPlaceholder: string | undefined,
 ): string {
   if (isStarting) return "Preparing workspace...";
-  if (placeholder) return placeholder;
-  // A steer-eligible session is not "busy" (the send is delivered, not queued),
-  // so this must be checked before the agent-commands/default copy. The label
-  // promises delivery into the running turn, never that the agent will fold it.
+  // The steer label wins over a caller-supplied placeholder: when a send would be
+  // delivered into the running turn, that is the one thing the operator most needs
+  // to know, and it must not be masked by a generic "Continue working…" prompt the
+  // task composer passes. It promises delivery, never that the agent will fold it.
+  // steerPlaceholder is set only when the session is steer-eligible, so this
+  // branch is inert for every non-steering composer.
   if (steerPlaceholder) return steerPlaceholder;
+  if (placeholder) return placeholder;
   if (isAgentBusy) return "Queue more instructions...";
   if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
   return "Ask to make changes, @mention files";

@@ -5,6 +5,8 @@ import { ToastProvider } from "@/components/toast-provider";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
 
+const callerPlaceholder = "Continue working on the task...";
+
 function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
   return renderHook(
     () =>
@@ -117,6 +119,28 @@ describe("useChatInputContainer", () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+
+  it("shows the steer affordance over a caller placeholder when the session can steer", () => {
+    const { result } = renderInputState({
+      supportsSteering: true,
+      placeholder: callerPlaceholder,
+    });
+
+    // The steer label must win: a send here is delivered into the running turn,
+    // and the generic "Continue working…" prompt would mask that.
+    expect(result.current.inputPlaceholder).not.toBe(callerPlaceholder);
+    expect(result.current.inputPlaceholder).not.toBe("Queue more instructions...");
+    expect(result.current.inputPlaceholder.length).toBeGreaterThan(0);
+  });
+
+  it("keeps the caller placeholder when the session cannot steer", () => {
+    const { result } = renderInputState({
+      supportsSteering: false,
+      placeholder: callerPlaceholder,
+    });
+
+    expect(result.current.inputPlaceholder).toBe(callerPlaceholder);
   });
 });
 
