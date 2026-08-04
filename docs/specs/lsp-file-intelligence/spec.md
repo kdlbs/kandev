@@ -142,7 +142,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Missing auto-installable server:** the UI reports the missing binary or shows install progress when auto-install is enabled.
 - **Task-only toolchain:** binary lookup, installer execution, and installed-binary discovery use the task runtime environment instead of the agentctl host environment.
 - **Capacity exceeded:** the UI reports that too many language servers are active.
-- **Server crash:** the connection closes, Monaco providers and markers are cleaned up, and the user can retry.
+- **Server crash:** the connection closes, Monaco providers and markers are cleaned up, and the status preserves the close reason with a Retry action. Only intentional stop or idle teardown returns to Off.
 - **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
 - **Initialize response is slow or never arrives:** the UI confirms that the process launched, changes to a long-running initialization warning after 60 seconds, and keeps Stop available. Kandev does not automatically kill a cold project import or claim that the server is indexing.
 - **Indeterminate progress:** the UI shows the server title/message and elapsed time without a percentage or ETA.
@@ -161,6 +161,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no process starts.
 - **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP, **THEN** the new connection closes with `4005`.
 - **GIVEN** two task/session connections have active providers, placeholder models, or diagnostics, **WHEN** one connection stops or crashes, **THEN** cleanup removes only that connection's state and leaves the other connection fully functional.
+- **GIVEN** an initialized language server exits unexpectedly, **WHEN** the WebSocket closes, **THEN** its editor shows an error with the close reason and Retry rather than presenting the server as intentionally off.
 - **GIVEN** two sessions expose the same task-host file URI (for example two Docker tasks rooted at `/workspace`), **WHEN** both files are open, **THEN** Monaco keeps session-scoped models and content while both language servers receive the clean task-host URI.
 - **GIVEN** a connection is replaced for the same session and language, **WHEN** callbacks from the old connection arrive late, **THEN** they cannot close, initialize, or clean up the replacement generation.
 - **GIVEN** session workspace metadata hydrates after the LSP connection, **WHEN** the client opens or navigates to a document, **THEN** it uses the canonical workspace URI and repository subpaths from the task-host ready handshake, including after that LSP connection stops.
