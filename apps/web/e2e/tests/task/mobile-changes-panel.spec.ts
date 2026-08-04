@@ -35,6 +35,18 @@ async function expectDiffText(testPage: Page, text: string, timeout = 45_000) {
 test.describe("Mobile changes panel", () => {
   test.describe.configure({ retries: 1, timeout: 120_000 });
 
+  test.beforeEach(({ backend }) => {
+    // The worker reuses its fixture repository across tests. Restore a clean
+    // working tree so staged/untracked files from an earlier scenario cannot
+    // move and remount the PR Changes section during async status hydration.
+    const git = new GitHelper(
+      path.join(backend.tmpDir, "repos", "e2e-repo"),
+      makeGitEnv(backend.tmpDir),
+    );
+    git.exec("git reset --hard HEAD");
+    git.exec("git clean -fd");
+  });
+
   test("renders timeline surface and opens Diff/Review/file/commit overlays", async ({
     testPage,
     apiClient,
