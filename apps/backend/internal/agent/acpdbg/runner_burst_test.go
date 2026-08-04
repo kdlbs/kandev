@@ -224,35 +224,47 @@ func TestRequestsRejectedOnceReadLoopIsTerminal(t *testing.T) {
 	}
 	t.Cleanup(func() { runner.Close("test cleanup") })
 
-	waitForReadLoopFailure(t, runner)
+	waitForReadLoopDone(t, runner)
 
-	// Both entry points must refuse, and refuse fast.
+	// Both entry points must refuse, must say why, and must not simply run out
+	// the clock. Accepting any error would let an unrelated immediate failure —
+	// or the caller's own deadline — stand in for the rejection being tested.
 	start := time.Now()
 	req, _ := runner.Framer().NewRequest("session/new", map[string]any{})
-	if _, err := runner.Request(ctx, req); err == nil {
+	_, reqErr := runner.Request(ctx, req)
+	if reqErr == nil {
 		t.Fatal("Request accepted a waiter after the read loop went terminal")
 	}
-	if _, err := sendPromptAndCollect(ctx, runner, "s1", "anyone home?"); err == nil {
+	if !strings.Contains(reqErr.Error(), "read loop exited") {
+		t.Fatalf("Request error = %v, want it to name the read loop", reqErr)
+	}
+	_, promptErr := sendPromptAndCollect(ctx, runner, "s1", "anyone home?")
+	if promptErr == nil {
 		t.Fatal("sendPromptAndCollect accepted a waiter after the read loop went terminal")
+	}
+	if !strings.Contains(promptErr.Error(), "read loop exited") {
+		t.Fatalf("sendPromptAndCollect error = %v, want it to name the read loop", promptErr)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("took %s to refuse; expected to fail immediately, not on the deadline", elapsed)
 	}
 }
 
-func waitForReadLoopFailure(t *testing.T, r *Runner) {
+// waitForReadLoopDone blocks until the read loop goroutine has finished, not
+// merely until readLoopEr is set: the two are separated by the teardown that
+// closes existing waiters, and the race under test lives in that gap.
+func waitForReadLoopDone(t *testing.T, r *Runner) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		r.mu.Lock()
-		failed := r.readLoopEr != nil
-		r.mu.Unlock()
-		if failed {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
+	done := make(chan struct{})
+	go func() {
+		r.readLoopWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("timed out waiting for the read loop to exit on malformed stdout")
 	}
-	t.Fatal("timed out waiting for the read loop to fail on malformed stdout")
 }
 
 // TestReadLoopStopsQueueingAfterShutdown pins that a wedged agent flooding
