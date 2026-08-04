@@ -9,6 +9,25 @@ export type LspLifecycleAction = {
 
 export const LSP_LONG_INITIALIZATION_MS = 60_000;
 
+function formatElapsedUnit(
+  unit: "Seconds" | "Minutes" | "Hours",
+  count: number,
+  value: number | string = count,
+): string {
+  switch (unit) {
+    case "Seconds":
+      return t("lsp:elapsedSeconds", { count, value });
+    case "Minutes":
+      return t("lsp:elapsedMinutes", { count, value });
+    case "Hours":
+      return t("lsp:elapsedHours", { count, value });
+  }
+}
+
+function joinElapsedParts(major: string, minor: string): string {
+  return t("lsp:elapsedDurationParts", { major, minor });
+}
+
 export type LspProgressView =
   | {
       kind: "active";
@@ -36,13 +55,21 @@ export type LspProgressView =
 
 export function formatLspElapsed(elapsedMs: number): string {
   const seconds = Math.max(0, Math.floor(elapsedMs / 1_000));
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return formatElapsedUnit("Seconds", seconds);
 
   const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  if (minutes < 60) {
+    return joinElapsedParts(
+      formatElapsedUnit("Minutes", minutes),
+      formatElapsedUnit("Seconds", seconds % 60, String(seconds % 60).padStart(2, "0")),
+    );
+  }
 
   const hours = Math.floor(minutes / 60);
-  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`;
+  return joinElapsedParts(
+    formatElapsedUnit("Hours", hours),
+    formatElapsedUnit("Minutes", minutes % 60, String(minutes % 60).padStart(2, "0")),
+  );
 }
 
 export function getLspConnectionLabel(status: LspStatus, progress?: LspProgressSnapshot): string {

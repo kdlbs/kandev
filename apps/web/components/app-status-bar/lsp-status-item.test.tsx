@@ -43,7 +43,7 @@ describe("LspStatusItem", () => {
 
     expect(screen.getByTestId("app-status-lsp").textContent).toContain("Kotlin");
     expect(screen.getByTestId("app-status-lsp").textContent).toContain(
-      "Server process started · 1m 05s",
+      "Server process started · 1 min 05 sec",
     );
   });
 

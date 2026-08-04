@@ -1,4 +1,5 @@
 import { expect, it } from "vitest";
+import { activateLocale } from "@/lib/i18n";
 import type { LspProgressSnapshot } from "./lsp-progress";
 import {
   formatLspElapsed,
@@ -16,10 +17,19 @@ const EMPTY_PROGRESS: LspProgressSnapshot = {
 };
 
 it("formats elapsed time without estimating time remaining", () => {
-  expect(formatLspElapsed(-1)).toBe("0s");
-  expect(formatLspElapsed(9_900)).toBe("9s");
-  expect(formatLspElapsed(65_000)).toBe("1m 05s");
-  expect(formatLspElapsed(3_725_000)).toBe("1h 02m");
+  expect(formatLspElapsed(-1)).toBe("0 sec");
+  expect(formatLspElapsed(9_900)).toBe("9 sec");
+  expect(formatLspElapsed(65_000)).toBe("1 min 05 sec");
+  expect(formatLspElapsed(3_725_000)).toBe("1 hr 02 min");
+});
+
+it("localizes elapsed units and their composition", async () => {
+  try {
+    await activateLocale("pseudo");
+    expect(formatLspElapsed(65_000)).toBe("1 ḿĩń 05 śēć");
+  } finally {
+    await activateLocale("en");
+  }
 });
 
 it("formats compact live summaries for the application status bar", () => {
@@ -29,7 +39,7 @@ it("formats compact live summaries for the application status bar", () => {
       { ...EMPTY_PROGRESS, initializingSince: 2_000 },
       67_000,
     ),
-  ).toBe("Server process started · 1m 05s");
+  ).toBe("Server process started · 1 min 05 sec");
 
   expect(
     getLspCompactSummary(
@@ -104,7 +114,7 @@ it("presents the oldest active server item without averaging concurrent work", (
     title: "Importing project",
     message: "Resolving modules",
     percentage: 42,
-    elapsed: "1m 05s",
+    elapsed: "1 min 05 sec",
     concurrentCount: 2,
   });
 });
@@ -119,7 +129,7 @@ it("discloses that the server process launched while initialize is pending", () 
     title: "Server process started",
     description: "Waiting for the language server to respond to the LSP initialize request.",
     guidance: "Cross-file features become available after initialization completes.",
-    elapsed: "59s",
+    elapsed: "59 sec",
   });
   expect(getLspLifecycleAction({ state: "starting" })).toEqual({
     label: "Stop",
@@ -142,7 +152,7 @@ it("warns at 60 seconds without timing out or inventing Kotlin progress", () => 
     description: "The server process is still running while Kandev waits for LSP initialize.",
     guidance:
       "Kotlin LSP may be importing the Gradle project. Cross-file features remain unavailable until initialization completes.",
-    elapsed: "1m 00s",
+    elapsed: "1 min 00 sec",
   });
   expect(JSON.stringify(view).toLowerCase()).not.toMatch(/eta|time remaining|percentage|indexing/);
   expect(getLspLifecycleAction({ state: "starting" })).toEqual({
