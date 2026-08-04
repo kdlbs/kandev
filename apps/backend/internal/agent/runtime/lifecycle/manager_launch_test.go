@@ -1599,6 +1599,59 @@ func TestLaunch_RaceRollback(t *testing.T) {
 	}
 }
 
+func TestLaunch_RollsBackRuntimeWhenSessionEndsDuringCreate(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	entered := make(chan struct{}, 1)
+	barrier := make(chan struct{})
+	backend := &createInstanceExecutor{
+		MockExecutor: MockExecutor{name: executor.NameStandalone},
+		entered:      entered,
+		barrier:      barrier,
+	}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	session := &models.TaskSession{ID: "session-deleted", State: models.TaskSessionStateStarting}
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: session})
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-deleted",
+			SessionID:      session.ID,
+			AgentProfileID: "profile-1",
+			IsEphemeral:    true,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for CreateInstance to start")
+	}
+	session.State = models.TaskSessionStateCancelled
+	close(barrier)
+
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "session-deleted") || !strings.Contains(err.Error(), "CANCELLED") {
+		t.Fatalf("Launch error = %v, want terminal-session validation", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID(session.ID); exists {
+		t.Fatal("terminal session runtime must not be registered")
+	}
+}
+
 func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	execRegistry := NewExecutorRegistry(log)

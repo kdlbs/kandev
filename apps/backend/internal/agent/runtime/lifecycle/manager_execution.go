@@ -604,6 +604,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		execution.agentctl.SetTraceContext(execution.SessionTraceContext())
 	}
 
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		m.rollbackLaunchExecution(ctx, rt, runtimeInstance, execution, "session ended during runtime creation")
+		return nil, err
+	}
+
 	if addErr := m.executionStore.Add(execution); addErr != nil {
 		// Lost a race: another path created an execution for this session
 		// between our check and our Add. Roll back the runtime instance we

@@ -1236,6 +1236,10 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
+		return err
+	}
 	if addErr := m.executionStore.Add(execution); addErr != nil {
 		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
 			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
@@ -1262,6 +1266,32 @@ func (m *Manager) registerAndPublishExecution(
 	// NOTE: This does NOT start the agent process — call StartAgentProcess() explicitly.
 	go m.waitForAgentctlReady(execution)
 	return nil
+}
+
+// ensureLaunchSessionStillActive closes the remote-runtime creation race: SSH,
+// Docker, and other remote CreateInstance calls can outlive a concurrent task
+// delete. Re-read the session immediately before registering the new execution
+// so a runtime created for a now-deleted or terminal session is rolled back
+// instead of becoming an orphan after cleanup already took its inventory.
+func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
+	if m.executorProfileReader == nil || sessionID == "" {
+		return nil
+	}
+	session, err := m.executorProfileReader.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify session before registering execution: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("verify session before registering execution: session %q not found", sessionID)
+	}
+	switch session.State {
+	case models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed:
+		return fmt.Errorf("verify session before registering execution: session %q is %s", sessionID, session.State)
+	default:
+		return nil
+	}
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
