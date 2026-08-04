@@ -12,10 +12,20 @@ async function openMobileChangesPanel(testPage: Page) {
 async function expandSection(testPage: Page, sectionTestId: string) {
   const toggle = testPage.getByTestId(`${sectionTestId}-collapse-toggle`);
   await expect(toggle).toBeVisible({ timeout: 10_000 });
-  if ((await toggle.getAttribute("aria-expanded")) === "false") {
-    await toggle.tap();
-    await expect(toggle).toHaveAttribute("aria-expanded", "true");
-  }
+  // Mirror session-page expandChangesSection: late defaultCollapsed resyncs
+  // can re-collapse after the first tap, so retry until expanded sticks.
+  await expect
+    .poll(
+      async () => {
+        if ((await toggle.getAttribute("aria-expanded")) === "true") {
+          return true;
+        }
+        await toggle.tap();
+        return (await toggle.getAttribute("aria-expanded")) === "true";
+      },
+      { timeout: 15_000 },
+    )
+    .toBe(true);
 }
 
 async function expectDiffText(testPage: Page, text: string, timeout = 45_000) {

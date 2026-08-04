@@ -931,10 +931,22 @@ export class SessionPage {
   async expandChangesSection(testId: string): Promise<void> {
     const toggle = this.changes.getByTestId(`${testId}-collapse-toggle`);
     await expect(toggle).toBeVisible({ timeout: 15_000 });
-    if ((await toggle.getAttribute("aria-expanded")) === "false") {
-      await toggle.click();
-      await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    }
+    // TimelineSection re-syncs collapsed state from defaultCollapsed until the
+    // user has toggled. A late git-data update can therefore re-collapse right
+    // after the first click (and can also remount the section). Retry until the
+    // expanded attribute sticks instead of asserting once.
+    await expect
+      .poll(
+        async () => {
+          if ((await toggle.getAttribute("aria-expanded")) === "true") {
+            return true;
+          }
+          await toggle.click();
+          return (await toggle.getAttribute("aria-expanded")) === "true";
+        },
+        { timeout: 15_000 },
+      )
+      .toBe(true);
   }
 
   /** Expand the commits section (collapsed by default in the changes panel). */
