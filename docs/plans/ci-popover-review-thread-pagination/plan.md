@@ -53,8 +53,11 @@ In `apps/backend/internal/github/graphql.go`:
   map on such failure, allowing the existing batched-query fallback to retain
   the previous complete count.
 - Preserve existing partial-success behavior for repositories that are
-  independently classified as missing, and issue no follow-up request when all
-  selected PRs fit in their first page.
+  independently classified as missing. If another repository's continuation
+  later fails, retain the typed missing-repository error around that failure so
+  the caller still populates its negative cache while rejecting all partial
+  statuses. Issue no follow-up request when all selected PRs fit in their first
+  page.
 
 ### Persistence and automation
 
@@ -94,6 +97,12 @@ desktop E2E coverage for that behavior.
   **File:** `apps/backend/internal/github/graphql_test.go`.
   **How:** Fail the sequenced executor after the first page and assert an error
   plus no consumable partial result.
+- **What:** A continuation failure does not hide repositories already
+  classified as unresolvable by the initial batch.
+  **File:** `apps/backend/internal/github/graphql_test.go`.
+  **How:** Return a missing-repository GraphQL error beside a busy PR, fail its
+  continuation, and assert the typed missing-repository wrapper retains the
+  pagination failure while the status map remains nil.
 - **What:** The exact multi-page count reaches the persisted `TaskPR` used by
   the popover and automation.
   **File:** `apps/backend/internal/github/poller_test.go`.

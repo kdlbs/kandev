@@ -370,6 +370,45 @@ func TestRunBatchedPRQuery_RejectsPagesBeyondInitialTotalCount(t *testing.T) {
 	}
 }
 
+func TestRunBatchedPRQuery_PreservesMissingReposOnReviewThreadPaginationFailure(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		mustJSON(t, map[string]any{
+			"data": map[string]any{
+				"repo1": map[string]any{
+					"pr0": batchedPRFixture(
+						"Busy PR", "https://x/live/42", 101,
+						resolvedReviewThreadNodes(100), true, "cursor-1",
+					),
+				},
+			},
+			"errors": []map[string]any{{
+				"message": "Could not resolve to a Repository with the name 'o/dead'.",
+				"type":    "NOT_FOUND",
+				"path":    []string{"repo0"},
+			}},
+		}),
+		`{"data": {}}`,
+	}}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "dead", Number: 1},
+		{Owner: "o", Repo: "live", Number: 42},
+	})
+	if got != nil {
+		t.Fatalf("status map = %#v, want nil after incomplete pagination", got)
+	}
+	var missingErr *batchedMissingReposErr
+	if !errors.As(err, &missingErr) {
+		t.Fatalf("error = %v, want batchedMissingReposErr", err)
+	}
+	if len(missingErr.Repos) != 1 || missingErr.Repos[0] != (repoRef{Owner: "o", Repo: "dead"}) {
+		t.Fatalf("missing repos = %#v, want o/dead", missingErr.Repos)
+	}
+	if missingErr.Inner == nil || !strings.Contains(missingErr.Inner.Error(), "missing repository alias") {
+		t.Fatalf("inner error = %v, want pagination failure", missingErr.Inner)
+	}
+}
+
 func TestRunBatchedPRQuery_RejectsEmptyReviewThreadCursor(t *testing.T) {
 	tests := []struct {
 		name      string

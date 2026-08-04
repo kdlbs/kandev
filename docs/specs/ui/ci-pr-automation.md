@@ -144,7 +144,9 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
 - If Kandev cannot finish review-thread pagination, it discards the partial
   count and follows the existing PR-status sync failure path. A partial page
   never replaces the last complete persisted count or becomes fresh automation
-  input.
+  input. If the initial batch also identified unresolvable repositories, those
+  classifications still reach the existing negative cache even when another
+  repository's continuation fails.
 - Branch-only PR discovery associates PR metadata without fetching unused
   review-thread continuation pages. Once the watch has a PR number, the next
   numbered status sync produces the complete review-thread count.
@@ -453,6 +455,10 @@ Auto-merge cycle for one task/PR:
 - **GIVEN** Kandev has a complete persisted review-thread count and GitHub
   fails a later pagination request, **WHEN** the lightweight PR status sync
   runs, **THEN** no partial or inferred count replaces that complete value.
+- **GIVEN** one repository is unresolvable and another repository's
+  review-thread continuation fails in the same batch, **WHEN** lightweight PR
+  status sync handles the failure, **THEN** it discards all partial statuses
+  while still negative-caching the unresolvable repository.
 - **GIVEN** a user is viewing the CI popover automation controls, **WHEN** they activate the info icon, **THEN** they see help text explaining that Kandev uses the existing 1-minute PR watch checks, fetches full feedback only for candidate PRs, snapshots each auto-fix round, and merges only when readiness gates pass.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-fix CI & address comments`, **THEN** the setting persists and remains enabled after page reload.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-merge when ready`, **THEN** the setting persists and remains enabled after page reload.

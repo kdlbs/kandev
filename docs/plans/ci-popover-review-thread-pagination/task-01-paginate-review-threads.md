@@ -24,7 +24,8 @@ popover and automation.
    metadata without depending on unused continuation pages.
 3. Missing, invalid, or failed continuation data returns no partial populated
    count, preserving the prior complete stored value through existing fallback
-   behavior.
+   behavior. Any missing-repository classifications from the initial batch
+   remain available to the existing negative cache.
 
 ## Files likely touched
 
@@ -97,11 +98,18 @@ remaining risks. Mark this task `done`, check it in `plan.md`, and synchronize
   null-connection fixture, and a branch-discovery regression. The duplicated
   numbered/branch completion tail now shares one helper, and page decoding and
   advancement are split into focused helpers to stay within complexity limits.
+- A later Codex regression proved that a continuation failure previously hid a
+  missing-repository classification from the negative cache. The typed missing
+  error now wraps the pagination failure while returning no partial statuses.
+- TDD review-remediation evidence: the combined missing-repository and
+  continuation-failure test first returned only the pagination error, then
+  passed after preserving the typed wrapper.
 - Focused final regression command passed all pagination-budget, cursor,
   multi-round, null-connection, continuation-batching, and branch-discovery
   cases in `0.184s`.
+- The focused missing-repository preservation regression passed in `0.016s`.
 - Full backend package: `go test ./internal/github -count=1` passed in
-  `12.569s`.
+  `13.265s`.
 - Scoped lint: `golangci-lint run ./internal/github/...` reported `0 issues`.
 - Workspace install: lockfile unchanged; 1,143 packages reused/installed in
   `4.8s`.

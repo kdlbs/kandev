@@ -625,6 +625,9 @@ func finishBatchedQuery(
 		return nil, batchErr
 	}
 	if err := completeReviewThreadContinuations(ctx, exec, continuations); err != nil {
+		if len(missing) > 0 {
+			return nil, &batchedMissingReposErr{Repos: missing, Inner: err}
+		}
 		return nil, err
 	}
 	if batchErr != nil {
