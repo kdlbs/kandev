@@ -202,7 +202,7 @@ Language servers run beside the project on the **task host**, with the task work
 
 Only enable Kotlin language support for repositories you trust. Kotlin project import can evaluate Gradle or Maven build configuration on the task host; use a disposable Local Docker executor when the repository or its build files are untrusted.
 
-Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. Auto-install uses different toolchains:
+Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. The managed cache resolves `~` from the same task `HOME` used to execute installer commands, including executor-provided environment overrides. Auto-install uses different toolchains:
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
 - Go runs `go install ...@latest` and therefore needs a working Go toolchain;

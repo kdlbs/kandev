@@ -56,6 +56,14 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: unexpected closes after readiness now retain an error status and close reason for Retry; explicit stop and idle cleanup still clear to disabled.
 - Review hardening: a dedicated synchronous registration guard now distinguishes LSP TypeScript providers from Monaco's lazy built-ins, and built-in suppression waits until Monaco's wrappers are installed.
 - Review hardening: a generic WebSocket close no longer overwrites a detailed install failure already reported by agentctl.
+- Review hardening: completion providers forward Monaco trigger context using LSP enum values, and managed installer caches resolve from the merged task `HOME`.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
+  - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
   - `pnpm run typecheck`
+  - `pnpm exec eslint lib/lsp/lsp-providers.ts lib/lsp/lsp-providers.test.ts e2e/tests/lsp/lsp-file-intelligence.spec.ts`
+  - `go test ./internal/agentctl/server/api ./internal/lsp/installer ./internal/tools/installer`
+  - `make lint`
+  - `GOOS=windows GOARCH=amd64 go test -c ./internal/lsp/installer` and `./internal/agentctl/server/api`
+  - `pnpm e2e:run -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` (13 passed)
+  - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`
