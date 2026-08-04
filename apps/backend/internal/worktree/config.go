@@ -2,6 +2,7 @@ package worktree
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -374,6 +375,29 @@ func SmallSuffix(maxLen int) string {
 	}
 	for i := range buf {
 		buf[i] = branchSuffixAlphabet[int(buf[i])%len(branchSuffixAlphabet)]
+	}
+	return string(buf)
+}
+
+// taskDirSuffixLen is the number of characters in a task-directory suffix. Eight
+// characters over the 36-symbol branchSuffixAlphabet make cross-task collisions
+// negligible while keeping the on-disk name short.
+const taskDirSuffixLen = 8
+
+// TaskDirSuffix returns a deterministic, filesystem-safe suffix derived from a
+// task ID. Unlike SmallSuffix (a random per-call value used for branch slugs),
+// it is stable for a given ID and unique across distinct IDs, so two tasks whose
+// titles sanitize to the same slug never resolve to the same ~/.kandev/tasks
+// root, and a resume that must recompute the name reproduces the launch value.
+// Returns the empty string for an empty ID.
+func TaskDirSuffix(taskID string) string {
+	if taskID == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(taskID))
+	buf := make([]byte, taskDirSuffixLen)
+	for i := range buf {
+		buf[i] = branchSuffixAlphabet[int(sum[i])%len(branchSuffixAlphabet)]
 	}
 	return string(buf)
 }

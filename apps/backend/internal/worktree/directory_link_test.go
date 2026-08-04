@@ -166,14 +166,55 @@ func TestEnsureOwnedDirectoryLinkIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestEnsureOwnedDirectoryLinkRejectsDifferentTarget(t *testing.T) {
+// A Kandev-owned task root is Kandev's to reconcile: an owned directory link is
+// a pointer, not content, so a stale target left by an earlier launch must be
+// repointed rather than wedging every launch and resume with a target mismatch.
+func TestEnsureOwnedDirectoryLinkRepointsOwnedLinkOnMismatch(t *testing.T) {
 	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	target, other := t.TempDir(), t.TempDir()
-	if _, _, err := EnsureOwnedDirectoryLink(root, "api", target); err != nil {
-		t.Fatalf("EnsureOwnedDirectoryLink: %v", err)
+	if err := os.WriteFile(filepath.Join(other, "live.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", target)
+
+	link, created, err := EnsureOwnedDirectoryLink(root, "api", other)
+	if err != nil {
+		t.Fatalf("EnsureOwnedDirectoryLink repoint: %v", err)
+	}
+	if !created {
+		t.Fatal("EnsureOwnedDirectoryLink did not report a recreate on mismatch")
+	}
+	linkInfo, err := os.Stat(link)
+	if err != nil {
+		t.Fatalf("stat repointed link: %v", err)
+	}
+	otherInfo, err := os.Stat(other)
+	if err != nil {
+		t.Fatalf("stat new target: %v", err)
+	}
+	if !os.SameFile(linkInfo, otherInfo) {
+		t.Fatal("link was not repointed to the new target")
+	}
+	if got, err := os.ReadFile(filepath.Join(link, "live.txt")); err != nil || string(got) != "two" {
+		t.Fatalf("read through repointed link = %q, %v", got, err)
+	}
+}
+
+// A non-link entry (a real file or directory a reconcile did not create) is not
+// Kandev's pointer to replace: it stays fail-closed and is never removed.
+func TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	if err := os.MkdirAll(filepath.Join(root, "api"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "api", "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	if _, _, err := EnsureOwnedDirectoryLink(root, "api", other); err == nil {
-		t.Fatal("EnsureOwnedDirectoryLink accepted a link pointing elsewhere")
+	if _, _, err := EnsureOwnedDirectoryLink(root, "api", t.TempDir()); err == nil {
+		t.Fatal("EnsureOwnedDirectoryLink overwrote a non-link entry")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "api", "keep.txt")); err != nil || string(got) != "keep" {
+		t.Fatalf("non-link entry was disturbed = %q, %v", got, err)
 	}
 }

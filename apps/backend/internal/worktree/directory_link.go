@@ -78,9 +78,10 @@ func verifyCreatedOwnedDirectoryLink(root, link string) error {
 	return nil
 }
 
-// EnsureOwnedDirectoryLink returns an existing matching live link or creates
-// it. A non-link/collision, or a link to another directory, fails closed and is
-// never replaced.
+// EnsureOwnedDirectoryLink returns an existing matching live link, repoints an
+// owned link whose target drifted, or creates the link. A non-link/collision
+// still fails closed and is never removed; only a Kandev-owned directory link
+// (a pointer, not content) is replaced when its target no longer matches.
 //
 // The existing link is matched by filesystem identity, not by resolved path.
 // filepath.EvalSymlinks does not traverse a Windows junction — it returns the
@@ -89,6 +90,12 @@ func verifyCreatedOwnedDirectoryLink(root, link string) error {
 // workspace source links failed. os.Stat follows a junction and a Unix symlink
 // alike, and os.SameFile compares volume and file index, which is also immune
 // to 8.3 short paths and path case.
+//
+// Repoint-on-mismatch is deliberately scoped here to the Kandev-owned task root:
+// the entry lives below a root built through real ancestors, and the entry is a
+// directory link, so removing and recreating it is safe. This is distinct from
+// IsSelfReferentialDirectoryLink, which stays report-only because it concerns
+// entries inside a user's own repository.
 func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 	link := filepath.Join(root, name)
 	info, err := os.Lstat(link)
@@ -104,10 +111,14 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 		if err != nil {
 			return "", false, fmt.Errorf("inspect link target: %w", err)
 		}
-		if !os.SameFile(actual, expected) {
-			return "", false, fmt.Errorf("owned link target mismatch: %s", name)
+		if os.SameFile(actual, expected) {
+			return link, false, nil
 		}
-		return link, false, nil
+		if err := os.Remove(link); err != nil {
+			return "", false, fmt.Errorf("repoint owned link: %w", err)
+		}
+		created, err := CreateOwnedDirectoryLink(root, name, target)
+		return created, err == nil, err
 	}
 	if !os.IsNotExist(err) {
 		return "", false, fmt.Errorf("inspect owned link entry: %w", err)
