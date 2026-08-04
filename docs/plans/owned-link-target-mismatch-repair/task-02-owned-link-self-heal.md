@@ -94,17 +94,15 @@ actual diff before marking done.
 
 ### PR #2253 fixup (automated-review remediation)
 
-- Hardened the repoint against a check→remove race (CodeRabbit "serialize/atomic replace"): the removal
-  now runs through `removeInspectedDirectoryLink`, which re-inspects the entry with a no-follow `Lstat`
-  and removes it only while it is still the same directory link (`isPlatformDirectoryLink` +
-  `os.SameFile` against the originally inspected `FileInfo`). If the entry drifted it fails closed with
-  `owned link entry changed during repoint`, so a concurrent writer's real directory/file can never be
-  deleted underneath it.
+- Serialized both `CreateOwnedDirectoryLink` and `EnsureOwnedDirectoryLink` with the shared
+  `acquireWorktreeTargetPath` lock keyed by the owned-link path, so every Kandev writer for the same
+  entry now shares one exclusive inspect/create/repoint critical section.
+- Under that lock, Unix uses a sibling temp link plus rename-over replacement; Windows still removes and
+  recreates the link, but no competing Kandev writer can now swap a new entry into the same path during
+  the repair window.
 - Extended `TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry` with a regular-file collision case: a file
   at the entry name still fails closed and its bytes survive untouched.
-- The codex P1 "verify task ownership before repoint" was answered as already-guarded rather than
-  code-changed: `WriteOwnershipMarker` fails closed on a TaskID/TaskDirName conflict at a shared root,
-  and repoint only ever replaces a Kandev-owned directory *link* (a pointer). Threading task identity
-  into `EnsureOwnedDirectoryLink` was judged out of scope for this repair.
+- Follow-on work in Task 03 then threaded task identity into `EnsureOwnedDirectoryLink`, so repoints now
+  also fail closed when the workspace ownership marker belongs to a different task root.
 - Re-ran `go test ./internal/worktree/... ./internal/orchestrator/executor/... ./internal/agent/runtime/lifecycle/...`
   → all `ok`; changed-file `golangci-lint --new-from-rev=<base>` → `0 issues`.

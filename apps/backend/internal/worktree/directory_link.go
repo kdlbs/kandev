@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -31,7 +32,16 @@ func CreateOwnedDirectoryLink(root, name, target string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	_, err = os.Lstat(link)
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return "", fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+	return createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget)
+}
+
+func createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget string) (string, error) {
+	_, err := os.Lstat(link)
 	if err == nil {
 		return "", fmt.Errorf("owned link entry already exists: %s", name)
 	}
@@ -116,12 +126,21 @@ type OwnedDirectoryLinkResult struct {
 // IsSelfReferentialDirectoryLink, which stays report-only because it concerns
 // entries inside a user's own repository.
 //
-// The removal re-inspects the entry with a no-follow Lstat and removes it only
-// while it is still the same directory link this call inspected, so a concurrent
-// writer that swapped the entry for a real directory or file between inspection
-// and removal cannot have that content deleted underneath it.
+// The full inspect, create, and repoint flow is serialized per owned-link path
+// with the shared target-path lock used by other Kandev writers. Unix still
+// stages a sibling temp link and renames it into place; Windows still removes
+// and recreates, but only while that exclusive slot is held.
 func EnsureOwnedDirectoryLink(root, name, target string, owner OwnedDirectoryLinkOwner) (OwnedDirectoryLinkResult, error) {
 	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return OwnedDirectoryLinkResult{}, err
+	}
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return OwnedDirectoryLinkResult{}, fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+	canonicalTarget, err := canonicalDirectoryLinkTarget(target)
 	if err != nil {
 		return OwnedDirectoryLinkResult{}, err
 	}
@@ -129,10 +148,6 @@ func EnsureOwnedDirectoryLink(root, name, target string, owner OwnedDirectoryLin
 	if err == nil {
 		if !isPlatformDirectoryLink(info, link) {
 			return OwnedDirectoryLinkResult{}, fmt.Errorf("owned link entry already exists: %s", name)
-		}
-		canonicalTarget, err := canonicalDirectoryLinkTarget(target)
-		if err != nil {
-			return OwnedDirectoryLinkResult{}, err
 		}
 		actual, err := os.Stat(link)
 		if err != nil {
@@ -160,7 +175,10 @@ func EnsureOwnedDirectoryLink(root, name, target string, owner OwnedDirectoryLin
 	if !os.IsNotExist(err) {
 		return OwnedDirectoryLinkResult{}, fmt.Errorf("inspect owned link entry: %w", err)
 	}
-	created, err := CreateOwnedDirectoryLink(root, name, target)
+	if err := mkdirOwned(root); err != nil {
+		return OwnedDirectoryLinkResult{}, err
+	}
+	created, err := createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget)
 	if err != nil {
 		return OwnedDirectoryLinkResult{}, err
 	}
@@ -184,7 +202,18 @@ func restoreOwnedDirectoryLink(root, name, target string) error {
 	if target == "" {
 		return nil
 	}
-	if _, err := CreateOwnedDirectoryLink(root, name, target); err != nil {
+	canonicalTarget, err := canonicalDirectoryLinkTarget(target)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: %w", err)
+	}
+	if err := mkdirOwned(root); err != nil {
+		return fmt.Errorf("restore prior directory link: %w", err)
+	}
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: %w", err)
+	}
+	if _, err := createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget); err != nil {
 		return fmt.Errorf("restore prior directory link: %w", err)
 	}
 	return nil
