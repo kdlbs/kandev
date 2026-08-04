@@ -727,6 +727,9 @@ func TestHandleTaskDeleted_PurgesLifecycleRowsAfterUserCancellation(t *testing.T
 	if err := svc.messageQueue.RemoveEntry(ctx, "s1", queued.ID); err != nil {
 		t.Fatalf("remove visible lifecycle row: %v", err)
 	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("user cancellation retained %d lifecycle queue rows, want 0", got)
+	}
 	if _, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
 		ctx, "s1", "t1", "remaining lifecycle prompt", "", messagequeue.QueuedByWorkflow,
 		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin}, "github-pr:repo:2:merged", true,
