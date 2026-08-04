@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const mocks = vi.hoisted(() => ({
@@ -165,6 +165,27 @@ describe("AppSidebarNewTaskItem row actions", () => {
 
     terminal.click();
     expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
+  });
+
+  it("does not show the terminal tooltip when focus returns after closing", () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.focus(terminal);
+
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("shows the terminal tooltip on pointer hover", async () => {
+    renderItem(false);
+
+    const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.pointerEnter(terminal);
+
+    expect((await screen.findByRole("tooltip")).textContent).toBe("Quick terminal");
+
+    fireEvent.pointerLeave(terminal);
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("opens quick chat from the trailing action beside New Task", () => {

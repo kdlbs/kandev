@@ -63,6 +63,7 @@ test.describe("quick terminal", () => {
     await testPage.getByTestId("host-shell-done").click();
     await expect(dialog).toBeHidden();
     await expect(terminalButton).toBeFocused();
+    await expect(testPage.getByRole("tooltip", { name: QUICK_TERMINAL_TITLE })).toHaveCount(0);
 
     if (process.env.CAPTURE_PR_ASSETS) {
       await testPage.setViewportSize({ width: 700, height: 800 });

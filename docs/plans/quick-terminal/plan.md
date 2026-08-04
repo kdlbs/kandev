@@ -137,12 +137,14 @@ posting `/resize`, producing the observed 404s.
 
 - Track a mount generation so stale effect cleanup cannot stop a newer mount's session.
 - Clear the session identity when the PTY stream reports exit/close so resize requests stop.
+- Keep sidebar row-action tooltips pointer-driven so restored accessibility focus does not leave a
+  tooltip open after the dialog closes.
 - Add a regression scenario that opens Quick Terminal, waits through startup, executes a command, and
   proves the surface remains interactive without stale resize failures.
 
 ## Verification Results
 
-- Focused component tests: 3 files, 23 tests passed.
+- Focused component tests: 3 files, 25 tests passed, including restored-focus tooltip coverage.
 - Web typecheck, targeted ESLint, i18n ratchet, and i18n checks passed.
 - Managed Quick Terminal Chromium E2E: 2 tests passed, including shell prompt and command input/output.
 - Managed host-shell lifecycle E2E: 2 tests passed.

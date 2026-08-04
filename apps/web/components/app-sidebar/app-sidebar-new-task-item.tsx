@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 import { useTranslation } from "react-i18next";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useRouter } from "@/lib/routing/client-router";
@@ -48,12 +55,31 @@ type RowActionButtonProps = {
 };
 
 function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButtonProps) {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+  const hoveredRef = useRef(false);
+
+  const handleTooltipOpenChange = (nextOpen: boolean) => {
+    // Focus is restored to this action after Quick Terminal closes. Keep the
+    // tooltip pointer-driven so that accessibility focus does not leave a
+    // stale popover behind the dialog.
+    if (nextOpen && !hoveredRef.current) return;
+    setTooltipOpen(nextOpen);
+  };
+
   return (
-    <Tooltip>
+    <Tooltip open={tooltipOpen} onOpenChange={handleTooltipOpenChange}>
       <TooltipTrigger asChild>
         <button
           type="button"
           onClick={onClick}
+          onPointerEnter={() => {
+            hoveredRef.current = true;
+            setTooltipOpen(true);
+          }}
+          onPointerLeave={() => {
+            hoveredRef.current = false;
+            setTooltipOpen(false);
+          }}
           aria-label={label}
           data-testid={testId}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"

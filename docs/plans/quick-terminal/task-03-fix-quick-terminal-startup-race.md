@@ -15,6 +15,7 @@ spec: "../../specs/quick-terminal/spec.md"
 - StrictMode effect replay cannot stop the session owned by the current terminal mount.
 - A live Quick Terminal accepts input after startup and resize requests remain successful.
 - A natural PTY exit clears the client session identity and stops further resize requests.
+- Restored launcher focus does not reopen its tooltip, while pointer hover still shows it.
 - Existing Agents-page terminal cleanup remains unchanged outside the shared lifecycle fix.
 
 ## Files
@@ -45,5 +46,6 @@ surface accepted `echo quick-terminal-fixed` and the resize request returned 200
 - Added mount-generation ownership so StrictMode replay cannot stop the active session.
 - Cleared the client session identity on PTY exit/close to stop stale resize requests.
 - Added browser coverage for shell readiness and command input/output.
+- Made the sidebar action tooltip pointer-driven and covered focus/hover behavior.
 - Passed focused component tests, typecheck, targeted lint, i18n checks, Chromium and Pixel 5 E2E,
   and backend PTY tests.

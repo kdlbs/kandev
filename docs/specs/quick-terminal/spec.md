@@ -41,6 +41,8 @@ utility available without leaving the current workflow.
   session running.
 - React development effect replays must not stop the session claimed by the current terminal mount;
   a successful start remains interactive and resize requests stop after the session naturally exits.
+- Restoring focus to a Quick Terminal launcher after close must not reopen its hover tooltip; the
+  tooltip remains available when the user points at the action again.
 
 ## Scenarios
 
@@ -62,6 +64,8 @@ utility available without leaving the current workflow.
   **THEN** it cannot stop the session owned by the current mount, and the terminal remains usable.
 - **GIVEN** the host shell sends its exit event, **WHEN** the backend removes the session, **THEN** the
   client clears its session identity and does not continue resize requests for it.
+- **GIVEN** Quick Terminal closes, **WHEN** focus returns to its launcher, **THEN** the launcher stays
+  tooltip-free until the user points at it again.
 - **GIVEN** the desktop sidebar is collapsed or no workspace is active, **WHEN** the relevant
   navigation surface renders, **THEN** it does not show an unusable Quick Terminal shortcut.
 
