@@ -230,21 +230,22 @@ func executorRunningStatusFromExecution(execution *AgentExecution) string {
 // runtime / status; the orchestrator owns resume_token / last_message_uuid /
 // metadata.context_window via narrow CAS updates.
 //
-// Logs and continues on persistence failure rather than failing the launch —
-// the in-memory store already has the truth, and the row will be re-upserted
-// on the next launch through this same path. (storeResumeToken does NOT
-// re-create a missing row; it uses a narrow CAS UPDATE keyed on
-// agent_execution_id, so a failure here leaves resume_token persistence broken
-// until the next full launch.) The store is the runtime authority; the row is
-// its durable mirror.
+// Status-only persistence is best-effort: the in-memory store is still the
+// runtime authority and a later transition can re-upsert its durable mirror.
+// New-runtime registration calls persistExecutorRunningResult directly and
+// fails closed because task cleanup relies on this row for race inventory.
 func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentExecution) {
+	_ = m.persistExecutorRunningResult(ctx, execution)
+}
+
+func (m *Manager) persistExecutorRunningResult(ctx context.Context, execution *AgentExecution) error {
 	if m.runningWriter == nil {
 		// Permitted in tests that don't exercise persistence; logged so a
 		// missed wire-up in production stands out.
 		m.logger.Debug("no executor-running writer configured; skipping row persistence",
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID))
-		return
+		return nil
 	}
 
 	// Best-effort read of any pre-existing row so we carry forward the orchestrator-
@@ -272,7 +273,7 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 				zap.String("execution_id", execution.ID),
 				zap.String("session_id", execution.SessionID),
 				zap.Error(err))
-			return
+			return err
 		}
 	}
 	if execution.AgentProfileID == "" && prior != nil {
@@ -304,7 +305,9 @@ func (m *Manager) persistExecutorRunning(ctx context.Context, execution *AgentEx
 			zap.String("execution_id", execution.ID),
 			zap.String("session_id", execution.SessionID),
 			zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // deleteExecutorRunning tears down the persistence row when an execution is

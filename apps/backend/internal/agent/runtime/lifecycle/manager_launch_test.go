@@ -1653,42 +1653,62 @@ func TestLaunch_RollsBackRuntimeWhenSessionEndsDuringCreate(t *testing.T) {
 }
 
 type launchRegistrationGateReader struct {
-	reads         atomic.Int32
-	cleanupActive atomic.Bool
-	finalState    models.TaskSessionState
-	secondRead    chan struct{}
-	release       chan struct{}
+	reads            atomic.Int32
+	cleanupReads     atomic.Int32
+	cleanupActive    atomic.Bool
+	finalState       models.TaskSessionState
+	blockRead        int32
+	blockCleanupRead int32
+	secondRead       chan struct{}
+	release          chan struct{}
 }
 
 type launchRegistrationWriter struct {
-	upserted chan struct{}
-	deleted  atomic.Int32
+	upserted  chan struct{}
+	deleted   atomic.Int32
+	repaired  atomic.Int32
+	upsertErr error
+	running   *models.ExecutorRunning
 }
 
-func (*launchRegistrationWriter) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
-	return nil, models.ErrExecutorRunningNotFound
+func (w *launchRegistrationWriter) GetExecutorRunningBySessionID(context.Context, string) (*models.ExecutorRunning, error) {
+	if w.running == nil {
+		return nil, models.ErrExecutorRunningNotFound
+	}
+	return w.running, nil
 }
 
-func (w *launchRegistrationWriter) UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error {
+func (w *launchRegistrationWriter) UpsertExecutorRunning(_ context.Context, running *models.ExecutorRunning) error {
 	close(w.upserted)
+	if w.upsertErr != nil {
+		return w.upsertErr
+	}
+	w.running = running
 	return nil
 }
 
 func (w *launchRegistrationWriter) DeleteExecutorRunningBySessionID(context.Context, string) error {
 	w.deleted.Add(1)
+	w.running = nil
 	return nil
 }
-
-func (*launchRegistrationWriter) RepairExecutorRunningDead(context.Context, string) error {
+func (w *launchRegistrationWriter) RepairExecutorRunningDead(context.Context, string) error {
+	w.repaired.Add(1)
+	if w.running != nil {
+		w.running.Status = models.ExecutorRunningStatusStopped
+	}
 	return nil
 }
 
 func (r *launchRegistrationGateReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
-	if r.reads.Add(1) == 1 {
+	read := r.reads.Add(1)
+	if read < r.blockRead {
 		return &models.TaskSession{ID: id, TaskID: "task-registration-race", State: models.TaskSessionStateStarting}, nil
 	}
-	close(r.secondRead)
-	<-r.release
+	if read == r.blockRead {
+		close(r.secondRead)
+		<-r.release
+	}
 	state := r.finalState
 	if state == "" {
 		state = models.TaskSessionStateCancelled
@@ -1697,6 +1717,10 @@ func (r *launchRegistrationGateReader) GetTaskSession(_ context.Context, id stri
 }
 
 func (r *launchRegistrationGateReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	if read := r.cleanupReads.Add(1); read == r.blockCleanupRead {
+		close(r.secondRead)
+		<-r.release
+	}
 	return r.cleanupActive.Load(), nil
 }
 
@@ -1722,6 +1746,7 @@ func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
 	mgr.dataDir = t.TempDir()
 	cleanupManagerStopCh(t, mgr)
 	reader := &launchRegistrationGateReader{
+		blockRead:  4,
 		secondRead: make(chan struct{}),
 		release:    make(chan struct{}),
 	}
@@ -1786,12 +1811,18 @@ func TestLaunch_RollsBackWhenTaskCleanupBeginsDuringRegistration(t *testing.T) {
 	mgr.dataDir = t.TempDir()
 	cleanupManagerStopCh(t, mgr)
 	reader := &launchRegistrationGateReader{
-		finalState: models.TaskSessionStateStarting,
-		secondRead: make(chan struct{}),
-		release:    make(chan struct{}),
+		finalState:       models.TaskSessionStateStarting,
+		blockCleanupRead: 2,
+		secondRead:       make(chan struct{}),
+		release:          make(chan struct{}),
 	}
 	mgr.SetExecutorProfileReader(reader)
-	writer := &launchRegistrationWriter{upserted: make(chan struct{})}
+	writer := &launchRegistrationWriter{
+		upserted: make(chan struct{}),
+		running: &models.ExecutorRunning{
+			SessionID: "session-cleanup-race", ExecutionProfileID: "profile-1", ResumeToken: "resume-token",
+		},
+	}
 	mgr.SetExecutorRunningWriter(writer)
 
 	errCh := make(chan error, 1)
@@ -1825,8 +1856,94 @@ func TestLaunch_RollsBackWhenTaskCleanupBeginsDuringRegistration(t *testing.T) {
 	if _, exists := mgr.executionStore.GetBySessionID("session-cleanup-race"); exists {
 		t.Fatal("runtime must be removed when task cleanup wins registration race")
 	}
-	if got := writer.deleted.Load(); got != 1 {
-		t.Fatalf("executor-running delete count = %d, want 1", got)
+	if got := writer.deleted.Load(); got != 0 {
+		t.Fatalf("executor-running delete count = %d, want 0 for resumable row", got)
+	}
+	if got := writer.repaired.Load(); got != 1 {
+		t.Fatalf("executor-running repair count = %d, want 1", got)
+	}
+	if writer.running == nil || writer.running.ResumeToken != "resume-token" || writer.running.Status != models.ExecutorRunningStatusStopped {
+		t.Fatalf("resumable row was not preserved and stopped: %#v", writer.running)
+	}
+}
+
+func TestLaunch_RollsBackWhenExecutionRegistrationCannotPersist(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+		ID: "session-persist-failure", TaskID: "task-persist-failure", State: models.TaskSessionStateStarting,
+	}})
+	writer := &launchRegistrationWriter{
+		upserted:  make(chan struct{}),
+		upsertErr: errors.New("database is locked"),
+	}
+	mgr.SetExecutorRunningWriter(writer)
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-persist-failure",
+		SessionID:      "session-persist-failure",
+		AgentProfileID: "profile-1",
+		IsEphemeral:    true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "persist execution registration") {
+		t.Fatalf("Launch error = %v, want persistence failure", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-persist-failure"); exists {
+		t.Fatal("runtime must be removed when durable registration fails")
+	}
+	if got := writer.deleted.Load(); got != 0 {
+		t.Fatalf("executor-running delete count = %d, want 0 for an uncommitted upsert", got)
+	}
+}
+
+type staleLaunchAdmissionReader struct {
+	reads atomic.Int32
+}
+
+func (r *staleLaunchAdmissionReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
+	state := models.TaskSessionStateStarting
+	if r.reads.Add(1) > 1 {
+		state = models.TaskSessionStateCancelled
+	}
+	return &models.TaskSession{ID: id, TaskID: "task-terminalization-race", State: state}, nil
+}
+
+func (*staleLaunchAdmissionReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return false, nil
+}
+
+func (*staleLaunchAdmissionReader) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+
+func (*staleLaunchAdmissionReader) GetExecutorProfile(context.Context, string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
+func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T) {
+	mgr := newTestManager(t)
+	reader := &staleLaunchAdmissionReader{}
+	mgr.SetExecutorProfileReader(reader)
+
+	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race")
+	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
+		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
+	}
+	if got := reader.reads.Load(); got != 2 {
+		t.Fatalf("session reads = %d, want 2", got)
 	}
 }
 

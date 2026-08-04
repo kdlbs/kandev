@@ -103,6 +103,30 @@ type blockingResumeCleanupRepository struct {
 	release chan struct{}
 }
 
+func TestCancelTaskResourceCleanupJobSurvivesCallerCancellation(t *testing.T) {
+	taskSvc, repo := setupOfficeTest(t)
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-cancel-detached", OperationID: "delete:cancel-detached", TaskID: "task-cancel-detached",
+		Trigger: models.TaskResourceCleanupTriggerDelete, State: models.TaskResourceCleanupStatePrepared,
+		ResourceSnapshot: `{}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(context.Background(), job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	taskSvc.cancelTaskResourceCleanupJob(ctx, job)
+
+	got, err := repo.GetTaskResourceCleanupJob(context.Background(), job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("cleanup state = %q, want %q", got.State, models.TaskResourceCleanupStateCancelled)
+	}
+}
+
 func (r *blockingResumeCleanupRepository) ResetRunningTaskResourceCleanupJobs(context.Context) error {
 	close(r.entered)
 	<-r.release

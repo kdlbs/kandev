@@ -28,6 +28,8 @@ import (
 
 const legacyExecutorTypeLocalPC = "local_pc"
 
+var errTaskCleanupActive = errors.New("task cleanup is active")
+
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
 	profileID := executionProfileID(req)
@@ -1250,10 +1252,17 @@ func (m *Manager) registerAndPublishExecution(
 	// Make the execution visible to durable cleanup before the final session
 	// read. This closes the precheck -> Add -> persist gap: deletion cleanup can
 	// now inventory the row, while a deletion that already ran is caught below.
-	m.persistExecutorRunning(ctx, execution)
+	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+		m.rollbackRegisteredLaunchAfterPersistFailure(rt, execInstance, execution)
+		return fmt.Errorf("persist execution registration: %w", err)
+	}
 
 	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
-		m.rollbackRegisteredLaunch(rt, execInstance, execution, "session ended during execution registration")
+		if errors.Is(err, errTaskCleanupActive) {
+			m.rollbackRegisteredLaunchForTaskCleanup(rt, execInstance, execution)
+		} else {
+			m.rollbackRegisteredLaunch(rt, execInstance, execution, "session ended during execution registration")
+		}
 		return err
 	}
 	m.setRuntimeInterest(execution.SessionID, true)
@@ -1293,7 +1302,17 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 		return fmt.Errorf("verify task cleanup before registering execution: %w", err)
 	}
 	if cleanupActive {
-		return fmt.Errorf("verify task cleanup before registering execution: cleanup is active for task %q", session.TaskID)
+		return fmt.Errorf("verify task cleanup before registering execution: %w for task %q", errTaskCleanupActive, session.TaskID)
+	}
+	// Re-read after the cleanup-intent lookup. A cleanup can transition to a
+	// terminal state between separate queries; its job then no longer appears
+	// active, but the session deletion/cancellation remains authoritative.
+	session, err = m.executorProfileReader.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reverify session after task cleanup admission: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("reverify session after task cleanup admission: session %q not found", sessionID)
 	}
 	switch session.State {
 	case models.TaskSessionStateCancelled,
@@ -1303,6 +1322,43 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	default:
 		return nil
 	}
+}
+
+// rollbackRegisteredLaunchForTaskCleanup cannot assume the session is
+// terminal: the task mutation may still fail after persisting its prepared
+// cleanup intent. Preserve resumable state while removing the rejected live
+// execution; committed cleanup can subsequently remove the stopped row.
+func (m *Manager) rollbackRegisteredLaunchForTaskCleanup(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+	cancel()
+	m.executionStore.Remove(execution.ID)
+	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, "task cleanup won execution registration")
+}
+
+// rollbackRegisteredLaunchAfterPersistFailure preserves any prior durable row
+// for the session. If the failed upsert actually committed before returning an
+// ambiguous transport error, clean it up resume-safely only after confirming
+// that it belongs to this exact execution.
+func (m *Manager) rollbackRegisteredLaunchAfterPersistFailure(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) {
+	if reader, ok := m.runningWriter.(executorRunningReader); ok {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		running, err := reader.GetExecutorRunningBySessionID(cleanupCtx, execution.SessionID)
+		if err == nil && running != nil && running.AgentExecutionID == execution.ID {
+			m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+		}
+		cancel()
+	}
+	m.executionStore.Remove(execution.ID)
+	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, "execution registration persistence failed")
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {

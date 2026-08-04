@@ -470,8 +470,10 @@ func (s *Service) cancelTaskResourceCleanupJob(ctx context.Context, job *models.
 	if job == nil || s.resourceCleanups == nil {
 		return
 	}
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
 	if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
-		ctx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
+		transitionCtx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
 	); err != nil {
 		s.logger.Warn("cancel task resource cleanup job failed",
 			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
