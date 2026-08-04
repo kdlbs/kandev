@@ -2,7 +2,6 @@ package installer
 
 import (
 	"fmt"
-	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
@@ -139,23 +138,37 @@ func WithCommandRunner(runner tools.CommandRunner) RegistryOption {
 // directory resolves to an absolute path. Otherwise the managed cache is
 // disabled so a project-relative path can never be treated as trusted.
 func NewRegistry(dataDir string, log *logger.Logger, options ...RegistryOption) *Registry {
-	var binDir string
-	if dataDir != "" && filepath.IsAbs(dataDir) {
-		binDir = filepath.Join(dataDir, "lsp-servers")
-	} else if dataDir == "" {
-		home, err := os.UserHomeDir()
-		if err == nil && filepath.IsAbs(home) {
-			binDir = filepath.Join(home, DefaultBinDir)
-		}
-	}
 	registry := &Registry{
-		binDir: binDir,
 		logger: log.WithFields(zap.String("component", "lsp-installer")),
 	}
 	for _, option := range options {
 		option(registry)
 	}
+	registry.binDir = managedBinDir(dataDir, registry.commandRunner)
 	return registry
+}
+
+func managedBinDir(dataDir string, runner tools.CommandRunner) string {
+	if dataDir != "" {
+		if filepath.IsAbs(dataDir) {
+			return filepath.Join(dataDir, "lsp-servers")
+		}
+		return ""
+	}
+	home, err := tools.CommandEnvironmentValue(runner, "HOME")
+	if err != nil {
+		return ""
+	}
+	if home == "" && runtime.GOOS == windowsOS {
+		home, err = tools.CommandEnvironmentValue(runner, "USERPROFILE")
+		if err != nil {
+			return ""
+		}
+	}
+	if !filepath.IsAbs(home) {
+		return ""
+	}
+	return filepath.Join(home, DefaultBinDir)
 }
 
 // StrategyFor returns the install strategy for a language.

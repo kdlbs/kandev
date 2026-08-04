@@ -314,6 +314,20 @@ func TestNewRegistryFailsClosedWithoutTrustedHome(t *testing.T) {
 	}
 }
 
+func TestNewRegistryUsesTaskEnvironmentHome(t *testing.T) {
+	processHome := t.TempDir()
+	taskHome := t.TempDir()
+	t.Setenv("HOME", processHome)
+
+	r := NewRegistry("", testLogger(), WithCommandRunner(&registryCommandRunner{
+		environment: map[string]string{"HOME": taskHome},
+	}))
+	want := filepath.Join(taskHome, DefaultBinDir)
+	if r.binDir != want {
+		t.Fatalf("binDir = %q, want task-environment cache %q", r.binDir, want)
+	}
+}
+
 func TestFindGoBinary(t *testing.T) {
 	// Test with GOBIN set to a temp directory containing a fake binary
 	tmpDir := t.TempDir()

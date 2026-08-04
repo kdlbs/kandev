@@ -40,6 +40,16 @@ func FindCommandInDirectory(binary, directory string, runner CommandRunner) (str
 	return findCommandInDirectory(binary, directory, env)
 }
 
+// CommandEnvironmentValue reads one value from the same merged process and
+// task environment used for command lookup and execution.
+func CommandEnvironmentValue(runner CommandRunner, key string) (string, error) {
+	env, _, err := commandEnvironment(runner)
+	if err != nil {
+		return "", err
+	}
+	return environmentValue(env, key), nil
+}
+
 func commandEnvironment(runner CommandRunner) (map[string]string, map[string]string, error) {
 	env := processEnvironment()
 	if runner == nil {
