@@ -62,7 +62,11 @@ func TestHTTPListQuickChatSessions(t *testing.T) {
 		Executors: repo, Environments: repo, TaskEnvironments: repo,
 		Reviews: repo,
 	}, nil, log, service.RepositoryDiscoveryConfig{})
-	h := &TaskHandlers{service: svc, logger: log}
+	h := &TaskHandlers{
+		service:             svc,
+		logger:              log,
+		cancellationPending: fakeCancellationPendingProvider{pending: true},
+	}
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
@@ -85,6 +89,7 @@ func TestHTTPListQuickChatSessions(t *testing.T) {
 	}, body.Sessions[0])
 	require.Len(t, body.TaskSessions, 1)
 	assert.Equal(t, "task-chat", body.TaskSessions[0].TaskID)
+	assert.True(t, body.TaskSessions[0].CancellationPending)
 }
 
 // TestHTTPListQuickChatSessionsEmptyIsArray keeps the empty response an array

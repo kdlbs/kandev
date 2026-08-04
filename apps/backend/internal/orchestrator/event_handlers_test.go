@@ -281,6 +281,11 @@ type mockAgentManager struct {
 	cancelAgentCalls   atomic.Int32
 	cancelAgentBlock   chan struct{}
 	cancelAgentEntered chan struct{}
+	// cancelAgentContextErr is returned after an optional block when the
+	// supplied context has been cancelled. It lets cancellation tests verify
+	// that accepted work uses a detached context.
+	cancelAgentContextErr error
+	cancelAgentFunc       func(context.Context, string) error
 	// cancelAgentErr, when set, is returned by CancelAgent instead of nil —
 	// lets tests exercise callers that must react to a genuine cancel
 	// failure (as opposed to the tolerated ErrNoExecutionForSession /
@@ -399,7 +404,7 @@ func (m *mockAgentManager) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}
 	return result, err
 }
-func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
+func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {
 	m.cancelAgentCalls.Add(1)
 	if m.cancelAgentEntered != nil {
 		select {
@@ -409,6 +414,12 @@ func (m *mockAgentManager) CancelAgent(_ context.Context, _ string) error {
 	}
 	if m.cancelAgentBlock != nil {
 		<-m.cancelAgentBlock
+	}
+	if m.cancelAgentFunc != nil {
+		return m.cancelAgentFunc(ctx, sessionID)
+	}
+	if m.cancelAgentContextErr != nil && ctx.Err() != nil {
+		return m.cancelAgentContextErr
 	}
 	return m.cancelAgentErr
 }
@@ -430,6 +441,10 @@ func (m *mockAgentManager) IsAgentReadyForPrompt(ctx context.Context, sessionID 
 
 func (m *mockAgentManager) OwnsPromptGeneration(_ string, executionID string, generation uint64) bool {
 	return executionID == m.currentPromptExecutionID && generation == m.currentPromptGeneration.Load()
+}
+
+func (m *mockAgentManager) GetPromptGenerationForSession(_ context.Context, _ string) (uint64, error) {
+	return m.currentPromptGeneration.Load(), nil
 }
 
 // RowLiveness makes the mock satisfy the orchestrator's optional

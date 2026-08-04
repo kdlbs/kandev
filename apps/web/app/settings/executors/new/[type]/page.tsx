@@ -574,7 +574,7 @@ function CreateProfileForm({
         label={typeInfo.label}
         description={typeInfo.description}
       />
-      <fieldset disabled={saving} className="contents">
+      <fieldset disabled={saving} className="space-y-8">
         <CreateProfileSections executorType={executorType} form={form} secrets={secrets} />
       </fieldset>
       {spritesTokenMissing && (

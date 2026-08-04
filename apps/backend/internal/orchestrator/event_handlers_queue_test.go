@@ -709,10 +709,10 @@ func TestDispatchTaskPRAgentPrompt_ArchivePurgesBusyAcceptedLifecycleEntry(t *te
 	}
 }
 
-// Lifecycle rows are server-owned: an untrusted client cannot remove one by
-// guessing its ID, but the task-deletion path has privileged authority to
-// purge it together with the task so no orphan work survives.
-func TestHandleTaskDeleted_PrivilegedCleanupPurgesLifecycleRowsWithoutClientDeleteAuthority(t *testing.T) {
+// Pending lifecycle rows are visible and cancellable by an authorized session
+// owner. Task deletion independently purges any remaining lifecycle work so no
+// orphan prompt survives after the task is gone.
+func TestHandleTaskDeleted_PurgesLifecycleRowsAfterUserCancellation(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedSession(t, repo, "t1", "s1", "step1")
@@ -724,8 +724,17 @@ func TestHandleTaskDeleted_PrivilegedCleanupPurgesLifecycleRowsWithoutClientDele
 	if err != nil || !accepted {
 		t.Fatalf("queue lifecycle prompt: accepted=%v err=%v", accepted, err)
 	}
-	if err := svc.messageQueue.RemoveEntry(ctx, "s1", queued.ID); !errors.Is(err, messagequeue.ErrEntryNotFound) {
-		t.Fatalf("client lifecycle removal error = %v, want ErrEntryNotFound", err)
+	if err := svc.messageQueue.RemoveEntry(ctx, "s1", queued.ID); err != nil {
+		t.Fatalf("remove visible lifecycle row: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("user cancellation retained %d lifecycle queue rows, want 0", got)
+	}
+	if _, _, accepted, err := svc.messageQueue.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s1", "t1", "remaining lifecycle prompt", "", messagequeue.QueuedByWorkflow,
+		false, nil, map[string]interface{}{"origin": githubPRAutomationOrigin}, "github-pr:repo:2:merged", true,
+	); err != nil || !accepted {
+		t.Fatalf("queue lifecycle prompt for task cleanup: accepted=%v err=%v", accepted, err)
 	}
 	if err := repo.DeleteTask(ctx, "t1"); err != nil {
 		t.Fatalf("delete task: %v", err)

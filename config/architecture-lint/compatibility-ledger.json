@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "agent-registry-type-aliases",
+      "locator": {
+        "path": "apps/backend/internal/agent/registry/registry.go",
+        "marker": "// Type aliases for backward compatibility during migration."
+      },
+      "reason": "Callers still refer to agent configuration types through the registry package after ownership moved to the agents package.",
+      "owner": "backend agent-runtime maintainers",
+      "introduced_on": "2026-02-14",
+      "removal_condition": "All callers import the owning agents package and no registry compatibility type alias remains.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "agent-model-fetcher-shim",
+      "locator": {
+        "path": "apps/backend/internal/agent/settings/modelfetcher/cache.go",
+        "marker": "// shim for legacy callers until they migrate."
+      },
+      "reason": "Legacy callers still require the old typed cache while model discovery moves to the host utility capability cache.",
+      "owner": "backend agent-settings maintainers",
+      "introduced_on": "2026-04-15",
+      "removal_condition": "No production package imports internal/agent/settings/modelfetcher and the shim package can be deleted.",
+      "target_removal_date": "2027-02-01"
+    },
+    {
+      "id": "passthrough-stdin-writes-legacy-view",
+      "locator": {
+        "path": "apps/backend/internal/agent/agents/passthrough_payload.go",
+        "marker": "// PlanPassthroughStdinWrites is the legacy string-only view of PlanPassthroughStdinChunks."
+      },
+      "reason": "Callers that do not yet consume timed passthrough chunks use a string-only compatibility view.",
+      "owner": "backend agent-runtime maintainers",
+      "introduced_on": "2026-05-25",
+      "removal_condition": "All callers use PlanPassthroughStdinChunks and preserve per-chunk delays where required.",
+      "target_removal_date": "2027-02-01"
+    }
+  ]
+}

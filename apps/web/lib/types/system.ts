@@ -122,11 +122,16 @@ export interface UpdatesResponse {
   /** ISO timestamp. */
   latest_checked_at: string;
   update_available: boolean;
+  channel: UpdatesChannel;
+  channel_editable: boolean;
+  channel_unsupported_reason: string;
   install?: InstallState;
   apply_supported?: boolean;
   apply_unsupported_reason?: string;
   manual_commands?: string[];
 }
+
+export type UpdatesChannel = "stable" | "nightly";
 
 export interface InstallState {
   running_as_service: boolean;
@@ -179,6 +184,22 @@ export interface SystemMetricsGlobalSettings {
 
 export interface SystemMetricsSettingsResponse {
   settings: SystemMetricsGlobalSettings;
+}
+
+export interface MessageQueueSettingsValue {
+  max_per_session: number;
+}
+
+export type MessageQueueSettingsSource = "default" | "setting" | "environment";
+
+export interface MessageQueueEffectiveSettings extends MessageQueueSettingsValue {
+  source: MessageQueueSettingsSource;
+  locked: boolean;
+}
+
+export interface MessageQueueSettingsResponse {
+  settings: MessageQueueSettingsValue;
+  effective: MessageQueueEffectiveSettings;
 }
 
 export interface SystemMetricSample {

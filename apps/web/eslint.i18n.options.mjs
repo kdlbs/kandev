@@ -161,8 +161,21 @@ export const noLiteralStringOptions = {
  *     and there is no treadmill.
  *
  * Entries may be single files or directory globs — use a file glob while a
- * directory is partially migrated, and collapse to `dir/**` once it is done.
- * The list only shrinks by mistake; adding to it is the whole point.
+ * directory is partially migrated. Once it is done, LEAVE those entries alone:
+ * **adding a path is the only safe edit to this list.**
+ *
+ * Do not collapse several file globs into one `dir/**`. That fails
+ * `check-guard-allowlist.mjs`, which flags every entry that disappears while its
+ * path still exists — globs included, resolved with `fs.globSync`. The check
+ * cannot tell a tidy-up from quietly dropping protection, and refusing to guess
+ * is the whole point of the ratchet: the two edits produce an identical diff to
+ * the array, and only one of them is harmless. A broader glob added *alongside*
+ * the existing entries passes; swapping them for it never does.
+ *
+ * Nor may a path be listed twice. An exact duplicate protects nothing new and
+ * presents an earlier migration's work as yours; the same check rejects it.
+ * (Entries a broader glob already covers are a different thing and are kept on
+ * purpose — see the storage globs below.)
  *
  * A clean lint is NOT proof a path is fully migrated — the rule only sees plain
  * literals in JSX. Template literals, `confirm()`/`alert()` arguments, and copy
@@ -681,7 +694,13 @@ export const i18nGuardFiles = [
   // union, and the `configure_session` rule `operation`s. Workflow and step
   // NAMES are user data throughout and are always interpolated as values,
   // never built into a message by concatenation.
-  "app/settings/workspace/[id]/workflows/**/*.{ts,tsx}",
+  // `[[]id[]]`, not `[id]`: glob brackets are a character class, so the
+  // unescaped form matches nothing and the entry silently guards no files.
+  // This one and the two under Workspaces were escaped by #2247, which hit the
+  // same trap on its own dynamic route. `pnpm lint` is unchanged by the repair,
+  // so these directories were always clean — just unguarded. See docs/i18n.md
+  // ("An entry can be born dead").
+  "app/settings/workspace/[[]id[]]/workflows/**/*.{ts,tsx}",
   "app/settings/workspace/use-workflow-creation.ts",
   "app/settings/workspace/workspace-workflows-client.tsx",
   "app/settings/workspace/workspace-workflows-dialogs.tsx",
@@ -813,4 +832,371 @@ export const i18nGuardFiles = [
   "hooks/domains/system/use-desktop-updater.ts",
   "hooks/domains/system/use-kandev-restart.ts",
   "hooks/domains/system/use-self-update.ts",
+  // The app sidebar, the settings nav tree and the app status bar. These mount
+  // on EVERY screen, so their copy is what the pseudo-coverage spec sees wrapped
+  // around each settings page it walks — leaving them was why that oracle had
+  // never run green.
+  //
+  // Deliberately file globs, not `components/app-sidebar/**`. #2202 has landed,
+  // so `sections/settings/system-group.tsx` is migrated and already listed in
+  // the System block above — this directory is now covered in full, just by two
+  // entries rather than one.
+  //
+  // Do NOT tidy that into `components/app-sidebar/**`.
+  // `check-guard-allowlist.mjs` flags any entry that disappears while its path
+  // still exists, globs included, so swapping these seven for one broader glob
+  // reports seven removed entries and fails (verified by simulating it). A
+  // redundant broader glob *alongside* them would pass; removing them never
+  // does.
+  //
+  // `general-group.tsx` and `agents-group.tsx` are absent on purpose: earlier
+  // migrations already listed them further up, and a second copy here would be
+  // dead weight that reads as this PR's coverage.
+  //
+  // The four `.ts` entries hold no JSX, so `mode: "jsx-only"` never inspects
+  // them. They are listed because they were read and carry no copy (section
+  // ids, cookie names, drag geometry, a route predicate) — not because the rule
+  // can keep them that way.
+  "components/app-sidebar/*.{ts,tsx}",
+  "components/app-sidebar/sections/*.tsx",
+  "components/app-sidebar/sections/settings/account-group.tsx",
+  "components/app-sidebar/sections/settings/executors-group.tsx",
+  "components/app-sidebar/sections/settings/settings-nav-primitives.tsx",
+  "components/app-sidebar/sections/settings/settings-tree.tsx",
+  "components/app-sidebar/sections/settings/workspaces-group.tsx",
+  "components/app-status-bar/**/*.{ts,tsx}",
+  "components/theme-toggle.tsx",
+  // The command palette's own copy. `group` doubles as the palette's Map key and
+  // its rendered heading, so it must be translated in lockstep across every
+  // producer; `components/task/recent-task-switcher-hooks.ts` is the other one
+  // and had its `group` converted here, but the rest of that file belongs to the
+  // components/task migration and is not listed.
+  "components/global-commands.tsx",
+  // Settings → Workspace: the workspace list and its inline create form, the
+  // workspace edit page (settings card, links card and delete dialog), the
+  // repositories page with its discover dialog, and the repository card with the
+  // branch-template help, copy-files help, custom-scripts editor and delete
+  // dialog it renders. Copy lives in a new `workspaces` namespace.
+  //
+  // This is a FILE list in `app/settings/workspace/`, not `**`, because the
+  // sibling `workspace-workflows-client.tsx` / `workspace-workflows-dialogs.tsx`
+  // and `use-workflow-creation.ts` belong to the workflow editor migrated in
+  // #2201 and are already listed above, while `[id]/automations/**` is a
+  // separate task.
+  //
+  // `components/settings/unsaved-indicator.tsx` is included: it is reached from
+  // nowhere else in the app today, so its "Unsaved changes" badge and its Save
+  // button were the only plain English left inside a repository card. Both
+  // strings went to `common` rather than `workspaces`, since the component is a
+  // generic settings primitive the remaining migrations will reuse.
+  //
+  // `components/settings/editable-card.tsx`, `settings-card.tsx` and
+  // `settings-section.tsx` are all in the closure and all already correct —
+  // the first two are pure render-prop/prop-forwarding shells and the third
+  // takes title/description as props. `editable-card.tsx` is already listed
+  // above from the Editors migration; the other two carry no literals at all.
+  //
+  // Two `.ts` files in this directory are deliberately ABSENT rather than
+  // listed. `workspace-repositories-validation.ts` is a single boolean predicate
+  // over the API response (`exists && is_git`) and
+  // `workspace-repositories-dirty.ts` is field-comparison logic — neither holds
+  // a string of any kind. Their user-facing validation MESSAGES live in
+  // `workspace-repositories-client.tsx`'s `useDiscoverDialog`, which is listed
+  // and migrated; `mode: "jsx-only"` could not have seen them there either,
+  // because they are `setManualValidation` arguments rather than JSX.
+  //
+  // Deliberately left in English, because each is PERSISTED rather than
+  // rendered: the seeded `New Repository` name in `buildDraftRepo`, and the
+  // `New Script` name and `echo ""` command the save path writes for a script
+  // left blank. Translating any of them would store a localized string in the
+  // database and render it later on surfaces this PR does not own — the same
+  // call as the `New Step` / `DEFAULT_CUSTOM_STEPS` names in #2201.
+  //
+  // Also English by design, each a VALUE the user types or a parser consumes,
+  // and each interpolated so the pseudo-locale cannot turn it into a dead
+  // pointer:
+  //   - The six branch-template placeholders `{title}` / `{title_full}` /
+  //     `{ticket}` / `{issue_key}` / `{task_id}` / `{suffix}`. `RenderTaskBranchName`
+  //     in `apps/backend/internal/worktree/config.go` substitutes each by exact
+  //     string match, so a translated token would land in the branch name
+  //     verbatim. Only the description beside each one is copy. Same for the
+  //     `feature/{ticket}-{title}` example and the default template
+  //     `feature/{title}-{suffix}`.
+  //   - Every copy-files glob: `.env`, `*`, `?`, `[abc]`, `**`, `**/.env`,
+  //     `{a,b}`, `.env{,.local}`, and the `:symlink` / `::symlink` suffixes.
+  //     The explanation around them is copy; the patterns are what the backend
+  //     matches on.
+  //   - `$PORT`, the environment variable a dev script reads.
+  //   - Every script placeholder (`#!/bin/bash` plus a command). Shell samples
+  //     the executor runs verbatim, the same call as `DEFAULT_DOCKERFILE` in the
+  //     executor editor.
+  //   - The `/absolute/path/to/repository`, `/path/to/repository` and `my-repo`
+  //     placeholders — value shapes, not prose.
+  //
+  // Repository names, paths, `owner/name` slugs, branch names and workspace
+  // names are user data throughout and are never built into a message by
+  // concatenation. The workspace delete dialog compares the typed text with the
+  // workspace's own name, so there is no translatable type-to-confirm token
+  // here to break; the name travels into the sentence as an interpolated value.
+  "app/settings/workspace/page.tsx",
+  "app/settings/workspace/[[]id[]]/page.tsx",
+  "app/settings/workspace/[[]id[]]/repositories/page.tsx",
+  "app/settings/workspace/workspace-edit-client.tsx",
+  "app/settings/workspace/workspace-not-found-card.tsx",
+  "app/settings/workspace/workspace-repositories-client.tsx",
+  "app/settings/workspace/workspace-repositories-dialog.tsx",
+  "app/settings/workspace/workspaces-page-client.tsx",
+  "components/settings/repository-branch-template-help.tsx",
+  "components/settings/repository-card.tsx",
+  "components/settings/repository-copy-files-help.tsx",
+  "components/settings/repository-custom-scripts.tsx",
+  "components/settings/repository-delete-dialog.tsx",
+  "components/settings/unsaved-indicator.tsx",
+  // Settings → External MCP, Prompts, Voice Mode and Utility Agents, plus the
+  // two Changelog cards. Four small routes in one entry group because none of
+  // them owns enough copy to be worth its own migration, and they share the
+  // `settings` namespace: two of the four already had their page title there
+  // (`settings:voiceMode`, `settings:utilityAgents`) and the other two in
+  // `common` (`common:externalMcp`, `common:prompts`), all of which are reused
+  // rather than twinned — `SEGMENT_LABEL_KEYS` in `settings-layout-client.tsx`
+  // renders the same words as the breadcrumb on these very routes.
+  //
+  // `lib/settings/external-mcp-tools.ts` is the load-bearing entry: a `.ts`
+  // catalog of 7 groups and 29 tools that `mode: "jsx-only"` never inspects, so
+  // its 43 strings were invisible to every previous sweep. Titles and
+  // descriptions now travel as `titleKey` / `descriptionKey` and resolve at
+  // render; the tool `name`s stay literal because they are the protocol
+  // identifiers an external agent calls. Two unit tests pin the keys to the
+  // catalog, because nothing else can.
+  //
+  // Three more shapes here held copy no lint rule could see, all now migrated:
+  // `buildEngineOptions` in `voice-mode-settings.tsx` (a plain builder
+  // returning label/description object literals), `noteForStatus` in
+  // `inference-agent-status.tsx` (a non-JSX switch over the probe status), and
+  // the `placeholder = "Select a model"` parameter default in
+  // `model-combobox.tsx`, which had to move into the component body — a
+  // parameter list is evaluated before `useTranslation()` is in scope.
+  //
+  // `model-combobox.tsx` and `inference-agent-status.tsx` were listed for the
+  // Settings → Agents migration and correctly left there, being absent from
+  // that route's import closure. They belong here: the combobox is reached from
+  // Utility Agents and from the task-side CLI profile editor
+  // (`components/agent/cli-profile-editor.tsx`, not yet migrated — the guard is
+  // per-file, so that surface is unaffected), and the status note only from
+  // Utility Agents. `mode-combobox.tsx`, `pty-terminal-dialog.tsx` and
+  // `changelog-list.tsx` are already listed above and were left alone.
+  //
+  // Five files here are DEAD TWINS — see "an existing key is not automatically
+  // the right key" in docs/i18n.md, which is the shape that silently rewrote
+  // English on a shipping System page. None of these had drifted, because none
+  // of them holds any copy at all, but the next migration should not have to
+  // rediscover which ones are live:
+  //
+  //   - `app/settings/prompts/page.tsx` and `app/settings/voice-mode/page.tsx`
+  //     are unreferenced. `SETTINGS_ROUTES` in `src/settings-routes.tsx` renders
+  //     `<PromptsSettings />` and `<VoiceModeSettings />` directly, so the SSR
+  //     prefetch in those pages never runs. `external-mcp` and `utility-agents`
+  //     go through their page, and are live.
+  //   - `app/settings/changelog/page.tsx` is likewise unreferenced; the route
+  //     table has its own `SettingsRedirect` to `/settings/system/updates`.
+  //   - `changelog-settings.tsx` and `changelog-notification-card.tsx` are
+  //     migrated but unreachable: nothing imports `ChangelogSettings`, and it is
+  //     the only importer of `ChangelogNotificationCard`. The pseudo-locale
+  //     therefore cannot verify either from any route — they were read by eye.
+  //
+  // That makes the whole changelog surface — the release-history list and the
+  // topbar-notification card — currently unreachable, which is worth stating
+  // plainly because it is easy to get wrong. `/settings/system/updates` renders
+  // `renderUpdatesRoute` from the route table, which mounts `UpdatesCard` and
+  // nothing else; it has never mounted `ChangelogList`. The
+  // `app/settings/system/updates/page.tsx` that did was itself a dead twin, and
+  // #2219 deleted it along with the other eight. So `changelog-list.tsx`, which
+  // #2202 allowlisted as part of that route, has no live consumer either. It is
+  // left listed here — an allowlist entry on unreachable code costs nothing and
+  // removing one is the thing this file must never do.
+  //
+  // Deleting the five is a correctness change, not tidiness, and belongs in its
+  // own PR rather than inside a copy-only migration.
+  //
+  // `use-inference-agents.ts` and `utility-dirty.ts` hold no JSX and no copy;
+  // the entries record that the review happened. `external-mcp-snippets.ts` is
+  // absent rather than noted: it is JSON/TOML config and CLI commands end to
+  // end, with no prose at all.
+  //
+  // Deliberately left in English, none of it copy:
+  //   - Every MCP tool `name` (`create_task_kandev`, …), the `parent_id`
+  //     request field, and the `open, in_progress, complete, blocked,
+  //     cancelled` task-state enum. The last two are interpolated as values so
+  //     the pseudo-locale cannot turn them into dead pointers.
+  //   - The agent product names and config paths in `SNIPPET_CARDS`
+  //     (`Claude Code`, `~/.claude.json`, `~/.codex/config.toml`, …) and the
+  //     whole of every generated snippet. All interpolated as values.
+  //   - The `{{` prompt-template sigil and the `@name` chat mention token —
+  //     both typed verbatim by the user, both interpolated.
+  //   - Wire values: the voice `engine` / `mode` / `whisper_web_model` unions
+  //     and the BCP-47 `language` tags, the `InferenceAgentStatus` probe
+  //     states, the `USE_DEFAULT` sentinel, and every agent/model id. Only
+  //     their labels are copy, and those travel as catalog keys.
+  //   - `~40 MB` / `~75 MB` / `~240 MB` in `WHISPER_MODELS`: download sizes in
+  //     binary units, not prose — the same call `storage-units.ts` made.
+  //   - Utility agent `name`, `description` and `prompt`, and custom prompt
+  //     `name` / `content`. The builtins' text is authored by the backend and
+  //     the rest is user data; a prompt body is also sent to the agent verbatim.
+  //   - `new Error("Voice settings require VoiceDraftProvider")`, a programming
+  //     error that can only fire in a broken render tree.
+  //
+  // Every key added here was audited against all 15 en catalogs for English that
+  // already exists under another key. Twelve matched. Ten are the established
+  // per-namespace pattern the repo already runs on — `Refresh`, `Add`,
+  // `Actions`, `Copied`, `Copy to clipboard`, `Tasks`, `Model`, `No default`,
+  // `Not configured` each already exist in two to eight namespaces, because a
+  // namespace is the unit a translator works in. Two needed a decision, both
+  // because they appear in `OWNED_BY_ANOTHER_NAMESPACE` in
+  // `settings-nav-copy.test.ts` and both because the nav renders the same word
+  // on the same screen:
+  //
+  //   - `externalMcpGroupAgents` = "Agents" vs `common:agents`
+  //   - `externalMcpGroupExecutors` = "Executors" vs `common:executors`
+  //
+  // These are kept separate, and that guard does not fire on them because it
+  // scans `sidebar.json` only. The rule it encodes is that a nav label and the
+  // page title of the destination it links to must share one key — same words,
+  // same destination. These are not that: they are headings for MCP tool
+  // categories mirroring the backend's grouping in
+  // `apps/backend/internal/mcp/server`, not the settings routes. Reusing
+  // `common:agents` would couple the tool catalog to the nav, so renaming the
+  // Agents settings route would silently retitle a group of MCP tools.
+  //
+  // `promptDeleteDescription` also duplicates `thisWillPermanentlyRemoveSecret`
+  // inside this namespace, sentence and tag index alike. Kept separate because
+  // that key is named for the secrets dialog it belongs to; folding the prompts
+  // dialog into it would leave a key whose name contradicts half its callers.
+  //
+  // Still English and NOT ours: `CONFIGURABLE_SHORTCUTS.VOICE_INPUT_TOGGLE.label`
+  // ("Voice Input") from `lib/keyboard/shortcut-overrides.ts`, interpolated into
+  // the migrated `settings:voiceShortcutTitle` frame. It is the shared keyboard
+  // registry, owned by whoever migrates `lib/keyboard`; under the pseudo-locale
+  // it reads as an English word inside accented copy, which is the oracle's
+  // known weak spot rather than a miss here.
+  "app/settings/changelog/**/*.{ts,tsx}",
+  "app/settings/external-mcp/**/*.{ts,tsx}",
+  "app/settings/prompts/**/*.{ts,tsx}",
+  "app/settings/utility-agents/**/*.{ts,tsx}",
+  "app/settings/voice-mode/**/*.{ts,tsx}",
+  "components/settings/changelog-notification-card.tsx",
+  "components/settings/changelog-settings.tsx",
+  "components/settings/config-chat-agent-section.tsx",
+  "components/settings/external-mcp-settings.tsx",
+  "components/settings/inference-agent-status.tsx",
+  "components/settings/model-combobox.tsx",
+  "components/settings/prompts-settings.tsx",
+  "components/settings/use-inference-agents.ts",
+  "components/settings/utility-agent-dialog.tsx",
+  "components/settings/utility-agents-section.tsx",
+  "components/settings/utility-dirty.ts",
+  "components/settings/utility-sections.tsx",
+  "components/settings/voice-mode-settings.tsx",
+  "lib/settings/external-mcp-tools.ts",
+  // Configuration Chat. `ConfigChatProvider` mounts the FAB on EVERY /settings
+  // route, so its `aria-label="Configuration Chat"` was the last text finding
+  // the pseudo-coverage oracle reported across the whole migrated surface.
+  //
+  // `use-config-chat.ts` holds no JSX, so `mode: "jsx-only"` never inspects it;
+  // the entry records that it was read by eye. The count from
+  // `pnpm run lint:i18n` reported it as 0 while it owned two strings that reach
+  // the user — the `setError` for a missing agent profile, and the fallback for
+  // a throw with no `message`. It imports the module-level `t` rather than the
+  // hook so each resolves when `startSession` runs, keeping `t` out of the
+  // callback's dependency array.
+  //
+  // `SUGGESTION_PROMPT_KEYS` in `config-chat-setup.tsx` was `SUGGESTION_PROMPTS`,
+  // four sentences the guard skipped entirely because the identifier is
+  // SCREAMING_CASE. They now travel as catalog keys and resolve at render.
+  //
+  // Copy lives in a new `configChat` namespace, except the feature NAME
+  // ("Configuration Chat"), which the command palette also renders and which is
+  // therefore `common:configurationChat` — `common:commandConfigurationChat`
+  // held the byte-identical string and was folded into it rather than left as a
+  // twin free to drift.
+  //
+  // Deliberately left in English: the `"Config Chat"` session-name fallback in
+  // `use-config-chat.ts`. `persistQuickChatRename` writes it to the task title,
+  // so translating it would persist a locale-dependent value — the same call as
+  // the built-in layout profile names and the seeded workflow step names.
+  //
+  // NOT listed, and not migrated here:
+  //   - `components/settings/config-chat-agent-section.tsx`, the Configuration
+  //     Chat card on Settings → Utility Agents. #2218 migrates it with the page
+  //     that owns it, into `settings:configChatAgent*`.
+  //   - `components/quick-chat/**`. `quick-chat-modal.tsx` renders
+  //     `ConfigChatSetup` in its `presentation="dialog"` form and calls
+  //     `useConfigChat`, so it inherits everything migrated here, but its own
+  //     chrome — and `configuration-chat-toggle.tsx`, which `ConfigChatSetup`
+  //     renders — is still English and belongs to the quick-chat migration.
+  "components/config-chat/*.{ts,tsx}",
+
+  // Automations — `components/automations/**` (incl. `trigger-configs/`) and
+  // the three `app/settings/**/automations/**` routes. Copy lives in a new
+  // `automations` namespace, except three strings reused verbatim from
+  // `common`: `common:automations` (the word SEGMENT_LABEL_KEYS already names
+  // as this settings route's owner), `common:cancel`, `common:status` and
+  // `common:requestFailed` — each diffed byte-for-byte against what the live
+  // surface rendered before reusing it. Inside the namespace the reverse call
+  // was made for "Webhook": the badge, the card summary and the picker's group
+  // heading get one key each rather than sharing one, because they are three
+  // different grammatical contexts and a language that inflects them
+  // differently would otherwise have nowhere to say so.
+  //
+  // Most of this directory's copy was invisible to the guard. `pnpm run
+  // lint:i18n` reported 116; the migration converted 156. The extra 40 were in
+  // shapes the rule does not inspect: SCREAMING_CASE config tables
+  // (`TRIGGER_LABELS`, `STATUS_BADGE`, `EXECUTION_MODE_ITEMS`, `PRESETS` in two
+  // files, `CRON_PRESETS`/`SIMPLE_SUMMARIES`/`TRIGGER_INFO`, `CI_CONCLUSIONS`,
+  // `PR_EVENTS`, `CATEGORY_META`), plain functions returning copy
+  // (`getTriggerSummary`, `getWorkflowStepHelpText`, `inputValueFor`), toasts
+  // and a save-contributor `invalidReason` in `automation-editor.tsx`, an
+  // `sr-only` "required" the guard's single-lowercase-token pattern skipped,
+  // and `automation-repository-selection.ts` — a `.ts` module with no JSX that
+  // reported 0 and held a picker option label.
+  //
+  // Persisted/protocol strings deliberately left in English, because a
+  // translated one breaks a stored automation with nothing failing until a
+  // locale switch: `DEFAULT_PROMPT` in `automation-editor.tsx` (persisted, sent
+  // to the agent verbatim, and compared with `===`), the `"New Automation"` and
+  // `"New Repository"` name fallbacks (both written to a record), every cron
+  // expression and shorthand, every TriggerType / RunStatus / ExecutionMode /
+  // PR-event / CI-conclusion id, `X-Webhook-Secret`, the `{{webhook.*}}`
+  // placeholder paths, and the example values in `placeholder` attributes
+  // (branch names, CI check names, GitHub usernames, a sample JSON body).
+  // `run.trigger_type` renders raw in the runs table for the same reason.
+  // Where syntax appears inside a sentence it travels as an interpolation
+  // value, so the pseudo-locale cannot accent it into something that no longer
+  // parses.
+  //
+  // NOT listed, and deliberately so:
+  //   - `components/task-create-dialog-multi-repo-guard.ts`. Its three disabled
+  //     -executor explanations render as a `title` in this editor's Executor
+  //     Profile picker, so they are migrated here (into `common:multiRepo*`),
+  //     but the module is shared with the un-migrated task-create dialog and
+  //     belongs to neither. Allowlisting it would claim a completeness that
+  //     dialog has not had; whichever migration takes the dialog adds it.
+  //   - `formatRelativeTime` in `lib/utils.ts`, which the runs table and the
+  //     automations table both render. It is a repo-wide formatter with 21
+  //     consumers and `lib/i18n/formats.ts` already holds its intended
+  //     replacement (`formatRelative`); swapping it is a cross-cutting change,
+  //     not part of a copy migration.
+  //
+  // NOTE the `[[]id[]]` escaping on the dynamic route. Written as `[id]`, the
+  // brackets are a glob CHARACTER CLASS matching a single `i` or `d`, so the
+  // pattern matches nothing and the route is silently unguarded — verified by
+  // putting a hardcoded literal in `automations/new/page.tsx` and watching
+  // `pnpm lint` report 0 errors. `check-guard-allowlist.mjs` cannot catch this:
+  // it only inspects entries that LEFT the array, so an entry that never
+  // matched anything looks identical to a healthy one. `fs.globSync` on the
+  // escaped form is what proves an entry is live.
+  "components/automations/*.{ts,tsx}",
+  "components/automations/trigger-configs/*.tsx",
+  "app/settings/automations/page.tsx",
+  "app/settings/workspace/[[]id[]]/automations/**/*.tsx",
+  "hooks/domains/settings/use-automation-runs.ts",
 ];

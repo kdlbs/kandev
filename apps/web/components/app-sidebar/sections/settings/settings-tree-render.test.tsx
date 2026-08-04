@@ -87,6 +87,8 @@ vi.mock("@kandev/ui/collapsible", async () => {
 });
 
 import { SettingsTree } from "./settings-tree";
+import { GeneralGroup } from "./general-group";
+import { SystemGroup } from "./system-group";
 import { WorkspacesGroup } from "./workspaces-group";
 
 describe("SettingsTree rendering", () => {
@@ -255,6 +257,24 @@ describe("SettingsTree standalone leaves", () => {
         .slice(-2)
         .map((link) => link.textContent),
     ).toEqual(["Plugins", "System"]);
+  });
+});
+
+describe("Message Queue settings navigation", () => {
+  afterEach(cleanup);
+
+  it("exposes Message Queue under General in the shared desktop and mobile settings tree", () => {
+    render(<GeneralGroup pathname="/settings/general/message-queue" expanded />);
+
+    const link = screen.getByRole("link", { name: "Message Queue" });
+    expect(link.getAttribute("href")).toBe("/settings/general/message-queue");
+    expect(link.className).toContain("before:bg-primary");
+  });
+
+  it("does not expose Message Queue under System", () => {
+    render(<SystemGroup pathname="/settings/system/status" expanded />);
+
+    expect(screen.queryByRole("link", { name: "Message Queue" })).toBeNull();
   });
 });
 

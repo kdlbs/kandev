@@ -157,6 +157,7 @@ func provideGateway(
 		orchestratorSvc.GetEventBus(),
 		log,
 		orchestratorSvc,
+		taskSvc,
 		referenceValidator,
 	)
 	queueHandlers.RegisterHandlers(gateway.Dispatcher)

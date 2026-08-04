@@ -83,6 +83,12 @@ func (s *Service) onStepCompletionSignaled(ctx context.Context, event *bus.Event
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isCancelInFlight(sessionID) {
+		s.logger.Debug("deferring workflow step completion signal while cancellation is in progress",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID))
+		return
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
@@ -15,16 +16,18 @@ type GitHubPRConfigProps = {
   onUpdate: (config: Record<string, unknown>) => void;
 };
 
+// `value` is the GitHub PR event name persisted in the trigger config and
+// matched by the backend — protocol. Label and tooltip are copy.
 const PR_EVENTS = [
   {
     value: "opened",
-    label: "Opened",
-    tooltip:
-      "Fires once when a new open PR is detected. Each PR number is deduped — the same PR won't trigger again.",
+    labelKey: "automations:prEventOpened",
+    tooltipKey: "automations:prEventOpenedTooltip",
   },
 ] as const;
 
 export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
+  const { t } = useTranslation();
   const events = (config.events as string[]) ?? [];
   const repos = (config.repos as RepoFilter[]) ?? [];
   const allRepos = (config.all_repos as boolean) ?? true;
@@ -74,7 +77,8 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
       />
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label className="text-xs">Base branches (comma-separated)</Label>
+          <Label className="text-xs">{t("automations:baseBranchesLabel")}</Label>
+          {/* Example branch names — data the user types verbatim, not copy. */}
           <Input
             value={branches}
             onChange={(e) => setBranches(e.target.value)}
@@ -83,7 +87,8 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
           />
         </div>
         <div className="space-y-1.5">
-          <Label className="text-xs">Authors (comma-separated)</Label>
+          <Label className="text-xs">{t("automations:authorsLabel")}</Label>
+          {/* Example GitHub usernames — data, not copy. */}
           <Input
             value={authors}
             onChange={(e) => setAuthors(e.target.value)}
@@ -99,7 +104,7 @@ export function GitHubPRConfig({ config, onUpdate }: GitHubPRConfigProps) {
           onCheckedChange={(checked) => onUpdate({ ...config, exclude_draft: checked })}
           className="cursor-pointer"
         />
-        <Label className="text-xs">Exclude draft PRs</Label>
+        <Label className="text-xs">{t("automations:excludeDraftPrs")}</Label>
       </div>
     </div>
   );
@@ -112,9 +117,10 @@ function EventsSection({
   events: string[];
   onToggle: (event: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <Label className="text-xs">Events</Label>
+      <Label className="text-xs">{t("automations:eventsLabel")}</Label>
       <div className="flex flex-wrap gap-3">
         {PR_EVENTS.map((evt) => (
           <label key={evt.value} className="flex items-center gap-1.5 cursor-pointer">
@@ -123,12 +129,12 @@ function EventsSection({
               onCheckedChange={() => onToggle(evt.value)}
               className="cursor-pointer"
             />
-            <span className="text-sm">{evt.label}</span>
+            <span className="text-sm">{t(evt.labelKey)}</span>
             <Tooltip>
               <TooltipTrigger asChild>
                 <IconInfoCircle className="h-3 w-3 text-muted-foreground" />
               </TooltipTrigger>
-              <TooltipContent className="max-w-[220px]">{evt.tooltip}</TooltipContent>
+              <TooltipContent className="max-w-[220px]">{t(evt.tooltipKey)}</TooltipContent>
             </Tooltip>
           </label>
         ))}

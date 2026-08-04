@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -27,24 +28,28 @@ const TRIGGER_BADGE_VARIANT: Record<TriggerType, string> = {
   webhook: "bg-orange-500/15 text-orange-400 border-orange-500/20",
 };
 
-const TRIGGER_LABELS: Record<TriggerType, string> = {
-  scheduled: "Scheduled",
-  github_pr: "GitHub PR",
-  github_push: "GitHub Push",
-  github_ci: "GitHub CI",
-  webhook: "Webhook",
+// The keys are persisted TriggerType identifiers the backend stores and
+// replays — only the catalog key is display copy, so the map holds keys and
+// resolves them at render (a module-scope t() would freeze at the boot locale).
+const TRIGGER_LABEL_KEYS: Record<TriggerType, string> = {
+  scheduled: "automations:triggerLabelScheduled",
+  github_pr: "automations:triggerLabelGithubPr",
+  github_push: "automations:triggerLabelGithubPush",
+  github_ci: "automations:triggerLabelGithubCi",
+  webhook: "automations:triggerLabelWebhook",
 };
 
 function TriggerBadges({ triggers }: { triggers: Automation["triggers"] }) {
+  const { t } = useTranslation();
   const items = triggers ?? [];
   if (items.length === 0) {
-    return <span className="text-xs text-muted-foreground">None</span>;
+    return <span className="text-xs text-muted-foreground">{t("automations:noTriggers")}</span>;
   }
   return (
     <div className="flex flex-wrap gap-1">
-      {items.map((t) => (
-        <Badge key={t.id} variant="outline" className={TRIGGER_BADGE_VARIANT[t.type]}>
-          {TRIGGER_LABELS[t.type]}
+      {items.map((trigger) => (
+        <Badge key={trigger.id} variant="outline" className={TRIGGER_BADGE_VARIANT[trigger.type]}>
+          {t(TRIGGER_LABEL_KEYS[trigger.type])}
         </Badge>
       ))}
     </div>
@@ -60,6 +65,7 @@ function RowActions({
   onTrigger: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-end gap-0.5">
       <Tooltip>
@@ -73,7 +79,7 @@ function RowActions({
             <IconPlayerPlay className="h-3.5 w-3.5" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Trigger manually</TooltipContent>
+        <TooltipContent>{t("automations:triggerManually")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -86,7 +92,7 @@ function RowActions({
             <IconTrash className="h-3.5 w-3.5 text-destructive" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("automations:delete")}</TooltipContent>
       </Tooltip>
     </div>
   );
@@ -100,6 +106,7 @@ export function AutomationsTable({
   onTrigger,
   onDelete,
 }: AutomationsTableProps) {
+  const { t } = useTranslation();
   const router = useRouter();
 
   return (
@@ -112,11 +119,11 @@ export function AutomationsTable({
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent focus-within:bg-transparent">
-            <TableHead>Name</TableHead>
-            <TableHead>Mode</TableHead>
-            <TableHead>Triggers</TableHead>
-            <TableHead>Enabled</TableHead>
-            <TableHead>Last Triggered</TableHead>
+            <TableHead>{t("automations:columnName")}</TableHead>
+            <TableHead>{t("automations:columnMode")}</TableHead>
+            <TableHead>{t("automations:columnTriggers")}</TableHead>
+            <TableHead>{t("automations:columnEnabled")}</TableHead>
+            <TableHead>{t("automations:columnLastTriggered")}</TableHead>
             <TableHead className="w-[100px]" />
           </TableRow>
         </TableHeader>
@@ -128,7 +135,7 @@ export function AutomationsTable({
                 className="text-center text-muted-foreground py-8"
                 data-testid="automations-empty"
               >
-                No automations yet
+                {t("automations:noAutomationsYet")}
               </TableCell>
             </TableRow>
           ) : (
@@ -146,7 +153,9 @@ export function AutomationsTable({
                 <TableCell className="font-medium">{a.name}</TableCell>
                 <TableCell>
                   <Badge variant="outline" className="text-[10px]">
-                    {a.execution_mode === "run" ? "Run" : "Task"}
+                    {a.execution_mode === "run"
+                      ? t("automations:executionModeRunShort")
+                      : t("automations:executionModeTaskShort")}
                   </Badge>
                 </TableCell>
                 <TableCell>
@@ -163,7 +172,9 @@ export function AutomationsTable({
                   />
                 </TableCell>
                 <TableCell className="text-muted-foreground text-sm">
-                  {a.last_triggered_at ? formatRelativeTime(a.last_triggered_at) : "Never"}
+                  {a.last_triggered_at
+                    ? formatRelativeTime(a.last_triggered_at)
+                    : t("automations:neverTriggered")}
                 </TableCell>
                 <TableCell onClick={(e) => e.stopPropagation()}>
                   <RowActions id={a.id} onTrigger={onTrigger} onDelete={onDelete} />

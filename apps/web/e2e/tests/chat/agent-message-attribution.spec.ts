@@ -101,18 +101,20 @@ async function createIdleTarget(
   return { id: task.id, sessionId: task.session_id };
 }
 
-/** Create a sender task whose initial prompt fires off a single message_task
- *  call against the supplied target and then exits with a final text. */
+/** Create a sender task whose initial prompt fires one or more message_task
+ *  calls against the supplied target and then exits with a final text. */
 async function createSenderTaskingTarget(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
   targetTaskId: string,
-  prompt: string,
+  prompt: string | string[],
 ): Promise<{ id: string; sessionId: string }> {
-  const description = [mcpScript({ task_id: targetTaskId, prompt }), 'e2e:message("done")'].join(
-    "\n",
-  );
+  const prompts = Array.isArray(prompt) ? prompt : [prompt];
+  const description = [
+    ...prompts.map((message) => mcpScript({ task_id: targetTaskId, prompt: message })),
+    'e2e:message("done")',
+  ].join("\n");
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -136,6 +138,83 @@ async function openTask(testPage: Page, taskId: string): Promise<SessionPage> {
 }
 
 test.describe("Cross-task agent message attribution", () => {
+  test("full agent-origin queue supports remove, clear-all, and new admission", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const target = await createIdleTarget(
+      apiClient,
+      seedData,
+      "Target — full agent queue",
+      ["e2e:delay(90000)", 'e2e:message("target finished")'].join("\n"),
+    );
+    const session = await openTask(testPage, target.id);
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(target.id);
+          return sessions.find((candidate) => candidate.id === target.sessionId)?.state;
+        },
+        { timeout: 20_000, message: "Target did not stay busy for queue seeding" },
+      )
+      .toBe("RUNNING");
+
+    await createSenderTaskingTarget(
+      apiClient,
+      seedData,
+      "Sender — first five queue rows",
+      target.id,
+      Array.from({ length: 5 }, (_, index) => `agent queued ${index + 1}`),
+    );
+    await createSenderTaskingTarget(
+      apiClient,
+      seedData,
+      "Sender — final five queue rows",
+      target.id,
+      Array.from({ length: 5 }, (_, index) => `agent queued ${index + 6}`),
+    );
+
+    const chat = session.activeChat();
+    const chip = chat.getByTestId("queue-chip");
+    await expect(chip).toContainText("10 queued", { timeout: 30_000 });
+    await chip.click();
+
+    const panel = chat.getByTestId("queued-ghost-list");
+    const entries = panel.getByTestId("queue-entry-text");
+    await expect(entries).toHaveCount(10, { timeout: 30_000 });
+    await expect(panel).toContainText("10 of 10");
+    await expect(panel.getByTestId("sender-task-badge")).toHaveCount(10);
+    await expect(panel.getByTestId("queue-entry-edit")).toHaveCount(0);
+    await expect(panel.getByTestId("queue-entry-remove")).toHaveCount(10);
+
+    const firstAgentEntry = panel.getByTestId("queue-entry").filter({
+      has: testPage.getByTestId("queue-entry-text").filter({ hasText: /^agent queued 1$/ }),
+    });
+    await firstAgentEntry.getByTestId("queue-entry-remove").click();
+    await expect(entries).toHaveCount(9, { timeout: 10_000 });
+    await expect(panel).toContainText("9 of 10");
+
+    await panel.getByTestId("queue-clear-all").click();
+    await expect(panel).not.toBeVisible({ timeout: 10_000 });
+    await expect(chat.getByTestId("queue-chip")).not.toBeVisible();
+
+    await createSenderTaskingTarget(
+      apiClient,
+      seedData,
+      "Sender — capacity reopened",
+      target.id,
+      "accepted after clear",
+    );
+    await expect(chat.getByTestId("queue-chip")).toContainText("1 queued", {
+      timeout: 30_000,
+    });
+    await chat.getByTestId("queue-chip").click();
+    await expect(chat.getByTestId("queue-entry-text")).toHaveText("accepted after clear");
+  });
+
   test("running target task: queued message shows sender badge in chat", async ({
     testPage,
     apiClient,

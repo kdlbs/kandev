@@ -120,7 +120,9 @@ For predictable top-level creation, pass `repository_url`, `repository_id`, or `
 | Created but not started     | Starts the session with the message.      |
 | Failed or cancelled         | Returns an error.                         |
 
-The default delivery mode is queued. Each session accepts 10 queued messages by default; operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`, and a value of `0` or less disables the limit. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after a target turn completes.
+The default delivery mode is queued. Each session accepts 10 queued messages by default. An admin can change the install-wide limit under **Settings > General > Message Queue**; `0` means unlimited. The saved value applies immediately to new admissions without removing messages already waiting. `KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence, locks the UI field, and requires a restart when changed; zero or a negative value means unlimited. Only one queued message drains per agent turn. When the cap is reached, the sender receives a structured `queue_full` error and should retry after space becomes available.
+
+In the task workbench, expand the queue chip to manage pending messages. Every visible pending row has **Remove**, whether it came from a user, another agent, workflow automation, or a server action. **Clear all** removes all visible pending rows in that session and releases their capacity. After removal, merge, or drain, displayed positions compact to `#1` through `#N` while FIFO order stays unchanged. Provenance still matters for editing and merging: only user-origin content can be edited. A row already reserved for delivery is hidden from the panel and cannot be cancelled there.
 
 Choose the control by intent:
 

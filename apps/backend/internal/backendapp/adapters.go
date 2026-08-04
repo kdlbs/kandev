@@ -97,6 +97,7 @@ type lifecycleAdapter struct {
 
 var _ interface {
 	OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool
+	GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error)
 } = (*lifecycleAdapter)(nil)
 
 // newLifecycleAdapter creates a new lifecycle adapter
@@ -401,6 +402,10 @@ func (a *lifecycleAdapter) WasSessionInitialized(executionID string) bool {
 
 func (a *lifecycleAdapter) OwnsPromptGeneration(sessionID, executionID string, generation uint64) bool {
 	return a.mgr.OwnsPromptGeneration(sessionID, executionID, generation)
+}
+
+func (a *lifecycleAdapter) GetPromptGenerationForSession(ctx context.Context, sessionID string) (uint64, error) {
+	return a.mgr.GetPromptGenerationForSession(ctx, sessionID)
 }
 
 func (a *lifecycleAdapter) GetSessionAuthMethods(sessionID string) []streams.AuthMethodInfo {

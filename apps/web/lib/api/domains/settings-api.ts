@@ -21,6 +21,8 @@ import type {
   DynamicModelsResponse,
 } from "@/lib/types/http";
 import type {
+  MessageQueueSettingsResponse,
+  MessageQueueSettingsValue,
   SystemMetricsGlobalSettings,
   SystemMetricsSettingsResponse,
 } from "@/lib/types/system";
@@ -54,6 +56,31 @@ export async function updateSystemMetricsSettings(
   return fetchJson<SystemMetricsSettingsResponse>("/api/v1/system/metrics/settings", {
     ...options,
     init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(payload) },
+  });
+}
+
+const MESSAGE_QUEUE_SETTINGS_PATH = "/api/v1/system/message-queue/settings";
+
+export async function fetchMessageQueueSettings(
+  options?: ApiRequestOptions,
+): Promise<MessageQueueSettingsResponse> {
+  return fetchJsonWithRetry<MessageQueueSettingsResponse>(MESSAGE_QUEUE_SETTINGS_PATH, {
+    ...options,
+    cache: "no-store",
+  });
+}
+
+export async function updateMessageQueueSettings(
+  payload: MessageQueueSettingsValue,
+  options?: ApiRequestOptions,
+): Promise<MessageQueueSettingsResponse> {
+  return fetchJson<MessageQueueSettingsResponse>(MESSAGE_QUEUE_SETTINGS_PATH, {
+    ...options,
+    init: {
+      ...(options?.init ?? {}),
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
   });
 }
 

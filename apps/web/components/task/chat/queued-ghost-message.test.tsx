@@ -26,6 +26,8 @@ const ATTACHMENT_1_ALT = "Attachment 1";
 const OPEN_ATTACHMENT_1_LABEL = "Open Attachment 1";
 const FULL_SIZE_ATTACHMENT_1_ALT = "Full size Attachment 1";
 const MERGE_TESTID = "queue-entry-merge";
+const EDIT_TESTID = "queue-entry-edit";
+const REMOVE_TESTID = "queue-entry-remove";
 const EDIT_TITLE = "Edit queued message";
 const MERGE_TITLE = "Merge with above";
 
@@ -341,6 +343,59 @@ describe("QueuedGhostMessage merge control", () => {
     );
     fireEvent.click(screen.getByTitle(EDIT_TITLE));
     expect(screen.queryByTestId(MERGE_TESTID)).toBeNull();
+  });
+});
+
+describe("QueuedGhostMessage row actions", () => {
+  it("shows Remove independently when an entry is not editable", () => {
+    const onRemove = vi.fn();
+    render(
+      <QueuedGhostMessage
+        entry={entry({ queued_by: "agent" })}
+        canEdit={false}
+        canRemove
+        onSave={async () => {}}
+        onRemove={onRemove}
+      />,
+    );
+
+    expect(screen.queryByTestId(EDIT_TESTID)).toBeNull();
+    fireEvent.click(screen.getByTestId(REMOVE_TESTID));
+    expect(onRemove).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps Edit independent from Remove", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry()}
+        canEdit
+        canRemove={false}
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    expect(screen.getByTestId(EDIT_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(REMOVE_TESTID)).toBeNull();
+  });
+
+  it("keeps compact desktop controls but provides coarse-pointer visibility and 44px targets", () => {
+    render(
+      <QueuedGhostMessage
+        entry={entry({ queued_by: "workflow" })}
+        canEdit={false}
+        canRemove
+        onSave={async () => {}}
+        onRemove={() => {}}
+      />,
+    );
+
+    const remove = screen.getByTestId(REMOVE_TESTID);
+    expect(remove.className).toContain("h-6");
+    expect(remove.className).toContain("w-6");
+    expect(remove.className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(remove.className).toContain("[@media(pointer:coarse)]:w-11");
+    expect(remove.parentElement?.className).toContain("[@media(pointer:coarse)]:opacity-100");
   });
 });
 

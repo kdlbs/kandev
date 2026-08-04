@@ -168,3 +168,64 @@ describe("useExpandableDiff", () => {
     expect(result.current.metadata).toBeNull();
   });
 });
+
+describe("useExpandableDiff — content-load retries", () => {
+  it("retries a transient WebSocket timeout and succeeds on a later attempt", async () => {
+    // A single 5s WS timeout used to set a terminal error and permanently
+    // disable expansion for this mount (the auto-load effect only fires while
+    // there is no error). The load now retries transient failures, so a brief
+    // backend stall recovers instead of killing expansion.
+    requestFileContentMock
+      .mockRejectedValueOnce(new Error("WebSocket request timed out: workspace.file.get"))
+      .mockResolvedValue({ content: "new", is_binary: false });
+    requestFileContentAtRefMock.mockResolvedValue({ content: "old", is_binary: false });
+    const reparsed = consistentMeta();
+    processFileMock.mockReturnValue(reparsed);
+
+    const { result } = renderHook(() =>
+      useExpandableDiff({ ...baseProps, fileDiffMetadata: PARTIAL }),
+    );
+    await loadAndSettle(result.current.loadContent);
+
+    expect(requestFileContentMock).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBeNull();
+    expect(result.current.metadata).toBe(reparsed);
+    expect(result.current.isContentLoaded).toBe(true);
+  });
+
+  it("does not retry a permanent error and falls back to the partial metadata", async () => {
+    // Binary files can never be expanded; retrying would just spin. The load
+    // surfaces the error on the first attempt and keeps the partial metadata.
+    requestFileContentMock.mockRejectedValue(new Error("Cannot expand binary files"));
+    requestFileContentAtRefMock.mockResolvedValue({ content: "old", is_binary: false });
+
+    const { result } = renderHook(() =>
+      useExpandableDiff({ ...baseProps, fileDiffMetadata: PARTIAL }),
+    );
+    await loadAndSettle(result.current.loadContent);
+
+    expect(requestFileContentMock).toHaveBeenCalledTimes(1);
+    expect(result.current.error).toBe("Cannot expand binary files");
+    expect(result.current.metadata).toBe(PARTIAL);
+    expect(result.current.canExpand).toBe(false);
+  });
+
+  it("surfaces a terminal error after transient retries are exhausted", async () => {
+    // Four attempts total (initial + 3 retries); when every one times out the
+    // load gives up with the error so the caller falls back to partial metadata.
+    requestFileContentMock.mockRejectedValue(
+      new Error("WebSocket request timed out: workspace.file.get"),
+    );
+    requestFileContentAtRefMock.mockResolvedValue({ content: "old", is_binary: false });
+
+    const { result } = renderHook(() =>
+      useExpandableDiff({ ...baseProps, fileDiffMetadata: PARTIAL }),
+    );
+    await loadAndSettle(result.current.loadContent);
+
+    expect(requestFileContentMock).toHaveBeenCalledTimes(4);
+    expect(result.current.error).toContain("timed out");
+    expect(result.current.metadata).toBe(PARTIAL);
+    expect(result.current.canExpand).toBe(false);
+  });
+});

@@ -54,6 +54,8 @@ export type MobileSessionState = {
 
 export type ChatInputState = {
   planModeBySessionId: Record<string, boolean>;
+  /** True while a session's agent.cancel request is awaiting settlement. */
+  cancellingBySessionId: Record<string, boolean>;
 };
 
 export type TranscriptAutoScrollState = {
@@ -223,6 +225,7 @@ export type UISliceActions = {
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
   setTranscriptVirtuosoState: (sessionId: string, state: StateSnapshot) => void;

@@ -322,21 +322,16 @@ test.describe("Workflow settings", () => {
   });
 
   test("modifies a step name only after Save", async ({ testPage, apiClient, seedData }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Step Rename Workflow");
+    const step = await apiClient.createWorkflowStep(workflow.id, "Original Step", 0);
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    // Use the first step name from seed data (same template)
-    const firstStepName = seedData.steps[0]?.name;
-    if (!firstStepName) {
-      test.skip(true, "No template steps available");
-      return;
-    }
-
-    const card = await page.findWorkflowCard("E2E Workflow");
+    const card = await page.findWorkflowCard(workflow.name);
     await expect(card).toBeVisible();
 
     // Click on the first step to open config panel
-    const stepNode = page.stepNodeByName(card, firstStepName);
+    const stepNode = page.stepNodeByName(card, step.name);
     await stepNode.click();
 
     // Find the step name input in the config panel and rename it
@@ -345,8 +340,8 @@ test.describe("Workflow settings", () => {
 
     await expect(nameInput).toHaveAttribute("data-settings-dirty", "true");
     await expect(card).toHaveAttribute("data-settings-dirty", "true");
-    const stepPanel = card.getByTestId(`workflow-step-panel-${seedData.steps[0].id}`);
-    const dirtyStepNode = card.getByTestId(`workflow-step-node-${seedData.steps[0].id}`);
+    const stepPanel = card.getByTestId(`workflow-step-panel-${step.id}`);
+    const dirtyStepNode = card.getByTestId(`workflow-step-node-${step.id}`);
 
     await expect(stepPanel).toHaveAttribute("data-settings-dirty", "true");
     await expect(card).toHaveAttribute("data-settings-dirty-level", "card");
@@ -359,16 +354,14 @@ test.describe("Workflow settings", () => {
     expect(await maxRingSpread(stepPanel)).toBe(0);
     expect(await maxRingSpread(dirtyStepNode)).toBe(0);
 
-    expect((await apiClient.listWorkflowSteps(seedData.workflowId)).steps[0]?.name).toBe(
-      firstStepName,
-    );
+    expect((await apiClient.listWorkflowSteps(workflow.id)).steps[0]?.name).toBe(step.name);
     await page.saveChanges();
 
     await expect(nameInput).toHaveAttribute("data-settings-dirty", "false");
     await expect(card).toHaveAttribute("data-settings-dirty", "false");
 
     await page.goto(seedData.workspaceId);
-    const reloadedCard = await page.findWorkflowCard("E2E Workflow");
+    const reloadedCard = await page.findWorkflowCard(workflow.name);
     await expect(reloadedCard).toBeVisible();
     await expect(reloadedCard.getByText("Renamed Step")).toBeVisible();
   });
@@ -441,10 +434,11 @@ test.describe("Workflow settings", () => {
     apiClient,
     seedData,
   }) => {
+    const workflow = await apiClient.createWorkflow(seedData.workspaceId, "Workflow Detail Save");
     const page = new WorkflowSettingsPage(testPage);
     await page.goto(seedData.workspaceId);
 
-    const card = await page.findWorkflowCard("E2E Workflow");
+    const card = await page.findWorkflowCard(workflow.name);
     const nameInput = card.locator("input").first();
     await nameInput.fill("Manually Saved Workflow Name");
 
@@ -453,9 +447,9 @@ test.describe("Workflow settings", () => {
 
     expect(
       (await apiClient.listWorkflows(seedData.workspaceId)).workflows.find(
-        (workflow) => workflow.id === seedData.workflowId,
+        (candidate) => candidate.id === workflow.id,
       )?.name,
-    ).toBe("E2E Workflow");
+    ).toBe(workflow.name);
     await expect(page.floatingSave).toBeVisible();
     await page.saveChanges();
 

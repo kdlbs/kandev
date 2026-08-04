@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -50,15 +51,18 @@ function RepoListContent({
   selectedRepoPath: string | null;
   onSelectRepoPath: (path: string) => void;
 }) {
+  const { t } = useTranslation();
   if (isLoading)
     return (
       <div className="flex items-center gap-2 p-3 text-sm text-muted-foreground">
         <IconLoader2 className="h-4 w-4 animate-spin" />
-        Scanning repositories...
+        {t("workspaces:scanningRepositories")}
       </div>
     );
   if (filteredRepositories.length === 0)
-    return <div className="p-3 text-sm text-muted-foreground">No repositories found.</div>;
+    return (
+      <div className="p-3 text-sm text-muted-foreground">{t("workspaces:noRepositoriesFound")}</div>
+    );
   return (
     <>
       {filteredRepositories.map((repo) => (
@@ -93,20 +97,19 @@ export function DiscoverRepoDialog({
   canSave,
   onConfirm,
 }: DiscoverRepoDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Add Local Repository</DialogTitle>
-          <DialogDescription>
-            Select a discovered repository or provide an absolute path to validate.
-          </DialogDescription>
+          <DialogTitle>{t("workspaces:addLocalRepository")}</DialogTitle>
+          <DialogDescription>{t("workspaces:discoverRepositoryDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Discovered repositories</Label>
+            <Label>{t("workspaces:discoveredRepositories")}</Label>
             <Input
-              placeholder="Filter repositories..."
+              placeholder={t("workspaces:filterRepositories")}
               value={repoSearch}
               onChange={(e) => onRepoSearchChange(e.target.value)}
             />
@@ -120,8 +123,10 @@ export function DiscoverRepoDialog({
             </div>
           </div>
           <div className="space-y-2">
-            <Label>Manual path</Label>
+            <Label>{t("workspaces:manualPath")}</Label>
             <div className="flex items-center gap-2">
+              {/* An absolute filesystem path is the value shape this field
+                  expects, not prose — left in English deliberately. */}
               <Input
                 placeholder="/absolute/path/to/repository"
                 value={manualRepoPath}
@@ -133,7 +138,7 @@ export function DiscoverRepoDialog({
                 onClick={onValidateManualPath}
                 disabled={!manualRepoPath.trim() || isValidating}
               >
-                {isValidating ? "Checking..." : "Validate"}
+                {isValidating ? t("workspaces:checking") : t("workspaces:validate")}
               </Button>
             </div>
             {manualValidation.status === "error" && (
@@ -146,10 +151,10 @@ export function DiscoverRepoDialog({
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button type="button" onClick={onConfirm} disabled={!canSave}>
-            Use Repository
+            {t("workspaces:useRepository")}
           </Button>
         </DialogFooter>
       </DialogContent>

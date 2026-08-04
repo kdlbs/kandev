@@ -225,8 +225,9 @@ test.describe("Workflow automation", () => {
     // Session transitions to idle — plan mode input placeholder visible
     await expect(session.planModeInput()).toBeVisible({ timeout: 15_000 });
 
-    // Sidebar shows the task under "Turn Finished" section
-    await expect(session.sidebarSection("Turn Finished")).toBeVisible();
+    // The active kanban projection must win over any stale all-workflow
+    // snapshot that was already in flight when the turn completed.
+    await expect(session.taskInSection("Plan Mode Workflow Task", "Turn Finished")).toBeVisible();
   });
 
   /**

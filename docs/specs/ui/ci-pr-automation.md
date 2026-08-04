@@ -136,6 +136,20 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
   every linked PR. Dedupe, last-attempt, review-request, and terminal state are
   tracked per linked PR.
 - Kandev checks watched PRs through the existing lightweight PR watch poller, which runs once per minute. Automation wakeups sync the latest lightweight PR state before evaluating gates. When auto-fix is enabled, Kandev fetches full PR feedback so failing checks, requested changes, unresolved threads, and human PR conversation comments can trigger deduped prompts even when the persisted lightweight row was stale. Auto-fix waits until all PR checks have finished before sending or queueing a prompt, so the agent receives the final check set and current comments in one pass. Bot-authored PR conversation comments without failed checks or unresolved review threads are treated as non-actionable status chatter and do not send an agent prompt.
+- Lightweight PR status sync counts unresolved review threads across every page
+  returned by GitHub. A connection's `totalCount` indicates that more threads
+  exist; it never classifies omitted threads as unresolved. The CI popover,
+  auto-fix eligibility, and auto-merge readiness consume only a complete
+  review-thread count.
+- If Kandev cannot finish review-thread pagination, it discards the partial
+  count and follows the existing PR-status sync failure path. A partial page
+  never replaces the last complete persisted count or becomes fresh automation
+  input. If the initial batch also identified unresolvable repositories, those
+  classifications still reach the existing negative cache even when another
+  repository's continuation fails.
+- Branch-only PR discovery associates PR metadata without fetching unused
+  review-thread continuation pages. Once the watch has a PR number, the next
+  numbered status sync produces the complete review-thread count.
 - Saving PR automation options while any option is enabled immediately
   evaluates the task's current linked PRs instead of waiting for the next PR
   watch poll. Prompt edits do not reset unchanged checkpoints.
@@ -430,6 +444,21 @@ Auto-merge cycle for one task/PR:
 ## Scenarios
 
 - **GIVEN** a task with one open linked PR, **WHEN** the user opens the CI popover above the chat input, **THEN** the popover shows the current CI/review summary and all five automation controls.
+- **GIVEN** a linked PR with more than 100 review threads and every thread is
+  resolved, **WHEN** Kandev completes its lightweight PR status sync, **THEN**
+  the CI popover shows no unresolved-review row and automation evaluates an
+  unresolved-thread count of zero.
+- **GIVEN** a linked PR whose unresolved review threads span more than one
+  GitHub page, **WHEN** Kandev completes its lightweight PR status sync,
+  **THEN** the persisted and displayed count equals the unresolved threads
+  across all pages.
+- **GIVEN** Kandev has a complete persisted review-thread count and GitHub
+  fails a later pagination request, **WHEN** the lightweight PR status sync
+  runs, **THEN** no partial or inferred count replaces that complete value.
+- **GIVEN** one repository is unresolvable and another repository's
+  review-thread continuation fails in the same batch, **WHEN** lightweight PR
+  status sync handles the failure, **THEN** it discards all partial statuses
+  while still negative-caching the unresolvable repository.
 - **GIVEN** a user is viewing the CI popover automation controls, **WHEN** they activate the info icon, **THEN** they see help text explaining that Kandev uses the existing 1-minute PR watch checks, fetches full feedback only for candidate PRs, snapshots each auto-fix round, and merges only when readiness gates pass.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-fix CI & address comments`, **THEN** the setting persists and remains enabled after page reload.
 - **GIVEN** a task with one open linked PR, **WHEN** the user enables `Auto-merge when ready`, **THEN** the setting persists and remains enabled after page reload.

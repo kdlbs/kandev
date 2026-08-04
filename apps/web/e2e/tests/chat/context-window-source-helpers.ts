@@ -6,6 +6,8 @@ import { SessionPage } from "../../pages/session-page";
 type ContextWindowStore = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
+      taskSessions: { items: Record<string, { state?: string }> };
+      clearContextWindow: (sessionId: string) => void;
       setContextWindow: (
         sessionId: string,
         contextWindow: {
@@ -18,6 +20,7 @@ type ContextWindowStore = Window & {
         },
       ) => void;
     };
+    setState: (partial: { clearContextWindow: (sessionId: string) => void }) => void;
   };
 };
 
@@ -44,6 +47,54 @@ export async function seedContextWindowTask(
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
 
+  // The idle input can render from the terminal text frame before the backend
+  // persists the session-state transition. That transition purges runtime
+  // context metadata, so injecting the fixture data before it settles can make
+  // the context control disappear while the mobile test is tapping it.
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((candidate) => candidate.id === task.session_id)?.state;
+      },
+      { timeout: 30_000, message: "Waiting for the context session to become idle" },
+    )
+    .toBe("WAITING_FOR_INPUT");
+
+  // The backend transition can beat this page's WS subscription. Reload from
+  // the persisted idle state before injecting runtime-only context data, or a
+  // late hydration can purge the fixture while a touch interaction is in
+  // progress.
+  await testPage.reload();
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+  await expect
+    .poll(() =>
+      testPage.evaluate(
+        (sessionId) =>
+          (window as ContextWindowStore).__KANDEV_E2E_STORE__?.getState().taskSessions.items[
+            sessionId
+          ]?.state,
+        task.session_id!,
+      ),
+    )
+    .toBe("WAITING_FOR_INPUT");
+
+  // Context metadata is runtime-only in this fixture. Protect the synthetic
+  // value from duplicate late session/model hydration frames that carry an
+  // explicit empty context window; those frames are unrelated to the touch UI
+  // contract under test and otherwise detach the trigger mid-tap.
+  await testPage.evaluate((sessionId) => {
+    const store = (window as ContextWindowStore).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge is unavailable");
+    const clearContextWindow = store.getState().clearContextWindow;
+    store.setState({
+      clearContextWindow: (candidateId) => {
+        if (candidateId !== sessionId) clearContextWindow(candidateId);
+      },
+    });
+  }, task.session_id!);
+
   await testPage.evaluate((sessionId) => {
     const store = (window as ContextWindowStore).__KANDEV_E2E_STORE__;
     if (!store) throw new Error("E2E store bridge is unavailable");
@@ -55,7 +106,8 @@ export async function seedContextWindowTask(
       compactionCount: 2,
       source: "acp",
     });
-  }, task.session_id);
+  }, task.session_id!);
+  await expect(testPage.getByRole("button", { name: "Context window: 21% used" })).toBeVisible();
 }
 
 export async function expectCompactionCount(contextTooltip: Locator): Promise<void> {
@@ -67,12 +119,18 @@ export async function expectCompactionCount(contextTooltip: Locator): Promise<vo
 
 export async function expectSourceRightOfTokenCount(contextTooltip: Locator): Promise<void> {
   const row = contextTooltip.getByTestId("context-window-token-row").first();
-  const tokenCount = row.getByText("54.1K of 258.4K tokens");
-  const source = row.getByText("ACP", { exact: true });
-  const [tokenBox, sourceBox] = await Promise.all([tokenCount.boundingBox(), source.boundingBox()]);
+  await expect(row).toBeVisible();
+  const positions = await row.evaluate((element) => {
+    const tokenCount = element.firstElementChild;
+    const source = element.lastElementChild;
+    if (!(tokenCount instanceof HTMLElement) || !(source instanceof HTMLElement)) return null;
+    const tokenBox = tokenCount.getBoundingClientRect();
+    const sourceBox = source.getBoundingClientRect();
+    return { sourceLeft: sourceBox.left, tokenRight: tokenBox.right };
+  });
 
-  if (!tokenBox || !sourceBox) throw new Error("Expected token count and source to be rendered");
-  if (sourceBox.x <= tokenBox.x + tokenBox.width) {
+  if (!positions) throw new Error("Expected token count and source to be rendered");
+  if (positions.sourceLeft <= positions.tokenRight) {
     throw new Error("Expected context source to render to the right of the token count");
   }
 }

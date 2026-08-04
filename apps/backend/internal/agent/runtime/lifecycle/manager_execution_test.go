@@ -25,6 +25,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -280,6 +281,38 @@ func TestCoalescedExecutionCreationHasManagerDeadline(t *testing.T) {
 		}
 		maintenance.Release()
 	})
+}
+
+func TestCreateExecutionRollsBackWhenRegistrationCannotPersist(t *testing.T) {
+	const sessionID = "session-create-persist-failure"
+	mgr, backend := newEnvironmentExecutionTestManager(t, &mockWorkspaceInfoProvider{
+		infos: map[string]*WorkspaceInfo{
+			sessionID: {
+				TaskID: "task-create-persist-failure", SessionID: sessionID,
+				TaskEnvironmentID: "env-create-persist-failure", WorkspacePath: "/workspace/task",
+				AgentID: "auggie",
+			},
+		},
+	})
+	mgr.SetExecutorProfileReader(&fakeExecutorProfileReader{session: &models.TaskSession{
+		ID: sessionID, TaskID: "task-create-persist-failure", State: models.TaskSessionStateStarting,
+	}})
+	writer := &launchRegistrationWriter{
+		upserted:  make(chan struct{}),
+		upsertErr: errors.New("database is locked"),
+	}
+	mgr.SetExecutorRunningWriter(writer)
+
+	_, err := mgr.GetOrEnsureExecution(context.Background(), sessionID)
+	if err == nil || !strings.Contains(err.Error(), "persist execution registration") {
+		t.Fatalf("GetOrEnsureExecution error = %v, want persistence failure", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance calls = %d, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID(sessionID); exists {
+		t.Fatal("workspace execution survived failed durable registration")
+	}
 }
 
 func TestResolveTaskEnvironmentID(t *testing.T) {

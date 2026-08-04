@@ -7,6 +7,7 @@ import {
   taskId as toTaskId,
   type SessionId,
   type TaskId,
+  type TaskSession,
   type TaskSessionState,
 } from "@/lib/types/http";
 import type { QueuedMessage } from "@/lib/state/slices/session/types";
@@ -236,6 +237,10 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
     update.foreground_activity = payload.foreground_activity;
   if (payload.active_subagent_count !== undefined)
     update.active_subagent_count = payload.active_subagent_count;
+  if (payload.cancellation_pending !== undefined)
+    update.cancellation_pending = payload.cancellation_pending;
+  if (payload.cancellation_revision !== undefined)
+    update.cancellation_revision = payload.cancellation_revision;
   return update;
 }
 
@@ -259,6 +264,8 @@ function upsertTaskSessionList(
     id: sessionId,
     task_id: taskId,
     state: (newState ?? existing?.state) as TaskSessionState,
+    cancellation_pending: existing?.cancellation_pending ?? false,
+    cancellation_revision: existing?.cancellation_revision ?? 0,
     started_at: existing?.started_at ?? "",
     updated_at: (sessionUpdate.updated_at as string | undefined) ?? existing?.updated_at ?? "",
     ...(payload.agent_profile_id ? { agent_profile_id: payload.agent_profile_id } : {}),
@@ -379,6 +386,22 @@ function maybeAdoptSessionOnTransition(
  *  otherwise stay empty and env-routed shell terminals stall on
  *  "Connecting terminal...". Routes through `upsertTaskSessionFromEvent`
  *  which calls `syncEnvironmentMapping` and merges with any existing row. */
+function sessionSeedFields(existing: TaskSession | undefined): {
+  state: TaskSessionState;
+  cancellation_pending: boolean;
+  cancellation_revision: number;
+  started_at: string;
+  updated_at: string;
+} {
+  return {
+    state: existing?.state ?? "CREATED",
+    cancellation_pending: existing?.cancellation_pending ?? false,
+    cancellation_revision: existing?.cancellation_revision ?? 0,
+    started_at: existing?.started_at ?? "",
+    updated_at: existing?.updated_at ?? "",
+  };
+}
+
 function syncEnvFromAgentctlPayload(
   store: StoreApi<AppState>,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -395,9 +418,7 @@ function syncEnvFromAgentctlPayload(
   store.getState().upsertTaskSessionFromEvent(taskId, {
     id: sessionId,
     task_id: taskId,
-    state: existing?.state ?? "CREATED",
-    started_at: existing?.started_at ?? "",
-    updated_at: existing?.updated_at ?? "",
+    ...sessionSeedFields(existing),
     task_environment_id: envId,
     ...getAgentctlWorktreeFields(payload, isSibling),
     workspace_path: payload.workspace_path ?? payload.task_workspace_path ?? payload.worktree_path,
@@ -544,6 +565,8 @@ function applyForegroundActivity(
     id: sessionId,
     task_id: taskId,
     state: existing.state,
+    cancellation_pending: existing.cancellation_pending,
+    cancellation_revision: existing.cancellation_revision,
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     foreground_activity: payload.foreground_activity ?? null,
@@ -551,6 +574,32 @@ function applyForegroundActivity(
       payload.active_subagent_count !== undefined
         ? payload.active_subagent_count
         : (existing.active_subagent_count ?? 0),
+  });
+}
+
+/** Apply the backend-owned cancellation projection to the addressed session. */
+function applyCancellationPending(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  if (
+    !payload?.session_id ||
+    typeof payload.cancellation_pending !== "boolean" ||
+    typeof payload.cancellation_revision !== "number"
+  )
+    return;
+  const sessionId = toSessionId(payload.session_id);
+  const existing = store.getState().taskSessions.items[sessionId];
+  if (!existing) return;
+  store.getState().upsertTaskSessionFromEvent(existing.task_id, {
+    id: sessionId,
+    task_id: existing.task_id,
+    state: existing.state,
+    started_at: existing.started_at ?? "",
+    updated_at: existing.updated_at ?? "",
+    cancellation_pending: payload.cancellation_pending,
+    cancellation_revision: payload.cancellation_revision,
   });
 }
 
@@ -572,6 +621,22 @@ function handleWorkspaceSourcesUpdated(
   store.getState().bumpWorkspaceFilesRefresh(sessionId);
   store.getState().clearLegacyGitStatusEntry(sessionId);
   store.getState().bumpSessionCommitsRefetch(sessionId);
+}
+
+function handleForegroundActivityMessage(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  applyForegroundActivity(store, payload);
+}
+
+function handleCancellationPendingMessage(
+  store: StoreApi<AppState>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+): void {
+  applyCancellationPending(store, payload);
 }
 
 export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandlers {
@@ -647,9 +712,10 @@ export function registerTaskSessionHandlers(store: StoreApi<AppState>): WsHandle
 
       maybeFanOutOfficeRefetch(store, newState, existingSession?.state);
     },
-    "session.activity_changed": (message) => {
-      applyForegroundActivity(store, message.payload);
-    },
+    "session.activity_changed": (message) =>
+      handleForegroundActivityMessage(store, message.payload),
+    "session.cancellation_changed": (message) =>
+      handleCancellationPendingMessage(store, message.payload),
     "session.agentctl_starting": (message) => {
       const payload = message.payload;
       if (!payload?.session_id) return;

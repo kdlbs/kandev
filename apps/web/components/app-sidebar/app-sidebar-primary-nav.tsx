@@ -1,6 +1,7 @@
 "use client";
 
 import { IconHome, IconInbox, IconMessageCircle } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useInOffice } from "@/hooks/use-in-office";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
@@ -13,6 +14,7 @@ type AppSidebarPrimaryNavProps = {
 };
 
 export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const inboxCount = useAppStore((s) => s.office.inboxCount);
   const inOffice = useInOffice();
@@ -22,7 +24,7 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
     <div className="flex flex-col gap-0.5">
       <AppSidebarNavItem
         icon={IconHome}
-        label="Home"
+        label={t("sidebar:home")}
         href={inOffice ? "/office" : linkToTaskOverview({ workspaceId: workspaceId ?? undefined })}
         collapsed={collapsed}
         exactMatch
@@ -30,7 +32,7 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
       {inOffice && (
         <AppSidebarNavItem
           icon={IconInbox}
-          label="Inbox"
+          label={t("sidebar:inbox")}
           href="/office/inbox"
           badge={inboxCount}
           collapsed={collapsed}
@@ -39,7 +41,7 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
       {workspaceId && collapsed && (
         <AppSidebarNavItem
           icon={IconMessageCircle}
-          label="Quick Chat"
+          label={t("sidebar:quickChat")}
           onClick={handleOpenQuickChat}
           collapsed={collapsed}
         />

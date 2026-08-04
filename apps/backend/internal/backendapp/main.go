@@ -696,7 +696,7 @@ func startGatewayAndServe(
 	}
 
 	gateways.RegisterSessionStreamNotifications(ctx, eventBus, gateway.Hub, log)
-	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, log))
+	gateway.Hub.SetSessionDataProvider(buildSessionDataProvider(repos.Task, lifecycleMgr, orchestratorSvc, log))
 	gateway.Hub.SetSessionGitDataProvider(buildSessionGitDataProvider(repos.Task, lifecycleMgr, log))
 	log.Info("Session data provider configured for session subscriptions (git status from snapshots)")
 
@@ -825,6 +825,7 @@ func startGatewayAndServe(
 		BuildTime: BuildTime,
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
+		MessageQueue:         orchestratorSvc.GetMessageQueue(),
 	})
 	storageComposition, err := provideStorageComposition(
 		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,

@@ -26,6 +26,7 @@ import {
   uploadFrontendBundleChunk,
   fetchUpdates,
   checkUpdates,
+  saveUpdatesChannel,
   applyUpdate,
   fetchSystemJob,
   fetchRestartCapability,
@@ -44,6 +45,7 @@ import {
 } from "./system-api";
 
 const BASE = "http://api.test/api/v1/system";
+const ISO_CHECKED_AT = "2026-05-18T00:00:00Z";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -282,7 +284,7 @@ describe("fetchSystemJob", () => {
         kind: "vacuum",
         state: "succeeded",
         message: "done",
-        started_at: "2026-05-18T00:00:00Z",
+        started_at: ISO_CHECKED_AT,
       }),
     );
     const job = await fetchSystemJob("job-abc");
@@ -300,7 +302,7 @@ describe("updates", () => {
         current: "1.0.0",
         latest: "1.0.1",
         latest_url: "https://gh/r",
-        latest_checked_at: "2026-05-18T00:00:00Z",
+        latest_checked_at: ISO_CHECKED_AT,
         update_available: true,
       }),
     );
@@ -316,7 +318,7 @@ describe("updates", () => {
         current: "1.0.0",
         latest: "1.0.0",
         latest_url: "",
-        latest_checked_at: "2026-05-18T00:00:00Z",
+        latest_checked_at: ISO_CHECKED_AT,
         update_available: false,
       }),
     );
@@ -325,13 +327,38 @@ describe("updates", () => {
     expect(method()).toBe("POST");
   });
 
-  it("applyUpdate POSTs /updates/apply with confirmation", async () => {
+  it("saveUpdatesChannel PATCHes the typed channel without allowing init overrides", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        current: "1.0.0",
+        latest: "1.0.1-nightly.shaabcdef123456",
+        latest_url: "https://www.npmjs.com/package/kandev/v/1.0.1-nightly.shaabcdef123456",
+        latest_checked_at: ISO_CHECKED_AT,
+        update_available: true,
+        channel: "nightly",
+        channel_editable: true,
+        channel_unsupported_reason: "",
+      }),
+    );
+
+    const res = await saveUpdatesChannel("nightly", {
+      init: { method: "GET", body: "caller override" },
+    });
+    const { url, init } = lastCall();
+
+    expect(url).toBe(`${BASE}/updates/channel`);
+    expect((init?.method ?? "").toUpperCase()).toBe("PATCH");
+    expect(init?.body).toBe(JSON.stringify({ channel: "nightly" }));
+    expect(res.channel).toBe("nightly");
+  });
+
+  it("applyUpdate POSTs /updates/apply with confirmation and the displayed target", async () => {
     fetchSpy.mockResolvedValueOnce(jsonResponse({ job_id: "self-update-1" }));
-    const res = await applyUpdate("UPDATE");
+    const res = await applyUpdate("UPDATE", "v1.0.1");
     const { url, init } = lastCall();
     expect(url).toBe(`${BASE}/updates/apply`);
     expect((init?.method ?? "").toUpperCase()).toBe("POST");
-    expect(init?.body).toBe(JSON.stringify({ confirm: "UPDATE" }));
+    expect(init?.body).toBe(JSON.stringify({ confirm: "UPDATE", target_version: "v1.0.1" }));
     expect(res.job_id).toBe("self-update-1");
   });
 });

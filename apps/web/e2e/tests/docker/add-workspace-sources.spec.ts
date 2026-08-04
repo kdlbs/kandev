@@ -126,11 +126,14 @@ test.describe("Docker executor — attach workspace sources", () => {
           "/workspace/fixture-docker-second-source-main/remote-source.txt",
         ),
       ).toBe("docker-second-source fixture\n");
-      await expect(
-        session.files
-          .getByTestId("file-tree-node")
-          .filter({ hasText: "fixture-docker-second-source-main" }),
-      ).toBeVisible({ timeout: 30_000 });
+      // Attaching the repository creates an untracked change and can activate
+      // the Changes tab after the earlier Files selection. Restore Files at
+      // the observation point so we assert the visible tree, not its mounted
+      // background panel.
+      await session.clickTab("Files");
+      await expect(session.fileTreeNode("fixture-docker-second-source-main")).toBeVisible({
+        timeout: 30_000,
+      });
 
       const forgedFolder = await apiClient.rawRequest(
         "POST",
@@ -179,11 +182,9 @@ test.describe("Docker executor — attach workspace sources", () => {
       await testPage.reload();
       await session.waitForLoad();
       await session.clickTab("Files");
-      await expect(
-        session.files
-          .getByTestId("file-tree-node")
-          .filter({ hasText: "fixture-docker-second-source-main" }),
-      ).toBeVisible({ timeout: 30_000 });
+      await expect(session.fileTreeNode("fixture-docker-second-source-main")).toBeVisible({
+        timeout: 30_000,
+      });
     } finally {
       await cleanupFixture(fixture, releaseBackendEnv);
     }

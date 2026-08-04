@@ -30,7 +30,10 @@ const PLAN_WITH_CLARIFICATION_SCRIPT = [
 
 const CLARIFICATION_WITH_POST_ANSWER_DELAY_SCRIPT = [
   'e2e:mcp:kandev:ask_user_question_kandev({"questions":[{"id":"db","prompt":"Which database should we use?","options":[{"label":"PostgreSQL","description":"Relational"},{"label":"SQLite","description":"Embedded"}]}]})',
-  "e2e:delay(5000)",
+  // Keep the resumed turn active long enough to observe the transient
+  // REVIEW → IN_PROGRESS transition even on a loaded shard. Mock delays are
+  // cancellation-aware, so test teardown does not wait out this interval.
+  "e2e:delay(30000)",
   'e2e:message("The clarification answer resumed the active turn.")',
 ].join("\n");
 
@@ -107,24 +110,16 @@ test.describe("Clarification flow", () => {
     );
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
-    // The mock agent reaches the clarification call asynchronously. Wait for
-    // the owning session to park before opening the page, then explicitly
-    // establish the Review state that the answer should move it out of.
-    await expect
-      .poll(
-        async () =>
-          (await apiClient.listTaskSessions(task.id)).sessions.find((s) => s.id === task.session_id)
-            ?.state,
-        { timeout: 30_000 },
-      )
-      .toBe("WAITING_FOR_INPUT");
-    await apiClient.updateTaskState(task.id, "REVIEW");
-    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
-
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
+
+    // The overlay is the durable pending-question precondition. Depending on
+    // whether the primary MCP response path is still connected, the session
+    // may correctly remain RUNNING or park in WAITING_FOR_INPUT.
+    await apiClient.updateTaskState(task.id, "REVIEW");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
 
     const filters = new SidebarFilterPopoverPage(testPage);
     await filters.open();

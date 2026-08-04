@@ -63,6 +63,8 @@ Stopping is not deletion. Resume succeeds only while the executor still has the 
 
 Stopping a turn does not itself run the next queued message. Expand the queue and select **Run next** when you want processing to continue.
 
+The expanded queue also lets you discard stale work. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
+
 A CLI-passthrough profile displays the agent's native terminal interface in a PTY. It still belongs to the task, but it does not provide Kandev's structured chat messages and tool-call presentation.
 
 <details>
@@ -83,7 +85,7 @@ Delivery follows the target state:
 - a created session starts with the message as its first prompt;
 - a failed or cancelled session rejects the message.
 
-The default pending-message limit is 10 per session. Operators can change it with `KANDEV_QUEUE_MAX_PER_SESSION`; a value of `0` or less removes the cap, so the queue can grow without that bound. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
+The default pending-message limit is 10 per session. An admin can change it live under **Settings > General > Message Queue**; `0` removes the cap. A valid `KANDEV_QUEUE_MAX_PER_SESSION` value takes precedence and makes the UI field read-only; changing the environment still requires a restart. Malformed environment values are logged and ignored, so the saved setting or default applies instead. Lowering the saved limit does not delete entries already waiting. Interrupt delivery is restricted to a direct parent task messaging its child. Other senders must queue.
 
 For urgent replacement work, the parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; this cancels the current approach and immediately tries to dispatch the new prompt, with a safe queued fallback. Use `stop_task_kandev` only for halt-only intent. A successful stop marks every accepted live child session `CANCELLED` and schedules graceful teardown asynchronously. Kandev then attempts to move an eligible unarchived, non-Office task from `IN_PROGRESS` or `SCHEDULING` to `REVIEW`; other task states remain unchanged. A child with no live execution returns idempotent `not_running`, and its worktrees, environment, commits, task record, descendants, and queued messages are preserved. See [Coordination](coordination.md) for the complete authority and lifecycle contract.
 
@@ -274,7 +276,7 @@ Before moving a task to done:
 - **New Agent has no profiles:** create a profile compatible with the task executor. A profile for another executor is intentionally hidden.
 - **Summary or generated text fails:** configure the corresponding utility agent and a reachable model in **Settings > Utility Agents**.
 - **Resume fails:** start fresh when the executor no longer has resumable session state, then supply a summary or copy the relevant context.
-- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them; a full queue must drain before another message can be accepted.
+- **A peer message never arrives:** check the target session state and ID. Running sessions queue messages; failed or cancelled sessions reject them. For a full queue, expand its chip and run, remove, or clear pending work before retrying; an admin can also review the install-wide limit under **Settings > General > Message Queue**.
 - **Changes is empty:** select the correct repository and comparison, then confirm the agent wrote inside the materialized task path.
 - **Review marks became stale:** the underlying diff changed. Re-review the new hash before marking the file complete.
 - **Walkthrough does not appear:** confirm an active task-MCP session exists and that the saved `changes-walkthrough` prompt was not removed or made invalid.

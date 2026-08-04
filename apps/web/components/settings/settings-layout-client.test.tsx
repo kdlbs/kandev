@@ -50,6 +50,7 @@ vi.mock("@/components/integrations/integration-copy-config-menu", () => ({
 
 import { SettingsLayoutClient } from "./settings-layout-client";
 import { useSettingsSaveContributor } from "./settings-save-provider";
+import { i18n } from "@/lib/i18n";
 
 function DirtySettings() {
   useSettingsSaveContributor({
@@ -136,5 +137,24 @@ describe("SettingsLayoutClient integrations actions", () => {
     expect(screen.getByTestId("settings-scroll-container").className).toContain(
       "app-status-bar-height",
     );
+  });
+
+  it("translates the Message Queue breadcrumb and keeps the shared scroll owner", async () => {
+    pathname = "/settings/general/message-queue";
+    await i18n.changeLanguage("pseudo");
+    try {
+      render(
+        <SettingsLayoutClient>
+          <div>Queue settings</div>
+        </SettingsLayoutClient>,
+      );
+
+      expect(screen.getByTestId("page-topbar-title").textContent).toBe("Ḿēśśàĝē Qũēũē");
+      expect(screen.getByTestId("settings-scroll-container").className).toContain(
+        "overflow-y-auto",
+      );
+    } finally {
+      await i18n.changeLanguage("en");
+    }
   });
 });

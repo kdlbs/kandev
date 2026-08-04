@@ -1,10 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { EXTERNAL_MCP_TOOL_GROUPS, countExternalMcpTools } from "./external-mcp-tools";
+import enSettings from "@/src/locales/en/settings.json";
 
 describe("external MCP tool catalog", () => {
-  it("matches the backend ModeExternal tool count (29 tools)", () => {
-    // Backend: 10 workflow + 4 agent + 4 mcp + 5 executor + 5 task + 1 create_task = 29.
-    // See apps/backend/internal/mcp/server/server.go (case ModeExternal).
+  // NOTE: this pins the CATALOG, which currently lags the backend. `ModeExternal`
+  // registers 32 tools (12 workflow + 4 agent + 4 mcp + 5 executor + 6 task +
+  // 1 create_task — see `TestServerModeExternal_ToolCount`), and this catalog
+  // lists 29: `list_repositories_kandev`, `import_workflow_kandev` and one task
+  // tool are missing, so the page under-advertises the endpoint by three.
+  //
+  // That drift predates this file's localization and is left alone here on
+  // purpose: adding the three means writing three new user-facing descriptions
+  // that have to be checked against the backend's own wording, which is a
+  // content change and not a copy migration. Update this number with them.
+  it("lists 29 tools, the catalog's current contents", () => {
     expect(countExternalMcpTools()).toBe(29);
   });
 
@@ -27,10 +36,41 @@ describe("external MCP tool catalog", () => {
     expect(names).not.toContain("create_task_plan_kandev");
   });
 
-  it("every group has at least one tool and a non-empty title", () => {
+  it("every group has at least one tool and a non-empty title key", () => {
     for (const group of EXTERNAL_MCP_TOOL_GROUPS) {
-      expect(group.title.length).toBeGreaterThan(0);
+      expect(group.titleKey.length).toBeGreaterThan(0);
       expect(group.tools.length).toBeGreaterThan(0);
+    }
+  });
+
+  // The catalog is a plain `.ts` module with no JSX, so `i18next/no-literal-string`
+  // never inspects it and a key that never made it into the catalog would render
+  // as the raw `settings:externalMcp…` string with nothing failing.
+  it("every title and description key resolves in the en catalog", () => {
+    const catalog = enSettings as Record<string, string>;
+    const keys = EXTERNAL_MCP_TOOL_GROUPS.flatMap((group) => [
+      group.titleKey,
+      group.descriptionKey,
+      ...group.tools.map((tool) => tool.descriptionKey),
+    ]);
+    // Derived, not a literal: this asserts every entry carries keys, and must
+    // not quietly re-pin the tool count the test above owns.
+    expect(keys).toHaveLength(EXTERNAL_MCP_TOOL_GROUPS.length * 2 + countExternalMcpTools());
+    for (const key of keys) {
+      const [ns, name] = key.split(":");
+      expect(ns).toBe("settings");
+      expect(catalog[name], `missing catalog entry for ${key}`).toBeTruthy();
+    }
+  });
+
+  // A message that interpolates a wire token renders a dead `{{placeholder}}`
+  // if the tool forgets to carry the value.
+  it("supplies a value for every interpolated description", () => {
+    const catalog = enSettings as Record<string, string>;
+    for (const tool of EXTERNAL_MCP_TOOL_GROUPS.flatMap((g) => g.tools)) {
+      const message = catalog[tool.descriptionKey.split(":")[1]];
+      const placeholders = [...message.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]);
+      expect(Object.keys(tool.descriptionValues ?? {}).sort()).toEqual(placeholders.sort());
     }
   });
 });

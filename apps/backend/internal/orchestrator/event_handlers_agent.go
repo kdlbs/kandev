@@ -45,6 +45,13 @@ func (s *Service) handleAgentRunning(ctx context.Context, data watcher.AgentEven
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if err := s.waitForCancellationWithGuard(ctx, data.SessionID, lock.Unlock, lock.Lock); err != nil {
+		s.logger.Debug("ignoring agent running event after cancellation wait was interrupted",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.Error(err))
+		return
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -104,38 +111,9 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
-	var (
-		requeuedMsg *messagequeue.QueuedMessage
-		replaced    bool
-		queueErr    error
+	requeuedMsg, replaced, queueErr := s.messageQueue.RequeueMessage(
+		ctx, queuedMsg, queuedBy, coalesceKey,
 	)
-	if coalesceKey != "" {
-		requeuedMsg, replaced, queueErr = s.messageQueue.QueueMessageWithCoalesceKey(
-			ctx,
-			queuedMsg.SessionID,
-			queuedMsg.TaskID,
-			queuedMsg.Content,
-			queuedMsg.Model,
-			queuedBy,
-			queuedMsg.PlanMode,
-			queuedMsg.Attachments,
-			queuedMsg.Metadata,
-			coalesceKey,
-			true,
-		)
-	} else {
-		requeuedMsg, queueErr = s.messageQueue.QueueMessageWithMetadata(
-			ctx,
-			queuedMsg.SessionID,
-			queuedMsg.TaskID,
-			queuedMsg.Content,
-			queuedMsg.Model,
-			queuedBy,
-			queuedMsg.PlanMode,
-			queuedMsg.Attachments,
-			queuedMsg.Metadata,
-		)
-	}
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",
 			zap.String("session_id", queuedMsg.SessionID),
@@ -234,7 +212,36 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 		return
 	}
 
+	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
+	if !lock.TryLock() {
+		if s.isCancelInFlight(data.SessionID) {
+			// Cancellation owns reconciliation and intentionally holds the guard
+			// until it has settled the session. Never make it wait for this stale
+			// boot signal.
+			release()
+			s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID))
+			return
+		}
+		// Stream metadata also uses this guard, but boot-ready is a one-shot
+		// lifecycle signal. Wait for ordinary stream persistence to finish
+		// instead of dropping the only event that can settle a booted session.
+		lock.Lock()
+	}
+	guardLocked := true
+	defer func() {
+		if guardLocked {
+			lock.Unlock()
+		}
+		release()
+	}()
 	if s.isCancelInFlight(data.SessionID) {
+		// A boot-ready event that arrives while cancellation is waiting must
+		// not revive the session in the cancellation window. The cancellation
+		// owner will reconcile the session after the lifecycle wait; dropping
+		// this stale boot signal also avoids blocking a handler on a marker that
+		// is intentionally held until that reconciliation is complete.
 		s.logger.Debug("ignoring agent.boot_ready while cancel is in progress",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
@@ -293,6 +300,12 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 	// own cancel+take runs. drainQueuedMessageForPromptableSession now owns
 	// that acquisition itself (blocking, plus its own promptability
 	// reload) — see its doc comment.
+	// Release the guard before the public drain reacquires it. The state flip
+	// above is the guarded admission decision; the drain performs its own
+	// cancellation check and leaves the queue untouched if a new cancellation
+	// claims the session in this handoff.
+	lock.Unlock()
+	guardLocked = false
 	s.drainQueuedMessageForPromptableSession(ctx, data.SessionID)
 }
 
@@ -392,7 +405,34 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	lock, release := s.acquireCancelInFlightGuard(data.SessionID)
 	defer release()
 	lock.Lock()
-	defer lock.Unlock()
+	guardLocked := true
+	defer func() {
+		if guardLocked {
+			lock.Unlock()
+		}
+	}()
+	for s.isCancelInFlight(data.SessionID) {
+		// The cancellation owner temporarily releases this mutex while the
+		// lifecycle manager waits for terminal stream frames. Do not complete
+		// the still-running turn in that window, but also do not discard this
+		// ready event: if cancellation fails, it is the event that must finish
+		// the unchanged turn and drain its queue.
+		lock.Unlock()
+		guardLocked = false
+		if err := s.waitForCancelInFlight(context.WithoutCancel(ctx), data.SessionID); err != nil {
+			// A cancellation error does not make this ready event stale. The
+			// owner may have failed before mutating session/turn state; once the
+			// operation is gone, re-read both below and let this event settle its
+			// captured turn. Returning here would strand the turn and any queued
+			// peer message with no future ready event to drain it.
+			s.logger.Warn("cancellation failed while agent.ready was waiting; re-evaluating the captured turn",
+				zap.String("task_id", data.TaskID),
+				zap.String("session_id", data.SessionID),
+				zap.Error(err))
+		}
+		lock.Lock()
+		guardLocked = true
+	}
 
 	// Re-validate now that the guard is held: a concurrent interrupt (or
 	// clarification recovery, or another drain) may have already resolved
@@ -833,6 +873,13 @@ func (s *Service) handleAgentCompleted(ctx context.Context, data watcher.AgentEv
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isCancelInFlight(data.SessionID) {
+		s.logger.Debug("deferring agent.completed while cancellation is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
 
 	s.handleAgentCompletedLocked(ctx, data)
 }
@@ -957,6 +1004,13 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isCancelInFlight(data.SessionID) {
+		s.logger.Debug("deferring agent.failed while cancellation is in progress",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID))
+		return
+	}
 
 	s.handleAgentFailedLocked(ctx, data)
 }
@@ -1132,16 +1186,32 @@ func (s *Service) claimForcedExecutionCleanup(sessionID, executionID string) boo
 	if sessionID == "" {
 		return true
 	}
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
-	lock.Lock()
-	claimed := s.claimExecutionTeardown(
-		sessionID,
-		executionID,
-		executionTeardownIntentForce,
-	)
-	lock.Unlock()
-	release()
-	return claimed
+	for {
+		if s.isCancelInFlight(sessionID) {
+			// Cleanup is a terminal claim, not an advisory event. Defer it until
+			// the cancellation owner has completed its lifecycle and reconciliation
+			// so a cancellation cannot strand the execution teardown.
+			if err := s.waitForCancelInFlight(context.Background(), sessionID); err != nil {
+				return false
+			}
+			continue
+		}
+		lock, release := s.acquireCancelInFlightGuard(sessionID)
+		lock.Lock()
+		if s.isCancelInFlight(sessionID) {
+			lock.Unlock()
+			release()
+			continue
+		}
+		claimed := s.claimExecutionTeardown(
+			sessionID,
+			executionID,
+			executionTeardownIntentForce,
+		)
+		lock.Unlock()
+		release()
+		return claimed
+	}
 }
 
 // RegisterExecutionStopOwner records explicit teardown ownership before a
@@ -1157,6 +1227,12 @@ func (s *Service) RegisterExecutionStopOwner(sessionID, executionID string, forc
 		lock.Unlock()
 		release()
 	}()
+	if s.isCancelInFlight(sessionID) {
+		s.logger.Debug("deferring execution stop ownership while cancellation is in progress",
+			zap.String("session_id", sessionID),
+			zap.String("execution_id", executionID))
+		return
+	}
 
 	intent := executionTeardownIntentGraceful
 	if force {
@@ -1440,6 +1516,13 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		defer release()
 		lock.Lock()
 		defer lock.Unlock()
+		if s.isCancelInFlight(sessionID) {
+			s.logger.Debug("deferring agent start failure while cancellation is in progress",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+			return true
+		}
 
 		if drop, terminalState := s.shouldDropSessionFailure(ctx, watcher.AgentEventData{
 			TaskID:           taskID,

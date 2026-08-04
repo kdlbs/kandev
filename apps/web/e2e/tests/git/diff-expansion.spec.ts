@@ -325,33 +325,46 @@ test.describe("Diff expansion — Pierre Diffs provider", () => {
     await openChangesTab(testPage);
     await openExpansionFileDiff(testPage);
 
-    await waitForDiffText(testPage, "HUNK_TOP", 15_000);
+    // Use the default (60s) waitForDiffText timeout, not a tight 15s: on a cold
+    // CI runner the first diff in a shard pays a 30-40s Shiki/regex-engine JIT
+    // (see the "renders Pierre Diffs viewer" test) before any diff text renders.
+    await waitForDiffText(testPage, "HUNK_TOP");
 
-    // Wait for expand buttons to appear in the shadow DOM. They load
-    // asynchronously after full file content is fetched via WebSocket.
-    await testPage.waitForFunction(
-      () => {
-        const container = document.querySelector("diffs-container");
-        const shadow = container?.shadowRoot;
-        if (!shadow) return false;
-        return shadow.querySelectorAll("[data-expand-button]").length >= 3;
-      },
-      null,
-      { timeout: 20_000 },
-    );
-
-    // Click the middle separator's expand-up button to reveal lines from the
-    // top of the collapsed gap. The middle separator is the only one without
-    // data-separator-first or data-separator-last attributes.
-    await testPage.evaluate(() => {
-      const container = document.querySelector("diffs-container");
-      const shadow = container!.shadowRoot!;
-      const sel =
-        "[data-separator='line-info']:not([data-separator-first]):not([data-separator-last])";
-      const btn = shadow.querySelector<HTMLElement>(`${sel} [data-expand-up]`);
-      if (!btn) throw new Error("Middle separator expand-up button not found");
-      btn.click();
-    });
+    // Expand controls render in two async phases: the separators appear once the
+    // patch is parsed, but their expand buttons are injected only after the full
+    // file content arrives over WebSocket and @pierre/diffs re-parses it (see
+    // components/diff/use-expandable-diff.ts). Waiting for a *count* of
+    // [data-expand-button] elements is insufficient — three buttons can exist
+    // while the middle separator's [data-expand-up] specifically has not been
+    // injected yet, which is the flake that failed CI with "Middle separator
+    // expand-up button not found". The re-parse can also replace the shadow
+    // subtree, so a separate wait-then-click leaves a window where the button
+    // vanishes between the wait passing and the click firing. Find the button
+    // and click it in a single browser evaluation, retried by expect.poll, so
+    // the lookup and the click are atomic per attempt and the click is only
+    // considered done once the collapsed lines are revealed. The timeout is
+    // generous because the WS content fetch + reparse is the slowest phase under
+    // a loaded runner; the 120s per-test budget leaves ample headroom.
+    const middleExpandUpSelector =
+      "[data-separator='line-info']:not([data-separator-first]):not([data-separator-last]) [data-expand-up]";
+    await expect
+      .poll(
+        () =>
+          testPage.evaluate((selector) => {
+            const container = document.querySelector("diffs-container");
+            const shadow = container?.shadowRoot;
+            if (!shadow) return false;
+            // Line 60 sits within the first 20 lines revealed by expanding from
+            // the top of the gap; if it is already present the click landed.
+            if (shadow.textContent?.includes("original_060")) return true;
+            const btn = shadow.querySelector<HTMLElement>(selector);
+            if (!btn) return false;
+            btn.click();
+            return shadow.textContent?.includes("original_060") ?? false;
+          }, middleExpandUpSelector),
+        { timeout: 40_000 },
+      )
+      .toBe(true);
 
     // Line 60 is within the first 20 lines revealed by expanding from the top hunk.
     await expect(testPage.getByText("original_060", { exact: false })).toBeVisible({

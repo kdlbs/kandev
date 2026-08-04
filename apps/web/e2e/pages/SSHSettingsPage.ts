@@ -21,7 +21,9 @@ export class SSHSettingsPage {
   /** Navigate to the edit page for an existing SSH executor. */
   async gotoExisting(executorId: string): Promise<void> {
     await this.page.goto(`/settings/executors/ssh/${executorId}`);
-    await expect(this.connectionCard).toBeVisible();
+    await expect(this.connectionCard).toBeVisible({ timeout: 15_000 });
+    await expect(this.sessionsCard).toBeVisible({ timeout: 15_000 });
+    await expect(this.sessionsEmpty.or(this.sessionsTable)).toBeVisible({ timeout: 15_000 });
   }
 
   // --- card roots ---

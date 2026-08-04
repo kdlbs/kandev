@@ -22,7 +22,7 @@ Kandev does not currently provide a user-login boundary for the web application,
 | --- | --- | --- | --- |
 | Desktop | Launch or quit Kandev | `~/.kandev` by default | **Settings > System > Updates** uses the signed desktop updater when supported |
 | Interactive CLI | `kandev`, then `Ctrl-C` | `~/.kandev` by default | Upgrade the Homebrew or npm package, then restart |
-| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | Use guarded in-app apply for a managed user service; otherwise upgrade the package, reinstall with the same flags, and restart |
+| Managed service | `kandev service {start,stop,restart,status}` | `~/.kandev` for a user service, `/var/lib/kandev` for a system service, or the install-time `--home-dir` | A verified npm/npx user service can select and apply Stable or Nightly; other services use Stable and may require a package upgrade, reinstall, and restart |
 | Docker or Kubernetes | Container or workload manager | Mounted Kandev home plus any external database/provider state | Replace the image and recreate the container or pod |
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
@@ -59,6 +59,14 @@ kandev service logs -f
 ```
 
 Add `--system` to both commands for a system service.
+
+## Message queue capacity
+
+Open **Settings > General > Message Queue** to set the install-wide number of pending messages allowed in each session. The default is `10`; `0` means unlimited. Admin saves apply immediately to later admissions. Lowering the limit does not prune rows already waiting, so a queue at or above the new limit rejects new work until messages run or are removed. Delivery retries for work accepted before the change are not discarded by the lower cap.
+
+`KANDEV_QUEUE_MAX_PER_SESSION` has higher precedence than the saved setting. A valid environment value makes the UI field read-only; zero or a negative value means unlimited. Invalid text is logged and ignored in favor of the saved setting or default. Environment changes require a backend restart, while UI changes do not.
+
+To recover capacity in one session, expand its queue chip in the task workbench. **Remove** deletes one visible pending row and **Clear all** deletes all visible pending rows, including user-, agent-, workflow-, and server-origin work. After removal, merge, or drain, displayed positions immediately compact to `#1` through `#N`; durable FIFO ordering is unchanged. A row already reserved for delivery is hidden and is not cancelled by either action.
 
 ## State and storage
 
@@ -298,14 +306,41 @@ Never delete a managed task directory merely because its database row looks term
 
 ## Updates
 
-The backend contacts the public GitHub Releases API once at startup and every six hours, with a 30-second HTTP timeout, and persists the last successful result. **Check now** performs a synchronous request and permits one manual check per process every 30 seconds. Offline or rate-limited installations continue to show cached state.
+Stable is the default update channel. It resolves signed releases from the public GitHub Releases
+API. A verified Kandev-managed npm or npx user service can select **Nightly** in
+**Settings > System > Updates**, then use the shared **Save changes** action. Nightly resolves the
+public npm `kandev@nightly` dist-tag. The install-wide selection survives restart. Desktop,
+Homebrew, system-service, unmanaged, local-checkout, unknown, and invalid-metadata installs stay on
+Stable and the page explains why Nightly is unavailable.
 
-Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. There is no separate update-only channel selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence.
+The backend checks the selected source once at startup and every six hours, with a 30-second HTTP
+timeout, and persists the last successful Stable and Nightly results separately. **Check now**
+performs a synchronous request and permits one manual check per process every 30 seconds. Offline,
+rate-limited, or registry-failing installations continue to show that channel's cached state.
+
+Nightlies are best-effort daily snapshots. A new version appears only when `main` contains commits
+after the latest Stable release and that exact commit has not already been published. Nightlies do
+not move npm `latest` and do not create Homebrew, Desktop, GHCR, Git tag, or GitHub Release
+artifacts.
+
+Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
 
 Before any update, finish or stop active sessions, create and export a database backup plus its master key, preserve unpushed Git work, and read release notes.
 
 - Desktop: use **Settings > System > Updates** when signed updater assets are available; otherwise install the new desktop package.
-- Managed user service: use **Settings > System > Updates > Apply update**. Kandev enables it only after verifying the managed unit or plist and `<home>/service/install.json`. If the guarded update is unavailable or fails, run `brew upgrade kandev` or `npm install -g kandev@latest`, rerun `kandev service install` with the same install flags, then `kandev service restart`. System services always use that terminal flow with the required privileges.
+- Managed npm/npx user service: choose Stable or Nightly, save, check the resolved exact version,
+  then use **Apply update**. Apply submits the exact immutable version shown; if a newer channel
+  target was cached meanwhile, the backend rejects the stale request so the page can refresh. To
+  recover from Nightly, select Stable and apply the shown release. For terminal recovery, an
+  npm-managed service runs `npm install -g kandev@latest` and then `kandev service install` with the
+  same flags; an npx-managed service runs
+  `npx -y kandev@latest service install` with the same flags. Restart afterward. An npx-managed
+  service points into npm's transient `_npx` cache and stops working if that cache is pruned; prefer
+  `npm install -g` for a durable service.
+- Managed Homebrew user service: Stable only. Use **Apply update** when available; otherwise run
+  `brew upgrade kandev`, reinstall the service with the same flags, and restart.
+- System service: Stable only. Upgrade with the required privileges, reinstall with the same
+  service flags, and restart; the UI never applies it.
 - Unmanaged CLI: run `brew upgrade kandev` or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
@@ -353,6 +388,8 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 | Diagnostic bundle is partial | `manifest.json` warnings, source status, and loss counters | Keep a Kandev browser open for frontend capture; use backend-only when browser evidence is unnecessary |
 | Update check returns HTTP 429 | Time since last **Check now** | Wait at least 30 seconds; background checks retry every six hours |
 | **Apply update** is absent | Install mode/method and `<home>/service/install.json` | Expected for system, unmanaged, local-checkout, or invalid-metadata installs. A managed npm, npx, or Homebrew user service should offer Apply; reinstall it with the same flags to refresh its identity and metadata, or use the manual package-manager flow. |
+| **Nightly** is disabled | Install mode/method and `<home>/service/install.json` | Expected unless this is a verified managed npm/npx user service. Homebrew, Desktop, system-service, unmanaged, local-checkout, invalid-metadata, and unknown installs are Stable-only. |
+| Nightly check or save fails | npm access and cached checked time | Verify access to `https://registry.npmjs.org/kandev`, retry after connectivity returns, or keep/select Stable. A malformed or missing npm `nightly` tag fails closed. |
 | Metrics show unavailable | OS support, disk path, executor connectivity | Select supported metrics and verify permissions/network; the collector reports errors per sample |
 | Disk total exceeds filesystem expectation | Separate `data` and `backups` rows | Backups are counted twice in the UI total; use volume metrics for capacity decisions |
 | Legacy `/tmp/kandev-agent/*` uses disk | Process inventory and open-file references for the exact directory | This is data from older Kandev versions, not a current Storage resource. Stop Kandev, confirm no live process references the target, then remove only the confirmed-inactive legacy directory through host administration. |

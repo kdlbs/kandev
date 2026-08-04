@@ -76,6 +76,7 @@ import (
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
+	taskdto "github.com/kandev/kandev/internal/task/dto"
 	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -105,7 +106,12 @@ const (
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
 // to send initial data (git status, context window, available commands) when a client subscribes.
-func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lifecycle.Manager, log *logger.Logger) func(context.Context, string) ([]*ws.Message, error) {
+func buildSessionDataProvider(
+	taskRepo *sqliterepo.Repository,
+	lifecycleMgr *lifecycle.Manager,
+	cancellationProvider taskdto.CancellationPendingProvider,
+	log *logger.Logger,
+) func(context.Context, string) ([]*ws.Message, error) {
 	return func(ctx context.Context, sessionID string) ([]*ws.Message, error) {
 		session, err := taskRepo.GetTaskSession(ctx, sessionID)
 		if err != nil {
@@ -113,7 +119,7 @@ func buildSessionDataProvider(taskRepo *sqliterepo.Repository, lifecycleMgr *lif
 		}
 
 		var result []*ws.Message
-		result = appendSessionStateMessage(sessionID, session, result)
+		result = appendSessionStateMessageWithCancellation(sessionID, session, cancellationProvider, result)
 		result = appendAgentctlStatusMessage(ctx, lifecycleMgr, sessionID, result, log)
 		result = appendLiveGitStatusMessage(ctx, taskRepo, lifecycleMgr, sessionID, session, result, log)
 		result = appendContextWindowMessage(sessionID, session, result)
@@ -201,12 +207,38 @@ func appendAgentctlStatusMessage(
 // (page reload, task switch, WS reconnect) can seed environmentIdBySessionId
 // — without it, env-routed shell terminals stall on "Connecting terminal...".
 func appendSessionStateMessage(sessionID string, session *models.TaskSession, result []*ws.Message) []*ws.Message {
+	return appendSessionStateMessageWithCancellation(sessionID, session, nil, result)
+}
+
+func cancellationPendingSnapshot(
+	provider taskdto.CancellationPendingProvider,
+	sessionID string,
+) (bool, uint64) {
+	if snapshotProvider, ok := provider.(taskdto.CancellationPendingSnapshotProvider); ok {
+		return snapshotProvider.CancellationPendingSnapshot(sessionID)
+	}
+	return provider.CancellationPending(sessionID), 0
+}
+
+func appendSessionStateMessageWithCancellation(
+	sessionID string,
+	session *models.TaskSession,
+	cancellationProvider taskdto.CancellationPendingProvider,
+	result []*ws.Message,
+) []*ws.Message {
 	payload := map[string]interface{}{
 		sessionIDPayloadKey:        sessionID,
 		taskIDPayloadKey:           session.TaskID,
 		newStatePayloadKey:         string(session.State),
 		sessionUpdatedAtPayloadKey: session.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		"name":                     session.Name,
+		"cancellation_pending":     false,
+		"cancellation_revision":    uint64(0),
+	}
+	if cancellationProvider != nil {
+		pending, revision := cancellationPendingSnapshot(cancellationProvider, sessionID)
+		payload["cancellation_pending"] = pending
+		payload["cancellation_revision"] = revision
 	}
 	if session.ReviewStatus != models.ReviewStatusNone {
 		payload["review_status"] = string(session.ReviewStatus)
@@ -751,15 +783,31 @@ func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 }
 
 func bootPayload(ctx context.Context, req *http.Request, p routeParams, route webapp.RouteClassification) webapp.BootPayload {
+	initialState := bootInitialState(ctx, req, p, route)
+	routeData := bootRouteData(ctx, req, p, route)
+	if route.Route == webapp.RouteTaskDetail && routeData == nil && canLoadTaskDetailFallback(req, p.authSvc) {
+		bootStateBuilder{p: p}.addHomeKanbanRouteState(ctx, req, initialState)
+	}
 	payload := webapp.NewBootPayload(
 		route,
 		webRuntimeConfig(p.devMode, req),
-		bootInitialState(ctx, req, p, route),
+		initialState,
 	)
-	payload.RouteData = bootRouteData(ctx, req, p, route)
+	payload.RouteData = routeData
 	payload.Plugins = bootActivePlugins(p)
 	payload.InterimSettingsInterlockToken = p.interimSettingsInterlockToken
 	return payload
+}
+
+func canLoadTaskDetailFallback(req *http.Request, authSvc *auth.Service) bool {
+	if authSvc == nil || authSvc.Mode() == auth.ModeDisabled {
+		return true
+	}
+	if req == nil {
+		return false
+	}
+	_, ok := authn.IdentityFromContext(req.Context())
+	return ok
 }
 
 // bootActivePlugins populates the boot payload's Plugins list from every

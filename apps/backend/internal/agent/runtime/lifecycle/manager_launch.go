@@ -28,6 +28,16 @@ import (
 
 const legacyExecutorTypeLocalPC = "local_pc"
 
+const registeredLaunchRollbackRetries = 3
+
+var registeredLaunchRollbackRetryDelays = [...]time.Duration{
+	100 * time.Millisecond,
+	500 * time.Millisecond,
+	2 * time.Second,
+}
+
+var errTaskCleanupActive = errors.New("task cleanup is active")
+
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
 func (m *Manager) resolveAgentProfile(ctx context.Context, req *LaunchRequest) (string, *AgentProfileInfo, error) {
 	profileID := executionProfileID(req)
@@ -1236,6 +1246,10 @@ func (m *Manager) registerAndPublishExecution(
 	execInstance *ExecutorInstance,
 	sessionID string,
 ) error {
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during runtime creation")
+		return err
+	}
 	if addErr := m.executionStore.Add(execution); addErr != nil {
 		if errors.Is(addErr, ErrExecutionAlreadyExistsForSession) {
 			m.rollbackRacedExecution(ctx, rt, execInstance, execution)
@@ -1243,15 +1257,25 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	// Make the execution visible to durable cleanup before the final session
+	// read. This closes the precheck -> Add -> persist gap: deletion cleanup can
+	// now inventory the row, while a deletion that already ran is caught below.
+	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+		m.rollbackRegisteredLaunchAfterPersistFailure(rt, execInstance, execution)
+		return fmt.Errorf("persist execution registration: %w", err)
+	}
+
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+		if errors.Is(err, errTaskCleanupActive) {
+			m.rollbackRegisteredLaunchForTaskCleanup(rt, execInstance, execution)
+		} else {
+			m.rollbackRegisteredLaunch(rt, execInstance, execution, "session ended during execution registration")
+		}
+		return err
+	}
 	m.setRuntimeInterest(execution.SessionID, true)
 
 	m.persistRuntimeSecrets(ctx, execInstance, execution)
-
-	// Persist executors_running in lockstep with Add — see persistence.go for the
-	// invariant. Carries forward resume_token / metadata from a prior row so the
-	// lifecycle write doesn't clobber data the orchestrator's narrow CAS updates
-	// wrote earlier (e.g., context_window from a previous run).
-	m.persistExecutorRunning(ctx, execution)
 
 	go m.pollOneRemoteStatus(context.Background(), execution)
 
@@ -1262,6 +1286,157 @@ func (m *Manager) registerAndPublishExecution(
 	// NOTE: This does NOT start the agent process — call StartAgentProcess() explicitly.
 	go m.waitForAgentctlReady(execution)
 	return nil
+}
+
+// ensureLaunchSessionStillActive closes the remote-runtime creation race: SSH,
+// Docker, and other remote CreateInstance calls can outlive a concurrent task
+// delete. Callers read both immediately before and after registration. The
+// durable cleanup-intent check is the admission boundary between them: either
+// launch persists first and cleanup's final inventory observes it, or cleanup
+// persists first and launch rolls the runtime back.
+func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
+	if m.executorProfileReader == nil || sessionID == "" {
+		return nil
+	}
+	session, err := m.executorProfileReader.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("verify session before registering execution: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("verify session before registering execution: session %q not found", sessionID)
+	}
+	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("verify task cleanup before registering execution: %w", err)
+	}
+	if cleanupActive {
+		return fmt.Errorf("verify task cleanup before registering execution: %w for task %q", errTaskCleanupActive, session.TaskID)
+	}
+	// Re-read after the cleanup-intent lookup. A cleanup can transition to a
+	// terminal state between separate queries; its job then no longer appears
+	// active, but the session deletion/cancellation remains authoritative.
+	session, err = m.executorProfileReader.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("reverify session after task cleanup admission: %w", err)
+	}
+	if session == nil {
+		return fmt.Errorf("reverify session after task cleanup admission: session %q not found", sessionID)
+	}
+	switch session.State {
+	case models.TaskSessionStateCancelled,
+		models.TaskSessionStateCompleted,
+		models.TaskSessionStateFailed:
+		return fmt.Errorf("verify session before registering execution: session %q is %s", sessionID, session.State)
+	default:
+		return nil
+	}
+}
+
+// rollbackRegisteredLaunchForTaskCleanup cannot assume the session is
+// terminal: the task mutation may still fail after persisting its prepared
+// cleanup intent. Preserve resumable state while removing the rejected live
+// execution; committed cleanup can subsequently remove the stopped row.
+func (m *Manager) rollbackRegisteredLaunchForTaskCleanup(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) {
+	m.rollbackRegisteredLaunchWithRetry(rt, execInstance, execution, true, "task cleanup won execution registration")
+}
+
+// rollbackRegisteredLaunchAfterPersistFailure preserves any prior durable row
+// for the session. If the failed upsert actually committed before returning an
+// ambiguous transport error, clean it up resume-safely only after confirming
+// that it belongs to this exact execution.
+func (m *Manager) rollbackRegisteredLaunchAfterPersistFailure(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) {
+	m.rollbackRegisteredLaunchWithRetry(rt, execInstance, execution, false, "execution registration persistence failed")
+}
+
+func (m *Manager) rollbackRegisteredLaunchWithRetry(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+	taskCleanupActive bool,
+	reason string,
+) {
+	if err := m.stopRegisteredLaunchRuntime(rt, execInstance, execution); err == nil {
+		m.finishRegisteredLaunchRollback(execution, taskCleanupActive)
+		return
+	} else {
+		m.logger.Warn("registered launch rollback retained ownership after stop failure",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for attempt := 0; attempt < registeredLaunchRollbackRetries; attempt++ {
+			timer := time.NewTimer(registeredLaunchRollbackRetryDelays[attempt])
+			select {
+			case <-m.stopCh:
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if _, exists := m.executionStore.Get(execution.ID); !exists {
+				return
+			}
+			if err := m.stopRegisteredLaunchRuntime(rt, execInstance, execution); err == nil {
+				m.finishRegisteredLaunchRollback(execution, taskCleanupActive)
+				return
+			} else {
+				m.logger.Warn("registered launch rollback retry failed",
+					zap.String("execution_id", execution.ID),
+					zap.Int("attempt", attempt+1),
+					zap.Error(err))
+			}
+		}
+		m.logger.Error("registered launch rollback exhausted retries; retaining cleanup ownership",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("reason", reason))
+	}()
+}
+
+func (m *Manager) stopRegisteredLaunchRuntime(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) error {
+	if rt != nil && execInstance != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := rt.StopInstance(cleanupCtx, execInstance, true)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	execution.EndSessionSpan()
+	return nil
+}
+
+func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, taskCleanupActive bool) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if taskCleanupActive {
+		m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+	} else if reader, ok := m.runningWriter.(executorRunningReader); ok {
+		running, err := reader.GetExecutorRunningBySessionID(cleanupCtx, execution.SessionID)
+		if err == nil && running != nil && running.AgentExecutionID == execution.ID {
+			m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+		}
+	}
+	m.executionStore.Remove(execution.ID)
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
@@ -1282,6 +1457,26 @@ func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend,
 		execution.agentctl.Close()
 	}
 	execution.EndSessionSpan()
+}
+
+// rollbackRegisteredLaunch removes both sides of an execution registration
+// before stopping its runtime. This path intentionally deletes the durable row
+// without the normal resume-token repair: the owning session was just proven
+// terminal or absent, so leaving a repaired row would expose a phantom runtime.
+func (m *Manager) rollbackRegisteredLaunch(rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
+	m.executionStore.Remove(execution.ID)
+	if m.runningWriter != nil && execution.SessionID != "" {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := m.runningWriter.DeleteExecutorRunningBySessionID(cleanupCtx, execution.SessionID); err != nil &&
+			!errors.Is(err, models.ErrExecutorRunningNotFound) {
+			m.logger.Warn("failed to delete executor-running row during launch rollback",
+				zap.String("execution_id", execution.ID),
+				zap.String("session_id", execution.SessionID),
+				zap.Error(err))
+		}
+		cancel()
+	}
+	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, reason)
 }
 
 // SetExecutionDescription updates the task description stored in an execution's metadata.

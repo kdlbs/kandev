@@ -53,7 +53,7 @@ The commitlint hook caps the header at **100 characters** (`type(scope): descrip
 
 ### Release & Versioning
 
-Kandev uses a **single SemVer** `X.Y.Z` across npm, Homebrew, and GitHub release; release flow runs entirely in CI via `.github/workflows/release.yml`. Full details in the `/release` skill — load it when cutting a release or debugging release artifacts.
+Stable Kandev releases use one **SemVer** `X.Y.Z` across npm, Homebrew, GitHub Releases, Desktop, and containers. Scheduled npm-only Nightlies use `X.Y.(Z+1)-nightly.sha<12-hex>` without moving any Stable channel. Both flows run in `.github/workflows/release.yml`. Full details are in the `/release` skill — load it when cutting a release, changing version channels, or debugging release artifacts.
 
 ### Code Quality
 

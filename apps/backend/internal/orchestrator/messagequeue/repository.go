@@ -96,12 +96,13 @@ type Repository interface {
 	// is mandatory so a caller can't delete an entry by guessing its UUID across
 	// sessions — the queue_full MCP payload deliberately discloses sibling-task
 	// entry IDs, so without this guard a hostile agent could prune another
-	// task's queue. Server-owned entries are immutable from this path and
-	// return ErrEntryNotFound.
+	// task's queue. A durable lifecycle entry already reserved in flight is not
+	// pending and returns ErrEntryNotFound.
 	DeleteByID(ctx context.Context, sessionID, entryID string) error
 
-	// DeleteAllBySession removes every user-owned entry for a session. Reserved
-	// agent/workflow/server entries remain. Returns the count removed.
+	// DeleteAllBySession removes every pending entry for a session, regardless
+	// of provenance. Durable lifecycle entries already reserved in flight remain.
+	// Returns the exact count removed.
 	DeleteAllBySession(ctx context.Context, sessionID string) (int, error)
 
 	// TransferSession moves all entries (and any pending move) from oldSessionID

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconWand } from "@tabler/icons-react";
 import {
   listUtilityAgents,
@@ -220,6 +221,7 @@ function useUtilityAgentsData() {
 }
 
 export function UtilityAgentsSection() {
+  const { t } = useTranslation();
   const data = useUtilityAgentsData();
   const {
     agents,
@@ -280,8 +282,8 @@ export function UtilityAgentsSection() {
     <>
       <SettingsSection
         icon={<IconWand className="h-5 w-5" />}
-        title="Utility Agents"
-        description="One-shot AI helpers for commits, PRs, and prompts."
+        title={t("settings:utilityAgents")}
+        description={t("settings:utilityAgentsPageDescription")}
       >
         <div className="space-y-4">
           <DefaultModelSection

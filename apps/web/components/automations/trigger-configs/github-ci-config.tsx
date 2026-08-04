@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -10,13 +11,16 @@ type GitHubCIConfigProps = {
   onUpdate: (config: Record<string, unknown>) => void;
 };
 
+// `value` is the GitHub check-run conclusion persisted in the trigger config
+// and matched by the backend — protocol. Only the label is copy.
 const CI_CONCLUSIONS = [
-  { value: "success", label: "Success" },
-  { value: "failure", label: "Failure" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "success", labelKey: "automations:ciConclusionSuccess" },
+  { value: "failure", labelKey: "automations:ciConclusionFailure" },
+  { value: "cancelled", labelKey: "automations:ciConclusionCancelled" },
 ] as const;
 
 export function GitHubCIConfig({ config, onUpdate }: GitHubCIConfigProps) {
+  const { t } = useTranslation();
   const conclusions = (config.conclusions as string[]) ?? [];
   const configCheckNames = ((config.check_names as string[]) ?? []).join(", ");
   const [checkNames, setCheckNames] = useState(configCheckNames);
@@ -42,7 +46,7 @@ export function GitHubCIConfig({ config, onUpdate }: GitHubCIConfigProps) {
   return (
     <div className="space-y-3">
       <div className="space-y-2">
-        <Label className="text-xs">Conclusions</Label>
+        <Label className="text-xs">{t("automations:ciConclusionsLabel")}</Label>
         <div className="flex flex-wrap gap-3">
           {CI_CONCLUSIONS.map((c) => (
             <label key={c.value} className="flex items-center gap-1.5 cursor-pointer">
@@ -51,13 +55,15 @@ export function GitHubCIConfig({ config, onUpdate }: GitHubCIConfigProps) {
                 onCheckedChange={() => toggleConclusion(c.value)}
                 className="cursor-pointer"
               />
-              <span className="text-sm">{c.label}</span>
+              <span className="text-sm">{t(c.labelKey)}</span>
             </label>
           ))}
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs">Check names (comma-separated, optional)</Label>
+        <Label className="text-xs">{t("automations:checkNamesLabel")}</Label>
+        {/* The placeholder is an example list of literal CI check names — data
+            the user types verbatim, not copy. */}
         <Input
           value={checkNames}
           onChange={(e) => setCheckNames(e.target.value)}

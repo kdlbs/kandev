@@ -26,6 +26,7 @@ const (
 	// rejected atomically instead of dropping persisted references.
 	queueErrorCodeMergeReferenceOverflow = "merge_reference_overflow"
 	queueInvalidReferences               = "Invalid entity references"
+	queueAccessDenied                    = "Session not found"
 
 	// Payload field names — extracted to satisfy goconst (≥3 occurrences).
 	fieldSessionID = "session_id"
@@ -51,10 +52,17 @@ type QueueDrainer interface {
 	DrainQueuedMessage(ctx context.Context, sessionID string) (bool, error)
 }
 
+// QueueAccessAuthorizer scopes queue reads and mutations to visible sessions.
+type QueueAccessAuthorizer interface {
+	AuthorizeSessionAccess(ctx context.Context, sessionID string) error
+	AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error
+}
+
 // QueueHandlers handles WebSocket message-queue operations.
 type QueueHandlers struct {
 	queueService       QueueService
 	queueDrainer       QueueDrainer
+	accessAuthorizer   QueueAccessAuthorizer
 	eventBus           bus.EventBus
 	logger             *logger.Logger
 	referenceValidator entityrefs.SubmissionValidator
@@ -66,6 +74,7 @@ func NewQueueHandlers(
 	eventBus bus.EventBus,
 	log *logger.Logger,
 	queueDrainer QueueDrainer,
+	accessAuthorizer QueueAccessAuthorizer,
 	validators ...entityrefs.SubmissionValidator,
 ) *QueueHandlers {
 	var referenceValidator entityrefs.SubmissionValidator
@@ -75,6 +84,7 @@ func NewQueueHandlers(
 	return &QueueHandlers{
 		queueService:       queueService,
 		queueDrainer:       queueDrainer,
+		accessAuthorizer:   accessAuthorizer,
 		eventBus:           eventBus,
 		logger:             log.WithFields(zap.String("component", "queue-handlers")),
 		referenceValidator: referenceValidator,
@@ -115,6 +125,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
+	}
+	if denied := h.authorizeTaskSession(ctx, msg, req.TaskID, req.SessionID); denied != nil {
+		return denied, nil
 	}
 	if req.Content == "" && len(req.Attachments) == 0 {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content or attachments are required", nil)
@@ -171,6 +184,9 @@ func (h *QueueHandlers) wsCancelAll(ctx context.Context, msg *ws.Message) (*ws.M
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
+	}
 
 	removed, err := h.queueService.CancelAll(ctx, req.SessionID)
 	if err != nil {
@@ -195,6 +211,9 @@ func (h *QueueHandlers) wsDrainQueue(ctx context.Context, msg *ws.Message) (*ws.
 	}
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
 	}
 	if h.queueDrainer == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Queue drain is unavailable", nil)
@@ -233,6 +252,9 @@ func (h *QueueHandlers) wsGetQueueStatus(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
+	}
 
 	status := h.queueService.GetStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, status)
@@ -256,6 +278,9 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		// Required so publishStatus can broadcast the post-update list to other
 		// connected clients; without it they'd be left with a stale view.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
 	}
 	if req.EntryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
@@ -345,13 +370,16 @@ func (h *QueueHandlers) wsRemoveEntry(ctx context.Context, msg *ws.Message) (*ws
 		// Required so publishStatus can broadcast the post-removal list.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
 	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
+	}
 	if req.EntryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
 	}
 
 	if err := h.queueService.RemoveEntry(ctx, req.SessionID, req.EntryID); err != nil {
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
-			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
+			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry is no longer pending", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
@@ -380,6 +408,9 @@ func (h *QueueHandlers) wsMergeIntoAbove(ctx context.Context, msg *ws.Message) (
 	if req.SessionID == "" {
 		// Required so publishStatus can broadcast the post-merge list.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "session_id is required", nil)
+	}
+	if denied := h.authorizeSession(ctx, msg, req.SessionID); denied != nil {
+		return denied, nil
 	}
 	if req.EntryID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "entry_id is required", nil)
@@ -434,6 +465,9 @@ func (h *QueueHandlers) wsAppendToQueue(ctx context.Context, msg *ws.Message) (*
 	if req.TaskID == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id is required", nil)
 	}
+	if denied := h.authorizeTaskSession(ctx, msg, req.TaskID, req.SessionID); denied != nil {
+		return denied, nil
+	}
 	if req.Content == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "content is required", nil)
 	}
@@ -471,6 +505,35 @@ func reservedIdentityError(queuedBy string) string {
 		return "user_id may not impersonate the agent identity"
 	}
 	return "user_id may not impersonate a reserved identity"
+}
+
+func (h *QueueHandlers) authorizeSession(ctx context.Context, msg *ws.Message, sessionID string) *ws.Message {
+	if h.accessAuthorizer == nil {
+		return queueAccessDeniedResponse(msg)
+	}
+	if err := h.accessAuthorizer.AuthorizeSessionAccess(ctx, sessionID); err != nil {
+		return queueAccessDeniedResponse(msg)
+	}
+	return nil
+}
+
+func (h *QueueHandlers) authorizeTaskSession(
+	ctx context.Context,
+	msg *ws.Message,
+	taskID, sessionID string,
+) *ws.Message {
+	if h.accessAuthorizer == nil {
+		return queueAccessDeniedResponse(msg)
+	}
+	if err := h.accessAuthorizer.AuthorizeTaskSessionAccess(ctx, taskID, sessionID); err != nil {
+		return queueAccessDeniedResponse(msg)
+	}
+	return nil
+}
+
+func queueAccessDeniedResponse(msg *ws.Message) *ws.Message {
+	response, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, queueAccessDenied, nil)
+	return response
 }
 
 // publishStatus emits the latest QueueStatus on the event bus so the frontend

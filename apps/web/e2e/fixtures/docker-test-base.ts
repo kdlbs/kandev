@@ -111,7 +111,6 @@ export const dockerTest = backendFixture.extend<
   ],
 
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
-    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
@@ -135,6 +134,19 @@ export const dockerTest = backendFixture.extend<
     await use(page);
     await context.close();
   },
+});
+
+// Container lifecycle cleanup must run for API-only tests too. `testPage` is a
+// lazy fixture, so keeping reset there allowed tests that only request
+// apiClient/seedData to leave tasks and containers behind for the next test.
+dockerTest.beforeEach(async ({ apiClient, seedData }) => {
+  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  removeKandevContainers();
+});
+
+dockerTest.afterEach(async ({ apiClient, seedData }) => {
+  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  removeKandevContainers();
 });
 
 export { expect } from "@playwright/test";

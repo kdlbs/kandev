@@ -6,6 +6,10 @@ owner: kandev
 
 # Merge Enqueued Messages Individually
 
+Queue-wide removal and capacity behavior is defined separately by
+[Manage Pending Message Queues](message-queue-management.md). This spec governs
+only the merge operation.
+
 ## Why
 
 When a session is busy, users queue follow-up prompts that drain one-per-turn. A
@@ -118,9 +122,10 @@ No schema change. The merge reuses the existing `queued_messages` table:
   one-way prompts from a single inter-task agent preserves the reserved row's
   provenance (the merged entry keeps the target's identity and the source's
   `sender_task_id`-matched lineage) while reducing deliveries. The gate is
-  strict — identical non-empty `sender_task_id`, never caller-tunable — so a
-  client still cannot move, delete, or reorder agent-owned rows outside that
-  exact fold.
+  strict — identical non-empty `sender_task_id`, never caller-tunable — so the
+  merge operation cannot move, reorder, or combine unrelated agent-owned rows.
+  Authorized pending-row deletion is a separate operation governed by
+  [Manage Pending Message Queues](message-queue-management.md).
 - Workflow and system messages are never a merge source or target.
 - The WS handler rejects client-supplied reserved `user_id` values, exactly like
   the update handler.

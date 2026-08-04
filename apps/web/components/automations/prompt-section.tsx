@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { ScriptEditor } from "@/components/settings/profile-edit/script-editor";
 import type { PlaceholderInfo } from "@/lib/types/automation";
@@ -14,11 +15,14 @@ type PromptSectionProps = {
 };
 
 export function PromptSection({ value, isDirty, onChange, placeholders }: PromptSectionProps) {
+  const { t } = useTranslation();
   const scriptPlaceholders = useMemo(() => toScriptPlaceholders(placeholders), [placeholders]);
 
   return (
     <div className="space-y-3">
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">Instructions</Label>
+      <Label className="text-xs uppercase tracking-wider text-muted-foreground">
+        {t("automations:instructionsLabel")}
+      </Label>
       <div
         className="rounded-md border border-transparent"
         data-settings-dirty={isDirty}
@@ -34,7 +38,7 @@ export function PromptSection({ value, isDirty, onChange, placeholders }: Prompt
       </div>
       {placeholders.length > 0 && (
         <div className="text-xs text-muted-foreground space-y-1">
-          <p className="font-medium">Available placeholders:</p>
+          <p className="font-medium">{t("automations:availablePlaceholdersColon")}</p>
           <div className="flex flex-wrap gap-x-3 gap-y-1">
             {placeholders.map((p) => (
               <span key={p.key} title={p.description}>

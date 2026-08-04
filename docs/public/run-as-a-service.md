@@ -7,7 +7,11 @@ description: "Install Kandev under systemd or launchd and operate it safely."
 
 The native Kandev launcher can install itself as a systemd service on Linux or a launchd service on macOS. Use this for a persistent workstation or server. Windows Service Control Manager, OpenRC, and SysV init are not supported.
 
-Install Kandev first using a persistent [CLI installation](cli.md#install). Do not install a long-lived service from an ephemeral `npx` invocation: the generated unit records the absolute native executable and release-bundle paths.
+For the simplest path, install Kandev persistently before creating the service; see [CLI installation](cli.md#install). A plain `npx -y kandev@...` launch is ephemeral, but `npx -y kandev@latest service install` can create a managed npx user service. That service depends on the cached npx package remaining present: reinstall it after upgrades, and expect npm cache cleanup to invalidate its recorded absolute paths. Prefer global npm for a durable service. Do not hand-write a long-lived service around an npx command.
+
+Stable is the default release channel. A verified Kandev-managed npm/npx user service can opt into
+the npm Nightly channel from **Settings → System → Updates**. Desktop, Homebrew, and system services
+remain Stable-only.
 
 > **Network security:** the backend listens on `0.0.0.0` by default and ships with authentication **disabled**. Before allowing remote access, enable [opt-in authentication](authentication.md) (the **Authentication & users** feature toggle, or `KANDEV_FEATURES_AUTH=true`) and terminate TLS in a reverse proxy — authentication does not replace HTTPS. A server bound to non-loopback interfaces without authentication logs a startup warning. See [server configuration](configuration.md#root-and-server).
 
@@ -185,15 +189,47 @@ sudo journalctl -u kandev.service -n 200 --no-pager
 
 For a user service installed by `kandev service install`, use **Settings → System → Updates → Apply update** when a newer release is available. Kandev verifies the managed unit or plist and its owner-only `<home>/service/install.json` metadata before enabling this action. System services still require a terminal update because they need elevated privileges.
 
-If the Apply action is unavailable or fails, upgrade the package manually, reinstall with the same mode and home flags so absolute paths and bundle metadata are refreshed, then restart explicitly:
+For a verified global npm user service, or an existing managed npx user service, the same page also
+provides an install-wide **Stable** or **Nightly** choice. A global npm install is the recommended
+durable service path. An npx-managed service is a recoverable but fragile fallback because its
+executable lives in npm's transient cache. Stable reads signed GitHub Releases and remains selected
+by default. Nightly reads npm's `kandev@nightly` tag and may contain unstable code from `main`. Select the row, use
+**Save changes**, inspect the exact version, and then apply it separately. Apply submits that exact
+immutable version; it does not re-resolve either mutable channel source. The backend accepts it
+only while it still matches the selected channel's cached target. If that cache changes, Apply
+returns a conflict and the page must refresh before you retry with the newly displayed target.
+
+To leave Nightly, select Stable, save, and apply the displayed stable release. If the UI cannot do
+that, use the manual stable recovery below. Homebrew, Desktop, system-service, unmanaged,
+local-checkout, unknown, and invalid-metadata installs cannot select Nightly.
+
+If the Apply action is unavailable or fails, use the recovery command that matches the original install. Repeat custom `--home-dir`, `--port`, and `--no-boot-start` values only on `service install`; `service restart` and `service status` accept `--system` but not those install-time flags.
 
 ```bash
-# npm example; use `brew upgrade kandev` for Homebrew
+# Global npm service
 npm install --global kandev@latest
-kandev service install --home-dir "$HOME/.kandev"
+# Append original install-time flags here when used.
+kandev service install
 kandev service restart
 kandev service status
+
+# Existing managed npx service recovery only (run each service command through npx)
+# This service points into npm's cache. Reinstall after upgrades; npm cache cleanup invalidates it.
+# Prefer a global npm installation for a durable service.
+# Append original install-time flags to service install when used.
+npx -y kandev@latest service install
+npx -y kandev@latest service restart
+npx -y kandev@latest service status
+
+# Homebrew service (Stable only)
+brew upgrade kandev
+# Append original install-time flags here when used.
+kandev service install
+kandev service restart
 ```
+
+To remain on Nightly during a manual npm or npx recovery, use `kandev@nightly` in the matching command.
+Do not use a Homebrew `HEAD` build as an equivalent channel; no Homebrew Nightly is published.
 
 For system mode:
 

@@ -6,9 +6,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"go.uber.org/zap"
@@ -33,6 +31,8 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
+	"github.com/kandev/kandev/internal/system/queuesettings"
+	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -90,7 +90,7 @@ func provideOrchestrator(
 	if err != nil {
 		return nil, nil, fmt.Errorf("init message queue repo: %w", err)
 	}
-	maxPerSession := resolveQueueMaxPerSession(log)
+	maxPerSession := resolveQueueMaxPerSession(pool, log)
 	msgQueue := messagequeue.NewService(queueRepo, maxPerSession, log)
 	log.Info("Message queue initialized",
 		zap.Int("max_per_session", maxPerSession))
@@ -244,19 +244,30 @@ func githubCredentialBrokerEndpoint(cfg *config.Config) string {
 // falling back to messagequeue.DefaultMaxPerSession (10) when unset or invalid.
 // Values <= 0 disable the cap entirely (callers can still flood queues — only
 // useful in tests / specialized deployments).
-func resolveQueueMaxPerSession(log *logger.Logger) int {
-	raw := strings.TrimSpace(os.Getenv("KANDEV_QUEUE_MAX_PER_SESSION"))
-	if raw == "" {
-		return messagequeue.DefaultMaxPerSession
+func resolveQueueMaxPerSession(pool *db.Pool, log *logger.Logger) int {
+	var configured *queuesettings.Settings
+	if pool != nil {
+		rawStore, err := systemsettings.NewStore(pool)
+		if err != nil {
+			log.Warn("Failed to initialize message queue settings store", zap.Error(err))
+		} else {
+			configured, err = queuesettings.NewStore(rawStore).Load(context.Background())
+			if err != nil {
+				log.Warn("Ignoring invalid persisted message queue settings", zap.Error(err))
+				configured = nil
+			}
+		}
 	}
-	n, err := strconv.Atoi(raw)
+	resolution, err := queuesettings.Resolve(configured, queuesettings.ReadEnvironment())
 	if err != nil {
-		log.Warn("KANDEV_QUEUE_MAX_PER_SESSION is not a number, using default",
-			zap.String("value", raw),
-			zap.Int("default", messagequeue.DefaultMaxPerSession))
+		log.Warn("Failed to resolve message queue capacity, using default", zap.Error(err))
 		return messagequeue.DefaultMaxPerSession
 	}
-	return n
+	if resolution.InvalidEnvironment {
+		log.Warn("Ignoring invalid message queue capacity environment value",
+			zap.String("environment_variable", queuesettings.EnvironmentVariable))
+	}
+	return resolution.Effective.MaxPerSession
 }
 
 func resolveEventNamespace(cfg *config.Config) string {

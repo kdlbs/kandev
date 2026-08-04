@@ -2,6 +2,8 @@ package updates
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -22,6 +24,23 @@ type capturingNotifier struct {
 type updateNotification struct {
 	version string
 	url     string
+}
+
+type firstCallBlockingNotifier struct {
+	calls   atomic.Int32
+	entered chan struct{}
+	release chan struct{}
+}
+
+func (n *firstCallBlockingNotifier) HandleUpdateAvailable(ctx context.Context, _, _ string) {
+	if n.calls.Add(1) != 1 {
+		return
+	}
+	close(n.entered)
+	select {
+	case <-n.release:
+	case <-ctx.Done():
+	}
 }
 
 func (n *capturingNotifier) HandleUpdateAvailable(_ context.Context, version, releaseURL string) {
@@ -66,6 +85,160 @@ func TestService_FetchAndPersist_NotifiesCanonicalServiceForNewerRelease(t *test
 
 	if len(notifier.calls) != 1 {
 		t.Fatalf("notifier calls = %d, want 1", len(notifier.calls))
+	}
+}
+
+func TestService_ReplayNightlyNotifiesForUnequalAuthoritativeSHA(t *testing.T) {
+	homeDir := configureManagedNPMInstall(t)
+	pool := newTestPool(t)
+	store := &memorySettingsStore{value: []byte(ChannelNightly), present: true}
+	if err := persistence.WriteLatestNightlyVersion(
+		pool.Writer(),
+		"1.2.4-nightly.sha000000000000",
+		"https://example.test/nightly",
+		time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(
+		pool,
+		"v1.2.4-nightly.shaffffffffffff",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(store),
+	)
+	notifier := &capturingNotifier{}
+	svc.SetNotifier(notifier)
+	if err := svc.ReplayCachedUpdate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.calls) != 1 {
+		t.Fatalf("notifier calls=%d want 1", len(notifier.calls))
+	}
+	if got := notifier.calls[0]; got.version != "1.2.4-nightly.sha000000000000" || got.url != "https://example.test/nightly" {
+		t.Errorf("notifier call = %+v, want cached nightly", got)
+	}
+}
+
+func TestService_ReplayCachedUpdateSerializesWithChannelSelection(t *testing.T) {
+	homeDir := configureManagedNPMInstall(t)
+	pool := newTestPool(t)
+	store := &memorySettingsStore{value: []byte(ChannelStable), present: true}
+	if err := persistence.WriteLatestVersion(
+		pool.Writer(),
+		"v1.2.4",
+		"https://example.test/stable",
+		time.Now(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(
+		pool,
+		"v1.2.3",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(store),
+	)
+	notifier := &firstCallBlockingNotifier{
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	releaseReplay := sync.OnceFunc(func() { close(notifier.release) })
+	t.Cleanup(releaseReplay)
+	svc.SetNotifier(notifier)
+	nightlyFetchEntered := make(chan struct{})
+	svc.SetNightlyFetcher(func(context.Context) (string, string, error) {
+		close(nightlyFetchEntered)
+		return "v1.2.5-nightly.shaabcdef123456", "https://example.test/nightly", nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+
+	replayDone := make(chan error, 1)
+	go func() { replayDone <- svc.ReplayCachedUpdate(ctx) }()
+	select {
+	case <-notifier.entered:
+	case err := <-replayDone:
+		t.Fatalf("cached replay returned before notifier: %v", err)
+	case <-ctx.Done():
+		t.Fatal("cached replay did not reach notifier")
+	}
+	if svc.updateMu.TryLock() {
+		svc.updateMu.Unlock()
+		t.Fatal("update lock was not held while cached replay notified")
+	}
+
+	selectDone := make(chan error, 1)
+	selectStarted := make(chan struct{})
+	go func() {
+		close(selectStarted)
+		_, err := svc.SelectChannel(ctx, string(ChannelNightly))
+		selectDone <- err
+	}()
+	select {
+	case <-selectStarted:
+	case <-ctx.Done():
+		t.Fatal("channel selection did not start")
+	}
+
+	releaseReplay()
+	select {
+	case err := <-replayDone:
+		if err != nil {
+			t.Fatalf("cached replay: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("cached replay did not finish")
+	}
+	select {
+	case <-nightlyFetchEntered:
+	case err := <-selectDone:
+		t.Fatalf("channel selection returned before resolving Nightly: %v", err)
+	case <-ctx.Done():
+		t.Fatal("channel selection did not resolve Nightly")
+	}
+	select {
+	case err := <-selectDone:
+		if err != nil {
+			t.Fatalf("channel selection: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("channel selection did not finish")
+	}
+}
+
+func TestService_ReturnToOlderStableIsAvailableWithoutUpgradeNotification(t *testing.T) {
+	homeDir := configureManagedNPMInstall(t)
+	pool := newTestPool(t)
+	store := &memorySettingsStore{value: []byte(ChannelStable), present: true}
+	if err := persistence.WriteLatestVersion(pool.Writer(), "v1.2.3", "https://example.test/stable", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(
+		pool,
+		"v1.2.4-nightly.shaabc123def456",
+		nil,
+		logger.Default(),
+		WithHomeDir(homeDir),
+		WithSettingsStore(store),
+	)
+	notifier := &capturingNotifier{}
+	svc.SetNotifier(notifier)
+
+	resp, err := svc.Get(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !resp.UpdateAvailable {
+		t.Fatal("explicit stable return should be available")
+	}
+	if err := svc.ReplayCachedUpdate(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(notifier.calls) != 0 {
+		t.Fatalf("downgrade-like stable return sent %d notification(s)", len(notifier.calls))
 	}
 }
 

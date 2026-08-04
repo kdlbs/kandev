@@ -915,15 +915,13 @@ func (m *cancelContextAgentManager) CancelAgent(ctx context.Context, sessionID s
 	return err
 }
 
-func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
+func newCancelTurnFailureFixture(t *testing.T, repo *sqliterepo.Repository, taskID, sessionID string) (*Service, *cancelTurnFailureService) {
+	t.Helper()
 	ctx := context.Background()
-	repo := setupTestRepo(t)
-	taskID := "task-cancel-turn-failure"
-	sessionID := "session-cancel-turn-failure"
 	seedSession(t, repo, taskID, sessionID, "step1")
 	now := time.Now().UTC()
 	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID:            "turn-cancel-turn-failure",
+		ID:            "turn-" + sessionID,
 		TaskID:        taskID,
 		TaskSessionID: sessionID,
 		StartedAt:     now,
@@ -932,11 +930,18 @@ func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
 	}))
 
 	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
-	turnService := &cancelTurnFailureService{
-		repoTurnService: &repoTurnService{repo: repo},
-		completeErr:     errors.New("turn close failed"),
-	}
+	turnService := &cancelTurnFailureService{repoTurnService: &repoTurnService{repo: repo}}
 	svc.turnService = turnService
+	return svc, turnService
+}
+
+func TestCancelAgent_DoesNotTransitionWhenTurnClosureFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-turn-failure"
+	sessionID := "session-cancel-turn-failure"
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
+	turnService.completeErr = errors.New("turn close failed")
 
 	err := svc.CancelAgent(ctx, sessionID)
 	require.Error(t, err)
@@ -964,24 +969,9 @@ func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-active-turn-inspection-failure"
 	sessionID := "session-cancel-active-turn-inspection-failure"
-	seedSession(t, repo, taskID, sessionID, "step1")
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
 	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
-	now := time.Now().UTC()
-	require.NoError(t, repo.CreateTurn(ctx, &models.Turn{
-		ID:            "turn-cancel-active-turn-inspection-failure",
-		TaskID:        taskID,
-		TaskSessionID: sessionID,
-		StartedAt:     now,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}))
-
-	svc := createEngineService(t, repo, cancelCompletionStepGetter(true, false), &mockAgentManager{})
-	turnService := &cancelTurnFailureService{
-		repoTurnService: &repoTurnService{repo: repo},
-		activeErr:       errors.New("active turn lookup failed"),
-	}
-	svc.turnService = turnService
+	turnService.activeErr = errors.New("active turn lookup failed")
 
 	err := svc.CancelAgent(ctx, sessionID)
 	require.Error(t, err)
@@ -998,6 +988,33 @@ func TestCancelAgent_DoesNotTransitionWhenActiveTurnInspectionFails(t *testing.T
 	task, err = repo.GetTask(ctx, taskID)
 	require.NoError(t, err)
 	assert.Equal(t, "step2", task.WorkflowStepID, "a later retry should evaluate the settled cancellation")
+}
+
+func TestCancelAgent_SurvivesCallerCancellationDuringWaitingRetry(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-waiting-retry"
+	sessionID := "session-cancel-waiting-retry"
+	svc, turnService := newCancelTurnFailureFixture(t, repo, taskID, sessionID)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	svc.agentManager = &cancelContextAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		cancel:           cancel,
+	}
+
+	err := svc.CancelAgent(ctx, sessionID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), sessionID))
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	activeTurn, err := turnService.GetActiveTurn(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Nil(t, activeTurn)
 }
 
 func TestCancelAgent_NonterminalTransitionReconcilesReviewState(t *testing.T) {
@@ -1053,17 +1070,13 @@ func TestReconcileCancelledTurn_DoesNotCloseTurnWhenSessionStateWriteFails(t *te
 	assert.NotNil(t, activeTurn, "a failed session-state write must not close the active turn")
 }
 
-func TestCancelAgent_DoesNotTransitionWhenSessionStateWriteFails(t *testing.T) {
+func TestCancelAgent_DoesNotTransitionWhenLifecycleCancelFails(t *testing.T) {
 	repo := setupTestRepo(t)
 	taskID := "task-cancel-session-write"
 	sessionID := "session-cancel-session-write"
 	seedSession(t, repo, taskID, sessionID, "step1")
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	manager := &cancelContextAgentManager{
-		mockAgentManager: &mockAgentManager{},
-		cancel:           cancel,
-	}
+	ctx := context.Background()
+	manager := &mockAgentManager{cancelAgentErr: errors.New("cancel failed")}
 	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
 
 	err := svc.CancelAgent(ctx, sessionID)
@@ -1130,13 +1143,175 @@ func TestUserCancelCompletion_SilentCancelDoesNotTrigger(t *testing.T) {
 	assert.Equal(t, "step1", task.WorkflowStepID)
 }
 
+func TestCancelAgent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancel-stream-drain", "session-cancel-stream-drain", models.TaskSessionStateRunning)
+
+	streamDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		go func() {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+				TaskID:    "task-cancel-stream-drain",
+				SessionID: sessionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+				},
+			})
+			close(streamDone)
+		}()
+
+		select {
+		case <-streamDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := svc.CancelAgent(ctx, "session-cancel-stream-drain")
+	require.NoError(t, err)
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the acknowledgement stream callback")
+	}
+}
+
+func TestCancelAgentSilent_AllowsAcknowledgementStreamToDrain(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-silent-stream-drain", "session-silent-stream-drain", models.TaskSessionStateRunning)
+
+	streamDone := make(chan struct{})
+	var svc *Service
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		go func() {
+			svc.handleAgentStreamEvent(ctx, &lifecycle.AgentStreamEventPayload{
+				TaskID:    "task-silent-stream-drain",
+				SessionID: sessionID,
+				Data: &lifecycle.AgentStreamEventData{
+					Type: agentEventComplete,
+				},
+			})
+			close(streamDone)
+		}()
+
+		select {
+		case <-streamDone:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	lock, release := svc.acquireCancelInFlightGuard("session-silent-stream-drain")
+	lock.Lock()
+	guardLocked := true
+	unlockGuard := func() {
+		if guardLocked {
+			lock.Unlock()
+			guardLocked = false
+		}
+	}
+	relockGuard := func() {
+		if !guardLocked {
+			lock.Lock()
+			guardLocked = true
+		}
+	}
+	defer func() {
+		unlockGuard()
+		release()
+	}()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	err := svc.cancelAgentSilentWithGuard(
+		ctx,
+		"task-silent-stream-drain",
+		"session-silent-stream-drain",
+		unlockGuard,
+		relockGuard,
+	)
+	require.NoError(t, err)
+	select {
+	case <-streamDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the acknowledgement stream callback")
+	}
+}
+
+func TestCancelAgent_DoesNotReconcileSuccessorTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-cancel-successor", "session-cancel-successor", models.TaskSessionStateRunning)
+
+	var svc *Service
+	var successor *models.Turn
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(ctx context.Context, sessionID string) error {
+		var err error
+		successor, err = svc.turnService.StartTurn(ctx, sessionID)
+		return err
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	captured, err := svc.turnService.StartTurn(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+
+	err = svc.CancelAgent(ctx, "session-cancel-successor")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "superseded")
+	require.NotNil(t, successor)
+
+	active, err := svc.turnService.GetActiveTurn(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, successor.ID, active.ID)
+	assert.NotEqual(t, captured.ID, active.ID)
+	session, err := repo.GetTaskSession(ctx, "session-cancel-successor")
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
+}
+
+func TestCancelAgent_SurvivesCallerCancellationAfterAdmission(t *testing.T) {
+	repo := setupTestRepo(t)
+	taskID := "task-cancel-caller-disconnect"
+	sessionID := "session-cancel-caller-disconnect"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := &cancelContextAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		cancel:           cancel,
+	}
+	svc := createTestServiceWithAgent(repo, cancelCompletionStepGetter(true, false), newMockTaskRepo(), manager)
+
+	err := svc.CancelAgent(ctx, sessionID)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), sessionID))
+	task, err := repo.GetTask(context.Background(), taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID)
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+}
+
 // TestCancelAgent_DeduplicatesConcurrentCalls covers the impatient-user case:
 // the UI's cancel button has no in-flight disable, so users click it multiple
 // times while the agent is still tearing down a slow turn (e.g. a Claude
 // Monitor tool). Without dedupe each click reaches the lifecycle layer and
 // emits its own "Turn cancelled by user" message; phantom turns are also
 // lazily started to host those messages. We assert that only one cancel makes
-// it through to agentManager.CancelAgent while one is already in flight.
+// it through to agentManager.CancelAgent while the other callers join its
+// result.
 func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	repo := setupTestRepo(t)
 	agentMgr := &mockAgentManager{
@@ -1160,23 +1335,29 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	// don't depend on real subprocess timing.
 	<-agentMgr.cancelAgentEntered
 
-	// Fire several duplicates while the first is still parked. Each must be
-	// short-circuited by the dedupe guard and return immediately.
+	// Fire several duplicates while the first is still parked. Each joins the
+	// owner operation and waits for its result rather than invoking the manager.
 	const duplicates = 5
+	duplicateDone := make(chan error, duplicates)
 	for i := 0; i < duplicates; i++ {
-		if err := svc.CancelAgent(context.Background(), "session1"); err != nil {
-			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
-		}
+		go func() {
+			duplicateDone <- svc.CancelAgent(context.Background(), "session1")
+		}()
 	}
 	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
 		t.Fatalf("expected exactly 1 agentManager.CancelAgent call while first is in flight, got %d", got)
 	}
 
-	// Release the first call. After it returns, the guard clears and a fresh
-	// cancel is allowed through.
+	// Release the first call. The owner and all joiners observe the same result;
+	// after the operation clears, a fresh cancel is allowed through.
 	close(agentMgr.cancelAgentBlock)
 	if err := <-firstDone; err != nil {
 		t.Fatalf("first CancelAgent returned error: %v", err)
+	}
+	for i := 0; i < duplicates; i++ {
+		if err := <-duplicateDone; err != nil {
+			t.Fatalf("duplicate cancel %d returned error: %v", i, err)
+		}
 	}
 
 	agentMgr.cancelAgentBlock = nil // unblock subsequent calls
@@ -1186,6 +1367,380 @@ func TestCancelAgent_DeduplicatesConcurrentCalls(t *testing.T) {
 	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
 		t.Fatalf("expected 2 agentManager.CancelAgent calls after release, got %d", got)
 	}
+}
+
+func TestCancellationPendingTracksReferencesAndPublishesTransitions(t *testing.T) {
+	recorded := &recordingEventBus{}
+	svc := &Service{eventBus: recorded}
+
+	endFirst := svc.beginCancelInFlight("session1")
+	require.True(t, svc.CancellationPending("session1"))
+	require.False(t, svc.CancellationPending("session2"))
+	pending, revision := svc.CancellationPendingSnapshot("session1")
+	require.True(t, pending)
+	require.Equal(t, uint64(1), revision)
+
+	endSecond := svc.beginCancelInFlight("session1")
+	require.True(t, svc.CancellationPending("session1"))
+	require.Len(t, cancellationPendingEvents(recorded), 1)
+
+	endFirst()
+	require.True(t, svc.CancellationPending("session1"))
+	endSecond()
+	require.False(t, svc.CancellationPending("session1"))
+	pending, revision = svc.CancellationPendingSnapshot("session1")
+	require.False(t, pending)
+	require.Equal(t, uint64(2), revision)
+
+	events := cancellationPendingEvents(recorded)
+	require.Len(t, events, 2)
+	require.Equal(t, true, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(1), events[0].event.Data.(map[string]interface{})["cancellation_revision"])
+	require.Equal(t, false, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(2), events[1].event.Data.(map[string]interface{})["cancellation_revision"])
+}
+
+func TestCancellationPendingSuccessorGenerationPreservesTransitionOrder(t *testing.T) {
+	recorded := &recordingEventBus{}
+	svc := &Service{
+		eventBus: recorded,
+		cancelOperations: map[string]*cancellationOperationState{
+			"session1": {
+				count:    1,
+				revision: 1,
+				publications: cancellationPublicationQueue{
+					publishing: true,
+				},
+			},
+		},
+	}
+
+	state := svc.cancelOperations["session1"]
+	// Model the final release and successor admission in one critical section:
+	// the false transition must be queued before the successor's true transition
+	// while an earlier publication is still draining.
+	svc.cancelOperationsMu.Lock()
+	state.count--
+	state.revision++
+	require.False(t, svc.enqueueCancellationPendingLocked("session1", state, false))
+	state.count++
+	state.revision++
+	require.False(t, svc.enqueueCancellationPendingLocked("session1", state, true))
+	state.publications.publishing = false
+	svc.cancelOperationsMu.Unlock()
+
+	svc.drainCancellationPublicationQueue("session1", state)
+
+	events := cancellationPendingEvents(recorded)
+	require.Len(t, events, 2)
+	require.Equal(t, false, events[0].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(2), events[0].event.Data.(map[string]interface{})["cancellation_revision"])
+	require.Equal(t, true, events[1].event.Data.(map[string]interface{})["cancellation_pending"])
+	require.Equal(t, uint64(3), events[1].event.Data.(map[string]interface{})["cancellation_revision"])
+}
+
+func TestCancelAgent_ClearsCancellationPendingOnError(t *testing.T) {
+	recorded := &recordingEventBus{}
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{cancelAgentErr: errors.New("cancel failed")}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.eventBus = recorded
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	require.Error(t, svc.CancelAgent(context.Background(), "session1"))
+	require.False(t, svc.CancellationPending("session1"))
+	require.Len(t, cancellationPendingEvents(recorded), 2)
+}
+
+func TestCancelAgent_SurvivesCallerCancellation(t *testing.T) {
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{
+		isAgentRunning:        true,
+		cancelAgentBlock:      make(chan struct{}),
+		cancelAgentEntered:    make(chan struct{}, 1),
+		cancelAgentContextErr: errors.New("cancel used caller context"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- svc.CancelAgent(ctx, "session1")
+	}()
+	<-agentMgr.cancelAgentEntered
+	cancel()
+	close(agentMgr.cancelAgentBlock)
+
+	require.ErrorIs(t, <-done, context.Canceled)
+	require.NoError(t, svc.waitForCancelInFlight(context.Background(), "session1"))
+}
+
+func cancellationPendingEvents(recorded *recordingEventBus) []recordedEvent {
+	const subject = "task_session.cancellation_changed"
+	filtered := make([]recordedEvent, 0, len(recorded.events))
+	for _, event := range recorded.events {
+		if event.subject == subject {
+			filtered = append(filtered, event)
+		}
+	}
+	return filtered
+}
+
+func TestCancellationSourcesShareLifecycleOwnership(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		start func(*Service, chan error)
+	}{
+		{
+			name: "explicit and silent",
+			start: func(svc *Service, done chan error) {
+				go func() { done <- svc.CancelAgent(context.Background(), "session1") }()
+				go func() { done <- svc.cancelAgentSilent(context.Background(), "task1", "session1") }()
+			},
+		},
+		{
+			name: "silent and silent",
+			start: func(svc *Service, done chan error) {
+				go func() { done <- svc.cancelAgentSilent(context.Background(), "task1", "session1") }()
+				go func() { done <- svc.cancelAgentSilent(context.Background(), "task1", "session1") }()
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+			agentMgr := &mockAgentManager{
+				cancelAgentBlock:   make(chan struct{}),
+				cancelAgentEntered: make(chan struct{}, 2),
+			}
+			svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+			done := make(chan error, 2)
+			tc.start(svc, done)
+			select {
+			case <-agentMgr.cancelAgentEntered:
+			case <-time.After(time.Second):
+				t.Fatal("timed out waiting for the cancellation owner")
+			}
+			select {
+			case <-agentMgr.cancelAgentEntered:
+				t.Fatal("a second cancellation source invoked the lifecycle manager")
+			case <-time.After(100 * time.Millisecond):
+			}
+
+			close(agentMgr.cancelAgentBlock)
+			for i := 0; i < 2; i++ {
+				select {
+				case <-done:
+				case <-time.After(time.Second):
+					t.Fatal("timed out waiting for cancellation source")
+				}
+			}
+			assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+		})
+	}
+}
+
+func TestCancelAgent_JoinedSilentCancellationRunsExplicitReconciliation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+	agentMgr := &mockAgentManager{
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	_, err := svc.turnService.StartTurn(ctx, "session1")
+	require.NoError(t, err)
+
+	silentDone := make(chan error, 1)
+	go func() {
+		silentDone <- svc.cancelAgentSilent(ctx, "task1", "session1")
+	}()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for silent cancellation owner")
+	}
+
+	// The explicit user request joins the silent owner. It must not call the
+	// lifecycle manager again, but it still owns its visible cancel message and
+	// other explicit reconciliation once the shared operation settles.
+	explicitDone := make(chan error, 1)
+	go func() {
+		explicitDone <- svc.CancelAgent(ctx, "session1")
+	}()
+	waitForCancellationJoin(t, svc, "session1")
+	close(agentMgr.cancelAgentBlock)
+
+	select {
+	case err := <-silentDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("silent cancellation did not finish")
+	}
+	select {
+	case err := <-explicitDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("joined explicit cancellation did not finish")
+	}
+	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+
+	messages.mu.Lock()
+	defer messages.mu.Unlock()
+	if len(messages.sessionMessages) != 1 || messages.sessionMessages[0].content != "Turn cancelled by user" {
+		t.Fatalf("expected one explicit cancellation message after joining silent owner, got %+v", messages.sessionMessages)
+	}
+}
+
+func TestCancellationStreamAdmissionRejectsStaleIdentity(t *testing.T) {
+	svc := &Service{logger: testLogger()}
+	operation, owner := svc.claimCancellation("session1", cancellationKindExplicit)
+	require.True(t, owner)
+	svc.setCancellationIdentity("session1", operation, cancellationIdentity{
+		executionID:      "execution-a",
+		promptGeneration: 7,
+		turnID:           "turn-a",
+	})
+
+	assert.False(t, svc.cancellationOwnsStreamEvent("session1", "execution-b", 7))
+	assert.False(t, svc.cancellationOwnsStreamEvent("session1", "execution-a", 8))
+	assert.True(t, svc.cancellationOwnsStreamEvent("session1", "execution-a", 7))
+	svc.handleAgentStreamEvent(context.Background(), &lifecycle.AgentStreamEventPayload{
+		TaskID:      "task1",
+		SessionID:   "session1",
+		ExecutionID: "execution-b",
+		Data: &lifecycle.AgentStreamEventData{
+			Type:             "message_streaming",
+			PromptGeneration: 7,
+		},
+	})
+
+	svc.finishCancellation("session1", operation, nil)
+	assert.True(t, svc.cancellationOwnsStreamEvent("session1", "execution-b", 8))
+}
+
+func TestCancelAgent_OwnerDisconnectDoesNotAbortJoinedOperation(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-owner-disconnect", "session-owner-disconnect", models.TaskSessionStateRunning)
+	agentMgr := &mockAgentManager{
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	ownerCtx, ownerCancel := context.WithCancel(context.Background())
+	ownerDone := make(chan error, 1)
+	go func() { ownerDone <- svc.CancelAgent(ownerCtx, "session-owner-disconnect") }()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for owner cancellation")
+	}
+	ownerCancel()
+	select {
+	case err := <-ownerDone:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("owner continued waiting on a disconnected request")
+	}
+
+	joinedDone := make(chan error, 1)
+	go func() { joinedDone <- svc.CancelAgent(context.Background(), "session-owner-disconnect") }()
+	waitForCancellationJoin(t, svc, "session-owner-disconnect")
+	close(agentMgr.cancelAgentBlock)
+	select {
+	case err := <-joinedDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("joined cancellation did not receive the service-owned result")
+	}
+	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+}
+
+func TestCancelAgent_DefersLifecycleCompletionDuringCancellation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID, sessionID := "task-cancel-completed-event", "session-cancel-completed-event"
+	seedSession(t, repo, taskID, sessionID, "step1")
+	steps := cancelCompletionStepGetter(true, false)
+	steps.steps["step2"].Events.OnTurnComplete = []wfmodels.OnTurnCompleteAction{{Type: wfmodels.OnTurnCompleteMoveToNext}}
+
+	var svc *Service
+	completedDone := make(chan struct{})
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(eventCtx context.Context, _ string) error {
+		go func() {
+			svc.handleAgentCompleted(eventCtx, watcher.AgentEventData{
+				TaskID:           taskID,
+				SessionID:        sessionID,
+				AgentExecutionID: "execution-cancelled",
+			})
+			close(completedDone)
+		}()
+		select {
+		case <-completedDone:
+		case <-eventCtx.Done():
+			return eventCtx.Err()
+		}
+		return nil
+	}
+	svc = createEngineService(t, repo, steps, agentMgr)
+	svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10),
+		svc.executor,
+		svc.taskRepo,
+		testLogger(),
+		scheduler.SchedulerConfig{},
+	)
+
+	require.NoError(t, svc.CancelAgent(ctx, sessionID))
+	select {
+	case <-completedDone:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the terminal lifecycle event")
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	assert.Equal(t, "step2", task.WorkflowStepID, "cancelled lifecycle completion must not advance workflow before cancellation reconciliation")
+}
+
+func TestCancelAgentSilent_DoesNotCloseSuccessorTurn(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	taskID, sessionID := "task-silent-successor", "session-silent-successor"
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+
+	var svc *Service
+	var successor *models.Turn
+	agentMgr := &mockAgentManager{}
+	agentMgr.cancelAgentFunc = func(cancelCtx context.Context, _ string) error {
+		var err error
+		successor, err = svc.turnService.StartTurn(cancelCtx, sessionID)
+		return err
+	}
+	svc = createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.turnService = &repoTurnService{repo: repo}
+	original, err := svc.turnService.StartTurn(ctx, sessionID)
+	require.NoError(t, err)
+
+	err = svc.cancelAgentSilent(ctx, taskID, sessionID)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "superseded")
+	require.NotNil(t, successor)
+	active, err := svc.turnService.GetActiveTurn(ctx, sessionID)
+	require.NoError(t, err)
+	require.NotNil(t, active)
+	assert.Equal(t, successor.ID, active.ID)
+	assert.NotEqual(t, original.ID, active.ID)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	assert.Equal(t, models.TaskSessionStateRunning, session.State)
 }
 
 // TestCancelAgent_TaskStateReconcile ensures cancel lands actively-working
@@ -1416,6 +1971,69 @@ func TestQueueAndInterruptForPeerMessage_DeliversQueuedMessageWithoutUserCancelS
 	}
 }
 
+// TestQueueAndInterruptForPeerMessage_LeavesMessageQueuedDuringUserCancel
+// covers the cross-source ownership boundary: a peer steering request that
+// arrives after the user cancel has claimed the session must not join the
+// explicit operation and dispatch its message after cancellation settles.
+// The message remains queued for a later, explicit drain.
+func TestQueueAndInterruptForPeerMessage_LeavesMessageQueuedDuringUserCancel(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
+
+	agentMgr := &mockAgentManager{
+		cancelAgentBlock:   make(chan struct{}),
+		cancelAgentEntered: make(chan struct{}, 1),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+
+	cancelDone := make(chan error, 1)
+	go func() { cancelDone <- svc.CancelAgent(ctx, "session1") }()
+	select {
+	case <-agentMgr.cancelAgentEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for explicit cancellation to enter lifecycle manager")
+	}
+
+	interruptDone := make(chan struct{})
+	var queued *messagequeue.QueuedMessage
+	var dispatched bool
+	var interruptErr error
+	go func() {
+		queued, dispatched, interruptErr = svc.QueueAndInterruptForPeerMessage(
+			ctx, "task1", "session1", "peer message during cancel", nil,
+		)
+		close(interruptDone)
+	}()
+
+	select {
+	case <-interruptDone:
+		t.Fatal("peer queue operation returned before the user cancellation settled")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(agentMgr.cancelAgentBlock)
+	select {
+	case err := <-cancelDone:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for explicit cancellation")
+	}
+	select {
+	case <-interruptDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for peer queue operation")
+	}
+
+	require.NoError(t, interruptErr)
+	require.NotNil(t, queued)
+	assert.False(t, dispatched)
+	status := svc.messageQueue.GetStatus(ctx, "session1")
+	require.Equal(t, 1, status.Count)
+	assert.Equal(t, queued.ID, status.Entries[0].ID)
+	assert.Equal(t, int32(1), agentMgr.cancelAgentCalls.Load())
+}
+
 // TestQueueAndInterruptForPeerMessage_CancelFailurePropagatesAndKeepsMessageQueued
 // pins the failure contract: a genuine cancel error (not the tolerated
 // ErrNoExecutionForSession / ErrCancelEscalated sentinels cancelAgentSilent
@@ -1512,14 +2130,12 @@ func TestQueueAndInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueued
 }
 
 // TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers
-// pins the mutual-exclusion contract: when another caller already holds the
-// session's cancelInFlight lock (mid-cancel, via a real concurrent
+// pins the shared-ownership contract: when another caller already owns the
+// session's cancellation (mid-cancel, via a real concurrent
 // QueueAndInterruptForPeerMessage call staged with the mock's
-// cancelAgentBlock/cancelAgentEntered hooks — no sleeps), a second call must
-// block on that same lock and wait for it to free up rather than falling
-// back to an unguarded "insert and hope" — see QueueAndInterruptForPeerMessage's
-// doc comment for why a busy-skip fallback would risk orphaning the second
-// call's message with no guaranteed future drain trigger.
+// cancelAgentBlock/cancelAgentEntered hooks), a second call must join that
+// cancellation and register its own targeted dispatch. The owner invokes the
+// lifecycle manager exactly once; both source-specific actions run after it.
 func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -1537,8 +2153,8 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	// First call: acquires the lock, queues its message, and blocks inside
-	// CancelAgent (holding the lock the whole time).
+	// First call queues its message, claims cancellation ownership, releases
+	// the guard around the lifecycle call, and blocks inside CancelAgent.
 	firstDone := make(chan struct{})
 	go func() {
 		_, _, _ = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "first parent message", nil)
@@ -1551,7 +2167,7 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatal("timed out waiting for the first call to enter CancelAgent")
 	}
 
-	// Second call starts while the first still holds the lock mid-cancel.
+	// Second call starts while the first owns the cancellation mid-lifecycle.
 	secondDone := make(chan struct{})
 	var queued *messagequeue.QueuedMessage
 	var dispatched bool
@@ -1561,17 +2177,20 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		close(secondDone)
 	}()
 
-	// The second call must not have completed yet — it has to be blocked
-	// on the lock, not working around it with an unguarded insert.
+	// Wait until the second call has joined the first operation before that
+	// operation is released.
+	waitForCancellationJoin(t, svc, "session1")
+
+	// A joined caller must still wait for the owner to settle cancellation and
+	// run its registered action.
 	select {
 	case <-secondDone:
-		t.Fatal("second QueueAndInterruptForPeerMessage returned before the first call released the lock")
+		t.Fatal("second QueueAndInterruptForPeerMessage returned before the shared cancellation settled")
 	default:
 	}
 
-	// Release the first call's cancel; it finishes and releases the lock,
-	// letting the second call proceed (its own CancelAgent no longer
-	// blocks either, since cancelAgentBlock is now closed).
+	// Release the shared lifecycle call. The coordinator then runs both
+	// targeted dispatch actions under the per-session guard.
 	close(agentMgr.cancelAgentBlock)
 
 	select {
@@ -1594,8 +2213,8 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatal("expected the second call to deliver its own message once the lock became available")
 	}
 
-	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
-		t.Fatalf("expected exactly 2 agent cancel calls (one per message), got %d", got)
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 lifecycle cancel call for both peer messages, got %d", got)
 	}
 
 	// Join whatever executeQueuedMessage did for the second message before
@@ -1617,6 +2236,19 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		}
 		return svc.messageQueue.GetStatus(ctx, "session1").Count == 1
 	}, 2*time.Second, 10*time.Millisecond, "expected the second message to either be dispatched or settle back into the queue via requeueMessage")
+}
+
+func waitForCancellationJoin(t *testing.T, svc *Service, sessionID string) {
+	t.Helper()
+	svc.cancellationOperationsMu.Lock()
+	operation := svc.cancellationOperations[sessionID]
+	svc.cancellationOperationsMu.Unlock()
+	require.NotNil(t, operation, "expected an in-flight cancellation for %s", sessionID)
+	select {
+	case <-operation.joined:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for a cancellation join on %s", sessionID)
+	}
 }
 
 // erroringTakeByIDRepository wraps a messagequeue.Repository and returns a
@@ -2570,7 +3202,7 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 	}
 	select {
 	case <-readyDone:
-		t.Fatal("handleAgentReady returned before CancelAgent released the guard — it must block, not work around it")
+		t.Fatal("handleAgentReady returned before CancelAgent released the cancellation marker")
 	case <-time.After(100 * time.Millisecond):
 	}
 
@@ -2582,11 +3214,10 @@ func TestCancelAgent_RacesHandleAgentReady_QueuedMessageStaysParked(t *testing.T
 		t.Fatal("timed out waiting for CancelAgent to finish")
 	}
 	require.NoError(t, cancelErr)
-
 	select {
 	case <-readyDone:
 	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for handleAgentReady to finish once the guard was released")
+		t.Fatal("timed out waiting for handleAgentReady after CancelAgent finished")
 	}
 
 	status := svc.messageQueue.GetStatus(ctx, "session1")

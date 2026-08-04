@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, useEffect } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { IconEdit, IconTrash, IconLock } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Badge } from "@kandev/ui/badge";
@@ -20,6 +21,7 @@ import { useCustomPrompts } from "@/hooks/domains/settings/use-custom-prompts";
 import { useAppStore } from "@/components/state-provider";
 import { createPrompt, deletePrompt, updatePrompt } from "@/lib/api";
 import { useRequest } from "@/lib/http/use-request";
+import { t } from "@/lib/i18n";
 import type { CustomPrompt } from "@/lib/types/http";
 
 const defaultFormState = {
@@ -27,8 +29,13 @@ const defaultFormState = {
   content: "",
 };
 
+/** The sigil the chat input matches on. Typed verbatim, so never translated. */
+const PROMPT_MENTION_TOKEN = "@name";
+
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Request failed";
+  // A thrown Error carries the backend's diagnostic, which stays English by
+  // design; only the missing-payload fallback is copy.
+  return error instanceof Error ? error.message : t("common:requestFailed");
 }
 
 async function runPromptSave(
@@ -53,6 +60,7 @@ type PromptCreateFormProps = {
 };
 
 function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptCreateFormProps) {
+  const { t } = useTranslation();
   const nameIsDirty = formState.name !== defaultFormState.name;
   const contentIsDirty = formState.content !== defaultFormState.content;
   return (
@@ -62,11 +70,11 @@ function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptC
       data-settings-dirty="true"
       data-settings-dirty-level="container"
     >
-      <div className="text-sm font-medium text-foreground">Add prompt</div>
+      <div className="text-sm font-medium text-foreground">{t("settings:promptAdd")}</div>
       <Input
         value={formState.name}
         onChange={(event) => onFormChange({ name: event.target.value })}
-        placeholder="Prompt name"
+        placeholder={t("settings:promptNamePlaceholder")}
         data-testid="prompt-name-input"
         disabled={isBusy}
         data-settings-dirty={nameIsDirty}
@@ -74,7 +82,7 @@ function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptC
       <Textarea
         value={formState.content}
         onChange={(event) => onFormChange({ content: event.target.value })}
-        placeholder="Prompt content"
+        placeholder={t("settings:promptContentPlaceholder")}
         rows={5}
         className="resize-y max-h-60 overflow-auto"
         data-testid="prompt-content-input"
@@ -83,7 +91,7 @@ function PromptCreateForm({ formState, onFormChange, onCancel, isBusy }: PromptC
       />
       <div className="flex items-center gap-2">
         <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
-          Cancel
+          {t("settings:cancel")}
         </Button>
       </div>
     </div>
@@ -115,6 +123,7 @@ function PromptListItem({
   isBusy,
   showCreate,
 }: PromptListItemProps) {
+  const { t } = useTranslation();
   const getPromptPreview = (content: string) => {
     return content.split(/\r?\n/)[0] ?? "";
   };
@@ -135,7 +144,7 @@ function PromptListItem({
           {prompt.builtin && (
             <Badge variant="secondary" className="text-xs">
               <IconLock className="h-3 w-3 mr-1" />
-              Built-in
+              {t("settings:builtIn")}
             </Badge>
           )}
         </div>
@@ -166,7 +175,7 @@ function PromptListItem({
           <Input
             value={formState.name}
             onChange={(event) => onFormChange({ name: event.target.value })}
-            placeholder="Prompt name"
+            placeholder={t("settings:promptNamePlaceholder")}
             data-testid="prompt-name-input"
             disabled={isBusy}
             data-settings-dirty={nameIsDirty}
@@ -174,7 +183,7 @@ function PromptListItem({
           <Textarea
             value={formState.content}
             onChange={(event) => onFormChange({ content: event.target.value })}
-            placeholder="Prompt content"
+            placeholder={t("settings:promptContentPlaceholder")}
             rows={5}
             className="resize-y max-h-60 overflow-auto"
             data-testid="prompt-content-input"
@@ -183,7 +192,7 @@ function PromptListItem({
           />
           <div className="flex items-center gap-2">
             <Button variant="ghost" onClick={onCancel} disabled={isBusy}>
-              Cancel
+              {t("settings:cancel")}
             </Button>
           </div>
         </div>
@@ -223,17 +232,18 @@ function PromptListContent({
   isBusy,
   showCreate,
 }: PromptListContentProps) {
+  const { t } = useTranslation();
   if (!promptsLoaded) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-        Loading prompts…
+        {t("settings:promptsLoading")}
       </div>
     );
   }
   if (prompts.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-        No prompts yet. Add your first prompt to get started.
+        {t("settings:promptsEmpty")}
       </div>
     );
   }
@@ -266,6 +276,9 @@ type DeletePromptDialogProps = {
 };
 
 function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: DeletePromptDialogProps) {
+  const { t } = useTranslation();
+  // The prompt's own name is user data; only the no-target fallback is copy.
+  const targetLabel = deleteTarget ? `@${deleteTarget.name}` : t("settings:promptDeleteThisPrompt");
   return (
     <Dialog
       open={Boolean(deleteTarget)}
@@ -277,21 +290,21 @@ function DeletePromptDialog({ deleteTarget, onClose, onConfirm, isBusy }: Delete
     >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Delete prompt</DialogTitle>
+          <DialogTitle>{t("settings:promptDelete")}</DialogTitle>
           <DialogDescription>
-            This will permanently remove{" "}
-            <span className="font-medium text-foreground">
-              {deleteTarget ? `@${deleteTarget.name}` : "this prompt"}
-            </span>
-            . This action cannot be undone.
+            <Trans i18nKey="settings:promptDeleteDescription" values={{ name: targetLabel }}>
+              This will permanently remove{" "}
+              <span className="font-medium text-foreground">{targetLabel}</span>. This action cannot
+              be undone.
+            </Trans>
           </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {t("settings:cancel")}
           </Button>
           <Button type="button" variant="destructive" onClick={onConfirm} disabled={isBusy}>
-            Delete prompt
+            {t("settings:promptDelete")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -324,36 +337,18 @@ function usePromptsState() {
   };
 }
 
-function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
-  const {
-    prompts,
-    setPrompts,
-    editingId,
-    setEditingId,
-    setShowCreate,
-    setFormState,
-    setDeleteTarget,
-    deleteTarget,
-    formState,
-  } = state;
-  const { toast } = useToast();
-
-  const resetForm = useCallback(() => {
-    setEditingId(null);
-    setShowCreate(false);
-    setFormState(defaultFormState);
-  }, [setEditingId, setShowCreate, setFormState]);
-
+/** The three prompt mutations, sharing the post-write list refresh and reset. */
+function usePromptRequests(
+  prompts: CustomPrompt[],
+  setPrompts: (next: CustomPrompt[]) => void,
+  editingId: string | null,
+  resetForm: () => void,
+) {
   const applyPrompts = useCallback(
     (next: CustomPrompt[]) => {
       setPrompts([...next].sort((a, b) => a.name.localeCompare(b.name)));
     },
     [setPrompts],
-  );
-
-  const isValid = useMemo(
-    () => Boolean(formState.name.trim() && formState.content.trim()),
-    [formState],
   );
 
   const createRequest = useRequest(async (s: typeof defaultFormState) => {
@@ -381,18 +376,56 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
     if (editingId === id) resetForm();
   });
 
+  return { createRequest, updateRequest, deleteRequest };
+}
+
+function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
+  const {
+    prompts,
+    setPrompts,
+    editingId,
+    setEditingId,
+    setShowCreate,
+    setFormState,
+    setDeleteTarget,
+    deleteTarget,
+    formState,
+  } = state;
+  const { toast } = useToast();
+
+  const resetForm = useCallback(() => {
+    setEditingId(null);
+    setShowCreate(false);
+    setFormState(defaultFormState);
+  }, [setEditingId, setShowCreate, setFormState]);
+
+  const isValid = useMemo(
+    () => Boolean(formState.name.trim() && formState.content.trim()),
+    [formState],
+  );
+
+  const { createRequest, updateRequest, deleteRequest } = usePromptRequests(
+    prompts,
+    setPrompts,
+    editingId,
+    resetForm,
+  );
+
   const isBusy = createRequest.isLoading || updateRequest.isLoading || deleteRequest.isLoading;
   const toastError = (title: string) => (err: unknown) =>
     toast({ title, description: errorMessage(err), variant: "error" });
   const handleCreate = () => {
     if (!isValid || isBusy) return;
-    return runPromptSave(() => createRequest.run(formState), toastError("Couldn't create prompt"));
+    return runPromptSave(
+      () => createRequest.run(formState),
+      toastError(t("settings:promptCreateFailed")),
+    );
   };
   const handleUpdate = () => {
     if (!isValid || isBusy || !editingId) return;
     return runPromptSave(
       () => updateRequest.run(editingId, formState),
-      toastError("Couldn't save prompt"),
+      toastError(t("settings:promptSaveFailed")),
     );
   };
   const startEditing = (prompt: CustomPrompt) => {
@@ -413,7 +446,7 @@ function usePromptsActions(state: ReturnType<typeof usePromptsState>) {
   };
   const confirmDelete = () => {
     if (!deleteTarget) return;
-    deleteRequest.run(deleteTarget.id).catch(toastError("Couldn't delete prompt"));
+    deleteRequest.run(deleteTarget.id).catch(toastError(t("settings:promptDeleteFailed")));
     closeDeleteDialog();
   };
 
@@ -450,6 +483,7 @@ export function getPromptDraftMeta(
 }
 
 export function PromptsSettings() {
+  const { t } = useTranslation();
   const state = usePromptsState();
   const {
     editingId,
@@ -483,32 +517,35 @@ export function PromptsSettings() {
 
   return (
     <SettingsPageTemplate
-      title="Prompts"
-      description="Create reusable prompt snippets for the chat input."
+      title={t("common:prompts")}
+      description={t("settings:promptsPageDescription")}
       isDirty={draft.isDirty}
       saveStatus="idle"
       saveId="prompts-item-draft"
       saveRevision={draft.revision}
       canSave={!draft.isDirty || isValid}
-      invalidReason={
-        draft.isDirty && !isValid ? "Prompt name and content are required." : undefined
-      }
+      invalidReason={draft.isDirty && !isValid ? t("settings:promptsInvalidReason") : undefined}
       onSave={showCreate ? handleCreate : handleUpdate}
       onDiscard={resetForm}
     >
       <div className="rounded-lg border border-border/70 bg-muted/30 p-4 text-xs text-muted-foreground">
-        Use <span className="font-medium text-foreground">@name</span> in the chat input to insert a
-        prompt’s content. Prompts are matched by name and expanded in place.
+        <Trans i18nKey="settings:promptMentionHelp" values={{ token: PROMPT_MENTION_TOKEN }}>
+          Use <span className="font-medium text-foreground">{PROMPT_MENTION_TOKEN}</span> in the
+          chat input to insert a prompt’s content. Prompts are matched by name and expanded in
+          place.
+        </Trans>
       </div>
       <div className="space-y-6 mt-4">
         <div className="flex items-center justify-between">
-          <div className="text-sm font-medium text-foreground">Custom prompts</div>
+          <div className="text-sm font-medium text-foreground">
+            {t("settings:promptsCustomHeading")}
+          </div>
           <Button
             onClick={startCreate}
             disabled={isBusy || isEditing || showCreate}
             data-testid="prompt-create-button"
           >
-            Add prompt
+            {t("settings:promptAdd")}
           </Button>
         </div>
 

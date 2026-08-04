@@ -265,8 +265,45 @@ describe("useQueue clearAll", () => {
   beforeEach(() => {
     resetMockState();
     setDocumentVisibility("visible");
+    queueApiMock.clearQueue.mockReset();
     queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
     queueApiMock.clearQueue.mockResolvedValue(undefined);
+  });
+
+  it("refetches authoritative status after a successful clear", async () => {
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.clearAll();
+    });
+
+    expect(queueApiMock.clearQueue).toHaveBeenCalledWith(SESSION_ID);
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches authoritative status and rethrows when clear fails", async () => {
+    queueApiMock.clearQueue.mockRejectedValueOnce(new Error("clear failed"));
+    const authoritative = entry({ id: "still-queued" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+    queueApiMock.getQueueStatus.mockResolvedValueOnce({
+      entries: [authoritative],
+      count: 1,
+      max: 10,
+    });
+
+    await act(async () => {
+      await expect(result.current.clearAll()).rejects.toThrow("clear failed");
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [authoritative], {
+      count: 1,
+      max: 10,
+    });
   });
 
   it("discards an in-flight refetch that resolves after the clear", async () => {
@@ -304,5 +341,66 @@ describe("useQueue clearAll", () => {
       [entry({ id: "pre-clear" })],
       { count: 1, max: 10 },
     );
+  });
+});
+
+describe("useQueue removeEntry", () => {
+  beforeEach(() => {
+    resetMockState();
+    setDocumentVisibility("visible");
+    queueApiMock.removeQueuedEntry.mockReset();
+    queueApiMock.getQueueStatus.mockResolvedValue({ entries: [], count: 0, max: 10 });
+  });
+
+  it("optimistically removes then refetches authoritative status after success", async () => {
+    queueApiMock.removeQueuedEntry.mockResolvedValueOnce({ entry_id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await result.current.removeEntry("q-1");
+    });
+
+    expect(mockState.removeQueueEntry).toHaveBeenCalledWith(SESSION_ID, "q-1");
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches after a drain race without surfacing a benign error", async () => {
+    queueApiMock.removeQueuedEntry.mockRejectedValueOnce(
+      new queueApiMock.QueueEntryNotFoundError(),
+    );
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+
+    await act(async () => {
+      await expect(result.current.removeEntry("q-1")).resolves.toBeUndefined();
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+  });
+
+  it("refetches and rethrows a failed removal", async () => {
+    queueApiMock.removeQueuedEntry.mockRejectedValueOnce(new Error("remove failed"));
+    const authoritative = entry({ id: "q-1" });
+    const { result } = renderHook(() => useQueue(SESSION_ID));
+    await waitFor(() => expect(queueApiMock.getQueueStatus).toHaveBeenCalled());
+    queueApiMock.getQueueStatus.mockClear();
+    queueApiMock.getQueueStatus.mockResolvedValueOnce({
+      entries: [authoritative],
+      count: 1,
+      max: 10,
+    });
+
+    await act(async () => {
+      await expect(result.current.removeEntry("q-1")).rejects.toThrow("remove failed");
+    });
+
+    expect(queueApiMock.getQueueStatus).toHaveBeenCalledWith(SESSION_ID);
+    expect(mockState.setQueueEntries).toHaveBeenCalledWith(SESSION_ID, [authoritative], {
+      count: 1,
+      max: 10,
+    });
   });
 });

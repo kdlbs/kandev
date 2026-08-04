@@ -151,7 +151,7 @@ test.describe("Diff update on file change", () => {
 });
 
 test.describe("File editor auto-update on file change", () => {
-  test.describe.configure({ retries: 2, timeout: 120_000 });
+  test.describe.configure({ timeout: 120_000 });
 
   test("editor panel auto-updates without re-opening when file changes", async ({
     testPage,
@@ -163,19 +163,20 @@ test.describe("File editor auto-update on file change", () => {
     // user re-clicking the file.
     const { session } = await seedDiffUpdateTask(testPage, apiClient, seedData);
 
-    // Open the file in the file editor via the Files tree.
-    await session.clickTab("Files");
-    const filesPanel = testPage.locator('[data-testid="files-panel"]:visible').first();
-    await expect(filesPanel).toBeVisible({ timeout: 10_000 });
-    const fileRow = filesPanel.getByRole("treeitem", {
-      name: "diff_update_test.txt",
-      exact: true,
-    });
-    await expect(fileRow).toBeVisible({ timeout: 10_000 });
-    await fileRow.dispatchEvent("click");
+    // Open the editor from the loaded diff. A late git-status update is allowed
+    // to focus Changes, so routing through Files would race that intentional
+    // focus transition instead of testing editor refresh behavior.
+    await openChangesTab(testPage);
+    await openFileDiff(testPage, "diff_update_test.txt");
+    await waitForDiffText(testPage, "FIRST_MODIFICATION", 15_000);
+    const editFile = testPage.getByRole("button", { name: "Edit", exact: true });
+    await expect(editFile).toBeVisible();
+    await editFile.click();
 
     // The editor tab should appear in dockview.
-    const editorTab = testPage.locator(".dv-default-tab", { hasText: "diff_update_test.txt" });
+    const editorTab = testPage.locator(".dv-default-tab[type='file-editor']", {
+      hasText: "diff_update_test.txt",
+    });
     await expect(editorTab).toBeVisible({ timeout: 10_000 });
 
     // Verify initial content shows FIRST_MODIFICATION (default Monaco editor).

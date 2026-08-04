@@ -192,7 +192,7 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    const workPrompt = "/slow 8s";
+    const workPrompt = "/slow 20s";
     await apiClient.updateWorkflowStep(workStep.id, {
       prompt: `${workPrompt}\n{{task_prompt}}`,
       events: {
@@ -237,15 +237,21 @@ test.describe("Manual proceed to next workflow step", () => {
     await expect(session.stepperStep("Work")).toHaveAttribute("aria-current", "step", {
       timeout: 15_000,
     });
-    await expect(
-      session.chat.locator(".chat-message-list:visible").getByText(workPrompt, { exact: false }),
-    ).toBeVisible({ timeout: 5_000 });
     await expect
       .poll(wsDrop.droppedCount, {
         message: "expected the test proxy to drop the workflow prompt's message-added frame",
         timeout: 10_000,
       })
       .toBeGreaterThan(0);
+    await expect
+      .poll(wsDrop.recoveryResponseCount, {
+        message: "expected message backfill after the dropped workflow prompt notification",
+        timeout: 10_000,
+      })
+      .toBeGreaterThan(0);
+    await expect(
+      session.chat.locator(".chat-message-list:visible").getByText(workPrompt, { exact: false }),
+    ).toBeVisible({ timeout: 5_000 });
   });
 
   /**

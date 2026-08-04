@@ -4,6 +4,16 @@ import { Slot } from "radix-ui";
 import { cn } from "./lib/utils";
 import { IconChevronRight, IconDots } from "@tabler/icons-react";
 
+/**
+ * `aria-label` is an English default, not a fixed string: `{...props}` spreads
+ * AFTER it, so any consumer can pass a translated `aria-label` and win.
+ *
+ * Do NOT import an i18n runtime here. `@kandev/ui` must stay usable standalone
+ * and must not depend on the app's i18next instance, so localization happens at
+ * the call site — see docs/i18n.md ("How it's wired") and the app's three
+ * consumers (`page-topbar`, `task-top-bar-title`, `OfficeSimplePane`), which all
+ * pass `aria-label={t("common:breadcrumb")}`.
+ */
 function Breadcrumb({ className, ...props }: React.ComponentProps<"nav">) {
   return (
     <nav aria-label="breadcrumb" data-slot="breadcrumb" className={cn(className)} {...props} />

@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@kandev/ui/badge";
 import type { MobileSessionPanel } from "@/lib/state/slices/ui/types";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
-import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
+import { useConnectionIssueCopy } from "@/components/app-status-bar/connection-status-item";
 
 type SessionMobileBottomNavProps = {
   activePanel: MobileSessionPanel;
@@ -132,9 +132,7 @@ function MobileNavButton({
   activePanel: MobileSessionPanel;
   onPanelChange: (panel: MobileSessionPanel) => void;
 }) {
-  const issueDetails = item.connectionIssueSeverity
-    ? connectionIssueDetails(item.connectionIssueSeverity)
-    : null;
+  const issueDetails = useConnectionIssueCopy(item.connectionIssueSeverity ?? "none");
 
   return (
     <button

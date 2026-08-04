@@ -1,4 +1,4 @@
-import { type Page, test as base } from "@playwright/test";
+import { expect, type Page, test as base } from "@playwright/test";
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
@@ -38,7 +38,7 @@ export type SSHSeedData = {
  * without Docker can still run the chromium project.
  */
 export const sshTest = backendFixture.extend<
-  { testPage: Page },
+  { testPage: Page; _sshRuntimeReset: void },
   { apiClient: ApiClient; seedData: SSHSeedData }
 >({
   apiClient: [
@@ -97,7 +97,6 @@ export const sshTest = backendFixture.extend<
   ],
 
   testPage: async ({ browser, backend, apiClient, seedData }, use) => {
-    await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
     await apiClient.saveUserSettings({
       workspace_id: seedData.workspaceId,
       workflow_filter_id: seedData.workflowId,
@@ -121,7 +120,41 @@ export const sshTest = backendFixture.extend<
     await use(page);
     await context.close();
   },
+
+  _sshRuntimeReset: [
+    async ({ apiClient, seedData }, use) => {
+      await resetSSHRuntime(apiClient, seedData);
+      try {
+        await use();
+      } finally {
+        await resetSSHRuntime(apiClient, seedData);
+      }
+    },
+    { auto: true },
+  ],
 });
+
+async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
+  await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  let emptySince = 0;
+  await expect
+    .poll(
+      async () => {
+        const count = (await apiClient.listSSHSessions(seedData.sshExecutorId)).length;
+        if (count > 0) {
+          emptySince = 0;
+          return false;
+        }
+        if (emptySince === 0) emptySince = Date.now();
+        return Date.now() - emptySince >= 1_500;
+      },
+      {
+        message: "previous SSH runtime rows should stay empty before the next test",
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
+}
 
 async function seedSSHWorkspace(
   apiClient: ApiClient,

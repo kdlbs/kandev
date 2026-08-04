@@ -191,5 +191,8 @@
   "watcherKindGithubIssue": "ĜĩţĤũƀ Ĩśśũēś",
   "watcherKindGithubReview": "ĜĩţĤũƀ ƤŔ Ŕēvĩēŵś",
   "watcherKindJira": "Ĵĩŕà",
-  "watcherKindLinear": "Ĺĩńēàŕ"
+  "watcherKindLinear": "Ĺĩńēàŕ",
+  "searchModels": "Śēàŕćĥ ḿōďēĺś...",
+  "noModelFound": "Ńō ḿōďēĺ ƒōũńď.",
+  "selectAModelShort": "Śēĺēćţ à ḿōďēĺ"
 }

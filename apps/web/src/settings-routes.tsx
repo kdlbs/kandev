@@ -22,6 +22,7 @@ import IntegrationsSentryPage from "@/app/settings/integrations/sentry/page";
 import IntegrationsSlackPage from "@/app/settings/integrations/slack/page";
 import PluginsSettingsPage from "@/app/settings/plugins/page";
 import PluginDetailPage from "@/app/settings/plugins/[pluginId]/page";
+import MessageQueueSettingsPage from "@/app/settings/general/message-queue/page";
 import StoragePage from "@/app/settings/system/storage/page";
 import UtilityAgentsSettingsPage from "@/app/settings/utility-agents/page";
 import AutomationsPage from "@/app/settings/workspace/[id]/automations/page";
@@ -141,6 +142,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/general/editors": () => <EditorsSettings />,
   "/settings/general/keyboard-shortcuts": () => <KeyboardShortcutsSettings />,
   "/settings/general/layouts": () => <LayoutSettings />,
+  "/settings/general/message-queue": () => <MessageQueueSettingsPage />,
   "/settings/general/notifications": () => <NotificationsSettings />,
   "/settings/general/resource-metrics": () => (
     <SettingsRedirect to="/settings/general/appearance" />
@@ -230,6 +232,7 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
       <LogViewer />
     </SystemRouteShell>
   ),
+  "/settings/system/message-queue": () => <SettingsRedirect to="/settings/general/message-queue" />,
   "/settings/system/status": () => (
     <SystemRouteShell titleKey="common:status" descriptionKey="system:statusPageDescription">
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

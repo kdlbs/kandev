@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { test, expect } from "../../fixtures/docker-test-base";
-import { E2E_IMAGE_TAG } from "../../fixtures/docker-probe";
+import { E2E_IMAGE_TAG, removeKandevContainers } from "../../fixtures/docker-probe";
 import { dockerInspectExists, dockerRemove } from "../../helpers/docker";
 
 function createStoppedContainer(labels: string[]): string {
@@ -17,6 +17,14 @@ test("removes only stopped Kandev-labeled containers and gates daemon-wide clean
   apiClient,
   seedData,
 }) => {
+  // This test asserts the *global* count of kandev.managed=true containers the
+  // daemon reports ("2 managed containers"). The containers project shares one
+  // Docker daemon across all specs in the worker and only sweeps managed
+  // containers at worker teardown, so a sibling Docker-executor spec (or one of
+  // its retries) can leave managed containers behind and inflate the count —
+  // the flake seen in CI was "5 managed containers" instead of 2. Sweep any
+  // stray managed containers first so this test counts only its own fixtures.
+  removeKandevContainers();
   const activeTask = await apiClient.createTask(seedData.workspaceId, "Retain active container", {
     workflow_id: seedData.workflowId,
     workflow_step_id: seedData.startStepId,

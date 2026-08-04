@@ -14,11 +14,21 @@ test.describe("mobile: multi-repository session picker", () => {
     seedData,
     backend,
   }) => {
+    const primaryRepoDir = path.join(backend.tmpDir, "repos", "mobile-session-primary");
     const secondaryRepoDir = path.join(backend.tmpDir, "repos", "mobile-session-secondary");
+    fs.mkdirSync(primaryRepoDir, { recursive: true });
     fs.mkdirSync(secondaryRepoDir, { recursive: true });
     const gitEnv = makeGitEnv(backend.tmpDir);
+    execSync("git init -b main", { cwd: primaryRepoDir, env: gitEnv });
+    execSync('git commit --allow-empty -m "init"', { cwd: primaryRepoDir, env: gitEnv });
     execSync("git init -b main", { cwd: secondaryRepoDir, env: gitEnv });
     execSync('git commit --allow-empty -m "init"', { cwd: secondaryRepoDir, env: gitEnv });
+    const primaryRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      primaryRepoDir,
+      "main",
+      { name: "Mobile primary" },
+    );
     const secondaryRepo = await apiClient.createRepository(
       seedData.workspaceId,
       secondaryRepoDir,
@@ -33,7 +43,7 @@ test.describe("mobile: multi-repository session picker", () => {
         description: 'e2e:message("primary repository session")',
         workflow_id: seedData.workflowId,
         workflow_step_id: seedData.startStepId,
-        repository_ids: [seedData.repositoryId, secondaryRepo.id],
+        repository_ids: [primaryRepo.id, secondaryRepo.id],
         executor_profile_id: seedData.worktreeExecutorProfileId,
       },
     );
@@ -56,13 +66,13 @@ test.describe("mobile: multi-repository session picker", () => {
       startedAt: "2026-01-01T00:01:00Z",
     });
 
-    await expect(pill).toHaveAccessibleName(/Repository: E2E Repo/);
-    await expect(pill).toContainText("E2E Repo");
+    await expect(pill).toHaveAccessibleName(/Repository: Mobile primary/);
+    await expect(pill).toContainText("Mobile primary");
 
     await pill.tap();
     const primaryRow = testPage.getByTestId(`mobile-session-row-${task.session_id}`);
     const secondaryRow = testPage.getByTestId(`mobile-session-row-${secondarySession.session_id}`);
-    await expect(primaryRow.getByText("E2E Repo", { exact: true })).toBeVisible();
+    await expect(primaryRow.getByText("Mobile primary", { exact: true })).toBeVisible();
     await expect(secondaryRow.getByText("Mobile secondary", { exact: true })).toBeVisible();
 
     await secondaryRow.tap();

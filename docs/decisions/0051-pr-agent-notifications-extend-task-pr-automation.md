@@ -209,3 +209,14 @@ target whose `queued_by` equals the caller's identity.
 Workflow- and server-owned rows remain entirely non-mergeable, and the reference-
 overflow guard (a merge is rejected atomically when the combined entity
 references exceed the per-message cap) applies to every sender kind.
+
+## Supersession: session-owner queue cancellation
+
+**Date:** 2026-08-03
+
+[ADR-2026-08-03-separate-message-queue-provenance-cancellation-and-capacity](2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md)
+supersedes this ADR only where it prohibited authorized clients from deleting
+agent-, workflow-, or server-owned **pending** queue rows. Provenance still
+governs editing and merging. Durable lifecycle rows already reserved in flight
+remain hidden and non-cancellable, and all acknowledgement, retry, purge, and
+generation guarantees in this ADR remain unchanged.

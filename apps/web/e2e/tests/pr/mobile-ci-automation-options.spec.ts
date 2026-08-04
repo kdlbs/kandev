@@ -123,9 +123,7 @@ test.describe("mobile PR CI automation options", () => {
     await expect(drawer.getByRole("switch", { name: "Auto-merge when ready" })).toBeVisible();
     const reviewFollowUp = drawer.getByTestId("ci-review-follow-up-trigger");
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "false");
-    const triggerBox = await reviewFollowUp.boundingBox();
-    expect(triggerBox).not.toBeNull();
-    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+    await expect(reviewFollowUp).toHaveCSS("min-height", "44px");
     await reviewFollowUp.tap();
     await expect(reviewFollowUp).toHaveAttribute("aria-expanded", "true");
     await expect(drawer.getByRole("switch", { name: "Your review is requested" })).toBeVisible();
@@ -148,9 +146,10 @@ test.describe("mobile PR CI automation options", () => {
     await testPage.keyboard.press("Escape");
 
     for (const name of ["Your review is requested", "PR merged", "PR closed without merging"]) {
-      const rowBox = await drawer.getByRole("switch", { name }).locator("..").boundingBox();
-      expect(rowBox).not.toBeNull();
-      expect(rowBox!.height).toBeGreaterThanOrEqual(44);
+      await expect(drawer.getByRole("switch", { name }).locator("..")).toHaveCSS(
+        "min-height",
+        "44px",
+      );
     }
 
     await drawer.getByRole("switch", { name: "Auto-fix CI and address comments" }).tap();

@@ -11,7 +11,9 @@ package system
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -28,12 +30,15 @@ import (
 	"github.com/kandev/kandev/internal/system/jobs"
 	"github.com/kandev/kandev/internal/system/logbundle"
 	"github.com/kandev/kandev/internal/system/metrics"
+	"github.com/kandev/kandev/internal/system/queuesettings"
 	"github.com/kandev/kandev/internal/system/restart"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	"github.com/kandev/kandev/internal/system/storage"
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
 )
+
+const e2eNPMRegistryURLEnv = "KANDEV_E2E_NPM_REGISTRY_URL"
 
 // BuildInfo holds the ldflag-injected build metadata that cmd/kandev
 // passes to Provide.
@@ -50,6 +55,7 @@ type BuildInfo struct {
 // no in-process re-exec is performed.
 type Wiring struct {
 	OrchestratorShutdown func()
+	MessageQueue         queuesettings.Target
 }
 
 // Service exposes the composed system sub-services. Each field is
@@ -64,6 +70,7 @@ type Service struct {
 	LogBundles     *logbundle.Service
 	FrontendErrors *frontenderrors.Service
 	Metrics        *metrics.Service
+	MessageQueue   *queuesettings.Service
 	Updates        *updates.Service
 	Restart        restart.Manager
 	Storage        *storage.Handler
@@ -97,10 +104,22 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		log.Error("Failed to initialize system settings store", zap.Error(err))
 	}
 	var metricsSvc *metrics.Service
+	var queueSettingsSvc *queuesettings.Service
 	updatesOpts := []updates.Option{updates.WithHomeDir(homeDir), updates.WithJobs(tracker)}
 	if settingsStore != nil {
 		metricsStore := metrics.NewStore(settingsStore)
 		metricsSvc = metrics.NewService(metricsStore, metrics.NewCollector())
+		if wiring.MessageQueue != nil {
+			queueSettingsSvc = queuesettings.NewService(
+				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
+			)
+		}
+		updatesOpts = append(updatesOpts, updates.WithSettingsStore(settingsStore))
+	}
+
+	updatesSvc := updates.NewService(pool, build.Version, nil, log, updatesOpts...)
+	if registryURL := e2eNPMRegistryURL(); registryURL != "" {
+		updatesSvc.SetNightlyURL(registryURL)
 	}
 
 	return &Service{
@@ -115,9 +134,17 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		}),
 		FrontendErrors: frontenderrors.New(log, nil),
 		Metrics:        metricsSvc,
-		Updates:        updates.NewService(pool, build.Version, nil, log, updatesOpts...),
+		MessageQueue:   queueSettingsSvc,
+		Updates:        updatesSvc,
 		Restart:        restart.NewManagerFromEnv(),
 	}
+}
+
+func e2eNPMRegistryURL() string {
+	if os.Getenv("KANDEV_E2E_MOCK") != "true" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv(e2eNPMRegistryURLEnv))
 }
 
 // RegisterRoutes mounts every system endpoint under /api/v1/system.
@@ -156,9 +183,13 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 	if s.Metrics != nil {
 		metrics.RegisterRoutes(g, s.Metrics)
 	}
+	if s.MessageQueue != nil {
+		queuesettings.RegisterRoutes(g, admin, s.MessageQueue)
+	}
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	admin.POST("/updates/check", updates.HandleCheck(s.Updates))
+	admin.PATCH("/updates/channel", updates.HandleSetChannel(s.Updates))
 	admin.POST("/updates/apply", updates.HandleApply(s.Updates))
 	g.GET("/restart-capability", restart.HandleCapability(s.Restart))
 	admin.POST("/restart", restart.HandleRequest(s.Restart))

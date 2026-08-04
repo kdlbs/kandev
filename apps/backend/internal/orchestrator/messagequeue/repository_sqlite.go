@@ -605,7 +605,7 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		ORDER BY position ASC
 		LIMIT 1
 	`), sessionID)
-	msg, err := scanQueuedRow(row)
+	msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -621,10 +621,19 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE queued_messages SET metadata_json = ? WHERE id = ? AND session_id = ?
-		`), reservedJSON, msg.ID, sessionID); err != nil {
+		res, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE queued_messages SET metadata_json = ?
+			WHERE id = ? AND session_id = ? AND metadata_json = ?
+		`), reservedJSON, msg.ID, sessionID, storedMetadataJSON)
+		if err != nil {
 			return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("mark lifecycle reservation rows affected: %w", err)
+		}
+		if affected == 0 {
+			return nil, nil
 		}
 		if err := tx.Commit(); err != nil {
 			return nil, err
@@ -923,12 +932,37 @@ func applyMergeWrites(ctx context.Context, r *sqliteRepository, tx *sqlx.Tx, tar
 }
 
 func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID string) error {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete queued tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var metadataJSON string
+	err = tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+	`), entryID, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read queued cancellation candidate: %w", err)
+	}
+	reserved, err := isReservedMetadataJSON(metadataJSON)
+	if err != nil {
+		return err
+	}
+	if reserved {
+		return ErrEntryNotFound
+	}
+
+	res, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM queued_messages
-		WHERE id = ?
-		  AND session_id = ?
-		  AND queued_by NOT IN (?, ?, ?)
-	`), entryID, sessionID, QueuedByAgent, QueuedByWorkflow, QueuedByServer)
+		WHERE id = ? AND session_id = ? AND metadata_json = ?
+	`), entryID, sessionID, metadataJSON)
 	if err != nil {
 		return fmt.Errorf("delete queued: %w", err)
 	}
@@ -939,19 +973,90 @@ func (r *sqliteRepository) DeleteByID(ctx context.Context, sessionID, entryID st
 	if n == 0 {
 		return ErrEntryNotFound
 	}
-	return nil
+	return tx.Commit()
 }
 
 func (r *sqliteRepository) DeleteAllBySession(ctx context.Context, sessionID string) (int, error) {
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM queued_messages
-		WHERE session_id = ? AND queued_by NOT IN (?, ?, ?)
-	`), sessionID, QueuedByAgent, QueuedByWorkflow, QueuedByServer)
+	unlock := r.withSessionLock(sessionID)
+	defer unlock()
+
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("delete all queued: %w", err)
+		return 0, fmt.Errorf("begin delete all queued tx: %w", err)
 	}
-	n, err := res.RowsAffected()
-	return int(n), err
+	defer func() { _ = tx.Rollback() }()
+
+	candidates, err := cancellationCandidates(ctx, tx, sessionID)
+	if err != nil {
+		return 0, err
+	}
+	removed := 0
+	for _, candidate := range candidates {
+		res, err := tx.ExecContext(ctx, r.db.Rebind(`
+			DELETE FROM queued_messages
+			WHERE id = ? AND session_id = ? AND metadata_json = ?
+		`), candidate.id, sessionID, candidate.metadataJSON)
+		if err != nil {
+			return 0, fmt.Errorf("delete queued candidate: %w", err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return 0, fmt.Errorf("delete queued candidate rows affected: %w", err)
+		}
+		removed += int(affected)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return removed, nil
+}
+
+type cancellationCandidate struct {
+	id           string
+	metadataJSON string
+}
+
+func cancellationCandidates(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID string,
+) ([]cancellationCandidate, error) {
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT id, metadata_json FROM queued_messages WHERE session_id = ?
+	`), sessionID)
+	if err != nil {
+		return nil, fmt.Errorf("list queued cancellation candidates: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	candidates := make([]cancellationCandidate, 0)
+	for rows.Next() {
+		var candidate cancellationCandidate
+		if err := rows.Scan(&candidate.id, &candidate.metadataJSON); err != nil {
+			return nil, fmt.Errorf("scan queued cancellation candidate: %w", err)
+		}
+		reserved, err := isReservedMetadataJSON(candidate.metadataJSON)
+		if err != nil {
+			return nil, err
+		}
+		if !reserved {
+			candidates = append(candidates, candidate)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate queued cancellation candidates: %w", err)
+	}
+	return candidates, nil
+}
+
+func isReservedMetadataJSON(metadataJSON string) (bool, error) {
+	metadata := make(map[string]interface{})
+	if metadataJSON != "" && metadataJSON != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return false, fmt.Errorf("unmarshal cancellation metadata: %w", err)
+		}
+	}
+	return (&QueuedMessage{Metadata: metadata}).IsReservedInFlight(), nil
 }
 
 func (r *sqliteRepository) TransferSession(ctx context.Context, oldSessionID, newSessionID string) error {
@@ -1176,6 +1281,13 @@ func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessi
 
 // scanQueuedRow scans a single queued_messages row from any sqlx-compatible row source.
 func scanQueuedRow(scanner interface{ Scan(dest ...any) error }) (*QueuedMessage, error) {
+	msg, _, err := scanQueuedRowWithMetadataJSON(scanner)
+	return msg, err
+}
+
+func scanQueuedRowWithMetadataJSON(
+	scanner interface{ Scan(dest ...any) error },
+) (*QueuedMessage, string, error) {
 	var (
 		msg                       QueuedMessage
 		planModeInt               int
@@ -1185,20 +1297,20 @@ func scanQueuedRow(scanner interface{ Scan(dest ...any) error }) (*QueuedMessage
 		&msg.ID, &msg.SessionID, &msg.TaskID, &msg.Position, &msg.Content, &msg.Model,
 		&planModeInt, &attachmentsJSON, &metaJSON, &msg.QueuedAt, &msg.QueuedBy,
 	); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	msg.PlanMode = planModeInt != 0
 	if attachmentsJSON != "" && attachmentsJSON != "[]" {
 		if err := json.Unmarshal([]byte(attachmentsJSON), &msg.Attachments); err != nil {
-			return nil, fmt.Errorf("unmarshal attachments: %w", err)
+			return nil, "", fmt.Errorf("unmarshal attachments: %w", err)
 		}
 	}
 	if metaJSON != "" && metaJSON != "{}" {
 		if err := json.Unmarshal([]byte(metaJSON), &msg.Metadata); err != nil {
-			return nil, fmt.Errorf("unmarshal metadata: %w", err)
+			return nil, "", fmt.Errorf("unmarshal metadata: %w", err)
 		}
 	}
-	return &msg, nil
+	return &msg, metaJSON, nil
 }
 
 func marshalAttachments(att []MessageAttachment) (string, error) {

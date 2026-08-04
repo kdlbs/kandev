@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
@@ -26,17 +27,33 @@ function isValidExpression(expr: string): boolean {
   return false;
 }
 
-const PRESETS = [
-  { label: "5 min", expression: "@every 5m" },
-  { label: "15 min", expression: "@every 15m" },
-  { label: "30 min", expression: "@every 30m" },
-  { label: "1 hour", expression: "@hourly" },
-  { label: "6 hours", expression: "@every 6h" },
-  { label: "Daily", expression: "@daily" },
-  { label: "Weekly", expression: "@weekly" },
-] as const;
+// `expression` is the cron/shorthand syntax the backend parses and persists —
+// never translated. The label is copy: the interval presets carry a `count` so
+// the plural form is chosen by i18next rather than baked into English, and the
+// two named presets are plain messages.
+const PRESETS: ReadonlyArray<{ labelKey: string; count?: number; expression: string }> = [
+  { labelKey: "automations:presetMinutes", count: 5, expression: "@every 5m" },
+  { labelKey: "automations:presetMinutes", count: 15, expression: "@every 15m" },
+  { labelKey: "automations:presetMinutes", count: 30, expression: "@every 30m" },
+  { labelKey: "automations:presetHours", count: 1, expression: "@hourly" },
+  { labelKey: "automations:presetHours", count: 6, expression: "@every 6h" },
+  { labelKey: "automations:presetDaily", expression: "@daily" },
+  { labelKey: "automations:presetWeekly", expression: "@weekly" },
+];
+
+// Cron syntax shown inside the help text. These travel as interpolation values
+// so the pseudo-locale cannot accent them into an expression that no longer
+// parses — see docs/i18n.md.
+const CRON_EVERY = "@every";
+const CRON_EVERY_10M = "@every 10m";
+const CRON_EVERY_2H30M = "@every 2h30m";
+const CRON_HOURLY = "@hourly";
+const CRON_DAILY = "@daily";
+const CRON_WEEKLY = "@weekly";
+const codeClass = "bg-muted px-1 rounded";
 
 export function ScheduleSelector({ config, isDirty = false, onChange }: ScheduleSelectorProps) {
+  const { t } = useTranslation();
   const configExpr = (config?.cron_expression as string) ?? "";
   const [customInput, setCustomInput] = useState(configExpr);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +82,11 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
       return;
     }
     if (!isValidExpression(trimmed)) {
-      setError("Invalid expression. Use @every with a duration, a shorthand, or a 5-field cron.");
+      // `@every` is the token the scheduler accepts and the user must type, so
+      // it is interpolated rather than left in the catalog — otherwise the
+      // pseudo-locale renders `@ēvēŕŷ` and the error tells them to type
+      // something that can never parse.
+      setError(t("automations:invalidExpression", { every: CRON_EVERY }));
       return;
     }
     setError(null);
@@ -84,7 +105,7 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
             className="cursor-pointer"
             onClick={() => handlePreset(preset.expression)}
           >
-            {preset.label}
+            {t(preset.labelKey, { count: preset.count })}
           </Button>
         ))}
         <Tooltip>
@@ -92,13 +113,14 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
             <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground ml-1" />
           </TooltipTrigger>
           <TooltipContent className="max-w-[280px]">
-            How often to check for matching events. Checked every 30 seconds by a background
-            process. Schedules persist across backend restarts.
+            {t("automations:scheduleTooltip")}
           </TooltipContent>
         </Tooltip>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs text-muted-foreground">Custom interval</Label>
+        <Label className="text-xs text-muted-foreground">
+          {t("automations:customIntervalLabel")}
+        </Label>
         <Input
           value={customInput}
           onChange={(e) => {
@@ -108,17 +130,31 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
           onBlur={handleCustomBlur}
           data-testid="schedule-custom-input"
           data-settings-dirty={isDirty}
-          placeholder="@every 2h30m"
+          // Cron syntax the user types verbatim, not copy — same value the
+          // help text below interpolates.
+          placeholder={CRON_EVERY_2H30M}
           className={`font-mono text-sm max-w-xs ${error ? "border-destructive" : ""}`}
         />
         {error && <p className="text-xs text-destructive">{error}</p>}
         <p className="text-xs text-muted-foreground">
-          Use <code className="bg-muted px-1 rounded">@every</code> with a duration (e.g.,{" "}
-          <code className="bg-muted px-1 rounded">@every 10m</code>,{" "}
-          <code className="bg-muted px-1 rounded">@every 2h30m</code>) or shorthands like{" "}
-          <code className="bg-muted px-1 rounded">@hourly</code>,{" "}
-          <code className="bg-muted px-1 rounded">@daily</code>,{" "}
-          <code className="bg-muted px-1 rounded">@weekly</code>.
+          <Trans
+            i18nKey="automations:scheduleSyntaxHelp"
+            values={{
+              every: CRON_EVERY,
+              example1: CRON_EVERY_10M,
+              example2: CRON_EVERY_2H30M,
+              hourly: CRON_HOURLY,
+              daily: CRON_DAILY,
+              weekly: CRON_WEEKLY,
+            }}
+          >
+            <code className={codeClass} />
+            <code className={codeClass} />
+            <code className={codeClass} />
+            <code className={codeClass} />
+            <code className={codeClass} />
+            <code className={codeClass} />
+          </Trans>
         </p>
       </div>
     </div>

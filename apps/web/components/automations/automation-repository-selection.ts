@@ -25,9 +25,16 @@ export function selectionToOptionId(sel: RepositorySelection): string {
 // used by the single-picker fallback (executor doesn't support multi-repo)
 // but omitted from per-row multi-repo pickers, where removing a row is how
 // you clear it.
+//
+// `t` is threaded in rather than imported from @/lib/i18n at module scope for
+// two reasons: this is a plain .ts helper with no JSX, so the eslint guard
+// never sees the option label at all, and both callers memoize the result —
+// a captured module-level `t` would leave the memo stale after a locale
+// switch. Every repository name in the list is user data and stays verbatim.
 export function buildRepositoryItems(
   workspaceRepos: Repository[],
   discoveredRepos: LocalRepository[],
+  t: (key: string) => string,
   options: { includeNone?: boolean } = {},
 ): Array<{ id: string; label: string }> {
   const registeredPaths = new Set(
@@ -39,7 +46,7 @@ export function buildRepositoryItems(
   const items: Array<{ id: string; label: string }> =
     options.includeNone === false
       ? []
-      : [{ id: REPO_NONE_OPTION_ID, label: "None — no repository" }];
+      : [{ id: REPO_NONE_OPTION_ID, label: t("automations:repositoryNone") }];
   for (const r of workspaceRepos) {
     items.push({ id: r.id, label: r.name || `${r.provider_owner}/${r.provider_name}` });
   }
@@ -62,6 +69,9 @@ export function pickSelectionFromOptionId(
     return {
       kind: "discovered",
       path,
+      // Persisted as the created repository's name (see resolveOneRepositoryId
+      // in automation-payload.ts) — user data, so it stays English rather than
+      // writing a locale-dependent name into the record.
       name: match?.name ?? path.split("/").pop() ?? "New Repository",
       defaultBranch: match?.default_branch ?? "",
     };

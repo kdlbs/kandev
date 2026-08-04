@@ -21,6 +21,8 @@ const (
 	taskResourceCleanupMaxAttempts      = 8
 )
 
+const taskResourceCleanupMutationOutcomeUnknown = "task mutation outcome requires reconciliation"
+
 var taskResourceCleanupRetryDelays = []time.Duration{
 	time.Minute,
 	5 * time.Minute,
@@ -250,7 +252,11 @@ func (s *Service) reconcilePreparedTaskResourceCleanupJobs(
 			continue
 		}
 		if !committed {
-			if cancelUncommittedBefore == nil || !job.CreatedAt.Before(*cancelUncommittedBefore) {
+			shouldCancel := job.LastError == taskResourceCleanupMutationOutcomeUnknown
+			if cancelUncommittedBefore != nil && job.CreatedAt.Before(*cancelUncommittedBefore) {
+				shouldCancel = true
+			}
+			if !shouldCancel {
 				continue
 			}
 			if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
@@ -466,12 +472,35 @@ func (s *Service) cancelIfTaskUnarchived(ctx context.Context, job *models.TaskRe
 	return false, nil
 }
 
-func (s *Service) cancelTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) {
+func (s *Service) resolveTaskResourceCleanupAfterMutationError(ctx context.Context, job *models.TaskResourceCleanupJob) {
 	if job == nil || s.resourceCleanups == nil {
 		return
 	}
+	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
+	defer cancel()
+	committed, err := s.preparedTaskCleanupMutationCommitted(transitionCtx, job)
+	if err != nil {
+		if markErr := s.resourceCleanups.CompleteTaskResourceCleanupJob(
+			transitionCtx, job.ID, models.TaskResourceCleanupStatePrepared,
+			taskResourceCleanupMutationOutcomeUnknown, nil,
+		); markErr != nil {
+			s.logger.Warn("mark ambiguous task resource cleanup outcome failed",
+				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(markErr))
+		}
+		s.startTaskResourceCleanup(job)
+		s.logger.Warn("task resource cleanup mutation outcome is ambiguous; retaining prepared intent",
+			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+		return
+	}
+	if committed {
+		if err := s.activatePreparedTaskResourceCleanupJob(transitionCtx, job); err != nil {
+			s.logger.Warn("activate cleanup after committed task mutation error failed",
+				zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))
+		}
+		return
+	}
 	if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
-		ctx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
+		transitionCtx, job.ID, models.TaskResourceCleanupStateCancelled, "", nil,
 	); err != nil {
 		s.logger.Warn("cancel task resource cleanup job failed",
 			zap.String("job_id", job.ID), zap.String("task_id", job.TaskID), zap.Error(err))

@@ -129,6 +129,27 @@ describe("buildSettingsInitialStateForRoute", () => {
   });
 });
 
+describe("message queue settings route", () => {
+  it("registers the Message Queue General settings leaf", () => {
+    const route = renderSettingsRoute("/settings/general/message-queue");
+
+    expect(isValidElement(route)).toBe(true);
+    expect(((route as ReactElement).type as { name?: string }).name).toBe(
+      "MessageQueueSettingsPage",
+    );
+  });
+
+  it("redirects the former System URL to the General settings leaf", () => {
+    const route = renderSettingsRoute("/settings/system/message-queue") as ReactElement<{
+      to: string;
+    }>;
+
+    expect(isValidElement(route)).toBe(true);
+    expect((route.type as { name?: string }).name).toBe("SettingsRedirect");
+    expect(route.props.to).toBe("/settings/general/message-queue");
+  });
+});
+
 describe("renderSettingsRoute", () => {
   it("directs update notification settings to Notifications", () => {
     render(renderSettingsRoute("/settings/system/updates"));

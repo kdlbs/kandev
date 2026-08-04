@@ -1,5 +1,5 @@
 ---
-status: shipped
+status: building
 created: 2026-08-02
 owner: kandev
 ---
@@ -21,6 +21,10 @@ Cancelling an active Kanban agent turn currently stops the agent and marks the r
 - A configured user cancellation reuses the ordinary `on_turn_complete` action pipeline. It runs source-step `on_exit`, applies at most one transition, and runs destination-step `on_enter` with the same first-transition-wins and side-effect behavior as a normal completed turn.
 - A configured user cancellation is a human completion decision and does not require `step_complete_kandev`, even when `auto_advance_requires_signal=true`. A pending clarification remains a hard barrier and still blocks the transition.
 - Cancellation keeps the current session and conversation context. It records the existing cancellation status message, durably confirms `WAITING_FOR_INPUT` and closes every active turn before evaluating completion, leaves queued user messages parked, and ignores the cancelled turn's later stale ready/completion events.
+- Once the agent acknowledges cancellation and publishes its terminal turn frames, the visible cancel request completes without waiting for the lifecycle escalation timeout. In the deterministic local regression environment, the shared desktop/mobile cancel control leaves its cancelling state within two seconds of that acknowledgement.
+- Terminal frames emitted while cancellation is pending retain their normal ordered persistence before cancellation reconciliation. Concurrent cancel requests for the same session join one backend-owned operation and cannot duplicate the lifecycle cancel, status message, turn closure, or workflow completion.
+- Explicit user cancellation, silent clarification recovery, and peer-message interruption share that same per-session operation. Only its owner invokes lifecycle cancellation; joined callers wait and then re-evaluate their own queue or clarification action.
+- Once authorization and admission succeed, the shared operation uses a bounded service-owned context. A caller that disconnects may stop waiting without aborting cancellation or causing a live joiner to inherit its context error.
 - If completion actions do not produce a transition, cannot be evaluated safely, or are blocked by pending user input, the task remains on the current workflow step and retains the existing `WAITING_FOR_INPUT` / review-ready reconciliation.
 - If completion reaches a terminal workflow step, the task receives the same completed state as an ordinary `on_turn_complete` transition without an intermediate `REVIEW` state write.
 - The workflow settings UI shows the option only when the step has an `on_turn_complete` transition. Its help text explains that destination `on_enter` actions may immediately start another agent.
@@ -73,11 +77,14 @@ No new permission is introduced. The caller must already be authorized to cancel
 ## Failure Modes
 
 - If the runtime cancel returns a non-recoverable error, the cancel request fails and Kandev does not reconcile the session or evaluate completion actions.
+- If the agent acknowledges cancellation and emits terminal frames, those frames must be allowed to drain through the normal ordered stream path; cancellation must not hold a serialization boundary that the terminal path itself needs in order to finish.
+- If the agent acknowledges the cancel but does not finish the turn, the existing bounded lifecycle timeout and escalation path still applies. Fast acknowledged cancellation does not shorten or remove that fallback.
 - If no live execution exists or the runtime cancellation must be escalated, Kandev performs its existing safe reconciliation. Because the user cancellation was accepted, an enabled step may still evaluate completion actions.
 - If the task is archived, ephemeral, Office-owned, missing its workflow step, or the current step cannot be loaded, Kandev does not move it through this policy.
 - If the session cannot be authoritatively persisted as `WAITING_FOR_INPUT`, or any active turn cannot be closed and verified, Kandev returns the cancellation reconciliation error and does not evaluate `on_turn_complete`, move the workflow, or launch destination `on_enter` actions.
 - If workflow evaluation or persistence fails, Kandev leaves the session input-ready on the current workflow step and surfaces the failure through existing logs and workflow state.
 - A stale `agent.ready` or `agent.completed` event emitted after cancellation cannot run the transition a second time because the reconciled session no longer owns a running turn.
+- While cancellation is admitted, non-stream prompt/state claimants defer or drop their mutations, and stream frames are accepted only when their execution and prompt generation match the captured cancellation identity. A successor prompt or stale completion therefore cannot be closed by the cancelled turn.
 - Destination `on_enter` behavior is not suppressed. If it contains `auto_start_agent`, cancellation can intentionally start work on the destination step; the settings help text must disclose this consequence.
 
 ## Persistence Guarantees
@@ -99,6 +106,11 @@ Template defaults apply when a workflow's steps are instantiated. Changing the e
 - **GIVEN** an enabled step with a queued user message, **WHEN** the user cancels, **THEN** the workflow transition may run but the queued message remains parked until an existing explicit drain or destination behavior consumes work.
 - **GIVEN** an internal clarification timeout, peer interrupt, parent stop, archive, runtime failure, or provider error, **WHEN** that path cancels or stops an agent turn, **THEN** it does not run cancellation-driven completion actions.
 - **GIVEN** a runtime cancel that is escalated or finds no live execution, **WHEN** Kandev safely reconciles the user's cancel request, **THEN** an enabled step evaluates completion once and the session does not remain stuck running.
+- **GIVEN** an agent that acknowledges cancellation and immediately emits its terminal stream frames, **WHEN** the user cancels the active turn, **THEN** the cancel request settles without reaching the lifecycle escalation timeout and the shared desktop/mobile control leaves its cancelling state within two seconds in the deterministic local regression environment.
+- **GIVEN** terminal usage, session-status, interruption-message, and completion frames emitted for the cancelled turn, **WHEN** cancellation is settling, **THEN** the frames drain in order before reconciliation and no frame can close or mutate a later successor turn.
+- **GIVEN** multiple cancel requests for the same active turn, **WHEN** the first request is still waiting for terminal frames, **THEN** all requests observe the same operation result while the lifecycle cancel, visible cancellation message, turn closure, and completion policy run exactly once.
+- **GIVEN** explicit and silent cancellation sources race for one active turn, **WHEN** both arrive before lifecycle cancellation settles, **THEN** exactly one lifecycle cancel runs and each source re-evaluates its own follow-up action after the shared result.
+- **GIVEN** the explicit cancel caller disconnects while a second caller remains connected, **WHEN** lifecycle cancellation is still in progress, **THEN** the service-owned operation continues and the connected caller receives its final result.
 - **GIVEN** the standard Kanban template, **WHEN** a new workflow is created from it, **THEN** `Backlog` and `In Progress` have `cancel_triggers_turn_complete=true` and cancellation moves work to `Review` through their existing actions.
 - **GIVEN** an existing persisted standard Kanban workflow, **WHEN** Kandev upgrades, **THEN** its stored setting remains `false` until a user enables it.
 - **GIVEN** an exported workflow with the setting enabled, **WHEN** it is imported or synchronized, **THEN** the imported step retains the enabled value.
@@ -111,3 +123,4 @@ Template defaults apply when a workflow's steps are instantiated. Changing the e
 - Changing queued-message drain policy after cancellation.
 - Treating agent errors, provider failures, crashes, task stops, or clarification pauses as successful completion.
 - Adding cancellation-cause metadata to workflow transition history.
+- Reducing the existing lifecycle timeout for agents that acknowledge cancellation but never finish their prompt, or synthesizing success before their terminal path settles.

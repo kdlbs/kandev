@@ -37,6 +37,16 @@ function mergeBase(ref, cwd) {
   return git(["merge-base", ref, "HEAD"], { quiet: true, cwd }).trim();
 }
 
+function inProgressBaseMerge(cwd) {
+  try {
+    const mergeHead = git(["rev-parse", "--verify", "MERGE_HEAD"], { quiet: true, cwd }).trim();
+    const baseTip = git(["rev-parse", "--verify", BASE_BRANCH], { quiet: true, cwd }).trim();
+    return mergeHead === baseTip ? mergeHead : null;
+  } catch {
+    return null;
+  }
+}
+
 function isAncestor(maybeAncestor, descendant, cwd) {
   try {
     git(["merge-base", "--is-ancestor", maybeAncestor, descendant], { quiet: true, cwd });
@@ -103,6 +113,17 @@ function forkPointFloor(base, cwd) {
 export function resolveBase(argv = process.argv, cwd = REPO_ROOT) {
   const flag = argv.indexOf("--base");
   const explicit = flag !== -1 && argv[flag + 1] ? argv[flag + 1] : null;
+
+  // During `git merge origin/main`, HEAD is still the PR-side parent until the
+  // merge commit exists. Its normal merge base therefore sits behind main and
+  // misattributes every incoming base-branch change to the PR. Use MERGE_HEAD
+  // only when it exactly matches the fetched base tip; merging another branch
+  // must keep judging that branch's incoming changes.
+  if (!explicit) {
+    const mergeHead = inProgressBaseMerge(cwd);
+    if (mergeHead) return { base: mergeHead };
+  }
+
   const requested = explicit ?? BASE_BRANCH;
 
   let base;

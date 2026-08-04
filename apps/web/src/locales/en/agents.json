@@ -191,5 +191,8 @@
   "watcherKindGithubIssue": "GitHub Issues",
   "watcherKindGithubReview": "GitHub PR Reviews",
   "watcherKindJira": "Jira",
-  "watcherKindLinear": "Linear"
+  "watcherKindLinear": "Linear",
+  "searchModels": "Search models...",
+  "noModelFound": "No model found.",
+  "selectAModelShort": "Select a model"
 }

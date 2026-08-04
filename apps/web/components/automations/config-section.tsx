@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
@@ -72,9 +73,12 @@ const CLEAN_FIELDS = {
   repositorySelections: false,
 };
 
+// `id` is the persisted ExecutionMode the backend stores and replays; only the
+// catalog key is copy. Resolved at render — a module-scope t() would freeze at
+// the boot locale.
 const EXECUTION_MODE_ITEMS = [
-  { id: "task", label: "Task — creates a tracked kanban task" },
-  { id: "run", label: "Run — fire-and-forget, hidden from kanban" },
+  { id: "task", labelKey: "automations:executionModeTask" },
+  { id: "run", labelKey: "automations:executionModeRun" },
 ];
 
 function useDiscoveredRepositories(workspaceId: string) {
@@ -99,9 +103,16 @@ function useDiscoveredRepositories(workspaceId: string) {
 
 type StepOption = { id: string; name: string };
 
-function getWorkflowStepHelpText(workflowId: string, workflowStepId: string): string | undefined {
-  if (!workflowId) return "Select a workflow before choosing a step.";
-  if (!workflowStepId) return "Select a workflow step to enable saving.";
+// A plain function returning copy is invisible to `i18next/no-literal-string`
+// (it only inspects literals in JSX), so `t` is threaded in explicitly rather
+// than imported at module scope.
+function getWorkflowStepHelpText(
+  workflowId: string,
+  workflowStepId: string,
+  t: (key: string) => string,
+): string | undefined {
+  if (!workflowId) return t("automations:workflowStepHelpNoWorkflow");
+  if (!workflowStepId) return t("automations:workflowStepHelp");
   return undefined;
 }
 
@@ -142,6 +153,7 @@ function useConfigSectionComputed({
   repositorySelections,
   repositories,
   discoveredRepos,
+  t,
 }: {
   agentProfiles: AgentProfileLike[];
   executors: ExecutorLike[];
@@ -149,6 +161,7 @@ function useConfigSectionComputed({
   repositorySelections: RepositorySelection[];
   repositories: Repository[];
   discoveredRepos: LocalRepository[];
+  t: (key: string) => string;
 }) {
   const filteredAgentProfiles = agentProfiles.filter((profile) => !profile.cli_passthrough);
   // Profiles returned by the executors list/boot payload don't always carry
@@ -177,8 +190,8 @@ function useConfigSectionComputed({
     };
   });
   const singleRepositoryItems = useMemo(
-    () => buildRepositoryItems(repositories, discoveredRepos),
-    [repositories, discoveredRepos],
+    () => buildRepositoryItems(repositories, discoveredRepos, t),
+    [repositories, discoveredRepos, t],
   );
   return { filteredAgentProfiles, executorItems, supportsMultiRepo, singleRepositoryItems };
 }
@@ -200,6 +213,7 @@ export function ConfigSection({
   onRepositoriesChange,
   onExecutionModeChange,
 }: ConfigSectionProps) {
+  const { t } = useTranslation();
   useSettingsData(true);
   useWorkflows(workspaceId, true);
   const { repositories } = useRepositories(workspaceId, true);
@@ -220,22 +234,23 @@ export function ConfigSection({
       repositorySelections,
       repositories,
       discoveredRepos,
+      t,
     });
 
   return (
     <div className="space-y-3">
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-        Configuration
+        {t("automations:configurationLabel")}
       </Label>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <SelectField
           testId="execution-mode-selector"
-          label="Execution Mode"
+          label={t("automations:executionModeLabel")}
           value={executionMode}
           isDirty={dirtyFields.executionMode}
           onChange={(v) => onExecutionModeChange(v as ExecutionMode)}
-          placeholder="Select mode"
-          items={EXECUTION_MODE_ITEMS}
+          placeholder={t("automations:executionModePlaceholder")}
+          items={EXECUTION_MODE_ITEMS.map((item) => ({ id: item.id, label: t(item.labelKey) }))}
         />
         {!isRunMode && (
           <WorkflowFields
@@ -250,22 +265,22 @@ export function ConfigSection({
           />
         )}
         <SelectField
-          label="Agent Profile"
+          label={t("automations:agentProfileLabel")}
           value={agentProfileId}
           isDirty={dirtyFields.agentProfileId}
           onChange={onAgentProfileChange}
-          placeholder="Select agent"
+          placeholder={t("automations:agentProfilePlaceholder")}
           items={filteredAgentProfiles.map((p) => ({
             id: p.id,
             label: p.label,
           }))}
         />
         <SelectField
-          label="Executor Profile"
+          label={t("automations:executorProfileLabel")}
           value={executorProfileId}
           isDirty={dirtyFields.executorProfileId}
           onChange={onExecutorProfileChange}
-          placeholder="Select executor"
+          placeholder={t("automations:executorProfilePlaceholder")}
           items={executorItems}
         />
         <RepositoryPickerField
@@ -307,6 +322,7 @@ function RepositoryPickerField({
   isDirty: boolean;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 }) {
+  const { t } = useTranslation();
   if (supportsMultiRepo && !isPRTrigger) {
     return (
       <AutomationRepositoryRows
@@ -322,17 +338,17 @@ function RepositoryPickerField({
   return (
     <SelectField
       testId="repository-selector"
-      label="Repository"
+      label={t("automations:repositoryLabel")}
       value={selectionToOptionId(repositorySelections[0] ?? { kind: "none" })}
       isDirty={isDirty}
       onChange={(v) => {
         const picked = pickSelectionFromOptionId(v, repositories, discoveredRepos);
         onRepositoriesChange(picked.kind === "none" ? [] : [picked]);
       }}
-      placeholder="Auto"
+      placeholder={t("automations:repositoryPlaceholderAuto")}
       items={singleRepositoryItems}
       disabled={isPRTrigger}
-      helpText={isPRTrigger ? "PR triggers always use the PR's own repository." : undefined}
+      helpText={isPRTrigger ? t("automations:prTriggerRepositoryHelp") : undefined}
     />
   );
 }
@@ -356,6 +372,7 @@ function WorkflowFields({
   onWorkflowChange: (id: string) => void;
   onStepChange: (id: string) => void;
 }) {
+  const { t } = useTranslation();
   // The step list is empty until a workflow is picked. Showing an empty
   // dropdown next to the workflow select invites users to click it first
   // and bounce off — keep the field in the DOM (so its testid is stable
@@ -366,26 +383,30 @@ function WorkflowFields({
     <>
       <SelectField
         testId="workflow-selector"
-        label="Workflow"
+        label={t("automations:workflowLabel")}
         required
         value={workflowId}
         isDirty={workflowDirty}
         onChange={onWorkflowChange}
-        placeholder="Select workflow"
+        placeholder={t("automations:workflowPlaceholder")}
         items={workflows.map((w) => ({ id: w.id, label: w.name }))}
-        helpText={!hasWorkflow ? "Select a workflow to enable saving." : undefined}
+        helpText={!hasWorkflow ? t("automations:workflowHelp") : undefined}
       />
       <SelectField
         testId="workflow-step-selector"
-        label="Workflow Step"
+        label={t("automations:workflowStepLabel")}
         required
         value={workflowStepId}
         isDirty={workflowStepDirty}
         onChange={onStepChange}
-        placeholder={hasWorkflow ? "Select step" : "Pick a workflow first"}
+        placeholder={
+          hasWorkflow
+            ? t("automations:workflowStepPlaceholder")
+            : t("automations:workflowStepPlaceholderNoWorkflow")
+        }
         items={steps.map((s) => ({ id: s.id, label: s.name }))}
         disabled={!hasWorkflow}
-        helpText={getWorkflowStepHelpText(workflowId, workflowStepId)}
+        helpText={getWorkflowStepHelpText(workflowId, workflowStepId, t)}
       />
     </>
   );

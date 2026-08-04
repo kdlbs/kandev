@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import {
   IconCopy,
@@ -98,8 +99,9 @@ function commentsReadOnly(task: Task, sessions: TaskSession[]): boolean {
 }
 
 function TaskBreadcrumb({ task }: { task: Task }) {
+  const { t } = useTranslation();
   return (
-    <Breadcrumb>
+    <Breadcrumb aria-label={t("common:breadcrumb")}>
       <BreadcrumbList className="text-sm">
         <BreadcrumbItem>
           <BreadcrumbLink asChild>

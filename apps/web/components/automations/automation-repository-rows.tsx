@@ -5,6 +5,7 @@ import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconPlus, IconTrash } from "@tabler/icons-react";
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import type { LocalRepository, Repository } from "@/lib/types/http";
 import {
   buildRepositoryItems,
@@ -37,9 +38,10 @@ export function AutomationRepositoryRows({
   onChange,
   isDirty,
 }: AutomationRepositoryRowsProps) {
+  const { t } = useTranslation();
   const baseItems = useMemo(
-    () => buildRepositoryItems(repositories, discoveredRepos, { includeNone: false }),
-    [repositories, discoveredRepos],
+    () => buildRepositoryItems(repositories, discoveredRepos, t, { includeNone: false }),
+    [repositories, discoveredRepos, t],
   );
   const usedOptionIds = new Set(selections.map(selectionToOptionId));
   const nextAvailableItem = baseItems.find((item) => !usedOptionIds.has(item.id));
@@ -61,7 +63,7 @@ export function AutomationRepositoryRows({
 
   return (
     <div className="space-y-1.5" data-testid={testId} data-settings-dirty={isDirty}>
-      <Label className="text-xs">Repository</Label>
+      <Label className="text-xs">{t("automations:repositoryLabel")}</Label>
       <div className="space-y-2">
         {selections.map((selection, index) => (
           <RepositoryRow
@@ -82,13 +84,10 @@ export function AutomationRepositoryRows({
           onClick={addRow}
         >
           <IconPlus className="h-3.5 w-3.5 mr-1" />
-          Add repository
+          {t("automations:addRepository")}
         </Button>
       </div>
-      <p className="text-[10px] text-muted-foreground">
-        With no repositories selected, this automation runs against the workspace&apos;s first
-        repository.
-      </p>
+      <p className="text-[10px] text-muted-foreground">{t("automations:noRepositoriesHelp")}</p>
     </div>
   );
 }
@@ -106,12 +105,13 @@ function RepositoryRow({
   onChange: (optionId: string) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   const currentOptionId = selectionToOptionId(selection);
   return (
     <div className="flex items-center gap-2">
       <Select value={currentOptionId || undefined} onValueChange={onChange}>
         <SelectTrigger className="cursor-pointer flex-1">
-          <SelectValue placeholder="Select a repository" />
+          <SelectValue placeholder={t("automations:selectRepositoryPlaceholder")} />
         </SelectTrigger>
         <SelectContent>
           {baseItems.map((item) => {
@@ -121,7 +121,7 @@ function RepositoryRow({
                 key={item.id}
                 value={item.id}
                 disabled={alreadyAdded}
-                title={alreadyAdded ? "Already added" : undefined}
+                title={alreadyAdded ? t("automations:alreadyAdded") : undefined}
               >
                 {item.label}
               </SelectItem>
@@ -134,7 +134,7 @@ function RepositoryRow({
         variant="ghost"
         size="icon"
         className="cursor-pointer"
-        aria-label="Remove repository"
+        aria-label={t("automations:removeRepository")}
         onClick={onRemove}
       >
         <IconTrash className="h-3.5 w-3.5 text-destructive" />

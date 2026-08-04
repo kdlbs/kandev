@@ -200,6 +200,19 @@
  *                             fetch.success/error means the PR fetch never
  *                             fired (look at useActiveTaskPR plumbing).
  *
+ *   Model selector pipeline (bug: selector shows then disappears on relaunch)
+ *     [model-selector:ws]     session.models_updated handler — payload vs.
+ *                             existing entry, isEmpty/populated guard, the
+ *                             stale-empty skip decision (willSkip), and the
+ *                             partial-update config-options preservation
+ *                             decision (preserveConfigOptions).
+ *     [model-selector:gate]   ModelSelector render gate — configHydrated,
+ *                             currentModel, hasModelConfig, configOptionIds
+ *                             (usable/filtered), rawConfigOptionIds (unfiltered
+ *                             store entry), requiredKeys (keys the session's
+ *                             profile/runtime config demand), and willHide (the
+ *                             exact gate expression).
+ *
  *   Other
  *     [ws:connection]         WS hook mount + status transitions
  *     [dockview:*]            layout restore / save / env-switch / session-tabs / task-select

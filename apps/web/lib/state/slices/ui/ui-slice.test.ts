@@ -44,6 +44,24 @@ function makeSidebarView(id: string, name: string): SidebarView {
   };
 }
 
+describe("cancel-turn progress", () => {
+  it("tracks pending cancellation independently per session and clears one entry", () => {
+    const store = makeStore();
+
+    store.getState().setCancelTurnPending("session-a", true);
+    expect(store.getState().chatInput.cancellingBySessionId).toEqual({ "session-a": true });
+    expect(store.getState().chatInput.cancellingBySessionId["session-b"]).toBeUndefined();
+
+    store.getState().setCancelTurnPending("session-b", true);
+    store.getState().setCancelTurnPending("session-a", false);
+
+    expect(store.getState().chatInput.cancellingBySessionId).toEqual({ "session-b": true });
+
+    store.getState().setCancelTurnPending("session-b", false);
+    expect(store.getState().chatInput.cancellingBySessionId).toEqual({});
+  });
+});
+
 describe("migrateView", () => {
   it("retains all supported boolean filter dimensions", () => {
     const view = makeSidebarView("view-a", "View A");

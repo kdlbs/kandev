@@ -109,7 +109,7 @@ export function useSelfUpdate({
     setPhase("starting");
     writePersisted({ target: latestVersion, startedAt: Date.now() });
     try {
-      const res = await applyUpdate("UPDATE");
+      const res = await applyUpdate("UPDATE", latestVersion);
       setJobId(res.job_id);
       setPhase("installing");
     } catch (e) {

@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
@@ -27,7 +26,9 @@ import {
 import { useUpdates } from "@/hooks/domains/system/use-updates";
 import { formatDateTime } from "@/lib/i18n/formats";
 import type { UpdatesResponse } from "@/lib/types/system";
+import { SettingsCard } from "../settings-card";
 import { SelfUpdateProgress } from "./self-update-progress";
+import { UpdateChannelControl, useUpdateChannelDraft } from "./update-channel-control";
 
 interface ApplyGate {
   canApply: boolean;
@@ -48,10 +49,6 @@ function formatChecked(value: string | number | null | undefined, t: TFunction):
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return String(value);
   return formatDateTime(d);
-}
-
-function errorMessage(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback;
 }
 
 function retryAfterSeconds(message: string): number | null {
@@ -91,54 +88,61 @@ function serviceCardView(
   };
 }
 
-export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesCardProps = {}) {
+function ChannelPendingNotice({ pending, saving }: { pending: boolean; saving: boolean }) {
   const { t } = useTranslation();
-  const { updates, check } = useUpdates();
-  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reloadDocument });
-  const desktopUpdater = useDesktopUpdater();
-  const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  if (!pending) return null;
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="system-updates-channel-pending">
+      {saving ? t("settings:updateChannelSavingNotice") : t("settings:updateChannelUnsavedNotice")}
+    </p>
+  );
+}
 
+export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesCardProps = {}) {
+  const desktopUpdater = useDesktopUpdater();
   if (desktopUpdater.available) {
     return <DesktopUpdatesCard updater={desktopUpdater} />;
   }
+  return <ServiceUpdatesCard reloadDocument={reloadDocument} />;
+}
 
-  const onCheck = async () => {
-    setChecking(true);
-    setError(null);
-    setRetryAfter(null);
-    try {
-      await check();
-    } catch (err) {
-      const message = errorMessage(err, t("system:updatesCheckFailed"));
-      setError(message);
-      setRetryAfter(retryAfterSeconds(message));
-    } finally {
-      setChecking(false);
-    }
-  };
-
+function ServiceUpdatesCard({ reloadDocument }: { reloadDocument: () => void }) {
+  const { t } = useTranslation();
+  const { updates, check, saveChannel, isChecking, error } = useUpdates();
+  const selfUpdate = useSelfUpdate({ latestVersion: updates?.latest, onComplete: reloadDocument });
+  const channel = useUpdateChannelDraft(updates, saveChannel);
   const view = serviceCardView(updates, selfUpdate);
+  const channelPending = channel.isDirty || channel.isSaving;
 
   return (
-    <Card data-testid="system-updates-card">
+    <SettingsCard isDirty={channelPending} data-testid="system-updates-card">
       <CardHeader>
-        <UpdatesHeader available={view.available} />
+        <UpdatesHeader available={view.available && !channelPending} />
       </CardHeader>
       <CardContent className="space-y-4">
-        <VersionGrid current={view.current} latest={view.latest} />
-        <LastChecked checkedAt={updates?.latest_checked_at} />
+        <UpdateChannelControl {...channel} />
+        <ChannelPendingNotice pending={channelPending} saving={channel.isSaving} />
+        <VersionGrid
+          current={view.current}
+          latest={channelPending ? "-" : view.latest}
+          latestLabel={
+            channel.draft === "nightly"
+              ? t("settings:updateChannelLatestNightly")
+              : t("settings:updateChannelLatestRelease")
+          }
+        />
+        <LastChecked checkedAt={channelPending ? undefined : updates?.latest_checked_at} />
         <UpdateActions
-          checking={checking}
-          showApply={view.showApply}
+          checking={isChecking}
+          disabled={channelPending}
+          showApply={view.showApply && !channelPending && !isChecking}
           latest={view.latest}
-          url={updates?.latest_url}
-          onCheck={onCheck}
+          url={channelPending ? undefined : updates?.latest_url}
+          onCheck={() => ignoreFailure(check())}
           onApply={selfUpdate.start}
         />
         <ManualUpdateInstructions
-          show={view.showManual}
+          show={view.showManual && !channelPending}
           reason={view.cannotApplyReason}
           commands={view.manualCommands}
         />
@@ -148,9 +152,9 @@ export function UpdatesCard({ reloadDocument = reloadCurrentDocument }: UpdatesC
           errorMessage={selfUpdate.errorMessage}
           onDismiss={selfUpdate.dismiss}
         />
-        <UpdateError error={error} retryAfter={retryAfter} />
+        <UpdateError error={error} retryAfter={error ? retryAfterSeconds(error) : null} />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -222,7 +226,7 @@ function DesktopCurrentStatus({ phase }: { phase: string | undefined }) {
   );
 }
 
-async function ignoreFailure(operation: Promise<void>): Promise<void> {
+async function ignoreFailure(operation: Promise<unknown>): Promise<void> {
   await operation.catch(() => undefined);
 }
 
@@ -268,17 +272,28 @@ function UpdatesHeader({ available }: { available: boolean }) {
   );
 }
 
-function VersionGrid({ current, latest }: { current: string; latest: string }) {
+function VersionGrid({
+  current,
+  latest,
+  latestLabel,
+}: {
+  current: string;
+  latest: string;
+  latestLabel?: string;
+}) {
   const { t } = useTranslation();
   return (
-    <div className="grid grid-cols-2 gap-3 text-sm">
+    <div
+      className="grid min-w-0 grid-cols-1 gap-3 text-sm sm:grid-cols-2"
+      data-testid="system-updates-versions"
+    >
       <VersionValue
         label={t("system:updatesCurrentVersion")}
         value={current}
         testId="system-updates-current"
       />
       <VersionValue
-        label={t("system:updatesLatestRelease")}
+        label={latestLabel ?? t("system:updatesLatestRelease")}
         value={latest}
         testId="system-updates-latest"
       />
@@ -288,9 +303,9 @@ function VersionGrid({ current, latest }: { current: string; latest: string }) {
 
 function VersionValue({ label, value, testId }: { label: string; value: string; testId: string }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="text-xs text-muted-foreground">{label}</div>
-      <div className="font-mono text-sm" data-testid={testId}>
+      <div className="break-all font-mono text-sm" data-testid={testId}>
         {value}
       </div>
     </div>
@@ -308,6 +323,7 @@ function LastChecked({ checkedAt }: { checkedAt?: string | number | null }) {
 
 interface UpdateActionsProps {
   checking: boolean;
+  disabled?: boolean;
   showApply: boolean;
   latest: string;
   url?: string;
@@ -322,7 +338,7 @@ function UpdateActions(props: UpdateActionsProps) {
       className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center"
       data-testid="system-updates-actions"
     >
-      <CheckNowButton checking={props.checking} onCheck={props.onCheck} />
+      <CheckNowButton checking={props.checking} disabled={props.disabled} onCheck={props.onCheck} />
       <ReleaseNotesLink url={props.url} />
       <ApplyUpdateDialog
         showApply={props.showApply}
@@ -336,9 +352,11 @@ function UpdateActions(props: UpdateActionsProps) {
 
 function CheckNowButton({
   checking,
+  disabled,
   onCheck,
 }: {
   checking: boolean;
+  disabled?: boolean;
   onCheck: () => Promise<void>;
 }) {
   const { t } = useTranslation();
@@ -346,7 +364,7 @@ function CheckNowButton({
     <Button
       variant="outline"
       size="sm"
-      disabled={checking}
+      disabled={checking || disabled}
       onClick={() => void onCheck()}
       className="cursor-pointer"
       data-testid="system-updates-check"

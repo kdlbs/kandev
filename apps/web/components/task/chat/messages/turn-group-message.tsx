@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, memo, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { GridSpinner } from "@/components/grid-spinner";
 import { cn, transformPathsInText } from "@/lib/utils";
@@ -26,20 +27,6 @@ type TurnGroupMessageProps = {
   onScrollToMessage?: (messageId: string) => void;
 };
 
-function countMessageTypes(messages: Message[]): { toolCalls: number; subagents: number } {
-  let toolCalls = 0;
-  let subagents = 0;
-  for (const msg of messages) {
-    const metadata = msg.metadata as ToolCallMetadata | undefined;
-    if (metadata?.normalized?.kind === "subagent_task") {
-      subagents++;
-    } else {
-      toolCalls++;
-    }
-  }
-  return { toolCalls, subagents };
-}
-
 function getActiveGroupDescription(messages: Message[]): string {
   for (let i = messages.length - 1; i >= 0; i--) {
     const msg = messages[i];
@@ -50,18 +37,6 @@ function getActiveGroupDescription(messages: Message[]): string {
     }
   }
   return "Working...";
-}
-
-function getCompletedGroupDescription(messages: Message[]): string {
-  const { toolCalls, subagents } = countMessageTypes(messages);
-  if (subagents === 0) return `tool call${toolCalls !== 1 ? "s" : ""}`;
-  if (toolCalls === 0) return `subagent${subagents !== 1 ? "s" : ""}`;
-  return `tool call${toolCalls !== 1 ? "s" : ""}, ${subagents} subagent${subagents !== 1 ? "s" : ""}`;
-}
-
-function getGroupDescription(messages: Message[], isActive: boolean): string {
-  if (isActive) return getActiveGroupDescription(messages);
-  return getCompletedGroupDescription(messages);
 }
 
 function hasPendingPermission(
@@ -380,6 +355,7 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
   streamingMessageId,
   onScrollToMessage,
 }: TurnGroupMessageProps) {
+  const { t } = useTranslation("chat");
   const isGroupRunning = hasRunningTool(group.messages, isTurnActive);
   const hasPending = hasPendingPermission(group.messages, permissionsByToolCallId);
 
@@ -393,7 +369,13 @@ export const TurnGroupMessage = memo(function TurnGroupMessage({
     setManualExpandState((prev) => !(prev ?? autoExpanded));
   }, [autoExpanded]);
 
-  const rawDescription = getGroupDescription(group.messages, isGroupRunning);
+  // The count badge beside this label renders `messages.length`, so the label
+  // has to agree with that same number. Subagents are hoisted out of turn
+  // groups (`isSubagentMessage` in use-processed-messages), so a group is tool
+  // calls and nothing else.
+  const rawDescription = isGroupRunning
+    ? getActiveGroupDescription(group.messages)
+    : t("turnGroupToolCalls", { count: group.messages.length });
   const description = transformPathsInText(rawDescription, worktreePath);
   const count = group.messages.length;
 

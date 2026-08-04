@@ -291,6 +291,7 @@ type DisplayViewProps = {
   entityReferences: readonly EntityReference[];
   positionLabel: string;
   canEdit: boolean;
+  canRemove: boolean;
   canMerge: boolean;
   onStartEdit: () => void;
   onRemove: () => void;
@@ -312,6 +313,7 @@ type RowActionsProps = {
   expanded: boolean;
   canMerge: boolean;
   canEdit: boolean;
+  canRemove: boolean;
   onToggleExpand: () => void;
   onMerge?: () => void | Promise<void>;
   onStartEdit: () => void;
@@ -323,6 +325,7 @@ function RowActions({
   expanded,
   canMerge,
   canEdit,
+  canRemove,
   onToggleExpand,
   onMerge,
   onStartEdit,
@@ -337,13 +340,14 @@ function RowActions({
         // visible on touch surfaces where there's no hover affordance.
         "opacity-0 group-hover:opacity-100 focus-within:opacity-100",
         "[@media(hover:none)]:opacity-100",
+        "[@media(pointer:coarse)]:opacity-100",
       )}
     >
       {canExpand && (
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           onClick={onToggleExpand}
           title={expanded ? t("chat:collapseMessage") : t("chat:expandMessage")}
           data-testid="queue-entry-expand"
@@ -360,7 +364,7 @@ function RowActions({
         <Button
           variant="ghost"
           size="sm"
-          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
+          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           onClick={onMerge}
           title={t("chat:mergeWithAbove")}
           data-testid="queue-entry-merge"
@@ -369,26 +373,28 @@ function RowActions({
         </Button>
       )}
       {canEdit && (
-        <>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={onStartEdit}
-            title={t("chat:editQueuedMessage")}
-          >
-            <IconEdit className="h-3.5 w-3.5" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground"
-            onClick={onRemove}
-            title={t("chat:removeQueuedMessage")}
-          >
-            <IconX className="h-4 w-4" />
-          </Button>
-        </>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          onClick={onStartEdit}
+          title={t("chat:editQueuedMessage")}
+          data-testid="queue-entry-edit"
+        >
+          <IconEdit className="h-3.5 w-3.5" />
+        </Button>
+      )}
+      {canRemove && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 w-6 cursor-pointer p-0 text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+          onClick={onRemove}
+          title={t("chat:removeQueuedMessage")}
+          data-testid="queue-entry-remove"
+        >
+          <IconX className="h-4 w-4" />
+        </Button>
       )}
     </div>
   );
@@ -399,6 +405,7 @@ function DisplayView({
   entityReferences,
   positionLabel,
   canEdit,
+  canRemove,
   canMerge,
   onStartEdit,
   onRemove,
@@ -415,7 +422,7 @@ function DisplayView({
     [entityReferences],
   );
   return (
-    <div className="group flex items-start gap-2 py-1.5">
+    <div className="group flex items-start gap-2 py-1.5" data-testid="queue-entry">
       <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
         <span
           aria-label={`Position ${positionLabel}`}
@@ -451,6 +458,7 @@ function DisplayView({
         expanded={expanded}
         canMerge={canMerge}
         canEdit={canEdit}
+        canRemove={canRemove}
         onToggleExpand={() => setExpanded((v) => !v)}
         onMerge={onMerge}
         onStartEdit={onStartEdit}
@@ -469,6 +477,8 @@ type QueuedGhostMessageProps = {
    * entry's queued_by. Inter-task entries are visible but read-only.
    */
   canEdit: boolean;
+  /** Removal is independent from edit ownership and applies to every visible row. */
+  canRemove?: boolean;
   /**
    * Merge-with-above control; only shown when this row and the one above it
    * share a sender kind. Optional so standalone renders (tests) can omit it.
@@ -482,11 +492,34 @@ type QueuedGhostMessageProps = {
   onEditComplete?: () => void;
 };
 
+function useFocusQueuedEdit(
+  editing: boolean,
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>,
+): void {
+  useEffect(() => {
+    if (!editing || !textareaRef.current) return;
+    const textarea = textareaRef.current;
+    textarea.focus();
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+  }, [editing, textareaRef]);
+}
+
 export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGhostMessageProps>(
   function QueuedGhostMessage(
-    { entry, index, canEdit, canMerge = false, onSave, onRemove, onMerge, onEditComplete },
+    {
+      entry,
+      index,
+      canEdit,
+      canRemove = true,
+      canMerge = false,
+      onSave,
+      onRemove,
+      onMerge,
+      onEditComplete,
+    },
     ref,
   ) {
+    const { t } = useTranslation();
     const [editing, setEditing] = useState(false);
     const [value, setValue] = useState(entry.content);
     const [saving, setSaving] = useState(false);
@@ -495,22 +528,12 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
       () => entityReferencesFromMetadata(entry.metadata),
       [entry.metadata],
     );
-    // A row is mergeable only when both the caller gate and the entry itself
-    // pass: workflow/server/system rows are reserved and never mergeable, even
-    // if a parent computed canMerge for a different row.
     const effectiveCanMerge = canMerge && canMergeEntry(entry);
+    useFocusQueuedEdit(editing, textareaRef);
 
     useEffect(() => {
       if (!editing) setValue(entry.content);
     }, [entry.content, editing]);
-
-    useEffect(() => {
-      if (editing && textareaRef.current) {
-        const el = textareaRef.current;
-        el.focus();
-        el.setSelectionRange(el.value.length, el.value.length);
-      }
-    }, [editing]);
 
     const startEdit = useCallback(() => {
       if (!canEdit) return;
@@ -540,22 +563,23 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
         onEditComplete?.();
       } catch (err) {
         console.error("Failed to update queued entry:", err);
-        // Exit edit mode so the user sees the current state instead of being
-        // stuck in a textarea with no signal that the save failed (drain race
-        // or transient network error).
+        // Exit edit mode after both drain races and transient failures.
         if (err instanceof QueueEntryNotFoundError) {
-          toast.error("Message already sent — agent picked it up before your edit landed.");
+          toast.error(t("chat:queueEditAlreadySent"));
         } else {
-          toast.error("Failed to save edit. Please try again.");
+          toast.error(t("chat:queueEditSaveFailed"));
         }
         setEditing(false);
         onEditComplete?.();
       } finally {
         setSaving(false);
       }
-    }, [value, entry.content, onSave, onEditComplete, entityReferences]);
+    }, [value, entry.content, onSave, onEditComplete, entityReferences, t]);
 
-    const positionNumber = entry.position ?? (index ?? 0) + 1;
+    // Persisted positions are durable FIFO keys and intentionally retain gaps
+    // after a remove or merge. The panel index is the compact user-facing
+    // ordinal, so prefer it whenever this row belongs to a rendered list.
+    const positionNumber = index === undefined ? (entry.position ?? 1) : index + 1;
     const positionLabel = `#${positionNumber}`;
 
     return (
@@ -581,6 +605,7 @@ export const QueuedGhostMessage = forwardRef<QueuedGhostMessageHandle, QueuedGho
             entityReferences={entityReferences}
             positionLabel={positionLabel}
             canEdit={canEdit}
+            canRemove={canRemove}
             canMerge={effectiveCanMerge}
             onStartEdit={startEdit}
             onRemove={onRemove}

@@ -1,11 +1,78 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
+
+	acp "github.com/coder/acp-go-sdk"
 )
+
+type promptCancelUpdater struct {
+	started chan struct{}
+	once    sync.Once
+}
+
+func (u *promptCancelUpdater) SessionUpdate(context.Context, acp.SessionNotification) error {
+	u.once.Do(func() { close(u.started) })
+	return nil
+}
+
+func (u *promptCancelUpdater) RequestPermission(context.Context, acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
+	return acp.RequestPermissionResponse{}, nil
+}
+
+func TestMockAgentCancelStopsPrompt(t *testing.T) {
+	const sessionID = acp.SessionId("cancel-session")
+	updater := &promptCancelUpdater{started: make(chan struct{})}
+	agent := &mockAgent{
+		model:           "mock-fast",
+		conn:            updater,
+		sessions:        map[acp.SessionId]bool{sessionID: true},
+		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+
+	result := make(chan struct {
+		response acp.PromptResponse
+		err      error
+	}, 1)
+	go func() {
+		response, err := agent.Prompt(context.Background(), acp.PromptRequest{
+			SessionId: sessionID,
+			Prompt:    []acp.ContentBlock{acp.TextBlock("e2e:message(\"started\")\ne2e:delay(5000)")},
+		})
+		result <- struct {
+			response acp.PromptResponse
+			err      error
+		}{response: response, err: err}
+	}()
+
+	select {
+	case <-updater.started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for the prompt to start")
+	}
+	if err := agent.Cancel(context.Background(), acp.CancelNotification{SessionId: sessionID}); err != nil {
+		t.Fatalf("cancel prompt: %v", err)
+	}
+
+	select {
+	case outcome := <-result:
+		if outcome.err != nil {
+			t.Fatalf("prompt returned error: %v", outcome.err)
+		}
+		if outcome.response.StopReason != acp.StopReasonCancelled {
+			t.Fatalf("stop reason = %q, want cancelled", outcome.response.StopReason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("prompt did not stop after cancellation")
+	}
+}
 
 func TestParseModelFromArgs(t *testing.T) {
 	tests := []struct {

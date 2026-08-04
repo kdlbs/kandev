@@ -27,6 +27,17 @@ func newTestDockerLogger() *logger.Logger {
 	return log
 }
 
+func requireDockerRequest(t *testing.T, requests []string, method, pathSuffix string) {
+	t.Helper()
+	for _, request := range requests {
+		fields := strings.Fields(request)
+		if len(fields) == 2 && fields[0] == method && strings.HasSuffix(fields[1], pathSuffix) {
+			return
+		}
+	}
+	t.Fatalf("missing %s *%s request in %v", method, pathSuffix, requests)
+}
+
 // failingClientFactory returns a factory that always fails.
 func failingClientFactory(errMsg string) func(config.DockerConfig, *logger.Logger) (*docker.Client, error) {
 	return func(_ config.DockerConfig, _ *logger.Logger) (*docker.Client, error) {
@@ -152,26 +163,41 @@ func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
 	}
 }
 
-func TestDockerStopInstanceStopsContainerOnStaleCleanup(t *testing.T) {
-	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
-	exec.newClientFunc = failingClientFactory("docker required for stale cleanup")
+func TestDockerStopInstanceStopsButPreservesContainerOnStaleCleanup(t *testing.T) {
+	requests := make(chan string, 2)
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requests <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
 
-	err := exec.StopInstance(context.Background(), &ExecutorInstance{
-		InstanceID:  "inst-1",
-		ContainerID: "container-1",
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	require.NoError(t, dockerExec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "stale-instance",
+		ContainerID: "stale-container",
 		StopReason:  stopReasonStaleExecutionCleanup,
-	}, false)
-	if err == nil {
-		t.Fatal("StopInstance should attempt Docker cleanup for stale executions")
+	}, false))
+
+	got := make([]string, 0, len(requests))
+	for len(requests) > 0 {
+		got = append(got, <-requests)
 	}
-	if !strings.Contains(err.Error(), "docker required for stale cleanup") {
-		t.Fatalf("StopInstance error = %v", err)
+	requireDockerRequest(t, got, http.MethodPost, "/containers/stale-container/stop")
+	for _, request := range got {
+		require.NotEqual(t, http.MethodDelete, strings.Fields(request)[0], request)
 	}
 }
 
-func TestRollbackLaunchExecutionForceKillsUnregisteredDockerContainer(t *testing.T) {
-	requests := make(chan string, 1)
+func TestRollbackLaunchExecutionForceKillsAndRemovesUnregisteredDockerContainer(t *testing.T) {
+	requests := make(chan string, 2)
 	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
 			w.WriteHeader(http.StatusOK)
@@ -193,13 +219,37 @@ func TestRollbackLaunchExecutionForceKillsUnregisteredDockerContainer(t *testing
 		ContainerID: "failed-container",
 	}, &AgentExecution{ID: "failed-execution", SessionID: "failed-session"}, "command construction failed")
 
-	select {
-	case got := <-requests:
-		require.Equal(t, http.MethodPost, strings.Fields(got)[0])
-		require.True(t, strings.HasSuffix(got, "/containers/failed-container/kill"), got)
-	default:
-		t.Fatal("rollback must force Docker cleanup for an unregistered failed instance")
-	}
+	got := []string{<-requests, <-requests}
+	requireDockerRequest(t, got, http.MethodPost, "/containers/failed-container/kill")
+	requireDockerRequest(t, got, http.MethodDelete, "/containers/failed-container")
+}
+
+func TestDockerStopInstanceStopsAndRemovesContainerOnTaskArchive(t *testing.T) {
+	requests := make(chan string, 2)
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requests <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
+
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	require.NoError(t, dockerExec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "archive-instance",
+		ContainerID: "archive-container",
+		StopReason:  StopReasonTaskArchived,
+	}, false))
+
+	got := []string{<-requests, <-requests}
+	requireDockerRequest(t, got, http.MethodPost, "/containers/archive-container/stop")
+	requireDockerRequest(t, got, http.MethodDelete, "/containers/archive-container")
 }
 
 func TestDockerCleanupContextIgnoresCanceledParentAfterAgentStopFailed(t *testing.T) {

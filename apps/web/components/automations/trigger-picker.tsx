@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Command, CommandInput, CommandList, CommandGroup, CommandItem } from "@kandev/ui/command";
@@ -14,17 +15,27 @@ type TriggerPickerProps = {
 };
 
 type CategoryMeta = {
-  heading: string;
+  headingKey: string;
   icon: typeof IconBrandGithub;
   color: string;
 };
 
+// Keyed by the backend's trigger-type category id; only the heading is copy.
 const CATEGORY_META: Record<string, CategoryMeta> = {
-  github: { heading: "GitHub", icon: IconBrandGithub, color: "text-purple-400" },
-  webhook: { heading: "Webhook", icon: IconWebhook, color: "text-blue-400" },
+  github: {
+    headingKey: "automations:triggerCategoryGithub",
+    icon: IconBrandGithub,
+    color: "text-purple-400",
+  },
+  webhook: {
+    headingKey: "automations:triggerCategoryWebhook",
+    icon: IconWebhook,
+    color: "text-blue-400",
+  },
 };
 
 export function TriggerPicker({ triggerTypes, onSelect }: TriggerPickerProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
 
   // Only show condition types (not schedule — that's handled separately).
@@ -59,12 +70,12 @@ export function TriggerPicker({ triggerTypes, onSelect }: TriggerPickerProps) {
           className="cursor-pointer text-muted-foreground"
         >
           <IconPlus className="h-4 w-4 mr-1" />
-          Add Condition
+          {t("automations:addCondition")}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[320px] p-0" align="start">
         <Command>
-          <CommandInput placeholder="Search conditions..." />
+          <CommandInput placeholder={t("automations:searchConditions")} />
           <CommandList>
             {groups.map(([category, items]) => {
               const meta = CATEGORY_META[category];
@@ -72,7 +83,7 @@ export function TriggerPicker({ triggerTypes, onSelect }: TriggerPickerProps) {
               return (
                 <PickerGroup
                   key={category}
-                  heading={meta.heading}
+                  heading={t(meta.headingKey)}
                   icon={meta.icon}
                   color={meta.color}
                   items={items}
@@ -100,6 +111,7 @@ function PickerGroup({
   items: TriggerTypeInfo[];
   onSelect: (info: TriggerTypeInfo) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <CommandGroup heading={heading}>
       {items.map((item) => (
@@ -110,9 +122,11 @@ function PickerGroup({
           className={!item.enabled ? "opacity-50" : "cursor-pointer"}
         >
           <Icon className={`h-4 w-4 mr-2 ${color}`} />
+          {/* item.label and item.description are authored by the backend's
+              trigger-type registry, not the frontend. */}
           <span className="flex-1">
             {item.label}
-            {!item.enabled && " (Coming soon)"}
+            {!item.enabled && t("automations:comingSoonSuffix")}
           </span>
           <Tooltip>
             <TooltipTrigger asChild>

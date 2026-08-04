@@ -36,6 +36,25 @@ func (r *Repository) CreateTaskResourceCleanupJob(ctx context.Context, job *mode
 	return err
 }
 
+// HasActiveTaskResourceCleanupJob reports whether teardown has been admitted
+// for a task. The prepared state is included because the cleanup intent is
+// persisted before task deletion and before the worker is allowed to run.
+func (r *Repository) HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error) {
+	var active bool
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM task_resource_cleanup_jobs
+			WHERE task_id = ? AND state IN (?, ?, ?, ?)
+		)
+	`), taskID,
+		models.TaskResourceCleanupStatePrepared,
+		models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRunning,
+		models.TaskResourceCleanupStateRetryWait,
+	).Scan(&active)
+	return active, err
+}
+
 func (r *Repository) GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error) {
 	row := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
 		SELECT `+taskResourceCleanupColumns+`

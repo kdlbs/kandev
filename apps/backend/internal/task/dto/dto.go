@@ -272,6 +272,13 @@ type TaskSessionDTO struct {
 	// Not persisted — populated at the serialization boundary by
 	// EnrichForegroundActivity, never by FromTaskSession.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// CancellationPending mirrors the orchestrator's runtime cancellation
+	// projection. It is always serialized so false clears stale client state.
+	CancellationPending bool `json:"cancellation_pending"`
+	// CancellationRevision identifies the process-local cancellation transition
+	// generation that produced CancellationPending. It is always serialized so
+	// clients can reject delayed snapshots from older generations.
+	CancellationRevision uint64 `json:"cancellation_revision"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action,omitempty"`
@@ -322,6 +329,12 @@ type TaskSessionSummaryDTO struct {
 	// ForegroundActivity mirrors the in-memory fine-grained busy substate
 	// (ADR-0049); see TaskSessionDTO.
 	ForegroundActivity v1.ForegroundActivity `json:"foreground_activity,omitempty"`
+	// CancellationPending mirrors the runtime cancellation projection and is
+	// always serialized so false clears stale client state.
+	CancellationPending bool `json:"cancellation_pending"`
+	// CancellationRevision identifies the process-local cancellation transition
+	// generation represented by CancellationPending.
+	CancellationRevision uint64 `json:"cancellation_revision"`
 	// PendingAction is the compact per-session projection used when the
 	// session transcript is not loaded in the client.
 	PendingAction       *string `json:"pending_action"`
@@ -815,6 +828,19 @@ func FromTaskSession(session *models.TaskSession) TaskSessionDTO {
 // takes no hard orchestrator dependency and can be faked in tests.
 type ForegroundActivityProvider interface {
 	ForegroundActivity(sessionID string) v1.ForegroundActivity
+}
+
+// CancellationPendingProvider surfaces the orchestrator's runtime cancellation
+// projection without coupling task serialization to the orchestrator package.
+type CancellationPendingProvider interface {
+	CancellationPending(sessionID string) bool
+}
+
+// CancellationPendingSnapshotProvider is the atomic form of the cancellation
+// projection used by serialization boundaries that need ordering identity.
+// Implementations must read the boolean and revision from one critical section.
+type CancellationPendingSnapshotProvider interface {
+	CancellationPendingSnapshot(sessionID string) (pending bool, revision uint64)
 }
 
 type ActiveSubagentCountProvider interface {

@@ -333,13 +333,13 @@ Profile environment variables are eventually injected into agent subprocesses or
 
 ## Advanced operator tuning
 
-These startup-only variables are supported by specific runtime components but are not YAML fields. Leave them at defaults unless diagnosing a measured problem.
+These variables are supported by specific runtime components but are not YAML fields. Most are startup-only; the message queue limit also has a live database-backed setting described below. Leave them at defaults unless diagnosing a measured problem.
 
 | Variable | Default | Parsing and effect |
 |---|---:|---|
 | `KANDEV_GH_MAX_CONCURRENT` | `8` | Positive integer process-wide cap for `gh` subprocesses; invalid/non-positive uses default. |
 | `KANDEV_GIT_MAX_CONCURRENT` | `12` | Positive integer process-wide cap for `git` subprocesses; invalid/non-positive uses default. |
-| `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Queued user messages per session. Invalid uses default; zero/negative disables the cap. |
+| `KANDEV_QUEUE_MAX_PER_SESSION` | `10` | Pending messages per session. A valid value overrides and locks the saved UI setting; zero/negative means unlimited, while invalid falls through to the saved setting or default. |
 | `KANDEV_ACP_IDLE_TIMEOUT` | `1h` | Go duration after which idle agentctl instances are reaped; `0` disables. Invalid uses default. |
 | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | `1m` | Go duration between idle scans. Intended mainly for testing; use the default in production. |
 | `KANDEV_ACP_NOTIF_QUEUE` | `131072` | Per-connection ACP inbound notification capacity; positive values clamp to `1024`-`131072`, invalid uses default. |
@@ -348,7 +348,7 @@ These startup-only variables are supported by specific runtime components but ar
 | `KANDEV_MCP_LOG_FILE` | unset | File path for per-agentctl MCP debug logs. Logs tool names, arguments, session IDs, results for tool errors, and timings; invalid paths warn and disable this sink. |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer. See the transport warning below. |
 
-Changing concurrency/queue values trades memory and process pressure against throughput. Values are captured during process/component initialization and need a restart.
+Changing concurrency values trades process pressure against throughput and requires a restart. The queue environment value is also read at startup. Without that environment override, an admin can use **Settings > General > Message Queue** to save an install-wide limit that applies live. `0` means unlimited. Lowering the live limit does not prune existing rows; new admissions remain blocked until the pending count drops below the limit, while retries of already accepted work remain eligible.
 
 The current OTLP exporter strips an `http://` or `https://` prefix from the configured endpoint and always uses `WithInsecure()`. Treat this as implementation-bound cleartext transport: send it only to a trusted private collector over a protected network, not directly across an untrusted network. The service name is `kandev-agentctl`, and spans can include task/session/execution IDs plus raw agent-event JSON truncated to 8192 characters. That payload can contain prompts, files, and tool data. Use collector-side access controls and retention accordingly.
 

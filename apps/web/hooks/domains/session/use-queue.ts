@@ -139,21 +139,34 @@ function useQueueActions({
   const clearAll = useCallback(async () => {
     if (!sessionId) return;
     setQueueLoading(sessionId, true);
+    let mutationFailed = false;
+    let mutationError: unknown;
     try {
-      await clearQueue(sessionId);
-      // Invalidate any in-flight refetch so a pre-clear getQueueStatus
-      // response cannot land after the empty snapshot and restore the
-      // entries that were just drained.
-      refetchVersion.current[sessionId] = (refetchVersion.current[sessionId] ?? 0) + 1;
-      // Reset to a neutral capacity snapshot; the next status_changed event
-      // will replace it with the authoritative server value. Using the
-      // pre-clear entry count as a fallback for `max` was wrong (it would
-      // pretend the cap equals "however many were queued").
-      setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? 0 });
+      try {
+        await clearQueue(sessionId);
+        // Invalidate any pre-clear status request before publishing the
+        // optimistic empty state. The explicit refetch below then owns the
+        // newest version and replaces it with the backend's exact result.
+        refetchVersion.current[sessionId] = (refetchVersion.current[sessionId] ?? 0) + 1;
+        setQueueEntries(sessionId, [], { count: 0, max: metaMax ?? 0 });
+      } catch (err) {
+        mutationFailed = true;
+        mutationError = err;
+      }
+
+      try {
+        await refetch(sessionId);
+      } catch (reconcileError) {
+        // Preserve the mutation error when both operations fail; it best
+        // explains why the requested action did not complete.
+        if (mutationFailed) throw mutationError;
+        throw reconcileError;
+      }
+      if (mutationFailed) throw mutationError;
     } finally {
       setQueueLoading(sessionId, false);
     }
-  }, [sessionId, setQueueEntries, setQueueLoading, metaMax]);
+  }, [sessionId, setQueueEntries, setQueueLoading, metaMax, refetch]);
 
   const drainNext = useDrainNextAction(sessionId, setQueueLoading, refetch);
 
@@ -206,12 +219,29 @@ function useEntryMutations({ sessionId, removeQueueEntry, refetch }: EntryMutati
     async (entryId: string) => {
       if (!sessionId) return;
       removeQueueEntry(sessionId, entryId);
+      let mutationFailed = false;
+      let mutationError: unknown;
       try {
         await removeQueuedEntry({ session_id: sessionId, entry_id: entryId });
       } catch (err) {
-        if (err instanceof QueueEntryNotFoundError) return;
+        mutationFailed = true;
+        mutationError = err;
+      }
+
+      try {
         await refetch(sessionId);
-        throw err;
+      } catch (reconcileError) {
+        if (mutationFailed && !(mutationError instanceof QueueEntryNotFoundError)) {
+          throw mutationError;
+        }
+        throw reconcileError;
+      }
+
+      // A drain/remove race is already reflected by the authoritative status,
+      // so it is a successful UI outcome. Other failures restore state above
+      // and remain actionable to the caller.
+      if (mutationFailed && !(mutationError instanceof QueueEntryNotFoundError)) {
+        throw mutationError;
       }
     },
     [sessionId, refetch, removeQueueEntry],
