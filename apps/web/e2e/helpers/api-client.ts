@@ -1782,7 +1782,7 @@ export class ApiClient {
   }
 
   async setPrimarySession(sessionId: string): Promise<void> {
-    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+    await this.wsRequest("session.set_primary", { session_id: sessionId });
   }
 
   async deleteSession(sessionId: string): Promise<void> {
