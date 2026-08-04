@@ -1001,8 +1001,7 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -1014,11 +1013,28 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
     await this.page.getByTestId("submit-message-button").click();
+  }
+
+  /**
+   * Resolve the active chat's ProseMirror composer and wait until it is
+   * actually editable before returning it.
+   *
+   * TipTap flips the host to `contenteditable="true"` only after the editor
+   * instance mounts, and on mobile-chrome under CI shard load that mount can
+   * lag well past Playwright's implicit 5s `toBeEditable` budget — the composer
+   * node exists but is still `contenteditable="false"`, so a bare `fill`/`tap`
+   * throws "element is not ... [contenteditable]" or "element(s) not found".
+   * Gate on an explicit, generous editability wait so callers act on a ready
+   * editor instead of racing hydration.
+   */
+  private async composerReady(): Promise<Locator> {
+    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
+    await expect(editor).toBeEditable({ timeout: 20_000 });
+    return editor;
   }
 
   /**

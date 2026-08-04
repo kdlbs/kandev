@@ -45,8 +45,14 @@ test.describe("Mobile slash command composer", () => {
     const session = await openTaskChat(testPage, task.id);
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
-    // Multiple TipTap instances can be mounted in mobile layouts; scope to the first visible one.
-    const editor = testPage.locator(".tiptap.ProseMirror:visible").first();
+    // Multiple TipTap instances can be mounted in mobile layouts; scope to the
+    // first visible one that TipTap has already flipped to editable. Under
+    // mobile-chrome CI shard load the editor node mounts before its
+    // contenteditable host is ready, so tapping/filling too early throws
+    // "element is not ... [contenteditable]". Gate on an explicit editability
+    // wait rather than the implicit 5s default.
+    const editor = testPage.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
+    await expect(editor).toBeEditable({ timeout: 20_000 });
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");
