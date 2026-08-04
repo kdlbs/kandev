@@ -51,6 +51,22 @@ afterEach(() => {
 });
 
 describe("SleepInhibitionSettings", () => {
+  it("explains the host sleep controls from an accessible info button", async () => {
+    render(<SleepInhibitionSettings />);
+
+    const infoButton = await screen.findByRole("button", {
+      name: "How host sleep prevention works",
+    });
+    fireEvent.focus(infoButton);
+
+    const tooltip = (await screen.findAllByRole("tooltip"))[0];
+    expect(tooltip).toBeTruthy();
+    expect(tooltip?.textContent).toContain("macOS runs");
+    expect(tooltip?.textContent).toContain("/usr/bin/caffeinate -i -w <kandev-pid>");
+    expect(tooltip?.textContent).toContain("Windows calls");
+    expect(tooltip?.textContent).toContain("Linux asks systemd-logind");
+  });
+
   it("stages an admin edit until the shared save contributor runs", async () => {
     updateSettingsMock.mockResolvedValueOnce(
       response(true, { platform: "linux", supported: true, active: true }),

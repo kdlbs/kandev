@@ -44,6 +44,16 @@ test.describe("Settings manual save", () => {
       const toggle = card.getByRole("switch", { name: "Prevent idle system sleep" });
       await expect(card).toBeVisible();
       await expect(card).toContainText("Container, Kubernetes, remote-executor");
+      const info = card.getByRole("button", { name: "How host sleep prevention works" });
+      await info.hover();
+      const infoTooltip = testPage.getByRole("tooltip");
+      await expect(infoTooltip).toContainText("/usr/bin/caffeinate -i -w");
+      await expect(infoTooltip).toContainText("SetThreadExecutionState");
+      await expect(infoTooltip).toContainText("systemd-logind");
+      await testPage.waitForTimeout(500);
+      await prCapture.screenshot("sleep-inhibition-desktop-info", {
+        caption: "Desktop host sleep prevention details in the hover tooltip",
+      });
       if (initial.settings.enabled) await expect(toggle).toBeChecked();
       else await expect(toggle).not.toBeChecked();
 

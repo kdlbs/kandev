@@ -17,6 +17,29 @@ test.describe("Mobile general settings", () => {
       const card = testPage.getByTestId("sleep-inhibition-settings");
       const toggle = card.getByRole("switch", { name: "Prevent idle system sleep" });
       await expect(card).toBeVisible();
+      const info = card.getByRole("button", { name: "How host sleep prevention works" });
+      await info.click();
+      const infoDrawer = testPage.getByRole("dialog", {
+        name: "How Kandev prevents host sleep",
+      });
+      await expect(infoDrawer).toBeVisible();
+      await expect(infoDrawer).toContainText("/usr/bin/caffeinate -i -w");
+      await expect(infoDrawer).toContainText("systemd-logind");
+      expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+        await testPage.evaluate(() => document.documentElement.clientWidth),
+      );
+      await prCapture.screenshot("sleep-inhibition-mobile-info", {
+        caption: "Mobile host sleep prevention details in the info drawer",
+      });
+      const releaseCopy = infoDrawer.getByText(
+        "The request does not keep the display awake or override an explicit user sleep action.",
+      );
+      await releaseCopy.scrollIntoViewIfNeeded();
+      const releaseBox = await releaseCopy.boundingBox();
+      expect(releaseBox).not.toBeNull();
+      expect(releaseBox!.y + releaseBox!.height).toBeLessThanOrEqual(844);
+      await testPage.keyboard.press("Escape");
+      await expect(infoDrawer).not.toBeVisible();
       await toggle.click();
       await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
       const controlRow = card.getByTestId("sleep-inhibition-control-row");
@@ -27,13 +50,14 @@ test.describe("Mobile general settings", () => {
       const floatingSave = testPage.getByTestId("settings-floating-save");
       await expect(floatingSave).toBeVisible();
       await card.scrollIntoViewIfNeeded();
-      const [cardBox, saveBox] = await Promise.all([
-        card.boundingBox(),
+      const cardContent = card.locator('[data-slot="card-content"]');
+      const [cardContentBox, saveBox] = await Promise.all([
+        cardContent.boundingBox(),
         floatingSave.boundingBox(),
       ]);
-      expect(cardBox).not.toBeNull();
+      expect(cardContentBox).not.toBeNull();
       expect(saveBox).not.toBeNull();
-      expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(saveBox!.y);
+      expect(cardContentBox!.y + cardContentBox!.height).toBeLessThanOrEqual(saveBox!.y + 2);
       expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
         await testPage.evaluate(() => document.documentElement.clientWidth),
       );

@@ -1,14 +1,23 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
+import {
+  Drawer,
+  DrawerContent,
+  DrawerDescription,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@kandev/ui/drawer";
 import { Label } from "@kandev/ui/label";
 import { Spinner } from "@kandev/ui/spinner";
 import { Switch } from "@kandev/ui/switch";
-import { IconAlertCircle } from "@tabler/icons-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
+import { IconAlertCircle, IconInfoCircle } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "./settings-card";
 import { useSettingsSaveContributor } from "./settings-save-provider";
@@ -16,7 +25,14 @@ import {
   fetchSleepInhibitionSettings,
   updateSleepInhibitionSettings,
 } from "@/lib/api/domains/settings-api";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
+
+const MACOS_COMMAND = "/usr/bin/caffeinate -i -w <kandev-pid>";
+const WINDOWS_API = "SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)";
+const LINUX_METHOD =
+  'org.freedesktop.login1.Manager.Inhibit("sleep", "Kandev", "A Kandev task is running", "block")';
+const CODE_CLASS = "break-all rounded bg-muted px-1 py-0.5 font-mono text-[0.7rem]";
 
 function statusMessageKey(response: SleepInhibitionResponse): string {
   if (response.status.issue === "unsupported_platform")
@@ -138,6 +154,97 @@ function SleepInhibitionLoadError({ onRetry }: { onRetry: () => void }) {
   );
 }
 
+function SleepInhibitionInfoDetails() {
+  const { t } = useTranslation();
+  return (
+    <>
+      <ul className="list-disc space-y-1 pl-4">
+        <li>
+          <Trans i18nKey="settings:sleepInhibitionInfoMacos" values={{ command: MACOS_COMMAND }}>
+            <code className={CODE_CLASS} />
+            <code className={CODE_CLASS} />
+            <code className={CODE_CLASS} />
+          </Trans>
+        </li>
+        <li>
+          <Trans i18nKey="settings:sleepInhibitionInfoWindows" values={{ api: WINDOWS_API }}>
+            <code className={CODE_CLASS} />
+          </Trans>
+        </li>
+        <li>
+          <Trans i18nKey="settings:sleepInhibitionInfoLinux" values={{ method: LINUX_METHOD }}>
+            <code className={CODE_CLASS} />
+          </Trans>
+        </li>
+      </ul>
+      <p>{t("settings:sleepInhibitionInfoRelease")}</p>
+    </>
+  );
+}
+
+function SleepInhibitionInfoTooltipContent() {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-2">
+      <p className="font-medium">{t("settings:sleepInhibitionInfoTitle")}</p>
+      <p>{t("settings:sleepInhibitionInfoTrigger")}</p>
+      <SleepInhibitionInfoDetails />
+    </div>
+  );
+}
+
+function SleepInhibitionInfoTooltip() {
+  const { t } = useTranslation();
+  const usesTouchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const button = (
+    <Button
+      variant="ghost"
+      size="icon"
+      type="button"
+      aria-label={t("settings:sleepInhibitionInfoLabel")}
+      aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
+      aria-expanded={usesTouchDrawer ? open : undefined}
+      data-testid="sleep-inhibition-info"
+      className="absolute right-0 top-1/2 h-11 w-11 -translate-y-1/2 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground sm:static sm:h-7 sm:w-7 sm:translate-y-0"
+    >
+      <IconInfoCircle className="size-4" aria-hidden="true" />
+    </Button>
+  );
+  const trigger = usesTouchDrawer ? (
+    <DrawerTrigger asChild>{button}</DrawerTrigger>
+  ) : (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>{button}</TooltipTrigger>
+        <TooltipContent
+          side="bottom"
+          align="start"
+          sideOffset={8}
+          className="max-w-[min(22rem,calc(100vw-2rem))]"
+        >
+          <SleepInhibitionInfoTooltipContent />
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+
+  return (
+    <Drawer open={open} onOpenChange={setOpen}>
+      {trigger}
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{t("settings:sleepInhibitionInfoTitle")}</DrawerTitle>
+          <DrawerDescription>{t("settings:sleepInhibitionInfoTrigger")}</DrawerDescription>
+        </DrawerHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+          <SleepInhibitionInfoDetails />
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
 function SleepInhibitionCard({ state }: { state: SleepInhibitionState }) {
   const { t } = useTranslation();
   const snapshot = state.snapshot;
@@ -149,7 +256,10 @@ function SleepInhibitionCard({ state }: { state: SleepInhibitionState }) {
       data-testid="sleep-inhibition-settings"
     >
       <CardHeader>
-        <CardTitle className="text-base">{t("settings:sleepInhibitionTitle")}</CardTitle>
+        <CardTitle className="relative flex items-center gap-1 pr-11 text-base sm:pr-0">
+          <span className="min-w-0">{t("settings:sleepInhibitionTitle")}</span>
+          <SleepInhibitionInfoTooltip />
+        </CardTitle>
         <CardDescription>{t("settings:sleepInhibitionDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="min-w-0 space-y-4">
