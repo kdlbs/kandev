@@ -29,6 +29,24 @@ async function waitForQuickChatWidth(dialog: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  test("adds elevation when opened over the page", async ({ testPage }) => {
+    const dialog = await openQuickChatSetup(testPage);
+    const overlay = testPage.locator('[data-slot="dialog-overlay"]');
+
+    await expect(overlay).toBeVisible();
+    const styles = await Promise.all([
+      overlay.evaluate((element) => getComputedStyle(element).backgroundColor),
+      dialog.evaluate((element) => getComputedStyle(element).boxShadow),
+    ]);
+    expect(styles[0]).not.toBe("rgba(0, 0, 0, 0)");
+    expect(styles[0]).not.toBe("transparent");
+    expect(styles[1]).not.toBe("none");
+
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).not.toBeVisible();
+    await expect(overlay).not.toBeVisible();
+  });
+
   test("clarification shortcuts work after clicking the message surface", async ({ testPage }) => {
     const dialog = await openQuickChatWithAgent(testPage);
     await sendQuickChatMessage(dialog, testPage, "/e2e:clarification-multi");
