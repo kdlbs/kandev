@@ -4,6 +4,7 @@ import {
   setBuiltinTsSuppressed,
   withLspProviderRegistration,
 } from "@/components/editors/monaco/builtin-providers";
+import { t } from "@/lib/i18n";
 import { registerLspProviders } from "./lsp-providers";
 import { canonicalFileUri, joinFileUri } from "./file-uri";
 import {
@@ -230,7 +231,9 @@ class LSPClientManager {
       if (statusFactory) {
         this.setStatus(key, statusFactory(event.reason));
       } else {
-        const fallbackReason = bridgeStarted ? "language server exited" : "Connection closed";
+        const fallbackReason = bridgeStarted
+          ? t("lsp:languageServerExited")
+          : t("lsp:connectionClosed");
         this.setStatus(key, { state: "error", reason: event.reason || fallbackReason });
       }
     };

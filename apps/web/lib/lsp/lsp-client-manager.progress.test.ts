@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { activateLocale } from "@/lib/i18n";
 import { createLspManagerHarness, FakeWebSocket } from "./lsp-client-manager.test-harness";
 import { LSP_IDLE_TIMEOUT } from "./lsp-client-config";
 import type { LspProgressToken } from "./lsp-progress";
@@ -87,7 +88,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("LSP progress handshake and initialization", () => {
+describe("LSP connection failure reporting", () => {
   it("preserves detailed install failures when the socket closes", () => {
     lspClientManager.connect(SESSION_ID, LANGUAGE);
     const socket = FakeWebSocket.instances.at(-1);
@@ -133,6 +134,40 @@ describe("LSP progress handshake and initialization", () => {
     });
   });
 
+  it("localizes fallback reasons when the proxy omits its close reason", async () => {
+    await activateLocale("pseudo");
+    try {
+      lspClientManager.connect(SESSION_ID, LANGUAGE);
+      const startingSocket = FakeWebSocket.instances.at(-1);
+      if (!startingSocket) throw new Error(EXPECTED_SOCKET_ERROR);
+      startingSocket.open();
+      startingSocket.failClosed(1006, "");
+
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
+        state: "error",
+        reason: "Ćōńńēćţĩōń ćĺōśēď",
+      });
+
+      const { initialize, socket } = beginInitialization(REPLACEMENT_SESSION_ID);
+      completeInitialization(socket, initialize.id);
+      await vi.waitFor(() => {
+        expect(lspClientManager.getStatus(REPLACEMENT_SESSION_ID, LANGUAGE)).toEqual({
+          state: "ready",
+        });
+      });
+      socket.failClosed(1000, "");
+
+      expect(lspClientManager.getStatus(REPLACEMENT_SESSION_ID, LANGUAGE)).toEqual({
+        state: "error",
+        reason: "ĺàńĝũàĝē śēŕvēŕ ēxĩţēď",
+      });
+    } finally {
+      await activateLocale("en");
+    }
+  });
+});
+
+describe("LSP progress handshake and initialization", () => {
   it("advertises work-done support and tracks initialize until the response", async () => {
     const { initialize, socket } = beginInitialization();
 
