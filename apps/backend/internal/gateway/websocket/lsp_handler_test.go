@@ -12,6 +12,7 @@ import (
 	"time"
 
 	gorillaws "github.com/gorilla/websocket"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/lsp/installer"
 	"github.com/kandev/kandev/internal/lsp/protocol"
@@ -20,6 +21,23 @@ import (
 
 type staticLSPUserService struct {
 	settings *models.UserSettings
+}
+
+type recordingLSPLifecycleManager struct {
+	runtimeName agentruntime.Runtime
+	execution   *lifecycle.AgentExecution
+	resolveErr  error
+	ensureErr   error
+	ensureCalls int
+}
+
+func (m *recordingLSPLifecycleManager) ResolveSessionRuntime(context.Context, string) (agentruntime.Runtime, error) {
+	return m.runtimeName, m.resolveErr
+}
+
+func (m *recordingLSPLifecycleManager) GetOrEnsureExecution(context.Context, string) (*lifecycle.AgentExecution, error) {
+	m.ensureCalls++
+	return m.execution, m.ensureErr
 }
 
 type recordingLSPMessageWriter struct {
@@ -262,6 +280,45 @@ func TestLSPRuntimeSupported(t *testing.T) {
 		if got := lspRuntimeSupported(tc.runtime); got != tc.want {
 			t.Fatalf("lspRuntimeSupported(%q) = %v, want %v", tc.runtime, got, tc.want)
 		}
+	}
+}
+
+func TestResolveLSPExecutionRejectsUnsupportedRuntimeBeforeEnsure(t *testing.T) {
+	manager := &recordingLSPLifecycleManager{runtimeName: agentruntime.RuntimeSSH}
+	handler := &LSPHandler{lifecycleMgr: manager}
+
+	_, runtimeName, err := handler.resolveLSPExecution(context.Background(), "session-ssh")
+	if !errors.Is(err, errLSPUnsupportedExecutor) {
+		t.Fatalf("resolveLSPExecution() error = %v, want unsupported executor", err)
+	}
+	if runtimeName != agentruntime.RuntimeSSH {
+		t.Fatalf("resolveLSPExecution() runtime = %q, want %q", runtimeName, agentruntime.RuntimeSSH)
+	}
+	if manager.ensureCalls != 0 {
+		t.Fatalf("GetOrEnsureExecution calls = %d, want 0", manager.ensureCalls)
+	}
+}
+
+func TestResolveLSPExecutionEnsuresSupportedRuntime(t *testing.T) {
+	execution := &lifecycle.AgentExecution{RuntimeName: agentruntime.RuntimeDocker}
+	manager := &recordingLSPLifecycleManager{
+		runtimeName: agentruntime.RuntimeDocker,
+		execution:   execution,
+	}
+	handler := &LSPHandler{lifecycleMgr: manager}
+
+	got, runtimeName, err := handler.resolveLSPExecution(context.Background(), "session-docker")
+	if err != nil {
+		t.Fatalf("resolveLSPExecution() error = %v", err)
+	}
+	if got != execution || runtimeName != agentruntime.RuntimeDocker {
+		t.Fatalf(
+			"resolveLSPExecution() = (%p, %q), want (%p, %q)",
+			got, runtimeName, execution, agentruntime.RuntimeDocker,
+		)
+	}
+	if manager.ensureCalls != 1 {
+		t.Fatalf("GetOrEnsureExecution calls = %d, want 1", manager.ensureCalls)
 	}
 }
 

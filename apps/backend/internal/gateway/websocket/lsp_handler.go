@@ -2,6 +2,7 @@ package websocket
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sync"
@@ -41,11 +42,18 @@ type LSPUserService interface {
 	GetUserSettings(ctx context.Context) (*models.UserSettings, error)
 }
 
+type lspLifecycleManager interface {
+	ResolveSessionRuntime(ctx context.Context, sessionID string) (agentruntime.Runtime, error)
+	GetOrEnsureExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error)
+}
+
+var errLSPUnsupportedExecutor = errors.New("unsupported LSP executor")
+
 // LSPHandler handles browser-facing LSP WebSocket connections.
 // The backend owns session/runtime policy and proxies raw LSP traffic to the
 // task host's agentctl instance, where the language server process runs.
 type LSPHandler struct {
-	lifecycleMgr *lifecycle.Manager
+	lifecycleMgr lspLifecycleManager
 	userService  LSPUserService
 	capacity     *lspCapacityLimiter
 	logger       *logger.Logger
@@ -89,22 +97,21 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 		zap.String("session_id", sessionID),
 		zap.String("language", language))
 
-	execution, err := h.lifecycleMgr.GetOrEnsureExecution(c.Request.Context(), sessionID)
+	execution, runtimeName, err := h.resolveLSPExecution(c.Request.Context(), sessionID)
 	if err != nil {
+		if errors.Is(err, errLSPUnsupportedExecutor) {
+			h.logger.Info("LSP: unsupported runtime",
+				zap.String("session_id", sessionID),
+				zap.Stringer("runtime", runtimeName))
+			h.closeWithCode(c, lspCloseUnsupportedExecutor, lspCloseUnsupportedCloseText)
+			return
+		}
 		h.logger.Warn("LSP: session not found in lifecycle manager",
 			zap.String("session_id", sessionID),
 			zap.Error(err))
 		h.closeWithCode(c, lspCloseSessionNotFound, "session not found")
 		return
 	}
-	if !lspRuntimeSupported(execution.RuntimeName) {
-		h.logger.Info("LSP: unsupported runtime",
-			zap.String("session_id", sessionID),
-			zap.Stringer("runtime", execution.RuntimeName))
-		h.closeWithCode(c, lspCloseUnsupportedExecutor, lspCloseUnsupportedCloseText)
-		return
-	}
-
 	agentctlClient := execution.GetAgentCtlClient()
 	if agentctlClient == nil {
 		h.logger.Warn("LSP: execution has no agentctl client", zap.String("session_id", sessionID))
@@ -148,6 +155,30 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 	defer func() { _ = upstreamConn.Close() }()
 
 	h.proxyLSPConnections(browserConn, upstreamConn, sessionID, language)
+}
+
+func (h *LSPHandler) resolveLSPExecution(
+	ctx context.Context,
+	sessionID string,
+) (*lifecycle.AgentExecution, agentruntime.Runtime, error) {
+	runtimeName, err := h.lifecycleMgr.ResolveSessionRuntime(ctx, sessionID)
+	if err != nil {
+		return nil, runtimeName, err
+	}
+	if !lspRuntimeSupported(runtimeName) {
+		return nil, runtimeName, errLSPUnsupportedExecutor
+	}
+	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
+	if err != nil {
+		return nil, runtimeName, err
+	}
+	if execution == nil {
+		return nil, runtimeName, errors.New("lifecycle manager returned no execution")
+	}
+	if !lspRuntimeSupported(execution.RuntimeName) {
+		return nil, execution.RuntimeName, errLSPUnsupportedExecutor
+	}
+	return execution, execution.RuntimeName, nil
 }
 
 func lspRuntimeSupported(runtimeName agentruntime.Runtime) bool {
