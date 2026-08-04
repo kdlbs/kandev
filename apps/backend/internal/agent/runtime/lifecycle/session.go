@@ -403,7 +403,17 @@ func (sm *SessionManager) initializeACPConnection(
 	}
 	result, err := sm.InitializeSession(ctx, execution.agentctl, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
 	if err != nil {
-		sm.logger.Error("session initialization failed", zap.String("execution_id", execution.ID), zap.Error(err))
+		// loadSession already logged the root cause. A cancelled/expired
+		// context is caller teardown, so keep this outer boundary at WARN
+		// too — otherwise the intentional load-path downgrade is undone
+		// by a second ERROR stacktrace here.
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			sm.logger.Warn("session initialization aborted by context",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		} else {
+			sm.logger.Error("session initialization failed",
+				zap.String("execution_id", execution.ID), zap.Error(err))
+		}
 		return ctx, nil, err
 	}
 	sm.logger.Info("ACP session initialized",

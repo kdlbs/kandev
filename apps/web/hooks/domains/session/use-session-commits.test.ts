@@ -142,6 +142,34 @@ describe("useSessionCommits", () => {
     expect(mockRequest).toHaveBeenCalledTimes(1);
   });
 
+  it("does not retry or clear commits when the session is terminal", async () => {
+    // A cancelled/completed/failed session returns ready:false with
+    // reason session_terminal forever. Retrying would poll every 2s with
+    // loading stuck true; overwriting with [] would wipe a previously
+    // visible snapshot.
+    storeState.sessionCommits = {
+      byEnvironmentId: {
+        "sess-1": [{ commit_sha: "kept", insertions: 1, deletions: 0 }],
+      },
+      loading: {},
+      refetchTrigger: {},
+    };
+    mockRequest.mockResolvedValue({
+      commits: [],
+      ready: false,
+      reason: "session_terminal",
+    });
+
+    renderHook(() => useSessionCommits("sess-1"));
+
+    await waitFor(() => expect(mockRequest).toHaveBeenCalledTimes(1));
+    expect(mockSetSessionCommits).not.toHaveBeenCalled();
+
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(mockRequest).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mockSetSessionCommitsLoading).toHaveBeenCalledWith("sess-1", false));
+  });
+
   it("does not fetch when disconnected", () => {
     setStore("disconnected");
     renderHook(() => useSessionCommits("sess-1"));

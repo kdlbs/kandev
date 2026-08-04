@@ -115,12 +115,13 @@ func (e *Executor) handleAgentProcessStartFailure(
 	startErr error,
 	escalateTaskOnFailure, fromResume bool,
 ) {
-	// A context cancellation or a terminal-session error is a benign teardown
-	// race (the session ended while StartAgentProcess was blocked), not a
-	// genuine start fault, so it logs at WARN without a stacktrace. Real start
-	// failures keep ERROR severity. Control flow below is unchanged.
+	// A cancelled context or a terminal-session error is a benign teardown race
+	// (the session ended while StartAgentProcess was blocked), not a genuine
+	// start fault, so it logs at WARN without a stacktrace. DeadlineExceeded
+	// is NOT treated as teardown: runAgentProcessAsync owns a 5-minute startup
+	// deadline, and a hung agent that hits it on a still-active session is a
+	// real operational failure that must stay at ERROR.
 	if errors.Is(startErr, context.Canceled) ||
-		errors.Is(startErr, context.DeadlineExceeded) ||
 		errors.Is(startErr, lifecycle.ErrSessionTerminal) {
 		e.logger.Warn("agent process start aborted by session teardown",
 			zap.String("task_id", taskID),

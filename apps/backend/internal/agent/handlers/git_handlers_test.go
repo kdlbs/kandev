@@ -720,6 +720,9 @@ func TestWsGitCommits_TerminalSessionError(t *testing.T) {
 	if ready, ok := payload["ready"].(bool); !ok || ready {
 		t.Errorf("expected ready=false, got %v", payload["ready"])
 	}
+	if got, want := payload["reason"], sessionTerminalReason; got != want {
+		t.Errorf("reason = %v, want %v", got, want)
+	}
 	commits, ok := payload["commits"].([]any)
 	if !ok {
 		t.Fatalf("expected commits array, got %T", payload["commits"])
@@ -755,6 +758,9 @@ func TestWsGitCommits_WrappedTerminalSessionError(t *testing.T) {
 	if ready, ok := payload["ready"].(bool); !ok || ready {
 		t.Errorf("expected ready=false, got %v", payload["ready"])
 	}
+	if got, want := payload["reason"], sessionTerminalReason; got != want {
+		t.Errorf("reason = %v, want %v", got, want)
+	}
 }
 
 func TestWsCumulativeDiff_TerminalSessionError(t *testing.T) {
@@ -780,6 +786,9 @@ func TestWsCumulativeDiff_TerminalSessionError(t *testing.T) {
 	}
 	if ready, ok := payload["ready"].(bool); !ok || ready {
 		t.Errorf("expected ready=false, got %v", payload["ready"])
+	}
+	if got, want := payload["reason"], sessionTerminalReason; got != want {
+		t.Errorf("reason = %v, want %v", got, want)
 	}
 	if payload["cumulative_diff"] != nil {
 		t.Errorf("expected cumulative_diff=nil, got %v", payload["cumulative_diff"])

@@ -90,6 +90,32 @@ function commitFetchedDiff(
   listeners.forEach((fn) => fn({ envKey, kind: "populated" }));
 }
 
+type CumulativeDiffResponse = {
+  cumulative_diff?: CumulativeDiff | null;
+  ready?: boolean;
+  reason?: string;
+};
+
+// applyCumulativeDiffResponse commits a successful fetch unless the backend
+// reports a permanent terminal-session envelope. Returns true when the
+// response was applied (or intentionally skipped as terminal); false when the
+// caller should treat the response as stale/abandoned.
+function applyCumulativeDiffResponse(
+  envKey: string,
+  sessionId: string,
+  response: CumulativeDiffResponse | null | undefined,
+  setDiff: (d: CumulativeDiff | null) => void,
+): void {
+  // Terminal sessions no longer have an execution. A ready:false envelope
+  // with reason session_terminal is not an authoritative empty diff — keep
+  // any previously cached snapshot instead of clearing the panel.
+  if (response?.ready === false && response.reason === "session_terminal") {
+    debug("fetch.terminal", { sessionId, envKey });
+    return;
+  }
+  commitFetchedDiff(envKey, sessionId, response?.cumulative_diff ?? null, setDiff);
+}
+
 export function useCumulativeDiff(sessionId: string | null) {
   // Resolve to environment key so sessions sharing the same environment share the cache.
   const envKey = useAppStore((state) => {
@@ -131,15 +157,14 @@ export function useCumulativeDiff(sessionId: string | null) {
 
     try {
       // Backend routes by session_id, but we cache by envKey
-      const response = await client.request<{ cumulative_diff?: CumulativeDiff }>(
-        "session.cumulative_diff",
-        { session_id: sessionId },
-      );
+      const response = await client.request<CumulativeDiffResponse>("session.cumulative_diff", {
+        session_id: sessionId,
+      });
 
       // Discard if the environment changed while the request was in flight
       if (version !== requestVersionRef.current) return;
 
-      commitFetchedDiff(envKey, sessionId, response?.cumulative_diff ?? null, setDiff);
+      applyCumulativeDiffResponse(envKey, sessionId, response, setDiff);
     } catch (err) {
       if (version !== requestVersionRef.current) return;
       console.error("Failed to fetch cumulative diff:", err);
