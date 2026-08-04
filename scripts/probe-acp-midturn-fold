@@ -57,11 +57,23 @@ import os
 import queue
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
 import threading
 import time
+
+
+def _kill_process_group(proc):
+    """SIGKILL the child's whole process group, falling back to the direct
+    child. The bridge spawns a CLI and tool subprocesses that outlive a plain
+    proc.kill(); signalling the group reaps the entire tree."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+
 
 PROMPT_A = (
     "Run exactly this shell command with the Bash tool: sleep {s}\n"
@@ -175,9 +187,13 @@ def main():
     rec = Recorder()
     rec.note("start", cmd=cmd, session_cwd=cwd)
 
+    # start_new_session puts the bridge in its own process group so a forced
+    # cleanup can signal the whole tree (bridge + CLI + tool subprocesses), not
+    # just the direct child.
     proc = subprocess.Popen(
         cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd,
+        start_new_session=True,
     )
     events = queue.Queue()
     threading.Thread(target=reader, args=(proc.stdout, "received", rec, events, True),
@@ -283,8 +299,14 @@ def main():
                 chosen = next(
                     (o.get("optionId") for o in opts
                      if str(o.get("kind", "")).startswith(want)),
-                    (opts[0].get("optionId") if opts else None),
+                    None,
                 )
+                # Never fall back to an arbitrary option when denying: opts[0]
+                # may be an allow_* option, which would grant a permission the
+                # operator asked to reject. Cancel instead. The allow path may
+                # still use opts[0] as a benign last resort.
+                if chosen is None and not args.deny and opts:
+                    chosen = opts[0].get("optionId")
                 rec.note("permission_answered", option_id=chosen,
                          kinds=[o.get("kind") for o in opts])
                 if chosen is None:
@@ -394,7 +416,7 @@ def main():
         proc.wait(timeout=15)
     except subprocess.TimeoutExpired:
         rec.note("kill_after_stdin_close")
-        proc.kill()
+        _kill_process_group(proc)
         proc.wait(timeout=10)
 
     ra, rb = responses.get(ID_PROMPT_A), responses.get(ID_PROMPT_B)

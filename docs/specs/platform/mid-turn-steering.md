@@ -135,6 +135,49 @@ a steer is the single new reason a `RUNNING` session accepts direct input.
   the steer boundary does not orphan it.
 - A steer whose session was replaced (new/loaded session) while it waited is
   dropped rather than delivered to the new session.
+- **The steer must attach to a live, dispatched foreground turn, never a
+  half-started or finished one.** A steer reuses the predecessor turn's identity
+  so the folded completion is attributed to the predecessor's still-open waiter.
+  Therefore a steer that arrives after the foreground turn was admitted but
+  before its prompt actually reached the agent MUST NOT overtake it (its stream
+  buffers are still being reset); and a steer that arrives after the foreground
+  turn has already completed MUST NOT attach to that finished turn. Both cases
+  degrade to an ordinary prompt delivered in submission order — never a steer
+  bound to a non-live turn, which would strand the operator's message on a
+  completion that never arrives.
+- **A steer dispatch error is never silently re-sent.** The agentctl request can
+  be written to the agent and then have its acknowledgement fail (a stream
+  disconnect or context cancellation after the write), so a steer that returns an
+  error may already be in flight. The handler therefore surfaces the error rather
+  than re-running the message as an ordinary prompt, which could deliver it twice.
+  Only a steer that provably never reached the agent — the session became
+  ineligible before dispatch, or there was no live turn to fold into — degrades to
+  an ordinary prompt.
+
+## Known residuals
+
+These are narrow, accepted windows inherent to opportunistic steering over an
+asynchronous agent boundary. All are gated behind the default-off toggle.
+
+- **Acknowledgement is not delivery.** agentctl acknowledges a steer, then runs
+  the concurrent `session/prompt` on a goroutine. The handoff is armed
+  synchronously before that acknowledgement so a predecessor settling in the gap
+  is still suppressed; but if the concurrent prompt itself then fails on an agent
+  that advertised prompt queueing yet rejects the concurrent prompt (abnormal),
+  the message can be stranded with success already reported. No client-side
+  fallback can fire once the request has been accepted.
+- **The fold is decided agent-side.** The lifecycle lock closes the backend-side
+  selection/dispatch race, but the acknowledgement proves acceptance, not that
+  the agent folded. If the turn ends agent-side between generation selection and
+  the fold, the steer runs as a fresh turn tagged with the reused generation and
+  that turn's completion bookkeeping (on_turn_complete, usage) is discarded as a
+  duplicate; the message is still delivered.
+- **Session replacement during a fall-through wait.** A steer that finds no
+  handoff-eligible turn (e.g. a synthetic wakeup holds the gate) falls through to
+  ordinary gate acquisition. If the ACP session is replaced (`session/new` /
+  `session/load`) while it waits there, it is delivered to the replacement rather
+  than dropped. The drop guarantee above holds for the wakeup-pinned path; this
+  fall-through path is the residual.
 
 ## Persistence guarantees
 

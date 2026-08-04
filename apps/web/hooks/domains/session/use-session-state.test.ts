@@ -34,7 +34,7 @@ vi.mock("@/hooks/use-task", () => ({
   useTask: (id: string | null) => (id ? mockTask : null),
 }));
 
-import { useSessionState } from "./use-session-state";
+import { deriveSessionFlags, useSessionState } from "./use-session-state";
 
 const createMockSession = (
   id: string,
@@ -252,5 +252,45 @@ describe("useSessionState — fine-grained busy signal (foreground_activity)", (
 
     expect(result.current.isWorking).toBe(false);
     expect(result.current.isAgentBusy).toBe(false);
+  });
+});
+
+// deriveSessionFlags is the pure source of the composer's steer contract; these
+// exercise supportsSteering directly (the hook exposes the same value) so it
+// cannot drift from inputMode.
+describe("deriveSessionFlags — supportsSteering", () => {
+  const running = (
+    foreground: TaskSession["foreground_activity"],
+    supports: boolean | undefined,
+  ): TaskSession =>
+    ({
+      ...createMockSession("session-1", "task-1", "RUNNING"),
+      foreground_activity: foreground,
+      supports_steering: supports,
+    }) as TaskSession;
+
+  it("is true only for RUNNING + generating + advertised capability", () => {
+    const flags = deriveSessionFlags(running("generating", true));
+    expect(flags.supportsSteering).toBe(true);
+    // A steer-eligible session sends directly rather than queueing.
+    expect(flags.inputMode).toBe("direct");
+    expect(flags.isAgentBusy).toBe(false);
+  });
+
+  it("is false when generating but the capability was not advertised", () => {
+    const flags = deriveSessionFlags(running("generating", false));
+    expect(flags.supportsSteering).toBe(false);
+    // Without steering a generating turn still gates the composer.
+    expect(flags.inputMode).toBe("queue");
+  });
+
+  it("is false for RUNNING + background even when advertised (handoff owns it)", () => {
+    const flags = deriveSessionFlags(running("background", true));
+    expect(flags.supportsSteering).toBe(false);
+    expect(flags.isWorking).toBe(true);
+  });
+
+  it("is false for RUNNING + background without the capability", () => {
+    expect(deriveSessionFlags(running("background", false)).supportsSteering).toBe(false);
   });
 });

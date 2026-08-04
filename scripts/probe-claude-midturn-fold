@@ -64,11 +64,23 @@ import json
 import os
 import queue
 import shutil
+import signal
 import subprocess
 import sys
 import threading
 import time
 import uuid
+
+
+def _kill_process_group(proc):
+    """SIGKILL the CLI's whole process group, falling back to the direct child.
+    The Claude CLI spawns tool subprocesses that outlive a plain proc.kill();
+    signalling the group reaps the entire tree."""
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        proc.kill()
+
 
 PROMPT_A = (
     "Run exactly this shell command with the Bash tool: sleep {s}\n"
@@ -224,6 +236,9 @@ def main():
     rec.note("start", cmd=cmd, session_id=session_id,
              uuid_a=uuid_a, uuid_b=uuid_b, cli_cwd=os.getcwd())
 
+    # start_new_session puts the CLI in its own process group so a forced
+    # cleanup can signal the whole tree (CLI + tool subprocesses), not just the
+    # direct child.
     proc = subprocess.Popen(
         cmd,
         stdin=subprocess.PIPE,
@@ -231,6 +246,7 @@ def main():
         stderr=subprocess.PIPE,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
     events = queue.Queue()
     threading.Thread(target=reader, args=(proc.stdout, "out", rec, events, True),
@@ -346,7 +362,7 @@ def main():
         proc.wait(timeout=20)
     except subprocess.TimeoutExpired:
         rec.note("kill_after_stdin_close")
-        proc.kill()
+        _kill_process_group(proc)
         proc.wait(timeout=10)
 
     first_result = result_times[0] if result_times else None
