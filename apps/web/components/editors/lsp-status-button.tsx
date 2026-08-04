@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, type ComponentProps, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import {
   Drawer,
@@ -31,6 +32,12 @@ import {
 import { getLspUnavailableSetupHint } from "@/lib/lsp/lsp-json-rpc";
 
 const ICON_CLASS = "h-3.5 w-3.5";
+const LIFECYCLE_ACTION_KEYS = {
+  Start: "lsp:startLanguageServer",
+  Stop: "lsp:stopLanguageServer",
+  Retry: "lsp:retryLanguageServer",
+  Stopping: "lsp:stoppingLanguageServer",
+} as const;
 
 export function LspStatusIcon({
   status,
@@ -80,6 +87,7 @@ function ConnectionDetails({
   lspLanguage: string;
   progress: LspProgressSnapshot;
 }) {
+  const { t } = useTranslation();
   const reason = "reason" in status ? status.reason : null;
   const setupHint = getLspUnavailableSetupHint(status, lspLanguage);
   return (
@@ -88,7 +96,7 @@ function ConnectionDetails({
         id="lsp-connection-heading"
         className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground"
       >
-        Connection
+        {t("lsp:connection")}
       </p>
       <div className="flex items-center gap-2">
         <LspStatusIcon status={status} progress={progress} />
@@ -108,6 +116,7 @@ function ActiveProgress({
 }: {
   view: Extract<ReturnType<typeof getLspProgressView>, { kind: "active" }>;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="flex items-start gap-2">
@@ -126,7 +135,10 @@ function ActiveProgress({
         <div className="flex items-center gap-2">
           <Progress
             value={view.percentage}
-            aria-label={`${view.title}: ${view.percentage}%`}
+            aria-label={t("lsp:progressPercentage", {
+              title: view.title,
+              percentage: view.percentage,
+            })}
             data-testid="lsp-work-progress-bar"
             className="flex-1"
           />
@@ -135,15 +147,17 @@ function ActiveProgress({
           </span>
         </div>
       ) : (
-        <p className="text-muted-foreground">The server did not provide a percentage.</p>
+        <p className="text-muted-foreground">{t("lsp:noPercentage")}</p>
       )}
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-muted-foreground">
-        <span className="tabular-nums">Elapsed {view.elapsed}</span>
-        {view.concurrentCount > 1 ? <span>{view.concurrentCount} work items active</span> : null}
+        <span className="tabular-nums">{t("lsp:elapsed", { elapsed: view.elapsed })}</span>
+        {view.concurrentCount > 1 ? (
+          <span>{t("lsp:activeWorkItems", { count: view.concurrentCount })}</span>
+        ) : null}
       </div>
       <p className="flex gap-1.5 text-pretty text-amber-700 dark:text-amber-300">
         <IconAlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
-        Cross-file definitions and references may be incomplete while this work is active.
+        {t("lsp:crossFileDefinitionsMayBeIncomplete")}
       </p>
     </>
   );
@@ -158,6 +172,7 @@ function ProjectProgress({
   progress: LspProgressSnapshot;
   lspLanguage: string;
 }) {
+  const { t } = useTranslation();
   const tracked = progress.active[0]?.startedAt ?? progress.initializingSince;
   const now = useLspLiveNow(tracked !== null);
   const view = getLspProgressView(status, progress, now, lspLanguage);
@@ -175,7 +190,7 @@ function ProjectProgress({
         id="lsp-project-progress-heading"
         className="text-[0.625rem] font-medium uppercase tracking-wider text-muted-foreground"
       >
-        Project analysis
+        {t("lsp:projectAnalysis")}
       </p>
       {view.kind === "active" ? <ActiveProgress view={view} /> : null}
       {view.kind === "initializing" ? (
@@ -197,7 +212,9 @@ function ProjectProgress({
               <p className="text-pretty text-muted-foreground">{view.description}</p>
             </div>
           </div>
-          <p className="text-muted-foreground tabular-nums">Elapsed {view.elapsed}</p>
+          <p className="text-muted-foreground tabular-nums">
+            {t("lsp:elapsed", { elapsed: view.elapsed })}
+          </p>
           <p
             className={
               view.stage === "long_running"
@@ -216,9 +233,7 @@ function ProjectProgress({
             {view.workTitle}
             {view.message ? ` — ${view.message}` : ""}
           </p>
-          <p className="text-pretty text-muted-foreground">
-            This confirms only the reported work item, not full project indexing.
-          </p>
+          <p className="text-pretty text-muted-foreground">{t("lsp:reportedWorkDisclaimer")}</p>
         </>
       ) : null}
       {view.kind === "idle" || view.kind === "waiting" ? (
@@ -244,6 +259,7 @@ export function LspProgressDetails({
   onToggle: () => void;
   touch: boolean;
 }) {
+  const { t } = useTranslation();
   const action = getLspLifecycleAction(status);
   return (
     <div className="space-y-3" data-testid="lsp-progress-details">
@@ -259,7 +275,7 @@ export function LspProgressDetails({
         data-testid="lsp-lifecycle-action"
         data-lsp-action={action.label.toLowerCase()}
       >
-        {action.label} language server
+        {t(LIFECYCLE_ACTION_KEYS[action.label])}
       </Button>
     </div>
   );
@@ -281,7 +297,10 @@ function StatusTrigger({
   touch,
   ...triggerProps
 }: StatusTriggerProps) {
-  const label = `Language server: ${getLspConnectionLabel(status, progress)}. Open status`;
+  const { t } = useTranslation();
+  const label = t("lsp:languageServerOpenStatus", {
+    summary: getLspConnectionLabel(status, progress),
+  });
   return (
     <Button
       type="button"
@@ -326,6 +345,7 @@ export function LspStatusPopoverContent({
   align = "end",
   side,
 }: LspStatusDetailsProps & Pick<ComponentProps<typeof PopoverContent>, "align" | "side">) {
+  const { t } = useTranslation();
   return (
     <PopoverContent
       align={align}
@@ -333,11 +353,11 @@ export function LspStatusPopoverContent({
       sideOffset={8}
       className="w-80 gap-0 p-0"
       data-testid="lsp-status-popover"
-      aria-label="Language server status"
+      aria-label={t("lsp:languageServerStatus")}
     >
       <div className="border-b px-3 py-2.5">
-        <p className="font-medium">Language server</p>
-        <p className="text-muted-foreground">Connection and project analysis</p>
+        <p className="font-medium">{t("lsp:languageServer")}</p>
+        <p className="text-muted-foreground">{t("lsp:connectionAndProjectAnalysis")}</p>
       </div>
       <div className="p-3">
         <LspProgressDetails
@@ -358,8 +378,11 @@ function LspStatusPopover({
   lspLanguage,
   onToggle,
 }: LspStatusButtonProps & { lspLanguage: string }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const tooltip = `Language server: ${getLspConnectionLabel(status, progress)}`;
+  const tooltip = t("lsp:languageServerConnection", {
+    summary: getLspConnectionLabel(status, progress),
+  });
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip open={open ? false : undefined}>
@@ -392,6 +415,7 @@ function LspStatusDrawer({
   lspLanguage,
   onToggle,
 }: LspStatusButtonProps & { lspLanguage: string }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <Drawer open={open} onOpenChange={setOpen}>
@@ -409,8 +433,8 @@ function LspStatusDrawer({
       >
         <DrawerHeader className="flex flex-row items-center justify-between border-b py-2">
           <div className="min-w-0 text-left">
-            <DrawerTitle>Language server</DrawerTitle>
-            <DrawerDescription>Connection and project analysis</DrawerDescription>
+            <DrawerTitle>{t("lsp:languageServer")}</DrawerTitle>
+            <DrawerDescription>{t("lsp:connectionAndProjectAnalysis")}</DrawerDescription>
           </div>
           <DrawerClose asChild>
             <Button
@@ -418,7 +442,7 @@ function LspStatusDrawer({
               variant="ghost"
               size="icon-sm"
               className="h-11 w-11"
-              aria-label="Close language server status"
+              aria-label={t("lsp:closeLanguageServerStatus")}
               data-testid="lsp-status-drawer-close"
             >
               <IconX className="h-4 w-4" />

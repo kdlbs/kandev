@@ -1,5 +1,6 @@
 import type { MarkerSeverity as MarkerSeverityType, IDisposable } from "monaco-editor";
 import { getBackendConfig } from "@/lib/config";
+import { t } from "@/lib/i18n";
 import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
 
 // ---------------------------------------------------------------------------
@@ -201,23 +202,23 @@ export function getWsBaseUrl(): string {
 export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = {
   4001: (reason) => ({
     state: "unavailable",
-    reason: reason || "Language server not found",
+    reason: reason || t("lsp:languageServerNotFound"),
     cause: "missing_binary",
   }),
   4002: () => ({
     state: "unavailable",
-    reason: "No active workspace",
+    reason: t("lsp:noActiveWorkspace"),
     cause: "workspace_unavailable",
   }),
-  4003: (reason) => ({ state: "error", reason: reason || "Install failed" }),
+  4003: (reason) => ({ state: "error", reason: reason || t("lsp:installFailed") }),
   4004: (reason) => ({
     state: "unavailable",
-    reason: reason || "Language servers are not supported by this task executor",
+    reason: reason || t("lsp:taskExecutorUnsupported"),
     cause: "unsupported_executor",
   }),
   4005: (reason) => ({
     state: "unavailable",
-    reason: reason || "Too many language servers are active",
+    reason: reason || t("lsp:tooManyLanguageServers"),
     cause: "capacity",
   }),
 };
@@ -228,9 +229,9 @@ export function getLspUnavailableSetupHint(
 ): string | null {
   if (status.state !== "unavailable" || status.cause !== "missing_binary") return null;
   if (lspLanguage === "kotlin") {
-    return "Install kotlin-lsp on the task host, then restart the task.";
+    return t("lsp:installKotlinLsp");
   }
-  return "Enable auto-install in Settings → Editors.";
+  return t("lsp:enableAutoInstall");
 }
 
 /** LSP client capabilities sent during initialization. */

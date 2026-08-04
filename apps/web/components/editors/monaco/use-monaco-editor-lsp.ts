@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState, useRef, type RefObject } from "react";
+import { useTranslation } from "react-i18next";
 import type { editor as monacoEditor } from "monaco-editor";
 import { useAppStore } from "@/components/state-provider";
 import { useLsp } from "@/hooks/use-lsp";
@@ -184,6 +185,7 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
   const { sessionId, worktreePath, repo, language, path, contentRef, editorRef, editorReady } =
     opts;
   const { toast } = useToast();
+  const { t } = useTranslation();
 
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const lspSessionId = sessionId ?? activeSessionId ?? null;
@@ -268,18 +270,21 @@ export function useMonacoEditorLsp(opts: UseMonacoLspOpts) {
   const lspSetupHintForToast = getLspUnavailableSetupHint(lspStatus, lspLanguage);
   useEffect(() => {
     if (lspStateForToast === "installing") {
-      toast({ title: "Installing language server", description: "This may take a moment..." });
+      toast({
+        title: t("lsp:installingLanguageServer"),
+        description: t("lsp:thisMayTakeAMoment"),
+      });
     } else if (lspStateForToast === "unavailable" && lspReasonForToast) {
       toast({
-        title: "Language server unavailable",
+        title: t("lsp:languageServerUnavailable"),
         description: lspSetupHintForToast
           ? `${lspReasonForToast}. ${lspSetupHintForToast}`
           : lspReasonForToast,
       });
     } else if (lspStateForToast === "error" && lspReasonForToast) {
-      toast({ title: "LSP error", description: lspReasonForToast });
+      toast({ title: t("lsp:languageServerError"), description: lspReasonForToast });
     }
-  }, [lspStateForToast, lspReasonForToast, lspSetupHintForToast, toast]);
+  }, [lspStateForToast, lspReasonForToast, lspSetupHintForToast, t, toast]);
 
   return { lspStatus, lspProgress, lspLanguage, toggleLsp, monacoPath };
 }

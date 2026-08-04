@@ -64,14 +64,90 @@ type LspLanguageCardsProps = {
   toggleAutoInstall: (langId: string, checked: boolean) => void;
 };
 
-function LspLanguageCards({
+function LspLanguageCard({
+  language,
   lspAutoStartLanguages,
   lspAutoInstallLanguages,
   baselineLspAutoStart,
   baselineLspAutoInstall,
   toggleAutoStart,
   toggleAutoInstall,
-}: LspLanguageCardsProps) {
+}: LspLanguageCardsProps & {
+  language: (typeof LSP_LANGUAGE_OPTIONS)[number];
+}) {
+  const { t } = useTranslation();
+  const autoInstallSupported = language.autoInstallSupported;
+  const autoStartDirty =
+    lspAutoStartLanguages.includes(language.id) !== baselineLspAutoStart.includes(language.id);
+  const autoInstallDirty =
+    autoInstallSupported &&
+    lspAutoInstallLanguages.includes(language.id) !== baselineLspAutoInstall.includes(language.id);
+
+  return (
+    <div
+      className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
+      data-settings-dirty={autoStartDirty || autoInstallDirty}
+      data-testid={`lsp-language-card-${language.id}`}
+    >
+      <div>
+        <div className="text-sm font-medium text-foreground">{language.label}</div>
+        <div className="text-xs text-muted-foreground">{language.binary}</div>
+      </div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{t("settings:autoStart")}</span>
+        <Switch
+          checked={lspAutoStartLanguages.includes(language.id)}
+          onCheckedChange={(checked) => toggleAutoStart(language.id, checked === true)}
+          data-settings-dirty={autoStartDirty}
+          data-testid={`lsp-auto-start-${language.id}`}
+          aria-label={t("settings:autoStartLanguageServer", { language: language.label })}
+        />
+      </div>
+      <div className="flex items-center gap-2">
+        {autoInstallSupported && (
+          <Checkbox
+            id={`lsp-install-${language.id}`}
+            checked={lspAutoInstallLanguages.includes(language.id)}
+            onCheckedChange={(checked) => toggleAutoInstall(language.id, checked === true)}
+            className="h-3.5 w-3.5"
+            data-settings-dirty={autoInstallDirty}
+            data-testid={`lsp-auto-install-${language.id}`}
+          />
+        )}
+        {autoInstallSupported ? (
+          <label
+            htmlFor={`lsp-install-${language.id}`}
+            className="text-xs text-muted-foreground cursor-pointer"
+          >
+            {t("settings:autoInstallIfNotFound")}
+          </label>
+        ) : (
+          <span className="text-xs text-muted-foreground">
+            {t("settings:manualInstallRequired")}
+          </span>
+        )}
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+          </TooltipTrigger>
+          <TooltipContent side="top" className="max-w-[260px] text-xs">
+            {t(language.installHintKey, language.installHintValues)}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+      {!autoInstallSupported && (
+        <p
+          className="text-[11px] leading-relaxed text-muted-foreground"
+          data-testid={`lsp-install-guidance-${language.id}`}
+        >
+          {t(language.installHintKey, language.installHintValues)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+function LspLanguageCards(props: LspLanguageCardsProps) {
   const { t } = useTranslation();
   return (
     <div className="space-y-3">
@@ -91,77 +167,9 @@ function LspLanguageCards({
         </div>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        {LSP_LANGUAGE_OPTIONS.map((lang) => {
-          const autoInstallSupported = lang.autoInstallSupported;
-          const autoStartDirty =
-            lspAutoStartLanguages.includes(lang.id) !== baselineLspAutoStart.includes(lang.id);
-          const autoInstallDirty =
-            autoInstallSupported &&
-            lspAutoInstallLanguages.includes(lang.id) !== baselineLspAutoInstall.includes(lang.id);
-          return (
-            <div
-              key={lang.id}
-              className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
-              data-settings-dirty={autoStartDirty || autoInstallDirty}
-              data-testid={`lsp-language-card-${lang.id}`}
-            >
-              <div>
-                <div className="text-sm font-medium text-foreground">{lang.label}</div>
-                <div className="text-xs text-muted-foreground">{lang.binary}</div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-muted-foreground">{t("settings:autoStart")}</span>
-                <Switch
-                  checked={lspAutoStartLanguages.includes(lang.id)}
-                  onCheckedChange={(checked) => toggleAutoStart(lang.id, checked === true)}
-                  data-settings-dirty={autoStartDirty}
-                  data-testid={`lsp-auto-start-${lang.id}`}
-                  aria-label={t("settings:autoStartLanguageServer", { language: lang.label })}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                {autoInstallSupported && (
-                  <Checkbox
-                    id={`lsp-install-${lang.id}`}
-                    checked={lspAutoInstallLanguages.includes(lang.id)}
-                    onCheckedChange={(checked) => toggleAutoInstall(lang.id, checked === true)}
-                    className="h-3.5 w-3.5"
-                    data-settings-dirty={autoInstallDirty}
-                    data-testid={`lsp-auto-install-${lang.id}`}
-                  />
-                )}
-                {autoInstallSupported ? (
-                  <label
-                    htmlFor={`lsp-install-${lang.id}`}
-                    className="text-xs text-muted-foreground cursor-pointer"
-                  >
-                    {t("settings:autoInstallIfNotFound")}
-                  </label>
-                ) : (
-                  <span className="text-xs text-muted-foreground">
-                    {t("settings:manualInstallRequired")}
-                  </span>
-                )}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-                  </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[260px] text-xs">
-                    {t(lang.installHintKey, lang.installHintValues)}
-                  </TooltipContent>
-                </Tooltip>
-              </div>
-              {!autoInstallSupported && (
-                <p
-                  className="text-[11px] leading-relaxed text-muted-foreground"
-                  data-testid={`lsp-install-guidance-${lang.id}`}
-                >
-                  {t(lang.installHintKey, lang.installHintValues)}
-                </p>
-              )}
-            </div>
-          );
-        })}
+        {LSP_LANGUAGE_OPTIONS.map((language) => (
+          <LspLanguageCard key={language.id} language={language} {...props} />
+        ))}
       </div>
     </div>
   );

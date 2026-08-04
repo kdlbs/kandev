@@ -1,5 +1,6 @@
 import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
+import { useTranslation } from "react-i18next";
 import type { LspStatusLocation } from "@/lib/types/http";
 
 type LspStatusLocationSettingProps = {
@@ -11,19 +12,18 @@ type LspStatusLocationSettingProps = {
 const OPTIONS = [
   {
     value: "toolbar",
-    label: "Editor toolbar",
-    description: "Show LSP status beside the active file's editor actions.",
+    labelKey: "lsp:editorToolbar",
+    descriptionKey: "lsp:editorToolbarDescription",
   },
   {
     value: "status_bar",
-    label: "Application status bar",
-    description:
-      "Show LSP status in the reorderable application status bar. If that bar is disabled or a touch-oriented layout is active, the editor toolbar is used instead.",
+    labelKey: "lsp:applicationStatusBar",
+    descriptionKey: "lsp:applicationStatusBarDescription",
   },
 ] as const satisfies ReadonlyArray<{
   value: LspStatusLocation;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
 }>;
 
 export function LspStatusLocationSetting({
@@ -31,17 +31,16 @@ export function LspStatusLocationSetting({
   baseline,
   onChange,
 }: LspStatusLocationSettingProps) {
+  const { t } = useTranslation();
   const isDirty = value !== baseline;
   return (
     <div className="space-y-3" data-settings-dirty={isDirty}>
       <div>
-        <div className="text-sm font-medium text-foreground">Status location</div>
-        <div className="text-xs text-muted-foreground">
-          Choose where LSP startup, indexing, and connection details appear.
-        </div>
+        <div className="text-sm font-medium text-foreground">{t("lsp:statusLocation")}</div>
+        <div className="text-xs text-muted-foreground">{t("lsp:chooseStatusLocation")}</div>
       </div>
       <RadioGroup
-        aria-label="LSP status location"
+        aria-label={t("lsp:statusLocationAria")}
         value={value}
         onValueChange={(next) => onChange(next as LspStatusLocation)}
         className="grid gap-3 sm:grid-cols-2"
@@ -59,9 +58,9 @@ export function LspStatusLocationSetting({
               className="mt-0.5"
             />
             <span className="min-w-0 space-y-1">
-              <span className="block text-sm font-medium">{option.label}</span>
+              <span className="block text-sm font-medium">{t(option.labelKey)}</span>
               <span className="block text-xs leading-relaxed text-muted-foreground">
-                {option.description}
+                {t(option.descriptionKey)}
               </span>
             </span>
           </Label>

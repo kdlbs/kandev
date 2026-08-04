@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Popover, PopoverTrigger } from "@kandev/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
@@ -23,6 +24,7 @@ function languageLabel(language: string): string {
 }
 
 export function LspStatusItem({ sessionId, monacoLanguage }: LspStatusItemProps) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const lspLanguage = toLspLanguage(monacoLanguage);
   const { status, progress, toggle } = useLspStatus(sessionId, lspLanguage);
@@ -32,7 +34,7 @@ export function LspStatusItem({ sessionId, monacoLanguage }: LspStatusItemProps)
 
   const language = languageLabel(lspLanguage);
   const summary = getLspCompactSummary(status, progress, now);
-  const description = `${language} language server: ${summary}`;
+  const description = t("lsp:languageServerDescription", { language, summary });
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -42,7 +44,7 @@ export function LspStatusItem({ sessionId, monacoLanguage }: LspStatusItemProps)
             <button
               type="button"
               className="inline-flex h-full max-w-72 min-w-0 cursor-pointer items-center gap-1.5 rounded-sm px-1 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-              aria-label={`${description}. Open status`}
+              aria-label={t("lsp:openStatus", { description })}
               aria-haspopup="dialog"
               aria-expanded={open}
               data-testid="app-status-lsp"

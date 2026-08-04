@@ -1,3 +1,4 @@
+import { t } from "@/lib/i18n";
 import type { LspStatus } from "./lsp-json-rpc";
 import type { LspProgressSnapshot } from "./lsp-progress";
 
@@ -47,23 +48,23 @@ export function formatLspElapsed(elapsedMs: number): string {
 export function getLspConnectionLabel(status: LspStatus, progress?: LspProgressSnapshot): string {
   switch (status.state) {
     case "disabled":
-      return "Off";
+      return t("lsp:off");
     case "connecting":
-      return "Connecting";
+      return t("lsp:connecting");
     case "installing":
-      return "Installing language server";
+      return t("lsp:installingLanguageServer");
     case "starting":
       return progress?.initializingSince !== null && progress?.initializingSince !== undefined
-        ? "Server process started"
-        : "Starting language server";
+        ? t("lsp:serverProcessStarted")
+        : t("lsp:startingLanguageServer");
     case "ready":
-      return "Connected";
+      return t("lsp:connected");
     case "stopping":
-      return "Stopping";
+      return t("lsp:stopping");
     case "unavailable":
-      return "Unavailable";
+      return t("lsp:unavailable");
     case "error":
-      return "Error";
+      return t("lsp:error");
   }
 }
 
@@ -103,11 +104,11 @@ export function getLspLifecycleAction(status: LspStatus): LspLifecycleAction {
 }
 
 function getInitializationGuidance(longRunning: boolean, language?: string): string {
-  if (!longRunning) return "Cross-file features become available after initialization completes.";
+  if (!longRunning) return t("lsp:crossFileFeaturesAfterInitialization");
   if (language?.toLowerCase() === "kotlin") {
-    return "Kotlin LSP may be importing the Gradle project. Cross-file features remain unavailable until initialization completes.";
+    return t("lsp:kotlinInitializationGuidance");
   }
-  return "Cross-file features remain unavailable until initialization completes.";
+  return t("lsp:crossFileFeaturesUnavailable");
 }
 
 export function getLspProgressView(
@@ -134,10 +135,10 @@ export function getLspProgressView(
     return {
       kind: "initializing",
       stage: longRunning ? "long_running" : "initialize_pending",
-      title: longRunning ? "Initialization is taking longer than usual" : "Server process started",
+      title: longRunning ? t("lsp:initializationLongRunning") : t("lsp:serverProcessStarted"),
       description: longRunning
-        ? "The server process is still running while Kandev waits for LSP initialize."
-        : "Waiting for the language server to respond to the LSP initialize request.",
+        ? t("lsp:serverStillInitializing")
+        : t("lsp:waitingForInitializeResponse"),
       guidance: getInitializationGuidance(longRunning, language),
       elapsed: formatLspElapsed(elapsedMs),
     };
@@ -146,7 +147,7 @@ export function getLspProgressView(
   if (snapshot.completed) {
     return {
       kind: "completed",
-      title: "Server-reported work finished",
+      title: t("lsp:serverWorkFinished"),
       workTitle: snapshot.completed.title,
       message: snapshot.completed.message,
     };
@@ -155,34 +156,33 @@ export function getLspProgressView(
   if (status.state === "ready") {
     return {
       kind: "idle",
-      title: "No background work reported",
-      description:
-        "The language server has not reported ongoing project analysis. Cross-file results may still warm up.",
+      title: t("lsp:noBackgroundWorkReported"),
+      description: t("lsp:noBackgroundWorkReportedDescription"),
     };
   }
 
   if (status.state === "disabled") {
     return {
       kind: "waiting",
-      title: "Language server is off",
-      description: "Start the language server to receive project progress.",
+      title: t("lsp:languageServerIsOff"),
+      description: t("lsp:startServerForProgress"),
     };
   }
 
   if (status.state === "error" || status.state === "unavailable") {
     return {
       kind: "waiting",
-      title: "Project progress unavailable",
-      description: "Retry the connection to receive project progress.",
+      title: t("lsp:progressUnavailable"),
+      description: t("lsp:progressUnavailableDescription"),
     };
   }
 
   return {
     kind: "waiting",
-    title: "Waiting for the language server",
+    title: t("lsp:waitingForLanguageServer"),
     description:
       status.state === "stopping"
-        ? "Project progress will clear when the language server stops."
-        : "Project progress appears when language-server initialization begins.",
+        ? t("lsp:progressWillClear")
+        : t("lsp:progressAppearsDuringInitialization"),
   };
 }
