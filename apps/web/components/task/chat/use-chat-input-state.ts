@@ -351,6 +351,10 @@ export function useChatInputState({
 
   const handleChange = useCallback(
     (newValue: string) => {
+      // TipTap renders its document before React's passive effects flush. Keep
+      // the submit snapshot in sync with the editor event so a fast submit
+      // cannot observe the previous draft and silently no-op.
+      valueRef.current = newValue;
       setValue(newValue);
       if (sessionId) setChatDraftText(sessionId, newValue);
       if (historyIndex >= 0) setHistoryIndex(-1);

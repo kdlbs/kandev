@@ -44,6 +44,20 @@ export async function seedContextWindowTask(
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
 
+  // The idle input can render from the terminal text frame before the backend
+  // persists the session-state transition. That transition purges runtime
+  // context metadata, so injecting the fixture data before it settles can make
+  // the context control disappear while the mobile test is tapping it.
+  await expect
+    .poll(
+      async () => {
+        const { sessions } = await apiClient.listTaskSessions(task.id);
+        return sessions.find((candidate) => candidate.id === task.session_id)?.state;
+      },
+      { timeout: 30_000, message: "Waiting for the context session to become idle" },
+    )
+    .toBe("WAITING_FOR_INPUT");
+
   await testPage.evaluate((sessionId) => {
     const store = (window as ContextWindowStore).__KANDEV_E2E_STORE__;
     if (!store) throw new Error("E2E store bridge is unavailable");

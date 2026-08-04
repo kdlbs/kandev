@@ -112,7 +112,16 @@ test.describe("@chat message pagination", () => {
             return "reached";
           }
           if (await loadOlder.isVisible().catch(() => false)) {
-            await loadOlder.click().catch(() => undefined);
+            // An actionability click scrolls the button into the adjacent
+            // IntersectionObserver sentinel. The observer can then load the
+            // page and detach the button while Playwright waits to click it,
+            // consuming the poll's entire timeout even though pagination won.
+            // An atomic DOM click avoids that scroll race and returns
+            // immediately if the observer already removed the control.
+            await loadOlder.evaluateAll((buttons) => {
+              const button = buttons[0];
+              if (button instanceof HTMLButtonElement) button.click();
+            });
           }
           return "loading";
         },

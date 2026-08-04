@@ -50,6 +50,7 @@ const reference: EntityReference = {
   url: "https://github.com/acme/repo/issues/42",
   scope: "acme/repo",
 };
+const REFERENCE_MARKDOWN = "[#acme/repo#42](https://github.com/acme/repo/issues/42)";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -106,7 +107,7 @@ describe("useChatInputState", () => {
     const { result } = renderInputState(onSubmit);
 
     act(() => {
-      result.current.handleChange("[#acme/repo#42](https://github.com/acme/repo/issues/42)");
+      result.current.handleChange(REFERENCE_MARKDOWN);
       attachInputHandle(result.current.inputRef, vi.fn(), [reference]);
     });
     await waitFor(() => expect(result.current.value).toContain("acme/repo#42"));
@@ -117,7 +118,7 @@ describe("useChatInputState", () => {
 
     await waitFor(() =>
       expect(onSubmit).toHaveBeenCalledWith({
-        message: "[#acme/repo#42](https://github.com/acme/repo/issues/42)",
+        message: REFERENCE_MARKDOWN,
         entityReferences: [reference],
       }),
     );
@@ -182,6 +183,24 @@ describe("useChatInputState", () => {
     expect(result.current.allItems).toHaveLength(1);
     expect(clear).toHaveBeenCalled();
     expect(resetHeight).toHaveBeenCalled();
+  });
+});
+
+describe("useChatInputState immediate submission", () => {
+  it("submits a structured reference immediately after the editor change", () => {
+    const onSubmit = vi.fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>();
+    const { result } = renderInputState(onSubmit);
+
+    act(() => {
+      result.current.handleChange(REFERENCE_MARKDOWN);
+      attachInputHandle(result.current.inputRef, vi.fn(), [reference]);
+      result.current.handleSubmit(vi.fn());
+    });
+
+    expect(onSubmit).toHaveBeenCalledWith({
+      message: REFERENCE_MARKDOWN,
+      entityReferences: [reference],
+    });
   });
 });
 

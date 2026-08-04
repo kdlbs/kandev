@@ -1,5 +1,28 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
+
+type GitSnapshotResponse = {
+  snapshots: Array<{
+    metadata?: { branch_additions?: number; branch_deletions?: number };
+  }>;
+};
+
+async function waitForPersistedDiffSnapshot(apiClient: ApiClient, sessionId: string) {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.wsRequest<GitSnapshotResponse>("session.git.snapshots", {
+          session_id: sessionId,
+          limit: 1,
+        });
+        const metadata = response.snapshots[0]?.metadata;
+        return (metadata?.branch_additions ?? 0) + (metadata?.branch_deletions ?? 0);
+      },
+      { timeout: 60_000, message: `Waiting for persisted diff snapshot for ${sessionId}` },
+    )
+    .toBeGreaterThan(0);
+}
 
 /**
  * Regression test for the task sidebar diff badge bug.
@@ -73,9 +96,16 @@ test.describe("Task sidebar diff stats", () => {
       betaSession.chat.getByText("diff-update-setup complete", { exact: false }),
     ).toBeVisible({ timeout: 60_000 });
 
-    // Both tasks now have diffs and the live monitor has run at least once
-    // — meaning the orchestrator should have persisted a live_monitor
-    // snapshot row for each session via UpsertLatestLiveGitSnapshot.
+    if (!taskAlpha.session_id || !taskBeta.session_id) {
+      throw new Error("Diff tasks must start sessions");
+    }
+    // The mock response text is published before the ACP complete frame that
+    // captures the final git status. Establish that both snapshots are durable
+    // before restarting the backend, rather than racing that terminal frame.
+    await Promise.all([
+      waitForPersistedDiffSnapshot(apiClient, taskAlpha.session_id),
+      waitForPersistedDiffSnapshot(apiClient, taskBeta.session_id),
+    ]);
 
     // Restart the backend. This destroys all in-memory executions, so
     // GetExecutionBySessionID will return nil for both sessions on the next
