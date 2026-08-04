@@ -775,10 +775,16 @@ func (h *MessageHandlers) handlePromptWithResume(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(waitErr))
-		return waitErr
+		return origErr
 	}
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
-	return err
+	if _, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false); err != nil {
+		h.logger.Warn("retry prompt failed after resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return origErr
+	}
+	return nil
 }
 
 // createPromptErrorMessage creates an agent error message visible to the user when

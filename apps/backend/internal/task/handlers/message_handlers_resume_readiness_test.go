@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -31,13 +32,16 @@ func (r *resumeRetryRepo) CreateMessage(_ context.Context, message *models.Messa
 // resumeRetryOrchestrator is a minimal OrchestratorService fake that fails
 // PromptTask's first call with a caller-supplied error and succeeds on every
 // subsequent call, so tests can observe whether forwardMessageAsPrompt
-// retries automatically after a recoverable failure.
+// retries automatically after a recoverable failure. Setting retryPromptErr
+// additionally fails the second (retry) call, so tests can assert that a
+// failed retry still surfaces the original error rather than the retry's own.
 type resumeRetryOrchestrator struct {
-	promptErr   error
-	promptCalls int
-	resumeCalls int
-	resumeErr   error
-	callOrder   []string
+	promptErr      error
+	retryPromptErr error
+	promptCalls    int
+	resumeCalls    int
+	resumeErr      error
+	callOrder      []string
 }
 
 func (o *resumeRetryOrchestrator) PromptTask(
@@ -47,6 +51,9 @@ func (o *resumeRetryOrchestrator) PromptTask(
 	o.callOrder = append(o.callOrder, fmt.Sprintf("prompt:%d", o.promptCalls))
 	if o.promptCalls == 1 && o.promptErr != nil {
 		return nil, o.promptErr
+	}
+	if o.promptCalls == 2 && o.retryPromptErr != nil {
+		return nil, o.retryPromptErr
 	}
 	return &orchestrator.PromptResult{}, nil
 }
@@ -221,4 +228,70 @@ func TestForwardMessageAsPrompt_DoesNotRetryGenericTimeout(t *testing.T) {
 	assert.Equal(t, 0, orch.resumeCalls)
 	require.Len(t, repo.createdMessages, 1)
 	assert.Contains(t, repo.createdMessages[0].Content, "Request timed out")
+}
+
+// TestForwardMessageAsPrompt_SurfacesOrigErrorWhenReadinessWaitFails ensures
+// that when the post-resume readiness wait itself fails (e.g. the session
+// transitions to FAILED while waiting), handlePromptWithResume surfaces the
+// original pre-dispatch error rather than the internal readiness-wait error.
+// The two errors classify differently for the user-facing message
+// (createPromptErrorMessage), so returning the wrong one would silently
+// downgrade the readiness timeout's "Request timed out..." UX to the
+// generic "Failed to send message to agent".
+func TestForwardMessageAsPrompt_SurfacesOrigErrorWhenReadinessWaitFails(t *testing.T) {
+	readinessErr := fmt.Errorf("%w: %w", orchestrator.ErrAgentNotReadyForPrompt, context.DeadlineExceeded)
+	resumeErr := fmt.Errorf("agent not ready after resume: %w", readinessErr)
+	promptErr := fmt.Errorf("failed to ensure session is running: %w", resumeErr)
+
+	repo := &resumeRetryRepo{
+		sessionStateSequencer: sessionStateSequencer{
+			states: []models.TaskSessionState{models.TaskSessionStateFailed},
+		},
+	}
+	orch := &resumeRetryOrchestrator{promptErr: promptErr}
+	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+
+	h.forwardMessageAsPrompt(
+		context.Background(), "task-1", "session-1", "profile-1", "continue",
+		"", false, nil, nil, false,
+	)
+
+	assert.Equal(t, 1, orch.promptCalls, "PromptTask must not be retried when the post-resume readiness wait itself fails")
+	assert.Equal(t, 1, orch.resumeCalls)
+	require.Len(t, repo.createdMessages, 1, "a failed readiness wait must still surface an error message")
+	assert.Contains(t, repo.createdMessages[0].Content, "Request timed out",
+		"the surfaced error must be the original readiness timeout, not the internal 'session failed after resume' wait error")
+}
+
+// TestForwardMessageAsPrompt_SurfacesOrigErrorWhenRetryPromptFails ensures
+// that when the retry's second PromptTask call fails with its own,
+// differently-classified error (e.g. a dispatch/transport failure), the
+// original pre-dispatch error is still what reaches createPromptErrorMessage,
+// preserving the "failed recovery surfaces the original error" contract.
+func TestForwardMessageAsPrompt_SurfacesOrigErrorWhenRetryPromptFails(t *testing.T) {
+	readinessErr := fmt.Errorf("%w: %w", orchestrator.ErrAgentNotReadyForPrompt, context.DeadlineExceeded)
+	resumeErr := fmt.Errorf("agent not ready after resume: %w", readinessErr)
+	promptErr := fmt.Errorf("failed to ensure session is running: %w", resumeErr)
+
+	repo := &resumeRetryRepo{
+		sessionStateSequencer: sessionStateSequencer{
+			states: []models.TaskSessionState{models.TaskSessionStateWaitingForInput},
+		},
+	}
+	orch := &resumeRetryOrchestrator{
+		promptErr:      promptErr,
+		retryPromptErr: errors.New("dispatch: connection refused"),
+	}
+	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+
+	h.forwardMessageAsPrompt(
+		context.Background(), "task-1", "session-1", "profile-1", "continue",
+		"", false, nil, nil, false,
+	)
+
+	assert.Equal(t, 2, orch.promptCalls, "the retry must still be attempted even though it goes on to fail")
+	assert.Equal(t, 1, orch.resumeCalls)
+	require.Len(t, repo.createdMessages, 1, "a failed retry must still surface an error message")
+	assert.Contains(t, repo.createdMessages[0].Content, "Request timed out",
+		"the surfaced error must be the original readiness timeout, not the retry's own dispatch error")
 }
