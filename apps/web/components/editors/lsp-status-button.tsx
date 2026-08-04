@@ -180,7 +180,7 @@ function ProjectProgress({
   return (
     <section
       aria-labelledby="lsp-project-progress-heading"
-      className="space-y-2"
+      className="min-w-0 space-y-2 [overflow-wrap:anywhere]"
       data-testid="lsp-project-progress"
       data-lsp-progress-kind={view.kind}
       data-lsp-initialization-stage={view.kind === "initializing" ? view.stage : undefined}

@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/lsp-file-intelligence/spec.md
 created: 2026-08-04
-status: draft
+status: completed
 ---
 
 # Implementation Plan: LSP Project Progress Text Containment
@@ -40,11 +40,16 @@ The fixed-width LSP popover currently renders server-controlled project-progress
 
 ## Verification Results
 
-Pending. On completion, synchronize this section with the task's `## Results`, including the RED assertion, final desktop/tablet test counts, and cleanup evidence.
+- RED desktop: the focused Chromium run failed both toolbar and status-bar scenarios at the intended assertion, with `scrollWidth: 506px` inside `clientWidth: 320px`.
+- RED tablet: after widening the synthetic server token enough to exercise the 820px tablet, the focused mobile run failed at the intended assertion, with `scrollWidth: 1406px` inside `clientWidth: 750px`.
+- GREEN desktop: `pnpm e2e:run tests/lsp/lsp-file-intelligence.spec.ts -- --grep "shows server-reported project work|persists status-bar placement"` — 2 passed against rebuilt production assets.
+- GREEN tablet: `pnpm e2e:run --project mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts -- --grep "contained tablet drawer"` — 1 passed against rebuilt production assets.
+- `pnpm run typecheck` and focused ESLint both passed; `git diff --check` passed.
+- Managed E2E runs tore down their isolated backends and repositories. No temporary production code, fixture mode, or tracked build artifact remains.
 
 ## Implementation Waves And Parallel Candidates
 
-- [ ] [task-01-contain-progress-text](task-01-contain-progress-text.md) — Wave 1, sequential
+- [x] [task-01-contain-progress-text](task-01-contain-progress-text.md) — Wave 1, completed
 
 There are no parallel candidates: the production component and all responsive regression cases express one layout contract and should move through one Red-Green-Refactor cycle.
 

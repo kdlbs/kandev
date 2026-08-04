@@ -1,7 +1,7 @@
 ---
 id: "01-contain-progress-text"
 title: "Contain LSP project progress text"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -61,4 +61,17 @@ Report the RED failure, minimal CSS containment change, files changed, exact tes
 
 ## Results
 
-Pending.
+- RED:
+  - Desktop toolbar and status-bar popovers both failed the new element-containment assertion with `scrollWidth: 506px` versus `clientWidth: 320px`.
+  - The original artifact URL fit the 820px tablet drawer, so the shared fixture was extended with one long checksum-like identifier. The revised tablet test then failed the intended message assertion with `scrollWidth: 1406px` versus `clientWidth: 750px`.
+  - An initial count of every computed `overflow-y: auto` descendant found two framework-level candidates; the assertion was narrowed to the drawer's existing `[data-vaul-no-drag]` scroll body before accepting the RED signal.
+- GREEN:
+  - Added inherited `overflow-wrap: anywhere` plus `min-width: 0` at the shared `ProjectProgress` boundary; full server text now wraps without clipping or truncation in both popovers and the tablet drawer.
+  - Desktop focused production E2E: 2 passed.
+  - Tablet focused production E2E: 1 passed, including the existing vertical scroll owner, 44px action, viewport bounds, drawer/message containment, and no document horizontal overflow.
+  - `pnpm run typecheck` passed.
+  - Focused ESLint passed with no output.
+  - `git diff --check` passed.
+- Files changed match `## Files Likely Touched`; the spec and plan were committed in the preceding design-package commit.
+- Cleanup: managed E2E runs stopped their isolated runtime processes and repositories; no temporary source or tracked build output remains.
+- Security/trust and external side effects: none. The fake server and seeded repositories remained local to worker-owned temporary directories.

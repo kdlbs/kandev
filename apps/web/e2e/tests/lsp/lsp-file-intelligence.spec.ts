@@ -5,6 +5,10 @@ import { execSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 import { makeGitEnv } from "../../helpers/git-helper";
 import {
+  assertLocatorWithinViewportX,
+  assertNoElementHorizontalOverflow,
+} from "../../helpers/layout-assertions";
+import {
   clearFakeKotlinLspModes,
   createKotlinTask,
   expectedMonacoModelUri,
@@ -13,6 +17,7 @@ import {
   expectFakeLspMarkerMessages,
   installAdditionalFakeLspBinary,
   installFakeKotlinLsp,
+  LONG_LSP_PROGRESS_MESSAGE,
   openDesktopFile,
   openLspStatus,
   performLspAction,
@@ -126,7 +131,7 @@ test.describe("LSP file intelligence", () => {
       progress: {
         title: "Importing Kotlin project",
         beginPercentage: 5,
-        message: "Resolving Gradle modules",
+        message: LONG_LSP_PROGRESS_MESSAGE,
         percentage: 42,
         endMessage: "Project model loaded",
       },
@@ -145,7 +150,8 @@ test.describe("LSP file intelligence", () => {
     });
     await expect(statusButton).toHaveAttribute("data-lsp-state", "starting");
     await expect(projectProgress).toContainText("Importing Kotlin project");
-    await expect(projectProgress).toContainText("Resolving Gradle modules");
+    const progressMessage = projectProgress.getByText(LONG_LSP_PROGRESS_MESSAGE, { exact: true });
+    await expect(progressMessage).toBeVisible();
     await expect(projectProgress).toContainText("Cross-file definitions and references");
     await expect(projectProgress.getByTestId("lsp-work-progress-bar")).toHaveAttribute(
       "aria-valuenow",
@@ -156,6 +162,9 @@ test.describe("LSP file intelligence", () => {
       "data-lsp-action",
       "stop",
     );
+    await assertNoElementHorizontalOverflow(progressMessage, "desktop toolbar LSP progress text");
+    await assertNoElementHorizontalOverflow(surface, "desktop toolbar LSP progress popover");
+    await assertLocatorWithinViewportX(surface, "desktop toolbar LSP progress popover");
 
     releaseFakeLspInitialization(backend);
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
@@ -267,7 +276,14 @@ test.describe("LSP file intelligence", () => {
       await testPage.reload();
       await expect(testPage.getByRole("radio", { name: /Application status bar/ })).toBeChecked();
 
-      installFakeKotlinLsp(backend);
+      installFakeKotlinLsp(backend, {
+        progress: {
+          title: "Importing Kotlin project",
+          message: LONG_LSP_PROGRESS_MESSAGE,
+          percentage: 42,
+          endMessage: "Status-bar project model loaded",
+        },
+      });
       const task = await createKotlinTask(testPage, apiClient, seedData, backend, {
         title: "Kotlin LSP Status Bar Placement",
         filePaths: ["Main.kt", "README.md"],
@@ -285,10 +301,20 @@ test.describe("LSP file intelligence", () => {
       );
 
       await performLspAction(testPage, "start");
-      await expect(statusItem).toHaveAttribute("data-lsp-state", "ready", {
+      await expect(statusItem).toHaveAttribute("data-lsp-state", "starting", {
         timeout: 15_000,
       });
-      await expect(await openLspStatus(testPage)).toContainText(/kotlin/i);
+      const statusSurface = await openLspStatus(testPage);
+      const statusProgress = statusSurface.getByTestId("lsp-project-progress");
+      await expect(statusProgress).toHaveAttribute("data-lsp-progress-kind", "active");
+      const statusMessage = statusProgress.getByText(LONG_LSP_PROGRESS_MESSAGE, { exact: true });
+      await expect(statusMessage).toBeVisible();
+      await assertNoElementHorizontalOverflow(statusMessage, "status-bar LSP progress text");
+      await assertNoElementHorizontalOverflow(statusSurface, "status-bar LSP progress popover");
+      await assertLocatorWithinViewportX(statusSurface, "status-bar LSP progress popover");
+
+      releaseFakeLspInitialization(backend);
+      await expect(statusItem).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
       const kotlinPreview = testPage.getByTestId("preview-tab-file-editor");
       await kotlinPreview.dblclick();
       await expect(kotlinPreview).not.toHaveAttribute(

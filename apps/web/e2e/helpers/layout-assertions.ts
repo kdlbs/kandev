@@ -118,6 +118,24 @@ export async function assertNoDocumentHorizontalOverflow(
 }
 
 /**
+ * Asserts that an element's rendered contents do not exceed its own horizontal
+ * content box. Unlike bounding-box checks, this catches overflowing text glyphs.
+ */
+export async function assertNoElementHorizontalOverflow(
+  locator: Locator,
+  label = "element",
+): Promise<void> {
+  const widths = await locator.evaluate((node) => ({
+    scroll: node.scrollWidth,
+    client: node.clientWidth,
+  }));
+  expect(
+    widths.scroll,
+    `${label}: scrollWidth (${widths.scroll}) exceeds clientWidth (${widths.client})`,
+  ).toBeLessThanOrEqual(widths.client + 1);
+}
+
+/**
  * Asserts that a visible locator fits inside the viewport horizontally.
  * Useful for popovers that portal outside their dialog/container.
  */

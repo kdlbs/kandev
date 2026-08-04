@@ -50,6 +50,10 @@ export type FakeLspEvent = {
 
 const FAKE_SERVER_SOURCE = path.resolve(__dirname, "../../fixtures/fake-lsp-server.mjs");
 
+export const LONG_LSP_PROGRESS_MESSAGE =
+  "Metadata of https://artifactory.tools.gspcloud.com/artifactory/maven/io/fabric8/kubernetes-model-resource/6.13.5/kubernetes-model-resource-6.13.5-sources.jar started with checksum " +
+  "0123456789abcdef".repeat(12);
+
 function fakeServerPath(backend: BackendContext): string {
   return path.join(backend.tmpDir, "bin", "kotlin-lsp");
 }

@@ -1,8 +1,12 @@
 import { test, expect } from "../../fixtures/test-base";
-import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import {
+  assertNoDocumentHorizontalOverflow,
+  assertNoElementHorizontalOverflow,
+} from "../../helpers/layout-assertions";
 import {
   createKotlinTask,
   installFakeKotlinLsp,
+  LONG_LSP_PROGRESS_MESSAGE,
   openLspStatus,
   performLspAction,
   readFakeLspEvents,
@@ -81,7 +85,7 @@ test.describe("Mobile LSP boundaries", () => {
       installFakeKotlinLsp(backend, {
         progress: {
           title: "Importing Kotlin project",
-          message: "Resolving tablet modules",
+          message: LONG_LSP_PROGRESS_MESSAGE,
           percentage: 42,
           endMessage: "Tablet project model loaded",
         },
@@ -114,7 +118,10 @@ test.describe("Mobile LSP boundaries", () => {
         timeout: 15_000,
       });
       await expect(projectProgress).toContainText("Importing Kotlin project");
-      await expect(projectProgress).toContainText("Resolving tablet modules");
+      const progressMessage = projectProgress.getByText(LONG_LSP_PROGRESS_MESSAGE, {
+        exact: true,
+      });
+      await expect(progressMessage).toBeVisible();
       await expect(projectProgress).toContainText("42%");
 
       const drawerBox = await drawer.boundingBox();
@@ -125,6 +132,11 @@ test.describe("Mobile LSP boundaries", () => {
       expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(900);
       const actionBox = await drawer.getByTestId("lsp-lifecycle-action").boundingBox();
       expect(actionBox?.height).toBeGreaterThanOrEqual(44);
+      const verticalScrollOwner = drawer.locator("[data-vaul-no-drag]");
+      await expect(verticalScrollOwner).toHaveCount(1);
+      await expect(verticalScrollOwner).toHaveCSS("overflow-y", "auto");
+      await assertNoElementHorizontalOverflow(progressMessage, "tablet LSP progress text");
+      await assertNoElementHorizontalOverflow(drawer, "tablet LSP progress drawer");
       await assertNoDocumentHorizontalOverflow(testPage, "tablet LSP progress drawer");
 
       releaseFakeLspInitialization(backend);
