@@ -53,6 +53,7 @@ Record RED/GREEN E2E evidence, exact commands and outcomes, migrated selectors/a
 - RED: desktop tests first observed no project-work disclosure; the initial tablet test also exposed the tablet file tree's different panel root. Container coverage then caught a lifecycle-helper race with the popover's closing animation.
 - GREEN: the fake server can hold initialization and emit controlled begin/report/end frames; desktop proves reported and no-report states, tablet proves the shared drawer and touch geometry, and the lifecycle helper now keys off the trigger's authoritative expanded state.
 - Review hardening: desktop crash recovery now proves the close reason, error state, and Retry action before reconnecting, while cross-language crash isolation retains the surviving connection.
+- Review hardening: elapsed-time E2E assertions follow the localized English unit catalog (`sec`) instead of the removed hard-coded suffix.
 - Verified:
   - `pnpm e2e:run --no-build -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` — 12 passed
   - `pnpm e2e:run --no-build -- --project=mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3 passed

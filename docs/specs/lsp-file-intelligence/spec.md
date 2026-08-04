@@ -41,8 +41,11 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Progress copy warns that cross-file results may be incomplete while server-reported analysis is active. Completion means only that the reported work item ended; it does not guarantee that every reference, dependency, or project module is resolved.
 - Server-reported project titles and messages remain fully readable and wrap within the LSP status surface, including URL-, path-, and identifier-like text without ordinary break points. The desktop popover and coarse-pointer tablet drawer do not clip, truncate, or horizontally overflow this text.
 - Kotlin supports auto-start but not auto-install. `kotlin-lsp` must already be available on the task host's `PATH`.
+- Rust auto-install is available only on supported macOS and Linux task hosts. Windows can still run a manually installed `rust-analyzer` from the task host's `PATH`.
 - Language servers run through the task's `agentctl`, with the task workspace as their working directory. This keeps project files, dependencies, and server execution in the same environment.
 - Binary discovery and npm/Go auto-install resolve commands and installation results with that same task environment, including task-provided `PATH`, `GOBIN`, `GOPATH`, and `HOME` values.
+- Managed npm-server lookup resolves the concrete platform launcher, including PATHEXT-backed `.cmd` shims on Windows, both immediately after installation and on later starts.
+- TypeScript/JavaScript LSP providers use a dedicated registration guard. Monaco's built-in providers are wrapped before runtime suppression begins, including when Monaco loads after the LSP handshake, so built-in and LSP providers cannot both remain active.
 - V1 task-host support is limited to Local PC and local Docker executors. Remote Docker, SSH, and Sprites report an unsupported-executor state.
 - Each active browser WebSocket owns one language-server process. The browser shares a connection for the same session and language inside one window and closes it after its idle timeout; separate browser windows may own separate processes.
 - The backend caps active LSP WebSocket connections at 8 by default. `KANDEV_LSP_MAX_CONNECTIONS` overrides the cap.
@@ -58,7 +61,7 @@ Existing user-setting fields are the durable global policy:
 | JSON field                   | Type                    | Meaning                                                                                                                         |
 | ---------------------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `lsp_auto_start_languages`   | `string[]`              | Languages that connect when a matching file opens.                                                                              |
-| `lsp_auto_install_languages` | `string[]`              | Languages Kandev may install when their server binary is missing. Kotlin is rejected because it requires manual installation.   |
+| `lsp_auto_install_languages` | `string[]`              | Languages Kandev may install when their server binary is missing. Kotlin and platform-unsupported installers are rejected.      |
 | `lsp_server_configs`         | `object`                | Per-language JSON returned to the server through `workspace/configuration`.                                                     |
 | `lsp_status_location`        | `toolbar \| status_bar` | Preferred LSP status surface. Missing or invalid values normalize to `toolbar`; runtime capability fallbacks do not rewrite it. |
 
@@ -141,6 +144,9 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Missing Kotlin server:** the UI tells the user to install `kotlin-lsp` on the task host; it does not offer or retry auto-install.
 - **Missing auto-installable server:** the UI reports the missing binary or shows install progress when auto-install is enabled.
 - **Task-only toolchain:** binary lookup, installer execution, and installed-binary discovery use the task runtime environment instead of the agentctl host environment.
+- **Windows npm launcher:** installation and later cache lookup return the executable npm shim selected through PATHEXT rather than an unlaunchable extensionless path.
+- **Unsupported Rust installer:** Windows rejects Rust auto-install and continues to discover a manually installed `rust-analyzer` from the task environment.
+- **Cold Monaco initialization:** TypeScript built-ins are wrapped before LSP suppression is enabled; the LSP provider registration guard does not depend on the suppression state.
 - **Capacity exceeded:** the UI reports that too many language servers are active.
 - **Server crash:** the connection closes, Monaco providers and markers are cleaned up, and the status preserves the close reason with a Retry action. Only intentional stop or idle teardown returns to Off.
 - **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
@@ -158,6 +164,9 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4001` and the UI shows manual setup guidance without attempting installation.
 - **GIVEN** a local Docker task, **WHEN** an LSP starts, **THEN** the binary is resolved and executed inside the container rather than on the main backend host.
 - **GIVEN** Go and `GOBIN` are available only through the task runtime environment, **WHEN** Kandev discovers or installs `gopls`, **THEN** lookup, `go install`, and result discovery all use those task values.
+- **GIVEN** an npm-managed language server is installed on Windows, **WHEN** installation completes or a later connection reuses the cache, **THEN** Kandev returns and launches the concrete PATHEXT-resolved shim.
+- **GIVEN** a Windows task host, **WHEN** Rust auto-install is requested, **THEN** Kandev rejects that unsupported installer while continuing to allow a `rust-analyzer` already present on `PATH`.
+- **GIVEN** TypeScript LSP initializes while Monaco is still loading, **WHEN** Monaco's lazy TypeScript providers register, **THEN** the built-ins are wrapped and suppressed while only the explicitly guarded LSP providers remain active.
 - **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no process starts.
 - **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP, **THEN** the new connection closes with `4005`.
 - **GIVEN** two task/session connections have active providers, placeholder models, or diagnostics, **WHEN** one connection stops or crashes, **THEN** cleanup removes only that connection's state and leaves the other connection fully functional.

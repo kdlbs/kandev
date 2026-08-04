@@ -54,6 +54,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - RED: the manager test proved `window.workDoneProgress` and the initialize token were absent; transition tests then proved begin/report/end state was unimplemented.
 - GREEN: the client now advertises and registers generation-owned tokens, tracks initialize timing and immutable work snapshots, and ignores malformed, unknown, or stale progress.
 - Review hardening: unexpected closes after readiness now retain an error status and close reason for Retry; explicit stop and idle cleanup still clear to disabled.
+- Review hardening: a dedicated synchronous registration guard now distinguishes LSP TypeScript providers from Monaco's lazy built-ins, and built-in suppression waits until Monaco's wrappers are installed.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm run typecheck`

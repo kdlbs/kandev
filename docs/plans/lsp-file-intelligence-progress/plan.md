@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment, resolves Windows npm shims through PATHEXT, and rejects Rust auto-install on platforms without a packaged strategy.
 
 ## Frontend
 
@@ -22,6 +22,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Extend `ManagedLspConnection` with generation-owned progress state and registered string/number tokens.
 - Update `lsp-client-manager.ts` to advertise `window.workDoneProgress`, supply a client-generated initialize token, accept `window/workDoneProgress/create`, consume `$/progress`, expose a referentially stable progress snapshot, and notify subscribers.
 - Clear initialization and work state on stop, idle teardown, crash, retry, or connection replacement.
+- Keep runtime TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers.
 
 ### Status disclosure
 
@@ -35,7 +36,7 @@ The progress protocol itself requires no backend payload transform because both 
 - **Work progress transitions:** `apps/web/lib/lsp/lsp-progress.test.ts` covers token validation, clamping, omitted-field preservation, independent concurrent tokens, unknown/malformed payloads, completion, and reset.
 - **Protocol integration:** `apps/web/lib/lsp/lsp-client-manager.test.ts` proves initialize capability/token advertisement, pre-initialize progress, server-created numeric tokens, subscriber updates, and stale-generation isolation.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
-- **Task-host environment:** focused Go tests cover PATH-based command discovery, GOBIN result lookup, pre-install registry discovery, and process-manager environment exposure.
+- **Task-host environment:** focused Go tests cover PATH-based command discovery, GOBIN result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, and process-manager environment exposure.
 
 ## E2E Tests
 
