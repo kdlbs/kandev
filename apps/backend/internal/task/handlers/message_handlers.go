@@ -612,6 +612,18 @@ func (h *MessageHandlers) checkSessionStateForMessage(ctx context.Context, msg *
 	sessionDTO := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
 	resp := &dto.GetTaskSessionResponse{Session: sessionDTO}
+	// A steer-eligible generating RUNNING session must pass this first guard:
+	// otherwise the busy error is returned here, before the steer branch in
+	// wsAddMessage is ever reached, and the message is rejected instead of
+	// delivered into the running turn. The steer branch there re-checks
+	// eligibility (after on_turn_start) and remains the authoritative decision;
+	// this only widens the first gate for the sessions steering targets. Every
+	// other blocked state is unchanged.
+	if h.orchestrator != nil &&
+		sessionDTO.State == models.TaskSessionStateRunning &&
+		h.orchestrator.SteerEligible(sessionID, sessionDTO.State) {
+		return resp, nil
+	}
 	if wsErr := h.errorForBlockedMessageSession(msg, sessionID, sessionDTO.State); wsErr != nil {
 		if sessionDTO.State == models.TaskSessionStateRunning {
 			h.logBlockedRunningSession(sessionID, sessionDTO.State)
@@ -674,10 +686,20 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 
 // forwardMessageAsSteer delivers a message into a still-generating turn.
 // SteerTask returns nil whether it dispatched the steer or enqueued it behind
-// pending work (both are success — order is preserved either way). Only
-// ErrSteerNotEligible means the session is no longer steerable at all (its turn
-// ended between the handler's eligibility check and here), in which case the
-// ordinary prompt path is correct: the session is now promptable.
+// pending work (both are success — order is preserved either way).
+//
+// ErrSteerNotEligible is returned by SteerTask's eligibility check *before* any
+// dispatch, so nothing was sent: the session's turn ended between the handler's
+// check and here, and the ordinary prompt path is correct (the session is now
+// promptable). Falling back there cannot double-deliver.
+//
+// Any other error is a genuine dispatch failure, and it is NOT safe to re-send:
+// the agentctl request can be written to the agent and then have its
+// acknowledgement fail (a stream disconnect or context cancellation after the
+// write, see agentctl client sendStreamRequest), so the steer may already be in
+// flight. Re-running it as an ordinary prompt would deliver the operator's
+// message twice. Surface the error instead — exactly as the ordinary prompt path
+// does for its own dispatch failures — unless the agent itself reported it.
 func (h *MessageHandlers) forwardMessageAsSteer(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -693,10 +715,10 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		_, promptErr := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
-		if promptErr != nil && !isAgentReportedError(promptErr) {
-			h.createPromptErrorMessage(ctx, taskID, sessionID, promptErr)
-		}
+		// agentProfileID/references/startCreated are irrelevant: a steer only
+		// targets a RUNNING session, never a CREATED one, so this takes the
+		// ordinary prompt branch (PromptTask + resume + error handling).
+		h.forwardMessageAsPrompt(ctx, taskID, sessionID, "", content, model, planMode, attachments, nil, false)
 		return
 	}
 	if !isAgentReportedError(err) {

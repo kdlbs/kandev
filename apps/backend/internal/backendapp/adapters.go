@@ -438,6 +438,22 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}, nil
 }
 
+// SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
+// manager. Without it the executor's steer path type-assertion fails and every
+// eligible steer returns ErrPromptDispatchCallbackUnsupported, so the production
+// agent-manager client must satisfy the steerAgentWithDispatchCallback capability
+// exactly as it does the ordinary dispatch-callback prompt.
+func (a *lifecycleAdapter) SteerAgentWithDispatchCallback(ctx context.Context, agentInstanceID string, prompt string, attachments []v1.MessageAttachment, dispatchOnly bool, onDispatched func()) (*executor.PromptResult, error) {
+	result, err := a.mgr.SteerAgentWithDispatchCallback(ctx, agentInstanceID, prompt, attachments, dispatchOnly, onDispatched)
+	if err != nil {
+		return nil, err
+	}
+	return &executor.PromptResult{
+		StopReason:   result.StopReason,
+		AgentMessage: result.AgentMessage,
+	}, nil
+}
+
 // CancelAgent interrupts the current agent turn without terminating the process.
 func (a *lifecycleAdapter) CancelAgent(ctx context.Context, sessionID string) error {
 	return a.mgr.CancelAgentBySessionID(ctx, sessionID)

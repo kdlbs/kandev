@@ -42,7 +42,13 @@ func (s *Service) SteerEligible(sessionID string, state models.TaskSessionState)
 	}
 	// A background-idle session is already promptable via the handoff path;
 	// steering is specifically for a foreground that is still generating.
-	return s.ForegroundActivity(sessionID) == v1.ForegroundActivityGenerating
+	//
+	// Use the raw foregroundActivityValue, not the public ForegroundActivity:
+	// the latter collapses to Generating whenever ClaudeBackgroundPromptHandoff
+	// is off, and that flag is independent of ClaudeMidTurnSteering. Reading it
+	// here would make a background-idle session steer-eligible with only
+	// mid-turn steering enabled, which is exactly the case steering must exclude.
+	return s.foregroundActivityValue(sessionID) == v1.ForegroundActivityGenerating
 }
 
 // steerEligibleForSession resolves the session state and reports steer
@@ -116,11 +122,17 @@ func (s *Service) SteerTask(
 		if !steerOutstanding {
 			s.steerInFlight.Delete(sessionID)
 		}
-		admit.Unlock()
-		if _, qErr := s.messageQueue.QueueMessageWithMetadata(
+		// Hold the admission lock across the queue write. Releasing it first would
+		// open a window where the outstanding steer completes (clearing its
+		// in-flight slot) and a later send observes an empty queue with no
+		// in-flight claim, then dispatches ahead of this not-yet-persisted steer —
+		// breaking submission order.
+		_, qErr := s.messageQueue.QueueMessageWithMetadata(
 			ctx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser,
 			planMode, toQueuedAttachments(attachments), nil,
-		); qErr != nil {
+		)
+		admit.Unlock()
+		if qErr != nil {
 			return nil, fmt.Errorf("queue steer behind pending work: %w", qErr)
 		}
 		s.logger.Info("steer enqueued behind pending work",

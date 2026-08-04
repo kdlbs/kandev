@@ -135,6 +135,125 @@ func TestSteerAttributesCompletionToSuccessor(t *testing.T) {
 	}
 }
 
+// TestSteerUsageCountedOnceAcrossHandoff pins the spec's usage rule: the turn's
+// usage is recorded once, on the successor, and the predecessor's early
+// settlement never contributes a second usage-bearing completion. Because the
+// predecessor emits no completion at all, its (zeroed) usage cannot be
+// double-counted; the single completion the client sees carries the steer's
+// generation and the turn's usage.
+func TestSteerUsageCountedOnceAcrossHandoff(t *testing.T) {
+	a, fake, conn := setupHandoffFakeAgent(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	if err := a.Initialize(ctx); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if _, err := a.NewSession(ctx, nil); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- a.Prompt(ctx, "predecessor", nil, 91) }()
+	awaitPromptCall(t, fake, "predecessor prompt")
+
+	steerDone := make(chan error, 1)
+	go func() { steerDone <- a.PromptSteer(ctx, "steer", nil, 92) }()
+	awaitPromptCall(t, fake, "steer")
+	if err := awaitPromptErr(t, firstDone, "predecessor prompt"); err != nil {
+		t.Fatalf("predecessor errored after handoff: %v", err)
+	}
+
+	// The turn reports cumulative usage before it settles.
+	sendCapturedUpdate(t, conn, `{
+		"sessionId":"session-handoff",
+		"update":{
+			"sessionUpdate":"usage_update",
+			"size":1000000,
+			"used":5000,
+			"_meta":{"_claude/origin":{"kind":"human"}}
+		}
+	}`)
+
+	fake.releasePrompts()
+	if err := <-steerDone; err != nil {
+		t.Fatalf("steer prompt: %v", err)
+	}
+
+	complete := waitForEventType(t, a, streams.EventTypeComplete)
+	if complete.PromptGeneration != 92 {
+		t.Fatalf("completion generation = %d, want the steer's 92", complete.PromptGeneration)
+	}
+	// The turn's usage rides the single successor completion — recorded, and once.
+	if complete.Usage == nil {
+		t.Fatal("successor completion carried no usage; the turn's usage was dropped")
+	}
+	if complete.Usage.InputTokens != 5000 {
+		t.Fatalf("completion usage InputTokens = %d, want the turn's reported 5000", complete.Usage.InputTokens)
+	}
+	// Exactly one usage-bearing completion: the predecessor's suppressed
+	// settlement must not emit a second, which would double-count usage.
+	for _, event := range drainEvents(a) {
+		if event.Type == streams.EventTypeComplete {
+			t.Fatalf("a second completion was emitted (generation %d) — usage double-counted across the steer boundary", event.PromptGeneration)
+		}
+	}
+}
+
+// TestBeginSteerHandoffArmsSuppressionBeforePrompt covers the synchronous arm the
+// agentctl handler performs before it launches the async steer: arming the
+// handoff up front (while the predecessor turn is still in flight) must suppress
+// the predecessor's early settlement and hand the turn to the successor, exactly
+// as the inline arm does — and be idempotent with it. This closes the window
+// where the predecessor could settle between the steer's acknowledgement and the
+// async PromptSteer reaching beginSteerHandoff itself.
+func TestBeginSteerHandoffArmsSuppressionBeforePrompt(t *testing.T) {
+	a, fake, _ := setupHandoffFakeAgent(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	if err := a.Initialize(ctx); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if _, err := a.NewSession(ctx, nil); err != nil {
+		t.Fatalf("new session: %v", err)
+	}
+	if !a.SupportsSteering() {
+		t.Fatal("advertised agent does not report steering support")
+	}
+
+	firstDone := make(chan error, 1)
+	go func() { firstDone <- a.Prompt(ctx, "predecessor", nil, 61) }()
+	awaitPromptCall(t, fake, "predecessor prompt")
+
+	// The handler arms the handoff synchronously, before the async steer runs.
+	a.BeginSteerHandoff()
+	// Idempotent: a second arm (the inline one inside PromptSteer) is harmless.
+	a.BeginSteerHandoff()
+
+	steerDone := make(chan error, 1)
+	go func() { steerDone <- a.PromptSteer(ctx, "steer", nil, 62) }()
+	awaitPromptCall(t, fake, "steer")
+	if err := awaitPromptErr(t, firstDone, "predecessor prompt"); err != nil {
+		t.Fatalf("predecessor errored after pre-armed handoff: %v", err)
+	}
+
+	fake.releasePrompts()
+	if err := <-steerDone; err != nil {
+		t.Fatalf("steer prompt: %v", err)
+	}
+
+	complete := waitForEventType(t, a, streams.EventTypeComplete)
+	if complete.PromptGeneration != 62 {
+		t.Fatalf("completion generation = %d, want the steer's 62", complete.PromptGeneration)
+	}
+	for _, event := range drainEvents(a) {
+		if event.Type == streams.EventTypeComplete && event.PromptGeneration == 61 {
+			t.Fatal("predecessor emitted a completion despite the pre-armed handoff")
+		}
+	}
+}
+
 // TestSteerPreservesPredecessorBackgroundWork proves the boundary does not sweep
 // work that was live when the turn was handed off. This is required, not
 // cosmetic: a backgrounded workload has been observed outliving both prompts and

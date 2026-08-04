@@ -200,6 +200,21 @@ func (a *Adapter) handOffTurnLocked(turn *promptTurnState, sessionID string) boo
 	return true
 }
 
+// BeginSteerHandoff arms the mid-turn handoff synchronously so the agentctl
+// prompt handler can guarantee the predecessor's early settlement is suppressed
+// before it launches the asynchronous PromptSteer. The handler acknowledges the
+// steer and only then runs the prompt on a goroutine; without this, a predecessor
+// that settles in the window between the ack and the goroutine reaching
+// beginSteerHandoff would emit a completion the backend attributes to the reused
+// generation. No-op when steering was not negotiated or no handoff-eligible turn
+// is in flight, and idempotent with the arm inside the prompt path.
+func (a *Adapter) BeginSteerHandoff() {
+	if !a.supportsPromptHandoff() {
+		return
+	}
+	a.beginSteerHandoff()
+}
+
 func (a *Adapter) currentPromptGeneration() uint64 {
 	turn := a.currentPromptTurn()
 	if turn == nil {

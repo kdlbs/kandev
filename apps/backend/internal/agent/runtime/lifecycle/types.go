@@ -65,6 +65,13 @@ type AgentExecution struct {
 	// promptCompletionGeneration prevents duplicate terminal events for the
 	// same prompt from replacing the first terminal outcome or provider error.
 	promptCompletionGeneration uint64
+	// dispatchedPromptGeneration is the generation of the prompt that has been
+	// accepted by agentctl and is still in flight. It is set only after the
+	// ordinary prompt's triggerPrompt succeeds and reset by beginExecutionPrompt.
+	// A mid-turn steer reuses this exact generation, so the getter must not hand
+	// out a generation that was merely admitted (not yet dispatched — its buffers
+	// are still being reset) or already completed.
+	dispatchedPromptGeneration uint64
 	promptLifecycleMu          sync.Mutex
 
 	// PrepareResult carries the environment preparation result back to the caller

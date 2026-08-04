@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -69,6 +70,26 @@ func TestSteerEligible_GatedByFlagCapabilityAndState(t *testing.T) {
 		}
 	})
 
+	t.Run("background-idle is not steered even with handoff off (flags independent)", func(t *testing.T) {
+		// Regression: SteerEligible must read the raw foreground activity, not the
+		// public ForegroundActivity that collapses to Generating whenever
+		// ClaudeBackgroundPromptHandoff is off. With steering on but handoff off, a
+		// background-idle session would otherwise look generating and be wrongly
+		// steer-eligible — the two flags are independent.
+		svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+		svc.config.ClaudeMidTurnSteering = true
+		svc.config.ClaudeBackgroundPromptHandoff = false
+		advertisePromptQueueingForTest(t, svc, sessionID)
+		svc.registerBackgroundTask(sessionID, "bg-1")
+		svc.markForegroundIdle(sessionID)
+		if svc.foregroundActivityValue(sessionID) != v1.ForegroundActivityBackground {
+			t.Fatal("precondition: raw activity should be background")
+		}
+		if svc.SteerEligible(sessionID, models.TaskSessionStateRunning) {
+			t.Fatal("background-idle session is steer-eligible with handoff off")
+		}
+	})
+
 	t.Run("generating running with capability and flag is eligible", func(t *testing.T) {
 		svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 		svc.config.ClaudeMidTurnSteering = true
@@ -120,6 +141,91 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
 		t.Fatal("declined steer left an in-flight slot claimed")
 	}
+}
+
+// steerDispatchService builds a scheduler-backed service (real executor over a
+// fake agent manager) with a generating, steer-eligible session so SteerTask
+// reaches actual dispatch.
+func steerDispatchService(t *testing.T, taskID, sessionID string) (*Service, *mockAgentManager) {
+	t.Helper()
+	repo := setupTestRepo(t)
+	agentMgr := &mockAgentManager{}
+	agentMgr.getExecutionIDForSessionFunc = func(context.Context, string) (string, error) {
+		return "exec-steer", nil
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.config.ClaudeMidTurnSteering = true
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	advertisePromptQueueingForTest(t, svc, sessionID)
+	svc.registerBackgroundTask(sessionID, "bg-1")
+	svc.markForegroundIdle(sessionID)
+	svc.completeBackgroundTask(sessionID, "bg-1") // generating
+	return svc, agentMgr
+}
+
+// TestSteerTask_DispatchesAndReleasesInFlightSlot drives SteerTask all the way to
+// dispatch (the branch no other test reaches) and pins the contract that keeps
+// the feature working turn-after-turn: the steer dispatches with dispatchOnly,
+// carrying the operator's prompt, and — critically — releases the single
+// in-flight slot afterwards so the next steer dispatches rather than being
+// permanently declined-and-enqueued. Deleting `defer s.steerInFlight.Delete` in
+// SteerTask must fail this test.
+func TestSteerTask_DispatchesAndReleasesInFlightSlot(t *testing.T) {
+	ctx := context.Background()
+	const taskID = "task-dispatch"
+	const sessionID = "session-dispatch"
+
+	t.Run("dispatches then releases the slot for the next steer", func(t *testing.T) {
+		svc, agentMgr := steerDispatchService(t, taskID, sessionID)
+
+		res, err := svc.SteerTask(ctx, taskID, sessionID, "steer one", "", false, nil)
+		if err != nil {
+			t.Fatalf("first steer dispatch errored: %v", err)
+		}
+		if res == nil || res.StopReason == steerQueuedStopReason {
+			t.Fatalf("first steer result = %+v, want a real dispatch (not enqueued)", res)
+		}
+		calls := agentMgr.getCapturedSteerCalls()
+		if len(calls) != 1 {
+			t.Fatalf("steer dispatch count = %d, want 1", len(calls))
+		}
+		if calls[0].ExecutionID != "exec-steer" {
+			t.Fatalf("steer execution = %q, want exec-steer", calls[0].ExecutionID)
+		}
+		if !calls[0].DispatchOnly {
+			t.Fatal("steer must dispatch with dispatchOnly=true (dispatch-and-continue)")
+		}
+		if !strings.Contains(calls[0].Prompt, "steer one") {
+			t.Fatalf("steer prompt %q does not carry the operator's message", calls[0].Prompt)
+		}
+		if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
+			t.Fatal("in-flight slot was not released after dispatch")
+		}
+
+		// A second steer must dispatch too — proving the slot really released.
+		res2, err := svc.SteerTask(ctx, taskID, sessionID, "steer two", "", false, nil)
+		if err != nil {
+			t.Fatalf("second steer errored: %v", err)
+		}
+		if res2 == nil || res2.StopReason == steerQueuedStopReason {
+			t.Fatalf("second steer result = %+v, want dispatch — slot not released", res2)
+		}
+		if got := len(agentMgr.getCapturedSteerCalls()); got != 2 {
+			t.Fatalf("steer dispatch count = %d, want 2", got)
+		}
+	})
+
+	t.Run("releases the slot when dispatch fails", func(t *testing.T) {
+		svc, agentMgr := steerDispatchService(t, taskID, sessionID)
+		agentMgr.steerErr = errors.New("agent dispatch boom")
+
+		if _, err := svc.SteerTask(ctx, taskID, sessionID, "steer", "", false, nil); err == nil {
+			t.Fatal("expected the dispatch error to propagate")
+		}
+		if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
+			t.Fatal("in-flight slot was not released after a dispatch error")
+		}
+	})
 }
 
 // TestSteerTask_NotEligibleReturnsSentinel pins that an ineligible session yields
