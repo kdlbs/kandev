@@ -271,10 +271,7 @@ func rollbackOwnedDirectoryLink(undo ownedDirectoryLinkUndo) error {
 		}
 		return nil
 	}
-	if err := os.Remove(undo.Path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove repointed link %q: %w", undo.Path, err)
-	}
-	if _, err := worktree.CreateOwnedDirectoryLink(filepath.Dir(undo.Path), filepath.Base(undo.Path), undo.PriorTarget); err != nil {
+	if err := worktree.RestoreOwnedDirectoryLink(filepath.Dir(undo.Path), filepath.Base(undo.Path), undo.PriorTarget); err != nil {
 		return fmt.Errorf("restore repointed link %q: %w", undo.Path, err)
 	}
 	return nil

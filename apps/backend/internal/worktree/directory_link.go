@@ -57,6 +57,28 @@ func createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget string) (s
 	return link, nil
 }
 
+// RestoreOwnedDirectoryLink updates or recreates a live directory reference
+// below root so it points at target, preserving the current link if the
+// replacement cannot be completed safely.
+func RestoreOwnedDirectoryLink(root, name, target string) error {
+	if !isOwnedDirectoryLinkPath(root, name) {
+		return fmt.Errorf("invalid owned link path")
+	}
+	if err := mkdirOwned(root); err != nil {
+		return err
+	}
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return err
+	}
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+	return restoreOwnedDirectoryLinkLocked(root, name, link, target)
+}
+
 func isOwnedDirectoryLinkPath(root, name string) bool {
 	return root != "" && filepath.IsAbs(root) && name != "" && filepath.Base(name) == name && name != "." && name != ".."
 }
@@ -190,7 +212,7 @@ func repointOwnedDirectoryLink(root, name, link string, inspected os.FileInfo, p
 		return err
 	}
 	if err := verifyCreatedOwnedDirectoryLink(root, link); err != nil {
-		if restoreErr := restoreOwnedDirectoryLink(root, name, priorTarget); restoreErr != nil {
+		if restoreErr := restoreOwnedDirectoryLinkLocked(root, name, link, priorTarget); restoreErr != nil {
 			return errors.Join(err, restoreErr)
 		}
 		return err
@@ -198,7 +220,7 @@ func repointOwnedDirectoryLink(root, name, link string, inspected os.FileInfo, p
 	return nil
 }
 
-func restoreOwnedDirectoryLink(root, name, target string) error {
+func restoreOwnedDirectoryLinkLocked(root, name, link, target string) error {
 	if target == "" {
 		return nil
 	}
@@ -206,14 +228,38 @@ func restoreOwnedDirectoryLink(root, name, target string) error {
 	if err != nil {
 		return fmt.Errorf("restore prior directory link: %w", err)
 	}
-	if err := mkdirOwned(root); err != nil {
-		return fmt.Errorf("restore prior directory link: %w", err)
+	info, err := os.Lstat(link)
+	if os.IsNotExist(err) {
+		if _, err := createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget); err != nil {
+			return fmt.Errorf("restore prior directory link: %w", err)
+		}
+		return nil
 	}
-	link, err := ownedDirectoryLinkPath(root, name)
 	if err != nil {
+		return fmt.Errorf("restore prior directory link: inspect owned link entry: %w", err)
+	}
+	if !isPlatformDirectoryLink(info, link) {
+		return fmt.Errorf("restore prior directory link: owned link entry already exists: %s", name)
+	}
+	actual, err := os.Stat(link)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: resolve owned link: %w", err)
+	}
+	expected, err := os.Stat(canonicalTarget)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: inspect link target: %w", err)
+	}
+	if os.SameFile(actual, expected) {
+		return nil
+	}
+	currentTarget, err := platformDirectoryLinkTarget(link)
+	if err != nil {
+		return fmt.Errorf("restore prior directory link: read owned link target: %w", err)
+	}
+	if err := replacePlatformDirectoryLink(link, info, canonicalTarget, currentTarget); err != nil {
 		return fmt.Errorf("restore prior directory link: %w", err)
 	}
-	if _, err := createOwnedDirectoryLinkLocked(root, name, link, canonicalTarget); err != nil {
+	if err := verifyCreatedOwnedDirectoryLink(root, link); err != nil {
 		return fmt.Errorf("restore prior directory link: %w", err)
 	}
 	return nil

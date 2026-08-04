@@ -83,6 +83,8 @@ diff before marking done.
 - `materializeDirectoryLinks`, `materializeWorktreeSources`, and `materializeHostRuntime` now preserve `PriorTarget` from the Task 03 result struct, so rollback can distinguish a brand-new link from a repointed pre-existing one.
 - `rollbackHostWorkspaceMaterialization` now restores repointed entries to their prior target and deletes only genuinely new links, processing the undo records in reverse order.
 - Added `TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails`, which seeds a pre-existing owned link, forces adoption failure, and proves the original target is restored rather than deleted.
+- PR #2253 fixup: `rollbackOwnedDirectoryLink` now delegates pre-existing entries to `worktree.RestoreOwnedDirectoryLink`, so rollback uses the same platform-safe replacement path as owned-link repair instead of doing a raw remove-then-create.
+- Added `TestRestoreOwnedDirectoryLinkKeepsCurrentLinkWhenReplacementTargetIsInvalid`, which proves a failed restore request leaves the current owned link intact.
 - Commands:
   - `cd apps/backend && go test ./internal/backendapp/... ./internal/worktree/...` → all `ok`.
 - External side-effect boundary: rollback removes or recreates Kandev-owned directory links only under the task root, and restores a prior target only for entries this materialization repointed.

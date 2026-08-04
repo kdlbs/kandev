@@ -293,6 +293,22 @@ func TestEnsureOwnedDirectoryLinkKeepsOriginalLinkWhenReplacementTargetIsInvalid
 	}
 }
 
+func TestRestoreOwnedDirectoryLinkKeepsCurrentLinkWhenReplacementTargetIsInvalid(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	current := t.TempDir()
+	if err := os.WriteFile(filepath.Join(current, "live.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", current)
+
+	if err := RestoreOwnedDirectoryLink(root, "api", filepath.Join(t.TempDir(), "missing")); err == nil {
+		t.Fatal("RestoreOwnedDirectoryLink accepted a missing replacement target")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "api", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("failed restore disturbed current link = %q, %v", got, err)
+	}
+}
+
 func TestRenameInspectedDirectoryLinkRejectsChangedEntry(t *testing.T) {
 	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	current, other := t.TempDir(), t.TempDir()
