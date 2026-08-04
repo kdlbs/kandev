@@ -4,7 +4,12 @@ vi.mock("@/lib/config", () => ({
   getBackendConfig: () => ({ apiBaseUrl: "http://api.test" }),
 }));
 
-import { fetchMessageQueueSettings, updateMessageQueueSettings } from "./settings-api";
+import {
+  fetchMessageQueueSettings,
+  fetchSleepInhibitionSettings,
+  updateMessageQueueSettings,
+  updateSleepInhibitionSettings,
+} from "./settings-api";
 
 const BASE = "http://api.test/api/v1/system/message-queue/settings";
 type FetchInput = Parameters<typeof fetch>[0];
@@ -64,5 +69,37 @@ describe("message queue settings api", () => {
     expect(lastCall().url).toBe(BASE);
     expect(lastCall().init?.method).toBe("PATCH");
     expect(lastCall().init?.body).toBe(JSON.stringify({ max_per_session: 25 }));
+  });
+});
+
+describe("sleep inhibition settings api", () => {
+  it("fetches the install-wide setting without cache", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { enabled: false },
+        status: { platform: "linux", supported: true, active: false },
+      }),
+    );
+
+    const response = await fetchSleepInhibitionSettings();
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/system/sleep-inhibition");
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.settings.enabled).toBe(false);
+  });
+
+  it("PATCHes the configured enabled value", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: { enabled: true },
+        status: { platform: "linux", supported: true, active: true },
+      }),
+    );
+
+    await updateSleepInhibitionSettings({ enabled: true });
+
+    expect(lastCall().url).toBe("http://api.test/api/v1/system/sleep-inhibition");
+    expect(lastCall().init?.method).toBe("PATCH");
+    expect(lastCall().init?.body).toBe(JSON.stringify({ enabled: true }));
   });
 });

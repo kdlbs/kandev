@@ -1,6 +1,63 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Mobile general settings", () => {
+  test("keeps host sleep inhibition reachable and contained on a phone viewport", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    const initialResponse = await apiClient.rawRequest("GET", "/api/v1/system/sleep-inhibition");
+    expect(initialResponse.ok).toBe(true);
+    const initial = (await initialResponse.json()) as { settings: { enabled: boolean } };
+    const next = !initial.settings.enabled;
+
+    try {
+      await testPage.goto("/settings/general/task-actions");
+      const card = testPage.getByTestId("sleep-inhibition-settings");
+      const toggle = card.getByRole("switch", { name: "Prevent idle system sleep" });
+      await expect(card).toBeVisible();
+      await toggle.click();
+      await expect(toggle).toHaveAttribute("data-settings-dirty", "true");
+      const controlRow = card.getByTestId("sleep-inhibition-control-row");
+      const controlRowBox = await controlRow.boundingBox();
+      expect(controlRowBox).not.toBeNull();
+      expect(controlRowBox!.height).toBeGreaterThanOrEqual(44);
+
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await expect(floatingSave).toBeVisible();
+      await card.scrollIntoViewIfNeeded();
+      const [cardBox, saveBox] = await Promise.all([
+        card.boundingBox(),
+        floatingSave.boundingBox(),
+      ]);
+      expect(cardBox).not.toBeNull();
+      expect(saveBox).not.toBeNull();
+      expect(cardBox!.y + cardBox!.height).toBeLessThanOrEqual(saveBox!.y);
+      expect(await testPage.evaluate(() => document.documentElement.scrollWidth)).toBe(
+        await testPage.evaluate(() => document.documentElement.clientWidth),
+      );
+      await testPage.waitForTimeout(1_000);
+      await testPage
+        .locator("[data-sonner-toast], [data-testid='toast-message']")
+        .evaluateAll((toasts) => {
+          for (const toast of toasts) (toast as HTMLElement).style.display = "none";
+        });
+      await prCapture.screenshot("sleep-inhibition-mobile-draft", {
+        caption: "Mobile Task Actions sleep inhibition card above Save changes",
+      });
+
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
+      const savedResponse = await apiClient.rawRequest("GET", "/api/v1/system/sleep-inhibition");
+      expect(((await savedResponse.json()) as typeof initial).settings.enabled).toBe(next);
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/system/sleep-inhibition", {
+        enabled: initial.settings.enabled,
+      });
+    }
+  });
+
   test("keeps the full Transcript Navigation card above the floating Save action", async ({
     testPage,
     prCapture,

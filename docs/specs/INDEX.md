@@ -38,6 +38,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | Spec | Status |
 |---|---|
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
+| [task-sleep-inhibition](platform/task-sleep-inhibition.md) | building |
 | [i18n](platform/i18n.md) | building |
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |

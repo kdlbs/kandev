@@ -826,6 +826,7 @@ func startGatewayAndServe(
 	}, systemsvc.Wiring{
 		OrchestratorShutdown: func() { _ = orchestratorSvc.Stop() },
 		MessageQueue:         orchestratorSvc.GetMessageQueue(),
+		TaskSessions:         repos.Task,
 	})
 	storageComposition, err := provideStorageComposition(
 		cfg, dbPool, systemSvc.Jobs, lifecycleMgr, services.WorktreeMgr, services.Task,

@@ -27,6 +27,11 @@ import type {
   SystemMetricsSettingsResponse,
 } from "@/lib/types/system";
 
+export {
+  fetchSleepInhibitionSettings,
+  updateSleepInhibitionSettings,
+} from "./sleep-inhibition-api";
+
 // User settings
 export async function fetchUserSettings(options?: ApiRequestOptions) {
   return fetchJsonWithRetry<UserSettingsResponse>("/api/v1/user/settings", options);

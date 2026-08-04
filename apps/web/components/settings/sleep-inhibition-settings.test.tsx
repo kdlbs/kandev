@@ -1,0 +1,105 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SettingsSaveContributor } from "./settings-save-provider";
+import type { SleepInhibitionResponse } from "@/lib/types/system";
+
+const fetchSettingsMock = vi.fn();
+const updateSettingsMock = vi.fn();
+let saveContributor: SettingsSaveContributor | null = null;
+let currentRole: "admin" | "member" | undefined = "admin";
+
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  fetchSleepInhibitionSettings: (...args: unknown[]) => fetchSettingsMock(...args),
+  updateSleepInhibitionSettings: (...args: unknown[]) => updateSettingsMock(...args),
+}));
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (state: { auth: { user?: { role: string } } }) => unknown) =>
+    selector({ auth: { user: currentRole ? { role: currentRole } : undefined } }),
+}));
+
+vi.mock("./settings-save-provider", () => ({
+  useSettingsSaveContributor: (contributor: SettingsSaveContributor) => {
+    saveContributor = contributor;
+  },
+}));
+
+import { SleepInhibitionSettings } from "./sleep-inhibition-settings";
+
+function response(
+  enabled = false,
+  status: SleepInhibitionResponse["status"] = {
+    platform: "linux",
+    supported: true,
+    active: false,
+  },
+): SleepInhibitionResponse {
+  return { settings: { enabled }, status };
+}
+
+beforeEach(() => {
+  fetchSettingsMock.mockReset();
+  updateSettingsMock.mockReset();
+  fetchSettingsMock.mockResolvedValue(response());
+  currentRole = "admin";
+  saveContributor = null;
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+describe("SleepInhibitionSettings", () => {
+  it("stages an admin edit until the shared save contributor runs", async () => {
+    updateSettingsMock.mockResolvedValueOnce(
+      response(true, { platform: "linux", supported: true, active: true }),
+    );
+    render(<SleepInhibitionSettings />);
+
+    const toggle = await screen.findByTestId("sleep-inhibition-switch");
+    fireEvent.click(toggle);
+    expect(updateSettingsMock).not.toHaveBeenCalled();
+    expect(saveContributor?.isDirty).toBe(true);
+    if (!saveContributor) throw new Error("expected save contributor");
+
+    await act(async () => saveContributor?.save(saveContributor.revision));
+
+    expect(updateSettingsMock).toHaveBeenCalledWith({ enabled: true });
+    await waitFor(() => expect(saveContributor?.isDirty).toBe(false));
+    expect(screen.getByTestId("sleep-inhibition-status").textContent).toContain("Active");
+  });
+
+  it("keeps members read-only while preserving the configured value", async () => {
+    currentRole = "member";
+    fetchSettingsMock.mockResolvedValueOnce(
+      response(true, {
+        platform: "other",
+        supported: false,
+        active: false,
+        issue: "unsupported_platform",
+      }),
+    );
+    render(<SleepInhibitionSettings />);
+
+    const toggle = await screen.findByTestId("sleep-inhibition-switch");
+    expect(toggle).toHaveProperty("disabled", true);
+    expect(toggle.getAttribute("data-state")).toBe("checked");
+    expect(screen.getByTestId("sleep-inhibition-status").textContent).toContain("Unavailable");
+    expect(saveContributor?.isDirty).toBe(false);
+  });
+
+  it("reports failed saves without clearing the dirty draft", async () => {
+    updateSettingsMock.mockRejectedValueOnce(new Error("offline"));
+    render(<SleepInhibitionSettings />);
+    fireEvent.click(await screen.findByTestId("sleep-inhibition-switch"));
+    if (!saveContributor) throw new Error("expected save contributor");
+
+    await act(async () => {
+      await expect(saveContributor?.save(saveContributor.revision)).rejects.toThrow("offline");
+    });
+
+    expect(screen.getByText("Failed to save host sleep settings.")).toBeTruthy();
+    expect(saveContributor?.isDirty).toBe(true);
+  });
+});
