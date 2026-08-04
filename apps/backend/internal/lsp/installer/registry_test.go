@@ -1,14 +1,31 @@
 package installer
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
+
+type registryCommandRunner struct {
+	environment map[string]string
+}
+
+func (r *registryCommandRunner) CombinedOutput(
+	_ context.Context,
+	_ tools.CommandSpec,
+) ([]byte, error) {
+	return nil, nil
+}
+
+func (r *registryCommandRunner) CommandEnvironment() (map[string]string, error) {
+	return r.environment, nil
+}
 
 func testLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
@@ -264,7 +281,11 @@ func TestNewRegistryFailsClosedWithoutTrustedHome(t *testing.T) {
 func TestFindGoBinary(t *testing.T) {
 	// Test with GOBIN set to a temp directory containing a fake binary
 	tmpDir := t.TempDir()
-	fakeBinary := filepath.Join(tmpDir, "gopls")
+	binaryName := "gopls"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	fakeBinary := filepath.Join(tmpDir, binaryName)
 	if err := os.WriteFile(fakeBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -278,6 +299,30 @@ func TestFindGoBinary(t *testing.T) {
 	}
 	if p != fakeBinary {
 		t.Errorf("tools.FindGoBinary(\"gopls\") = %q, want %q", p, fakeBinary)
+	}
+}
+
+func TestBinaryPathUsesTaskEnvironment(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	taskBin := t.TempDir()
+	binaryName := "gopls"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(taskBin, binaryName)
+	if err := os.WriteFile(binaryPath, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry("", testLogger(), WithCommandRunner(&registryCommandRunner{
+		environment: map[string]string{"PATH": taskBin},
+	}))
+
+	path, err := registry.BinaryPath("go")
+	if err != nil {
+		t.Fatalf("BinaryPath(go) error = %v", err)
+	}
+	if path != binaryPath {
+		t.Fatalf("BinaryPath(go) = %q, want task-environment path %q", path, binaryPath)
 	}
 }
 

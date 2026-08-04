@@ -13,10 +13,14 @@ type CommandSpec struct {
 	Env  map[string]string
 }
 
-// CommandRunner runs installer subprocesses. Agentctl supplies its process
-// manager so npm/go descendants follow task teardown on every platform.
+// CommandRunner exposes the task environment and runs installer subprocesses.
+// Agentctl supplies its process manager so npm/Go descendants follow task
+// teardown on every platform.
 type CommandRunner interface {
 	CombinedOutput(ctx context.Context, spec CommandSpec) ([]byte, error)
+	// CommandEnvironment returns the task-specific overrides that the runner
+	// applies on top of the current process environment.
+	CommandEnvironment() (map[string]string, error)
 }
 
 // InstallResult contains information about an installed tool binary.

@@ -3,8 +3,6 @@ package installer
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -37,7 +35,7 @@ func (s *GoInstallStrategy) Name() string {
 }
 
 func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error) {
-	goPath, err := exec.LookPath("go")
+	goPath, commandEnv, err := resolveCommand("go", s.runner)
 	if err != nil {
 		return nil, fmt.Errorf("go not found: %w", err)
 	}
@@ -47,13 +45,14 @@ func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error)
 	output, err := combinedOutput(ctx, s.runner, CommandSpec{
 		Path: goPath,
 		Args: []string{installSubcommand, s.importPath},
+		Env:  commandEnv,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("go install failed: %w\nOutput: %s", err, string(output))
 	}
 
 	// Find the installed binary using the shared Go binary lookup
-	binaryPath, err := FindGoBinary(s.binary)
+	binaryPath, err := FindGoBinaryWithRunner(s.binary, s.runner)
 	if err != nil {
 		return nil, err
 	}
@@ -66,24 +65,39 @@ func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error)
 
 // FindGoBinary looks for a Go binary in GOBIN, GOPATH/bin, and ~/go/bin.
 func FindGoBinary(binary string) (string, error) {
-	if gobin := os.Getenv("GOBIN"); gobin != "" {
-		p := filepath.Join(gobin, binary)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
+	return FindGoBinaryWithRunner(binary, nil)
+}
+
+// FindGoBinaryWithRunner looks for a Go binary using the runner's task
+// environment, including GOBIN, GOPATH, and HOME.
+func FindGoBinaryWithRunner(binary string, runner CommandRunner) (string, error) {
+	env, _, err := commandEnvironment(runner)
+	if err != nil {
+		return "", err
 	}
-	if gopath := os.Getenv("GOPATH"); gopath != "" {
-		p := filepath.Join(gopath, "bin", binary)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
-		}
-	}
-	home, _ := os.UserHomeDir()
-	if home != "" {
-		p := filepath.Join(home, "go", "bin", binary)
-		if _, err := os.Stat(p); err == nil {
-			return p, nil
+	for _, directory := range goBinaryDirectories(env) {
+		for _, name := range executableNames(binary, env) {
+			path := filepath.Join(directory, name)
+			if isExecutableFile(path) {
+				return path, nil
+			}
 		}
 	}
 	return "", fmt.Errorf("%s not found in GOBIN/GOPATH/~/go/bin", binary)
+}
+
+func goBinaryDirectories(env map[string]string) []string {
+	directories := make([]string, 0, 3)
+	if gobin := environmentValue(env, "GOBIN"); gobin != "" {
+		directories = append(directories, gobin)
+	}
+	for _, gopath := range filepath.SplitList(environmentValue(env, "GOPATH")) {
+		if gopath != "" {
+			directories = append(directories, filepath.Join(gopath, "bin"))
+		}
+	}
+	if home := environmentValue(env, "HOME"); home != "" {
+		directories = append(directories, filepath.Join(home, "go", "bin"))
+	}
+	return directories
 }

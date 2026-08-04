@@ -27,6 +27,22 @@ func TestManagerCombinedOutputCapturesFailureOutput(t *testing.T) {
 	}
 }
 
+func TestManagerCommandEnvironmentReturnsTaskOverrides(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		WorkDir:   t.TempDir(),
+		SessionID: "session-1",
+		AgentEnv:  []string{"PATH=/task/bin", "GOBIN=/task/gobin"},
+	}, newTestLogger(t))
+
+	env, err := mgr.CommandEnvironment()
+	if err != nil {
+		t.Fatalf("CommandEnvironment() error = %v", err)
+	}
+	if env["PATH"] != "/task/bin" || env["GOBIN"] != "/task/gobin" {
+		t.Fatalf("CommandEnvironment() = %#v, want task PATH and GOBIN", env)
+	}
+}
+
 func TestManagerCombinedOutputCapturesFastExitStdoutAndStderr(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-1"}, newTestLogger(t))
 	t.Cleanup(func() { _ = mgr.StopForTeardown(context.Background()) })

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -40,7 +39,7 @@ func (s *NpmStrategy) Name() string {
 }
 
 func (s *NpmStrategy) Install(ctx context.Context) (*InstallResult, error) {
-	npmPath, err := exec.LookPath("npm")
+	npmPath, commandEnv, err := resolveCommand("npm", s.runner)
 	if err != nil {
 		return nil, fmt.Errorf("npm not found: %w", err)
 	}
@@ -53,7 +52,12 @@ func (s *NpmStrategy) Install(ctx context.Context) (*InstallResult, error) {
 	args := append([]string{installSubcommand, "--prefix", s.binDir}, s.packages...)
 	s.logger.Info("installing via npm", zap.Strings("packages", s.packages), zap.String("prefix", s.binDir))
 
-	output, err := combinedOutput(ctx, s.runner, CommandSpec{Path: npmPath, Args: args, Dir: s.binDir})
+	output, err := combinedOutput(ctx, s.runner, CommandSpec{
+		Path: npmPath,
+		Args: args,
+		Dir:  s.binDir,
+		Env:  commandEnv,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("npm install failed: %w\nOutput: %s", err, string(output))
 	}

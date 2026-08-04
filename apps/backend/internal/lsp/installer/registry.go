@@ -3,7 +3,6 @@ package installer
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -95,7 +94,8 @@ type Registry struct {
 // RegistryOption customizes an installer registry.
 type RegistryOption func(*Registry)
 
-// WithCommandRunner routes npm/go installs through an external process owner.
+// WithCommandRunner routes task-environment lookup and npm/Go installs through
+// an external process owner.
 func WithCommandRunner(runner tools.CommandRunner) RegistryOption {
 	return func(registry *Registry) {
 		registry.commandRunner = runner
@@ -163,15 +163,15 @@ func (r *Registry) StrategyFor(language string) (Strategy, error) {
 }
 
 // BinaryPath checks if a language server binary is installed.
-// It checks the system PATH, the Kandev bin directory, and Go-specific paths.
+// It checks the task PATH, the Kandev bin directory, and Go-specific paths.
 func (r *Registry) BinaryPath(language string) (string, error) {
 	binary, err := binaryName(language)
 	if err != nil {
 		return "", err
 	}
 
-	// Check system PATH first
-	if p, err := exec.LookPath(binary); err == nil {
+	// Check the task PATH first.
+	if p, err := tools.FindCommand(binary, r.commandRunner); err == nil {
 		return p, nil
 	}
 
@@ -191,7 +191,7 @@ func (r *Registry) BinaryPath(language string) (string, error) {
 
 	// Check Go-specific paths for Go binaries
 	if language == languageGo {
-		if p, err := tools.FindGoBinary(binary); err == nil {
+		if p, err := tools.FindGoBinaryWithRunner(binary, r.commandRunner); err == nil {
 			return p, nil
 		}
 	}

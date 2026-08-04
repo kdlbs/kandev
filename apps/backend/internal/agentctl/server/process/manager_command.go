@@ -13,6 +13,12 @@ import (
 
 const managedCommandOutputLimit = 1 << 20
 
+// CommandEnvironment returns the task environment overrides applied to every
+// command owned by this manager.
+func (m *Manager) CommandEnvironment() (map[string]string, error) {
+	return mergeAgentEnvIntoShellConfigWithError(m.agentEnvSnapshot(), nil)
+}
+
 // CombinedOutput runs a direct command as an instance-owned process and
 // returns bounded stdout/stderr after its complete process tree is reaped.
 func (m *Manager) CombinedOutput(parent context.Context, spec tools.CommandSpec) ([]byte, error) {
