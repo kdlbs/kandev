@@ -6,9 +6,8 @@ created: 2026-08-04
 
 # Plan: Restore the Feature Toggles restart action
 
-One task, one production file. Task detail is inline rather than in a sibling
-`task-NN-*.md` file: the change is a single route component plus its regression
-test, and a separate document would carry more ceremony than content.
+One task, four production files. The task detail lives in the sibling
+[`task-01-restore-restart-action.md`](task-01-restore-restart-action.md).
 
 ## Root cause
 
@@ -25,19 +24,13 @@ computes `const supported = capability?.supported === true`, so a `null` prop is
 permanently `false`. The restart `<Button>` at line 221 is never rendered and the
 `system:restartManualHint` copy is always appended.
 
-Nothing else supplies the value. `fetchRestartCapability`
-([`lib/api/domains/system-api.ts:233`](../../../apps/web/lib/api/domains/system-api.ts))
-has exactly one non-test caller: `app/settings/system/feature-toggles/page.tsx`.
-That page is not reachable from the SPA — it is `export default async function`,
-one of 44 remaining server components under `app/`, and the Vite route table can
-only import synchronous client components (it does import 72 of the 97 `app/`
-pages, so the tree as a whole is live, not dead).
-
-That asymmetry is the mechanism of the bug: because the async page could not be
-imported, `settings-routes.tsx` had to inline `FeatureTogglesSettings` and supply
-the props the server page used to fetch — and the capability fetch was stubbed to
-`null` instead of ported. `useKandevRestart` calls only `fetchSystemInfo` and
-`requestRestart`; it never fetches capability.
+Before the SPA migration, the former Next Feature Toggles page supplied the
+capability from `fetchRestartCapability`. During the migration,
+`settings-routes.tsx` inlined `FeatureTogglesSettings` but stubbed the prop to
+`null` instead of porting that fetch. The former page was later removed during
+the Next cleanup, leaving the SPA route as the only live composition. The
+`useKandevRestart` flow calls only `fetchSystemInfo` and `requestRestart`; it
+does not detect capability.
 
 Introduced by `aee1846cd` *"feat: remove nextjs production runtime (#1389)"* —
 the line was born stubbed when the Next→Vite port dropped the server-side fetch.
@@ -75,26 +68,26 @@ reloads flags itself on mount.
 **Acceptance:**
 
 - The Feature Toggles route resolves `restartCapability` from the running
-  backend via `fetchRestartCapability` and passes it to `FeatureTogglesSettings`.
+  backend through the system-domain hook and passes it to `FeatureTogglesSettings`.
 - Toggle cards render immediately; they do not block on the capability request.
-  Capability arrives after and re-renders the notice. (The notice only appears
-  once a pending-restart override exists, so there is no flash of wrong copy in
-  the common path.)
-- A failed or rejected capability request falls back to `null`, preserving
-  today's manual-guidance behavior — fail closed, never a phantom button.
-- The effect uses the file's existing `cancelled` guard idiom
-  (`WorkspaceRepositoriesRoute`, `settings-routes.tsx:543`) so an unmounted route
-  does not set state.
+  While capability detection is pending, the notice stays neutral. Manual
+  guidance appears only after an unsupported or unavailable result.
+- A failed or rejected capability request resolves to `null`, preserving today's
+  manual-guidance behavior — fail closed, never a phantom button.
+- The system-domain hook uses a `cancelled` guard so an unmounted route does not
+  set state.
 - With `{supported: true}`, the notice renders the restart action and omits
   `system:restartManualHint`. With `{supported: false}` or `null`, it renders the
   manual hint and no action.
 
-**Files:** `apps/web/src/settings-routes.tsx` (production change),
+**Files:** `apps/web/src/settings-routes.tsx`,
+`apps/web/components/settings/system/feature-toggles-route.tsx`,
+`apps/web/components/settings/system/feature-toggles-settings.tsx`, and
+`apps/web/hooks/domains/system/use-restart-capability.ts` (production changes),
 `apps/web/src/settings-routes.test.ts` or a new
 `apps/web/src/settings-routes.feature-toggles.test.tsx` (route-level regression
-test, via the exported `renderSettingsRoute`),
-`apps/web/components/settings/system/feature-toggles-settings.test.tsx` (add the
-missing `supported: true` case).
+test, via the exported `renderSettingsRoute`), the hook test, and desktop/mobile
+Playwright specs.
 
 **Regression test — must fail before the change:** render the
 `/settings/system/feature-toggles` route with `fetchRestartCapability` mocked to
@@ -127,6 +120,8 @@ Recorded results:
 - `pnpm run typecheck` → clean.
 - `pnpm exec eslint` on all changed files → 0 errors, 0 warnings.
 - `pnpm run i18n:ratchet` → clean, guard allowlist intact (199 entries).
+- Focused Feature Toggles Vitest suite (route, component, and capability hook) →
+  3 files, 14 tests passed.
 
 ## Out of scope
 

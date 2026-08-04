@@ -119,7 +119,8 @@ describe("feature toggles route restart capability", () => {
     renderFeatureTogglesRoute();
 
     // Cards are reachable while the capability request is still in flight.
-    expect(await screen.findByTestId("feature-toggles-settings")).not.toBeNull();
+    expect(await screen.findByText("Office mode")).not.toBeNull();
+    expect(screen.queryByText(/terminal or service manager/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Restart" })).toBeNull();
 
     resolveCapability({ supported: true, mode: "supervisor" });

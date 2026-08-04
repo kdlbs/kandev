@@ -1,10 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
-
-import { fetchRestartCapability } from "@/lib/api/domains/system-api";
-import type { RestartCapability } from "@/lib/types/system";
-
+import { useRestartCapability } from "@/hooks/domains/system/use-restart-capability";
 import { FeatureTogglesSettings } from "./feature-toggles-settings";
 
 /**
@@ -18,21 +14,7 @@ import { FeatureTogglesSettings } from "./feature-toggles-settings";
  * offering a button that cannot work.
  */
 export function FeatureTogglesRoute() {
-  const [restartCapability, setRestartCapability] = useState<RestartCapability | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    fetchRestartCapability({ cache: "no-store" })
-      .catch(() => null)
-      .then((capability) => {
-        if (!cancelled) setRestartCapability(capability);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { capability: restartCapability } = useRestartCapability();
 
   return <FeatureTogglesSettings initialFlags={[]} restartCapability={restartCapability} />;
 }

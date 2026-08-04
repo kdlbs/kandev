@@ -38,9 +38,9 @@ duplicating flag identity or config-binding code across many files.
 - Every toggle change requires restart before its effective runtime value
   changes. The page reads restart capability from the running backend: a
   restart-capable supervisor is offered an in-app restart action that applies
-  the saved override, and only an unsupported supervisor shows manual restart
-  guidance. Capability is a property of the running process, never a build-time
-  constant.
+  the saved override, while unsupported or unavailable capability results show
+  manual restart guidance. Capability is a property of the running process,
+  never a build-time constant.
 - `/api/v1/features` exposes the startup-effective feature booleans used by SSR
   and `useFeature()` callers. Missing or unavailable frontend flag data fails
   closed to `false`.
@@ -169,8 +169,9 @@ a saved override. A saved value that differs from the current process value is
   request without mutation or side effects. Route-owned surfaces use `404`;
   extensions to an existing endpoint use a stable client error defined by that
   feature.
-- **Restart unsupported or unsuccessful** — manual restart/recovery guidance is
-  shown and the running process retains its old effective values.
+- **Restart unsupported, unavailable, or unsuccessful** — manual
+  restart/recovery guidance is shown and the running process retains its old
+  effective values.
 - **Unknown persisted override** — the row is ignored and hidden, but retained
   for downgrade compatibility. Its key cannot be assigned to a future feature.
 - **Feature disabled after enabled data exists** — the data remains readable but
@@ -227,6 +228,9 @@ a saved override. A saved value that differs from the current process value is
   restart unsupported, **WHEN** an administrator opens Feature Toggles, **THEN**
   no restart action is offered, the manual restart guidance is shown, and the
   reported reason is available from the notice.
+- **GIVEN** a saved override is pending restart and capability detection is
+  unavailable, **WHEN** an administrator opens Feature Toggles, **THEN** no
+  restart action is offered and manual restart guidance is shown.
 
 ## Success criteria
 
