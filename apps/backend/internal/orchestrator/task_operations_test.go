@@ -2128,14 +2128,12 @@ func TestQueueAndInterruptForPeerMessage_DeliversTargetedEntryAheadOfOlderQueued
 }
 
 // TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers
-// pins the mutual-exclusion contract: when another caller already holds the
-// session's cancelInFlight lock (mid-cancel, via a real concurrent
+// pins the shared-ownership contract: when another caller already owns the
+// session's cancellation (mid-cancel, via a real concurrent
 // QueueAndInterruptForPeerMessage call staged with the mock's
-// cancelAgentBlock/cancelAgentEntered hooks — no sleeps), a second call must
-// block on that same lock and wait for it to free up rather than falling
-// back to an unguarded "insert and hope" — see QueueAndInterruptForPeerMessage's
-// doc comment for why a busy-skip fallback would risk orphaning the second
-// call's message with no guaranteed future drain trigger.
+// cancelAgentBlock/cancelAgentEntered hooks), a second call must join that
+// cancellation and register its own targeted dispatch. The owner invokes the
+// lifecycle manager exactly once; both source-specific actions run after it.
 func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -2153,8 +2151,8 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateRunning)
 	seedExecutorRunning(t, repo, "session1", "task1", "exec-1")
 
-	// First call: acquires the lock, queues its message, and blocks inside
-	// CancelAgent (holding the lock the whole time).
+	// First call queues its message, claims cancellation ownership, releases
+	// the guard around the lifecycle call, and blocks inside CancelAgent.
 	firstDone := make(chan struct{})
 	go func() {
 		_, _, _ = svc.QueueAndInterruptForPeerMessage(ctx, "task1", "session1", "first parent message", nil)
@@ -2167,7 +2165,7 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatal("timed out waiting for the first call to enter CancelAgent")
 	}
 
-	// Second call starts while the first still holds the lock mid-cancel.
+	// Second call starts while the first owns the cancellation mid-lifecycle.
 	secondDone := make(chan struct{})
 	var queued *messagequeue.QueuedMessage
 	var dispatched bool
@@ -2177,17 +2175,23 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		close(secondDone)
 	}()
 
-	// The second call must not have completed yet — it has to be blocked
-	// on the lock, not working around it with an unguarded insert.
+	// Wait until the second message is visible. This deterministically proves
+	// the second call reached the yielded lifecycle interval and joined the
+	// first operation before that operation is released.
+	require.Eventually(t, func() bool {
+		return svc.messageQueue.GetStatus(ctx, "session1").Count == 2
+	}, 2*time.Second, 10*time.Millisecond, "expected the second peer message to join the in-flight cancellation")
+
+	// A joined caller must still wait for the owner to settle cancellation and
+	// run its registered action.
 	select {
 	case <-secondDone:
-		t.Fatal("second QueueAndInterruptForPeerMessage returned before the first call released the lock")
+		t.Fatal("second QueueAndInterruptForPeerMessage returned before the shared cancellation settled")
 	default:
 	}
 
-	// Release the first call's cancel; it finishes and releases the lock,
-	// letting the second call proceed (its own CancelAgent no longer
-	// blocks either, since cancelAgentBlock is now closed).
+	// Release the shared lifecycle call. The coordinator then runs both
+	// targeted dispatch actions under the per-session guard.
 	close(agentMgr.cancelAgentBlock)
 
 	select {
@@ -2210,8 +2214,8 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		t.Fatal("expected the second call to deliver its own message once the lock became available")
 	}
 
-	if got := agentMgr.cancelAgentCalls.Load(); got != 2 {
-		t.Fatalf("expected exactly 2 agent cancel calls (one per message), got %d", got)
+	if got := agentMgr.cancelAgentCalls.Load(); got != 1 {
+		t.Fatalf("expected exactly 1 lifecycle cancel call for both peer messages, got %d", got)
 	}
 
 	// Join whatever executeQueuedMessage did for the second message before

@@ -519,6 +519,15 @@ func (s *Service) cancelAgentSilentAction(
 	taskID, sessionID string,
 	action func(context.Context) (bool, error),
 ) (bool, error) {
+	return s.cancelAgentSilentActionWithKind(ctx, taskID, sessionID, action, cancellationKindSilent)
+}
+
+func (s *Service) cancelAgentSilentActionWithKind(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+) (bool, error) {
 	if s.repo == nil {
 		return false, errors.New("cancel agent silently: repository is not configured")
 	}
@@ -528,7 +537,7 @@ func (s *Service) cancelAgentSilentAction(
 			return action(actionCtx)
 		}
 	}
-	operation, owner, registered := s.claimCancellationWithAction(sessionID, cancellationKindSilent, registeredAction)
+	operation, owner, registered := s.claimCancellationWithAction(sessionID, kind, registeredAction)
 	if owner {
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
 	}
@@ -646,11 +655,25 @@ func (s *Service) cancelAgentSilentWithGuardAction(
 	relockGuard func(),
 	action func(context.Context) (bool, error),
 ) (bool, error) {
+	return s.cancelAgentSilentWithGuardActionKind(
+		ctx, taskID, sessionID, unlockGuard, relockGuard, action, cancellationKindSilent,
+	)
+}
+
+func (s *Service) cancelAgentSilentWithGuardActionKind(
+	ctx context.Context,
+	taskID string,
+	sessionID string,
+	unlockGuard func(),
+	relockGuard func(),
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+) (bool, error) {
 	if unlockGuard != nil {
 		unlockGuard()
 		defer relockGuard()
 	}
-	return s.cancelAgentSilentAction(ctx, taskID, sessionID, action)
+	return s.cancelAgentSilentActionWithKind(ctx, taskID, sessionID, action, kind)
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {

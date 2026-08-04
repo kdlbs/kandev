@@ -3983,6 +3983,7 @@ type cancellationKind string
 const (
 	cancellationKindExplicit cancellationKind = "explicit"
 	cancellationKindSilent   cancellationKind = "silent"
+	cancellationKindPeer     cancellationKind = "peer"
 	cancellationKindInternal cancellationKind = "internal"
 	cancellationOperationTTL                  = 30 * time.Second
 )
@@ -5067,7 +5068,7 @@ func (s *Service) cancelAndTakeForPeerMessage(
 	unlockGuard func(),
 	relockGuard func(),
 ) (bool, error) {
-	return s.cancelAgentSilentWithGuardAction(
+	return s.cancelAgentSilentWithGuardActionKind(
 		ctx,
 		taskID,
 		sessionID,
@@ -5076,6 +5077,7 @@ func (s *Service) cancelAndTakeForPeerMessage(
 		func(actionCtx context.Context) (bool, error) {
 			return s.takeAndDispatchEntryLocked(actionCtx, sessionID, entryID)
 		},
+		cancellationKindPeer,
 	)
 }
 
@@ -5183,8 +5185,8 @@ func (s *Service) QueueAndInterruptForPeerMessage(ctx context.Context, taskID, s
 		return nil, false, err
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	if s.isCancelInFlight(sessionID) {
-		s.logger.Debug("leaving peer message queued while cancellation is in progress",
+	if operation := s.currentCancellation(sessionID); operation != nil && operation.kind != cancellationKindPeer {
+		s.logger.Debug("leaving peer message queued while a different cancellation source is in progress",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("queue_id", queued.ID))
