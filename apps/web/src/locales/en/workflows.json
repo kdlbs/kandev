@@ -184,6 +184,8 @@
   "workflowPrompt": "Workflow Prompt",
   "workflowPromptHelp": "Optional instructions included at every step entry, before the step prompt. Leave empty to disable. Visible to the agent and shown collapsed in chat.",
   "workflowPromptPlaceholder": "Always open a draft PR and mention security constraints…",
+  "workflowPromptCollapsedHint": "Optional — expand to add shared step-entry instructions",
+  "workflowPromptSetHint": "Configured — expand to edit",
   "workflowInstructionsCollapsed": "Workflow instructions",
   "stepPrompt": "Step Prompt",
   "stepPromptHelp": "Custom instructions for the agent on this step. Use {{taskPrompt}} to include the task description.",

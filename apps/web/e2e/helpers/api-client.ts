@@ -945,7 +945,7 @@ export class ApiClient {
 
   async updateWorkflow(
     workflowId: string,
-    updates: { name?: string; description?: string; agent_profile_id?: string },
+    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
   ): Promise<Workflow> {
     return this.request("PATCH", `/api/v1/workflows/${workflowId}`, updates);
   }
