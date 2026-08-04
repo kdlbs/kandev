@@ -112,13 +112,27 @@ function preserveTerminalSelection(
   const active = state.terminalTabs.find((tab) => tab.tabId === state.activeTerminalTabId);
   if (active) return { ...state, sessions };
 
-  const previousWorkspaceId = state.terminalTabs.find(
-    (tab) => tab.tabId === state.activeTerminalTabId,
-  )?.workspaceId;
+  const previousWorkspaceId =
+    Object.entries(state.lastTerminalTabIdByWorkspace).find(
+      ([, tabId]) => tabId === state.activeTerminalTabId,
+    )?.[0] ??
+    state.terminalTabs.find((tab) => tab.tabId === state.activeTerminalTabId)?.workspaceId;
   const terminal = state.terminalTabs.find(
     (tab) => !previousWorkspaceId || tab.workspaceId === previousWorkspaceId,
   );
-  if (!terminal) return null;
+  if (!terminal) {
+    const conversation =
+      sessions.find((session) => session.workspaceId === previousWorkspaceId) ??
+      sessions.find((session) => session.sessionId === state.activeSessionId) ??
+      sessions[0];
+    return {
+      ...state,
+      sessions,
+      activeKind: "conversation",
+      activeSessionId: conversation?.sessionId ?? null,
+      isOpen: conversation ? state.isOpen : false,
+    };
+  }
   return {
     ...state,
     sessions,

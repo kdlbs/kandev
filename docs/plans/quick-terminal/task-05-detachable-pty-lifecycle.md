@@ -25,10 +25,10 @@ spec: "../../specs/quick-terminal/spec.md"
 From the repository worktree:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run components/settings/pty-terminal-view.test.tsx components/quick-chat/quick-terminal-tab-view.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web exec eslint components/settings/pty-terminal-view.tsx components/settings/pty-terminal-view.test.tsx components/settings/pty-terminal-dialog.tsx components/quick-chat/quick-terminal-tab-view.tsx components/quick-chat/quick-terminal-tab-view.test.tsx lib/api/domains/settings-api.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run components/settings/pty-terminal-view.test.tsx components/quick-chat/quick-terminal-tab-view.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web exec eslint components/settings/pty-terminal-view.tsx components/settings/pty-terminal-view.test.tsx components/settings/pty-terminal-dialog.tsx components/quick-chat/quick-terminal-tab-view.tsx components/quick-chat/quick-terminal-tab-view.test.tsx lib/api/domains/settings-api.ts)
 ```
 
 ## Files likely touched
@@ -92,6 +92,6 @@ replace `## Results` before marking it `done`.
   reusable `PtyTerminalView`; standard dialogs retain stop-on-unmount and Quick Chat terminals
   explicitly detach.
 - Added the Quick Chat terminal wrapper and lightweight pending-start cancellation contract.
-- `cd apps && pnpm --filter @kandev/web exec vitest run components/settings/pty-terminal-view.test.tsx components/quick-chat/quick-terminal-tab-view.test.tsx lib/api/domains/settings-api.test.ts --reporter=verbose` — 3 files, 9 tests passed.
+- `cd apps && pnpm --filter @kandev/web exec vitest run components/settings/pty-terminal-view.test.tsx components/quick-chat/quick-terminal-tab-view.test.tsx lib/api/domains/settings-api.test.ts --reporter=verbose` — 3 files, 12 tests passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - Focused PTY/API ESLint — passed with no warnings.

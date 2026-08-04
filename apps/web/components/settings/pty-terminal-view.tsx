@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type MutableRefObject, type RefObject } from "react";
+import { useEffect, useRef, type MutableRefObject } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -73,10 +73,10 @@ function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAd
 
 function wireResize(
   container: HTMLDivElement,
-  fitRef: RefObject<FitAddon | null>,
-  termRef: RefObject<Terminal | null>,
-  sessionIdRef: RefObject<string | null>,
-  wsRef: RefObject<WebSocket | null>,
+  fitRef: MutableRefObject<FitAddon | null>,
+  termRef: MutableRefObject<Terminal | null>,
+  sessionIdRef: MutableRefObject<string | null>,
+  wsRef: MutableRefObject<WebSocket | null>,
 ): ResizeObserver {
   const observer = new ResizeObserver(() => {
     if (!fitRef.current || !termRef.current) return;
@@ -110,7 +110,6 @@ function openSessionWebSocket(
   term: Terminal,
   initialInput: string | undefined,
   report: (state: PtyTerminalState) => void,
-  sessionIdRef: RefObject<string | null>,
 ): WebSocket {
   const ws = new WebSocket(agentLoginStreamUrl(sessionId));
   ws.binaryType = "arraybuffer";
@@ -136,9 +135,6 @@ function openSessionWebSocket(
       error: translate("agents:ptyConnectionError"),
     });
   };
-  ws.onclose = () => {
-    if (sessionIdRef.current === null) sessionIdRef.current = sessionId;
-  };
   if (initialInput) {
     ws.addEventListener("open", () => ws.send(new TextEncoder().encode(initialInput)), {
       once: true,
@@ -163,15 +159,21 @@ type MountArgs = {
   mountGenerationRef: MutableRefObject<number>;
 };
 
+type LateStartContext = {
+  mountGeneration: number;
+  currentGeneration: number;
+  hasAttachIdentity: boolean;
+};
+
 function shouldStopLateStart(
   lifecycle: PtyTerminalLifecycle,
   pending: PendingPtyStart | null,
   cancelled: boolean,
-  mountGeneration: number,
-  currentGeneration: number,
+  context: LateStartContext,
 ): boolean {
   if (pending?.cancelled) return true;
-  return lifecycle === "stop-on-unmount" && cancelled && mountGeneration === currentGeneration;
+  if (lifecycle !== "stop-on-unmount" || !cancelled) return false;
+  return !context.hasAttachIdentity || context.mountGeneration === context.currentGeneration;
 }
 
 function registerPendingStart(ownerId?: string): PendingPtyStart | null {
@@ -204,13 +206,11 @@ async function stopIfLateStart(
   mountGeneration: number,
   sessionId: string,
 ): Promise<boolean> {
-  const shouldStop = shouldStopLateStart(
-    args.lifecycle,
-    pending,
-    cancelled,
+  const shouldStop = shouldStopLateStart(args.lifecycle, pending, cancelled, {
     mountGeneration,
-    args.mountGenerationRef.current,
-  );
+    currentGeneration: args.mountGenerationRef.current,
+    hasAttachIdentity: Boolean(args.ownerId ?? args.initialSessionId),
+  });
   if (!shouldStop) return false;
   await stopAgentLogin(sessionId).catch(() => undefined);
   return true;
@@ -234,7 +234,6 @@ function reportSession(
     term,
     isAttached ? undefined : args.initialInput,
     args.report,
-    args.sessionIdRef,
   );
 }
 
@@ -259,12 +258,13 @@ async function attachOrStart(args: MountArgs, cancelledRef: { value: boolean }):
 
   try {
     const session = await resolveSession(args, term, isAttached);
-    clearPendingStart(args.ownerId, pending);
     if (
       await stopIfLateStart(args, pending, cancelledRef.value, mountGeneration, session.session_id)
     ) {
+      clearPendingStart(args.ownerId, pending);
       return;
     }
+    clearPendingStart(args.ownerId, pending);
     // A detached mount that finished after cleanup leaves the session alive
     // for its tab owner, but must not attach a WebSocket or xterm instance to
     // the disposed StrictMode generation. A later mount will reattach through

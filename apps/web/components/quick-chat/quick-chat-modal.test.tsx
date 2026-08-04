@@ -128,7 +128,7 @@ vi.mock("./use-quick-chat-modal", () => ({
     },
     sessionToClose: null,
     setupKey: 0,
-    activeSessionNeedsAgent: false,
+    activeSessionNeedsAgent: true,
     pendingAgentId: null,
     setActiveQuickChatSession: handleSetActiveSession,
     setSessionToClose: vi.fn(),
@@ -159,6 +159,8 @@ describe("QuickChatModal mixed tabs", () => {
 
     expect(screen.getByTestId("quick-chat-dialog")).toBeTruthy();
     expect(screen.queryByTestId("quick-chat-session-view")).toBeNull();
+    expect(screen.queryByTestId("quick-chat-setup")).toBeNull();
+    expect(screen.getByTestId("quick-chat-tab").className).toContain("text-muted-foreground");
     expect(screen.getByTestId("mock-quick-terminal-view").getAttribute("data-tab-id")).toBe(
       "terminal-1",
     );

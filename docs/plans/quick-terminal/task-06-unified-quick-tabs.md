@@ -28,12 +28,12 @@ spec: "../../specs/quick-terminal/spec.md"
 From the repository worktree:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/ui/quick-chat-actions.test.ts lib/state/slices/ui/quick-chat-sync.test.ts lib/state/hydration/hydrator.test.ts components/quick-chat/quick-chat-modal.test.ts components/quick-chat/quick-tab-add-menu.test.tsx hooks/use-quick-chat-launcher.test.ts hooks/use-quick-terminal-launcher.test.ts components/app-sidebar/app-sidebar-new-task-item.test.tsx components/kanban/kanban-header-mobile.test.tsx
-cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web exec eslint components/quick-chat/quick-chat-modal.tsx components/quick-chat/quick-chat-tab-item.tsx components/quick-chat/quick-tab-add-menu.tsx components/quick-chat/quick-chat-provider.tsx hooks/use-quick-chat-launcher.ts hooks/use-quick-terminal-launcher.ts components/app-sidebar/app-sidebar-new-task-item.tsx components/kanban/kanban-header.tsx components/kanban/kanban-header-mobile.tsx lib/state/slices/ui/types.ts lib/state/slices/ui/ui-slice.ts lib/state/slices/ui/quick-chat-sync.ts lib/state/default-state.ts lib/state/hydration/hydrator.ts app/layout.tsx src/app-shell.tsx
-cd apps && pnpm --filter @kandev/web run i18n:ratchet
-cd apps && pnpm --filter @kandev/web run i18n:check
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps && pnpm --filter @kandev/web exec vitest run lib/state/slices/ui/quick-chat-actions.test.ts lib/state/slices/ui/quick-chat-sync.test.ts lib/state/hydration/hydrator.test.ts components/quick-chat/quick-chat-modal.test.ts components/quick-chat/quick-tab-add-menu.test.tsx hooks/use-quick-chat-launcher.test.ts hooks/use-quick-terminal-launcher.test.ts components/app-sidebar/app-sidebar-new-task-item.test.tsx components/kanban/kanban-header-mobile.test.tsx)
+(cd apps/web && pnpm run typecheck)
+(cd apps && pnpm --filter @kandev/web exec eslint components/quick-chat/quick-chat-modal.tsx components/quick-chat/quick-chat-tab-item.tsx components/quick-chat/quick-tab-add-menu.tsx components/quick-chat/quick-chat-provider.tsx hooks/use-quick-chat-launcher.ts hooks/use-quick-terminal-launcher.ts components/app-sidebar/app-sidebar-new-task-item.tsx components/kanban/kanban-header.tsx components/kanban/kanban-header-mobile.tsx lib/state/slices/ui/types.ts lib/state/slices/ui/ui-slice.ts lib/state/slices/ui/quick-chat-sync.ts lib/state/default-state.ts lib/state/hydration/hydrator.ts app/layout.tsx src/app-shell.tsx)
+(cd apps && pnpm --filter @kandev/web run i18n:ratchet)
+(cd apps && pnpm --filter @kandev/web run i18n:check)
 ```
 
 ## Files likely touched

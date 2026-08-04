@@ -56,12 +56,7 @@ async function openHostShellStream(baseUrl: string, sessionId: string): Promise<
 }
 
 async function waitFor(check: () => boolean, timeoutMs: number, label: string) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    if (check()) return;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-  throw new Error(`Timed out waiting for ${label}`);
+  await expect.poll(check, { timeout: timeoutMs, message: `Wait for ${label}` }).toBe(true);
 }
 
 test.describe("host shell PTY", () => {
@@ -70,23 +65,27 @@ test.describe("host shell PTY", () => {
   }) => {
     test.setTimeout(15_000);
     const session = await startHostShell(backend.baseUrl);
-    expect(session.session_id).toBeTruthy();
-    expect(session.agent_id).toBe("_host_shell");
-    expect(session.running).toBe(true);
-    expect(session.cmd.length).toBeGreaterThan(0);
-
-    const stream = await openHostShellStream(backend.baseUrl, session.session_id);
     try {
-      stream.ws.send(new TextEncoder().encode("echo HELLO_FROM_HOST_SHELL\n"));
-      await waitFor(
-        () => stream.getOutput().includes("HELLO_FROM_HOST_SHELL"),
-        8_000,
-        "shell echo",
-      );
-      await stopHostShell(backend.baseUrl, session.session_id);
-      await waitFor(() => stream.hasExited(), 5_000, "legacy shell exit");
+      expect(session.session_id).toBeTruthy();
+      expect(session.agent_id).toBe("_host_shell");
+      expect(session.running).toBe(true);
+      expect(session.cmd.length).toBeGreaterThan(0);
+
+      const stream = await openHostShellStream(backend.baseUrl, session.session_id);
+      try {
+        stream.ws.send(new TextEncoder().encode("echo HELLO_FROM_HOST_SHELL\n"));
+        await waitFor(
+          () => stream.getOutput().includes("HELLO_FROM_HOST_SHELL"),
+          8_000,
+          "shell echo",
+        );
+        await stopHostShell(backend.baseUrl, session.session_id);
+        await waitFor(() => stream.hasExited(), 5_000, "legacy shell exit");
+      } finally {
+        stream.ws.close();
+      }
     } finally {
-      stream.ws.close();
+      await stopHostShell(backend.baseUrl, session.session_id);
     }
   });
 
@@ -97,36 +96,39 @@ test.describe("host shell PTY", () => {
     const clientA = "11111111-1111-4111-8111-111111111111";
     const clientB = "22222222-2222-4222-8222-222222222222";
     const first = await startHostShell(backend.baseUrl, clientA);
-    const sameClient = await startHostShell(backend.baseUrl, clientA);
-    const otherClient = await startHostShell(backend.baseUrl, clientB);
-    expect(sameClient.session_id).toBe(first.session_id);
-    expect(otherClient.session_id).not.toBe(first.session_id);
-    expect(otherClient.agent_id).toBe("_host_shell");
-
-    const streamA = await openHostShellStream(backend.baseUrl, first.session_id);
-    const streamB = await openHostShellStream(backend.baseUrl, otherClient.session_id);
+    let otherClient: HostShellSession | undefined;
+    let streamA: HostShellStream | undefined;
+    let streamB: HostShellStream | undefined;
     try {
+      const sameClient = await startHostShell(backend.baseUrl, clientA);
+      otherClient = await startHostShell(backend.baseUrl, clientB);
+      expect(sameClient.session_id).toBe(first.session_id);
+      expect(otherClient.session_id).not.toBe(first.session_id);
+      expect(otherClient.agent_id).toBe("_host_shell");
+
+      streamA = await openHostShellStream(backend.baseUrl, first.session_id);
+      streamB = await openHostShellStream(backend.baseUrl, otherClient.session_id);
       streamA.ws.send(new TextEncoder().encode("echo CLIENT_A_MARKER\n"));
       streamB.ws.send(new TextEncoder().encode("echo CLIENT_B_MARKER\n"));
-      await waitFor(() => streamA.getOutput().includes("CLIENT_A_MARKER"), 8_000, "client A");
-      await waitFor(() => streamB.getOutput().includes("CLIENT_B_MARKER"), 8_000, "client B");
+      await waitFor(() => streamA!.getOutput().includes("CLIENT_A_MARKER"), 8_000, "client A");
+      await waitFor(() => streamB!.getOutput().includes("CLIENT_B_MARKER"), 8_000, "client B");
       expect(streamA.getOutput()).not.toContain("CLIENT_B_MARKER");
       expect(streamB.getOutput()).not.toContain("CLIENT_A_MARKER");
 
       await stopHostShell(backend.baseUrl, first.session_id);
-      await waitFor(() => streamA.hasExited(), 5_000, "client A exit");
+      await waitFor(() => streamA!.hasExited(), 5_000, "client A exit");
       streamB.ws.send(new TextEncoder().encode("echo CLIENT_B_AFTER_A_STOP\n"));
       await waitFor(
-        () => streamB.getOutput().includes("CLIENT_B_AFTER_A_STOP"),
+        () => streamB!.getOutput().includes("CLIENT_B_AFTER_A_STOP"),
         8_000,
         "client B after A stop",
       );
       expect(streamB.hasExited()).toBe(false);
     } finally {
-      streamA.ws.close();
-      streamB.ws.close();
+      streamA?.ws.close();
+      streamB?.ws.close();
       await stopHostShell(backend.baseUrl, first.session_id);
-      await stopHostShell(backend.baseUrl, otherClient.session_id);
+      if (otherClient) await stopHostShell(backend.baseUrl, otherClient.session_id);
     }
   });
 
@@ -141,8 +143,11 @@ test.describe("host shell PTY", () => {
     expect(invalid.status).toBe(400);
 
     const first = await startHostShell(backend.baseUrl);
-    const second = await startHostShell(backend.baseUrl);
-    expect(second.session_id).toBe(first.session_id);
-    await stopHostShell(backend.baseUrl, first.session_id);
+    try {
+      const second = await startHostShell(backend.baseUrl);
+      expect(second.session_id).toBe(first.session_id);
+    } finally {
+      await stopHostShell(backend.baseUrl, first.session_id);
+    }
   });
 });

@@ -29,9 +29,9 @@ spec: "../../specs/quick-terminal/spec.md"
 From the repository worktree:
 
 ```bash
-cd apps && pnpm install --frozen-lockfile
-cd apps/web && pnpm e2e:run tests/terminal/quick-terminal.spec.ts tests/settings/host-shell-pty.spec.ts tests/chat/quick-chat.spec.ts
-cd apps/web && pnpm e2e:run --project mobile-chrome tests/terminal/mobile-quick-terminal.spec.ts tests/chat/mobile-quick-chat-entry.spec.ts
+(cd apps && pnpm install --frozen-lockfile)
+(cd apps/web && pnpm e2e:run tests/terminal/quick-terminal.spec.ts tests/settings/host-shell-pty.spec.ts tests/chat/quick-chat.spec.ts tests/chat/entity-reference-composer.spec.ts)
+(cd apps/web && pnpm e2e:run --project mobile-chrome tests/terminal/mobile-quick-terminal.spec.ts tests/chat/mobile-quick-chat-entry.spec.ts)
 ```
 
 Confirm both managed-runner invocations discover the intended test counts, rebuild the backend and
@@ -105,7 +105,7 @@ synchronized task/plan status. Set this task to `in_progress` before test edits 
 - Added Pixel 5 coverage for the shared full-height dialog, safe-area classes, 44px launch/menu
   targets, bottom-sheet geometry, internal terminal scrolling, close/reopen behavior, and zero
   document horizontal overflow; existing mobile Quick Chat entry scenarios remain green.
-- `cd apps/web && pnpm e2e:run tests/terminal/quick-terminal.spec.ts tests/settings/host-shell-pty.spec.ts tests/chat/quick-chat.spec.ts` — managed Docker runner rebuilt the backend and Vite assets; 15 tests passed.
+- `cd apps/web && pnpm e2e:run tests/terminal/quick-terminal.spec.ts tests/settings/host-shell-pty.spec.ts tests/chat/quick-chat.spec.ts tests/chat/entity-reference-composer.spec.ts` — managed Docker runner rebuilt the backend and Vite assets; 20 tests passed.
 - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/terminal/mobile-quick-terminal.spec.ts tests/chat/mobile-quick-chat-entry.spec.ts` — managed Docker runner rebuilt the backend and Vite assets; 5 tests passed.
 - Both managed runners completed their worker teardown, including the temporary remote fixture
   repositories and worker-scoped backend/host-shell processes; no failure artifacts remained.

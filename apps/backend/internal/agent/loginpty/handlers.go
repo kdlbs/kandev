@@ -2,6 +2,8 @@ package loginpty
 
 import (
 	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -112,7 +114,10 @@ const hostShellAgentID = "_host_shell"
 // same stop/resize/stream endpoints.
 func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	var req startRequest
-	_ = c.ShouldBindJSON(&req)
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		return
+	}
 
 	managerKey := hostShellAgentID
 	if len(req.ClientID) > 0 {

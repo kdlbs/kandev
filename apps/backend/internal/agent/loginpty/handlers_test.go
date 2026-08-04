@@ -116,3 +116,27 @@ func TestHostShellClientIDValidationAndLegacySingleton(t *testing.T) {
 		t.Fatalf("legacy repeated start id = %q, want %q", second.ID, first.ID)
 	}
 }
+
+func TestHostShellRejectsMalformedJSON(t *testing.T) {
+	mgr := newTestManager(t, nil)
+	router := newHostShellRouter(t, mgr)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/host-shell/start",
+		bytes.NewBufferString(`{"client_id":`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, req)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("malformed body status = %d, want %d", response.Code, http.StatusBadRequest)
+	}
+	mgr.mu.Lock()
+	activeSessions := len(mgr.sessions)
+	mgr.mu.Unlock()
+	if activeSessions != 0 {
+		t.Fatal("malformed body started a host shell session")
+	}
+}

@@ -2,7 +2,7 @@
 spec: docs/specs/quick-terminal/spec.md
 created: 2026-08-03
 updated: 2026-08-04
-status: draft
+status: completed
 ---
 
 # Implementation Plan: Quick Chat and Terminal Tabs
@@ -16,8 +16,8 @@ tab surface. The backend first gains per-tab idempotent host-shell sessions, the
 separates reusable PTY rendering from stop-on-dialog-close ownership, adds browser-local terminal
 tab state, and replaces the Quick Chat plus action with the grouped add/switch menu.
 
-Tasks 01–03 remain the completed record of the shipped baseline. Tasks 04–07 are the pending
-implementation package for this revision.
+Tasks 01–03 remain the completed record of the shipped baseline. Tasks 04–07 complete this
+revision's backend, lifecycle, shared-tab, and viewport verification work.
 
 ## Backend
 
@@ -240,7 +240,7 @@ implementation package for this revision.
 ## Verification Results
 
 Completed. Tasks 04–06 record the backend, lifecycle, state, UI, typecheck, lint, and i18n
-results. Task 07 records the final managed desktop run (15 passed) and Pixel 5 run (5 passed),
+results. Task 07 records the final managed desktop run (20 passed) and Pixel 5 run (5 passed),
 including backend/Vite rebuilds and worker teardown evidence.
 
 ## Implementation Waves And Parallel Candidates

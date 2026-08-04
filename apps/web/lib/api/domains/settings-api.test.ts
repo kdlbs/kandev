@@ -126,4 +126,11 @@ describe("startHostShell", () => {
       client_id: clientId,
     });
   });
+
+  it("preserves the legacy request shape without a client id", async () => {
+    await startHostShell({ cols: 80, rows: 24 });
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    expect(JSON.parse(String(fetchCall?.[1]?.body))).toEqual({ cols: 80, rows: 24 });
+  });
 });

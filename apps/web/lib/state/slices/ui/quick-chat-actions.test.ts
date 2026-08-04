@@ -257,4 +257,18 @@ describe("quick terminal tabs", () => {
     store.getState().closeQuickChatSession(SESSION_A);
     expect(store.getState().quickChat.isOpen).toBe(false);
   });
+
+  it("keeps the terminal selected when its retained conversation closes", () => {
+    const store = makeStore();
+    const actions = withTerminalActions(store);
+    store.getState().openQuickChat(SESSION_A, WORKSPACE_A, undefined, "chat");
+    store.getState().openQuickChat(SESSION_B, WORKSPACE_A, undefined, "chat");
+    const terminalId = actions.createQuickTerminal(WORKSPACE_A);
+
+    store.getState().closeQuickChatSession(SESSION_B);
+
+    expect(terminalState(store).activeKind).toBe("terminal");
+    expect(terminalState(store).activeTerminalTabId).toBe(terminalId);
+    expect(store.getState().quickChat.isOpen).toBe(true);
+  });
 });

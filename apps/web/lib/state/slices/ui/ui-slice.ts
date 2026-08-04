@@ -416,7 +416,12 @@ function buildQuickChatActions(set: ImmerSet) {
         draft.quickChat.sessions = draft.quickChat.sessions.filter(
           (session) => session.sessionId !== sessionId,
         );
-        if (draft.quickChat.activeSessionId !== sessionId) return;
+        if (
+          draft.quickChat.activeKind !== "conversation" ||
+          draft.quickChat.activeSessionId !== sessionId
+        ) {
+          return;
+        }
         const nextSession = draft.quickChat.sessions.find(
           (session) => session.workspaceId === closingSession?.workspaceId,
         );

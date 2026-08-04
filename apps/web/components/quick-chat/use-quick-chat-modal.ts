@@ -89,7 +89,12 @@ function useWorkspaceQuickChat(store: QuickChatStore) {
     ) {
       store.closeQuickChat();
     }
-    if (store.isOpen && store.activeKind === "terminal" && !activeTerminalTab) {
+    if (
+      store.isOpen &&
+      store.activeKind === "terminal" &&
+      store.activeTerminalTabId &&
+      !activeTerminalTab
+    ) {
       store.closeQuickChat();
     }
   }, [activeSession, activeTerminalTab, store]);

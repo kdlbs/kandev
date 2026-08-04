@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, type CSSProperties } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogTitle } from "@kandev/ui/dialog";
 import { Button } from "@kandev/ui/button";
 import { IconX } from "@tabler/icons-react";
@@ -18,7 +19,6 @@ import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
 import type { QuickChatSession, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
-import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 
 const QuickTerminalTabView = dynamic(
@@ -76,7 +76,7 @@ function QuickChatTabs({
             <QuickChatTabItem
               key={s.sessionId || `new-${index}`}
               name={tabName}
-              isActive={s.sessionId === activeSessionId}
+              isActive={activeKind === "conversation" && s.sessionId === activeSessionId}
               isRenameable={!isQuickChatSetupSessionId(s.sessionId)}
               kind={s.kind}
               onActivate={() => onTabChange(s.sessionId)}
@@ -115,7 +115,7 @@ function QuickChatTabs({
         variant="ghost"
         className="h-11 w-11 shrink-0 cursor-pointer p-0 sm:hidden"
         onClick={onCloseModal}
-        aria-label={t("chat:closeQuickChat")}
+        aria-label={t("sidebar:quickChatClose")}
         data-testid="quick-chat-close"
       >
         <IconX className="h-3.5 w-3.5" />
@@ -182,28 +182,32 @@ function QuickChatContent({
             }
           />
         )}
-      {quickChat.activeSessionNeedsAgent && setupKind === "chat" && (
-        <QuickChatSetup
-          key={`${workspaceId}:${quickChat.setupKey}`}
-          workspaceId={workspaceId}
-          canCreateConfigurationChat={canCreateConfigurationChat}
-          pendingAgentId={quickChat.pendingAgentId}
-          onStart={quickChat.handleSelectAgent}
-          onCancel={() => quickChat.handleOpenChange(false)}
-          onKindChange={quickChat.handleSetupKindChange}
-        />
-      )}
-      {quickChat.activeSessionNeedsAgent && setupKind === "config" && (
-        <ConfigChatSetup
-          key={`${workspaceId}:config:${quickChat.setupKey}`}
-          defaultProfileId={configChat.defaultProfileId}
-          isStarting={configChat.isStarting}
-          error={configChat.error}
-          onStart={(profileId, prompt) => configChat.startSession(profileId, prompt)}
-          onCancel={() => quickChat.handleOpenChange(false)}
-          onKindChange={quickChat.handleSetupKindChange}
-        />
-      )}
+      {quickChat.activeKind === "conversation" &&
+        quickChat.activeSessionNeedsAgent &&
+        setupKind === "chat" && (
+          <QuickChatSetup
+            key={`${workspaceId}:${quickChat.setupKey}`}
+            workspaceId={workspaceId}
+            canCreateConfigurationChat={canCreateConfigurationChat}
+            pendingAgentId={quickChat.pendingAgentId}
+            onStart={quickChat.handleSelectAgent}
+            onCancel={() => quickChat.handleOpenChange(false)}
+            onKindChange={quickChat.handleSetupKindChange}
+          />
+        )}
+      {quickChat.activeKind === "conversation" &&
+        quickChat.activeSessionNeedsAgent &&
+        setupKind === "config" && (
+          <ConfigChatSetup
+            key={`${workspaceId}:config:${quickChat.setupKey}`}
+            defaultProfileId={configChat.defaultProfileId}
+            isStarting={configChat.isStarting}
+            error={configChat.error}
+            onStart={(profileId, prompt) => configChat.startSession(profileId, prompt)}
+            onCancel={() => quickChat.handleOpenChange(false)}
+            onKindChange={quickChat.handleSetupKindChange}
+          />
+        )}
     </>
   );
 }

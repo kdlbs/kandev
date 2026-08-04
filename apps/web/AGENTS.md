@@ -72,6 +72,16 @@ lib/api/domains/                    # API clients
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
+Quick Chat owns two kinds of browser-visible tabs. Server-backed conversation
+tabs remain in `quickChat.sessions`; browser-local terminal descriptors live in
+`quickChat.terminalTabs` with `activeKind`, `activeTerminalTabId`, and
+`lastTerminalTabIdByWorkspace` tracking terminal selection. Terminal actions in
+`lib/state/slices/ui/quick-terminal-actions.ts` create/reuse, activate, update,
+and remove PTYs, including same-workspace fallback. Terminal descriptors are
+never sent through Quick Chat conversation rename/delete/sync APIs; explicit
+terminal removal owns stopping the PTY, while server conversation reconciliation
+must preserve the local terminal descriptors and per-workspace selection.
+
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
 For rebasing or finishing PRs written against the old Next.js runtime, follow [`docs/nextjs-spa-migration.md`](../../docs/nextjs-spa-migration.md).

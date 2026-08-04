@@ -109,14 +109,12 @@ func TestStartWithKey_SeparatesUniquenessFromPublicAgentID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first start: %v", err)
 	}
+	t.Cleanup(func() { first.stop() })
 	second, err := mgr.StartWithKey("_host_shell:tab-b", "_host_shell", []string{"sh", "-c", "sleep 30"}, 80, 24)
 	if err != nil {
 		t.Fatalf("second start: %v", err)
 	}
-	t.Cleanup(func() {
-		first.stop()
-		second.stop()
-	})
+	t.Cleanup(func() { second.stop() })
 
 	if first.ID == second.ID {
 		t.Fatalf("distinct manager keys reused session %q", first.ID)

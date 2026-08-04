@@ -183,7 +183,7 @@ async function openQuickChatWithAgent(page: Page): Promise<{
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
     await dialog.getByTestId("quick-chat-add-menu-trigger").click();
-    await testPage.getByTestId("quick-chat-new-agent").click();
+    await page.getByTestId("quick-chat-new-agent").click();
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
 

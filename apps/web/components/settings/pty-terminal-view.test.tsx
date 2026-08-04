@@ -30,7 +30,9 @@ const mocks = vi.hoisted(() => {
       this.readyState = MockWebSocket.CLOSED;
       this.onclose?.();
     });
-    addEventListener = vi.fn();
+    addEventListener = vi.fn((type: string, listener: EventListener) => {
+      if (type === "open") queueMicrotask(() => listener(new Event("open")));
+    });
 
     constructor() {
       sockets.push(this);
@@ -182,6 +184,29 @@ describe("PtyTerminalView lifecycle races", () => {
     view.unmount();
   });
 
+  it("stops a superseded StrictMode start in the standard dialog lifecycle", async () => {
+    const resolvers: Array<(value: typeof session) => void> = [];
+    const start = vi.fn(
+      () =>
+        new Promise<typeof session>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const view = render(
+      <StrictMode>
+        <PtyTerminalView startSession={start} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(2));
+    await act(async () => resolvers[0]?.(session));
+    await waitFor(() => expect(mocks.stopAgentLogin).toHaveBeenCalledWith("session-1"));
+
+    await act(async () => resolvers[1]?.(session));
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    view.unmount();
+  });
+
   it("reports a WebSocket exit without replacing the terminal session", async () => {
     const onStateChange = vi.fn();
     const view = render(
@@ -228,5 +253,36 @@ describe("PtyTerminalView lifecycle races", () => {
     expect(start).not.toHaveBeenCalled();
     expect(mocks.sockets).toHaveLength(0);
     view.unmount();
+  });
+});
+
+describe("PtyTerminalView initial input", () => {
+  it("sends initial input only when a new session is started", async () => {
+    const view = render(
+      <PtyTerminalView startSession={startSession} initialInput={"echo NEW_SESSION\n"} />,
+    );
+
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    await waitFor(() =>
+      expect(mocks.sockets[0]?.send).toHaveBeenCalledWith(
+        new TextEncoder().encode("echo NEW_SESSION\n"),
+      ),
+    );
+    view.unmount();
+
+    mocks.sockets.length = 0;
+    mocks.getAgentLoginStatus.mockResolvedValueOnce(session);
+    const attached = render(
+      <PtyTerminalView
+        startSession={startSession}
+        sessionId="session-1"
+        lifecycle="detach-on-unmount"
+        initialInput={"echo SHOULD_NOT_SEND\n"}
+      />,
+    );
+
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    expect(mocks.sockets[0]?.send).not.toHaveBeenCalled();
+    attached.unmount();
   });
 });

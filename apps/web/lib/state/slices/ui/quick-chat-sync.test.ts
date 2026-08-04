@@ -16,6 +16,7 @@ vi.mock("@/lib/local-storage", () => ({
 const WS = "ws-1";
 const OTHER_WS = "ws-2";
 const SETUP_ID = getQuickChatSetupSessionId(WS, "chat");
+const STALE_TERMINAL_ID = "stale-terminal";
 
 function chat(sessionId: string, overrides: Partial<QuickChatSession> = {}): QuickChatSession {
   return {
@@ -200,6 +201,67 @@ describe("reconcileQuickChatSessions — selection preservation", () => {
     expect(after.activeKind).toBe("terminal");
     expect(after.activeTerminalTabId).toBe(terminal.tabId);
     expect(after.isOpen).toBe(true);
+  });
+});
+
+describe("reconcileQuickChatSessions — stale terminal recovery", () => {
+  it("recovers a stale terminal selection within its previous workspace", () => {
+    const workspaceTerminal: QuickTerminalTab = {
+      tabId: "terminal-a",
+      workspaceId: WS,
+      sessionId: "pty-a",
+      sequence: 1,
+      status: "running",
+    };
+    const otherWorkspaceTerminal: QuickTerminalTab = {
+      ...workspaceTerminal,
+      tabId: "terminal-b",
+      workspaceId: OTHER_WS,
+    };
+    const before = state([chat("chat-a")], {
+      activeKind: "terminal",
+      activeSessionId: "chat-a",
+      activeTerminalTabId: STALE_TERMINAL_ID,
+      terminalTabs: [otherWorkspaceTerminal, workspaceTerminal],
+      lastTerminalTabIdByWorkspace: {
+        [WS]: STALE_TERMINAL_ID,
+        [OTHER_WS]: otherWorkspaceTerminal.tabId,
+      },
+    });
+
+    const after = reconcileQuickChatSessions(before, WS, [chat("chat-a")]);
+
+    expect(after.activeKind).toBe("terminal");
+    expect(after.activeTerminalTabId).toBe(workspaceTerminal.tabId);
+  });
+
+  it("switches back to conversation mode when a stale terminal has no replacement", () => {
+    const before = state([chat("chat-a")], {
+      activeKind: "terminal",
+      activeSessionId: "chat-a",
+      activeTerminalTabId: STALE_TERMINAL_ID,
+      lastTerminalTabIdByWorkspace: { [WS]: STALE_TERMINAL_ID },
+    });
+
+    const after = reconcileQuickChatSessions(before, WS, [chat("chat-a")]);
+
+    expect(after.activeKind).toBe("conversation");
+    expect(after.activeSessionId).toBe("chat-a");
+  });
+
+  it("closes when stale terminal recovery has no conversation or terminal left", () => {
+    const before = state([], {
+      isOpen: true,
+      activeKind: "terminal",
+      activeTerminalTabId: STALE_TERMINAL_ID,
+      lastTerminalTabIdByWorkspace: { [WS]: STALE_TERMINAL_ID },
+    });
+
+    const after = reconcileQuickChatSessions(before, WS, []);
+
+    expect(after.activeKind).toBe("conversation");
+    expect(after.activeSessionId).toBeNull();
+    expect(after.isOpen).toBe(false);
   });
 });
 

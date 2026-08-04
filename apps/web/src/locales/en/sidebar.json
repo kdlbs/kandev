@@ -61,6 +61,7 @@
   "quickChatTerminals": "Terminals",
   "quickChatNewAgent": "New Agent",
   "quickChatNewTerminal": "New Terminal",
+  "quickChatClose": "Close quick chat",
   "quickChatTerminalTab_one": "Terminal {{count}}",
   "quickChatTerminalTab_other": "Terminal {{count}}",
   "quickChatCloseTerminal_one": "Close Terminal {{count}}",
