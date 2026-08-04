@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -46,8 +47,20 @@ func TestACPDBGBurstHelperProcess(t *testing.T) {
 	}
 	notifications, _ := strconv.Atoi(os.Getenv(burstHelperEnv + "_COUNT"))
 
+	// A wedged agent: never reads stdin, just writes notifications forever.
+	if mode == "flood" {
+		w := bufio.NewWriter(os.Stdout)
+		for {
+			_, _ = fmt.Fprintln(w, `{"jsonrpc":"2.0","method":"session/update"}`)
+			if err := w.Flush(); err != nil {
+				return
+			}
+		}
+	}
+
+	// emit flushes every line, so there is no deferred flush to lose when a
+	// scripted death calls os.Exit.
 	out := bufio.NewWriter(os.Stdout)
-	defer func() { _ = out.Flush() }()
 	emit := func(line string) {
 		_, _ = fmt.Fprintln(out, line)
 		_ = out.Flush()
@@ -78,6 +91,14 @@ func TestACPDBGBurstHelperProcess(t *testing.T) {
 			emit(fmt.Sprintf(`{"jsonrpc":"2.0","id":%v,"result":{}}`, id))
 		case "session/prompt":
 			emit(chunk("ANSWER"))
+			if mode == "die-mid-prompt" {
+				// Die after accepting the prompt and streaming part of the
+				// answer, so the caller is waiting on a response that will
+				// never come. Exiting is what closes the pipe: returning would
+				// leave the test binary finishing its own run with stdout still
+				// open, and the caller would hit its deadline instead.
+				os.Exit(0)
+			}
 			emit(fmt.Sprintf(`{"jsonrpc":"2.0","id":%v,"result":{"stopReason":"end_turn"}}`, id))
 		default:
 			emit(fmt.Sprintf(`{"jsonrpc":"2.0","id":%v,"result":{}}`, id))
@@ -133,6 +154,95 @@ func TestRequestSurvivesReplayBurst(t *testing.T) {
 	if left != 0 {
 		t.Fatalf("%d frames left queued after draining all %d", left, notifications)
 	}
+}
+
+// TestPromptReportsChildDeathInsteadOfSuccess pins that a prompt whose agent
+// dies mid-stream returns an error. The read loop closes the waiter, and a
+// receive from a closed channel yields a nil frame; without checking ok that
+// nil reads as a successful, empty response and the caller is told the prompt
+// worked.
+func TestPromptReportsChildDeathInsteadOfSuccess(t *testing.T) {
+	t.Setenv(burstHelperEnv, "die-mid-prompt")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	runner, err := NewRunner(ctx, filepath.Join(t.TempDir(), "frames.jsonl"), RunConfig{
+		AgentID: "dying-helper",
+		Command: burstHelperCommand(t),
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	t.Cleanup(func() { runner.Close("test cleanup") })
+
+	if _, err := sendInitialize(ctx, runner); err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	_, err = sendPromptAndCollect(ctx, runner, "s1", "are you there?")
+	if err == nil {
+		t.Fatal("prompt reported success after the agent died mid-stream")
+	}
+	// Must fail because the read loop closed the waiter, not because the
+	// caller's deadline expired — the latter would pass without the fix.
+	if !strings.Contains(err.Error(), "read loop exited") {
+		t.Fatalf("error = %v, want it to report the read loop exiting", err)
+	}
+
+	runner.mu.Lock()
+	pending := len(runner.pending)
+	runner.mu.Unlock()
+	if pending != 0 {
+		t.Fatalf("%d pending waiters left behind, want 0", pending)
+	}
+}
+
+// TestReadLoopStopsQueueingAfterShutdown pins that a wedged agent flooding
+// stdout cannot make us allocate indefinitely once shutdown starts. The queue
+// is unbounded, so the read loop has to stop on its own: nothing will ever
+// consume what it queues from that point.
+func TestReadLoopStopsQueueingAfterShutdown(t *testing.T) {
+	t.Setenv(burstHelperEnv, "flood")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runner, err := NewRunner(ctx, filepath.Join(t.TempDir(), "frames.jsonl"), RunConfig{
+		AgentID: "flood-helper",
+		Command: burstHelperCommand(t),
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+
+	// Let the flood get going, then start shutting down.
+	waitForOOBFrames(t, runner, 100)
+	runner.signalShutdown()
+
+	// The read loop should stop; the queue settles instead of growing without
+	// bound. Sample twice with a gap the flood would easily fill.
+	settled := oobLen(runner)
+	time.Sleep(300 * time.Millisecond)
+	if grown := oobLen(runner); grown != settled {
+		t.Fatalf("queue kept growing after shutdown: %d -> %d", settled, grown)
+	}
+	runner.Close("test cleanup")
+}
+
+func oobLen(r *Runner) int {
+	r.oobMu.Lock()
+	defer r.oobMu.Unlock()
+	return len(r.oobBuf)
+}
+
+func waitForOOBFrames(t *testing.T, r *Runner, want int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if oobLen(r) >= want {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d queued frames, got %d", want, oobLen(r))
 }
 
 // TestSessionLoadPromptExcludesReplayedHistory pins that a prompt issued after

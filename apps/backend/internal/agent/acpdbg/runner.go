@@ -451,13 +451,7 @@ func (r *Runner) readLoop() {
 		if err != nil {
 			// Fail any outstanding request waiters so Request() returns
 			// rather than blocking forever when the child dies.
-			r.mu.Lock()
-			r.readLoopEr = err
-			for id, ch := range r.pending {
-				close(ch)
-				delete(r.pending, id)
-			}
-			r.mu.Unlock()
+			r.failPending(err)
 			return
 		}
 		_ = r.rec.Received(frame)
@@ -471,8 +465,36 @@ func (r *Runner) readLoop() {
 		// orphaned responses) goes out of band. The queue is unbounded and
 		// never drops, so session/update chunks and agent-initiated requests
 		// survive a replay burst without stalling this loop.
+		//
+		// Stop once shutdown starts, though: nobody will read what we queue
+		// from here on, and a wedged child that floods stdout through the
+		// grace period would otherwise make us allocate everything it writes.
+		select {
+		case <-r.shutdownCh:
+			r.failPending(errShutdown)
+			return
+		default:
+		}
 		r.pushOOB(frame)
 	}
+}
+
+// errShutdown is what outstanding requests see when the read loop stops because
+// the runner is shutting down rather than because the child died.
+var errShutdown = errors.New("runner shutting down")
+
+// failPending closes every outstanding request waiter so callers return instead
+// of blocking on a child nobody is reading any more.
+func (r *Runner) failPending(err error) {
+	r.mu.Lock()
+	if r.readLoopEr == nil {
+		r.readLoopEr = err
+	}
+	for id, ch := range r.pending {
+		close(ch)
+		delete(r.pending, id)
+	}
+	r.mu.Unlock()
 }
 
 func (r *Runner) drainStderr(rc io.ReadCloser) {

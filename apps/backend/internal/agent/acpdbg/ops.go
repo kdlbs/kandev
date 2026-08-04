@@ -291,6 +291,13 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 	r.mu.Lock()
 	r.pending[promptID] = respCh
 	r.mu.Unlock()
+	// Every exit path drops the waiter, including the ones that give up before
+	// a response arrives, so the map does not accumulate dead entries.
+	defer func() {
+		r.mu.Lock()
+		delete(r.pending, promptID)
+		r.mu.Unlock()
+	}()
 
 	var text strings.Builder
 
@@ -328,7 +335,19 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 		drain(true)
 
 		select {
-		case resp := <-respCh:
+		case resp, ok := <-respCh:
+			if !ok {
+				// The read loop closed our waiter: the child died or the
+				// runner is shutting down. Without this check the nil frame
+				// would read as a successful, empty response.
+				r.mu.Lock()
+				readErr := r.readLoopEr
+				r.mu.Unlock()
+				if readErr == nil {
+					readErr = io.EOF
+				}
+				return text.String(), fmt.Errorf("read loop exited: %w", readErr)
+			}
 			// The read loop is serial and the agent emits every chunk before
 			// the response, so anything left queued belongs to this prompt.
 			drain(true)
