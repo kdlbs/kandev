@@ -220,3 +220,8 @@ cd apps && pnpm install --frozen-lockfile
 | [task-07-composer-steer-affordance](task-07-composer-steer-affordance.md) | 4 | 06 | done |
 | [task-08-mock-agent-and-e2e](task-08-mock-agent-and-e2e.md) | 5 | 04, 05, 07 | done |
 | [task-09-adr-and-verification](task-09-adr-and-verification.md) | 6 | all | done |
+
+## Assets
+
+- [`assets/mid-turn-steering-composer.png`](assets/mid-turn-steering-composer.png) — the
+  composer showing the steer-delivery affordance on a steer-eligible session.
