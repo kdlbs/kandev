@@ -152,30 +152,42 @@ function modelHostToken(document: URL): string {
   return WINDOWS_DRIVE_URI_PATH.test(document.pathname) ? "d" : "l";
 }
 
-/** Strip and verify the session qualifier before sending a model URI to an LSP server. */
-export function documentUriForModel(modelUri: string, sessionId: string): string | null {
+export type SessionModelIdentity = { documentUri: string; sessionId: string };
+
+/** Decode a browser-only Monaco model identity without choosing a task session. */
+export function parseSessionModelUri(modelUri: string): SessionModelIdentity | null {
   try {
     const parsed = new URL(modelUri);
-    const identity = parseModelIdentity(parsed, sessionId);
+    const identity = parseModelIdentity(parsed);
     if (!identity) return null;
-    return canonicalFileUri(`file://${identity.authority}/${identity.segments.join("/")}`);
+    const documentUri = canonicalFileUri(
+      `file://${identity.authority}/${identity.segments.join("/")}`,
+    );
+    return documentUri ? { documentUri, sessionId: identity.sessionId } : null;
   } catch {
     return null;
   }
 }
 
-type ModelIdentity = { authority: string; segments: string[] };
+/** Strip and verify the session qualifier before sending a model URI to an LSP server. */
+export function documentUriForModel(modelUri: string, sessionId: string): string | null {
+  const identity = parseSessionModelUri(modelUri);
+  return identity?.sessionId === sessionId ? identity.documentUri : null;
+}
 
-function parseModelIdentity(model: URL, sessionId: string): ModelIdentity | null {
+type ModelIdentity = { authority: string; segments: string[]; sessionId: string };
+
+function parseModelIdentity(model: URL): ModelIdentity | null {
   if (!hasModelUriEnvelope(model)) return null;
   const [sessionToken, hostToken, ...segments] = model.pathname
     .slice(MONACO_MODEL_PREFIX.length)
     .split("/");
   if (!sessionToken?.startsWith("s-") || !hostToken || !validModelSegments(segments)) return null;
-  if (decodeIdentityToken(sessionToken.slice(2)) !== sessionId) return null;
+  const sessionId = decodeIdentityToken(sessionToken.slice(2));
+  if (!sessionId) return null;
 
   const authority = decodeModelAuthority(hostToken, segments);
-  return authority === null ? null : { authority, segments };
+  return authority === null ? null : { authority, segments, sessionId };
 }
 
 function hasModelUriEnvelope(uri: URL): boolean {

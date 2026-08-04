@@ -4,9 +4,12 @@ import { modelUriForDocument } from "@/lib/lsp/file-uri";
 
 const getMonacoInstance = vi.hoisted(() => vi.fn());
 const APP_PATH = "src/app.ts";
+const ENCODED_APP_PATH = "src/app #1.ts";
 const MISSING_PATH = "src/missing.ts";
 const WORKTREE_PATH = "/worktree";
 const WORKTREE_APP_PATH = "/worktree/src/app.ts";
+const WORKSPACE_URI = "file:///workspace";
+const DOCUMENT_URI = `${WORKSPACE_URI}/${APP_PATH}`;
 const REPO = "frontend";
 const FIRST_SESSION_ID = "first-session";
 const SECOND_SESSION_ID = "second-session";
@@ -136,11 +139,14 @@ describe("scrollEditorIfMounted", () => {
     expect(editor.setPosition).not.toHaveBeenCalled();
     expect(consumePendingCursorPosition(MISSING_PATH)).toEqual({ line: 5, column: 1 });
   });
+});
+
+describe("scrollEditorIfMounted session model matching", () => {
+  afterEach(() => getMonacoInstance.mockReset());
 
   it("scrolls only the model owned by the requested task session", () => {
-    const documentUri = "file:///workspace/src/app.ts";
-    const firstModelUri = modelUriForDocument(documentUri, FIRST_SESSION_ID);
-    const secondModelUri = modelUriForDocument(documentUri, SECOND_SESSION_ID);
+    const firstModelUri = modelUriForDocument(DOCUMENT_URI, FIRST_SESSION_ID);
+    const secondModelUri = modelUriForDocument(DOCUMENT_URI, SECOND_SESSION_ID);
     const firstEditor = createEditor(new URL(firstModelUri).pathname, firstModelUri);
     const secondEditor = createEditor(new URL(secondModelUri).pathname, secondModelUri);
     getMonacoInstance.mockReturnValue({
@@ -148,13 +154,41 @@ describe("scrollEditorIfMounted", () => {
     });
 
     expect(
-      scrollEditorIfMounted(APP_PATH, "file:///workspace", 42, 3, {
+      scrollEditorIfMounted(APP_PATH, WORKSPACE_URI, 42, 3, {
         sessionId: SECOND_SESSION_ID,
       }),
     ).toBe(true);
 
     expect(firstEditor.setPosition).not.toHaveBeenCalled();
     expect(secondEditor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+  });
+
+  it("falls back to the sole session-qualified model for an unscoped caller", () => {
+    const documentUri = `${WORKSPACE_URI}/src/app%20%231.ts`;
+    const modelUri = modelUriForDocument(documentUri, FIRST_SESSION_ID);
+    const editor = createEditor(new URL(modelUri).pathname, modelUri);
+    getMonacoInstance.mockReturnValue({ editor: { getEditors: () => [editor] } });
+
+    expect(scrollEditorIfMounted(ENCODED_APP_PATH, WORKSPACE_URI, 42, 3)).toBe(true);
+
+    expect(editor.setPosition).toHaveBeenCalledWith({ lineNumber: 42, column: 3 });
+    expect(editor.revealLineInCenter).toHaveBeenCalledWith(42);
+    expect(editor.focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not choose between session-qualified models for an unscoped caller", () => {
+    const firstModelUri = modelUriForDocument(DOCUMENT_URI, FIRST_SESSION_ID);
+    const secondModelUri = modelUriForDocument(DOCUMENT_URI, SECOND_SESSION_ID);
+    const firstEditor = createEditor(new URL(firstModelUri).pathname, firstModelUri);
+    const secondEditor = createEditor(new URL(secondModelUri).pathname, secondModelUri);
+    getMonacoInstance.mockReturnValue({
+      editor: { getEditors: () => [firstEditor, secondEditor] },
+    });
+
+    expect(scrollEditorIfMounted(APP_PATH, WORKSPACE_URI, 42, 3)).toBe(false);
+
+    expect(firstEditor.setPosition).not.toHaveBeenCalled();
+    expect(secondEditor.setPosition).not.toHaveBeenCalled();
   });
 });
 
@@ -180,16 +214,15 @@ describe("useOpenFileAtLine", () => {
   });
 
   it("scrolls only the requested session-qualified model", () => {
-    const documentUri = "file:///workspace/src/app.ts";
-    const firstModelUri = modelUriForDocument(documentUri, FIRST_SESSION_ID);
-    const secondModelUri = modelUriForDocument(documentUri, SECOND_SESSION_ID);
+    const firstModelUri = modelUriForDocument(DOCUMENT_URI, FIRST_SESSION_ID);
+    const secondModelUri = modelUriForDocument(DOCUMENT_URI, SECOND_SESSION_ID);
     const firstEditor = createEditor(new URL(firstModelUri).pathname, firstModelUri);
     const secondEditor = createEditor(new URL(secondModelUri).pathname, secondModelUri);
     getMonacoInstance.mockReturnValue({
       editor: { getEditors: () => [firstEditor, secondEditor] },
     });
     const { result } = renderHook(() =>
-      useOpenFileAtLine(vi.fn(), 88, "file:///workspace", SECOND_SESSION_ID),
+      useOpenFileAtLine(vi.fn(), 88, WORKSPACE_URI, SECOND_SESSION_ID),
     );
 
     act(() => result.current(APP_PATH));

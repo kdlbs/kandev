@@ -8,10 +8,13 @@ import {
   fileUrisEqual,
   isSessionModelUri,
   joinFileUri,
+  parseSessionModelUri,
 } from "@/lib/lsp/file-uri";
 
 type CursorPosition = { line: number; column: number };
 type CodeMirrorCursorRevealer = (line: number, column: number) => boolean;
+type MonacoInstance = NonNullable<ReturnType<typeof getMonacoInstance>>;
+type MountedMonacoEditor = ReturnType<MonacoInstance["editor"]["getEditors"]>[number];
 
 const pendingCursorPositions = new Map<string, CursorPosition>();
 const codeMirrorCursorRevealers = new Map<
@@ -143,16 +146,101 @@ function editorModelMatchesTarget(
   context: ModelMatchContext,
 ): boolean {
   const { targetUri, sessionId, monacoPath, path, repo } = context;
-  if (targetUri && sessionId) {
-    const modelDocumentUri = documentUriForModel(model.uri.toString(), sessionId);
-    return modelDocumentUri !== null && fileUrisEqual(modelDocumentUri, targetUri);
+  const modelUriText = model.uri.toString();
+  if (sessionId) {
+    const modelDocumentUri = documentUriForModel(modelUriText, sessionId);
+    return modelDocumentUri !== null && sessionModelMatchesTarget(modelDocumentUri, context);
   }
 
-  const modelUri = canonicalFileUri(model.uri.toString());
-  if (targetUri && modelUri && !isSessionModelUri(model.uri.toString())) {
+  if (isSessionModelUri(modelUriText)) return false;
+  const modelUri = canonicalFileUri(modelUriText);
+  if (targetUri && modelUri) {
     return fileUrisEqual(modelUri, targetUri);
   }
   return editorModelMatches(model.uri.path, monacoPath, path, repo);
+}
+
+function decodedDocumentPath(documentUri: string): string | null {
+  try {
+    return new URL(documentUri).pathname
+      .split("/")
+      .map((segment) => decodeURIComponent(segment))
+      .join("/");
+  } catch {
+    return null;
+  }
+}
+
+function sessionModelMatchesTarget(documentUri: string, context: ModelMatchContext): boolean {
+  if (context.targetUri) return fileUrisEqual(documentUri, context.targetUri);
+  const modelPath = decodedDocumentPath(documentUri);
+  return (
+    modelPath !== null &&
+    editorModelMatches(modelPath, context.monacoPath, context.path, context.repo)
+  );
+}
+
+function revealMonacoEditor(editor: MountedMonacoEditor, line: number, column: number) {
+  editor.setPosition({ lineNumber: line, column });
+  editor.revealLineInCenter(line);
+  editor.focus();
+}
+
+function targetUriForPath(
+  worktreePath: string | null,
+  repo: string | undefined,
+  path: string,
+): string | null {
+  if (!worktreePath) return null;
+  try {
+    const workspaceUri = canonicalFileUri(worktreePath) ?? filePathToUri(worktreePath);
+    return joinFileUri(workspaceUri, repo, path);
+  } catch {
+    return null;
+  }
+}
+
+function findMountedMonacoEditor(
+  editors: MountedMonacoEditor[],
+  context: ModelMatchContext,
+): MountedMonacoEditor | null {
+  const sessionCandidates = new Map<string, MountedMonacoEditor>();
+  for (const editor of editors) {
+    const model = editor.getModel();
+    if (!model) continue;
+    if (context.sessionId === undefined) {
+      const identity = parseSessionModelUri(model.uri.toString());
+      if (identity && sessionModelMatchesTarget(identity.documentUri, context)) {
+        sessionCandidates.set(identity.sessionId, editor);
+        continue;
+      }
+    }
+    if (editorModelMatchesTarget(model, context)) return editor;
+  }
+  return sessionCandidates.size === 1 ? (sessionCandidates.values().next().value ?? null) : null;
+}
+
+function revealMountedMonaco(
+  path: string,
+  worktreePath: string | null,
+  line: number,
+  column: number,
+  scope: EditorFileScope,
+): boolean {
+  const monaco = getMonacoInstance();
+  if (!monaco) return false;
+  const { repo } = scope;
+  const context = {
+    targetUri: targetUriForPath(worktreePath, repo, path),
+    monacoPath: worktreePath ? `${worktreePath}/${repo ? `${repo}/` : ""}${path}` : path,
+    path,
+    ...scope,
+  };
+  const editor = findMountedMonacoEditor(monaco.editor.getEditors(), context);
+  if (!editor) return false;
+  consumePendingCursorPosition(path, repo, scope.sessionId);
+  revealMonacoEditor(editor, line, column);
+  return true;
 }
 
 export function scrollEditorIfMounted(
@@ -162,30 +250,6 @@ export function scrollEditorIfMounted(
   column: number,
   scope: EditorFileScope = {},
 ): boolean {
-  const { repo } = scope;
-  const monaco = getMonacoInstance();
-  if (monaco) {
-    let targetUri: string | null = null;
-    if (worktreePath) {
-      try {
-        const workspaceUri = canonicalFileUri(worktreePath) ?? filePathToUri(worktreePath);
-        targetUri = joinFileUri(workspaceUri, repo, path);
-      } catch {
-        targetUri = null;
-      }
-    }
-    const monacoPath = worktreePath ? `${worktreePath}/${repo ? `${repo}/` : ""}${path}` : path;
-    for (const editor of monaco.editor.getEditors()) {
-      const model = editor.getModel();
-      if (!model) continue;
-      if (editorModelMatchesTarget(model, { targetUri, monacoPath, path, ...scope })) {
-        consumePendingCursorPosition(path, repo, scope.sessionId);
-        editor.setPosition({ lineNumber: line, column });
-        editor.revealLineInCenter(line);
-        editor.focus();
-        return true;
-      }
-    }
-  }
-  return revealMountedCodeMirror(path, repo, scope.sessionId, line, column);
+  if (revealMountedMonaco(path, worktreePath, line, column, scope)) return true;
+  return revealMountedCodeMirror(path, scope.repo, scope.sessionId, line, column);
 }

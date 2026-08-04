@@ -8,6 +8,7 @@ import {
   joinFileUri,
   modelUriForDocument,
   documentUriForModel,
+  parseSessionModelUri,
   resolveFileUriInWorkspace,
 } from "./file-uri";
 
@@ -165,6 +166,10 @@ describe("LSP file URI workspace identity", () => {
     expect(isSessionModelUri(firstModel)).toBe(true);
     const monacoRoundTrip = MonacoUri.parse(firstModel).toString();
     expect(monacoRoundTrip).toBe(firstModel);
+    expect(parseSessionModelUri(monacoRoundTrip)).toEqual({
+      documentUri: canonicalFileUri(documentUri),
+      sessionId: "session/A",
+    });
     expect(documentUriForModel(monacoRoundTrip, "session/A")).toBe(canonicalFileUri(documentUri));
     expect(documentUriForModel(firstModel, "session/B")).toBeNull();
     expect(documentUriForModel(documentUri, "session/A")).toBeNull();
