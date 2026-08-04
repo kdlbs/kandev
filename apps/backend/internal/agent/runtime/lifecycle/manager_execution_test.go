@@ -952,9 +952,12 @@ func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.
 	}
 	mgr.secretStore = store
 	reader := &recoveryEnvironmentReader{
-		fakeExecutorProfileReader: fakeExecutorProfileReader{session: &models.TaskSession{
-			ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateStarting,
-		}},
+		fakeExecutorProfileReader: fakeExecutorProfileReader{
+			session: &models.TaskSession{ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateStarting},
+			profiles: map[string]*models.ExecutorProfile{
+				"executor-profile": {ID: "executor-profile", EnvVars: []models.ProfileEnvVar{{Key: "EXECUTOR_ONLY", Value: "executor-value"}}},
+			},
+		},
 		taskRepositories: []*models.TaskRepository{{RepositoryID: "repo-1"}},
 		repositories: map[string]*models.Repository{
 			"repo-1": {ID: "repo-1", WorkspaceID: "workspace-1", Name: "app", SecretBindings: []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "workspace-token"}}},
@@ -964,7 +967,8 @@ func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.
 
 	execution, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
 		SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
-		AgentID: "auggie", WorkspacePath: "/workspace/task-1",
+		ExecutorProfileID: "executor-profile",
+		AgentID:           "auggie", WorkspacePath: "/workspace/task-1",
 	})
 	if err != nil {
 		t.Fatalf("createExecution returned error: %v", err)
@@ -975,11 +979,32 @@ func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.
 	if got := backend.lastRequest.Env["PROFILE_ONLY"]; got != "profile-value" {
 		t.Fatalf("recovered profile env = %q, want profile value", got)
 	}
+	if got := backend.lastRequest.Env["EXECUTOR_ONLY"]; got != "executor-value" {
+		t.Fatalf("recovered executor env = %q, want executor value", got)
+	}
+	if got := reader.profileArgs; len(got) != 1 || got[0] != "executor-profile" {
+		t.Fatalf("executor profile lookups = %v, want [executor-profile]", got)
+	}
 	if got := backend.lastRequest.ApprovedSecretEnvKeys; len(got) != 1 || got[0] != "NPM_TOKEN" {
 		t.Fatalf("recovered SSH approvals = %#v, want NPM_TOKEN", got)
 	}
 	if got := execution.RuntimeEnvironment()["NPM_TOKEN"]; got != "repository-value" {
 		t.Fatalf("execution runtime NPM_TOKEN = %q, want repository value", got)
+	}
+}
+
+func TestWorkspaceProfileIDsKeepAgentAndExecutorProfilesDistinct(t *testing.T) {
+	info := &WorkspaceInfo{
+		AgentProfileID:     "office-agent-instance",
+		ExecutionProfileID: "cli-profile",
+		ExecutorProfileID:  "executor-profile",
+	}
+
+	if got := workspaceExecutionProfileID(info); got != "cli-profile" {
+		t.Fatalf("workspaceExecutionProfileID = %q, want cli-profile", got)
+	}
+	if got := workspaceExecutorProfileID(info); got != "executor-profile" {
+		t.Fatalf("workspaceExecutorProfileID = %q, want executor-profile", got)
 	}
 }
 

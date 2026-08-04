@@ -134,8 +134,8 @@ test.describe("Repository secrets", () => {
       );
     } finally {
       await apiClient.updateRepository(seedData.repositoryId, { secret_bindings: [] });
-      await apiClient.deleteSecret(workspace.id, seedData.workspaceId);
-      await apiClient.deleteSecret(global.id);
+      await apiClient.deleteSecretIfPresent(workspace.id, seedData.workspaceId);
+      await apiClient.deleteSecretIfPresent(global.id);
     }
   });
 

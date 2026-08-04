@@ -577,7 +577,7 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		return nil, err
 	}
 	managedReq.EnvironmentDefinitions = append(managedReq.EnvironmentDefinitions, definitions...)
-	executorDefinitions, err := m.executorProfileEnvironmentDefinitions(ctx, executionProfileID)
+	executorDefinitions, err := m.executorProfileEnvironmentDefinitions(ctx, workspaceExecutorProfileID(info))
 	if err != nil {
 		return nil, err
 	}
@@ -753,6 +753,13 @@ func workspaceExecutionProfileID(info *WorkspaceInfo) string {
 		return info.ExecutionProfileID
 	}
 	return info.AgentProfileID
+}
+
+func workspaceExecutorProfileID(info *WorkspaceInfo) string {
+	if info == nil {
+		return ""
+	}
+	return info.ExecutorProfileID
 }
 
 // rollbackRacedExecution tears down an execution that lost a session-conflict

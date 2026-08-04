@@ -104,7 +104,7 @@ test.describe("Mobile repository secrets", () => {
       await assertNoDocumentHorizontalOverflow(testPage, "reloaded mobile repository secrets");
     } finally {
       await apiClient.updateRepository(seedData.repositoryId, { secret_bindings: [] });
-      await apiClient.deleteSecret(workspaceSecret.id, seedData.workspaceId);
+      await apiClient.deleteSecretIfPresent(workspaceSecret.id, seedData.workspaceId);
     }
   });
 });

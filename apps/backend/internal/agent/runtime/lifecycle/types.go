@@ -847,6 +847,7 @@ type WorkspaceInfo struct {
 	WorkspaceID           string
 	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
 	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	ExecutorProfileID     string // Concrete executor profile selected for this execution
 	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
 	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")

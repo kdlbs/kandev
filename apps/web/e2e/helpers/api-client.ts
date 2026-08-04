@@ -745,6 +745,17 @@ export class ApiClient {
     }
   }
 
+  async deleteSecretIfPresent(secretId: string, workspaceId?: string): Promise<void> {
+    try {
+      await this.deleteSecret(secretId, workspaceId);
+    } catch (error) {
+      if (error instanceof Error && error.message.includes(" failed (404):")) {
+        return;
+      }
+      throw error;
+    }
+  }
+
   async updateRepository(
     repositoryId: string,
     updates: {
