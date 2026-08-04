@@ -823,7 +823,14 @@ jobs:
   build-desktop:
     name: Build desktop app (${{ matrix.platform }})
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     strategy:
       matrix:
         include:
@@ -1369,7 +1376,15 @@ jobs:
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1440,7 +1455,15 @@ jobs:
   docker-arm64:
     name: Build & push container image (arm64)
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1499,7 +1522,16 @@ jobs:
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-amd64.result == 'success' &&
+        needs.docker-arm64.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1553,7 +1585,15 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1605,7 +1645,15 @@ jobs:
   docker-universal-arm64:
     name: Build & push universal image (arm64)
     needs: [prepare, docker-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success'
+      }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1656,7 +1704,16 @@ jobs:
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-universal-amd64.result == 'success' &&
+        needs.docker-universal-arm64.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1713,7 +1770,17 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success' &&
+        needs.build-desktop.result == 'success' &&
+        needs.docker-universal-manifest.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release
@@ -1863,7 +1930,15 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1953,7 +2028,15 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

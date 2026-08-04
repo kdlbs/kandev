@@ -43,6 +43,18 @@ describe("pluginRegistry", () => {
     });
   });
 
+  it("reports the owning plugin for each nav item", () => {
+    // Nav item ids are plugin-local, so navigation needs the owner to build a
+    // unique identity (`lib/navigation/plugin-destinations.ts`).
+    pluginRegistry.forPlugin("plugin-a").registerNavItem({ id: "nav", label: "A", path: "/a" });
+    pluginRegistry.forPlugin("plugin-b").registerNavItem({ id: "nav", label: "B", path: "/b" });
+
+    expect(pluginRegistry.getNavRegistrations()).toEqual([
+      { pluginId: "plugin-a", id: "nav", label: "A", path: "/a" },
+      { pluginId: "plugin-b", id: "nav", label: "B", path: "/b" },
+    ]);
+  });
+
   it("registers and returns a settings route", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
     function Settings() {

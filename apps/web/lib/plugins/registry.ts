@@ -43,6 +43,16 @@ export interface PluginRouteRegistration extends RouteRegistration {
   pluginId: string;
 }
 
+/**
+ * Nav item plus the owning pluginId — what `getNavRegistrations()` returns.
+ * Navigation needs the owner because `NavItem.id` is plugin-local: two plugins
+ * may register the same id, and the navigation manifest builds its React keys
+ * from it (`lib/navigation/plugin-destinations.ts`).
+ */
+export interface PluginNavRegistration extends NavItem {
+  pluginId: string;
+}
+
 interface SlotRegistration {
   registrationId: string;
   orderingId: string;
@@ -185,8 +195,18 @@ class PluginRegistryStore {
     return this.settingsRoutes.map((entry) => entry.value);
   }
 
+  /**
+   * Nav items without their owner. Use `getNavRegistrations()` for anything that
+   * needs a globally unique identity; this stays for callers that only read the
+   * item's own fields (e.g. deriving a page title from a path).
+   */
   getNavItems(): NavItem[] {
     return this.navItems.map((entry) => entry.value);
+  }
+
+  /** Nav items plus the pluginId that registered each one, in registration order. */
+  getNavRegistrations(): PluginNavRegistration[] {
+    return this.navItems.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
   }
 
   getSlotComponents(slot: string): SlotComponent[] {

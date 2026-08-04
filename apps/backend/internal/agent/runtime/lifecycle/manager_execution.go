@@ -23,6 +23,13 @@ import (
 // have a resolved workspace path (typically while worktree preparation is in progress).
 var ErrSessionWorkspaceNotReady = errors.New("session workspace not ready")
 
+// ErrSessionTerminal indicates the task session has reached a terminal state
+// (cancelled/completed/failed) and no execution can be created for it. User-facing
+// workspace handlers treat this like ErrSessionWorkspaceNotReady: a graceful
+// not-ready envelope rather than an ERROR-logged failure, since a terminal session
+// will never recover an execution.
+var ErrSessionTerminal = errors.New("session is terminal")
+
 // coalescedExecutionCreationTimeout matches the runtime's 60-second agentctl
 // startup window while preventing blocked instance I/O from owning the shared
 // session slot and its activity lease for the lifetime of the manager.

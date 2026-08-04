@@ -16,8 +16,8 @@ test.describe("Integrations section on mobile", () => {
     testPage,
     apiClient,
   }) => {
-    // Make GitHub report authenticated so useConfiguredIntegrationLinks yields
-    // the GitHub link before the page loads its status.
+    // Make GitHub report authenticated so the navigation manifest resolves the
+    // GitHub destination before the page loads its status.
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
 

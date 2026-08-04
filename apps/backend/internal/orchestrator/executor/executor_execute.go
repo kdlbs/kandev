@@ -115,11 +115,26 @@ func (e *Executor) handleAgentProcessStartFailure(
 	startErr error,
 	escalateTaskOnFailure, fromResume bool,
 ) {
-	e.logger.Error("failed to start agent process",
-		zap.String("task_id", taskID),
-		zap.String("session_id", sessionID),
-		zap.String("agent_execution_id", agentExecutionID),
-		zap.Error(startErr))
+	// A cancelled context or a terminal-session error is a benign teardown race
+	// (the session ended while StartAgentProcess was blocked), not a genuine
+	// start fault, so it logs at WARN without a stacktrace. DeadlineExceeded
+	// is NOT treated as teardown: runAgentProcessAsync owns a 5-minute startup
+	// deadline, and a hung agent that hits it on a still-active session is a
+	// real operational failure that must stay at ERROR.
+	if errors.Is(startErr, context.Canceled) ||
+		errors.Is(startErr, lifecycle.ErrSessionTerminal) {
+		e.logger.Warn("agent process start aborted by session teardown",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(startErr))
+	} else {
+		e.logger.Error("failed to start agent process",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(startErr))
+	}
 
 	// A terminal transition may have landed while StartAgentProcess was
 	// blocked. Drop all failure/recovery side effects in that case. CANCELLED
