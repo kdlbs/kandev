@@ -56,3 +56,16 @@ func TestValidateGlobalSecretRefsAcceptsGlobalSecret(t *testing.T) {
 		t.Fatalf("global secret rejected: %v", err)
 	}
 }
+
+func TestValidateGlobalSecretRefsRejectsBackendOwnedIDThroughUserVisibleStore(t *testing.T) {
+	controller := &Controller{secretStore: secrets.NewUserVisibleStore(&profileSecretStore{secret: &secrets.Secret{
+		ID: "github:user:workspace:user:access", Scope: secrets.ScopeGlobal,
+	}})}
+
+	err := controller.validateGlobalSecretRefs(context.Background(), []dto.ProfileEnvVarDTO{{
+		Key: "TOKEN", SecretID: "github:user:workspace:user:access",
+	}})
+	if err == nil {
+		t.Fatal("backend-owned secret ID accepted in shared profile")
+	}
+}

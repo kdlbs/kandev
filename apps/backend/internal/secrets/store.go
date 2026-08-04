@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/jmoiron/sqlx"
 )
 
 // ErrNotFound is the sentinel returned (wrapped) by store implementations when
@@ -64,4 +66,10 @@ type ScopedSecretStore interface {
 	RevealGlobal(ctx context.Context, id string) (string, error)
 	RevealForWorkspace(ctx context.Context, id, workspaceID string) (string, error)
 	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
+}
+
+// WorkspaceSecretTransactionalDeleter is implemented by stores that can
+// remove workspace-owned secrets on a caller-owned SQL transaction.
+type WorkspaceSecretTransactionalDeleter interface {
+	DeleteWorkspaceSecretsTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error
 }

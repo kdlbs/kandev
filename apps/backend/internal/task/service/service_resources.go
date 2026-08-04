@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/events"
@@ -217,17 +218,30 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
-	if confirmedName == nil {
+	transactionalCleanup, hasTransactionalCleanup := s.workspaceSecretDeleter.(secrets.WorkspaceSecretTransactionalDeleter)
+	transactionalCascade, hasTransactionalCascade := s.workspaces.(transactionalWorkspaceCascade)
+	switch {
+	case hasTransactionalCleanup && hasTransactionalCascade:
+		cleanup := func(cleanupCtx context.Context, tx *sqlx.Tx) error {
+			return transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID)
+		}
+		if confirmedName == nil {
+			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithSecretCleanup(ctx, workspace.ID, cleanup)
+		} else {
+			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithNameAndSecretCleanup(ctx, workspace.ID, *confirmedName, cleanup)
+		}
+	case confirmedName == nil:
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascade(ctx, workspace.ID)
-	} else {
+	default:
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
 		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 		return s.mapWorkspaceDeleteError(workspace.ID, err)
 	}
-	if s.workspaceSecretDeleter != nil {
+	if s.workspaceSecretDeleter != nil && (!hasTransactionalCleanup || !hasTransactionalCascade) {
 		if err := s.workspaceSecretDeleter.DeleteWorkspaceSecrets(ctx, workspace.ID); err != nil {
+			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
 			return err
 		}

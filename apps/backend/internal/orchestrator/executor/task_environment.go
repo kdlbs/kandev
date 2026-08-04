@@ -2,13 +2,12 @@ package executor
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"sort"
 	"strings"
 
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -23,108 +22,38 @@ type environmentSource struct {
 
 type environmentSourceResolver func(context.Context, environmentSource) (string, error)
 
-// EnvironmentConflictError identifies an ambiguous environment key without
-// including either plaintext values or secret identifiers.
-type EnvironmentConflictError struct {
-	Key     string
-	Origins []string
-}
-
-func (e *EnvironmentConflictError) Error() string {
-	return fmt.Sprintf("environment key %q has conflicting definitions from %s", e.Key, strings.Join(e.Origins, ", "))
-}
-
-// EnvironmentSecretError identifies a secret that could not be resolved while
-// retaining a redacted error boundary for callers and logs.
-type EnvironmentSecretError struct {
-	Key    string
-	Origin string
-	err    error
-}
-
-func (e *EnvironmentSecretError) Error() string {
-	return fmt.Sprintf("environment key %q from %s could not be resolved", e.Key, e.Origin)
-}
-
-func (e *EnvironmentSecretError) Unwrap() error { return e.err }
+// Keep the historical executor error names as aliases while the lifecycle and
+// orchestrator share one source-aware resolver.
+type EnvironmentConflictError = runtimeenv.ConflictError
+type EnvironmentSecretError = runtimeenv.SecretError
 
 func resolveEnvironmentSources(
 	ctx context.Context, sources []environmentSource, resolve environmentSourceResolver,
 ) (map[string]string, error) {
-	ordered := append([]environmentSource(nil), sources...)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		if ordered[i].key != ordered[j].key {
-			return ordered[i].key < ordered[j].key
-		}
-		if ordered[i].origin != ordered[j].origin {
-			return ordered[i].origin < ordered[j].origin
-		}
-		return ordered[i].secretID < ordered[j].secretID
+	definitions := make([]runtimeenv.Definition, 0, len(sources))
+	for _, source := range sources {
+		definitions = append(definitions, runtimeenv.Definition{
+			Key: source.key, Literal: source.literal, SecretID: source.secretID,
+			Origin: source.origin, WorkspaceID: source.workspaceID,
+		})
+	}
+	return runtimeenv.Resolve(ctx, definitions, func(ctx context.Context, definition runtimeenv.Definition) (string, error) {
+		return resolve(ctx, environmentSource{
+			key: definition.Key, literal: definition.Literal, secretID: definition.SecretID,
+			origin: definition.Origin, workspaceID: definition.WorkspaceID,
+		})
 	})
-
-	selected := make(map[string]environmentSource, len(ordered))
-	origins := make(map[string]map[string]struct{}, len(ordered))
-	for _, source := range ordered {
-		if strings.TrimSpace(source.key) == "" {
-			continue
-		}
-		if prior, exists := selected[source.key]; exists {
-			if environmentSourceIdentity(prior) != environmentSourceIdentity(source) {
-				conflictOrigins := make([]string, 0, len(origins[source.key])+1)
-				for origin := range origins[source.key] {
-					conflictOrigins = append(conflictOrigins, origin)
-				}
-				conflictOrigins = append(conflictOrigins, source.origin)
-				sort.Strings(conflictOrigins)
-				return nil, &EnvironmentConflictError{Key: source.key, Origins: conflictOrigins}
-			}
-			origins[source.key][source.origin] = struct{}{}
-			continue
-		}
-		selected[source.key] = source
-		origins[source.key] = map[string]struct{}{source.origin: {}}
-	}
-
-	resolved := make(map[string]string, len(selected))
-	keys := make([]string, 0, len(selected))
-	for key := range selected {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	for _, key := range keys {
-		source := selected[key]
-		value := source.literal
-		if source.secretID != "" {
-			var err error
-			value, err = resolve(ctx, source)
-			if err != nil {
-				return nil, &EnvironmentSecretError{Key: source.key, Origin: source.origin, err: err}
-			}
-		}
-		resolved[key] = value
-	}
-	return resolved, nil
 }
 
-func environmentSourceIdentity(source environmentSource) string {
-	if source.secretID != "" {
-		return "secret:" + source.secretID
-	}
-	hash := sha256.Sum256([]byte(source.literal))
-	return "literal:" + hex.EncodeToString(hash[:])
-}
-
-// resolveTaskEnvironment merges managed values, executor profile definitions,
-// and all attached repository bindings. Secret values are revealed only after
-// the origin/conflict pass has completed.
-func (e *Executor) resolveTaskEnvironment(
-	ctx context.Context,
+func (e *Executor) taskEnvironmentSources(
 	workspaceID string,
 	managed map[string]string,
 	profileEnvVars []models.ProfileEnvVar,
 	repositories []*repoInfo,
-) (map[string]string, error) {
-	sources := make([]environmentSource, 0, len(managed)+len(profileEnvVars))
+) ([]environmentSource, error) {
+	// Avoid adding independent lengths to build the capacity. The sum can
+	// overflow before allocation when values originate in request-sized data.
+	sources := make([]environmentSource, 0)
 	managedKeys := make([]string, 0, len(managed))
 	for key := range managed {
 		managedKeys = append(managedKeys, key)
@@ -155,7 +84,7 @@ func (e *Executor) resolveTaskEnvironment(
 			})
 		}
 	}
-	return resolveEnvironmentSources(ctx, sources, e.resolveEnvironmentSource)
+	return sources, nil
 }
 
 func (e *Executor) resolveLaunchEnvironment(
@@ -168,11 +97,24 @@ func (e *Executor) resolveLaunchEnvironment(
 		return errors.New("launch request is required")
 	}
 	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
-	resolved, err := e.resolveTaskEnvironment(ctx, req.WorkspaceID, req.Env, profileEnvVars, repositories)
+	sources, err := e.taskEnvironmentSources(req.WorkspaceID, req.Env, profileEnvVars, repositories)
 	if err != nil {
-		return fmt.Errorf("resolve task environment: %w", err)
+		return fmt.Errorf("build task environment sources: %w", err)
 	}
-	req.Env = resolved
+	req.EnvironmentDefinitions = make([]runtimeenv.Definition, 0, len(sources))
+	for _, source := range sources {
+		req.EnvironmentDefinitions = append(req.EnvironmentDefinitions, runtimeenv.Definition{
+			Key: source.key, Literal: source.literal, SecretID: source.secretID,
+			Origin: source.origin, WorkspaceID: source.workspaceID,
+		})
+	}
+	// This shape-only preflight keeps repository/repository and profile/repository
+	// conflicts from reaching the agent manager. Lifecycle repeats validation and
+	// performs the actual reveal after it has added managed runtime definitions.
+	if err := runtimeenv.Validate(req.EnvironmentDefinitions); err != nil {
+		return fmt.Errorf("validate task environment sources: %w", err)
+	}
+	req.EnvironmentResolutionRequired = true
 	keys := make(map[string]struct{})
 	for _, info := range repositories {
 		if info == nil || info.Repository == nil {
@@ -184,26 +126,12 @@ func (e *Executor) resolveLaunchEnvironment(
 			}
 		}
 	}
-	if len(keys) > 0 {
-		req.ApprovedSecretEnvKeys = make([]string, 0, len(keys))
-		for key := range keys {
-			req.ApprovedSecretEnvKeys = append(req.ApprovedSecretEnvKeys, key)
-		}
-		sort.Strings(req.ApprovedSecretEnvKeys)
+	req.ApprovedSecretEnvKeys = make([]string, 0, len(keys))
+	for key := range keys {
+		req.ApprovedSecretEnvKeys = append(req.ApprovedSecretEnvKeys, key)
 	}
+	sort.Strings(req.ApprovedSecretEnvKeys)
 	return nil
-}
-
-func (e *Executor) resolveEnvironmentSource(ctx context.Context, source environmentSource) (string, error) {
-	if e.secretStore == nil {
-		return "", errors.New("secret store unavailable")
-	}
-	if source.workspaceID != "" {
-		if scoped, ok := e.secretStore.(secrets.ScopedSecretStore); ok {
-			return scoped.RevealForWorkspace(ctx, source.secretID, source.workspaceID)
-		}
-	}
-	return e.revealGlobalSecret(ctx, source.secretID)
 }
 
 func (e *Executor) revealGlobalSecret(ctx context.Context, secretID string) (string, error) {

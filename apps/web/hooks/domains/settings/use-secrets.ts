@@ -26,6 +26,8 @@ export function useSecrets(
   const [scopedItems, setScopedItems] = useState<SecretListItem[]>(initialItems ?? []);
   const [scopedLoaded, setScopedLoaded] = useState(initialItems !== undefined);
   const [scopedLoading, setScopedLoading] = useState(false);
+  const scopedKey = `${scope}:${workspaceId ?? ""}`;
+  const [loadedScopedKey, setLoadedScopedKey] = useState(scopedKey);
 
   useEffect(() => {
     if (scope === "global") {
@@ -37,21 +39,38 @@ export function useSecrets(
         .finally(() => setSecretsLoading(false));
       return;
     }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    setScopedItems(initialItems ?? []);
+    setLoadedScopedKey(scopedKey);
+    setScopedLoaded(initialItems !== undefined);
+    setScopedLoading(initialItems === undefined && Boolean(workspaceId));
+
     if (!workspaceId || initialItems !== undefined) {
-      setScopedLoaded(true);
-      return;
+      setScopedLoading(false);
+      return () => controller.abort();
     }
-    setScopedLoading(true);
-    listSecrets({ scope, workspaceId, cache: "no-store" })
+
+    listSecrets({ scope, workspaceId, cache: "no-store", init: { signal: controller.signal } })
       .then((response) => {
+        if (cancelled) return;
         setScopedItems(response ?? []);
         setScopedLoaded(true);
       })
       .catch(() => {
+        if (cancelled) return;
         setScopedItems([]);
         setScopedLoaded(true);
       })
-      .finally(() => setScopedLoading(false));
+      .finally(() => {
+        if (!cancelled) setScopedLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [
     globalLoaded,
     globalLoading,
@@ -59,18 +78,19 @@ export function useSecrets(
     scope,
     setSecrets,
     setSecretsLoading,
+    scopedKey,
     workspaceId,
   ]);
 
-  useEffect(() => {
-    if (scope !== "workspace" || initialItems === undefined) return;
-    setScopedItems(initialItems);
-    setScopedLoaded(true);
-  }, [initialItems, scope]);
-
-  const items = scope === "global" ? filterGlobalSecrets(globalItems) : scopedItems;
-  const loaded = scope === "global" ? globalLoaded : scopedLoaded;
-  const loading = scope === "global" ? globalLoading : scopedLoading;
+  const scopedCurrent = loadedScopedKey === scopedKey;
+  let items: SecretListItem[] = [];
+  if (scope === "global") {
+    items = filterGlobalSecrets(globalItems);
+  } else if (scopedCurrent) {
+    items = scopedItems;
+  }
+  const loaded = scope === "global" ? globalLoaded : scopedCurrent && scopedLoaded;
+  const loading = scope === "global" ? globalLoading : scopedCurrent && scopedLoading;
 
   const addSecret = (item: SecretListItem) => {
     if (scope === "global") {

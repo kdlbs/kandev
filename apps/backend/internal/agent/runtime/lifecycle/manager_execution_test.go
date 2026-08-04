@@ -26,6 +26,7 @@ import (
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -936,6 +937,64 @@ func TestCreateExecutionResolvesProfileOnceForEnvAndAutoApprove(t *testing.T) {
 	if got := backend.lastRequest.Env["CLAUDE_CONFIG_DIR"]; got != "/tmp/claude" {
 		t.Fatalf("CLAUDE_CONFIG_DIR = %q, want %q", got, "/tmp/claude")
 	}
+}
+
+func TestCreateExecutionRecoversRepositoryEnvironmentAndSSHApprovals(t *testing.T) {
+	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "agent-profile", AgentID: "auggie", EnvVars: []settingsmodels.ProfileEnvVar{{Key: "PROFILE_ONLY", Value: "profile-value"}},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, &mockWorkspaceInfoProvider{}, profileResolver)
+	store := newInMemorySecretStore()
+	if err := store.Create(context.Background(), &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "workspace-token", Scope: secrets.ScopeWorkspace, WorkspaceID: "workspace-1",
+	}, Value: "repository-value"}); err != nil {
+		t.Fatalf("seed repository secret: %v", err)
+	}
+	mgr.secretStore = store
+	reader := &recoveryEnvironmentReader{
+		fakeExecutorProfileReader: fakeExecutorProfileReader{session: &models.TaskSession{
+			ID: "session-1", TaskID: "task-1", State: models.TaskSessionStateStarting,
+		}},
+		taskRepositories: []*models.TaskRepository{{RepositoryID: "repo-1"}},
+		repositories: map[string]*models.Repository{
+			"repo-1": {ID: "repo-1", WorkspaceID: "workspace-1", Name: "app", SecretBindings: []models.RepositorySecretBinding{{Key: "NPM_TOKEN", SecretID: "workspace-token"}}},
+		},
+	}
+	mgr.SetExecutorProfileReader(reader)
+
+	execution, err := mgr.createExecution(context.Background(), "task-1", &WorkspaceInfo{
+		SessionID: "session-1", WorkspaceID: "workspace-1", AgentProfileID: "agent-profile", ExecutionProfileID: "agent-profile",
+		AgentID: "auggie", WorkspacePath: "/workspace/task-1",
+	})
+	if err != nil {
+		t.Fatalf("createExecution returned error: %v", err)
+	}
+	if got := backend.lastRequest.Env["NPM_TOKEN"]; got != "repository-value" {
+		t.Fatalf("recovered NPM_TOKEN = %q, want repository value", got)
+	}
+	if got := backend.lastRequest.Env["PROFILE_ONLY"]; got != "profile-value" {
+		t.Fatalf("recovered profile env = %q, want profile value", got)
+	}
+	if got := backend.lastRequest.ApprovedSecretEnvKeys; len(got) != 1 || got[0] != "NPM_TOKEN" {
+		t.Fatalf("recovered SSH approvals = %#v, want NPM_TOKEN", got)
+	}
+	if got := execution.RuntimeEnvironment()["NPM_TOKEN"]; got != "repository-value" {
+		t.Fatalf("execution runtime NPM_TOKEN = %q, want repository value", got)
+	}
+}
+
+type recoveryEnvironmentReader struct {
+	fakeExecutorProfileReader
+	taskRepositories []*models.TaskRepository
+	repositories     map[string]*models.Repository
+}
+
+func (r *recoveryEnvironmentReader) ListTaskRepositories(context.Context, string) ([]*models.TaskRepository, error) {
+	return r.taskRepositories, nil
+}
+
+func (r *recoveryEnvironmentReader) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	return r.repositories[id], nil
 }
 
 func TestCreateExecutionRunsRemoteResumePreflightBeforeCreatingWorkspaceExecution(t *testing.T) {

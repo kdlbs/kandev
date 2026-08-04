@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/secrets"
@@ -24,10 +26,23 @@ type WorktreeCleanup interface {
 	OnTaskDeleted(ctx context.Context, taskID string) error
 }
 
-// WorkspaceSecretDeleter removes secrets owned by a workspace after the
-// workspace cascade commits. It is optional for isolated task-service users.
+// WorkspaceSecretDeleter removes secrets owned by a workspace. It is optional
+// for isolated task-service users.
 type WorkspaceSecretDeleter interface {
 	DeleteWorkspaceSecrets(ctx context.Context, workspaceID string) error
+}
+
+type transactionalWorkspaceCascade interface {
+	DeleteWorkspaceCascadeWithSecretCleanup(
+		ctx context.Context,
+		id string,
+		cleanup func(context.Context, *sqlx.Tx) error,
+	) ([]*models.Task, []*models.Workflow, error)
+	DeleteWorkspaceCascadeWithNameAndSecretCleanup(
+		ctx context.Context,
+		id, name string,
+		cleanup func(context.Context, *sqlx.Tx) error,
+	) ([]*models.Task, []*models.Workflow, error)
 }
 
 // WorktreeProvider extends WorktreeCleanup with query capabilities.

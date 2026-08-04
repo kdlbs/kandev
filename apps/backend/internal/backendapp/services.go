@@ -55,8 +55,9 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, err
 	}
+	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
 	agentSettingsController := agentsettingscontroller.NewController(repos.AgentSettings, discoveryRegistry, agentRegistry, repos.Task, log)
-	agentSettingsController.SetSecretStore(repos.Secrets)
+	agentSettingsController.SetSecretStore(userSecretStore)
 
 	userSvc := userservice.NewService(repos.User, eventBus, log)
 	editorSvc := editorservice.NewService(repos.Editor, repos.Task, userSvc)
@@ -92,8 +93,8 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 			TaskWorktreeRoots: []string{filepath.Join(cfg.ResolvedHomeDir(), "tasks")},
 		},
 	)
-	taskSvc.SetSecretStore(repos.Secrets)
-	if deleter, ok := repos.Secrets.(taskservice.WorkspaceSecretDeleter); ok {
+	taskSvc.SetSecretStore(userSecretStore)
+	if deleter, ok := userSecretStore.(taskservice.WorkspaceSecretDeleter); ok {
 		taskSvc.SetWorkspaceSecretDeleter(deleter)
 	}
 

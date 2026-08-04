@@ -786,6 +786,12 @@ func sshRemoteAgentEnv(req *ExecutorCreateRequest) map[string]string {
 		if !posixSSHEnvIdentifier.MatchString(key) {
 			continue
 		}
+		// Repository approval grants forwarding of an otherwise non-managed
+		// key; it must never replace a credential or broker value selected by
+		// the executor composition boundary.
+		if _, exists := env[key]; exists {
+			continue
+		}
 		if value := req.Env[key]; value != "" {
 			env[key] = value
 		}

@@ -342,15 +342,19 @@ type LaunchAgentRequest struct {
 	// forward in addition to its managed credential allowlist. Values are
 	// still taken only from Env; the key list is the explicit repository grant.
 	ApprovedSecretEnvKeys []string
-	ACPSessionID          string            // ACP session ID to resume, if available
-	ModelOverride         string            // If set, use this model instead of the profile's model
-	ExecutorType          string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
-	ExecutorConfig        map[string]string // Executor config (docker_host, git_token, etc.)
-	PreviousExecutionID   string            // Previous execution ID for runtime reconnect
-	McpMode               string            // MCP tool mode: "task" (default), "config", or "office"
-	McpProviders          []string          // Normalized provider capabilities attached to the task
-	IsEphemeral           bool              // Ephemeral task (quick chat) — enables fallback workspace creation
-	WorkspacePath         string            // Optional host folder for repo-less tasks (overrides scratch fallback)
+	// EnvironmentDefinitions preserve source identity until lifecycle has added
+	// every managed runtime value and can perform the final strict resolution.
+	EnvironmentDefinitions        []runtimeenv.Definition
+	EnvironmentResolutionRequired bool
+	ACPSessionID                  string            // ACP session ID to resume, if available
+	ModelOverride                 string            // If set, use this model instead of the profile's model
+	ExecutorType                  string            // Executor type (e.g., "local", "worktree", "local_docker") - determines runtime
+	ExecutorConfig                map[string]string // Executor config (docker_host, git_token, etc.)
+	PreviousExecutionID           string            // Previous execution ID for runtime reconnect
+	McpMode                       string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders                  []string          // Normalized provider capabilities attached to the task
+	IsEphemeral                   bool              // Ephemeral task (quick chat) — enables fallback workspace creation
+	WorkspacePath                 string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so

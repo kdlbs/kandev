@@ -280,6 +280,24 @@ func (m *Manager) finalizeBootMessage(execution *AgentExecution, msg *models.Mes
 // buildEnvForExecution builds environment variables for any runtime.
 // This is the unified method used by the runtime interface.
 func (m *Manager) buildEnvForExecution(ctx context.Context, executionID string, req *LaunchRequest, agentConfig agents.Agent, profileInfo *AgentProfileInfo) (map[string]string, error) {
+	if req.EnvironmentFinalized {
+		env := cloneStringMap(req.Env)
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+	if req.EnvironmentResolutionRequired {
+		env, err := m.resolveStrictEnvironment(ctx, executionID, req, agentConfig, profileInfo)
+		if err != nil {
+			return nil, err
+		}
+		if err := spillLargeWakePayloadEnv(env, req.WorkspacePath, m.logger.Zap()); err != nil {
+			return nil, err
+		}
+		return env, nil
+	}
+
 	env := make(map[string]string)
 
 	// Copy request environment

@@ -187,3 +187,26 @@ func TestSQLiteStore_ScopedSecretVisibility(t *testing.T) {
 		t.Fatalf("deleted workspace secret = %v, want ErrNotFound", err)
 	}
 }
+
+func TestSQLiteStore_ListScopedRequiresExplicitScope(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	ctx := context.Background()
+	if err := store.Create(ctx, &SecretWithValue{Secret: Secret{Name: "global"}, Value: "global"}); err != nil {
+		t.Fatalf("create global: %v", err)
+	}
+	if err := store.Create(ctx, &SecretWithValue{Secret: Secret{
+		Name: "workspace", Scope: ScopeWorkspace, WorkspaceID: "workspace-a",
+	}, Value: "workspace"}); err != nil {
+		t.Fatalf("create workspace: %v", err)
+	}
+	if _, err := store.ListScoped(ctx, SecretListOptions{}); err == nil {
+		t.Fatal("ListScoped with no scope succeeded, want explicit-scope error")
+	}
+	items, err := store.List(ctx)
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(items) != 1 || items[0].Scope != ScopeGlobal {
+		t.Fatalf("List returned %#v, want only global secret", items)
+	}
+}

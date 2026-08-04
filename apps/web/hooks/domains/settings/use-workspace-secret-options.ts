@@ -13,10 +13,13 @@ export function useWorkspaceSecretOptions(workspaceId?: string) {
     if (!workspaceId) {
       setItems([]);
       setLoaded(true);
+      setLoading(false);
       return;
     }
 
     let cancelled = false;
+    const controller = new AbortController();
+    setItems([]);
     setLoading(true);
     setLoaded(false);
     listSecrets({
@@ -24,6 +27,7 @@ export function useWorkspaceSecretOptions(workspaceId?: string) {
       workspaceId,
       includeGlobal: true,
       cache: "no-store",
+      init: { signal: controller.signal },
     })
       .then((response) => {
         if (!cancelled) setItems(response ?? []);
@@ -40,6 +44,7 @@ export function useWorkspaceSecretOptions(workspaceId?: string) {
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [workspaceId]);
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -649,10 +650,18 @@ type LaunchRequest struct {
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist.
 	ApprovedSecretEnvKeys []string
-	ACPSessionID          string // ACP session ID to resume, if available
-	Metadata              map[string]interface{}
-	ModelOverride         string         // If set, use this model instead of the profile's model
-	RouteOverride         *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
+	// EnvironmentDefinitions preserve source identity until lifecycle has added
+	// every managed runtime value and can perform the final strict resolution.
+	EnvironmentDefinitions        []runtimeenv.Definition
+	EnvironmentResolutionRequired bool
+	// EnvironmentFinalized marks the immutable effective snapshot passed to the
+	// runtime. Later lifecycle steps must not merge profile or credential values
+	// over this snapshot.
+	EnvironmentFinalized bool
+	ACPSessionID         string // ACP session ID to resume, if available
+	Metadata             map[string]interface{}
+	ModelOverride        string         // If set, use this model instead of the profile's model
+	RouteOverride        *RouteOverride // If set, overrides agent_id/model/mode/etc per provider routing
 
 	// Ephemeral tasks (quick chat) get fallback workspace directories when no repo is configured.
 	// Non-ephemeral tasks without a workspace path will not receive a fallback directory.

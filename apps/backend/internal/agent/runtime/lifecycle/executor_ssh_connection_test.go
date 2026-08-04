@@ -653,6 +653,22 @@ func runSSHContributionGit(t *testing.T, dir string, args ...string) string {
 	return string(output)
 }
 
+func TestSSHRemoteAgentEnvApprovedRepositoryKeyCannotReplaceManagedCredential(t *testing.T) {
+	got := sshRemoteAgentEnv(&ExecutorCreateRequest{
+		Env: map[string]string{
+			"ANTHROPIC_API_KEY": "managed-credential",
+			"NPM_TOKEN":         "repository-token",
+		},
+		ApprovedSecretEnvKeys: []string{"ANTHROPIC_API_KEY", "NPM_TOKEN"},
+	})
+	if got["ANTHROPIC_API_KEY"] != "managed-credential" {
+		t.Fatalf("ANTHROPIC_API_KEY = %q, want managed credential", got["ANTHROPIC_API_KEY"])
+	}
+	if got["NPM_TOKEN"] != "repository-token" {
+		t.Fatalf("NPM_TOKEN = %q, want repository token", got["NPM_TOKEN"])
+	}
+}
+
 func TestSSHManagedBrokerResumeForcesFreshAgentctlWithNewLease(t *testing.T) {
 	sshExec := NewSSHExecutor(nil, nil, nil, logger.Default())
 	sshExec.sessions["instance-1"] = &sshSessionState{pid: 1234, remoteDir: "/remote/session"}

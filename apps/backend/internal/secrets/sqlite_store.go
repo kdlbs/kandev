@@ -210,7 +210,7 @@ func (s *sqliteStore) Delete(ctx context.Context, id string) error {
 }
 
 func (s *sqliteStore) List(ctx context.Context) ([]*SecretListItem, error) {
-	return s.ListScoped(ctx, SecretListOptions{})
+	return s.ListScoped(ctx, SecretListOptions{Scope: ScopeGlobal})
 }
 
 func (s *sqliteStore) ListScoped(ctx context.Context, opts SecretListOptions) ([]*SecretListItem, error) {
@@ -279,7 +279,23 @@ func (s *sqliteStore) DeleteWorkspaceSecrets(ctx context.Context, workspaceID st
 	if strings.TrimSpace(workspaceID) == "" {
 		return fmt.Errorf("workspace id is required")
 	}
-	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
+	return s.deleteWorkspaceSecrets(ctx, s.db, workspaceID)
+}
+
+// DeleteWorkspaceSecretsTx removes workspace-owned secrets on the supplied
+// transaction so workspace and secret deletion can commit or roll back as one.
+func (s *sqliteStore) DeleteWorkspaceSecretsTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
+	if tx == nil {
+		return fmt.Errorf("transaction is required")
+	}
+	return s.deleteWorkspaceSecrets(ctx, tx, workspaceID)
+}
+
+func (s *sqliteStore) deleteWorkspaceSecrets(ctx context.Context, exec sqlx.ExtContext, workspaceID string) error {
+	if strings.TrimSpace(workspaceID) == "" {
+		return fmt.Errorf("workspace id is required")
+	}
+	_, err := exec.ExecContext(ctx, s.db.Rebind(`
 		DELETE FROM secrets WHERE scope = ? AND workspace_id = ?`), ScopeWorkspace, workspaceID)
 	if err != nil {
 		return fmt.Errorf("delete workspace secrets: %w", err)
@@ -305,8 +321,8 @@ func validateSecretScope(scope SecretScope, workspaceID string) error {
 
 func validateListOptions(opts SecretListOptions) error {
 	switch opts.Scope {
-	case "", ScopeGlobal:
-		if opts.Scope == ScopeGlobal && strings.TrimSpace(opts.WorkspaceID) != "" {
+	case ScopeGlobal:
+		if strings.TrimSpace(opts.WorkspaceID) != "" {
 			return fmt.Errorf("global secret listing cannot have a workspace")
 		}
 	case ScopeWorkspace:

@@ -132,8 +132,14 @@ func (r *Repository) UpdateRepositoryWithSecretBindings(
 
 // DeleteRepository soft-deletes a repository by ID
 func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories SET deleted_at = ?, updated_at = ? WHERE id = ? AND deleted_at IS NULL
 	`), now, now, id)
 	if err != nil {
@@ -143,17 +149,23 @@ func (r *Repository) DeleteRepository(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("repository not found: %s", id)
 	}
-	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
 		return err
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteRepositoryIfUnreferenced soft-deletes only an unadopted repository.
 // Keeping the reference check inside UPDATE closes the cleanup/adoption race.
 func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id string) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories
 		SET deleted_at = ?, updated_at = ?
 		WHERE id = ?
@@ -170,7 +182,10 @@ func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id stri
 		return false, err
 	}
 	if rows > 0 {
-		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
 			return false, err
 		}
 	}
@@ -182,8 +197,14 @@ func (r *Repository) DeleteRepositoryIfUnreferenced(ctx context.Context, id stri
 // predicate in the UPDATE prevents a session from becoming active between a
 // separate check and the delete.
 func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	now := time.Now().UTC()
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE repositories
 		SET deleted_at = ?, updated_at = ?
 		WHERE id = ?
@@ -206,7 +227,10 @@ func (r *Repository) DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context,
 		return false, err
 	}
 	if rows > 0 {
-		if _, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM repository_secret_bindings WHERE repository_id = ?`), id); err != nil {
+			return false, err
+		}
+		if err := tx.Commit(); err != nil {
 			return false, err
 		}
 	}

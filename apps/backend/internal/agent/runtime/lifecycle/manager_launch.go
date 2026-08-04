@@ -519,7 +519,8 @@ func invalidScratchPathID(id string) bool {
 }
 
 // launchPrepareRequest copies the launch request, sets the resolved workspace path,
-// populates metadata from the request fields, and injects profile environment variables.
+// and populates metadata from the request fields. Runtime/profile environment
+// values are composed later, after every managed source has been collected.
 func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentProfileInfo, workspacePath string) (LaunchRequest, string, error) {
 	executionID := uuid.New().String()
 	reqWithWorktree := *req
@@ -538,17 +539,6 @@ func (m *Manager) launchPrepareRequest(req *LaunchRequest, profileInfo *AgentPro
 		reqWithWorktree.Metadata["session_id"] = req.SessionID
 	}
 
-	if profileInfo != nil {
-		if reqWithWorktree.Env == nil {
-			reqWithWorktree.Env = make(map[string]string)
-		}
-		if profileInfo.Model != "" {
-			reqWithWorktree.Env["AGENT_MODEL"] = profileInfo.Model
-		}
-		if profileInfo.AutoApprove {
-			reqWithWorktree.Env["AGENTCTL_AUTO_APPROVE_PERMISSIONS"] = "true"
-		}
-	}
 	if err := mergeRouteOverrideEnv(&reqWithWorktree); err != nil {
 		return LaunchRequest{}, "", err
 	}
@@ -1146,11 +1136,28 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	progressRecorder := newPrepareProgressRecorder(m.newProgressCallback(req.TaskID, req.SessionID))
 
+	// Compose the request before preparation so setup scripts receive the same
+	// final snapshot that the runtime, agent, shell, and terminal will use.
+	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	finalEnv, err := m.buildEnvForExecution(ctx, executionID, &reqWithWorktree, agentConfig, profileInfo)
+	if err != nil {
+		m.publishLaunchPrepareCompleted(req, nil, progressRecorder, workspacePath, false, err)
+		return nil, err
+	}
+	reqWithWorktree.Env = finalEnv
+	reqWithWorktree.EnvironmentDefinitions = nil
+	reqWithWorktree.EnvironmentResolutionRequired = false
+	reqWithWorktree.EnvironmentFinalized = true
+
 	// 4b. Run environment preparation (if preparer registered for this executor type).
 	// Skip on resume (ACPSessionID set) — workspace was already prepared during initial launch.
 	var prepResult *EnvPrepareResult
 	if req.ACPSessionID == "" {
-		prepResult = m.runEnvironmentPreparerWithProgress(ctx, req, workspacePath, progressRecorder.Callback(0))
+		prepResult = m.runEnvironmentPreparerWithProgress(ctx, &reqWithWorktree, workspacePath, progressRecorder.Callback(0))
 	} else {
 		m.logger.Debug("skipping environment preparation for resumed session",
 			zap.String("task_id", req.TaskID),
@@ -1158,16 +1165,9 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 	}
 	if prepResult != nil {
 		progressRecorder.Merge(prepResult.Steps)
-		if err := m.launchApplyPrepareResult(req, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
+		if err := m.launchApplyPrepareResult(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
 		}
-	}
-
-	// 5 & 6. Prepare the request copy with metadata and profile env
-	reqWithWorktree, executionID, err := m.launchPrepareRequest(req, profileInfo, workspacePath)
-	if err != nil {
-		m.publishLaunchPrepareCompleted(req, prepResult, progressRecorder, workspacePath, false, err)
-		return nil, err
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).

@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -62,6 +63,28 @@ func TestResolveEnvironmentSources_RejectsEveryConflictingPair(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestResolveEnvironmentSources_ReportsEveryConflictingOrigin(t *testing.T) {
+	_, err := resolveEnvironmentSources(context.Background(), []environmentSource{
+		{key: "TOKEN", secretID: "secret-a", origin: "repository app"},
+		{key: "TOKEN", secretID: "secret-b", origin: "repository tools"},
+		{key: "TOKEN", literal: "profile-value", origin: "executor profile"},
+		{key: "OTHER", literal: "unrelated", origin: "repository docs"},
+	}, func(context.Context, environmentSource) (string, error) {
+		return "unused", nil
+	})
+	if err == nil {
+		t.Fatal("resolve succeeded, want conflict")
+	}
+	var conflictErr *EnvironmentConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("error = %T %v, want EnvironmentConflictError", err, err)
+	}
+	want := []string{"executor profile", "repository app", "repository tools"}
+	if !reflect.DeepEqual(conflictErr.Origins, want) {
+		t.Fatalf("conflict origins = %#v, want %#v", conflictErr.Origins, want)
 	}
 }
 

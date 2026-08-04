@@ -28,6 +28,16 @@ type failingWorkspaceBootstrapper struct {
 	err error
 }
 
+type failingTransactionalWorkspaceSecretDeleter struct{}
+
+func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecrets(context.Context, string) error {
+	return errors.New("legacy cleanup should not be used")
+}
+
+func (failingTransactionalWorkspaceSecretDeleter) DeleteWorkspaceSecretsTx(context.Context, *sqlx.Tx, string) error {
+	return errors.New("injected transactional secret cleanup failure")
+}
+
 func (b *failingWorkspaceBootstrapper) CreateWorkspaceWithKanban(
 	context.Context,
 	*models.Workspace,
@@ -229,6 +239,32 @@ func TestService_ExecutorProfileSecretRefsRequireGlobalScope(t *testing.T) {
 	}
 	if err := svc.validateGlobalProfileEnvRefs(ctx, []models.ProfileEnvVar{{Key: "TOKEN", SecretID: workspaceSecret.ID}}); err == nil {
 		t.Fatal("workspace secret accepted in executor profile")
+	}
+}
+
+func TestService_ExecutorProfileRejectsBackendOwnedSecretID(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	secretDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	crypto, err := secrets.NewMasterKeyProvider(t.TempDir())
+	if err != nil {
+		t.Fatalf("master key: %v", err)
+	}
+	secretStore, closeSecrets, err := secrets.Provide(secretDB, secretDB, crypto)
+	if err != nil {
+		t.Fatalf("secret store: %v", err)
+	}
+	t.Cleanup(func() { _ = closeSecrets() })
+	svc.SetSecretStore(secrets.NewUserVisibleStore(secretStore))
+
+	internal := &secrets.SecretWithValue{Secret: secrets.Secret{
+		ID: "github:user:workspace:user:access", Scope: secrets.ScopeGlobal,
+	}, Value: "backend-owned"}
+	if err := secretStore.Create(ctx, internal); err != nil {
+		t.Fatalf("create internal secret: %v", err)
+	}
+	if err := svc.validateGlobalProfileEnvRefs(ctx, []models.ProfileEnvVar{{Key: "TOKEN", SecretID: internal.ID}}); err == nil {
+		t.Fatal("backend-owned secret ID accepted in executor profile")
 	}
 }
 
@@ -932,6 +968,37 @@ func TestService_DeleteWorkspaceDeletesWorkspaceOwnedTasksAndWorkflows(t *testin
 	}
 	if _, err := repo.GetWorkflow(ctx, "wf-keep"); err != nil {
 		t.Fatalf("unrelated workflow should remain: %v", err)
+	}
+}
+
+func TestService_DeleteWorkspaceRollsBackCascadeWhenSecretCleanupFails(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	svc.SetWorkspaceSecretDeleter(failingTransactionalWorkspaceSecretDeleter{})
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-delete", Name: "Delete Me"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-delete", WorkspaceID: "ws-delete", Name: "Doomed"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-delete", WorkspaceID: "ws-delete", WorkflowID: "wf-delete", WorkflowStepID: "step-delete", Title: "Delete task",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err == nil {
+		t.Fatal("DeleteWorkspace succeeded, want secret cleanup failure")
+	}
+	if _, err := repo.GetWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("workspace was deleted after cleanup failure: %v", err)
+	}
+	if _, err := repo.GetTask(ctx, "task-delete"); err != nil {
+		t.Fatalf("task was deleted after cleanup failure: %v", err)
+	}
+	if events := eventBus.GetPublishedEvents(); len(events) != 0 {
+		t.Fatalf("events after rolled-back delete = %#v, want none", events)
 	}
 }
 
