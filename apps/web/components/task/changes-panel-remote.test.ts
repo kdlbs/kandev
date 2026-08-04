@@ -85,4 +85,37 @@ describe("mergeCommits source provenance", () => {
       detailTarget: { source: "github", repo: "widget-b" },
     });
   });
+
+  it("keeps a same-SHA PR-only commit when another repository matches locally", () => {
+    const local = [{ ...makeLocal(SHARED_SHA, "local"), repository_name: "widget-a" }];
+    const matchedPR = {
+      ...makePR(SHARED_SHA, "local PR"),
+      stats_available: false,
+      workspace_id: WORKSPACE_ID,
+      owner: "acme",
+      repo: "widget-a",
+      repository_name: "widget-a",
+    };
+    const remotePR = {
+      ...makePR(SHARED_SHA, "remote PR"),
+      stats_available: false,
+      workspace_id: WORKSPACE_ID,
+      owner: "acme",
+      repo: "widget-b",
+      repository_name: "widget-b",
+    };
+
+    const result = mergeCommits(local, [matchedPR, remotePR]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      commit_message: "local",
+      detailTarget: { source: "local", repo: "widget-a" },
+    });
+    expect(result[1]).toMatchObject({
+      commit_message: "remote PR",
+      repository_name: "widget-b",
+      detailTarget: { source: "github", repo: "widget-b" },
+    });
+  });
 });

@@ -347,9 +347,10 @@ export function mergeCommits(
   ) =>
     shaMatches(pr.sha, local.commit_sha) &&
     repositoryMatches(local.repository_name, pr.repository_name);
+  const prCommitKey = (pr: PRCommitForMerge) => `${pr.repository_name ?? ""}\0${pr.sha}`;
   const unpushed: MergedCommit[] = [];
   const pushed: MergedCommit[] = [];
-  const matchedPRShas = new Set<string>();
+  const matchedPRKeys = new Set<string>();
   for (const c of localCommits) {
     const matchesPR = prCommits.some((pr) => commitsMatch(c, pr));
     const isPushed = c.pushed === true || matchesPR;
@@ -371,13 +372,13 @@ export function mergeCommits(
     if (matchesPR) {
       for (const pr of prCommits) {
         if (commitsMatch(c, pr)) {
-          matchedPRShas.add(pr.sha);
+          matchedPRKeys.add(prCommitKey(pr));
         }
       }
     }
   }
   for (const pr of prCommits) {
-    if (!matchedPRShas.has(pr.sha)) {
+    if (!matchedPRKeys.has(prCommitKey(pr))) {
       pushed.push({
         commit_sha: pr.sha,
         commit_message: pr.message,
