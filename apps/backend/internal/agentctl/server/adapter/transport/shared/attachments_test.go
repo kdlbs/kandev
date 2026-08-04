@@ -69,6 +69,16 @@ func TestSaveAttachments_MissingWorkDir(t *testing.T) {
 	}
 }
 
+func TestSaveAttachments_RejectsPathTraversalSession(t *testing.T) {
+	mgr := NewAttachmentManager(t.TempDir(), testLogger())
+	mgr.SetSessionID("../escape")
+
+	_, err := mgr.SaveAttachments([]v1.MessageAttachment{{Type: "resource", Data: "", MimeType: "text/plain", Name: "note.txt"}})
+	if err == nil {
+		t.Fatal("expected unsafe session id to be rejected")
+	}
+}
+
 func TestSaveAttachments_ImageAttachment(t *testing.T) {
 	workDir := t.TempDir()
 	mgr := NewAttachmentManager(workDir, testLogger())

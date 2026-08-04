@@ -75,7 +75,41 @@ func TestMaterializeAttachmentsStreamsClaimedDescriptor(t *testing.T) {
 	if len(attachments) != 1 {
 		t.Fatalf("attachments = %+v", attachments)
 	}
-	if attachments[0].DeliveryMode != "path" || attachments[0].Data != "" || attachments[0].Name != "bundle.zip" {
+	if attachments[0].DeliveryMode != "prompt" || attachments[0].Data != "" || attachments[0].Name != "bundle.zip" {
 		t.Fatalf("materialized attachment = %+v", attachments[0])
+	}
+}
+
+func TestMaterializeAttachmentsPreservesPromptDeliveryMode(t *testing.T) {
+	sm := NewSessionManager(logger.Default(), nil)
+	sm.SetAttachmentReader(testAttachmentReader{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseMultipartForm(1 << 20); err != nil {
+			t.Fatalf("parse multipart form: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"name":"photo.png","size_bytes":16}`))
+	}))
+	defer server.Close()
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+	execution := &AgentExecution{
+		TaskID: "task-1", SessionID: "session-1", ACPSessionID: "acp-session",
+		agentctl: agentctl.NewClient(parsed.Hostname(), port, logger.Default()),
+	}
+	attachments, err := sm.materializeAttachments(context.Background(), execution, []v1.MessageAttachment{
+		{AttachmentID: "attachment-1", Type: "image", Name: "photo.png", DeliveryMode: "prompt"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(attachments) != 1 || attachments[0].DeliveryMode != "prompt" {
+		t.Fatalf("materialized attachment = %+v, want prompt delivery", attachments)
 	}
 }

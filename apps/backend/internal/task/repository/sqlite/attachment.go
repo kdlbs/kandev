@@ -106,12 +106,13 @@ func (r *Repository) ClaimMessageAttachments(ctx context.Context, ids []string, 
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	selection, err := r.selectAttachmentsForClaim(ctx, tx, ids, ownerID, workspaceID, taskID, sessionID)
+	now := time.Now().UTC()
+	selection, err := r.selectAttachmentsForClaim(ctx, tx, ids, ownerID, workspaceID, taskID, sessionID, now)
 	if err != nil {
 		return err
 	}
-	if err := r.checkAttachmentClaimAggregate(ctx, tx, ids, selection, ownerID, workspaceID, taskID, sessionID); err != nil {
-		return err
+	if selection.selectedSize > models.MaxMessageAttachmentBytes {
+		return models.ErrAttachmentTotalTooLarge
 	}
 	if err := r.markAttachmentsClaimed(ctx, tx, selection.claimIDs, ownerID, workspaceID, taskID, sessionID); err != nil {
 		return err
@@ -127,7 +128,7 @@ type attachmentClaimSelection struct {
 	selectedSize int64
 }
 
-func (r *Repository) selectAttachmentsForClaim(ctx context.Context, tx *sqlx.Tx, ids []string, ownerID, workspaceID, taskID, sessionID string) (attachmentClaimSelection, error) {
+func (r *Repository) selectAttachmentsForClaim(ctx context.Context, tx *sqlx.Tx, ids []string, ownerID, workspaceID, taskID, sessionID string, now time.Time) (attachmentClaimSelection, error) {
 	selection := attachmentClaimSelection{}
 	seen := make(map[string]struct{}, len(ids))
 	for _, id := range ids {
@@ -148,54 +149,52 @@ func (r *Repository) selectAttachmentsForClaim(ctx context.Context, tx *sqlx.Tx,
 		if attachment.OwnerID != ownerID || attachment.WorkspaceID != workspaceID {
 			return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
 		}
-		switch attachment.State {
-		case models.AttachmentStateStaged:
-			if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
-				return attachmentClaimSelection{}, models.ErrAttachmentTooLarge
-			}
-			selection.selectedSize += attachment.SizeBytes
-			selection.claimIDs = append(selection.claimIDs, id)
-		case models.AttachmentStateClaimed:
-			if attachment.TaskID != taskID || attachment.SessionID != sessionID {
-				return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
-			}
-		default:
-			return attachmentClaimSelection{}, models.ErrAttachmentClaimConflict
+		if err := addAttachmentToClaim(&selection, &attachment, id, taskID, sessionID, now); err != nil {
+			return attachmentClaimSelection{}, err
 		}
 	}
 	return selection, nil
 }
 
-func (r *Repository) checkAttachmentClaimAggregate(ctx context.Context, tx *sqlx.Tx, ids []string, selection attachmentClaimSelection, ownerID, workspaceID, taskID, sessionID string) error {
-	var existingCount, existingSize int64
-	claimPlaceholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	aggregateQuery := `
-		SELECT COUNT(*), COALESCE(SUM(size_bytes), 0)
-		FROM task_message_attachments
-		WHERE owner_id = ? AND workspace_id = ? AND task_id = ? AND session_id = ?
-		  AND state IN (?, ?)
-		  AND id NOT IN (` + claimPlaceholders + `)`
-	aggregateArgs := []interface{}{ownerID, workspaceID, taskID, sessionID,
-		models.AttachmentStateStaged, models.AttachmentStateClaimed}
-	aggregateArgs = append(aggregateArgs, idsToInterfaces(ids)...)
-	if err := tx.QueryRowxContext(ctx, tx.Rebind(aggregateQuery), aggregateArgs...).Scan(&existingCount, &existingSize); err != nil {
-		return fmt.Errorf("check attachment claim aggregate: %w", err)
+func addAttachmentToClaim(selection *attachmentClaimSelection, attachment *models.TaskMessageAttachment, id, taskID, sessionID string, now time.Time) error {
+	switch attachment.State {
+	case models.AttachmentStateStaged:
+		if !attachment.ExpiresAt.IsZero() && !attachment.ExpiresAt.After(now) {
+			return models.ErrAttachmentClaimConflict
+		}
+		if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+			return models.ErrAttachmentTooLarge
+		}
+		selection.selectedSize += attachment.SizeBytes
+		selection.claimIDs = append(selection.claimIDs, id)
+		return nil
+	case models.AttachmentStateClaimed:
+		if attachment.TaskID != taskID || attachment.SessionID != sessionID {
+			return models.ErrAttachmentClaimConflict
+		}
+		return nil
+	default:
+		return models.ErrAttachmentClaimConflict
 	}
-	if existingCount+int64(len(selection.claimIDs)) > int64(models.MaxMessageAttachmentCount) || existingSize+selection.selectedSize > models.MaxMessageAttachmentBytes {
-		return models.ErrAttachmentTotalTooLarge
-	}
-	return nil
 }
 
 func (r *Repository) markAttachmentsClaimed(ctx context.Context, tx *sqlx.Tx, ids []string, ownerID, workspaceID, taskID, sessionID string) error {
 	now := time.Now().UTC()
 	for _, id := range ids {
-		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE task_message_attachments
 			SET task_id = ?, session_id = ?, state = ?, updated_at = ?
 			WHERE id = ? AND owner_id = ? AND workspace_id = ? AND state = ?
-		`), taskID, sessionID, models.AttachmentStateClaimed, now, id, ownerID, workspaceID, models.AttachmentStateStaged); err != nil {
+		`), taskID, sessionID, models.AttachmentStateClaimed, now, id, ownerID, workspaceID, models.AttachmentStateStaged)
+		if err != nil {
 			return fmt.Errorf("claim attachment: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("claim attachment rows affected: %w", err)
+		}
+		if affected != 1 {
+			return models.ErrAttachmentClaimConflict
 		}
 	}
 	return nil
@@ -215,36 +214,156 @@ func (r *Repository) DeleteMessageAttachment(ctx context.Context, id, ownerID st
 	return nil
 }
 
+func (r *Repository) DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := []interface{}{ownerID, taskID, sessionID, models.AttachmentStateClaimed}
+	args = append(args, idsToInterfaces(ids)...)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin claimed attachment release: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
+		WHERE owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
+		  AND id IN (`+placeholders+`)
+	`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list claimed attachments for release: %w", err)
+	}
+	var released []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan claimed attachment for release: %w", err)
+		}
+		released = append(released, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate claimed attachments for release: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close claimed attachments for release: %w", err)
+	}
+	for _, attachment := range released {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			DELETE FROM task_message_attachments
+			WHERE id = ? AND owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
+		`), attachment.ID, ownerID, taskID, sessionID, models.AttachmentStateClaimed)
+		if err != nil {
+			return nil, fmt.Errorf("release claimed attachment: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("release claimed attachment rows affected: %w", err)
+		}
+		if affected != 1 {
+			return nil, models.ErrAttachmentClaimConflict
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit claimed attachment release: %w", err)
+	}
+	return released, nil
+}
+
+func (r *Repository) DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin task attachment cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments WHERE task_id = ?
+	`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task attachments for cleanup: %w", err)
+	}
+	var attachments []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan task attachment for cleanup: %w", err)
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate task attachments for cleanup: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task attachments for cleanup: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_message_attachments WHERE task_id = ?`), taskID); err != nil {
+		return nil, fmt.Errorf("delete task attachments: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit task attachment cleanup: %w", err)
+	}
+	return attachments, nil
+}
+
 func (r *Repository) MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error) {
-	rows, err := r.db.QueryxContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin expired attachment cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
 		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
 		WHERE state = ? AND expires_at <= ?
 	`), models.AttachmentStateStaged, now)
 	if err != nil {
 		return nil, fmt.Errorf("list expired attachments: %w", err)
 	}
-	defer func() { _ = rows.Close() }()
 	var expired []*models.TaskMessageAttachment
 	for rows.Next() {
 		attachment := &models.TaskMessageAttachment{}
 		if err := rows.StructScan(attachment); err != nil {
+			_ = rows.Close()
 			return nil, fmt.Errorf("scan expired attachment: %w", err)
 		}
 		expired = append(expired, attachment)
 	}
 	if err := rows.Err(); err != nil {
+		_ = rows.Close()
 		return nil, fmt.Errorf("iterate expired attachments: %w", err)
 	}
-	if len(expired) == 0 {
-		return nil, nil
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close expired attachments: %w", err)
 	}
-	if _, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		UPDATE task_message_attachments SET state = ?, updated_at = ?
-		WHERE state = ? AND expires_at <= ?
-	`), models.AttachmentStateExpired, now, models.AttachmentStateStaged, now); err != nil {
-		return nil, fmt.Errorf("mark expired attachments: %w", err)
+	transitioned := make([]*models.TaskMessageAttachment, 0, len(expired))
+	for _, attachment := range expired {
+		result, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments SET state = ?, updated_at = ?
+			WHERE id = ? AND state = ? AND expires_at <= ?
+		`), models.AttachmentStateExpired, now, attachment.ID, models.AttachmentStateStaged, now)
+		if err != nil {
+			return nil, fmt.Errorf("mark expired attachment: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return nil, fmt.Errorf("mark expired attachment rows affected: %w", err)
+		}
+		if affected == 1 {
+			attachment.State = models.AttachmentStateExpired
+			attachment.UpdatedAt = now
+			transitioned = append(transitioned, attachment)
+		}
 	}
-	return expired, nil
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit expired attachment cleanup: %w", err)
+	}
+	return transitioned, nil
 }
 
 func errorsIsNoRows(err error) bool { return err == sql.ErrNoRows }

@@ -24,8 +24,9 @@ import (
 )
 
 const (
-	modelConfigOptionID    = "model"
-	attachmentDeliveryPath = "path"
+	modelConfigOptionID      = "model"
+	attachmentDeliveryPath   = "path"
+	attachmentDeliveryPrompt = "prompt"
 )
 
 // SessionManager handles ACP session initialization and management
@@ -914,8 +915,10 @@ func (sm *SessionManager) sendPrompt(
 // materializeAttachments resolves claimed backend descriptors into the active
 // agentctl session. The prompt and queue protocols carry only bounded
 // descriptors; bytes are streamed directly from backend storage to agentctl.
-// Materialized descriptors use path delivery so a 100 MiB file never becomes
-// an ACP base64/WebSocket payload. Legacy inline attachments are left intact.
+// Materialized descriptors preserve the requested delivery mode. Path-mode
+// files stay on disk; prompt-mode images are converted to native ACP content
+// by agentctl from the materialized file. Legacy inline attachments are left
+// intact.
 func (sm *SessionManager) materializeAttachments(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -964,9 +967,11 @@ func (sm *SessionManager) materializeAttachments(
 		result[i].MimeType = mimeType
 		result[i].SizeBytes = sizeBytes
 		result[i].Data = ""
-		result[i].DeliveryMode = attachmentDeliveryPath
-		if attachment.DeliveryMode != attachmentDeliveryPath {
-			sm.logger.Debug("using workspace-path delivery for staged attachment",
+		if result[i].DeliveryMode == "" {
+			result[i].DeliveryMode = attachmentDeliveryPrompt
+		}
+		if result[i].DeliveryMode != attachmentDeliveryPath {
+			sm.logger.Debug("preserving native delivery for staged attachment",
 				zap.String("attachment_id", attachment.AttachmentID),
 				zap.String("requested_delivery_mode", attachment.DeliveryMode),
 				zap.Int64("size_bytes", sizeBytes))

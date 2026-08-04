@@ -1789,6 +1789,12 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 		return false, nil
 	}
+	if s.attachmentSvc != nil {
+		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), id); err != nil {
+			s.logger.Warn("failed to remove task attachment bytes",
+				zap.String("task_id", id), zap.Error(err))
+		}
+	}
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
 	var extra map[string]interface{}
@@ -1853,6 +1859,12 @@ func (s *Service) deleteTaskStopTargets(ctx context.Context, id string) ([]taskS
 // for delete cascade, false for archive — archive preserves the row). Runtime
 // inventory failures abort cleanup so durable stop handles remain retryable.
 func (s *Service) CleanupTaskResources(ctx context.Context, taskID string, deleteEnvRow bool) {
+	if deleteEnvRow && s.attachmentSvc != nil {
+		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), taskID); err != nil {
+			s.logger.Warn("failed to remove task attachment bytes during resource cleanup",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
 	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
 	if err != nil {
 		s.logger.Warn("failed to list sessions for cascade cleanup",

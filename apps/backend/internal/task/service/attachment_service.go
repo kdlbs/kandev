@@ -240,11 +240,7 @@ func (s *AttachmentService) Delete(ctx context.Context, ownerID, id string) erro
 	if err := s.repo.DeleteMessageAttachment(ctx, id, ownerID); err != nil {
 		return err
 	}
-	if attachment.StorageKey != "" {
-		if err := os.Remove(filepath.Join(s.root, filepath.Base(attachment.StorageKey))); err != nil && !errors.Is(err, os.ErrNotExist) {
-			s.log.Warn("remove deleted attachment bytes failed", zap.String("attachment_id", id), zap.Error(err))
-		}
-	}
+	s.removeBytes(attachment)
 	return nil
 }
 
@@ -255,6 +251,33 @@ func (s *AttachmentService) Claim(ctx context.Context, ownerID, workspaceID, tas
 		}
 	}
 	return s.repo.ClaimMessageAttachments(ctx, ids, ownerID, workspaceID, taskID, sessionID)
+}
+
+// Release removes claimed descriptors that are no longer referenced by a
+// queued message. It is used after an atomic queue replacement succeeds.
+func (s *AttachmentService) Release(ctx context.Context, ownerID, taskID, sessionID string, ids []string) error {
+	attachments, err := s.repo.DeleteClaimedMessageAttachments(ctx, ids, ownerID, taskID, sessionID)
+	if err != nil {
+		return err
+	}
+	for _, attachment := range attachments {
+		s.removeBytes(attachment)
+	}
+	return nil
+}
+
+// DeleteByTask removes all attachment registry rows and private bytes owned by
+// a task. Task deletion must clean claimed rows as well as staged rows because
+// only staged rows participate in expiry maintenance.
+func (s *AttachmentService) DeleteByTask(ctx context.Context, taskID string) error {
+	attachments, err := s.repo.DeleteMessageAttachmentsByTask(ctx, taskID)
+	if err != nil {
+		return err
+	}
+	for _, attachment := range attachments {
+		s.removeBytes(attachment)
+	}
+	return nil
 }
 
 func (s *AttachmentService) Descriptor(attachment *models.TaskMessageAttachment) AttachmentDescriptor {
@@ -272,14 +295,18 @@ func (s *AttachmentService) CleanupExpired(ctx context.Context) (int, error) {
 		return 0, err
 	}
 	for _, attachment := range expired {
-		if attachment.StorageKey == "" {
-			continue
-		}
-		if err := os.Remove(filepath.Join(s.root, filepath.Base(attachment.StorageKey))); err != nil && !errors.Is(err, os.ErrNotExist) {
-			s.log.Warn("remove expired attachment bytes failed", zap.String("attachment_id", attachment.ID), zap.Error(err))
-		}
+		s.removeBytes(attachment)
 	}
 	return len(expired), nil
+}
+
+func (s *AttachmentService) removeBytes(attachment *models.TaskMessageAttachment) {
+	if attachment == nil || attachment.StorageKey == "" {
+		return
+	}
+	if err := os.Remove(filepath.Join(s.root, filepath.Base(attachment.StorageKey))); err != nil && !errors.Is(err, os.ErrNotExist) {
+		s.log.Warn("remove attachment bytes failed", zap.String("attachment_id", attachment.ID), zap.Error(err))
+	}
 }
 
 // ValidateAttachmentSize applies the raw-byte per-file limit. The boundary is

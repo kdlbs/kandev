@@ -164,6 +164,38 @@ func TestBuildPromptContentBlocks_PathModeAttachmentSavesWritableFile(t *testing
 	}
 }
 
+func TestBuildPromptContentBlocks_PromptModeMaterializedImageUsesFileBytes(t *testing.T) {
+	a := newTestAdapter()
+	t.Cleanup(func() { _ = a.Close() })
+
+	workDir := t.TempDir()
+	dir := filepath.Join(workDir, ".kandev", "attachments", "sess-prompt")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shot.png"), []byte("materialized image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.attachMgr = shared.NewAttachmentManager(workDir, a.logger.Zap())
+	a.attachMgr.SetSessionID("sess-prompt")
+	a.capabilities = acp.AgentCapabilities{PromptCapabilities: acp.PromptCapabilities{Image: true}}
+
+	blocks := a.buildPromptContentBlocks("inspect this", []v1.MessageAttachment{{
+		Type:         "image",
+		AttachmentID: "attachment-1",
+		MimeType:     "image/png",
+		Name:         "shot.png",
+		DeliveryMode: "prompt",
+	}})
+
+	if len(blocks) != 2 || blocks[1].Image == nil {
+		t.Fatalf("expected materialized prompt image block, got %#v", blocks)
+	}
+	if blocks[1].Image.Data != base64.StdEncoding.EncodeToString([]byte("materialized image")) {
+		t.Fatalf("image data = %q, want materialized bytes", blocks[1].Image.Data)
+	}
+}
+
 func TestBuildPromptContentBlocks_PathModeSaveFailureFallsBackToNativeBlock(t *testing.T) {
 	a := newTestAdapter()
 	t.Cleanup(func() { _ = a.Close() })

@@ -2,8 +2,10 @@ package acp
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"os"
 
 	"github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
@@ -260,6 +262,14 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 			contentBlocks = append(contentBlocks, acp.TextBlock(shared.BuildAttachmentPrompt(saved, true)))
 			continue
 		}
+		if att.AttachmentID != "" && att.Data == "" && (att.Type == contentTypeImage || att.Type == contentTypeAudio) {
+			if data, ok := a.loadMaterializedAttachmentData(att); ok {
+				att.Data = data
+			} else {
+				a.logger.Warn("failed to load materialized prompt attachment",
+					zap.String("attachment_id", att.AttachmentID), zap.String("name", att.Name))
+			}
+		}
 
 		switch att.Type {
 		case contentTypeImage:
@@ -284,6 +294,21 @@ func (a *Adapter) buildPromptContentBlocks(message string, attachments []v1.Mess
 	}
 
 	return contentBlocks
+}
+
+func (a *Adapter) loadMaterializedAttachmentData(att v1.MessageAttachment) (string, bool) {
+	if a.attachMgr == nil {
+		return "", false
+	}
+	saved, err := a.attachMgr.SaveAttachments([]v1.MessageAttachment{att})
+	if err != nil || len(saved) == 0 {
+		return "", false
+	}
+	data, err := os.ReadFile(saved[0].AbsPath)
+	if err != nil {
+		return "", false
+	}
+	return base64.StdEncoding.EncodeToString(data), true
 }
 
 func buildAttachmentFallbackBlock(att v1.MessageAttachment) acp.ContentBlock {

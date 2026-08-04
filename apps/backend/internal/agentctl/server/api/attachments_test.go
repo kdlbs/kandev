@@ -109,3 +109,44 @@ func TestMaterializeAttachment_RejectsDescriptorSizeMismatch(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
 	}
 }
+
+func TestMaterializeAttachment_RejectsPathTraversalIdentity(t *testing.T) {
+	workDir := t.TempDir()
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{Port: 0, WorkDir: workDir, AuthToken: "test-token"}
+	server := NewServer(cfg, process.NewManager(cfg, log), nil, nil, log)
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for key, value := range map[string]string{
+		"session_id":    "../escape",
+		"attachment_id": "attachment-1",
+		"name":          "diagnostic.zip",
+		"mime_type":     "application/zip",
+		"size_bytes":    "0",
+	} {
+		if err := writer.WriteField(key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	part, err := writer.CreateFormFile("file", "diagnostic.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/attachments/materialize", &body)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	response := httptest.NewRecorder()
+	server.Router().ServeHTTP(response, req)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}

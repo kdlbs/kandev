@@ -41,6 +41,7 @@ const (
 type QueueService interface {
 	QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error)
 	AppendContent(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
+	GetEntry(ctx context.Context, sessionID, entryID string) (*messagequeue.QueuedMessage, error)
 	UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []messagequeue.MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error
 	RemoveEntry(ctx context.Context, sessionID, entryID string) error
 	MergeIntoAbove(ctx context.Context, sessionID, entryID, queuedBy string) (*messagequeue.QueuedMessage, error)
@@ -63,6 +64,10 @@ type QueueAccessAuthorizer interface {
 // after a queue entry has been durably accepted.
 type QueueAttachmentClaimer interface {
 	ClaimMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
+type QueueAttachmentReleaser interface {
+	ReleaseMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
 }
 
 // QueueHandlers handles WebSocket message-queue operations.
@@ -350,14 +355,61 @@ func (h *QueueHandlers) wsUpdateMessage(ctx context.Context, msg *ws.Message) (*
 		}
 		metadataUpdates = map[string]interface{}{messagequeue.MetadataEntityReferences: referenceMetadata}
 	}
+	var previous *messagequeue.QueuedMessage
+	var releaseClaims QueueAttachmentReleaser
+	if h.attachmentClaimer != nil {
+		var err error
+		previous, err = h.queueService.GetEntry(ctx, req.SessionID, req.EntryID)
+		if err != nil {
+			if errors.Is(err, messagequeue.ErrEntryNotFound) {
+				return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
+			}
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
+		}
+		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
+		}
+		releaseClaims, _ = h.attachmentClaimer.(QueueAttachmentReleaser)
+	}
 	if err := h.queueService.UpdateMessageWithMetadata(ctx, req.SessionID, req.EntryID, req.Content, req.Attachments, metadataUpdates, queuedBy); err != nil {
+		if releaseClaims != nil && previous != nil {
+			if releaseErr := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); releaseErr != nil {
+				h.logger.Warn("failed to release attachments after queue update failure", zap.Error(releaseErr))
+			}
+		}
 		if errors.Is(err, messagequeue.ErrEntryNotFound) {
 			return ws.NewError(msg.ID, msg.Action, queueErrorCodeEntryNotFound, "Queue entry was already drained or not owned by caller", nil)
 		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
+	if releaseClaims != nil && previous != nil {
+		if superseded := supersededQueueAttachments(previous.Attachments, req.Attachments); len(superseded) > 0 {
+			if err := releaseClaims.ReleaseMessageAttachments(ctx, previous.TaskID, req.SessionID, queueAttachmentsToV1(superseded)); err != nil {
+				h.logger.Warn("failed to release superseded queue attachments", zap.Error(err))
+			}
+		}
+	}
 	h.publishStatus(ctx, req.SessionID)
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{fieldEntryID: req.EntryID})
+}
+
+func supersededQueueAttachments(previous, replacement []messagequeue.MessageAttachment) []messagequeue.MessageAttachment {
+	retained := make(map[string]struct{}, len(replacement))
+	for _, attachment := range replacement {
+		if attachment.AttachmentID != "" {
+			retained[attachment.AttachmentID] = struct{}{}
+		}
+	}
+	var superseded []messagequeue.MessageAttachment
+	for _, attachment := range previous {
+		if attachment.AttachmentID == "" {
+			continue
+		}
+		if _, ok := retained[attachment.AttachmentID]; !ok {
+			superseded = append(superseded, attachment)
+		}
+	}
+	return superseded
 }
 
 func (h *QueueHandlers) validateSubmittedReferences(

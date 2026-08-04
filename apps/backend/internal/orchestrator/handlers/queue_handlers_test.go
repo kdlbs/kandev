@@ -78,6 +78,30 @@ type fakeReferenceSubmissionValidator struct {
 	err       error
 }
 
+type recordingQueueAttachmentClaimer struct {
+	claims   []string
+	releases []string
+	claimErr error
+}
+
+func (f *recordingQueueAttachmentClaimer) ClaimMessageAttachments(_ context.Context, _ string, _ string, attachments []v1.MessageAttachment) error {
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			f.claims = append(f.claims, attachment.AttachmentID)
+		}
+	}
+	return f.claimErr
+}
+
+func (f *recordingQueueAttachmentClaimer) ReleaseMessageAttachments(_ context.Context, _ string, _ string, attachments []v1.MessageAttachment) error {
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" {
+			f.releases = append(f.releases, attachment.AttachmentID)
+		}
+	}
+	return nil
+}
+
 func (f *fakeReferenceSubmissionValidator) ValidateForSubmission(
 	_ context.Context,
 	sessionID, taskID string,
@@ -553,6 +577,29 @@ func TestWsGetQueueStatus(t *testing.T) {
 }
 
 func TestWsUpdateMessage(t *testing.T) {
+	t.Run("claims replacement attachments and releases superseded claims", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		claimer := &recordingQueueAttachmentClaimer{}
+		handlers.SetAttachmentClaimer(claimer)
+		ctx := context.Background()
+		queued, err := svc.QueueMessage(ctx, "s", "task-1", "original", "", "u", false, []messagequeue.MessageAttachment{{
+			Type: "resource", AttachmentID: "old-attachment", Name: "old.txt", MimeType: "text/plain",
+		}})
+		require.NoError(t, err)
+
+		response, err := handlers.wsUpdateMessage(ctx,
+			createTestMessage(t, ws.ActionMessageQueueUpdate, map[string]interface{}{
+				"session_id": "s", "entry_id": queued.ID, "content": "edited", "user_id": "u",
+				"attachments": []messagequeue.MessageAttachment{{
+					Type: "resource", AttachmentID: "new-attachment", Name: "new.txt", MimeType: "text/plain",
+				}},
+			}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		assert.Equal(t, []string{"new-attachment"}, claimer.claims)
+		assert.Equal(t, []string{"old-attachment"}, claimer.releases)
+	})
+
 	t.Run("updates an entry", func(t *testing.T) {
 		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()

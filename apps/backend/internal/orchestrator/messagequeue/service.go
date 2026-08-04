@@ -392,6 +392,23 @@ func (s *Service) UpdateMessage(ctx context.Context, sessionID, entryID, content
 	return s.UpdateMessageWithMetadata(ctx, sessionID, entryID, content, attachments, nil, queuedBy)
 }
 
+// GetEntry returns a pending queue entry scoped to its session. It is used by
+// lifecycle-aware callers that must inspect the trusted task ID and previous
+// attachment descriptors before replacing an entry.
+func (s *Service) GetEntry(ctx context.Context, sessionID, entryID string) (*QueuedMessage, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range entries {
+		if entries[i].ID == entryID {
+			entry := entries[i]
+			return &entry, nil
+		}
+	}
+	return nil, ErrEntryNotFound
+}
+
 // UpdateMessageWithMetadata atomically edits queue content and applies
 // metadata replacements while retaining unrelated metadata keys.
 func (s *Service) UpdateMessageWithMetadata(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, metadataUpdates map[string]interface{}, queuedBy string) error {

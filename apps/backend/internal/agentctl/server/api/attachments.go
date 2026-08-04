@@ -69,7 +69,7 @@ func parseMaterializedAttachmentUpload(c *gin.Context) (materializedAttachmentUp
 		return upload, http.StatusBadRequest, "attachment metadata is invalid"
 	}
 	upload.declaredSize = declaredSize
-	if filepath.Base(upload.sessionID) != upload.sessionID || strings.ContainsAny(upload.sessionID, `/\x00`) || filepath.Base(upload.attachmentID) != upload.attachmentID || strings.ContainsAny(upload.attachmentID, `/\x00`) {
+	if !isSafeAttachmentComponent(upload.sessionID) || !isSafeAttachmentComponent(upload.attachmentID) {
 		return upload, http.StatusBadRequest, "attachment identity is invalid"
 	}
 	upload.fileHeader, err = c.FormFile("file")
@@ -86,7 +86,10 @@ func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUplo
 	}
 	defer func() { _ = file.Close() }()
 
-	dir := filepath.Join(s.cfg.WorkDir, ".kandev", "attachments", upload.sessionID)
+	dir, err := safeAttachmentPath(s.cfg.WorkDir, ".kandev", "attachments", upload.sessionID)
+	if err != nil {
+		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment identity is invalid")
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		s.logger.Error("create agent attachment directory", zap.Error(err))
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusInternalServerError, "attachment storage unavailable")
@@ -119,7 +122,10 @@ func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUplo
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment name is invalid")
 	}
 	destinationName = uniqueAttachmentName(dir, destinationName)
-	destination := filepath.Join(dir, destinationName)
+	destination, err := safeAttachmentPath(dir, destinationName)
+	if err != nil {
+		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment name is invalid")
+	}
 	if err := os.Rename(tmpPath, destination); err != nil {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusInternalServerError, "attachment storage unavailable")
 	}
@@ -146,15 +152,42 @@ func materializedAttachmentError(err error) (int, string, bool) {
 }
 
 func safeAttachmentName(name string) string {
-	name = filepath.Base(name)
-	if name == "." || name == ".." || name == "" || strings.ContainsAny(name, `/\x00`) {
+	if !isSafeAttachmentComponent(name) {
 		return ""
 	}
 	return name
 }
 
+func isSafeAttachmentComponent(value string) bool {
+	return value != "" && filepath.IsLocal(value) && filepath.Base(value) == value && !strings.ContainsAny(value, "/\\\x00")
+}
+
+func safeAttachmentPath(root string, components ...string) (string, error) {
+	if root == "" {
+		return "", fmt.Errorf("attachment root is required")
+	}
+	parts := make([]string, 0, len(components)+1)
+	parts = append(parts, root)
+	for _, component := range components {
+		if !isSafeAttachmentComponent(component) {
+			return "", fmt.Errorf("invalid attachment path component")
+		}
+		parts = append(parts, component)
+	}
+	path := filepath.Join(parts...)
+	rel, err := filepath.Rel(root, path)
+	if err != nil || filepath.IsAbs(rel) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("attachment path escapes root")
+	}
+	return path, nil
+}
+
 func uniqueAttachmentName(dir, name string) string {
-	if _, err := os.Stat(filepath.Join(dir, name)); err == nil || !errors.Is(err, os.ErrNotExist) {
+	namePath, pathErr := safeAttachmentPath(dir, name)
+	if pathErr != nil {
+		return ""
+	}
+	if _, err := os.Stat(namePath); err == nil || !errors.Is(err, os.ErrNotExist) {
 		// An existing file (or an error other than not-exist) must not be
 		// overwritten. Continue with a deterministic suffix; the final rename
 		// remains atomic and therefore safe against concurrent materializers.
@@ -165,7 +198,11 @@ func uniqueAttachmentName(dir, name string) string {
 	base := strings.TrimSuffix(name, ext)
 	for i := 2; i <= 10000; i++ {
 		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
-		if _, err := os.Stat(filepath.Join(dir, candidate)); errors.Is(err, os.ErrNotExist) {
+		candidatePath, pathErr := safeAttachmentPath(dir, candidate)
+		if pathErr != nil {
+			return ""
+		}
+		if _, err := os.Stat(candidatePath); errors.Is(err, os.ErrNotExist) {
 			return candidate
 		}
 	}
