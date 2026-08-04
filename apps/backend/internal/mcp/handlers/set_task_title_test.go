@@ -46,6 +46,9 @@ func TestHandleSetTaskTitle_UpdatesPendingTitleOnce(t *testing.T) {
 		"task_id":  "task-title",
 		"title":    "Useful Feature",
 	})
+	var acceptedPayload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &acceptedPayload))
+	require.Equal(t, "not_applicable", acceptedPayload["branch_rename"].(map[string]interface{})["status"])
 
 	updated, err := svc.GetTask(ctx, "task-title")
 	require.NoError(t, err)

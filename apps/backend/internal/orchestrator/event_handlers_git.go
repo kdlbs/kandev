@@ -802,9 +802,7 @@ func (s *Service) updateBranchSwitchWorktreeSnapshot(ctx context.Context, sessio
 	if !ok {
 		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
 	}
-	lister, ok := s.repo.(interface {
-		ListTaskSessionWorktrees(context.Context, string) ([]*models.TaskSessionWorktree, error)
-	})
+	lister, ok := s.repo.(titleBranchWorktreeLister)
 	if !ok {
 		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
 	}
@@ -814,6 +812,9 @@ func (s *Service) updateBranchSwitchWorktreeSnapshot(ctx context.Context, sessio
 	}
 	matched := matchingBranchSwitchWorktrees(worktrees, repositoryName)
 	if len(matched) == 0 {
+		if repositoryName != "" {
+			return nil
+		}
 		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
 	}
 	return s.persistBranchSwitchWorktrees(ctx, scoped, sessionID, branch, matched)

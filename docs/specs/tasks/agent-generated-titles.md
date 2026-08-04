@@ -57,6 +57,8 @@ and
   a GitHub pull request or another remote change link, so the session remains on the remote head branch
   and can contribute changes to it. Local-executor sessions are also preserved because Kandev does not
   own their shared checkout branch.
+- If the owner session switched away from its recorded generated branch before the title call arrives,
+  Kandev preserves the current branch rather than treating that user selection as Kandev-owned.
 - In multi-repository tasks, eligibility is evaluated per repository. Kandev can rename generated
   branches and preserve explicit remote checkouts in the same owner session. Sessions other than the
   title owner keep their current branches; future sessions render new branches from the final task
@@ -240,6 +242,8 @@ provisional-title name.
   branch name is preserved.
 - **GIVEN** an auto-titled Local-executor task, **WHEN** the owner title call is accepted, **THEN** the
   shared checkout branch is preserved.
+- **GIVEN** an auto-titled task whose owner switched to another branch before the title call, **WHEN**
+  the owner title call is accepted, **THEN** the selected branch is preserved and reported as preserved.
 - **GIVEN** an auto-titled multi-repository task mixes a generated branch with a direct remote
   checkout, **WHEN** the owner title call is accepted, **THEN** the generated branch is renamed and the
   direct remote checkout is preserved with both outcomes reported.

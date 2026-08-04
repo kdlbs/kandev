@@ -184,7 +184,8 @@ returns `title_not_owner`, without changing the title.
 When the owner accepts a generated title, Kandev also updates the names of the task's Kandev-managed
 branches from that final title and refreshes the session's branch snapshots. This is evaluated per
 repository: a repository opened from an existing checkout branch (including a GitHub PR) is preserved,
-as is every Local/Local PC checkout. If one managed repository cannot be renamed, the title remains
+as is every Local/Local PC checkout. A branch manually selected before the title call is preserved.
+If one managed repository cannot be renamed or its snapshot cannot be persisted, the title remains
 accepted and the response reports the successful, preserved, and failed branch outcomes separately.
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.

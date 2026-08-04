@@ -509,24 +509,35 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 }
 
 // UpdateExecutorRunningWorktreeBranch narrowly updates the branch snapshot for
-// a live execution. Lifecycle owns this column, so callers must not replace
-// the full executors_running row after a branch rename.
-func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, sessionID, branch string) error {
+// a live execution. The execution ID is part of the CAS so a rotated execution
+// cannot overwrite the successor's branch snapshot.
+func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, sessionID, expectedExecID, branch string) error {
 	if sessionID == "" {
 		return fmt.Errorf("session_id is required")
+	}
+	if expectedExecID == "" {
+		return fmt.Errorf("expected execution_id is required")
 	}
 	now := time.Now().UTC()
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE executors_running
 		   SET worktree_branch = ?, updated_at = ?
 		 WHERE session_id = ?
-	`), branch, now, sessionID)
+		   AND agent_execution_id = ?
+	`), branch, now, sessionID, expectedExecID)
 	if err != nil {
 		return err
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+		exists, hasErr := r.HasExecutorRunningRow(ctx, sessionID)
+		if hasErr != nil {
+			return hasErr
+		}
+		if !exists {
+			return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+		}
+		return models.ErrExecutionRotated
 	}
 	return nil
 }

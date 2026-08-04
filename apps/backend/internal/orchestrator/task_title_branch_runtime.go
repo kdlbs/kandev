@@ -2,11 +2,11 @@ package orchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"path/filepath"
 	"strings"
-
-	"go.uber.org/zap"
 
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/task/models"
@@ -44,6 +44,10 @@ type titleBranchScopedSnapshotStore interface {
 
 type titleBranchWorktreeSnapshotStore interface {
 	UpdateTaskSessionWorktreeBranchByWorktree(ctx context.Context, sessionID, worktreeID, branch string) error
+}
+
+type titleBranchWorktreeLister interface {
+	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error)
 }
 
 type titleBranchBinding struct {
@@ -212,7 +216,7 @@ func (s *Service) buildTitleBranchBindings(
 	envRepos map[string][]*models.TaskEnvironmentRepo,
 ) ([]titleBranchBinding, error) {
 	inputs := make([]worktree.BranchIdentityInput, 0, len(taskRepositories))
-	repositories := make([]*models.Repository, 0, len(taskRepositories))
+	bindings := make([]titleBranchBinding, 0, len(taskRepositories))
 	for _, taskRepository := range taskRepositories {
 		if taskRepository == nil {
 			continue
@@ -224,7 +228,10 @@ func (s *Service) buildTitleBranchBindings(
 		if repository == nil {
 			return nil, fmt.Errorf("repository %q is unavailable", taskRepository.RepositoryID)
 		}
-		repositories = append(repositories, repository)
+		bindings = append(bindings, titleBranchBinding{
+			taskRepository: taskRepository,
+			repository:     repository,
+		})
 		inputs = append(inputs, worktree.BranchIdentityInput{
 			RepositoryID:   taskRepository.RepositoryID,
 			BaseBranch:     taskRepository.BaseBranch,
@@ -235,23 +242,11 @@ func (s *Service) buildTitleBranchBindings(
 		})
 	}
 	plans := worktree.BuildBranchIdentityPlans(inputs)
-	bindings := make([]titleBranchBinding, 0, len(inputs))
-	inputIndex := 0
-	for _, taskRepository := range taskRepositories {
-		if taskRepository == nil {
-			continue
-		}
-		repository := repositories[inputIndex]
-		plan := plans[inputIndex]
-		inputIndex++
-		binding := titleBranchBinding{
-			taskRepository: taskRepository,
-			repository:     repository,
-			plan:           plan,
-		}
-		binding.worktree = titleBranchWorktree(worktrees, taskRepository.RepositoryID, plan.IdentitySlug)
-		binding.environmentRepo = titleBranchEnvironmentRepo(envRepos[taskRepository.RepositoryID], plan.IdentitySlug)
-		bindings = append(bindings, binding)
+	for i := range bindings {
+		repositoryID := bindings[i].taskRepository.RepositoryID
+		bindings[i].plan = plans[i]
+		bindings[i].worktree = titleBranchWorktree(worktrees, repositoryID, plans[i].IdentitySlug)
+		bindings[i].environmentRepo = titleBranchEnvironmentRepo(envRepos[repositoryID], plans[i].IdentitySlug)
 	}
 	return bindings, nil
 }
@@ -288,6 +283,22 @@ func titleBranchEnvironmentRepo(repos []*models.TaskEnvironmentRepo, branchSlug 
 	return fallback
 }
 
+func addTitleBranchPreservation(result *TitleBranchRenameResult, repositoryID, branch, reason string) {
+	result.Preserved = append(result.Preserved, TitleBranchPreservation{
+		RepositoryID: repositoryID,
+		Branch:       branch,
+		Reason:       reason,
+	})
+}
+
+func addTitleBranchFailure(result *TitleBranchRenameResult, repositoryID, branch, message string) {
+	result.Failed = append(result.Failed, TitleBranchFailure{
+		RepositoryID: repositoryID,
+		Branch:       branch,
+		Message:      message,
+	})
+}
+
 func (s *Service) renameTitleBranchBinding(
 	ctx context.Context,
 	task *models.Task,
@@ -303,26 +314,31 @@ func (s *Service) renameTitleBranchBinding(
 	}
 	branch := titleBranchCurrentBranch(binding, env)
 	if reason := titleBranchPreservationReason(binding.taskRepository, executorType); reason != "" {
-		result.Preserved = append(result.Preserved, TitleBranchPreservation{
-			RepositoryID: binding.taskRepository.RepositoryID,
-			Branch:       branch,
-			Reason:       reason,
-		})
+		addTitleBranchPreservation(result, binding.taskRepository.RepositoryID, branch, reason)
 		return
 	}
 	if binding.worktree == nil || branch == "" {
-		result.Failed = append(result.Failed, TitleBranchFailure{
-			RepositoryID: binding.taskRepository.RepositoryID,
-			Branch:       branch,
-			Message:      "current generated branch is unavailable",
-		})
+		addTitleBranchFailure(result, binding.taskRepository.RepositoryID, branch, "current generated branch is unavailable")
+		return
+	}
+	generatedBranch, generatedBranchKnown := titleBranchGeneratedSnapshot(binding, env)
+	if !generatedBranchKnown {
+		addTitleBranchPreservation(result, binding.taskRepository.RepositoryID, branch, "branch_unverified")
+		return
+	}
+	if generatedBranch != branch {
+		addTitleBranchPreservation(result, binding.taskRepository.RepositoryID, branch, "branch_changed")
+		return
+	}
+	if s.titleBranchRuntime == nil {
+		addTitleBranchPreservation(result, binding.taskRepository.RepositoryID, branch, "runtime_unavailable")
 		return
 	}
 
 	primary := titleBranchIsPrimaryEnvironment(env, binding, multiRepo)
 	newName, err := s.performTitleBranchRename(ctx, task, title, executorType, env, multiRepo, primary, binding, branch)
 	if err != nil {
-		result.Failed = append(result.Failed, TitleBranchFailure{RepositoryID: binding.taskRepository.RepositoryID, Branch: branch, Message: err.Error()})
+		addTitleBranchFailure(result, binding.taskRepository.RepositoryID, branch, err.Error())
 		return
 	}
 	if branch == newName {
@@ -333,8 +349,9 @@ func (s *Service) renameTitleBranchBinding(
 		})
 		return
 	}
-	if s.titleBranchRuntime != nil {
-		s.persistTitleBranchSnapshots(ctx, env, binding, newName, multiRepo)
+	if err := s.persistTitleBranchSnapshots(ctx, env, binding, newName, multiRepo); err != nil {
+		addTitleBranchFailure(result, binding.taskRepository.RepositoryID, newName, err.Error())
+		return
 	}
 	result.Renamed = append(result.Renamed, TitleBranchRename{
 		RepositoryID: binding.taskRepository.RepositoryID,
@@ -361,9 +378,6 @@ func (s *Service) performTitleBranchRename(
 	}
 	if branch == newName {
 		return newName, nil
-	}
-	if s.titleBranchRuntime == nil {
-		return "", fmt.Errorf("branch rename runtime is unavailable")
 	}
 	repoPath := titleBranchAgentctlRepoPath(env, binding, multiRepo)
 	operation, err := s.renameTitleBranchRuntime(ctx, binding.worktree.SessionID, newName, repoPath, primary)
@@ -411,7 +425,11 @@ func titleBranchCurrentBranch(binding titleBranchBinding, env *models.TaskEnviro
 
 func titleBranchSuffix(executorType models.ExecutorType, taskID string) string {
 	if executorType == models.ExecutorTypeWorktree {
-		return worktree.SmallSuffix(3)
+		// The initial worktree suffix is random, but title handoffs can be
+		// retried. Derive a stable replacement from task data so repeated
+		// renders of the same title remain idempotent.
+		digest := sha256.Sum256([]byte(taskID))
+		return hex.EncodeToString(digest[:])[:3]
 	}
 	suffix := taskID
 	if len(suffix) > 6 {
@@ -445,48 +463,55 @@ func (s *Service) persistTitleBranchSnapshots(
 	binding titleBranchBinding,
 	branch string,
 	multiRepo bool,
-) {
-	s.persistTitleBranchSessionWorktreeSnapshot(ctx, binding, branch, multiRepo)
-	s.persistTitleBranchEnvironmentRepoSnapshot(ctx, binding, branch)
-	s.persistTitleBranchLegacyEnvironmentSnapshot(ctx, env, binding, branch, multiRepo)
+) error {
+	if err := s.persistTitleBranchSessionWorktreeSnapshot(ctx, binding, branch, multiRepo); err != nil {
+		return err
+	}
+	if err := s.persistTitleBranchEnvironmentRepoSnapshot(ctx, binding, branch); err != nil {
+		return err
+	}
+	return s.persistTitleBranchLegacyEnvironmentSnapshot(ctx, env, binding, branch, multiRepo)
 }
 
-func (s *Service) persistTitleBranchSessionWorktreeSnapshot(ctx context.Context, binding titleBranchBinding, branch string, multiRepo bool) {
+func (s *Service) persistTitleBranchSessionWorktreeSnapshot(ctx context.Context, binding titleBranchBinding, branch string, multiRepo bool) error {
 	if binding.worktree == nil {
-		return
+		return nil
 	}
 	binding.worktree.WorktreeBranch = branch
 	if exact, ok := s.repo.(titleBranchWorktreeSnapshotStore); ok && binding.worktree.WorktreeID != "" {
 		if err := exact.UpdateTaskSessionWorktreeBranchByWorktree(ctx, binding.worktree.SessionID, binding.worktree.WorktreeID, branch); err != nil {
-			s.titleBranchSnapshotWarning("failed to persist session worktree branch", err)
+			return fmt.Errorf("failed to persist session worktree branch: %w", err)
 		}
-		return
+		return nil
 	}
 	if scoped, ok := s.repo.(titleBranchScopedSnapshotStore); ok {
 		if err := scoped.UpdateTaskSessionWorktreeBranchByRepository(ctx, binding.worktree.SessionID, binding.worktree.RepositoryID, branch); err != nil {
-			s.titleBranchSnapshotWarning("failed to persist session worktree branch", err)
+			return fmt.Errorf("failed to persist session worktree branch: %w", err)
 		}
-		return
+		return nil
 	}
 	if !multiRepo {
 		if err := s.repo.UpdateTaskSessionWorktreeBranch(ctx, binding.worktree.SessionID, branch); err != nil {
-			s.titleBranchSnapshotWarning("failed to persist session worktree branch", err)
+			return fmt.Errorf("failed to persist session worktree branch: %w", err)
 		}
+		return nil
 	}
+	return fmt.Errorf("repository-scoped session worktree snapshot capability is unavailable")
 }
 
-func (s *Service) persistTitleBranchEnvironmentRepoSnapshot(ctx context.Context, binding titleBranchBinding, branch string) {
+func (s *Service) persistTitleBranchEnvironmentRepoSnapshot(ctx context.Context, binding titleBranchBinding, branch string) error {
 	if binding.environmentRepo == nil {
-		return
+		return nil
 	}
 	binding.environmentRepo.WorktreeBranch = branch
 	store, ok := s.repo.(titleBranchStore)
 	if !ok {
-		return
+		return nil
 	}
 	if err := store.UpdateTaskEnvironmentRepo(ctx, binding.environmentRepo); err != nil {
-		s.titleBranchSnapshotWarning("failed to persist environment repository branch", err)
+		return fmt.Errorf("failed to persist environment repository branch: %w", err)
 	}
+	return nil
 }
 
 func (s *Service) persistTitleBranchLegacyEnvironmentSnapshot(
@@ -495,18 +520,19 @@ func (s *Service) persistTitleBranchLegacyEnvironmentSnapshot(
 	binding titleBranchBinding,
 	branch string,
 	multiRepo bool,
-) {
+) error {
 	if env == nil || binding.taskRepository == nil || !titleBranchIsPrimaryEnvironment(env, binding, multiRepo) || env.WorktreeBranch == branch {
-		return
+		return nil
 	}
 	env.WorktreeBranch = branch
 	store, ok := s.repo.(titleBranchStore)
 	if !ok {
-		return
+		return nil
 	}
 	if err := store.UpdateTaskEnvironment(ctx, env); err != nil {
-		s.titleBranchSnapshotWarning("failed to persist environment branch", err)
+		return fmt.Errorf("failed to persist environment branch: %w", err)
 	}
+	return nil
 }
 
 func titleBranchIsPrimaryEnvironment(env *models.TaskEnvironment, binding titleBranchBinding, multiRepo bool) bool {
@@ -528,10 +554,16 @@ func titleBranchIsPrimaryEnvironment(env *models.TaskEnvironment, binding titleB
 	return binding.taskRepository != nil && binding.taskRepository.Position == 0
 }
 
-func (s *Service) titleBranchSnapshotWarning(message string, err error) {
-	if s.logger != nil {
-		s.logger.Warn(message, zap.Error(err))
+func titleBranchGeneratedSnapshot(binding titleBranchBinding, env *models.TaskEnvironment) (string, bool) {
+	if binding.environmentRepo != nil && binding.environmentRepo.WorktreeBranch != "" {
+		return binding.environmentRepo.WorktreeBranch, true
 	}
+	if env != nil && binding.taskRepository != nil && titleBranchIsPrimaryEnvironment(env, binding, true) {
+		if env.WorktreeBranch != "" {
+			return env.WorktreeBranch, true
+		}
+	}
+	return "", false
 }
 
 func titleBranchPRNumber(metadata map[string]interface{}) int {

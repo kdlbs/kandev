@@ -82,18 +82,53 @@ func (m *Manager) renameBranchForSession(
 	// execution metadata/running snapshot. Other repositories have their
 	// durable branch snapshots updated by the orchestrator.
 	if primary {
-		if execution.Metadata == nil {
-			execution.Metadata = make(map[string]interface{})
-		}
-		execution.Metadata[MetadataKeyWorktreeBranch] = newName
+		execution.setMetadataValue(MetadataKeyWorktreeBranch, newName)
 		if updater, ok := m.runningWriter.(interface {
-			UpdateExecutorRunningWorktreeBranch(context.Context, string, string) error
+			UpdateExecutorRunningWorktreeBranch(context.Context, string, string, string) error
 		}); ok {
 			// Git has already been renamed. Persistence failure must not turn a
 			// successful workspace operation into a retryable Git operation.
-			_ = updater.UpdateExecutorRunningWorktreeBranch(ctx, sessionID, newName)
+			_ = updater.UpdateExecutorRunningWorktreeBranch(ctx, sessionID, execution.ID, newName)
 		}
 	}
 
 	return result, nil
+}
+
+func (e *AgentExecution) setMetadataValue(key string, value interface{}) {
+	if e == nil {
+		return
+	}
+	e.metadataMu.Lock()
+	defer e.metadataMu.Unlock()
+	if e.Metadata == nil {
+		e.Metadata = make(map[string]interface{})
+	}
+	e.Metadata[key] = value
+}
+
+func (e *AgentExecution) metadataValue(key string) (interface{}, bool) {
+	if e == nil {
+		return nil, false
+	}
+	e.metadataMu.RLock()
+	defer e.metadataMu.RUnlock()
+	value, ok := e.Metadata[key]
+	return value, ok
+}
+
+func (e *AgentExecution) metadataSnapshot() map[string]interface{} {
+	if e == nil {
+		return nil
+	}
+	e.metadataMu.RLock()
+	defer e.metadataMu.RUnlock()
+	if len(e.Metadata) == 0 {
+		return nil
+	}
+	snapshot := make(map[string]interface{}, len(e.Metadata))
+	for key, value := range e.Metadata {
+		snapshot[key] = value
+	}
+	return snapshot
 }

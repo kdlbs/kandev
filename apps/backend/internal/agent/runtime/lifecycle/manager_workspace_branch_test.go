@@ -14,7 +14,8 @@ import (
 )
 
 type branchSnapshotWriter struct {
-	branch string
+	executionID string
+	branch      string
 }
 
 func (w *branchSnapshotWriter) UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error {
@@ -29,7 +30,8 @@ func (w *branchSnapshotWriter) RepairExecutorRunningDead(context.Context, string
 	return nil
 }
 
-func (w *branchSnapshotWriter) UpdateExecutorRunningWorktreeBranch(_ context.Context, _, branch string) error {
+func (w *branchSnapshotWriter) UpdateExecutorRunningWorktreeBranch(_ context.Context, _, executionID, branch string) error {
+	w.executionID = executionID
 	w.branch = branch
 	return nil
 }
@@ -124,5 +126,8 @@ func TestRenameBranchForSessionUpdatesPrimaryExecutionMetadata(t *testing.T) {
 	}
 	if writer.branch != "feature/final-title-abc" {
 		t.Fatalf("running snapshot branch = %q, want final branch", writer.branch)
+	}
+	if writer.executionID != "execution-1" {
+		t.Fatalf("running snapshot execution = %q, want execution-1", writer.executionID)
 	}
 }

@@ -55,6 +55,7 @@ type AgentExecution struct {
 	ErrorMessage         string
 	ProviderError        *streams.ProviderError
 	Metadata             map[string]interface{}
+	metadataMu           sync.RWMutex
 	// runtimeEnv is the effective environment used to create the task's
 	// runtime instance. It is kept in memory only so authorized task-scoped
 	// terminals and passthrough processes can inherit the same credentials and

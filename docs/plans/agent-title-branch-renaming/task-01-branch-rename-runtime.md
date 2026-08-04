@@ -71,9 +71,10 @@ the MCP integration.
 
 - Implemented the lifecycle `GitRenameBranch` seam, primary running-row/metadata update, and
   repository/worktree-scoped SQLite snapshot writers.
-- Implemented orchestrator branch ownership matching, template rendering, executor-specific suffixes,
-  remote-checkout and Local preservation, mixed multi-repository outcomes, and best-effort failure
-  handling. Branch-switch events now scope snapshot updates to the tagged repository/worktree.
+- Implemented orchestrator branch ownership matching, template rendering, deterministic executor-specific
+  suffixes, manual-branch/remote-checkout/Local preservation, mixed multi-repository outcomes, and
+  surfaced snapshot failures. Branch-switch events now scope snapshot updates to the tagged
+  repository/worktree.
 - Exact verification: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/task/repository/sqlite ./internal/worktree -run 'Test.*(TaskTitleBranch|Rename.*Branch|BranchName)'` — 31 passed in 4 packages.
 - Affected-package verification: `cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/mcp/handlers ./internal/mcp/server ./internal/backendapp ./internal/task/repository/sqlite` — 3469 passed in 6 packages.
 - Focused race verification: `cd apps/backend && go test -race ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/mcp/handlers -run 'Test.*(TaskTitleBranch|RenameBranchForSession|SetTaskTitle|HandleBranchSwitched)'` — 11 passed in 3 packages.
