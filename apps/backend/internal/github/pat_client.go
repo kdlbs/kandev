@@ -578,6 +578,28 @@ func (c *PATClient) ListPRCommits(ctx context.Context, owner, repo string, numbe
 	return convertRawPRCommits(raw), nil
 }
 
+func (c *PATClient) GetPRCommitDetail(ctx context.Context, owner, repo, sha string) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	var pages []ghPRCommitDetail
+	endpoint := fmt.Sprintf("/repos/%s/%s/commits/%s?per_page=100", owner, repo, sha)
+	for endpoint != "" {
+		var page ghPRCommitDetail
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return PRCommitDetail{}, fmt.Errorf("get PR commit detail: %w", err)
+		}
+		pages = append(pages, page)
+		endpoint = next
+	}
+	encoded, err := json.Marshal(pages)
+	if err != nil {
+		return PRCommitDetail{}, fmt.Errorf("encode PR commit detail pages: %w", err)
+	}
+	return parsePRCommitDetailJSON(string(encoded))
+}
+
 func (c *PATClient) ListRepoBranches(ctx context.Context, owner, repo string) ([]RepoBranch, error) {
 	var branches []RepoBranch
 	endpoint := fmt.Sprintf("/repos/%s/%s/branches?per_page=100", owner, repo)

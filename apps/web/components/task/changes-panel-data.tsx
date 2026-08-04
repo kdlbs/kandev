@@ -36,8 +36,9 @@ import {
   buildRepoNameById,
   selectPRFilesForReviewProgress,
   type ReviewProgressPRSource,
+  type PRCommitForMerge,
 } from "./changes-panel-helpers";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import type { PRDiffFile, TaskPR } from "@/lib/types/github";
 import { getGitCredentialDisplay } from "./changes-git-credential-display";
 
@@ -95,14 +96,7 @@ export type ChangesPanelBodyProps = {
   unstagedFiles: ChangedFile[];
   stagedFiles: ChangedFile[];
   prFiles: PRChangedFile[];
-  prCommits: {
-    sha: string;
-    message: string;
-    author_login: string;
-    author_date: string;
-    additions: number;
-    deletions: number;
-  }[];
+  prCommits: PRCommitForMerge[];
   commits: {
     commit_sha: string;
     commit_message: string;
@@ -120,7 +114,7 @@ export type ChangesPanelBodyProps = {
   dialogs: DialogsType;
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   onOpenReview?: () => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onStageAll: () => void;
@@ -256,6 +250,7 @@ function buildChangesPanelPRData({
 function useChangesPanelPRData(repositoryNames: string[], sessionId: string | null) {
   const { prs, filesByPRKey } = useActiveTaskPRsWithFiles();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { selectedPR: taskPR } = useReviewPRSelection(activeTaskId);
   const reposByWorkspace = useAppStore((s) => s.repositories.itemsByWorkspaceId);
   const repoNameById = useMemo(() => buildRepoNameById(reposByWorkspace), [reposByWorkspace]);
@@ -274,6 +269,17 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     taskPR?.repo ?? null,
     taskPR?.pr_number ?? null,
     refreshKey,
+  );
+  const prCommits = useMemo<PRCommitForMerge[]>(
+    () =>
+      prCommitsList.map((commit) => ({
+        ...commit,
+        workspace_id: workspaceId ?? undefined,
+        owner: taskPR?.owner,
+        repo: taskPR?.repo,
+        repository_name: selectedPRRepositoryName,
+      })),
+    [prCommitsList, workspaceId, taskPR?.owner, taskPR?.repo, selectedPRRepositoryName],
   );
   const { prFiles, prDiffFiles } = useMemo(
     () =>
@@ -297,10 +303,10 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     ],
   );
   const hasPRFiles = prFiles.length > 0;
-  const hasPRCommits = prCommitsList.length > 0;
+  const hasPRCommits = prCommits.length > 0;
   return {
     prDiffFiles,
-    prCommitsList,
+    prCommits,
     hasPRFiles,
     hasPRCommits,
     prFiles,
@@ -389,7 +395,7 @@ export function useChangesPanelData() {
 type ChangesPanelCallbacks = {
   onOpenDiffFile: (path: string, options?: OpenDiffOptions) => void;
   onEditFile: (path: string, repo?: string) => void;
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   onOpenReview?: () => void;
 };
 
@@ -411,7 +417,7 @@ export function buildChangesPanelBodyProps(
     unstagedFiles: data.unstagedFiles,
     stagedFiles: data.stagedFiles,
     prFiles: data.prFiles,
-    prCommits: data.prCommitsList,
+    prCommits: data.prCommits,
     commits: git.commits,
     pendingStageFiles: git.pendingStageFiles,
     reviewedCount: data.reviewedCount,

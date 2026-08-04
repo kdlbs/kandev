@@ -10,7 +10,11 @@ import type {
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
-import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
+import type {
+  PRCommitDetail,
+  TaskCIAutomationOptions,
+  TaskCIAutomationPatch,
+} from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type {
@@ -1319,6 +1323,7 @@ export class ApiClient {
       message: string;
       author_login: string;
       author_date: string;
+      stats_available?: boolean;
     }>,
   ): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/commits", {
@@ -1331,6 +1336,28 @@ export class ApiClient {
 
     // PR commit fixtures predate workspace-scoped GitHub authentication and
     // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+  }
+
+  async mockGitHubAddPRCommitDetail(
+    owner: string,
+    repo: string,
+    sha: string,
+    detail: Omit<PRCommitDetail, "sha"> & { sha?: string },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/commit-details", {
+      owner,
+      repo,
+      sha,
+      detail: { ...detail, sha: detail.sha ?? sha },
+    });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
     const workspaceId = await this.activeWorkspaceId();
     if (!workspaceId) return;
     await this.mockGitHubSetWorkspaceConnection(workspaceId, {

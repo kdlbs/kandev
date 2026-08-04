@@ -1,5 +1,24 @@
 export type DiffSource = "uncommitted" | "committed" | "pr";
 
+export type LocalCommitDetailTarget = {
+  source: "local";
+  sha: string;
+  /** Multi-repo local repository subpath, omitted for the workspace root. */
+  repo?: string;
+};
+
+export type GitHubCommitDetailTarget = {
+  source: "github";
+  sha: string;
+  workspaceId: string;
+  owner: string;
+  repo: string;
+  /** Local display/group identity for the linked repository. */
+  repositoryName?: string;
+};
+
+export type CommitDetailTarget = LocalCommitDetailTarget | GitHubCommitDetailTarget;
+
 export type OpenDiffOptions = {
   source?: DiffSource;
   repositoryName?: string;
@@ -15,4 +34,4 @@ export type DiffSheetMode =
       repositoryName?: string;
       prKey?: string;
     }
-  | { kind: "commit"; sha: string; repo?: string };
+  | { kind: "commit"; target: CommitDetailTarget };

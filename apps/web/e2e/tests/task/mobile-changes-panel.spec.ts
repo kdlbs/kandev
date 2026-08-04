@@ -254,6 +254,106 @@ test.describe("Mobile changes panel", () => {
     await testPage.getByTestId("mobile-diff-sheet-close").tap();
   });
 
+  test("PR-only commit opens the remote commit sheet when local history is stale", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile PR-only Commit Detail",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    const remoteSha = "e".repeat(40);
+    const remoteMessage = "Mobile force-pushed commit";
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("mobile-remote-author");
+    await apiClient.mockGitHubAddPRs([
+      {
+        number: 2254,
+        title: "Mobile force-pushed PR",
+        state: "open",
+        head_branch: "feature/mobile-stale",
+        base_branch: "main",
+        author_login: "mobile-remote-author",
+        repo_owner: "testorg",
+        repo_name: "testrepo",
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 2254, [
+      {
+        sha: remoteSha,
+        message: remoteMessage,
+        author_login: "mobile-remote-author",
+        author_date: "2026-08-04T12:00:00Z",
+        stats_available: false,
+      },
+    ]);
+    await apiClient.mockGitHubAddPRCommitDetail("testorg", "testrepo", remoteSha, {
+      message: remoteMessage,
+      author_login: "mobile-remote-author",
+      author_name: "Mobile Remote Author",
+      author_date: "2026-08-04T12:00:00Z",
+      additions: 1,
+      deletions: 0,
+      files_changed: 1,
+      files: [
+        {
+          filename: "mobile-pr-only.ts",
+          status: "added",
+          additions: 1,
+          deletions: 0,
+          patch: "@@ -0,0 +1 @@\n+MOBILE_PR_ONLY_REMOTE_MARKER",
+        },
+      ],
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 2254,
+      pr_url: "https://github.com/testorg/testrepo/pull/2254",
+      pr_title: "Mobile force-pushed PR",
+      head_branch: "feature/mobile-stale",
+      base_branch: "main",
+      author_login: "mobile-remote-author",
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 45_000 });
+    await openMobileChangesPanel(testPage);
+    await expandSection(testPage, "commits-section");
+
+    const row = testPage.getByTestId(`commit-row-${remoteSha.slice(0, 7)}`);
+    await expect(row).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByText("+0", { exact: true })).toHaveCount(0);
+    await expect(row.getByText("-0", { exact: true })).toHaveCount(0);
+    await row.tap();
+
+    await expect(testPage.getByText("Commit Changes")).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByLabel("Commit Changes").getByText(remoteMessage)).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(testPage.getByText("Mobile Remote Author")).toBeVisible({ timeout: 10_000 });
+    await expectDiffText(testPage, "MOBILE_PR_ONLY_REMOTE_MARKER");
+    await expect(testPage.getByTestId("mobile-diff-sheet-close")).toBeVisible();
+    await expect(testPage.getByTestId("mobile-diff-sheet-close")).toHaveCount(1);
+    await expect(testPage.locator("body")).toHaveCSS("overflow-x", "hidden");
+    await testPage.getByTestId("mobile-diff-sheet-close").tap();
+    await expect(testPage.getByTestId("mobile-diff-sheet-close")).not.toBeVisible({
+      timeout: 10_000,
+    });
+  });
+
   test("tapping PR file row shows PR diff when same file also has local changes", async ({
     testPage,
     apiClient,

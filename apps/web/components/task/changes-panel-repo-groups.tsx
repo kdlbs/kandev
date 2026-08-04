@@ -10,6 +10,7 @@ import {
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { CommitRow, type CommitItem } from "./commit-row";
+import type { CommitDetailTarget } from "./changes-diff-target";
 import { groupByRepositoryName } from "@/lib/group-by-repo";
 import type { ChangedFile } from "./changes-panel-helpers";
 
@@ -222,7 +223,7 @@ export function CommitsRepoGroup({
    *  workspaces use this — the action buttons (Push / PR) move up to the
    *  section header so we don't render a redundant repo sub-header. */
   showHeader?: boolean;
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   onAmendCommit?: (currentMessage: string, repo?: string) => void;
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;

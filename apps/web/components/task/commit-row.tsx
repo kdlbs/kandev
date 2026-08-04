@@ -16,6 +16,7 @@ import {
   ContextMenuTrigger,
 } from "@kandev/ui/context-menu";
 import { timeAgo } from "@/lib/utils/time";
+import type { CommitDetailTarget } from "./changes-diff-target";
 
 export type CommitItem = {
   commit_sha: string;
@@ -23,6 +24,8 @@ export type CommitItem = {
   insertions: number;
   deletions: number;
   pushed?: boolean;
+  statsAvailable: boolean;
+  detailTarget: CommitDetailTarget;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
   committed_at?: string;
@@ -47,7 +50,8 @@ function CommitContextMenu({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
-  const hasActions = onAmendCommit || onRevertCommit || onResetToCommit;
+  const hasActions =
+    commit.detailTarget.source === "local" && (onAmendCommit || onRevertCommit || onResetToCommit);
 
   if (!hasActions) {
     return <>{children}</>;
@@ -177,7 +181,7 @@ export function CommitRow({
   // Multi-repo: opening the diff for a non-primary repo's commit needs the
   // repo subpath, otherwise the agentctl looks up the SHA at the workspace
   // root and finds nothing (each repo has its own commit graph).
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   // Multi-repo: handlers receive the commit's repository_name so the
   // amend/revert/reset op runs in the right git repo. Without it, ops hit
   // the workspace root which fails on multi-repo task workspaces.
@@ -185,7 +189,9 @@ export function CommitRow({
   onRevertCommit?: (sha: string, repo?: string) => void;
   onResetToCommit?: (sha: string, repo?: string) => void;
 }) {
-  const showActions = onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit));
+  const isLocalCommit = commit.detailTarget.source === "local";
+  const showActions =
+    isLocalCommit && (onResetToCommit || (isLatest && (onAmendCommit || onRevertCommit)));
 
   return (
     <CommitContextMenu
@@ -200,11 +206,11 @@ export function CommitRow({
         tabIndex={0}
         data-testid={`commit-row-${commit.commit_sha.slice(0, 7)}`}
         className="group relative flex items-center gap-2 text-xs rounded-md px-1 py-1 -mx-1 hover:bg-muted/60 cursor-pointer"
-        onClick={() => onOpenCommitDetail?.(commit.commit_sha, commit.repository_name)}
+        onClick={() => onOpenCommitDetail?.(commit.detailTarget)}
         onKeyDown={(e) => {
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
-            onOpenCommitDetail?.(commit.commit_sha, commit.repository_name);
+            onOpenCommitDetail?.(commit.detailTarget);
           }
         }}
       >
@@ -225,12 +231,14 @@ export function CommitRow({
           {commit.commit_sha.slice(0, 7)}
         </code>
         <span className="flex-1 min-w-0 truncate text-foreground">{commit.commit_message}</span>
-        <span
-          className={`shrink-0 text-[11px] flex items-center gap-1 mr-1 ${commit.committed_at ? "group-hover:hidden" : ""}`}
-        >
-          <span className="text-emerald-500">+{commit.insertions}</span>{" "}
-          <span className="text-rose-500">-{commit.deletions}</span>
-        </span>
+        {commit.statsAvailable && (
+          <span
+            className={`shrink-0 text-[11px] flex items-center gap-1 mr-1 ${commit.committed_at ? "group-hover:hidden" : ""}`}
+          >
+            <span className="text-emerald-500">+{commit.insertions}</span>{" "}
+            <span className="text-rose-500">-{commit.deletions}</span>
+          </span>
+        )}
         {commit.committed_at && (
           <span className="hidden group-hover:flex shrink-0 text-[11px] items-center gap-1 mr-1 text-muted-foreground">
             {timeAgo(commit.committed_at)}

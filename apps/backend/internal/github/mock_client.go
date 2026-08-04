@@ -70,6 +70,12 @@ type repoKey struct {
 	Repo  string
 }
 
+type commitDetailKey struct {
+	Owner string
+	Repo  string
+	SHA   string
+}
+
 // repoFileEntry is one seeded file for MockClient.ListRepoDirectory /
 // GetRepoFileContent. Ref "" is a wildcard that matches any requested ref;
 // a non-empty Ref only matches that exact ref.
@@ -104,6 +110,7 @@ type MockClient struct {
 	checks           map[checkKey][]CheckRun
 	files            map[prKey][]PRFile
 	commits          map[prKey][]PRCommitInfo
+	commitDetails    map[commitDetailKey]PRCommitDetail
 	submittedReviews []submittedReview
 	requestedReviews []requestedReviewers
 	mergedPRs        []mergedPR
@@ -151,6 +158,7 @@ func NewMockClient() *MockClient {
 		checks:        make(map[checkKey][]CheckRun),
 		files:         make(map[prKey][]PRFile),
 		commits:       make(map[prKey][]PRCommitInfo),
+		commitDetails: make(map[commitDetailKey]PRCommitDetail),
 		mergeMethods:  make(map[repoKey]RepoMergeMethods),
 		gists:         make(map[string]mockGist),
 		repoFiles:     make(map[repoKey][]repoFileEntry),
@@ -447,6 +455,17 @@ func (m *MockClient) ListPRCommits(_ context.Context, owner, repo string, number
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.commits[prKey{owner, repo, number}], nil
+}
+
+func (m *MockClient) GetPRCommitDetail(_ context.Context, owner, repo, sha string) (PRCommitDetail, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	detail, ok := m.commitDetails[commitDetailKey{Owner: owner, Repo: repo, SHA: sha}]
+	if !ok {
+		return PRCommitDetail{}, fmt.Errorf("mock: commit %s/%s@%s not found", owner, repo, sha)
+	}
+	detail.Files = append([]PRFile(nil), detail.Files...)
+	return detail, nil
 }
 
 func (m *MockClient) ListRepoBranches(_ context.Context, owner, repo string) ([]RepoBranch, error) {
@@ -855,6 +874,17 @@ func (m *MockClient) AddPRCommits(owner, repo string, number int, commits []PRCo
 	m.commits[k] = append(m.commits[k], commits...)
 }
 
+// AddPRCommitDetail seeds an individual GitHub commit response.
+func (m *MockClient) AddPRCommitDetail(owner, repo, sha string, detail PRCommitDetail) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if detail.SHA == "" {
+		detail.SHA = sha
+	}
+	detail.Files = append([]PRFile(nil), detail.Files...)
+	m.commitDetails[commitDetailKey{Owner: owner, Repo: repo, SHA: sha}] = detail
+}
+
 // Reset clears all mock data and resets the user to the default.
 func (m *MockClient) Reset() {
 	m.mu.Lock()
@@ -874,6 +904,7 @@ func (m *MockClient) Reset() {
 	m.checks = make(map[checkKey][]CheckRun)
 	m.files = make(map[prKey][]PRFile)
 	m.commits = make(map[prKey][]PRCommitInfo)
+	m.commitDetails = make(map[commitDetailKey]PRCommitDetail)
 	m.submittedReviews = nil
 	m.requestedReviews = nil
 	m.mergedPRs = nil

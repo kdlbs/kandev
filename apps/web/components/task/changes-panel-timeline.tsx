@@ -20,7 +20,7 @@ import {
   RepoGroupItem,
 } from "./changes-panel-repo-groups";
 import { PRFilesGroupedList } from "./changes-panel-pr-files";
-import type { OpenDiffOptions } from "./changes-diff-target";
+import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 
 // --- Timeline visual components ---
 
@@ -129,7 +129,7 @@ function TimelineSection({
 
 type CommitsSectionProps = {
   commits: CommitItem[];
-  onOpenCommitDetail?: (sha: string, repo?: string) => void;
+  onOpenCommitDetail?: (target: CommitDetailTarget) => void;
   // Handlers receive the commit's repository_name so amend/revert/reset land
   // in the right git repo. The empty string routes to the workspace root for
   // single-repo workspaces.

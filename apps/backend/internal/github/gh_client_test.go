@@ -234,6 +234,53 @@ esac
 	}
 }
 
+func TestGHClient_PRCommitDetailUsesExactSHAAndMergesPages(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+case "$*" in
+  *commits/*)
+    printf '%s\n' '[{"sha":"2222222222222222222222222222222222222222","commit":{"message":"remote detail","author":{"name":"Octo Cat","date":"2026-08-04T11:00:00Z"}},"author":{"login":"octocat"},"stats":{"additions":7,"deletions":3},"files":[{"filename":"one.txt","status":"modified","additions":4,"deletions":1,"patch":"@@ -1 +1 @@\\n-old\\n+new"}]},{"sha":"2222222222222222222222222222222222222222","commit":{"message":"ignored","author":{"name":"Other","date":"2026-08-05T11:00:00Z"}},"stats":{"additions":99,"deletions":99},"files":[{"filename":"two.txt","status":"removed","additions":0,"deletions":2,"patch":"@@ -1 +0,0 @@\\n-gone"}]}]'
+    ;;
+  *) printf '%s\n' '[]' ;;
+esac
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	detail, err := NewGHClient().GetPRCommitDetail(
+		context.Background(), "acme", "widget", "2222222222222222222222222222222222222222",
+	)
+	if err != nil {
+		t.Fatalf("GetPRCommitDetail: %v", err)
+	}
+	if detail.SHA != "2222222222222222222222222222222222222222" || detail.Additions != 7 || detail.Deletions != 3 {
+		t.Fatalf("detail = %#v", detail)
+	}
+	if len(detail.Files) != 2 {
+		t.Fatalf("files = %#v, want two merged files", detail.Files)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read gh args: %v", err)
+	}
+	command := string(args)
+	for _, want := range []string{
+		"api repos/acme/widget/commits/2222222222222222222222222222222222222222?per_page=100",
+		"--paginate",
+		"--slurp",
+	} {
+		if !strings.Contains(command, want) {
+			t.Fatalf("gh args = %q, want %q", command, want)
+		}
+	}
+}
+
 func TestGHClient_RequestReviewers_UsesGitHubReviewRequestEndpoint(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "gh-args.log")

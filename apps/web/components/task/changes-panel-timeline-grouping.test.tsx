@@ -71,6 +71,12 @@ function commit(sha: string, message: string, repo?: string): CommitProps["commi
     insertions: 1,
     deletions: 0,
     pushed: false,
+    statsAvailable: true,
+    detailTarget: {
+      source: "local",
+      sha,
+      ...(repo ? { repo } : {}),
+    },
     repository_name: repo,
   };
 }
@@ -304,6 +310,8 @@ describe("section auto-expand (defaultCollapsed prop)", () => {
             insertions: 1,
             deletions: 0,
             pushed: false,
+            statsAvailable: true,
+            detailTarget: { source: "local", sha: "abc123" },
             repository_name: undefined,
           },
         ]}

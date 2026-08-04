@@ -548,6 +548,24 @@ func (s *Service) GetPRCommitsForWorkspace(
 	return resolved.Client.ListPRCommits(ctx, owner, repo, number)
 }
 
+// GetPRCommitDetailForWorkspace fetches one commit through the workspace's
+// authorized personal read client. It never consults a task worktree.
+func (s *Service) GetPRCommitDetailForWorkspace(
+	ctx context.Context, workspaceID, userID, owner, repo, sha string,
+) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return PRCommitDetail{}, err
+	}
+	resolved, err := s.resolvePersonalReadClient(ctx, workspaceID, userID, owner, repo)
+	if err != nil {
+		return PRCommitDetail{}, err
+	}
+	return resolved.Client.GetPRCommitDetail(ctx, owner, repo, sha)
+}
+
 // timeEqual compares two nullable time pointers for equality.
 func timeEqual(a, b *time.Time) bool {
 	if a == nil && b == nil {

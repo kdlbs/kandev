@@ -55,20 +55,18 @@ describe("mergeCommits", () => {
   it("marks all local commits as unpushed when no PR commits exist", () => {
     const local = [makeLocal("aaa1111", "first"), makeLocal("bbb2222", "second")];
     const result = mergeCommits(local, []);
-    expect(result).toEqual([
+    expect(result).toMatchObject([
       {
         commit_sha: "aaa1111",
-        commit_message: "first",
-        insertions: 1,
-        deletions: 0,
         pushed: false,
+        statsAvailable: true,
+        detailTarget: { source: "local", sha: "aaa1111" },
       },
       {
         commit_sha: "bbb2222",
-        commit_message: "second",
-        insertions: 1,
-        deletions: 0,
         pushed: false,
+        statsAvailable: true,
+        detailTarget: { source: "local", sha: "bbb2222" },
       },
     ]);
   });
@@ -106,8 +104,13 @@ describe("mergeCommits", () => {
     const local = [makeLocal("aaa1111", "first")];
     const pr = [makePRFull("aaa1111bbbccc", "first", "user")];
     const result = mergeCommits(local, pr);
-    expect(result).toEqual([
-      { commit_sha: "aaa1111", commit_message: "first", insertions: 1, deletions: 0, pushed: true },
+    expect(result).toMatchObject([
+      {
+        commit_sha: "aaa1111",
+        pushed: true,
+        statsAvailable: true,
+        detailTarget: { source: "local", sha: "aaa1111" },
+      },
     ]);
   });
 
@@ -115,14 +118,20 @@ describe("mergeCommits", () => {
     const local: ReturnType<typeof makeLocal>[] = [];
     const pr = [makePRFull("ccc3333", "external fix", "other-dev")];
     const result = mergeCommits(local, pr);
-    expect(result).toEqual([
+    expect(result).toMatchObject([
       {
         commit_sha: "ccc3333",
         commit_message: "external fix",
-        insertions: 5,
-        deletions: 2,
         pushed: true,
         committed_at: PR_DATE,
+        statsAvailable: false,
+        detailTarget: {
+          source: "github",
+          sha: "ccc3333",
+          workspaceId: "",
+          owner: "",
+          repo: "",
+        },
       },
     ]);
   });

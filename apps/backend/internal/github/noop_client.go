@@ -89,6 +89,10 @@ func (c *NoopClient) ListPRCommits(context.Context, string, string, int) ([]PRCo
 	return nil, ErrNoClient
 }
 
+func (c *NoopClient) GetPRCommitDetail(context.Context, string, string, string) (PRCommitDetail, error) {
+	return PRCommitDetail{}, ErrNoClient
+}
+
 func (c *NoopClient) ListRepoBranches(context.Context, string, string) ([]RepoBranch, error) {
 	return nil, ErrNoClient
 }

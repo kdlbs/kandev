@@ -10,6 +10,7 @@ import type { FileInfo } from "@/lib/state/store";
 import type { PRDiffFile } from "@/lib/types/github";
 import { normalizeFileChangeStatus, type FileChangeStatus } from "@/lib/utils/file-change-status";
 import type { PRChangedFile } from "./changes-panel-timeline";
+import type { CommitDetailTarget } from "./changes-diff-target";
 
 export type ChangedFile = {
   path: string;
@@ -266,16 +267,53 @@ export function firstVisibleSection(flags: {
   return null;
 }
 
-type MergedCommit = {
+export type MergedCommit = {
   commit_sha: string;
   commit_message: string;
   insertions: number;
   deletions: number;
   pushed: boolean;
+  statsAvailable: boolean;
+  detailTarget: CommitDetailTarget;
   /** Multi-repo: name of the repo this commit was made in. Empty for single-repo. */
   repository_name?: string;
   committed_at?: string;
 };
+
+export type PRCommitForMerge = {
+  sha: string;
+  message: string;
+  additions: number;
+  deletions: number;
+  author_date?: string;
+  stats_available?: boolean;
+  workspace_id?: string;
+  owner?: string;
+  repo?: string;
+  repository_name?: string;
+};
+
+function localCommitTarget(commit: {
+  commit_sha: string;
+  repository_name?: string;
+}): CommitDetailTarget {
+  return {
+    source: "local",
+    sha: commit.commit_sha,
+    ...(commit.repository_name ? { repo: commit.repository_name } : {}),
+  };
+}
+
+function githubCommitTarget(commit: PRCommitForMerge): CommitDetailTarget {
+  return {
+    source: "github",
+    sha: commit.sha,
+    workspaceId: commit.workspace_id ?? "",
+    owner: commit.owner ?? "",
+    repo: commit.repo ?? "",
+    ...(commit.repository_name ? { repositoryName: commit.repository_name } : {}),
+  };
+}
 
 /**
  * Merge local session commits and PR commits into a single list. A commit is
@@ -299,29 +337,40 @@ export function mergeCommits(
     pushed?: boolean;
     committed_at?: string;
   }[],
-  prCommits: {
-    sha: string;
-    message: string;
-    additions: number;
-    deletions: number;
-    author_date?: string;
-  }[],
+  prCommits: PRCommitForMerge[],
 ): MergedCommit[] {
   const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+  const repositoryMatches = (a?: string, b?: string) => !a || !b || a === b;
+  const commitsMatch = (
+    local: { commit_sha: string; repository_name?: string },
+    pr: PRCommitForMerge,
+  ) =>
+    shaMatches(pr.sha, local.commit_sha) &&
+    repositoryMatches(local.repository_name, pr.repository_name);
   const unpushed: MergedCommit[] = [];
   const pushed: MergedCommit[] = [];
   const matchedPRShas = new Set<string>();
   for (const c of localCommits) {
-    const matchesPR = prCommits.some((pr) => shaMatches(pr.sha, c.commit_sha));
+    const matchesPR = prCommits.some((pr) => commitsMatch(c, pr));
     const isPushed = c.pushed === true || matchesPR;
     if (isPushed) {
-      pushed.push({ ...c, pushed: true });
+      pushed.push({
+        ...c,
+        pushed: true,
+        statsAvailable: true,
+        detailTarget: localCommitTarget(c),
+      });
     } else {
-      unpushed.push({ ...c, pushed: false });
+      unpushed.push({
+        ...c,
+        pushed: false,
+        statsAvailable: true,
+        detailTarget: localCommitTarget(c),
+      });
     }
     if (matchesPR) {
       for (const pr of prCommits) {
-        if (shaMatches(pr.sha, c.commit_sha)) {
+        if (commitsMatch(c, pr)) {
           matchedPRShas.add(pr.sha);
         }
       }
@@ -335,6 +384,9 @@ export function mergeCommits(
         insertions: pr.additions,
         deletions: pr.deletions,
         pushed: true,
+        statsAvailable: pr.stats_available === true,
+        detailTarget: githubCommitTarget(pr),
+        ...(pr.repository_name ? { repository_name: pr.repository_name } : {}),
         committed_at: pr.author_date,
       });
     }

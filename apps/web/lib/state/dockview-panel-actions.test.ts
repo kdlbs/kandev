@@ -456,6 +456,27 @@ describe("addCommitDetailPanel — preview behavior", () => {
     expect(preview.params.commitSha).toBe(SHA_B);
     expect(preview.params.promoted).toBeUndefined();
   });
+
+  it("serializes remote provenance and keeps repositories with equal SHAs distinct", () => {
+    const first = {
+      source: "github" as const,
+      sha: SHA_A,
+      workspaceId: "workspace-1",
+      owner: "acme",
+      repo: "frontend",
+    };
+    const second = { ...first, repo: "backend" };
+
+    actions.addCommitDetailPanel(first, { pin: true });
+    actions.addCommitDetailPanel(second, { pin: true });
+
+    const firstPanel = api.getPanel(`commit:github:workspace-1:acme/frontend:${SHA_A}`);
+    const secondPanel = api.getPanel(`commit:github:workspace-1:acme/backend:${SHA_A}`);
+    expect(firstPanel).toBeDefined();
+    expect(secondPanel).toBeDefined();
+    expect((secondPanel as unknown as MockPanel).params.target).toEqual(second);
+    expect((secondPanel as unknown as MockPanel).params.commitSha).toBe(SHA_A);
+  });
 });
 
 describe("preview slots are independent across types", () => {
