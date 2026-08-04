@@ -146,8 +146,8 @@ Wave 5:
   prove natural wording, preserved semantic tokens, or layout fit.
 - Node 24 and Corepack select pnpm 9.15.9 from `apps/package.json`. Go 1.26.0 is
   installed under the current user's program directory and registered in the
-  user PATH; the already-running Codex host must be restarted or refresh its
-  process PATH before Task 02 invokes `go` by name.
+  user PATH; Task 02 and repository verification successfully invoked it
+  directly.
 - Full E2E and manual `make dev` validation are environment-sensitive and may
   expose baseline failures; focused locale evidence must remain separately
   recorded.

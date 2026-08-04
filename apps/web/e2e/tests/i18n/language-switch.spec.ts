@@ -43,7 +43,7 @@ test.describe("i18n language switcher", () => {
     const select = testPage.getByLabel("Display language");
     await expect(select).toBeVisible({ timeout: 10_000 });
     await select.click();
-    await testPage.getByRole("option", { name: "简体中文" }).click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "简体中文" }).click();
 
     await expect(testPage.locator("html")).toHaveAttribute("lang", "zh-cn", { timeout: 10_000 });
     await expect(testPage.getByLabel("显示语言")).toBeVisible({ timeout: 10_000 });
@@ -64,7 +64,7 @@ test.describe("i18n language switcher", () => {
 
     const selectAfter = testPage.getByLabel("显示语言");
     await selectAfter.click();
-    await testPage.getByRole("option", { name: "English" }).click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "English" }).click();
     await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
     await expect(testPage.getByLabel("Display language")).toBeVisible({ timeout: 10_000 });
   });
@@ -78,7 +78,10 @@ test.describe("i18n language switcher", () => {
     const select = testPage.getByLabel("Display language");
     await expect(select).toBeVisible({ timeout: 10_000 });
     await select.click();
-    await testPage.getByRole("option", { name: /Pseudo/ }).click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: /Pseudo/ })
+      .click();
 
     // Locale activates client-side: <html lang> flips and chrome is accented.
     await expect(testPage.locator("html")).toHaveAttribute("lang", "pseudo", { timeout: 10_000 });
@@ -97,7 +100,10 @@ test.describe("i18n language switcher", () => {
     // Switch back so the persisted cookie does not leak into later tests.
     const selectAfter = testPage.getByLabel(/Display language|Ďĩśƥĺàŷ ĺàńĝũàĝē/);
     await selectAfter.click();
-    await testPage.getByRole("option", { name: /English|Ēńĝĺĩśĥ/ }).click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: /English|Ēńĝĺĩśĥ/ })
+      .click();
     await expect(testPage.locator("html")).toHaveAttribute("lang", "en", { timeout: 10_000 });
   });
 });

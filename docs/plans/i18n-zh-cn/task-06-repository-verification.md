@@ -17,8 +17,10 @@ spec: "../../specs/platform/i18n.md"
 
 ## Acceptance
 
-- Every user-requested focused and repository-wide command is run and recorded;
-  unrelated baseline or environment failures are identified without concealment.
+- Every user-requested check is either run and recorded or, when a native-Windows
+  wrapper is unavailable, its approved cross-platform equivalent is run and the
+  skipped wrapper is recorded; unrelated baseline or environment failures are
+  identified without concealment.
 - Manual browser inspection covers Chinese text, canonical html lang, reload,
   switching back, raw keys, interpolation/Trans integrity, and obvious overflow.
 - Final diff contains no unrelated formatting, generated files, dependency
@@ -42,12 +44,19 @@ git diff --check
 make dev
 ```
 
+On native Windows, record root Make wrappers as not run when their POSIX
+`printf` prevents command entry, then run the documented underlying commands.
+An isolated Playwright language-switch run is the approved alternative to the
+`make dev` manual browser flow in that environment.
+
 After the checks and manual inspection pass, reconcile all task/plan results,
 review the complete diff, then use the repository `commit`, `push`, and `pr`
 workflows with title `feat(i18n): add Simplified Chinese locale`.
 
-Keep `make dev` running only for the manual Appearance check, then stop it
-cleanly after switching zh-cn → reload → English and inspecting migrated pages.
+When `make dev` is available, keep it running only for the manual Appearance
+check, then stop it cleanly after switching zh-cn → reload → English and
+inspecting migrated pages. Otherwise, use the isolated Playwright alternative
+and record `make dev` as not run.
 
 ## Files likely touched
 
@@ -97,8 +106,8 @@ task/plan status, and readiness for commit, push, and PR creation.
 - `make fmt`, `make typecheck`, `make test`, `make lint`, and `make test-e2e`
   cannot enter their underlying commands on native Windows because the root
   Makefile invokes POSIX `printf`. Direct cross-platform equivalents were run.
-  `make dev` was replaced by the isolated Playwright browser run to avoid
-  leaving a development process active.
+  `make dev` was not run; the approved alternative was the isolated Playwright
+  browser run, which also avoided leaving a development process active.
 - The repository-wide Prettier check reports 388 pre-existing formatting
   differences on `origin/main`; only changed code/catalog files were checked to
   avoid an unrelated rewrite. `golangci-lint` and `pre-commit` are not installed

@@ -92,4 +92,40 @@ describe("real locale catalog parity", () => {
     expect(result.stderr).toContain("common");
     expect(result.stderr).toContain("extra key: surprise");
   });
+
+  it("rejects a translation that drops an interpolation placeholder", () => {
+    const fixture = completeFixture();
+    fixture.en.common.first = "Open {{url}} as {{user}}";
+    fixture["zh-cn"].common.first = "以 {{user}} 身份打开";
+    const result = runFixture(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("zh-cn");
+    expect(result.stderr).toContain("common");
+    expect(result.stderr).toContain("interpolation placeholder mismatch: first");
+  });
+
+  it("rejects a translation that drops numeric Trans tags", () => {
+    const fixture = completeFixture();
+    fixture.en.common.first = "Open <1>{{url}}</1>";
+    fixture["zh-cn"].common.first = "打开 {{url}}";
+    const result = runFixture(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("zh-cn");
+    expect(result.stderr).toContain("common");
+    expect(result.stderr).toContain("Trans tag structure mismatch: first");
+  });
+
+  it("rejects a translation that changes a numeric Trans tag index", () => {
+    const fixture = completeFixture();
+    fixture.en.common.first = "Open <1>{{url}}</1>";
+    fixture["zh-cn"].common.first = "打开 <2>{{url}}</2>";
+    const result = runFixture(fixture);
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("zh-cn");
+    expect(result.stderr).toContain("common");
+    expect(result.stderr).toContain("Trans tag structure mismatch: first");
+  });
 });

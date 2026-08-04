@@ -25,6 +25,49 @@ export function discoverRealLocales(localesDir) {
     .sort();
 }
 
+function interpolationPlaceholders(message) {
+  return [
+    ...new Set([...message.matchAll(/\{\{\s*-?\s*([^},\s]+)[^}]*\}\}/g)].map((match) => match[1])),
+  ].sort();
+}
+
+function numericTagStructure(message) {
+  const stack = [];
+  const nodes = [];
+  for (const match of message.matchAll(/<(\/)?(\d+)>/g)) {
+    const closing = Boolean(match[1]);
+    const tag = match[2];
+    if (closing) {
+      if (stack.at(-1) !== tag) return null;
+      stack.pop();
+      continue;
+    }
+    nodes.push([...stack, tag].join("/"));
+    stack.push(tag);
+  }
+  return stack.length === 0 ? nodes.sort() : null;
+}
+
+function sameItems(left, right) {
+  return left !== null && right !== null && JSON.stringify(left) === JSON.stringify(right);
+}
+
+function messageParityIssues(sourceMessage, translatedMessage, context) {
+  const issues = [];
+  if (
+    !sameItems(
+      interpolationPlaceholders(sourceMessage),
+      interpolationPlaceholders(translatedMessage),
+    )
+  ) {
+    issues.push({ ...context, type: "interpolation placeholder mismatch" });
+  }
+  if (!sameItems(numericTagStructure(sourceMessage), numericTagStructure(translatedMessage))) {
+    issues.push({ ...context, type: "Trans tag structure mismatch" });
+  }
+  return issues;
+}
+
 export function realLocaleParityIssues(source, translated, locale) {
   const issues = [];
   for (const namespace of source.keys()) {
@@ -37,7 +80,13 @@ export function realLocaleParityIssues(source, translated, locale) {
     for (const key of sourceMessages.keys()) {
       if (!translatedMessages.has(key)) {
         issues.push({ locale, namespace, type: "missing key", key });
+        continue;
       }
+      const sourceMessage = sourceMessages.get(key);
+      const translatedMessage = translatedMessages.get(key);
+      issues.push(
+        ...messageParityIssues(sourceMessage, translatedMessage, { locale, namespace, key }),
+      );
     }
     for (const key of translatedMessages.keys()) {
       if (!sourceMessages.has(key)) {

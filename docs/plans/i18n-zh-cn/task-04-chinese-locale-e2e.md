@@ -19,7 +19,8 @@ spec: "../../specs/platform/i18n.md"
   `<html lang>`, survives reload through the locale cookie, and restores English.
 - The existing pseudo-locale scenario remains intact and passing.
 - A fresh desktop Chinese Appearance screenshot is captured, inspected for
-  secrets and layout problems, and staged only as an ignored PR asset.
+  secrets and layout problems, stored under ignored `apps/web/.pr-assets/`, and
+  excluded from the feature branch.
 
 ## Verification
 
