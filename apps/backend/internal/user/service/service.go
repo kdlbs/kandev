@@ -782,7 +782,7 @@ func validateLSPAutoInstallLanguages(langs []string) error {
 		return err
 	}
 	for _, lang := range langs {
-		if !installer.CanAutoInstall(lang) {
+		if !installer.SupportsAutoInstall(lang) {
 			return fmt.Errorf("language %s does not support auto-install", lang)
 		}
 	}

@@ -155,7 +155,7 @@ func lspRuntimeSupported(runtimeName agentruntime.Runtime) bool {
 }
 
 func (h *LSPHandler) shouldAutoInstall(ctx context.Context, language string) bool {
-	if h.userService == nil || !installer.CanAutoInstall(language) {
+	if h.userService == nil || !installer.SupportsAutoInstall(language) {
 		return false
 	}
 	settings, err := h.userService.GetUserSettings(ctx)

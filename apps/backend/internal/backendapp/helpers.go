@@ -773,10 +773,10 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // client can activate the right catalog before first paint.
 func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
-		APIPrefix:                        "/api/v1",
-		WebSocketPath:                    "/ws",
-		LSPAutoInstallSupportedLanguages: lspinstaller.AutoInstallLanguages(),
-		Debug:                            debug,
+		APIPrefix:                         "/api/v1",
+		WebSocketPath:                     "/ws",
+		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
+		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.

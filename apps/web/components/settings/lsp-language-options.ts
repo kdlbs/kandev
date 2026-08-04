@@ -39,11 +39,11 @@ export function lspLanguageDisplayLabel(
   return translate("settings:lspLanguageExperimental", { language: language.label });
 }
 
-export function lspAutoInstallSupported(
+export function lspAutoInstallConfigurable(
   language: LspLanguageOption,
-  supportedLanguages: readonly string[],
+  preferenceLanguages: readonly string[],
 ): boolean {
-  return language.autoInstallSupported && supportedLanguages.includes(language.id);
+  return language.autoInstallSupported && preferenceLanguages.includes(language.id);
 }
 
 export const LSP_LANGUAGE_OPTIONS: LspLanguageOption[] = [

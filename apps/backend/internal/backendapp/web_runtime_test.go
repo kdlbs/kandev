@@ -8,11 +8,11 @@ import (
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 )
 
-func TestWebRuntimeConfigAdvertisesLSPAutoInstallCapabilities(t *testing.T) {
+func TestWebRuntimeConfigAdvertisesLSPAutoInstallPreferences(t *testing.T) {
 	request := httptest.NewRequest("GET", "/settings/editors", nil)
-	got := webRuntimeConfig(false, request).LSPAutoInstallSupportedLanguages
-	want := lspinstaller.AutoInstallLanguages()
+	got := webRuntimeConfig(false, request).LSPAutoInstallPreferenceLanguages
+	want := lspinstaller.AutoInstallPreferenceLanguages()
 	if !slices.Equal(got, want) {
-		t.Fatalf("LSP auto-install capabilities = %v, want %v", got, want)
+		t.Fatalf("LSP auto-install preferences = %v, want %v", got, want)
 	}
 }

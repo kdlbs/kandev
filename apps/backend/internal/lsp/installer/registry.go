@@ -63,23 +63,26 @@ func IsSupported(language string) bool {
 	return ok
 }
 
-// CanAutoInstall reports whether Kandev has an install strategy for language.
-// A language can be supported for manually installed binaries without being
-// safe or practical for Kandev to install automatically.
+// SupportsAutoInstall reports whether a language may be stored as a global
+// auto-install preference. The task host remains responsible for deciding
+// whether its own platform has a usable strategy.
+func SupportsAutoInstall(language string) bool {
+	cfg, ok := languages[language]
+	return ok && cfg.autoInstall
+}
+
+// CanAutoInstall reports whether this process's host platform has an install
+// strategy for language. Call this only in agentctl, where installation runs.
 func CanAutoInstall(language string) bool {
 	return canAutoInstallOnPlatform(language, runtime.GOOS)
 }
 
-// AutoInstallLanguages returns the stable set of language installers available
-// on the current host platform for browser capability disclosure.
-func AutoInstallLanguages() []string {
-	return autoInstallLanguagesForPlatform(runtime.GOOS)
-}
-
-func autoInstallLanguagesForPlatform(goos string) []string {
+// AutoInstallPreferenceLanguages returns the stable, task-host-independent set
+// of languages exposed by the global Editors preference.
+func AutoInstallPreferenceLanguages() []string {
 	result := make([]string, 0, len(languages))
 	for language := range languages {
-		if canAutoInstallOnPlatform(language, goos) {
+		if SupportsAutoInstall(language) {
 			result = append(result, language)
 		}
 	}
@@ -88,8 +91,7 @@ func autoInstallLanguagesForPlatform(goos string) []string {
 }
 
 func canAutoInstallOnPlatform(language, goos string) bool {
-	cfg, ok := languages[language]
-	if !ok || !cfg.autoInstall {
+	if !SupportsAutoInstall(language) {
 		return false
 	}
 	return language != languageRust || goos == darwinOS || goos == linuxOS

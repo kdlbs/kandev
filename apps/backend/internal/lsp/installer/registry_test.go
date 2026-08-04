@@ -125,19 +125,16 @@ func TestCanAutoInstall(t *testing.T) {
 	}
 }
 
-func TestAutoInstallLanguagesForPlatform(t *testing.T) {
-	tests := []struct {
-		goos string
-		want []string
-	}{
-		{goos: linuxOS, want: []string{"go", "python", "rust", "typescript"}},
-		{goos: darwinOS, want: []string{"go", "python", "rust", "typescript"}},
-		{goos: windowsOS, want: []string{"go", "python", "typescript"}},
+func TestAutoInstallPreferenceLanguagesAreTaskHostIndependent(t *testing.T) {
+	want := []string{"go", "python", "rust", "typescript"}
+	if got := AutoInstallPreferenceLanguages(); !slices.Equal(got, want) {
+		t.Fatalf("AutoInstallPreferenceLanguages() = %v, want %v", got, want)
 	}
-	for _, tc := range tests {
-		if got := autoInstallLanguagesForPlatform(tc.goos); !slices.Equal(got, tc.want) {
-			t.Errorf("autoInstallLanguagesForPlatform(%q) = %v, want %v", tc.goos, got, tc.want)
-		}
+	if !SupportsAutoInstall("rust") {
+		t.Fatal("Rust must remain configurable when a Windows backend can launch a Linux task host")
+	}
+	if SupportsAutoInstall("kotlin") {
+		t.Fatal("Kotlin must remain manual-install-only")
 	}
 }
 

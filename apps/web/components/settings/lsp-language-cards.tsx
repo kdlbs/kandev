@@ -8,7 +8,7 @@ import { readBootPayload } from "@/src/boot-payload";
 import { Trans, useTranslation } from "react-i18next";
 import {
   LSP_LANGUAGE_OPTIONS,
-  lspAutoInstallSupported,
+  lspAutoInstallConfigurable,
   lspLanguageDisplayLabel,
 } from "./lsp-language-options";
 
@@ -25,7 +25,7 @@ type LspLanguageCardsProps = {
 
 function LspLanguageCard({
   language,
-  supportedLanguages,
+  preferenceLanguages,
   lspAutoStartLanguages,
   lspAutoInstallLanguages,
   baselineLspAutoStart,
@@ -34,15 +34,15 @@ function LspLanguageCard({
   toggleAutoInstall,
 }: LspLanguageCardsProps & {
   language: (typeof LSP_LANGUAGE_OPTIONS)[number];
-  supportedLanguages: readonly string[];
+  preferenceLanguages: readonly string[];
 }) {
   const { t } = useTranslation();
   const languageLabel = lspLanguageDisplayLabel(language, (key, options) => t(key, options));
-  const autoInstallSupported = lspAutoInstallSupported(language, supportedLanguages);
+  const autoInstallConfigurable = lspAutoInstallConfigurable(language, preferenceLanguages);
   const autoStartDirty =
     lspAutoStartLanguages.includes(language.id) !== baselineLspAutoStart.includes(language.id);
   const autoInstallDirty =
-    autoInstallSupported &&
+    autoInstallConfigurable &&
     lspAutoInstallLanguages.includes(language.id) !== baselineLspAutoInstall.includes(language.id);
 
   return (
@@ -66,7 +66,7 @@ function LspLanguageCard({
         />
       </div>
       <div className="flex items-center gap-2">
-        {autoInstallSupported && (
+        {autoInstallConfigurable && (
           <Checkbox
             id={`lsp-install-${language.id}`}
             checked={lspAutoInstallLanguages.includes(language.id)}
@@ -76,7 +76,7 @@ function LspLanguageCard({
             data-testid={`lsp-auto-install-${language.id}`}
           />
         )}
-        {autoInstallSupported ? (
+        {autoInstallConfigurable ? (
           <label
             htmlFor={`lsp-install-${language.id}`}
             className="text-xs text-muted-foreground cursor-pointer"
@@ -97,7 +97,7 @@ function LspLanguageCard({
           </TooltipContent>
         </Tooltip>
       </div>
-      {!autoInstallSupported && (
+      {!autoInstallConfigurable && (
         <p
           className="text-[11px] leading-relaxed text-muted-foreground"
           data-testid={`lsp-install-guidance-${language.id}`}
@@ -109,14 +109,14 @@ function LspLanguageCard({
   );
 }
 
-function autoInstallSupportedLanguages(): readonly string[] {
+function autoInstallPreferenceLanguages(): readonly string[] {
   if (typeof window === "undefined") return [];
-  return readBootPayload(window).runtime?.lspAutoInstallSupportedLanguages ?? [];
+  return readBootPayload(window).runtime?.lspAutoInstallPreferenceLanguages ?? [];
 }
 
 export function LspLanguageCards(props: LspLanguageCardsProps) {
   const { t } = useTranslation();
-  const supportedLanguages = autoInstallSupportedLanguages();
+  const preferenceLanguages = autoInstallPreferenceLanguages();
   return (
     <div className="space-y-3">
       <div>
@@ -139,7 +139,7 @@ export function LspLanguageCards(props: LspLanguageCardsProps) {
           <LspLanguageCard
             key={language.id}
             language={language}
-            supportedLanguages={supportedLanguages}
+            preferenceLanguages={preferenceLanguages}
             {...props}
           />
         ))}

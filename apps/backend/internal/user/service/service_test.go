@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -249,6 +250,20 @@ func TestApplyLSPSettingsRejectsManualOnlyAutoInstallLanguage(t *testing.T) {
 	}
 	if len(settings.LspAutoInstallLanguages) != 0 {
 		t.Fatalf("LspAutoInstallLanguages = %v, want unchanged", settings.LspAutoInstallLanguages)
+	}
+}
+
+func TestApplyLSPSettingsAcceptsTaskHostAutoInstallPreference(t *testing.T) {
+	settings := &models.UserSettings{}
+	req := &UpdateUserSettingsRequest{
+		LspAutoInstallLanguages: ptr([]string{"rust"}),
+	}
+
+	if err := applyLSPSettings(settings, req); err != nil {
+		t.Fatalf("applyLSPSettings() error = %v, want Rust preference accepted", err)
+	}
+	if !slices.Equal(settings.LspAutoInstallLanguages, []string{"rust"}) {
+		t.Fatalf("LspAutoInstallLanguages = %v, want [rust]", settings.LspAutoInstallLanguages)
 	}
 }
 

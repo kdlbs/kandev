@@ -267,7 +267,7 @@ func TestLSPRuntimeSupported(t *testing.T) {
 
 func TestShouldAutoInstallRejectsManualOnlyLanguage(t *testing.T) {
 	handler := &LSPHandler{userService: staticLSPUserService{settings: &models.UserSettings{
-		LspAutoInstallLanguages: []string{"kotlin", "python"},
+		LspAutoInstallLanguages: []string{"kotlin", "python", "rust"},
 	}}}
 
 	if handler.shouldAutoInstall(context.Background(), "kotlin") {
@@ -275,5 +275,8 @@ func TestShouldAutoInstallRejectsManualOnlyLanguage(t *testing.T) {
 	}
 	if !handler.shouldAutoInstall(context.Background(), "python") {
 		t.Fatal("Python should honor its auto-install setting")
+	}
+	if !handler.shouldAutoInstall(context.Background(), "rust") {
+		t.Fatal("Rust preference must reach agentctl so the task host decides platform support")
 	}
 }
