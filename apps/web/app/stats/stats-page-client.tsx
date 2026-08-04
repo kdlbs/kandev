@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { PageShell } from "@/components/page-shell";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { IconChartBar } from "@tabler/icons-react";
 import { useCopyToClipboard } from "@/hooks/use-copy-to-clipboard";
