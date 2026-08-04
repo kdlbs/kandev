@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { migrateView } from "./ui-slice";
-import type { SidebarView } from "./sidebar-view-types";
+import { migrateSidebarViewDraft, migrateView } from "./ui-slice";
+import type { SidebarView, SidebarViewDraft } from "./sidebar-view-types";
 
 function makeSidebarView(id: string, name: string): SidebarView {
   return {
@@ -10,6 +10,15 @@ function makeSidebarView(id: string, name: string): SidebarView {
     sort: { key: "state", direction: "asc" },
     group: "none",
     collapsedGroups: [],
+  };
+}
+
+function makeSidebarDraft(baseViewId = "view-a"): SidebarViewDraft {
+  return {
+    baseViewId,
+    filters: [],
+    sort: { key: "state", direction: "asc" },
+    group: "none",
   };
 }
 
@@ -56,5 +65,27 @@ describe("migrateView archived compatibility", () => {
     ];
 
     expect(migrateView(view).filters).toEqual([]);
+  });
+});
+
+describe("migrateSidebarViewDraft archived compatibility", () => {
+  it("drops legacy archived clauses while preserving draft state", () => {
+    const draft = makeSidebarDraft();
+    draft.filters = [
+      {
+        id: "archived",
+        dimension: "archived",
+        op: "is",
+        value: true,
+      } as unknown as SidebarViewDraft["filters"][number],
+      { id: "title", dimension: "titleMatch", op: "matches", value: "keep" },
+    ];
+    draft.sort = { key: "title", direction: "desc" };
+    draft.group = "repository";
+
+    expect(migrateSidebarViewDraft(draft)).toEqual({
+      ...draft,
+      filters: [{ id: "title", dimension: "titleMatch", op: "matches", value: "keep" }],
+    });
   });
 });

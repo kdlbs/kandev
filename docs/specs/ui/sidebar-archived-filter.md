@@ -20,6 +20,9 @@ unreachable control suggesting that the sidebar is an archived-task browser.
 - Existing saved sidebar views that contain an `archived` clause discard that
   clause during frontend view migration while preserving the view, its other
   clauses, sort, grouping, collapsed groups, name, and active selection.
+- In-flight sidebar drafts that contain an `archived` clause are migrated at
+  boot, hydration, and live user-settings updates while preserving valid
+  clauses and sort/group state.
 - A migrated view whose only clause was `archived` behaves as an unfiltered
   sidebar view instead of remaining permanently empty.
 - The sidebar continues to list active workflow tasks and may still show the
@@ -40,6 +43,10 @@ unreachable control suggesting that the sidebar is an archived-task browser.
 - **GIVEN** a persisted saved view whose only clause is `archived`, **WHEN**
   Kandev hydrates the view, **THEN** the view has no filters and active tasks are
   visible.
+- **GIVEN** a persisted or live sidebar draft with an `archived` clause,
+  **WHEN** Kandev restores or receives the draft, **THEN** the clause is
+  removed before the editor applies it and the remaining draft state is
+  preserved.
 - **GIVEN** an archived task opened from the full Tasks page, **WHEN** the task
   sidebar renders, **THEN** the existing synthetic archived row can still
   identify the current task.

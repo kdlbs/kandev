@@ -42,7 +42,9 @@ and command-panel contract.
   state untouched.
 - `apps/web/lib/state/slices/ui/ui-slice.ts`: remove `archived` from
   `KNOWN_DIMENSIONS`; the existing `migrateView` behavior then drops legacy
-  clauses while preserving the rest of each view.
+  clauses while preserving the rest of each view. The shared
+  `migrateSidebarViewDraft` helper applies the same normalization to in-flight
+  drafts before boot merge, hydration, and live WebSocket settings updates.
 - `apps/web/lib/sidebar/apply-view.ts`: remove the unreachable archived
   extractor from the supported view engine.
 - Update focused unit tests to replace the synthetic archived-filter assertion
@@ -66,6 +68,10 @@ primary task navigation remain unchanged.
   `migrateView` regression before the code change and is removed afterward,
   while a neighboring valid clause and all other view fields survive.
   **File:** `apps/web/lib/state/slices/ui/ui-slice-migration.test.ts`.
+- **Draft migration boundaries:** legacy drafts are normalized at boot merge,
+  hydration, and `user.settings.updated` boundaries so the editor never sees a
+  removed dimension. **Files:** `apps/web/lib/state/hydration/hydrator.test.ts`
+  and `apps/web/lib/ws/handlers/users.test.ts`.
 - **Supported dimension registry:** the registry does not expose `archived`.
   **File:**
   `apps/web/components/task/sidebar-filter/filter-dimension-registry.test.ts`.
@@ -86,10 +92,11 @@ primary task navigation remain unchanged.
 ## Verification Results
 
 - Task 01 unit suite: 4 files, 98 tests passed.
+- Fixup draft-migration suite: 3 files, 40 tests passed.
 - Task 01 typecheck passed.
 - Task 01 focused ESLint passed with no warnings or errors.
 - Task 02 desktop E2E: 1 Chromium test passed via the managed production runner.
-- Task 02 mobile E2E: 1 Pixel 5/mobile-chrome test passed via the managed production runner.
+- Task 02 mobile E2E: 1 Pixel 5/mobile-chrome test passed via the managed production runner, including viewport-containment assertions.
 - `git diff --check` passed.
 
 ## Implementation Waves And Parallel Candidates

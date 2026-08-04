@@ -174,6 +174,18 @@ test.describe("Mobile sidebar — view system", () => {
 
     await expect(testPage.getByRole("option", { name: "Archived", exact: true })).toHaveCount(0);
     await expect(testPage.getByRole("option", { name: "Title", exact: true })).toBeVisible();
+    const viewport = testPage.viewportSize();
+    const sheetBox = await sheet.boundingBox();
+    const popoverBox = await popover.boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(sheetBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    for (const box of [sheetBox!, popoverBox!]) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport!.height);
+    }
     await testPage.keyboard.press("Escape");
   });
 

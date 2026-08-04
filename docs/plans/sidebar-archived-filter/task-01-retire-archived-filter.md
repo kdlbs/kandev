@@ -19,6 +19,8 @@ saved clauses through the existing frontend normalization boundary.
   expose `archived`.
 - Hydrating a legacy saved view removes only its `archived` clause and
   preserves all other view state.
+- Restoring or receiving a legacy in-flight draft removes its `archived`
+  clause before the editor consumes it.
 - Archived task rendering and the synthetic current-archived row remain
   supported outside the filter engine.
 
@@ -45,6 +47,11 @@ cd apps && pnpm install --frozen-lockfile
 - `apps/web/lib/state/slices/ui/sidebar-view-types.ts`
 - `apps/web/lib/state/slices/ui/ui-slice.ts`
 - `apps/web/lib/state/slices/ui/ui-slice-migration.test.ts`
+- `apps/web/lib/state/default-state.ts`
+- `apps/web/lib/state/hydration/hydrator.ts`
+- `apps/web/lib/state/hydration/hydrator.test.ts`
+- `apps/web/lib/ws/handlers/users.ts`
+- `apps/web/lib/ws/handlers/users.test.ts`
 
 ## Dependencies
 
@@ -72,9 +79,11 @@ changed, commands and results, blockers or risks, and update this task plus
 
 ## Results
 
-- RED: `cd apps && pnpm --filter @kandev/web test -- --run components/task/sidebar-filter/filter-dimension-registry.test.ts lib/state/slices/ui/ui-slice.test.ts` — failed as expected with 3 assertions because the registry and migration still accepted `archived`.
+- RED: `cd apps && pnpm --filter @kandev/web test -- --run components/task/sidebar-filter/filter-dimension-registry.test.ts lib/state/slices/ui/ui-slice-migration.test.ts lib/state/slices/ui/ui-slice.test.ts` — failed as expected with 3 assertions because the registry and migration still accepted `archived`.
 - GREEN: `cd apps && pnpm --filter @kandev/web test -- --run components/task/sidebar-filter/filter-dimension-registry.test.ts lib/state/slices/ui/ui-slice-migration.test.ts lib/state/slices/ui/ui-slice.test.ts lib/sidebar/apply-view.test.ts` — passed, 4 files / 98 tests.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm exec eslint components/task/sidebar-filter/filter-dimension-registry.ts components/task/sidebar-filter/filter-dimension-registry.test.ts lib/sidebar/apply-view.ts lib/sidebar/apply-view.test.ts lib/state/slices/ui/sidebar-view-types.ts lib/state/slices/ui/ui-slice.ts lib/state/slices/ui/ui-slice.test.ts lib/state/slices/ui/ui-slice-migration.test.ts` — passed with no warnings or errors.
+- Fixup: `cd apps && pnpm --filter @kandev/web test -- --run lib/state/slices/ui/ui-slice-migration.test.ts lib/state/hydration/hydrator.test.ts lib/ws/handlers/users.test.ts` — passed, 3 files / 40 tests; draft migration is applied at boot merge, hydration, and live settings boundaries.
+- Fixup: the mobile archived-dimension E2E now asserts the existing sheet and popover remain within the viewport; 1 Pixel 5/mobile-chrome test passed.
 - `git diff --check` — passed.
 - No temporary instances, captures, or generated artifacts were left behind.

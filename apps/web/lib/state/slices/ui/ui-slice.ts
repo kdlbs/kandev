@@ -16,7 +16,7 @@ import { APP_SIDEBAR_EXPANDED_WIDTH } from "@/components/app-sidebar/app-sidebar
 import { buildSidebarTaskPrefsActions } from "./sidebar-task-prefs-actions";
 import { buildSidebarViewActions } from "./sidebar-view-actions";
 import { DEFAULT_VIEW } from "./sidebar-view-builtins";
-import type { SidebarView, SortSpec } from "./sidebar-view-types";
+import type { SidebarView, SidebarViewDraft, SortSpec } from "./sidebar-view-types";
 import type { SystemHealthResponse } from "@/lib/types/health";
 import type { ActiveDocument, QuickChatSession, UISlice, UISliceState } from "./types";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
@@ -64,6 +64,18 @@ export function migrateView(view: SidebarView): SidebarView {
   return {
     ...view,
     filters: view.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
+    sort,
+  };
+}
+
+/** Drops removed filter dimensions from an in-flight saved-view draft. */
+export function migrateSidebarViewDraft(draft: SidebarViewDraft): SidebarViewDraft {
+  const sort: SortSpec = KNOWN_SORT_KEYS.has(draft.sort.key)
+    ? draft.sort
+    : { key: "state", direction: draft.sort.direction };
+  return {
+    ...draft,
+    filters: draft.filters.filter((c) => KNOWN_DIMENSIONS.has(c.dimension)),
     sort,
   };
 }

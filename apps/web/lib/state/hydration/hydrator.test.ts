@@ -239,6 +239,27 @@ describe("mergeInitialState — sidebar views from boot settings", () => {
       subtaskOrderByParentId: { "task-1": ["subtask-1"] },
     });
   });
+
+  it("migrates a legacy archived clause from the boot draft", () => {
+    const result = mergeInitialState({
+      userSettings: {
+        sidebarDraft: {
+          baseViewId: "server",
+          filters: [
+            { id: "archived", dimension: "archived", op: "is", value: true },
+            { id: "title", dimension: "titleMatch", op: "matches", value: "keep" },
+          ],
+          sort: { key: "state", direction: "asc" },
+          group: "none",
+        },
+        loaded: true,
+      },
+    } as unknown as Partial<AppState>);
+
+    expect(result.sidebarViews.draft?.filters).toEqual([
+      { id: "title", dimension: "titleMatch", op: "matches", value: "keep" },
+    ]);
+  });
 });
 
 describe("hydrateState — sidebar views from user settings", () => {
@@ -345,6 +366,25 @@ describe("hydrateState — sidebar views from user settings", () => {
       subtaskOrderByParentId: { shared: ["server-child"], serverOnly: ["child"] },
       syncError: "retry",
     });
+  });
+});
+
+describe("hydrateState — sidebar draft migration", () => {
+  it("removes a legacy archived clause during hydration", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      hydrateState(draft, {
+        userSettings: {
+          sidebarDraft: {
+            baseViewId: "server",
+            filters: [{ id: "archived", dimension: "archived", op: "is", value: true }],
+            sort: { key: "state", direction: "asc" },
+            group: "none",
+          },
+        },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.sidebarViews.draft?.filters).toEqual([]);
   });
 });
 

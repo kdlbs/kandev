@@ -69,5 +69,5 @@ conversation.
 - RED: both scenarios failed against the pre-fix registry because **Archived**
   was still present in the shared dimension selector.
 - GREEN: `cd apps/web && pnpm e2e:run tests/task/sidebar-filter.spec.ts -- --grep "does not offer archived"` — 1 Chromium test passed via the managed production runner, which built backend/Vite artifacts and cleaned its temporary E2E directory.
-- GREEN: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "does not offer archived"` — 1 Pixel 5/mobile-chrome test passed via the managed production runner, which built backend/Vite artifacts and cleaned its temporary E2E directory.
+- GREEN: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-sidebar-views.spec.ts -- --grep "does not offer archived"` — 1 Pixel 5/mobile-chrome test passed via the managed production runner, including sheet/popover viewport-containment assertions; the runner built backend/Vite artifacts and cleaned its temporary E2E directory.
 - No failure artifacts or temporary test files remain.

@@ -19,7 +19,7 @@ import {
 } from "./slices";
 import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
 import type { HydrationState } from "./store";
-import { migrateView } from "./slices/ui/ui-slice";
+import { migrateSidebarViewDraft, migrateView } from "./slices/ui/ui-slice";
 
 export const defaultState = {
   kanban: defaultKanbanState.kanban,
@@ -178,7 +178,11 @@ function mergeSidebarViewState(initialState: HydrationState): DefaultState["side
   } else if (!sidebarViews.views.some((view) => view.id === sidebarViews.activeViewId)) {
     sidebarViews.activeViewId = sidebarViews.views[0].id;
   }
-  if (userSettings?.sidebarDraft !== undefined) sidebarViews.draft = userSettings.sidebarDraft;
+  if (userSettings?.sidebarDraft !== undefined) {
+    sidebarViews.draft = userSettings.sidebarDraft
+      ? migrateSidebarViewDraft(userSettings.sidebarDraft)
+      : null;
+  }
   return sidebarViews;
 }
 
