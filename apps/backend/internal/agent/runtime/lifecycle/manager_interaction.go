@@ -406,28 +406,43 @@ func (m *Manager) reapplySessionModeAfterReset(ctx context.Context, execution *A
 }
 
 // reapplySessionModelAfterReset re-applies the effective model to a freshly
-// initialized ACP session so a context reset does not replace the task's model
-// with the provider default advertised by the new session.
+// initialized ACP session under the no-silent-model-fallback policy: a model
+// that is gone in the fresh session's advertised list fails the reset
+// explicitly (returning an error) unless the profile opted into a fallback
+// model or the legacy auto-fallback toggle. Previously the re-apply was
+// best-effort, silently leaving the fresh session on the provider default.
 func (m *Manager) reapplySessionModelAfterReset(
 	ctx context.Context,
 	execution *AgentExecution,
 	newSessionID, modelID string,
-) {
+) error {
 	if execution.agentctl == nil || modelID == "" {
-		return
+		return nil
 	}
-	if err := execution.agentctl.SetModel(ctx, modelID); err != nil {
+	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
+	policy.Model = modelID
+	appliedModel, usingFallback, err := applyStartModelPolicy(
+		ctx, m.logger, execution.agentctl, execution.GetModelState(), policy,
+	)
+	if err != nil {
 		m.logger.Warn("failed to re-apply session model after context reset",
 			zap.String("execution_id", execution.ID),
 			zap.String("model", modelID),
 			zap.Error(err))
-		return
+		return err
 	}
-	m.logger.Info("re-applied session model after context reset",
-		zap.String("execution_id", execution.ID),
-		zap.String("session_id", execution.SessionID),
-		zap.String("new_acp_session_id", newSessionID),
-		zap.String("model", modelID))
+	if appliedModel != "" {
+		m.logger.Info("re-applied session model after context reset",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("new_acp_session_id", newSessionID),
+			zap.String("model", appliedModel),
+			zap.Bool("using_fallback", usingFallback))
+		if usingFallback && m.sessionManager != nil {
+			m.sessionManager.publishModelFallbackEvent(execution, newSessionID, appliedModel)
+		}
+	}
+	return nil
 }
 
 func (m *Manager) effectiveSessionModelForReset(ctx context.Context, execution *AgentExecution) string {
@@ -507,8 +522,12 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	})
 
 	// Restore the task's effective model and the user's session permission mode
-	// onto the fresh ACP session.
-	m.reapplySessionModelAfterReset(ctx, execution, newSessionID, effectiveModel)
+	// onto the fresh ACP session. A strict-mode model that is gone in the new
+	// session fails the reset explicitly instead of silently dropping to the
+	// provider default.
+	if err := m.reapplySessionModelAfterReset(ctx, execution, newSessionID, effectiveModel); err != nil {
+		return err
+	}
 	m.reapplySessionModeAfterReset(ctx, execution, newSessionID, prevMode)
 
 	m.logger.Info("agent context reset via session (no process restart)",

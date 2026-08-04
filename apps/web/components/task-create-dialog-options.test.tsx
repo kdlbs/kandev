@@ -1,50 +1,126 @@
-import { describe, it, expect } from "vitest";
-import type { Executor } from "@/lib/types/http";
-import { computeExecutorHint } from "./task-create-dialog-options";
+import { cleanup, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { AgentProfileOption } from "@/lib/state/slices";
+import type { AvailableAgent } from "@/lib/types/http-agents";
 
-function exec(id: string, type: Executor["type"]): Executor {
-  return { id, type, name: id } as Executor;
+// Minimal store shape consumed by useAvailableAgents.
+type MockStore = {
+  availableAgents: {
+    items: AvailableAgent[];
+    loading: boolean;
+    loaded: boolean;
+    tools: [];
+  };
+};
+
+let mockStore: MockStore = {
+  availableAgents: { items: [], loading: false, loaded: true, tools: [] },
+};
+
+vi.mock("@/components/state-provider", () => ({
+  useAppStore: (selector: (s: MockStore) => unknown) => selector(mockStore),
+}));
+
+import { useAgentProfileOptions } from "./task-create-dialog-options";
+
+function setAvailableAgents(items: AvailableAgent[]) {
+  mockStore = { availableAgents: { items, loading: false, loaded: true, tools: [] } };
 }
 
-const WORKTREE_SINGLE = "A git worktree will be created from the base branch.";
-const WORKTREE_MULTI =
-  "A git worktree will be created for each repository in a parent folder. The agent runs in that parent folder so it can see every worktree side by side.";
-const DOCKER =
-  "A Docker container will be created from the selected base branch and checked out on a task branch.";
-const LOCAL = "The agent will run directly on the repository.";
+const AGENT_WITH_GPT: AvailableAgent = {
+  name: "omp-acp",
+  available: true,
+  model_config: {
+    default_model: "gpt-5",
+    available_models: [{ id: "gpt-5", name: "GPT-5" }],
+    current_model_id: "gpt-5",
+    available_modes: [],
+    supports_dynamic_models: false,
+    status: "ok",
+  },
+} as unknown as AvailableAgent;
 
-describe("computeExecutorHint", () => {
-  const executors = [
-    exec("wt", "worktree"),
-    exec("loc", "local"),
-    exec("docker", "local_docker"),
-    exec("remote-docker", "remote_docker"),
-  ];
+const GONE_MODEL = "claude-gone";
+const DATA_DISABLED = "data-disabled";
 
-  it("returns the multi-repo worktree hint when more than one repo is selected", () => {
-    expect(computeExecutorHint(executors, "wt", 2)).toBe(WORKTREE_MULTI);
+function profileOption(overrides: Partial<AgentProfileOption>): AgentProfileOption {
+  return {
+    id: "profile-1",
+    label: "OMP • hybrid",
+    agent_id: "agent-1",
+    agent_name: "omp-acp",
+    cli_passthrough: false,
+    ...overrides,
+  };
+}
+
+function OptionsProbe({ profiles }: { profiles: AgentProfileOption[] }) {
+  const options = useAgentProfileOptions(profiles);
+  return (
+    <div>
+      {options.map((option, index) => (
+        <div
+          key={option.value}
+          data-testid={`option-${index}`}
+          data-disabled={option.disabled ? "true" : undefined}
+          data-reason={option.disabledReason}
+        >
+          {option.renderLabel()}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function renderOptions(profiles: AgentProfileOption[]) {
+  render(<OptionsProbe profiles={profiles} />);
+  return screen.getByTestId("option-0");
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  setAvailableAgents([AGENT_WITH_GPT]);
+});
+
+afterEach(cleanup);
+
+describe("useAgentProfileOptions no-silent-model-fallback gating", () => {
+  it("blocks a profile whose start model is gone (strict mode)", () => {
+    const option = renderOptions([profileOption({ model: GONE_MODEL })]);
+    expect(option.getAttribute(DATA_DISABLED)).toBe("true");
+    expect(option.getAttribute("data-reason")).toContain(GONE_MODEL);
   });
 
-  it("returns the single-repo worktree hint when exactly one repo is selected", () => {
-    expect(computeExecutorHint(executors, "wt", 1)).toBe(WORKTREE_SINGLE);
+  it("keeps a profile with an available start model selectable", () => {
+    const option = renderOptions([profileOption({ model: "gpt-5" })]);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
   });
 
-  it("explains that Docker profiles create an isolated task branch", () => {
-    expect(computeExecutorHint(executors, "docker", 1)).toBe(DOCKER);
-    expect(computeExecutorHint(executors, "remote-docker", 1)).toBe(DOCKER);
+  it("keeps a profile with an empty (agent default) model selectable", () => {
+    const option = renderOptions([profileOption({ model: "" })]);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
   });
 
-  it("returns the local hint regardless of repoCount", () => {
-    expect(computeExecutorHint(executors, "loc", 1)).toBe(LOCAL);
-    expect(computeExecutorHint(executors, "loc", 5)).toBe(LOCAL);
+  it("keeps a gone-model profile with a fallback selectable and warns", () => {
+    const option = renderOptions([
+      profileOption({ model: "claude-gone", fallback_model: "gpt-5" }),
+    ]);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(option.getAttribute("data-reason")).toBeNull();
+
+    // The amber warning icon carries the fallback note.
+    expect(screen.getByTitle(/gpt-5/)).not.toBeNull();
   });
 
-  it("returns null for an unknown executor id", () => {
-    expect(computeExecutorHint(executors, "nope", 1)).toBeNull();
+  it("keeps a gone-model profile with auto-fallback selectable without a warning", () => {
+    const option = renderOptions([profileOption({ model: "claude-gone", auto_fallback: true })]);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
+    expect(screen.queryByTitle(/claude-gone/)).toBeNull();
   });
 
-  it("returns null for an unrecognised executor type", () => {
-    const odd = [exec("x", "remote" as Executor["type"])];
-    expect(computeExecutorHint(odd, "x", 1)).toBeNull();
+  it("does not gate when the agent model list is unknown (probe not landed)", () => {
+    setAvailableAgents([]);
+    const option = renderOptions([profileOption({ model: GONE_MODEL })]);
+    expect(option.getAttribute(DATA_DISABLED)).toBeNull();
   });
 });

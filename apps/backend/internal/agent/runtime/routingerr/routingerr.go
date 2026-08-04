@@ -42,6 +42,28 @@ const (
 // new session recovers.
 const RemediationStartFreshSession = "start_fresh_session"
 
+// ModelUnavailableMessage renders the actionable user-facing message for a
+// configured model that is no longer available. Shared by the session-start
+// policy and the office post-start failure path so chat and run detail both
+// ask the user to change the model instead of silently falling back.
+func ModelUnavailableMessage(modelID string) string {
+	return fmt.Sprintf("Model unavailable: the configured model %q is no longer available. Change the model in the agent profile or configure a fallback.", modelID)
+}
+
+// IsAvailabilityCode reports whether a classified code means the provider or
+// model became unavailable (auth expired, model dropped, credentials or
+// subscription missing) — the failure class the no-silent-model-fallback
+// feature treats as "ask the user to change the model".
+func IsAvailabilityCode(code Code) bool {
+	switch code {
+	case CodeModelUnavailable, CodeAuthRequired, CodeMissingCredentials,
+		CodeSubscriptionRequired, CodeProviderUnavailable, CodeRateLimited,
+		CodeQuotaLimited:
+		return true
+	}
+	return false
+}
+
 // Confidence reflects how strongly the classifier trusts the matched signal.
 type Confidence string
 

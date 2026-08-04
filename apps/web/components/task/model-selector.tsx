@@ -26,6 +26,8 @@ type SessionModelsEntry = {
   models: SessionModelEntry[];
   configOptions: ConfigOptionEntry[];
   configBaseline?: Record<string, string>;
+  /** Set when the session started on the profile's fallback model. */
+  fallbackModel?: string;
 };
 
 type ModelSelectorProps = {
@@ -127,7 +129,15 @@ function buildModelOptions(
 ): ModelSelectorOption[] {
   const options = [...availableModels];
   if (currentModel && !options.some((m) => m.id === currentModel)) {
-    options.unshift({ id: currentModel, name: currentModel });
+    // The configured/active model is no longer advertised ("gone"). Keep it
+    // visible but greyed out so the user is asked to pick a replacement —
+    // never silently drop it.
+    options.unshift({
+      id: currentModel,
+      name: currentModel,
+      disabled: true,
+      disabledReason: "Model no longer available — select a new model",
+    });
   }
   return options;
 }
@@ -325,7 +335,20 @@ function useModelSelectorState(sessionId: string | null) {
     snapshotModel,
     profileModel,
   );
-  const modelOptions = buildModelOptions(availableModels, currentModel);
+  const modelOptions = useMemo(() => {
+    const options = buildModelOptions(availableModels, currentModel);
+    const fallbackModel = sessionModelsData?.fallbackModel;
+    // Explicit "using fallback" signal: annotate the fallback model so the
+    // user sees the session is not on the configured start model.
+    if (fallbackModel) {
+      for (const option of options) {
+        if (option.id === fallbackModel && !option.name.includes("(fallback)")) {
+          option.name = `${option.name} (fallback)`;
+        }
+      }
+    }
+    return options;
+  }, [availableModels, currentModel, sessionModelsData?.fallbackModel]);
 
   const { handleModelChange, handleConfigChange } = useModelChangeHandlers(
     configOptions,

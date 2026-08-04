@@ -1,7 +1,7 @@
 ---
 id: task-08-e2e
 title: E2E: gone start model flows on the mock backend
-status: pending
+status: done
 wave: 4
 depends_on: [task-05-picker-gone-support, task-06-profile-editor, task-07-profile-picker-gating]
 plan: docs/plans/no-silent-model-fallback/plan.md

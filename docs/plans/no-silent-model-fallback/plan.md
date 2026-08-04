@@ -1,7 +1,7 @@
 # Plan: No Silent Model Fallback
 
 **Spec**: `docs/specs/no-silent-model-fallback/spec.md`
-**Status**: approved (design package) — pending model-switch checkpoint
+**Status**: implemented (all tasks done, gate green; PR pending)
 **Date**: 2026-08-04
 
 ## Summary

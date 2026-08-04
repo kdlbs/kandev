@@ -530,6 +530,8 @@ export class ApiClient {
     name: string,
     opts: {
       model: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
@@ -541,6 +543,8 @@ export class ApiClient {
     const response = await this.request<unknown>("POST", `/api/v1/agents/${agentId}/profiles`, {
       name,
       model: opts.model,
+      fallback_model: opts.fallback_model,
+      auto_fallback: opts.auto_fallback,
       mode: opts.mode,
       config_options: opts.config_options,
       cli_passthrough: opts.cli_passthrough ?? false,

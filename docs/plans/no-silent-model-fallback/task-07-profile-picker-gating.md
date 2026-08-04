@@ -1,7 +1,7 @@
 ---
 id: task-07-profile-picker-gating
 title: Block/warn profiles with gone start model in pickers
-status: pending
+status: done
 wave: 3
 depends_on: [task-01-profile-fields]
 plan: docs/plans/no-silent-model-fallback/plan.md

@@ -1,7 +1,7 @@
 ---
 id: task-04-post-start-gating
 title: Office post-start failure gates on profile mode
-status: pending
+status: done
 wave: 2
 depends_on: [task-01-profile-fields]
 plan: docs/plans/no-silent-model-fallback/plan.md

@@ -1,7 +1,7 @@
 ---
 id: task-01-profile-fields
 title: Add fallback_model and auto_fallback to agent profiles
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: docs/plans/no-silent-model-fallback/plan.md

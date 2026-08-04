@@ -1,7 +1,7 @@
 ---
 id: task-03-session-start-strict
 title: Session start applies start-model policy (strict/fallback/legacy)
-status: pending
+status: done
 wave: 1
 depends_on: [task-01-profile-fields]
 plan: docs/plans/no-silent-model-fallback/plan.md

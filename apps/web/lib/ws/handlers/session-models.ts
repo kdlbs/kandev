@@ -87,22 +87,29 @@ function clearStaleContextWindow(state: AppState, sessionId: string, currentMode
   }
 }
 
-function clearStaleActiveModel(
-  state: AppState,
-  sessionId: string,
-  acpModels: SessionModelsPayload["models"],
-) {
-  if (!acpModels?.length) {
-    return;
-  }
-  const currentActive = state.activeModel.bySessionId[sessionId];
-  if (currentActive && !acpModels.some((m) => m.model_id === currentActive)) {
-    state.setActiveModel(sessionId, "");
-  }
-}
-
 export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    "session.model_fallback": (message) => {
+      const payload = message.payload as
+        | { session_id?: string; fallback_model?: string }
+        | undefined;
+      if (!payload?.session_id || !payload.fallback_model) {
+        return;
+      }
+      const state = store.getState();
+      const sessionId = payload.session_id;
+      const existing = state.sessionModels.bySessionId[sessionId];
+      // Merge the explicit "using fallback model" signal into the session's
+      // model entry so the picker can show why the start model was replaced.
+      store.getState().setSessionModels(sessionId, {
+        currentModelId: existing?.currentModelId ?? "",
+        models: existing?.models ?? [],
+        configOptions: existing?.configOptions ?? [],
+        configBaseline: existing?.configBaseline,
+        fallbackModel: payload.fallback_model,
+      });
+    },
+
     "session.models_updated": (message) => {
       const payload = message.payload as SessionModelsPayload | undefined;
       if (!payload?.session_id) {
@@ -142,8 +149,6 @@ export function registerSessionModelsHandlers(store: StoreApi<AppState>): WsHand
           persisted.baseline ??
           state.sessionModels.bySessionId[sessionId]?.configBaseline,
       });
-
-      clearStaleActiveModel(state, sessionId, acpModels);
     },
   };
 }

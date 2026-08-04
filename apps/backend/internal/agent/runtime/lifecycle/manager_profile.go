@@ -158,6 +158,25 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 	return info.Model, info.Mode, info.ConfigOptions
 }
 
+// resolveStartModelPolicy resolves the profile's no-silent-model-fallback
+// policy (start model + optional fallback + legacy toggle). Returns a zero
+// policy when the profile cannot be resolved, which the policy helper treats
+// as "no start model configured".
+func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string) StartModelPolicy {
+	if profileID == "" || m.profileResolver == nil {
+		return StartModelPolicy{}
+	}
+	info, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil || info == nil {
+		return StartModelPolicy{}
+	}
+	return StartModelPolicy{
+		Model:         info.Model,
+		FallbackModel: info.FallbackModel,
+		AutoFallback:  info.AutoFallback,
+	}
+}
+
 // initializeACPSession delegates to SessionManager for full ACP session initialization and prompting.
 // We pass MarkBootReady (not MarkReady) for the no-prompt branches: dispatchInitialPrompt only
 // invokes the callback when there's no taskDescription/attachments to send, which is a *boot*
@@ -170,7 +189,13 @@ func (m *Manager) resolveProfileSessionConfig(ctx context.Context, profileID str
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions := m.resolveProfileSessionConfig(ctx, execution.AgentProfileID)
 	model, mode, configOptions := m.effectiveSessionRuntimeConfig(ctx, execution, profileModel, profileMode, profileConfigOptions)
-	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, model, mode, configOptions)
+	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
+	// The effective runtime model (user-selected, persisted session state)
+	// takes precedence over the profile's start model for the session; the
+	// policy still carries the profile's fallback settings so a gone
+	// effective model is handled the same way.
+	policy.Model = model
+	return m.sessionManager.InitializeAndPrompt(ctx, execution, agentConfig, taskDescription, attachments, mcpServers, m.MarkBootReady, policy, mode, configOptions)
 }
 
 func (m *Manager) effectiveSessionRuntimeConfig(ctx context.Context, execution *AgentExecution, profileModel, profileMode string, profileConfigOptions map[string]string) (string, string, map[string]string) {

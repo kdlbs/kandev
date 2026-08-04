@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
 import { IconTrash } from "@tabler/icons-react";
@@ -150,6 +150,8 @@ function ProfileSettingsCard({
           profile={{
             name: draft.name,
             model: draft.model,
+            fallback_model: draft.fallbackModel ?? "",
+            auto_fallback: draft.autoFallback ?? false,
             mode: draft.mode ?? "",
             config_options: draft.configOptions ?? {},
             auto_approve: permissionValues.auto_approve,
@@ -161,6 +163,8 @@ function ProfileSettingsCard({
           baselineProfile={{
             name: savedProfile.name,
             model: savedProfile.model,
+            fallback_model: savedProfile.fallbackModel ?? "",
+            auto_fallback: savedProfile.autoFallback ?? false,
             mode: savedProfile.mode ?? "",
             config_options: savedProfile.configOptions ?? {},
             auto_approve: savedPermissionValues.auto_approve,
@@ -201,6 +205,28 @@ function useSyncAgentsToStore() {
   };
 }
 
+// areProfileFieldsDirty compares every editable profile field against the
+// saved baseline so the card-level save affordance only appears for real changes.
+function areProfileFieldsDirty(
+  draft: AgentProfile,
+  saved: AgentProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+): boolean {
+  return [
+    draft.name !== saved.name,
+    draft.model !== saved.model,
+    (draft.fallbackModel ?? "") !== (saved.fallbackModel ?? ""),
+    (draft.autoFallback ?? false) !== (saved.autoFallback ?? false),
+    (draft.mode ?? "") !== (saved.mode ?? ""),
+    !areConfigOptionsEqual(draft.configOptions, saved.configOptions),
+    arePermissionsDirty(draft, saved, permissionSettings),
+    draft.cliPassthrough !== saved.cliPassthrough,
+    !areCLIFlagsEqual(draft.cliFlags ?? [], saved.cliFlags ?? []),
+    (draft.commandPrefix ?? "") !== (saved.commandPrefix ?? ""),
+    !areEnvVarsEqual(draft.envVars, saved.envVars),
+  ].some(Boolean);
+}
+
 function useProfileEditorState(
   profile: AgentProfile,
   permissionSettings: Record<string, PermissionSetting>,
@@ -209,19 +235,8 @@ function useProfileEditorState(
   const [savedProfile, setSavedProfile] = useState<AgentProfile>(profile);
   const [saveStatus, setSaveStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
-  const isDirty = useMemo(
-    () =>
-      draft.name !== savedProfile.name ||
-      draft.model !== savedProfile.model ||
-      (draft.mode ?? "") !== (savedProfile.mode ?? "") ||
-      !areConfigOptionsEqual(draft.configOptions, savedProfile.configOptions) ||
-      arePermissionsDirty(draft, savedProfile, permissionSettings) ||
-      draft.cliPassthrough !== savedProfile.cliPassthrough ||
-      !areCLIFlagsEqual(draft.cliFlags ?? [], savedProfile.cliFlags ?? []) ||
-      (draft.commandPrefix ?? "") !== (savedProfile.commandPrefix ?? "") ||
-      !areEnvVarsEqual(draft.envVars, savedProfile.envVars),
-    [draft, savedProfile, permissionSettings],
-  );
+  // Cheap field-wise comparison; memoization would cost more than it saves.
+  const isDirty = areProfileFieldsDirty(draft, savedProfile, permissionSettings);
 
   return { draft, setDraft, savedProfile, setSavedProfile, saveStatus, setSaveStatus, isDirty };
 }

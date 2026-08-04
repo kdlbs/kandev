@@ -382,6 +382,11 @@ type Run struct {
 	ResolvedExecutionProfileID *string `json:"resolved_execution_profile_id,omitempty" db:"resolved_execution_profile_id"`
 	ResolvedProviderID         *string `json:"resolved_provider_id,omitempty" db:"resolved_provider_id"`
 	ResolvedModel              *string `json:"resolved_model,omitempty" db:"resolved_model"`
+	// FallbackModelOverride is a one-shot post-start fallback: set by the
+	// routing lifecycle when the profile configured an explicit fallback
+	// model, consumed (and cleared) by the next dispatch which launches
+	// only this model on the same provider.
+	FallbackModelOverride *string `json:"fallback_model,omitempty" db:"fallback_model"`
 	// CurrentRouteAttemptSeq tracks the in-flight attempt so post-start
 	// fallback can find the right row to update and exclude already-tried
 	// providers when re-resolving.

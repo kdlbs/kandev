@@ -1,7 +1,7 @@
 ---
 id: task-05-picker-gone-support
 title: Model pickers support disabled (gone) models
-status: pending
+status: done
 wave: 3
 depends_on: []
 plan: docs/plans/no-silent-model-fallback/plan.md

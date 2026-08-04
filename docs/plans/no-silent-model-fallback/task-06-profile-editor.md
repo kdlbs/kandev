@@ -1,7 +1,7 @@
 ---
 id: task-06-profile-editor
 title: Profile editor: gone start model red + fallback row + toggle
-status: pending
+status: done
 wave: 3
 depends_on: [task-01-profile-fields, task-05-picker-gone-support]
 plan: docs/plans/no-silent-model-fallback/plan.md

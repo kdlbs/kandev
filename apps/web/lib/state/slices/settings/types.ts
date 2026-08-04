@@ -51,6 +51,12 @@ export type AgentProfileOption = {
   agent_id: string;
   agent_name: string;
   cli_passthrough: boolean;
+  /** Configured start model (ACP model ID). Empty = agent default. */
+  model?: string;
+  /** Optional explicit fallback model; ignored when auto_fallback is on. */
+  fallback_model?: string;
+  /** Legacy automatic-fallback opt-in. */
+  auto_fallback?: boolean;
   /**
    * Host utility probe status for the agent this profile belongs to.
    * Used by pickers and the settings sidebar to flag profiles whose agent
@@ -63,7 +69,12 @@ export type AgentProfileOption = {
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
   agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
-  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & { cliPassthrough?: boolean },
+  profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name"> & {
+    cliPassthrough?: boolean;
+    model?: string;
+    fallbackModel?: string;
+    autoFallback?: boolean;
+  },
 ): AgentProfileOption {
   return {
     id: profile.id,
@@ -71,6 +82,9 @@ export function toAgentProfileOption(
     agent_id: agent.id,
     agent_name: agent.name,
     cli_passthrough: profile.cliPassthrough ?? false,
+    model: profile.model ?? undefined,
+    fallback_model: profile.fallbackModel ?? undefined,
+    auto_fallback: profile.autoFallback ?? undefined,
     capability_status: agent.capability_status,
     capability_error: agent.capability_error,
   };

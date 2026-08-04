@@ -199,6 +199,7 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 		SupportsEmbeddedContext: event.SupportsEmbeddedContext,
 		AuthMethods:             event.AuthMethods,
 		CurrentModelID:          event.CurrentModelID,
+		FallbackModel:           event.FallbackModel,
 		SessionModels:           event.SessionModels,
 		ConfigOptions:           event.ConfigOptions,
 		ConfigBaselineCandidate: event.ConfigBaselineCandidate,

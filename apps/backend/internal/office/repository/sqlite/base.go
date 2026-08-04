@@ -322,6 +322,11 @@ func (r *Repository) createRunTables() error {
 		resolved_execution_profile_id TEXT,
 		resolved_provider_id TEXT,
 		resolved_model TEXT,
+		-- fallback_model is a one-shot post-start fallback override: set by
+		-- HandlePostStartFailure when the profile configured an explicit
+		-- fallback model; consumed (and cleared) by the next dispatch which
+		-- launches only this model on the same provider.
+		fallback_model TEXT,
 		current_route_attempt_seq INTEGER NOT NULL DEFAULT 0,
 		routing_blocked_status TEXT,
 		earliest_retry_at TIMESTAMP,

@@ -7,18 +7,25 @@ import (
 )
 
 type AgentProfileDTO struct {
-	ID               string             `json:"id"`
-	AgentID          string             `json:"agent_id"`
-	Name             string             `json:"name"`
-	AgentDisplayName string             `json:"agent_display_name"`
-	Model            string             `json:"model"`
-	Mode             string             `json:"mode,omitempty"`
-	ConfigOptions    map[string]string  `json:"config_options,omitempty"`
-	AllowIndexing    bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
-	AutoApprove      bool               `json:"auto_approve"`
-	CLIFlags         []CLIFlagDTO       `json:"cli_flags"`
-	EnvVars          []ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CLIPassthrough   bool               `json:"cli_passthrough"`
+	ID               string `json:"id"`
+	AgentID          string `json:"agent_id"`
+	Name             string `json:"name"`
+	AgentDisplayName string `json:"agent_display_name"`
+	Model            string `json:"model"`
+	Mode             string `json:"mode,omitempty"`
+	// FallbackModel is the optional single ACP model ID the runtime switches
+	// to when the start model becomes unavailable. Ignored when
+	// auto_fallback is true.
+	FallbackModel string `json:"fallback_model,omitempty"`
+	// AutoFallback opts the profile into the legacy automatic-fallback
+	// behavior (session-start best-effort, office re-dispatch).
+	AutoFallback   bool               `json:"auto_fallback"`
+	ConfigOptions  map[string]string  `json:"config_options,omitempty"`
+	AllowIndexing  bool               `json:"allow_indexing"` // Deprecated: use CLIFlags. Retained for legacy clients.
+	AutoApprove    bool               `json:"auto_approve"`
+	CLIFlags       []CLIFlagDTO       `json:"cli_flags"`
+	EnvVars        []ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CLIPassthrough bool               `json:"cli_passthrough"`
 	// CommandPrefix is an optional launcher prefix prepended to the agent
 	// command (e.g. "greywall --"). Shell-tokenised at launch time.
 	CommandPrefix string `json:"command_prefix,omitempty"`

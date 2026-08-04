@@ -7,6 +7,7 @@ import type { SessionModelsPayload } from "@/lib/types/session-runtime-payloads"
 import { registerSessionModelsHandlers } from "./session-models";
 
 const providerModelId = "gpt-5.6-sol";
+const GONE_MODEL = "claude-sonnet";
 const reasoningOptionId = "reasoning_effort";
 const reasoningOptionName = "Reasoning Effort";
 const optionDescription = "Controls how much reasoning the model performs.";
@@ -361,5 +362,45 @@ describe("session.models_updated live updates", () => {
     expect(
       store.getState().sessionModels.bySessionId["session-1"].configOptions[0]?.currentValue,
     ).toBe("low");
+  });
+});
+
+describe("session.models_updated stale active model", () => {
+  it("keeps the active model when it disappears from the ACP list (no silent clear)", () => {
+    const store = makeStore({
+      activeModel: {
+        bySessionId: {
+          "session-1": GONE_MODEL,
+        },
+      },
+    });
+    const handlers = registerSessionModelsHandlers(store);
+
+    // The ACP list drops claude-sonnet (auth expired); only gpt-5 remains.
+    const payload = makePayload("gpt-5", {
+      models: [{ model_id: "gpt-5", name: "GPT-5" }],
+    });
+    handlers["session.models_updated"]!(makeMessage(payload));
+
+    // The gone active model must NOT be silently cleared — the picker needs
+    // it to stay visible (greyed) so the user is asked to change it.
+    expect(store.getState().setActiveModel).not.toHaveBeenCalled();
+  });
+
+  it("keeps the active model when it is still in the ACP list", () => {
+    const store = makeStore({
+      activeModel: {
+        bySessionId: {
+          "session-1": GONE_MODEL,
+        },
+      },
+    });
+    const handlers = registerSessionModelsHandlers(store);
+
+    const payload = makePayload(GONE_MODEL, {
+      models: [{ model_id: GONE_MODEL, name: "Claude Sonnet" }],
+    });
+    handlers["session.models_updated"]!(makeMessage(payload));
+    expect(store.getState().setActiveModel).not.toHaveBeenCalled();
   });
 });

@@ -95,6 +95,8 @@ export async function createAgentProfileAction(
   payload: {
     name: string;
     model: string;
+    fallback_model?: string;
+    auto_fallback?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     cli_passthrough: boolean;
@@ -118,6 +120,8 @@ export async function updateAgentProfileAction(
   payload: {
     name?: string;
     model?: string;
+    fallback_model?: string;
+    auto_fallback?: boolean;
     mode?: string;
     config_options?: Record<string, string>;
     allow_indexing?: boolean;

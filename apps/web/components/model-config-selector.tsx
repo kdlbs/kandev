@@ -23,6 +23,10 @@ export type ModelSelectorOption = {
   name: string;
   description?: string;
   usageMultiplier?: string;
+  /** When true the model is unavailable ("gone") — rendered greyed out and
+   * not selectable, with `disabledReason` shown in a tooltip. */
+  disabled?: boolean;
+  disabledReason?: string;
 };
 
 export type DynamicConfigOption = {
@@ -182,12 +186,13 @@ function ModelRow({
   selected: boolean;
   onSelect: (value: string) => void;
 }) {
-  return (
+  const item = (
     <CommandItem
       value={model.id}
       keywords={[model.name, model.description ?? "", model.id]}
-      onSelect={() => onSelect(model.id)}
-      className="relative pr-7"
+      onSelect={() => !model.disabled && onSelect(model.id)}
+      disabled={model.disabled}
+      className={cn("relative pr-7", model.disabled && "opacity-40 cursor-not-allowed")}
     >
       <div className="flex min-w-0 flex-1 items-center">
         <div className="min-w-0 flex-1">
@@ -207,6 +212,19 @@ function ModelRow({
       />
     </CommandItem>
   );
+  // cmdk's CommandItem swallows pointer events with no native tooltip slot;
+  // wrap disabled items in a Tooltip trigger so the gone-reason shows.
+  if (model.disabled && model.disabledReason) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div>{item}</div>
+        </TooltipTrigger>
+        <TooltipContent side="right">{model.disabledReason}</TooltipContent>
+      </Tooltip>
+    );
+  }
+  return item;
 }
 
 function ConfigOptionTrigger({

@@ -65,6 +65,11 @@ const (
 	// EventTypeSessionModels indicates available models from ACP session/new.
 	EventTypeSessionModels = "session_models"
 
+	// EventTypeSessionModelFallback indicates the session started on the
+	// profile's fallback model because the configured start model was
+	// unavailable. Data carries {"fallback_model": <model id>}.
+	EventTypeSessionModelFallback = "session_model_fallback"
+
 	// EventTypeSessionInfo indicates ACP session metadata such as title changed.
 	EventTypeSessionInfo = "session_info"
 
@@ -276,6 +281,11 @@ type AgentEvent struct {
 
 	// CurrentModelID is the active model identifier.
 	CurrentModelID string `json:"current_model_id,omitempty"`
+
+	// FallbackModel carries the fallback model a session started on when
+	// the configured start model was unavailable (session_model_fallback
+	// events).
+	FallbackModel string `json:"fallback_model,omitempty"`
 
 	// SessionModels lists models available in the ACP session.
 	SessionModels []SessionModelInfo `json:"session_models,omitempty"`

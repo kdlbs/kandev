@@ -1,7 +1,7 @@
 ---
 id: task-02-reconciler-keep-gone
 title: Reconciler keeps gone start/fallback models
-status: pending
+status: done
 wave: 1
 depends_on: [task-01-profile-fields]
 plan: docs/plans/no-silent-model-fallback/plan.md

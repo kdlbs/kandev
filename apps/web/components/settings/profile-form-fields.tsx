@@ -1,5 +1,7 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
+
 import { useId } from "react";
 import { IconAlertCircle, IconAlertTriangle, IconRefresh } from "@tabler/icons-react";
 import { NoAuthPanel, ProbingPanel } from "@/components/settings/profile-status-panels";
@@ -9,20 +11,11 @@ import { Label } from "@kandev/ui/label";
 import { Skeleton } from "@kandev/ui/skeleton";
 import { Switch } from "@kandev/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { ModeCombobox } from "@/components/settings/mode-combobox";
-import {
-  configOptionToModelOptions,
-  isModelConfigOption,
-  ModelConfigSelector,
-  type SelectConfigOption,
-  usableConfigOptions,
-} from "@/components/model-config-selector";
 import { useAgentCapabilities } from "@/hooks/domains/settings/use-dynamic-models";
 import {
   PERMISSION_APPLY_AGENTCTL_AUTO_APPROVE,
   PERMISSION_KEYS,
   readPermissionValue,
-  type PermissionKey,
 } from "@/lib/agent-permissions";
 import { CLIFlagsField } from "@/components/settings/cli-flags-field";
 import { CommandPrefixField } from "@/components/settings/command-prefix-field";
@@ -33,7 +26,6 @@ import {
   profileModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import type {
-  CLIFlag,
   CommandEntry,
   ModelConfig,
   ModeEntry,
@@ -42,15 +34,14 @@ import type {
   PassthroughConfig,
 } from "@/lib/types/http";
 
-export type ProfileFormData = {
-  name: string;
-  model: string;
-  mode: string;
-  config_options?: Record<string, string>;
-  cli_passthrough: boolean;
-  cli_flags: CLIFlag[];
-  command_prefix?: string;
-} & Record<PermissionKey, boolean>;
+export type { ProfileFormData } from "./profile-model-fields";
+import {
+  ModelFallbackSection,
+  ModelPicker,
+  ModePicker,
+  modelConfigOptions,
+  type ProfileFormData,
+} from "./profile-model-fields";
 
 export type ProfileFormFieldsProps = {
   profile: ProfileFormData;
@@ -318,86 +309,6 @@ function RefreshCapabilitiesButton({
   );
 }
 
-function ModelPicker({
-  profile,
-  models,
-  currentModelId,
-  configOptions,
-  onChange,
-}: {
-  profile: ProfileFormData;
-  models: ModelEntry[];
-  currentModelId: string | undefined;
-  configOptions: SelectConfigOption[];
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  const modelConfig = configOptions.find(isModelConfigOption);
-  const modelOptions = modelConfig
-    ? configOptionToModelOptions(modelConfig)
-    : models.map((model) => ({
-        id: model.id,
-        name: model.name,
-        description: model.description || (model.id !== model.name ? model.id : undefined),
-        usageMultiplier:
-          typeof model.meta?.copilotUsage === "string" ? model.meta.copilotUsage : undefined,
-      }));
-  const currentModel = profile.model || modelConfig?.currentValue || currentModelId || null;
-  const selectedConfigOptions = configOptions.map((option) => ({
-    ...option,
-    currentValue: isModelConfigOption(option)
-      ? profile.model || option.currentValue
-      : profile.config_options?.[option.id] || option.currentValue,
-  }));
-
-  return (
-    <ModelConfigSelector
-      modelOptions={modelOptions}
-      currentModel={currentModel}
-      configOptions={selectedConfigOptions}
-      onModelChange={(value) => onChange({ model: value })}
-      onConfigChange={(configId, value) =>
-        onChange({ config_options: { ...(profile.config_options ?? {}), [configId]: value } })
-      }
-      placeholder="Select a model..."
-      ariaLabel="Profile start model settings"
-    />
-  );
-}
-
-function ModePicker({
-  profile,
-  modes,
-  currentModeId,
-  onChange,
-}: {
-  profile: ProfileFormData;
-  modes: ModeEntry[];
-  currentModeId: string | undefined;
-  onChange: (patch: Partial<ProfileFormData>) => void;
-}) {
-  return (
-    <ModeCombobox
-      value={profile.mode}
-      onChange={(value) => onChange({ mode: value })}
-      modes={modes}
-      currentModeId={currentModeId}
-    />
-  );
-}
-
-function modelConfigOptions(modelConfig: ModelConfig): SelectConfigOption[] {
-  return usableConfigOptions(
-    modelConfig.config_options?.map((option) => ({
-      type: option.type,
-      id: option.id,
-      name: option.name,
-      currentValue: option.current_value,
-      category: option.category,
-      options: option.options,
-    })),
-  );
-}
-
 type CapabilitiesRowProps = {
   profile: ProfileFormData;
   models: ModelEntry[];
@@ -433,7 +344,7 @@ function CapabilitiesRow({
   agentName,
   baselineProfile,
 }: CapabilitiesRowProps) {
-  const hasModes = modes.length > 0;
+  const { t } = useTranslation();
   const configOptions = modelConfigOptions(modelConfig);
   const activeMode = findActiveMode(modes, profile.mode, currentModeId);
   const labelCls = isCompact ? "text-xs text-muted-foreground" : undefined;
@@ -479,9 +390,11 @@ function CapabilitiesRow({
             currentModelId={currentModelId}
             configOptions={configOptions}
             onChange={onChange}
+            ariaLabel={t("settings:startModelAria")}
+            goneModelLabel={t("settings:startModelUnavailable")}
           />
         </div>
-        {hasModes && (
+        {modes.length > 0 && (
           <div
             data-testid="profile-mode-field"
             className={`flex-1 min-w-0 ${gapCls}`}
@@ -502,6 +415,16 @@ function CapabilitiesRow({
       {activeMode?.description && (
         <p className="text-xs text-muted-foreground">{activeMode.description}</p>
       )}
+      <ModelFallbackSection
+        profile={profile}
+        models={models}
+        currentModelId={currentModelId}
+        configOptions={configOptions}
+        baselineProfile={baselineProfile}
+        labelCls={labelCls}
+        gapCls={gapCls}
+        onChange={onChange}
+      />
       {commands.length > 0 && <CommandsButton commands={commands} />}
       <CapabilityStatusMessage status={status} />
     </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Label } from "@kandev/ui/label";
 import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
@@ -50,6 +51,8 @@ type FormState = {
   agentName: string;
   profileName: string;
   model: string;
+  fallbackModel: string;
+  autoFallback: boolean;
   mode: string;
   cliFlags: CLIFlag[];
   cliPassthrough: boolean;
@@ -66,6 +69,8 @@ function fromExistingProfile(profile: AgentProfile): FormState {
     agentName: profile.agentId ?? "",
     profileName: profile.name,
     model: profile.model ?? "",
+    fallbackModel: profile.fallbackModel ?? "",
+    autoFallback: profile.autoFallback ?? false,
     mode: profile.mode ?? "",
     cliFlags: profile.cliFlags ?? [],
     cliPassthrough: profile.cliPassthrough ?? false,
@@ -85,6 +90,8 @@ function fromDefaultAgent(
     agentName: defaultAgent?.name ?? "",
     profileName: defaultName,
     model: cfg?.default_model ?? "",
+    fallbackModel: "",
+    autoFallback: false,
     mode: cfg?.current_mode_id ?? "",
     cliFlags: seedDefaultCLIFlags(permissionSettings),
     cliPassthrough: false,
@@ -177,13 +184,7 @@ export function CliProfileEditor({
         />
       </div>
 
-      <ModelModeFields
-        modelConfig={modelConfig ?? null}
-        model={form.model}
-        mode={form.mode}
-        onModelChange={(v) => patch({ model: v })}
-        onModeChange={(v) => patch({ mode: v })}
-      />
+      <ModelModeFieldsBinding form={form} patch={patch} modelConfig={modelConfig ?? null} />
 
       <AdvancedToggles
         open={advancedOpen}
@@ -289,21 +290,56 @@ function CliClientPicker({
   );
 }
 
+// ModelModeFieldsBinding forwards the editor's form state to ModelModeFields.
+// Extracted so CliProfileEditor stays under the linter's line budget.
+function ModelModeFieldsBinding({
+  form,
+  patch,
+  modelConfig,
+}: {
+  form: FormState;
+  patch: (p: Partial<FormState>) => void;
+  modelConfig: NonNullable<AvailableAgent["model_config"]> | null;
+}) {
+  return (
+    <ModelModeFields
+      modelConfig={modelConfig}
+      model={form.model}
+      fallbackModel={form.fallbackModel}
+      autoFallback={form.autoFallback}
+      mode={form.mode}
+      onModelChange={(v) => patch({ model: v })}
+      onFallbackModelChange={(v) => patch({ fallbackModel: v })}
+      onAutoFallbackChange={(v) => patch({ autoFallback: v })}
+      onModeChange={(v) => patch({ mode: v })}
+    />
+  );
+}
+
 type ModelModeFieldsProps = {
   modelConfig: NonNullable<AvailableAgent["model_config"]> | null;
   model: string;
+  fallbackModel: string;
+  autoFallback: boolean;
   mode: string;
   onModelChange: (v: string) => void;
+  onFallbackModelChange: (v: string) => void;
+  onAutoFallbackChange: (v: boolean) => void;
   onModeChange: (v: string) => void;
 };
 
 function ModelModeFields({
   modelConfig,
   model,
+  fallbackModel,
+  autoFallback,
   mode,
   onModelChange,
+  onFallbackModelChange,
+  onAutoFallbackChange,
   onModeChange,
 }: ModelModeFieldsProps) {
+  const { t } = useTranslation();
   if (!modelConfig) {
     return (
       <p className="text-xs text-muted-foreground">
@@ -311,28 +347,74 @@ function ModelModeFields({
       </p>
     );
   }
+  const availableModels = modelConfig.available_models ?? [];
+  const startModelGone = Boolean(model && !availableModels.some((m) => m.id === model));
+  const fallbackModelGone = Boolean(
+    fallbackModel && !availableModels.some((m) => m.id === fallbackModel),
+  );
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-      <div>
-        <Label>Model</Label>
-        <ModelCombobox
-          value={model}
-          onChange={onModelChange}
-          models={modelConfig.available_models ?? []}
-          currentModelId={modelConfig.current_model_id}
-        />
-      </div>
-      {(modelConfig.available_modes ?? []).length > 0 && (
+    <div className="grid grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <div>
-          <Label>Mode</Label>
-          <ModeCombobox
-            value={mode}
-            onChange={onModeChange}
-            modes={modelConfig.available_modes ?? []}
-            currentModeId={modelConfig.current_mode_id}
+          <Label>{t("settings:model")}</Label>
+          <ModelCombobox
+            value={model}
+            onChange={onModelChange}
+            models={
+              startModelGone
+                ? [
+                    ...availableModels,
+                    { id: model, name: `${model} (${t("settings:startModelUnavailable")})` },
+                  ]
+                : availableModels
+            }
+            currentModelId={modelConfig.current_model_id}
           />
         </div>
+        {(modelConfig.available_modes ?? []).length > 0 && (
+          <div>
+            <Label>{t("settings:mode")}</Label>
+            <ModeCombobox
+              value={mode}
+              onChange={onModeChange}
+              modes={modelConfig.available_modes ?? []}
+              currentModeId={modelConfig.current_mode_id}
+            />
+          </div>
+        )}
+      </div>
+      {!autoFallback && (
+        <div>
+          <Label className={fallbackModelGone ? "text-destructive" : undefined}>
+            {t("settings:agentFallback")}
+          </Label>
+          <ModelCombobox
+            value={fallbackModel}
+            onChange={onFallbackModelChange}
+            models={
+              fallbackModelGone
+                ? [
+                    ...availableModels,
+                    {
+                      id: fallbackModel,
+                      name: `${fallbackModel} (${t("settings:startModelUnavailable")})`,
+                    },
+                  ]
+                : availableModels
+            }
+            currentModelId={modelConfig.current_model_id}
+            placeholder={t("settings:agentFallbackPlaceholder")}
+          />
+          <p className="text-xs text-muted-foreground mt-1">{t("settings:agentFallbackHelper")}</p>
+        </div>
       )}
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5">
+          <Label>{t("settings:autoFallback")}</Label>
+          <p className="text-xs text-muted-foreground">{t("settings:autoFallbackHelper")}</p>
+        </div>
+        <Switch checked={autoFallback} onCheckedChange={onAutoFallbackChange} />
+      </div>
     </div>
   );
 }
@@ -484,6 +566,8 @@ async function saveExistingProfile(id: string, form: FormState): Promise<AgentPr
   return updateAgentProfileAction(id, {
     name: form.profileName.trim(),
     model: form.model,
+    fallback_model: form.fallbackModel || undefined,
+    auto_fallback: form.autoFallback,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
     auto_approve: form.autoApprove,
@@ -497,6 +581,8 @@ async function saveNewProfile(form: FormState, settingsAgents: Agent[]): Promise
   const profilePayload = {
     name: form.profileName.trim(),
     model: form.model,
+    fallback_model: form.fallbackModel || undefined,
+    auto_fallback: form.autoFallback,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
     auto_approve: form.autoApprove,

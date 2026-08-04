@@ -289,7 +289,7 @@ func (sm *SessionManager) InitializeAndPrompt(
 	attachments []MessageAttachment,
 	mcpServers []agentctltypes.McpServer,
 	markReady func(executionID string) error,
-	profileModel string,
+	startModelPolicy StartModelPolicy,
 	profileMode string,
 	profileConfigOptions map[string]string,
 ) error {
@@ -357,20 +357,35 @@ func (sm *SessionManager) InitializeAndPrompt(
 	providerDefaultConfig := execution.GetModelState()
 	finalConfigID := ""
 
-	// Apply profile model through the ACP session's advertised model-selection
-	// mechanism (best-effort). ACP is the only surface for model selection now;
-	// no --model CLI flag.
-	if profileModel != "" && execution.agentctl != nil {
-		if err := execution.agentctl.SetModel(ctx, profileModel); err != nil {
-			sm.logger.Warn("failed to set profile model via ACP",
+	// Apply the profile's start model through the ACP session's advertised
+	// model-selection mechanism under the no-silent-model-fallback policy:
+	// a gone start model fails the launch explicitly (asking the user to
+	// change the model) unless the profile opted into a fallback model or
+	// the legacy auto-fallback toggle. Previously this was best-effort — a
+	// failed SetModel only logged a warning and the session continued on
+	// the provider default, which is the implicit model switch this feature
+	// eliminates.
+	if startModelPolicy.Model != "" && execution.agentctl != nil {
+		appliedModel, usingFallback, policyErr := applyStartModelPolicy(
+			ctx, sm.logger, execution.agentctl,
+			execution.GetModelState(), startModelPolicy,
+		)
+		if policyErr != nil {
+			sm.logger.Error("start model unavailable, failing session start",
 				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel),
-				zap.Error(err))
-		} else {
+				zap.Error(policyErr))
+			return policyErr
+		}
+		if appliedModel != "" {
 			finalConfigID = modelConfigIDFromState(execution.GetModelState())
 			sm.logger.Info("set profile model on ACP session",
 				zap.String("execution_id", execution.ID),
-				zap.String("model", profileModel))
+				zap.String("session_id", result.SessionID),
+				zap.String("model", appliedModel),
+				zap.Bool("using_fallback", usingFallback))
+			if usingFallback {
+				sm.publishModelFallbackEvent(execution, result.SessionID, appliedModel)
+			}
 		}
 	}
 
@@ -442,6 +457,24 @@ func (sm *SessionManager) publishSettledConfigOptions(
 		ConfigOptions:           live.ConfigOptions,
 		ConfigBaselineCandidate: baselineCandidate.ConfigOptions,
 		Data:                    map[string]any{"config_options_settled": true},
+	})
+}
+
+// publishModelFallbackEvent broadcasts an explicit "using fallback model"
+// signal so the UI can surface why the session is not on the configured
+// start model. The event carries the fallback model id in Data.
+func (sm *SessionManager) publishModelFallbackEvent(
+	execution *AgentExecution,
+	acpSessionID string,
+	fallbackModel string,
+) {
+	if sm.eventPublisher == nil || fallbackModel == "" {
+		return
+	}
+	sm.eventPublisher.PublishAgentStreamEvent(execution, agentctl.AgentEvent{
+		Type:          streams.EventTypeSessionModelFallback,
+		SessionID:     acpSessionID,
+		FallbackModel: fallbackModel,
 	})
 }
 

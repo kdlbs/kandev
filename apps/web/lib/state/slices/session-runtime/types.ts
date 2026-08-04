@@ -463,6 +463,9 @@ export type SessionRuntimeSliceActions = {
       models: SessionModelEntry[];
       configOptions: ConfigOptionEntry[];
       configBaseline?: Record<string, string>;
+      /** Set when the session started on the profile's fallback model
+       *  because the configured start model was unavailable. */
+      fallbackModel?: string;
     },
   ) => void;
   setSessionMCPStatus: (sessionId: string, history: MCPAttachmentHistory) => void;
