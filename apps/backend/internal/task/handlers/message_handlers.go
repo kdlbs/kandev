@@ -52,6 +52,10 @@ type MessageHandlers struct {
 	referenceValidator  entityrefs.SubmissionValidator
 	messageIDMu         sync.Mutex
 	messageIDGates      map[string]*messageIDGate
+	// waitForSessionReadyFn backs waitForSessionReady; defaults to
+	// service.WaitForSessionReady but is overridable in tests to avoid its
+	// real polling delay.
+	waitForSessionReadyFn func(ctx context.Context, sessionID string) error
 }
 
 type messageIDGate struct {
@@ -67,9 +71,10 @@ func NewMessageHandlers(
 	validators ...entityrefs.SubmissionValidator,
 ) *MessageHandlers {
 	handlers := &MessageHandlers{
-		service:      svc,
-		orchestrator: orchestrator,
-		logger:       log.WithFields(zap.String("component", "task-message-handlers")),
+		service:               svc,
+		orchestrator:          orchestrator,
+		logger:                log.WithFields(zap.String("component", "task-message-handlers")),
+		waitForSessionReadyFn: svc.WaitForSessionReady,
 	}
 	if len(validators) > 0 {
 		handlers.referenceValidator = validators[0]
@@ -821,10 +826,12 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 	}
 }
 
-// waitForSessionReady delegates to the shared service.WaitForSessionReady helper.
-// Kept as a thin wrapper so existing tests on this method continue to pass.
+// waitForSessionReady delegates to waitForSessionReadyFn (by default
+// service.WaitForSessionReady). Kept as a thin wrapper so existing tests on
+// this method continue to pass; the indirection lets tests stub out the
+// real polling delay via waitForSessionReadyFn.
 func (h *MessageHandlers) waitForSessionReady(ctx context.Context, sessionID string) error {
-	return h.service.WaitForSessionReady(ctx, sessionID)
+	return h.waitForSessionReadyFn(ctx, sessionID)
 }
 
 type wsListMessagesRequest struct {

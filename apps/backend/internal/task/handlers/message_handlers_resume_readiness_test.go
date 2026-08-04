@@ -130,6 +130,7 @@ func TestForwardMessageAsPrompt_RetriesOnceWhenAgentNotReadyAfterResume(t *testi
 	}
 	orch := &resumeRetryOrchestrator{promptErr: promptErr}
 	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+	h.waitForSessionReadyFn = func(context.Context, string) error { return nil }
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
@@ -190,6 +191,7 @@ func TestForwardMessageAsPrompt_RetryGoesThroughResumeBeforeReprompting(t *testi
 	}
 	orch := &resumeRetryOrchestrator{promptErr: promptErr}
 	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+	h.waitForSessionReadyFn = func(context.Context, string) error { return nil }
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
@@ -245,11 +247,14 @@ func TestForwardMessageAsPrompt_SurfacesOrigErrorWhenReadinessWaitFails(t *testi
 
 	repo := &resumeRetryRepo{
 		sessionStateSequencer: sessionStateSequencer{
-			states: []models.TaskSessionState{models.TaskSessionStateFailed},
+			states: []models.TaskSessionState{models.TaskSessionStateWaitingForInput},
 		},
 	}
 	orch := &resumeRetryOrchestrator{promptErr: promptErr}
 	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+	h.waitForSessionReadyFn = func(context.Context, string) error {
+		return errors.New("session failed after resume: session failed during resume")
+	}
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
@@ -283,6 +288,7 @@ func TestForwardMessageAsPrompt_SurfacesOrigErrorWhenRetryPromptFails(t *testing
 		retryPromptErr: errors.New("dispatch: connection refused"),
 	}
 	h := newTestMessageHandlersWithOrchestrator(t, repo, orch)
+	h.waitForSessionReadyFn = func(context.Context, string) error { return nil }
 
 	h.forwardMessageAsPrompt(
 		context.Background(), "task-1", "session-1", "profile-1", "continue",
