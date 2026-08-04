@@ -69,7 +69,7 @@ export function QuickTabAddMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="text-xs text-muted-foreground">
-          {t("sidebar:quickChatAgents")}
+          {t("common:agents")}
         </DropdownMenuLabel>
         <DropdownMenuItem
           onSelect={onNewAgent}

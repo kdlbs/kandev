@@ -28,7 +28,7 @@ vi.mock("react-i18next", () => ({
     t: (key: string, values?: { count?: number; error?: string }) => {
       const messages: Record<string, string> = {
         "sidebar:quickChatAdd": "Add or switch tab",
-        "sidebar:quickChatAgents": "Agents",
+        "common:agents": "Agents",
         "sidebar:quickChatNewAgent": "New Agent",
         "sidebar:quickChatTerminals": "Terminals",
         "sidebar:quickChatNewTerminal": "New Terminal",

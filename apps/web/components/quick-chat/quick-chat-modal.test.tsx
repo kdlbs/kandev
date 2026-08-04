@@ -57,7 +57,7 @@ vi.mock("react-i18next", () => ({
   useTranslation: () => ({
     t: (key: string, values?: { count?: number }) => {
       if (key === "sidebar:quickChatTerminalTab") return `Terminal ${values?.count}`;
-      if (key === "sidebar:quickChatAgents") return "Agents";
+      if (key === "common:agents") return "Agents";
       if (key === "sidebar:quickChatTerminals") return "Terminals";
       if (key === "sidebar:quickChatNewAgent") return "New Agent";
       if (key === "sidebar:quickChatNewTerminal") return "New Terminal";
