@@ -4,9 +4,11 @@ STEP 1: Determine what to review
 - First, check if there are any uncommitted changes (dirty working directory)
 - If there are uncommitted/staged changes: review those files
 - If the working directory is clean: review ONLY the commits from this branch
-  - Use: git log --oneline $(git merge-base origin/main HEAD)..HEAD to list the branch commits
-  - Use: git diff $(git merge-base origin/main HEAD) to see the cumulative changes
-  - Do NOT diff directly against origin/main or master - that would include unrelated changes if the branch is outdated
+  - Run: git remote show origin | grep 'HEAD branch' to find the default branch name
+  - Set BASE_REF to origin/<default-branch> using the reported branch
+  - Use: git log --oneline $(git merge-base "$BASE_REF" HEAD)..HEAD to list the branch commits
+  - Use: git diff $(git merge-base "$BASE_REF" HEAD) to see the cumulative changes
+  - Do NOT diff directly against BASE_REF or origin/main/master - that would include unrelated changes if the branch is outdated
 - Read each changed file in full — understand surrounding code, not just the diff
 - Navigate callers, interfaces, and tests to understand changes end-to-end
 - Check git blame on modified sections to understand why code was written a certain way
