@@ -87,7 +87,13 @@ func (a *Adapter) sendPrompt(
 	// turn in flight (idle session, or a synthetic wakeup holding the gate), this
 	// is a no-op and the call falls through to ordinary gate acquisition, which is
 	// exactly the specified behavior for those cases.
-	if steer && humanPrompt && promptGeneration != 0 && a.supportsPromptHandoff() {
+	//
+	// Guarded on a live context: beginSteerHandoff protects the predecessor's
+	// background work and closes its handoff channel, which only pays off once a
+	// successor actually acquires the gate. If ctx is already cancelled the
+	// acquisition below will fail immediately, so triggering the handoff first
+	// would strand that protection with no successor to clear it.
+	if steer && humanPrompt && promptGeneration != 0 && a.supportsPromptHandoff() && ctx.Err() == nil {
 		a.beginSteerHandoff()
 	}
 	if err := a.acquirePromptTurn(ctx, turn, humanPrompt); err != nil {

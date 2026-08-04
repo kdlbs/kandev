@@ -570,6 +570,10 @@ type Service struct {
 	// while one is outstanding queues instead. Keyed by sessionID, cleared when
 	// the steer dispatch is accepted or fails.
 	steerInFlight sync.Map
+	// steerAdmitLocks holds a per-session mutex serializing steer admission
+	// decisions (queue-empty check + in-flight claim + enqueue-on-decline) so
+	// they cannot race. Keyed by sessionID -> *sync.Mutex.
+	steerAdmitLocks sync.Map
 
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.

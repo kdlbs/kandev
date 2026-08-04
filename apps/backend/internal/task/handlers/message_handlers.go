@@ -672,10 +672,12 @@ func (h *MessageHandlers) dispatchPromptAsync(ctx context.Context, req wsAddMess
 	}()
 }
 
-// forwardMessageAsSteer delivers a message into a still-generating turn. If the
-// orchestrator returns a steer sentinel — the queue is non-empty, a steer is
-// already in flight, or eligibility lapsed between the handler check and here —
-// it falls back to the ordinary prompt path, which applies today's gating.
+// forwardMessageAsSteer delivers a message into a still-generating turn.
+// SteerTask returns nil whether it dispatched the steer or enqueued it behind
+// pending work (both are success — order is preserved either way). Only
+// ErrSteerNotEligible means the session is no longer steerable at all (its turn
+// ended between the handler's eligibility check and here), in which case the
+// ordinary prompt path is correct: the session is now promptable.
 func (h *MessageHandlers) forwardMessageAsSteer(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -686,10 +688,8 @@ func (h *MessageHandlers) forwardMessageAsSteer(
 	if err == nil {
 		return
 	}
-	if errors.Is(err, orchestrator.ErrSteerWouldReorder) ||
-		errors.Is(err, orchestrator.ErrSteerInFlight) ||
-		errors.Is(err, orchestrator.ErrSteerNotEligible) {
-		h.logger.Debug("steer declined; falling back to ordinary prompt path",
+	if errors.Is(err, orchestrator.ErrSteerNotEligible) {
+		h.logger.Debug("steer no longer eligible; using ordinary prompt path",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))

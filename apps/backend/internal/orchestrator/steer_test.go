@@ -81,7 +81,8 @@ func TestSteerEligible_GatedByFlagCapabilityAndState(t *testing.T) {
 }
 
 // TestSteerTask_OrderRuleQueuesBehindPending pins that a steer never jumps ahead
-// of an already-queued message.
+// of an already-queued message: it enqueues behind the pending one (preserving
+// order) rather than dispatching a steer or erroring.
 func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -100,9 +101,24 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 		t.Fatalf("seed queued message: %v", err)
 	}
 
-	_, err := svc.SteerTask(ctx, taskID, sessionID, "steer", "", false, nil)
-	if !errors.Is(err, ErrSteerWouldReorder) {
-		t.Fatalf("SteerTask with a queued message = %v, want ErrSteerWouldReorder", err)
+	result, err := svc.SteerTask(ctx, taskID, sessionID, "steer second", "", false, nil)
+	if err != nil {
+		t.Fatalf("SteerTask with a queued message errored: %v", err)
+	}
+	if result == nil || result.StopReason != steerQueuedStopReason {
+		t.Fatalf("SteerTask result = %+v, want a queued steer (%q)", result, steerQueuedStopReason)
+	}
+	// The steer must have joined the queue behind the pending message, in order.
+	status := svc.messageQueue.GetStatus(ctx, sessionID)
+	if status == nil || status.Count != 2 {
+		t.Fatalf("queue count = %v, want 2 (pending + enqueued steer)", status)
+	}
+	if status.Entries[0].Content != "queued first" || status.Entries[1].Content != "steer second" {
+		t.Fatalf("queue order = [%q, %q], want [queued first, steer second]",
+			status.Entries[0].Content, status.Entries[1].Content)
+	}
+	if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
+		t.Fatal("declined steer left an in-flight slot claimed")
 	}
 }
 
@@ -125,7 +141,8 @@ func TestSteerTask_NotEligibleReturnsSentinel(t *testing.T) {
 }
 
 // TestSteerTask_SingleInFlight pins the one-steer-per-session rule: while a steer
-// holds the in-flight slot, a second attempt is rejected with ErrSteerInFlight.
+// holds the in-flight slot, a second attempt is enqueued (not dispatched) and
+// does not disturb the prior steer's in-flight claim.
 func TestSteerTask_SingleInFlight(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -143,8 +160,18 @@ func TestSteerTask_SingleInFlight(t *testing.T) {
 	// Occupy the in-flight slot as a prior steer dispatch would.
 	svc.steerInFlight.Store(sessionID, struct{}{})
 
-	_, err := svc.SteerTask(ctx, taskID, sessionID, "steer", "", false, nil)
-	if !errors.Is(err, ErrSteerInFlight) {
-		t.Fatalf("second concurrent steer = %v, want ErrSteerInFlight", err)
+	result, err := svc.SteerTask(ctx, taskID, sessionID, "steer", "", false, nil)
+	if err != nil {
+		t.Fatalf("second concurrent steer errored: %v", err)
+	}
+	if result == nil || result.StopReason != steerQueuedStopReason {
+		t.Fatalf("second steer result = %+v, want a queued steer (%q)", result, steerQueuedStopReason)
+	}
+	// The prior steer's in-flight claim must survive the decline.
+	if _, inFlight := svc.steerInFlight.Load(sessionID); !inFlight {
+		t.Fatal("declining a second steer cleared the prior steer's in-flight slot")
+	}
+	if status := svc.messageQueue.GetStatus(ctx, sessionID); status == nil || status.Count != 1 {
+		t.Fatalf("queue count = %v, want 1 (enqueued second steer)", status)
 	}
 }
