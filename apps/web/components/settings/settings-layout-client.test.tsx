@@ -155,7 +155,7 @@ describe("SettingsLayoutClient", () => {
         </SettingsLayoutClient>,
       );
 
-      expect(screen.getByText("ḿēśśàĝē Qũēũē")).toBeTruthy();
+      expect(screen.getByText("Ḿēśśàĝē Qũēũē")).toBeTruthy();
       expect(screen.getByTestId("settings-scroll-container").className).toContain(
         "overflow-y-auto",
       );
