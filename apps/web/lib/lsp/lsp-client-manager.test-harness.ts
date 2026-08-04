@@ -152,7 +152,11 @@ export function createLspManagerHarness(manager: LspManager, mocks: LspManagerMo
     socket.emitMessage(JSON.stringify({ status: "ready", workspacePath }));
     const initializeRequest = JSON.parse(socket.sent[0]) as { id: number };
     socket.emitMessage(
-      JSON.stringify({ jsonrpc: "2.0", id: initializeRequest.id, result: { capabilities: {} } }),
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: initializeRequest.id,
+        result: { capabilities: { textDocumentSync: { openClose: true, change: 1 } } },
+      }),
     );
     await vi.waitFor(() => {
       expect(manager.getStatus(sessionId, "typescript")).toEqual({ state: "ready" });

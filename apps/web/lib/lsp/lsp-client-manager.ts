@@ -39,6 +39,7 @@ import {
 } from "./lsp-client-storage";
 import { DISABLED_LSP_STATUS, LSP_IDLE_TIMEOUT } from "./lsp-client-config";
 import { LSP_DEFAULT_CONFIGS } from "./lsp-client-config";
+import { buildDocumentContentChanges } from "./lsp-document-sync";
 
 export type { LspStatus } from "./lsp-json-rpc";
 export { toLspLanguage } from "./lsp-json-rpc";
@@ -430,11 +431,13 @@ class LSPClientManager {
     if (!doc) return;
     if (doc.text === text) return;
 
-    doc.version++;
+    const contentChanges = buildDocumentContentChanges(conn.serverCapabilities, doc.text, text);
     doc.text = text;
+    if (contentChanges.length === 0) return;
+    doc.version++;
     conn.rpc.sendNotification("textDocument/didChange", {
       textDocument: { uri: canonicalUri, version: doc.version },
-      contentChanges: [{ text }],
+      contentChanges,
     });
   }
 

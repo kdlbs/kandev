@@ -78,7 +78,7 @@ function initializeResult(id) {
     id,
     result: {
       capabilities: {
-        textDocumentSync: { openClose: true, change: 1 },
+        textDocumentSync: { openClose: true, change: 2 },
         completionProvider: { triggerCharacters: ["."] },
         hoverProvider: true,
         definitionProvider: true,
