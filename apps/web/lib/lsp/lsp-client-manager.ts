@@ -438,18 +438,7 @@ class LSPClientManager {
     if (!conn?.initialized || !conn.rpc) return;
     const canonicalUri = canonicalFileUri(documentUri);
     if (!canonicalUri) return;
-    const doc = conn.openDocuments.get(canonicalUri);
-    if (!doc) return;
-    if (doc.text === text) return;
-
-    const contentChanges = buildDocumentContentChanges(conn.serverCapabilities, doc.text, text);
-    doc.text = text;
-    if (contentChanges.length === 0) return;
-    doc.version++;
-    conn.rpc.sendNotification("textDocument/didChange", {
-      textDocument: { uri: canonicalUri, version: doc.version },
-      contentChanges,
-    });
+    this.synchronizeOpenDocument(conn, canonicalUri, text);
   }
 
   saveDocument(
@@ -471,9 +460,33 @@ class LSPClientManager {
       }
       if (!conn.openDocuments.has(documentUri)) continue;
 
+      this.synchronizeOpenDocument(conn, documentUri, text);
       const params = buildDocumentSaveParams(conn.serverCapabilities, documentUri, text);
       if (params) conn.rpc.sendNotification("textDocument/didSave", params);
     }
+  }
+
+  private synchronizeOpenDocument(
+    conn: ManagedLspConnection,
+    documentUri: string,
+    text: string,
+  ): void {
+    if (!conn.rpc) return;
+    const document = conn.openDocuments.get(documentUri);
+    if (!document || document.text === text) return;
+
+    const contentChanges = buildDocumentContentChanges(
+      conn.serverCapabilities,
+      document.text,
+      text,
+    );
+    document.text = text;
+    if (contentChanges.length === 0) return;
+    document.version++;
+    conn.rpc.sendNotification("textDocument/didChange", {
+      textDocument: { uri: documentUri, version: document.version },
+      contentChanges,
+    });
   }
 
   closeDocument(sessionId: string, lspLanguage: string, documentUri: string): void {

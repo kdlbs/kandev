@@ -104,10 +104,21 @@ describe("LSP document subscriptions", () => {
 
     lspClientManager.saveDocument(SESSION_ID, "src/Main.ts", "backend", "persisted snapshot");
 
-    const didSave = socket.sent
+    const synchronization = socket.sent
       .map((frame) => JSON.parse(frame) as { method?: string; params?: unknown })
-      .find((frame) => frame.method === "textDocument/didSave");
-    expect(didSave?.params).toEqual({
+      .filter(
+        (frame) =>
+          frame.method === "textDocument/didChange" || frame.method === "textDocument/didSave",
+      );
+    expect(synchronization.map((frame) => frame.method)).toEqual([
+      "textDocument/didChange",
+      "textDocument/didSave",
+    ]);
+    expect(synchronization[0]?.params).toEqual({
+      textDocument: { uri: DOCUMENT_URI, version: 2 },
+      contentChanges: [{ text: "persisted snapshot" }],
+    });
+    expect(synchronization[1]?.params).toEqual({
       textDocument: { uri: DOCUMENT_URI },
       text: "persisted snapshot",
     });

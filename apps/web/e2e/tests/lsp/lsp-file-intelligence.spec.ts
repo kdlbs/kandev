@@ -536,13 +536,6 @@ test.describe("LSP file intelligence", () => {
     await editor.click();
     await testPage.keyboard.press("Control+End");
     await testPage.keyboard.insertText("\n// e2e change");
-    await expectFakeLspEvent(
-      backend,
-      (event) => event.event === "message" && event.method === "textDocument/didChange",
-      "document change",
-    );
-    await expectFakeLspMarkerCount(testPage, 1);
-
     await testPage.getByRole("button", { name: "Save (Ctrl+S)", exact: true }).click();
     const didSave = await expectFakeLspEvent(
       backend,
@@ -553,6 +546,30 @@ test.describe("LSP file intelligence", () => {
       "document save",
     );
     expect(didSave.params?.text).toContain("// e2e change");
+    await expectFakeLspEvent(
+      backend,
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/didChange" &&
+        (event.params?.textDocument as { uri?: string } | undefined)?.uri === definitionUri,
+      "document change before save",
+    );
+    const synchronizationEvents = readFakeLspEvents(backend);
+    const didChangeIndex = synchronizationEvents.findIndex(
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/didChange" &&
+        (event.params?.textDocument as { uri?: string } | undefined)?.uri === definitionUri,
+    );
+    const didSaveIndex = synchronizationEvents.findIndex(
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/didSave" &&
+        (event.params?.textDocument as { uri?: string } | undefined)?.uri === definitionUri,
+    );
+    expect(didChangeIndex).toBeGreaterThanOrEqual(0);
+    expect(didSaveIndex).toBeGreaterThan(didChangeIndex);
+    await expectFakeLspMarkerCount(testPage, 1);
 
     await editor.click();
     await testPage.keyboard.press("Control+End");
