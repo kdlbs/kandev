@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment, resolves Windows npm shims through PATHEXT, rejects Rust auto-install on platforms without a packaged strategy, and publishes that platform-filtered capability set in the boot runtime.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment, resolves Windows npm shims through PATHEXT, rejects Rust auto-install on task hosts without a packaged strategy, and keeps that task-host decision out of the main backend's global settings policy.
 
 ## Frontend
 
@@ -31,7 +31,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Replace the one-click toolbar toggle with a disclosure-first `LspStatusButton`.
 - Add a shared progress body that separates connection readiness from project work, renders a determinate bar only for server percentages, uses tabular elapsed time, preserves concurrent-work counts, and avoids project-wide completion claims.
 - Use `useTouchDrawer`: fine pointers receive an anchored popover; coarse-pointer Monaco/tablet layouts receive an inset bottom drawer with one internal scroll owner and touch-sized controls. Phone CodeMirror viewing remains unchanged.
-- Gate each Editors auto-install checkbox with the backend capability list so Windows Rust settings cannot save an unsupported value.
+- Gate each Editors auto-install checkbox with the task-host-independent preference list. Forward enabled preferences to agentctl so its actual platform decides whether installation can run.
 
 ## Tests
 

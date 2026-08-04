@@ -206,7 +206,7 @@ Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` dire
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
 - Go runs `go install ...@latest` and therefore needs a working Go toolchain;
-- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 hosts. Windows is not registered for automatic Rust installation, so Editors settings show manual installation instead of an auto-install checkbox;
+- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 task hosts. The Editors checkbox is a global preference; agentctl applies it only when the active task host supports the installer. A Windows Local PC task therefore needs a manual installation, while a Linux Local Docker task can auto-install Rust even when Kandev itself runs on Windows;
 - Kotlin is manual-only. Follow the [official Kotlin LSP installation guide](https://kotlinlang.org/docs/kotlin-lsp.html), then verify `command -v kotlin-lsp` and `kotlin-lsp --version` in the task environment.
 
 For a Local PC task, start Kandev from an environment whose `PATH` includes the server executable. For a Local Docker task, the host installation is not visible: add the executable and its runtime requirements to the executor image or prepare script, then recreate the task container. A Kotlin server in a Local Docker task must therefore be resolvable by `command -v kotlin-lsp` inside that container. If a managed installation fails, the language-server status preserves the detailed installer output after the connection closes.
