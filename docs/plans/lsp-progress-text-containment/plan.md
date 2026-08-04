@@ -57,6 +57,8 @@ The fixed-width LSP popover currently renders server-controlled project-progress
 - The editor-ownership RED cases failed in the expected cursor and status-item assertions. GREEN verification passed across 12 affected test files (63 tests), web typecheck, focused ESLint with zero warnings, and `git diff --check`.
 - The next Codex pass found that the two-minute zero-lease timer could terminate initialization or active server-reported work. Commit `08569254a5190be9a06347f974996c66a2655470` cancels idle cleanup while either progress state is active and starts a fresh idle period when work finishes.
 - Both idle-lifecycle regressions failed against the fixed timer and passed after the change. GREEN verification passed across all 8 LSP unit files (82 tests), web typecheck, focused ESLint with zero warnings, and `git diff --check`.
+- A subsequent Codex pass found that unscoped navigation could not reliably target session-qualified Monaco models and could guess across task sessions. Commit `1d57d775c3e816aa732259d318d0af341f7315f2` decodes the model identity, falls back only when exactly one session owns the target, and preserves exact matching for explicitly scoped calls.
+- The encoded-filename and multiple-session cases both failed before the fix and passed afterward. GREEN verification passed across 13 LSP/editor navigation test files (116 tests), web typecheck, focused ESLint with zero warnings, Prettier, and `git diff --check`.
 
 ## Implementation Waves And Parallel Candidates
 
