@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
   IconBuildings,
@@ -32,7 +33,7 @@ import {
   workspaceHomeHref,
 } from "./app-sidebar-workspace-navigation";
 import { isSettingsRoute } from "./app-sidebar-route";
-import { connectionIssueDetails } from "../app-status-bar/connection-status-item";
+import { useConnectionIssueCopy } from "../app-status-bar/connection-status-item";
 import type { ConnectionIssueSeverity } from "@/lib/types/connection";
 
 type AppSidebarFooterProps = {
@@ -108,7 +109,9 @@ function SidebarConnectionWarning({
   collapsed: boolean;
   severity: Exclude<ConnectionIssueSeverity, "none">;
 }) {
-  const details = connectionIssueDetails(severity);
+  const details = useConnectionIssueCopy(severity);
+  if (!details) return null;
+  const { label, description } = details;
 
   return (
     <Tooltip>
@@ -116,7 +119,7 @@ function SidebarConnectionWarning({
         <span
           className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
           role="status"
-          aria-label={details.description}
+          aria-label={description}
           tabIndex={0}
           data-testid="sidebar-connection-warning"
           data-connection-severity={severity}
@@ -129,10 +132,10 @@ function SidebarConnectionWarning({
             )}
             aria-hidden="true"
           />
-          <span className="sr-only">{details.label}</span>
+          <span className="sr-only">{label}</span>
         </span>
       </TooltipTrigger>
-      <TooltipContent side={collapsed ? "right" : "top"}>{details.description}</TooltipContent>
+      <TooltipContent side={collapsed ? "right" : "top"}>{description}</TooltipContent>
     </Tooltip>
   );
 }
@@ -183,6 +186,7 @@ function SidebarFooterDialogs({
 }
 
 export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebarFooterProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const pathname = usePathname();
   const workspaces = useAppStore((s) => s.workspaces);
@@ -221,7 +225,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
     >
       <FooterIconButton
         icon={IconSettings}
-        label={settingsMode ? "Close settings" : "Settings"}
+        label={settingsMode ? t("sidebar:closeSettings") : t("common:settings")}
         collapsed={collapsed}
         onClick={enterSettings}
         active={settingsMode}
@@ -229,14 +233,14 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
       />
       <FooterIconButton
         icon={IconChartBar}
-        label="Stats"
+        label={t("sidebar:stats")}
         collapsed={collapsed}
         onClick={() => router.push("/stats")}
         testId="sidebar-stats-button"
       />
       <FooterIconButton
         icon={IconStethoscope}
-        label="Improve Kandev"
+        label={t("sidebar:improveKandev")}
         collapsed={collapsed}
         onClick={() => setImproveOpen(true)}
         testId="sidebar-improve-kandev-button"
@@ -244,7 +248,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
       {releaseNotes.showTopbarButton && (
         <FooterIconButton
           icon={IconSparkles}
-          label="What's new"
+          label={t("sidebar:whatsNew")}
           collapsed={collapsed}
           onClick={releaseNotes.openDialog}
           badge={releaseNotes.hasUnseen}
@@ -254,7 +258,7 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
       {officeEnabled && (
         <FooterIconButton
           icon={activeIsOffice ? IconLayoutKanban : IconBuildings}
-          label={activeIsOffice ? "Kanban" : "Office"}
+          label={activeIsOffice ? t("sidebar:kanban") : t("sidebar:office")}
           collapsed={collapsed}
           onClick={() => {
             if (!activeIsOffice) rememberLastKanbanWorkspace(activeWorkspace);

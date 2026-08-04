@@ -53,6 +53,15 @@ type TaskExecutionStopper interface {
 	RegisterExecutionStopOwner(sessionID, executionID string, force bool)
 }
 
+// TaskRowLivenessProber classifies an executors_running row's backing-process
+// liveness in a runtime-aware way (a local process check is never applied to a
+// remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
+// unwired, cleanup treats every row as Unknown so a not-found stop is never
+// mistaken for an absent runtime.
+type TaskRowLivenessProber interface {
+	RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness
+}
+
 // TaskResourceCleanupActivityGate serializes durable cleanup with install-wide maintenance.
 type TaskResourceCleanupActivityGate interface {
 	AcquireTaskResourceCleanup(context.Context) (TaskResourceCleanupActivityLease, error)
@@ -243,6 +252,7 @@ type Service struct {
 	discoveryConfig             RepositoryDiscoveryConfig
 	worktreeCleanup             WorktreeCleanup
 	executionStopper            TaskExecutionStopper
+	rowLivenessProber           TaskRowLivenessProber
 	contextWindowResetter       func(context.Context, string) error
 	cleanupActivity             TaskResourceCleanupActivityGate
 	branchMaterializer          BranchMaterializer
@@ -369,6 +379,13 @@ func (s *Service) SetProviderDefaultBranchProber(p ProviderDefaultBranchProber) 
 // SetExecutionStopper wires the task execution stopper (orchestrator).
 func (s *Service) SetExecutionStopper(stopper TaskExecutionStopper) {
 	s.executionStopper = stopper
+}
+
+// SetRowLivenessProber wires the runtime-aware executors_running liveness probe
+// (satisfied by the lifecycle adapter). It is optional; when unwired, cleanup
+// treats every row as Unknown.
+func (s *Service) SetRowLivenessProber(prober TaskRowLivenessProber) {
+	s.rowLivenessProber = prober
 }
 
 // SetContextWindowResetter wires the guarded context-window reset callback

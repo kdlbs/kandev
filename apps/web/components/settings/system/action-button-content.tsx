@@ -3,6 +3,7 @@
 import { Spinner } from "@kandev/ui/spinner";
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import type { ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { ActionFeedbackState } from "@/hooks/use-action-feedback";
 
 type Props = {
@@ -11,11 +12,11 @@ type Props = {
   idleIcon: ReactNode;
   /** Label to show in the idle state (e.g. "Run vacuum"). */
   idleLabel: string;
-  /** Label to show while pending. Defaults to "Running...". */
+  /** Label to show while pending. Defaults to a translated "Running...". */
   pendingLabel?: string;
-  /** Label to show on success. Defaults to "Done". */
+  /** Label to show on success. Defaults to a translated "Done". */
   successLabel?: string;
-  /** Label to show on error. Defaults to "Failed". */
+  /** Label to show on error. Defaults to a translated "Failed". */
   errorLabel?: string;
 };
 
@@ -29,15 +30,19 @@ export function ActionButtonContent({
   state,
   idleIcon,
   idleLabel,
-  pendingLabel = "Running...",
-  successLabel = "Done",
-  errorLabel = "Failed",
+  pendingLabel,
+  successLabel,
+  errorLabel,
 }: Props) {
+  // The three fallbacks resolve here rather than as destructuring defaults:
+  // a default parameter is evaluated before the component body runs, so `t`
+  // is not in scope there.
+  const { t } = useTranslation();
   if (state === "pending") {
     return (
       <>
         <Spinner className="size-3.5 mr-1" />
-        {pendingLabel}
+        {pendingLabel ?? t("system:actionRunning")}
       </>
     );
   }
@@ -45,7 +50,7 @@ export function ActionButtonContent({
     return (
       <>
         <IconCheck className="h-3.5 w-3.5 mr-1 text-emerald-500" />
-        {successLabel}
+        {successLabel ?? t("system:actionDone")}
       </>
     );
   }
@@ -53,7 +58,7 @@ export function ActionButtonContent({
     return (
       <>
         <IconAlertTriangle className="h-3.5 w-3.5 mr-1 text-red-500" />
-        {errorLabel}
+        {errorLabel ?? t("system:actionFailed")}
       </>
     );
   }

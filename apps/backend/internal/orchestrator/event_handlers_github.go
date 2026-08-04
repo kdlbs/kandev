@@ -448,7 +448,7 @@ func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewT
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
 		WorkflowStepID: evt.WorkflowStepID,
-		Title:          fmt.Sprintf("PR #%d: %s", pr.Number, pr.Title),
+		Title:          service.TruncateTaskTitle(fmt.Sprintf("PR #%d: %s", pr.Number, pr.Title)),
 		Description:    interpolateReviewPrompt(evt.Prompt, pr),
 		Repositories:   repositories,
 		Metadata: map[string]interface{}{
@@ -472,6 +472,13 @@ func buildReviewTaskRequest(evt *github.NewReviewPREvent, repositories []ReviewT
 			models.MetaKeyAutoStartClaimed: true,
 		},
 	}
+}
+
+// buildIssueTaskTitle builds the "Issue #<n>: <title>" task title for an issue
+// watcher, shortened to the task title limit so an over-long remote issue title
+// does not cause CreateIssueTask to reject the whole task.
+func buildIssueTaskTitle(number int, title string) string {
+	return service.TruncateTaskTitle(fmt.Sprintf("Issue #%d: %s", number, title))
 }
 
 // shouldAutoStartStep checks if the workflow step has the OnEnterAutoStartAgent action.
@@ -1365,7 +1372,7 @@ func (s *Service) createIssueTask(ctx context.Context, evt *github.NewIssueEvent
 		WorkspaceID:    evt.WorkspaceID,
 		WorkflowID:     evt.WorkflowID,
 		WorkflowStepID: evt.WorkflowStepID,
-		Title:          fmt.Sprintf("Issue #%d: %s", issue.Number, issue.Title),
+		Title:          buildIssueTaskTitle(issue.Number, issue.Title),
 		Description:    interpolateIssuePrompt(evt.Prompt, issue),
 		Metadata: map[string]interface{}{
 			issueWatchIDKey:       evt.IssueWatchID,

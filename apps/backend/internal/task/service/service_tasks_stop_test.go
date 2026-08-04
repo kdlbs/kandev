@@ -58,6 +58,8 @@ type stubExecutors struct {
 	runningByTaskErr error
 	runningBySession *models.ExecutorRunning
 	runningBySessErr error
+	deletedSessions  []string
+	repairedSessions []string
 }
 
 func (s *stubExecutors) ListExecutorsRunningByTaskID(_ context.Context, _ string) ([]*models.ExecutorRunning, error) {
@@ -68,7 +70,13 @@ func (s *stubExecutors) GetExecutorRunningBySessionID(_ context.Context, _ strin
 	return s.runningBySession, s.runningBySessErr
 }
 
-func (s *stubExecutors) DeleteExecutorRunningBySessionID(_ context.Context, _ string) error {
+func (s *stubExecutors) DeleteExecutorRunningBySessionID(_ context.Context, sessionID string) error {
+	s.deletedSessions = append(s.deletedSessions, sessionID)
+	return nil
+}
+
+func (s *stubExecutors) RepairExecutorRunningDead(_ context.Context, sessionID string) error {
+	s.repairedSessions = append(s.repairedSessions, sessionID)
 	return nil
 }
 
@@ -200,7 +208,7 @@ func TestRefreshTaskRuntimeStopTargets_ExactRuntimeSupersedesEmptySessionFallbac
 		targets,
 		"archive",
 		"stop failed",
-	)
+	).failed
 	if len(failed) != 0 {
 		t.Fatalf("late exact execution left retryable fallback failure: %v", failed)
 	}
@@ -270,7 +278,7 @@ func TestStopTaskRuntimeTargets_TerminalStopFailureDoesNotBlockCleanup(t *testin
 		{sessionID: "sess-cancelled", terminal: true},
 	}
 
-	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-a", targets, "archive", "stop failed")
+	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-a", targets, "archive", "stop failed").failed
 	if len(failed) != 0 {
 		t.Errorf("terminal stop failure must not add to failedStops; got %v", failed)
 	}
@@ -288,7 +296,7 @@ func TestStopTaskRuntimeTargets_ExactRuntimeAbsenceIsIdempotent(t *testing.T) {
 		[]taskStopTarget{{sessionID: "sess-running", executionID: "exec-running"}},
 		"archive",
 		"stop failed",
-	)
+	).failed
 	if len(failed) != 0 {
 		t.Errorf("exact runtime absence must be idempotent; got %v", failed)
 	}
@@ -306,9 +314,125 @@ func TestStopTaskRuntimeTargets_SessionRuntimeAbsenceRemainsRetryable(t *testing
 		[]taskStopTarget{{sessionID: "sess-running"}},
 		"archive",
 		"stop failed",
-	)
+	).failed
 	if _, ok := failed["sess-running"]; !ok {
 		t.Errorf("session-level absence must remain retryable; got %v", failed)
+	}
+}
+
+// stubRowLivenessProber is a minimal TaskRowLivenessProber for tests.
+type stubRowLivenessProber struct {
+	liveness models.ProcessLiveness
+}
+
+func (s stubRowLivenessProber) RowLiveness(*models.ExecutorRunning) models.ProcessLiveness {
+	return s.liveness
+}
+
+// TestStopTaskRuntimeTargets_SessionAbsenceDeadLocalIsIdempotent is the
+// regression test for the infinite cleanup-retry bug: a session-only stop that
+// returns not-found for a CONFIRMED-DEAD LOCAL row must be treated as an
+// already-stopped runtime (not a failed stop) so the durable cleanup job stops
+// retrying forever.
+func TestStopTaskRuntimeTargets_SessionAbsenceDeadLocalIsIdempotent(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	execs := &stubExecutors{
+		runningBySession: &models.ExecutorRunning{
+			SessionID: "sess-dead", Runtime: agentruntime.RuntimeStandalone, LocalPID: 4242,
+		},
+	}
+	svc.executors = execs
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("gone: %w", runtimeapi.ErrNotFound),
+	}
+	svc.rowLivenessProber = stubRowLivenessProber{liveness: models.ProcessLivenessDead}
+
+	outcome := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-dead",
+		[]taskStopTarget{{sessionID: "sess-dead"}},
+		"archive",
+		"stop failed",
+	)
+	if len(outcome.failed) != 0 {
+		t.Errorf("session absence for a confirmed-dead local row must be idempotent; got %v", outcome.failed)
+	}
+	// A tokenless, non-resumable dead-local row is prunable: it must NOT be
+	// preserved and must NOT be repaired in place — the normal cleanup path
+	// deletes it.
+	if len(outcome.preserve) != 0 {
+		t.Errorf("tokenless dead-local row must be prunable, not preserved; got %v", outcome.preserve)
+	}
+	if len(execs.repairedSessions) != 0 {
+		t.Errorf("tokenless dead-local row must not be repaired in place; got %v", execs.repairedSessions)
+	}
+}
+
+// TestStopTaskRuntimeTargets_DeadLocalResumeSafeRowPreservedNotRetried is the
+// resume-safety regression: a confirmed-dead local row that still carries a
+// resume_token must be repaired in place (never torn down) AND excluded from the
+// retryable failedStops set, so the durable cleanup job neither retries forever
+// nor loses the only resume handle.
+func TestStopTaskRuntimeTargets_DeadLocalResumeSafeRowPreservedNotRetried(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	execs := &stubExecutors{
+		runningBySession: &models.ExecutorRunning{
+			SessionID: "sess-tok", Runtime: agentruntime.RuntimeStandalone,
+			LocalPID: 4242, ResumeToken: "tok-tok",
+		},
+	}
+	svc.executors = execs
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("gone: %w", runtimeapi.ErrNotFound),
+	}
+	svc.rowLivenessProber = stubRowLivenessProber{liveness: models.ProcessLivenessDead}
+
+	outcome := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-tok",
+		[]taskStopTarget{{sessionID: "sess-tok"}},
+		"archive",
+		"stop failed",
+	)
+	if _, retried := outcome.failed["sess-tok"]; retried {
+		t.Errorf("resume-safe dead-local row must not be a retryable failed stop; got %v", outcome.failed)
+	}
+	if _, preserved := outcome.preserve["sess-tok"]; !preserved {
+		t.Errorf("resume-safe dead-local row must be preserved from teardown; got %v", outcome.preserve)
+	}
+	if len(execs.repairedSessions) != 1 || execs.repairedSessions[0] != "sess-tok" {
+		t.Errorf("resume-safe dead-local row must be repaired in place; got %v", execs.repairedSessions)
+	}
+	if len(execs.deletedSessions) != 0 {
+		t.Errorf("resume-safe dead-local row must never be deleted; got %v", execs.deletedSessions)
+	}
+}
+
+// TestStopTaskRuntimeTargets_SessionAbsenceUnknownRemainsRetryable guards the
+// anti-blanket-ignore rule for the cleanup worker: a session-only not-found stop
+// for a row whose liveness is Unknown (remote/no local handle) stays a failed,
+// retryable stop.
+func TestStopTaskRuntimeTargets_SessionAbsenceUnknownRemainsRetryable(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	svc.executors = &stubExecutors{
+		runningBySession: &models.ExecutorRunning{
+			SessionID: "sess-remote", Runtime: agentruntime.RuntimeSSH,
+		},
+	}
+	svc.executionStopper = &stubStopper{
+		stopSessionErr: fmt.Errorf("not registered yet: %w", runtimeapi.ErrNotFound),
+	}
+	svc.rowLivenessProber = stubRowLivenessProber{liveness: models.ProcessLivenessUnknown}
+
+	failed := svc.stopTaskRuntimeTargets(
+		context.Background(),
+		"task-remote",
+		[]taskStopTarget{{sessionID: "sess-remote"}},
+		"archive",
+		"stop failed",
+	).failed
+	if _, ok := failed["sess-remote"]; !ok {
+		t.Errorf("session absence for an unknown/remote row must remain retryable; got %v", failed)
 	}
 }
 
@@ -321,7 +445,7 @@ func TestStopTaskRuntimeTargets_NonTerminalStopFailureBlocksCleanup(t *testing.T
 		{sessionID: "sess-running", terminal: false},
 	}
 
-	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-b", targets, "archive", "stop failed")
+	failed := svc.stopTaskRuntimeTargets(context.Background(), "task-b", targets, "archive", "stop failed").failed
 	if _, ok := failed["sess-running"]; !ok {
 		t.Error("non-terminal stop failure must add session to failedStops")
 	}
@@ -421,6 +545,90 @@ func TestCleanupTaskResources_NonTerminalSessionStopFailureBlocksCleanup(t *test
 
 	if _, err := repo.GetExecutorRunningBySessionID(context.Background(), "sess-running"); err != nil {
 		t.Error("executor_running row must be preserved when stop fails for a non-terminal (RUNNING) session")
+	}
+}
+
+// seedDeadLocalSessionOnly seeds a session and a session-only executor_running
+// row (empty agent_execution_id) so cleanup takes the StopSession path rather
+// than StopExecution. resumeToken, when set, makes the row resume-safe.
+func seedDeadLocalSessionOnly(t *testing.T, repo interface {
+	CreateWorkspace(context.Context, *models.Workspace) error
+	CreateWorkflow(context.Context, *models.Workflow) error
+	CreateTask(context.Context, *models.Task) error
+	CreateTaskSession(context.Context, *models.TaskSession) error
+	UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error
+}, wsID, wfID, taskID, sessID, resumeToken string, state models.TaskSessionState) {
+	t.Helper()
+	ctx := context.Background()
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: wsID, Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: wfID, WorkspaceID: wsID, Name: "WF"})
+	_ = repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: wsID, WorkflowID: wfID, WorkflowStepID: "step-1", Title: "T", Priority: "medium"})
+	_ = repo.CreateTaskSession(ctx, &models.TaskSession{ID: sessID, TaskID: taskID, State: state})
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: sessID, SessionID: sessID, TaskID: taskID, ExecutorID: "executor-1",
+		Runtime: agentruntime.RuntimeStandalone, Status: models.ExecutorRunningStatusRunning,
+		LocalPID: 4242, ResumeToken: resumeToken,
+	}); err != nil {
+		t.Fatalf("seed executor_running: %v", err)
+	}
+}
+
+// TestCleanupTaskResources_NonTerminalDeadLocalSessionGetsCleanedUp is the
+// end-to-end companion for the confirmed-dead prune path: a non-terminal but
+// non-resumable (CREATED, no resume token) session with a session-only
+// executor_running row whose StopSession reports the runtime not-found and whose
+// local liveness is Dead must have its executor_running row removed after
+// cleanup — the durable job does not retry solely because the runtime was gone.
+func TestCleanupTaskResources_NonTerminalDeadLocalSessionGetsCleanedUp(t *testing.T) {
+	svc, _, repo := createTestService(t)
+
+	stopper := newRecordingTaskExecutionStopper()
+	// Mirror the not-found result executor.Stop now surfaces for a genuinely
+	// missing session (the runtime seam normalizes to runtimeapi.ErrNotFound).
+	stopper.stopSessionErr = fmt.Errorf("execution not found: %w: gone", runtimeapi.ErrNotFound)
+	svc.SetExecutionStopper(stopper)
+	svc.SetRowLivenessProber(stubRowLivenessProber{liveness: models.ProcessLivenessDead})
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	seedDeadLocalSessionOnly(t, repo, "ws-dl", "wf-dl", "task-dl", "sess-dead-local", "", models.TaskSessionStateCreated)
+
+	svc.CleanupTaskResources(context.Background(), "task-dl", false)
+	waitForCleanupDone(t, svc)
+
+	if _, err := repo.GetExecutorRunningBySessionID(context.Background(), "sess-dead-local"); err == nil {
+		t.Error("executor_running row must be removed for a confirmed-dead local non-resumable session")
+	}
+}
+
+// TestCleanupTaskResources_DeadLocalResumeSafeSessionRepairedNotDeleted is the
+// resume-safety end-to-end case: a confirmed-dead local row that still carries a
+// resume_token must be repaired in place (row preserved, token intact,
+// local_pid cleared) rather than deleted.
+func TestCleanupTaskResources_DeadLocalResumeSafeSessionRepairedNotDeleted(t *testing.T) {
+	svc, _, repo := createTestService(t)
+
+	stopper := newRecordingTaskExecutionStopper()
+	stopper.stopSessionErr = fmt.Errorf("execution not found: %w: gone", runtimeapi.ErrNotFound)
+	svc.SetExecutionStopper(stopper)
+	svc.SetRowLivenessProber(stubRowLivenessProber{liveness: models.ProcessLivenessDead})
+	svc.setCleanupDoneForTestHook(make(chan struct{}, 1))
+
+	// CREATED (non-resumable) state isolates the resume_token as the sole
+	// preservation driver.
+	seedDeadLocalSessionOnly(t, repo, "ws-rs", "wf-rs", "task-rs", "sess-resume-safe", "tok-keep", models.TaskSessionStateCreated)
+
+	svc.CleanupTaskResources(context.Background(), "task-rs", false)
+	waitForCleanupDone(t, svc)
+
+	row, err := repo.GetExecutorRunningBySessionID(context.Background(), "sess-resume-safe")
+	if err != nil {
+		t.Fatalf("resume-safe dead-local row must be preserved, not deleted: %v", err)
+	}
+	if row.ResumeToken != "tok-keep" {
+		t.Errorf("resume_token must survive repair; got %q", row.ResumeToken)
+	}
+	if row.Status != models.ExecutorRunningStatusStopped || row.LocalPID != 0 {
+		t.Errorf("dead row must be repaired to stopped with cleared local_pid; got status=%q local_pid=%d", row.Status, row.LocalPID)
 	}
 }
 

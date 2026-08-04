@@ -18,6 +18,12 @@ repos:
         language: system
         pass_filenames: true
 
+      - id: architecture-lint
+        name: Architecture lint and compatibility expiry
+        entry: python3 scripts/lint-architecture.py --all
+        language: system
+        pass_filenames: false
+
   # Backend (Go) hooks
   - repo: local
     hooks:
@@ -30,7 +36,7 @@ repos:
 
       - id: go-lint
         name: Go lint (PR changed code)
-        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD); cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
+        entry: bash -c 'unset GIT_DIR GIT_WORK_TREE; merge_head=$(git rev-parse --verify MERGE_HEAD 2>/dev/null || true); base_tip=$(git rev-parse --verify origin/main 2>/dev/null || true); if [[ -n "$merge_head" && "$merge_head" == "$base_tip" ]]; then base="$merge_head"; else base=$(git merge-base HEAD origin/main 2>/dev/null || git rev-parse HEAD); fi; cd apps/backend && golangci-lint run ./... --new-from-rev="$base" --timeout=5m'
         language: system
         files: ^apps/backend/.*\.go$
         pass_filenames: false

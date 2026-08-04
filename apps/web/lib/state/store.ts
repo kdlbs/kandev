@@ -328,6 +328,7 @@ export type AppState = KanbanSlice & {
   setMobileSessionReview: (sessionId: string, mrKey: string | null) => void;
   setMobileSessionTaskSwitcherOpen: (open: boolean) => void;
   setPlanMode: (sessionId: string, enabled: boolean) => void;
+  setCancelTurnPending: UIA["setCancelTurnPending"];
   setTranscriptAutoScrollEnabled: UIA["setTranscriptAutoScrollEnabled"];
   setTranscriptScrollTop: UIA["setTranscriptScrollTop"];
   setTranscriptVirtuosoState: UIA["setTranscriptVirtuosoState"];

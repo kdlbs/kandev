@@ -122,6 +122,51 @@ func TestRestoreMessageBypassesLoweredCapacity(t *testing.T) {
 	assert.Equal(t, "second", status.Entries[1].Content)
 }
 
+func TestRequeueMessageBypassesLoweredCapacity(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		coalesceKey string
+	}{
+		{name: "ordinary"},
+		{name: "coalesced", coalesceKey: "retry-key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
+			require.NoError(t, err)
+			svc := NewService(NewMemoryRepository(), 2, log)
+			ctx := context.Background()
+
+			var first *QueuedMessage
+			if tc.coalesceKey == "" {
+				first, err = svc.QueueMessage(ctx, "s", "t", "first", "", QueuedByUser, false, nil)
+			} else {
+				first, _, err = svc.QueueMessageWithCoalesceKey(
+					ctx, "s", "t", "first", "", QueuedByWorkflow, false, nil, nil,
+					tc.coalesceKey, true,
+				)
+			}
+			require.NoError(t, err)
+			_, err = svc.QueueMessage(ctx, "s", "t", "second", "", QueuedByUser, false, nil)
+			require.NoError(t, err)
+			dequeued, ok := svc.TakeQueued(ctx, "s")
+			require.True(t, ok)
+			require.Equal(t, first.ID, dequeued.ID)
+			svc.SetMaxPerSession(1)
+
+			requeued, replaced, err := svc.RequeueMessage(
+				ctx, dequeued, dequeued.QueuedBy, tc.coalesceKey,
+			)
+			require.NoError(t, err)
+			require.NotNil(t, requeued)
+			assert.False(t, replaced)
+			status := svc.GetStatus(ctx, "s")
+			require.Equal(t, 2, status.Count)
+			assert.Equal(t, "second", status.Entries[0].Content)
+			assert.Equal(t, "first", status.Entries[1].Content)
+		})
+	}
+}
+
 func TestLifecycleRetryBypassesCurrentCapacity(t *testing.T) {
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})
 	require.NoError(t, err)

@@ -296,7 +296,6 @@
         "/settings/system/feature-toggles",
         "/settings/system/licenses",
         "/settings/system/logs",
-        "/settings/system/message-queue",
         "/settings/system/status",
         "/settings/system/storage",
         "/settings/system/updates"
@@ -361,7 +360,8 @@
       { "route": "/settings/general/resource-metrics", "reason": "Legacy redirect to Appearance." },
       { "route": "/settings/general/shell", "reason": "Legacy redirect to Terminal." },
       { "route": "/settings/plugins", "reason": "Experimental feature intentionally omitted until its public contract stabilizes." },
-      { "route": "/settings/system", "reason": "Redirect to System status." }
+      { "route": "/settings/system", "reason": "Redirect to System status." },
+      { "route": "/settings/system/message-queue", "reason": "Legacy redirect to General Message Queue." }
     ],
     "mcpTools": []
   }

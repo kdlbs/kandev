@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type Dispatch, type SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import dynamic from "@/lib/routing/client-dynamic";
 import { useRouter } from "@/lib/routing/client-router";
 import { IconMessageCircle, IconSquarePlus } from "@tabler/icons-react";
@@ -76,6 +77,7 @@ function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButton
  * global navigation item focused on creating top-level tasks and quick chats.
  */
 export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const workflowId = useAppStore((s) => s.kanban.workflowId);
@@ -112,7 +114,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
       <div className="relative">
         <AppSidebarNavItem
           icon={IconSquarePlus}
-          label="New Task"
+          label={t("sidebar:newTask")}
           onClick={() => setOpen(true)}
           collapsed={collapsed}
           disabled={!workspaceId}
@@ -123,7 +125,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
           <div className="absolute right-1.5 top-1/2 -translate-y-1/2 flex items-center gap-1 sidebar-fade-in">
             <RowActionButton
               icon={IconMessageCircle}
-              label="Quick Chat"
+              label={t("sidebar:quickChat")}
               testId="sidebar-quick-chat-shortcut"
               onClick={handleOpenQuickChat}
             />

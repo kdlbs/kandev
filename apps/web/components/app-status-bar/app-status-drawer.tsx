@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconActivity } from "@tabler/icons-react";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { cn } from "@kandev/ui/lib/utils";
@@ -26,6 +27,7 @@ export function AppStatusDrawer({
   onOpenChange,
   connectionOnly = false,
 }: AppStatusDrawerProps) {
+  const { t } = useTranslation();
   const context = useMemo(
     () => ({ pathname, activeWorkspaceId, activeTaskId, activeSessionId }),
     [pathname, activeWorkspaceId, activeTaskId, activeSessionId],
@@ -62,10 +64,10 @@ export function AppStatusDrawer({
               </div>
               <div className="min-w-0">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Workspace
+                  {t("common:workspace")}
                 </p>
                 <DrawerTitle className="text-base font-semibold tracking-[-0.015em] text-balance">
-                  Status
+                  {t("common:status")}
                 </DrawerTitle>
               </div>
             </div>
@@ -74,7 +76,7 @@ export function AppStatusDrawer({
             data-testid="app-status-drawer-scroll-region"
             className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3"
           >
-            <section className="space-y-2" aria-label="Application status items">
+            <section className="space-y-2" aria-label={t("sidebar:applicationStatusItems")}>
               {orderedItems.map((item) => (
                 <DrawerStatusItem key={item.id} item={item} open={open} />
               ))}

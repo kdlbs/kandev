@@ -7,7 +7,8 @@ test("mobile navigation reaches Message Queue with touch-safe shared settings la
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileMenuButton.click();
-  await testPage.getByRole("link", { name: "Settings" }).click();
+  const homeMenu = testPage.getByTestId("mobile-home-menu-card");
+  await homeMenu.getByRole("link", { name: "Settings" }).click();
   await testPage.getByTestId("settings-mobile-menu-button").click();
 
   const menu = testPage.getByTestId("settings-mobile-menu");

@@ -22,8 +22,19 @@ func TestReconcileWorkspaceSources_RejectsMissingFolderTarget(t *testing.T) {
 	}
 }
 
+// canonicalTempDir resolves symlinks in t.TempDir() so tests hand production
+// code a canonical owned control root (macOS /var -> /private/var); no-op on Linux.
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks: %v", err)
+	}
+	return d
+}
+
 func TestReconcileWorkspaceRepositories_RecreatesMissingOwnedLink(t *testing.T) {
-	root, source := t.TempDir(), t.TempDir()
+	root, source := canonicalTempDir(t), t.TempDir()
 	writeMarker(t, source)
 	if err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{{RepoName: "api", RepositoryPath: source}}, nil); err != nil {
 		t.Fatalf("reconcileWorkspaceRepositories: %v", err)
@@ -77,7 +88,7 @@ func TestReconcileWorkspaceRepositories_SkipsRepositoryThatIsWorkspaceRoot(t *te
 // contract though — the user has to learn the entry is there — so the warning
 // and its structured entry path are asserted too.
 func TestReconcileWorkspaceRepositories_PreservesAndReportsPreExistingSelfLink(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	marker := writeMarker(t, root)
 	if _, err := worktree.CreateOwnedDirectoryLink(root, "api", root); err != nil {
 		t.Fatalf("seed self link: %v", err)
@@ -127,7 +138,7 @@ func TestReconcileWorkspaceRepositories_DoesNotWarnWithoutSelfLink(t *testing.T)
 
 // The guard is per spec, not a blanket skip: siblings still need their links.
 func TestReconcileWorkspaceRepositories_LinksSiblingWhenPrimaryIsWorkspaceRoot(t *testing.T) {
-	root, sibling := t.TempDir(), t.TempDir()
+	root, sibling := canonicalTempDir(t), t.TempDir()
 	writeMarker(t, sibling)
 
 	err := reconcileWorkspaceRepositories(root, []WorkspaceRepositorySpec{
@@ -231,7 +242,7 @@ func TestReconcileWorkspaceRepositories_RejectsTraversalRepoName(t *testing.T) {
 // where the first repository is a real sibling — so the guard must not degrade
 // into skipping index 0.
 func TestReconcileWorkspaceRepositories_LinksPrimaryWhenRootIsTaskDirectory(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "tasks", "task-1")
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	primary := t.TempDir()
 	writeMarker(t, primary)
 

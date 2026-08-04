@@ -747,7 +747,7 @@ func TestListBranches_SavedRepositoryOutsideDiscoveryRoots(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
-		ID: "outside-repo", WorkspaceID: "ws-1", Name: "outside", SourceType: sourceTypeLocal, LocalPath: repoPath,
+		ID: "outside-repo", WorkspaceID: "ws-1", Name: "outside", SourceType: sourceTypeLocal, LocalPath: canonicalRepoTestPath(t, repoPath),
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}
@@ -848,7 +848,7 @@ func TestListBranches_SavedLinkedWorktreeOutsideDiscoveryRoots(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 	if err := svc.repoEntities.CreateRepository(ctx, &models.Repository{
-		ID: "linked-repo", WorkspaceID: "ws-1", Name: "linked", SourceType: sourceTypeLocal, LocalPath: linkedPath,
+		ID: "linked-repo", WorkspaceID: "ws-1", Name: "linked", SourceType: sourceTypeLocal, LocalPath: canonicalRepoTestPath(t, linkedPath),
 	}); err != nil {
 		t.Fatalf("CreateRepository: %v", err)
 	}

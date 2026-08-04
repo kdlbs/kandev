@@ -63,7 +63,7 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 		launchManaged = oldLaunchManaged
 	})
 
-	exe := filepath.Join(t.TempDir(), "bin", "kandev")
+	exe := filepath.Join(canonicalTempDir(t), "bin", "kandev")
 	executablePath = func() (string, error) {
 		return exe, nil
 	}
@@ -73,7 +73,9 @@ func TestRunStartUsesSelfExecutableAndBackendCWD(t *testing.T) {
 		got = cfg
 		return 42
 	}
-	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
+	// ensureDataDir rejects a data dir with any symlinked ancestor, so the home
+	// dir must be canonical (macOS temp dirs sit under the /var -> /private/var link).
+	t.Setenv("KANDEV_HOME_DIR", canonicalTempDir(t))
 
 	code := runStart(context.Background(), Options{Command: CommandStart, BackendPort: 48123, Headless: true})
 	if code != 42 {

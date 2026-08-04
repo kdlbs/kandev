@@ -143,7 +143,7 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	if session == nil || session.TaskID != taskID {
 		return repoerrors.ErrTaskNotFound
 	}
-	return s.authorizeTaskID(ctx, session.TaskID)
+	return nil
 }
 
 // AuthorizeEnvironmentAccess checks visibility of a task environment via its

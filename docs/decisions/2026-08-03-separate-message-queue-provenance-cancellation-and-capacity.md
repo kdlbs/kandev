@@ -41,7 +41,7 @@ concerns.
 - Every user-facing WebSocket queue operation authorizes the named session in
   its handler. Session scoping remains mandatory on every row mutation, so a
   disclosed or guessed entry UUID cannot mutate another session.
-- Queue capacity is an install-wide setting exposed under **Settings > System
+- Queue capacity is an install-wide setting exposed under **Settings > General
   > Message Queue**. The effective value uses this precedence:
 
   ```text

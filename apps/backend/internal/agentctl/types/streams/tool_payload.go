@@ -288,11 +288,10 @@ type SubagentTaskPayload struct {
 	// Cursor) stay omitted rather than surfacing a misleading "0 tools" chip.
 	ToolUseCount *int `json:"tool_use_count,omitempty"`
 
-	// ResultText is the final summary returned by the subagent. Populated for
-	// silent subagents (Auggie) that don't stream intermediate tool calls and
-	// only deliver a single text payload on completion via `rawOutput.output`.
-	// Claude/OpenCode/Cursor leave this empty because their progress is
-	// visible as nested child messages.
+	// ResultText is the final summary returned by the subagent. Auggie reads it
+	// from `rawOutput.output`; Claude reads text blocks from
+	// `_meta.claudeCode.toolResponse.content`. OpenCode and Cursor currently
+	// leave it empty because their progress is visible as nested child messages.
 	ResultText string `json:"result_text,omitempty"`
 
 	// Async/backgrounded subagent fields. Claude Code's Task tool with

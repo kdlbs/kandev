@@ -21,7 +21,7 @@ func TestPruneQuarantinedWorkspacePreservesOtherRecoverableRegistration(t *testi
 		t.Fatalf("NewManager: %v", err)
 	}
 
-	originalRoot := t.TempDir()
+	originalRoot := canonicalTempDir(t)
 	quarantineRoot := t.TempDir()
 	firstPath := filepath.Join(originalRoot, "task-1", "repo")
 	secondPath := filepath.Join(originalRoot, "task-2", "repo")

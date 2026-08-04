@@ -605,7 +605,7 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		ORDER BY position ASC
 		LIMIT 1
 	`), sessionID)
-	msg, err := scanQueuedRow(row)
+	msg, storedMetadataJSON, err := scanQueuedRowWithMetadataJSON(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -616,10 +616,6 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		// Keep the row for crash recovery but stop reporting it as pending.
 		// Strip a marker persisted by an interrupted prior process from the
 		// returned copy so a failed retry becomes visible again.
-		pendingJSON, err := marshalMetadata(msg.Metadata)
-		if err != nil {
-			return nil, err
-		}
 		msg.Metadata = clearReservedMetadata(msg.Metadata)
 		reservedJSON, err := marshalMetadata(markReservedMetadata(msg.Metadata))
 		if err != nil {
@@ -628,7 +624,7 @@ func (r *sqliteRepository) ReserveHead(ctx context.Context, sessionID string) (*
 		res, err := tx.ExecContext(ctx, r.db.Rebind(`
 			UPDATE queued_messages SET metadata_json = ?
 			WHERE id = ? AND session_id = ? AND metadata_json = ?
-		`), reservedJSON, msg.ID, sessionID, pendingJSON)
+		`), reservedJSON, msg.ID, sessionID, storedMetadataJSON)
 		if err != nil {
 			return nil, fmt.Errorf("mark lifecycle reservation in flight: %w", err)
 		}
@@ -990,7 +986,7 @@ func (r *sqliteRepository) DeleteAllBySession(ctx context.Context, sessionID str
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	candidates, err := cancellationCandidates(ctx, tx, r.db, sessionID)
+	candidates, err := cancellationCandidates(ctx, tx, sessionID)
 	if err != nil {
 		return 0, err
 	}
@@ -1023,10 +1019,9 @@ type cancellationCandidate struct {
 func cancellationCandidates(
 	ctx context.Context,
 	tx *sqlx.Tx,
-	db *sqlx.DB,
 	sessionID string,
 ) ([]cancellationCandidate, error) {
-	rows, err := tx.QueryxContext(ctx, db.Rebind(`
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
 		SELECT id, metadata_json FROM queued_messages WHERE session_id = ?
 	`), sessionID)
 	if err != nil {
@@ -1286,6 +1281,13 @@ func (r *sqliteRepository) findCoalesced(ctx context.Context, tx *sqlx.Tx, sessi
 
 // scanQueuedRow scans a single queued_messages row from any sqlx-compatible row source.
 func scanQueuedRow(scanner interface{ Scan(dest ...any) error }) (*QueuedMessage, error) {
+	msg, _, err := scanQueuedRowWithMetadataJSON(scanner)
+	return msg, err
+}
+
+func scanQueuedRowWithMetadataJSON(
+	scanner interface{ Scan(dest ...any) error },
+) (*QueuedMessage, string, error) {
 	var (
 		msg                       QueuedMessage
 		planModeInt               int
@@ -1295,20 +1297,20 @@ func scanQueuedRow(scanner interface{ Scan(dest ...any) error }) (*QueuedMessage
 		&msg.ID, &msg.SessionID, &msg.TaskID, &msg.Position, &msg.Content, &msg.Model,
 		&planModeInt, &attachmentsJSON, &metaJSON, &msg.QueuedAt, &msg.QueuedBy,
 	); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	msg.PlanMode = planModeInt != 0
 	if attachmentsJSON != "" && attachmentsJSON != "[]" {
 		if err := json.Unmarshal([]byte(attachmentsJSON), &msg.Attachments); err != nil {
-			return nil, fmt.Errorf("unmarshal attachments: %w", err)
+			return nil, "", fmt.Errorf("unmarshal attachments: %w", err)
 		}
 	}
 	if metaJSON != "" && metaJSON != "{}" {
 		if err := json.Unmarshal([]byte(metaJSON), &msg.Metadata); err != nil {
-			return nil, fmt.Errorf("unmarshal metadata: %w", err)
+			return nil, "", fmt.Errorf("unmarshal metadata: %w", err)
 		}
 	}
-	return &msg, nil
+	return &msg, metaJSON, nil
 }
 
 func marshalAttachments(att []MessageAttachment) (string, error) {

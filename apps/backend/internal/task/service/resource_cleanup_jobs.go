@@ -393,12 +393,14 @@ func (s *Service) executeTaskResourceCleanupJob(
 		return fmt.Errorf("refresh task cleanup runtime inventory: %w", err)
 	}
 	s.registerTaskRuntimeStopOwners(targets, true)
-	failedStops := s.stopTaskRuntimeTargets(ctx, job.TaskID, targets, taskResourceCleanupStopReason(job.Trigger), "task cleanup runtime stop failed")
+	stopOutcome := s.stopTaskRuntimeTargets(ctx, job.TaskID, targets, taskResourceCleanupStopReason(job.Trigger), "task cleanup runtime stop failed")
+	failedStops := stopOutcome.failed
 	if cancelled, err := s.cancelIfTaskUnarchived(ctx, job); err != nil || cancelled {
 		return err
 	}
 	errs := s.performTaskCleanup(ctx, job.TaskID, snapshot.Sessions, snapshot.Worktrees, targets,
-		taskEnvironmentCleanup{env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow}, failedStops)
+		taskEnvironmentCleanup{env: snapshot.TaskEnvironment, deleteRow: snapshot.DeleteEnvironmentRow},
+		taskCleanupPreserveRows(stopOutcome))
 	if cause := context.Cause(ctx); cause != nil {
 		return errors.Join(append(errs, cause)...)
 	}

@@ -25,6 +25,8 @@ test.describe("Mobile layout profiles", () => {
     const layouts = new LayoutSettingsPage(testPage);
     await layouts.openFromMobileMenu();
 
+    await expect(layouts.editor.locator(".dv-tab", { hasText: "PR Details" })).toHaveCount(0);
+    await layouts.addPanel("PR Details", true);
     const prDetailsTab = layouts.editor.locator(".dv-tab", { hasText: "PR Details" });
     await expect(prDetailsTab).toBeVisible();
     await prDetailsTab.tap();

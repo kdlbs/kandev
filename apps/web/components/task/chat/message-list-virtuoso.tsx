@@ -37,6 +37,8 @@ import {
   MessageListStatus,
   MessageItem,
   UnreadDivider,
+  anchoredBarScrollOffsetPx,
+  canReassertDividerScroll,
   getItemKey,
   getConversationLoadingState,
   getEffectiveActiveTurnId,
@@ -260,21 +262,108 @@ function useVirtuosoRenderItem(args: RenderItemArgs) {
  * divider, and a value frozen at that first render could never be
  * corrected. Scrolling here imperatively, gated on a change to
  * dividerBeforeItemKey rather than mount, catches it whenever it resolves.
+ *
+ * `anchoredBar.offsetPx` negatively offsets the placement (see Virtuoso's
+ * documented sticky-header pattern) so the divider lands below the
+ * anchored last-prompt bar's pinned overlay instead of underneath it. The
+ * bar's real height typically arrives an async tick after mount, after
+ * the first placement already ran with offset 0 — {@link
+ * canReassertDividerScroll} allows exactly one more correction once it
+ * does, under the same settling-window/no-user-scroll gate
+ * `useScrollToDividerOrBottom` (message-list-native.tsx) uses for its
+ * own multi-wave corrections.
+ *
+ * The actual `scrollToIndex` call runs through `runLocked` (see
+ * `useProgrammaticScrollLock`) so `followOutput` can't fight a reassertion
+ * that fires while a live message is streaming in — without the lock, a
+ * `followOutput` re-evaluation triggered by that same message could snap
+ * the transcript back to the bottom and silently cancel the correction.
  */
-function useScrollToDividerOnceResolved(
+export function useScrollToDividerOnceResolved(
   virtuosoRef: React.RefObject<VirtuosoHandle | null>,
   items: RenderItem[],
   firstItemIndex: number,
   dividerBeforeItemKey: string | null | undefined,
+  anchoredBar: {
+    offsetPx: number;
+    scrollParent: HTMLDivElement;
+    runLocked: (performScroll: () => void) => void;
+  },
 ) {
+  const { offsetPx: anchoredBarOffsetPx, scrollParent, runLocked } = anchoredBar;
+  const isUserScrollingRef = useRef(false);
+  useEffect(() => {
+    const markUserScrolling = () => {
+      isUserScrollingRef.current = true;
+    };
+    scrollParent.addEventListener("wheel", markUserScrolling, { passive: true });
+    scrollParent.addEventListener("touchstart", markUserScrolling, { passive: true });
+    scrollParent.addEventListener("keydown", markUserScrolling);
+    return () => {
+      scrollParent.removeEventListener("wheel", markUserScrolling);
+      scrollParent.removeEventListener("touchstart", markUserScrolling);
+      scrollParent.removeEventListener("keydown", markUserScrolling);
+    };
+  }, [scrollParent]);
+
+  // Mirrors useScrollToDividerOrBottom's 4s settling window: bounds how
+  // long the correction below can keep re-asserting after mount,
+  // independent of user interaction.
+  const mountedAtRef = useRef<number | null>(null);
+  if (mountedAtRef.current === null) mountedAtRef.current = Date.now();
+  const isWithinSettlingWindow = () => Date.now() - (mountedAtRef.current ?? 0) < 4000;
+
   const didScrollRef = useRef(false);
   useEffect(() => {
-    if (didScrollRef.current || !dividerBeforeItemKey) return;
+    if (!dividerBeforeItemKey) return;
     const dividerIndex = items.findIndex((item) => getItemKey(item) === dividerBeforeItemKey);
     if (dividerIndex < 0) return;
-    virtuosoRef.current?.scrollToIndex({ index: firstItemIndex + dividerIndex, align: "start" });
+    const canReassert = canReassertDividerScroll({
+      hasDividerTarget: true,
+      didScrollToDivider: didScrollRef.current,
+      isUserScrolling: isUserScrollingRef.current,
+      isWithinSettlingWindow: isWithinSettlingWindow(),
+    });
+    if (!canReassert) return;
+    runLocked(() => {
+      virtuosoRef.current?.scrollToIndex({
+        index: firstItemIndex + dividerIndex,
+        align: "start",
+        offset: -anchoredBarOffsetPx || 0,
+      });
+    });
     didScrollRef.current = true;
-  }, [virtuosoRef, items, firstItemIndex, dividerBeforeItemKey]);
+  }, [
+    virtuosoRef,
+    items,
+    firstItemIndex,
+    dividerBeforeItemKey,
+    anchoredBarOffsetPx,
+    scrollParent,
+    runLocked,
+  ]);
+}
+
+/** Debounced `startReached` handler for lazy-loading older messages: a
+ * 500ms cooldown after each `loadMore()` settles prevents Virtuoso from
+ * re-firing `startReached` (e.g. while the prepended page is still
+ * settling scroll position) into a runaway fetch loop. */
+function useLoadOlderOnStartReached(
+  hasMore: boolean,
+  isLoadingMore: boolean,
+  loadMore: () => Promise<number>,
+) {
+  const loadCooldownRef = useRef(false);
+  return useCallback(() => {
+    if (hasMore && !isLoadingMore && !loadCooldownRef.current) {
+      loadCooldownRef.current = true;
+      loadMore().finally(() => {
+        setTimeout(() => {
+          loadCooldownRef.current = false;
+        }, 500);
+      });
+    }
+  }, [hasMore, isLoadingMore, loadMore]);
 }
 
 function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
@@ -292,20 +381,13 @@ function useVirtuosoCallbacks(props: VirtuosoBodyProps) {
   const itemCount = items.length;
   const streamingMessageId = getStreamingAgentMessageId(messages);
   const firstItemIndex = useStableFirstItemIndex(items);
-  useScrollToDividerOnceResolved(virtuosoRef, items, firstItemIndex, dividerBeforeItemKey);
   const { isLocked, runLocked } = useProgrammaticScrollLock(props.scrollParent);
-
-  const loadCooldownRef = useRef(false);
-  const handleStartReached = useCallback(() => {
-    if (hasMore && !isLoadingMore && !loadCooldownRef.current) {
-      loadCooldownRef.current = true;
-      loadMore().finally(() => {
-        setTimeout(() => {
-          loadCooldownRef.current = false;
-        }, 500);
-      });
-    }
-  }, [hasMore, isLoadingMore, loadMore]);
+  useScrollToDividerOnceResolved(virtuosoRef, items, firstItemIndex, dividerBeforeItemKey, {
+    offsetPx: anchoredBarScrollOffsetPx(props.anchoredBarHeight),
+    scrollParent: props.scrollParent,
+    runLocked,
+  });
+  const handleStartReached = useLoadOlderOnStartReached(hasMore, isLoadingMore, loadMore);
 
   const handleScrollToMessage = useCallback(
     (messageId: string, options?: { align?: "start" | "center" }) => {

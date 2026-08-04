@@ -413,7 +413,11 @@ func (b bootStateBuilder) quickChatSessions(ctx context.Context, workspaceID str
 	taskSessions := make(map[string]taskdto.TaskSessionDTO, len(items))
 	for _, item := range items {
 		sessions = append(sessions, mapQuickChatSessionState(item))
-		taskSessions[item.SessionID] = taskdto.FromTaskSession(item.Session)
+		sessionDTO := taskdto.FromTaskSession(item.Session)
+		if b.p.orchestratorSvc != nil {
+			taskdto.EnrichCancellationPending(&sessionDTO, b.p.orchestratorSvc)
+		}
+		taskSessions[item.SessionID] = sessionDTO
 	}
 	return quickChatBootState{sessions: sessions, taskSessions: taskSessions}, nil
 }
@@ -977,6 +981,7 @@ func (b bootStateBuilder) addTaskDetailSessionsState(
 		// (ADR-0049). No-op for non-RUNNING sessions.
 		if b.p.orchestratorSvc != nil {
 			taskdto.EnrichForegroundActivity(&dto, b.p.orchestratorSvc)
+			taskdto.EnrichCancellationPending(&dto, b.p.orchestratorSvc)
 		}
 		dto.PendingAction = bootPendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionItems[session.ID] = dto

@@ -146,6 +146,10 @@ func TestNewServiceRetainsSystemProviderForNonDesktopLaunch(t *testing.T) {
 }
 
 func TestSemanticOccurrencesUseEventSpecificCopyAndOccurrenceIdempotency(t *testing.T) {
+	// Keep the auto-provisioned system provider out so the test only exercises
+	// the single configured local provider; SystemProvider.Available() is true
+	// on desktop platforms (e.g. macOS) and would add an extra delivery.
+	t.Setenv(desktopNativeNotificationsEnv, "true")
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
 		t.Fatalf("create logger: %v", err)
@@ -302,6 +306,10 @@ func TestUpdateAvailabilityRoutesProviderScopedOccurrenceWithReleasePayload(t *t
 }
 
 func TestNoEligibleLocalUpdateSubscriberReleasesOccurrenceClaimForReplay(t *testing.T) {
+	// Keep the auto-provisioned system provider out so the test only exercises
+	// the single configured local provider; SystemProvider.Available() is true
+	// on desktop platforms (e.g. macOS) and would add an extra delivery.
+	t.Setenv(desktopNativeNotificationsEnv, "true")
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {
 		t.Fatalf("create logger: %v", err)

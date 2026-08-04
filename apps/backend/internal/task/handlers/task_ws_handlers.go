@@ -48,6 +48,7 @@ func (h *TaskHandlers) doListTaskSessions(ctx context.Context, msg *ws.Message, 
 	for _, session := range sessions {
 		summary := dto.FromTaskSessionSummary(session)
 		dto.EnrichForegroundActivitySummary(&summary, h.foregroundActivity)
+		dto.EnrichCancellationPendingSummary(&summary, h.cancellationPending)
 		summary.PendingAction = pendingActionPtr(&session.ID, pendingActionsBySession)
 		sessionDTOs = append(sessionDTOs, summary)
 	}

@@ -104,38 +104,9 @@ func (s *Service) requeueMessage(ctx context.Context, queuedMsg *messagequeue.Qu
 		s.requeueLifecycleMessage(ctx, queuedMsg, queuedBy, coalesceKey)
 		return
 	}
-	var (
-		requeuedMsg *messagequeue.QueuedMessage
-		replaced    bool
-		queueErr    error
+	requeuedMsg, replaced, queueErr := s.messageQueue.RequeueMessage(
+		ctx, queuedMsg, queuedBy, coalesceKey,
 	)
-	if coalesceKey != "" {
-		requeuedMsg, replaced, queueErr = s.messageQueue.QueueMessageWithCoalesceKey(
-			ctx,
-			queuedMsg.SessionID,
-			queuedMsg.TaskID,
-			queuedMsg.Content,
-			queuedMsg.Model,
-			queuedBy,
-			queuedMsg.PlanMode,
-			queuedMsg.Attachments,
-			queuedMsg.Metadata,
-			coalesceKey,
-			true,
-		)
-	} else {
-		requeuedMsg, queueErr = s.messageQueue.QueueMessageWithMetadata(
-			ctx,
-			queuedMsg.SessionID,
-			queuedMsg.TaskID,
-			queuedMsg.Content,
-			queuedMsg.Model,
-			queuedBy,
-			queuedMsg.PlanMode,
-			queuedMsg.Attachments,
-			queuedMsg.Metadata,
-		)
-	}
 	if queueErr != nil {
 		s.logger.Error("failed to requeue message",
 			zap.String("session_id", queuedMsg.SessionID),

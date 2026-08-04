@@ -9,6 +9,10 @@ function readRepoFile(path: string): string {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
+function runtimePackagesIn(source: string): string[] {
+  return [...new Set(source.match(/@kdlbs\/runtime-[a-z0-9-]+/g) ?? [])].sort();
+}
+
 function workflowFiles(): string[] {
   const workflowDir = resolve(repoRoot, ".github/workflows");
   return readdirSync(workflowDir)
@@ -226,16 +230,79 @@ describe("release runtime tooling configuration", () => {
 });
 
 describe("release npm publishing", () => {
-  it("skips packages that are already published on npm", () => {
+  it("accepts either GitHub release assets or local nightly assets", () => {
     const script = readRepoFile("scripts/release/publish-npm.sh");
 
-    expect(script).toContain('npm view "${pkg}@${VERSION}" version --silent');
-    expect(script).toMatch(
-      /if package_already_published "\$pkg"; then\s+record_already_published "\$pkg"\s+continue\s+fi/,
+    for (const flag of ["--version", "--dist-tag", "--release-tag", "--assets-dir"]) {
+      expect(script).toContain(flag);
+    }
+    expect(script).toContain('DIST_TAG=""');
+    expect(script).toContain('case "$DIST_TAG" in');
+    expect(script).toContain("latest)");
+    expect(script).toContain("nightly)");
+    expect(script).toContain('if [[ -n "$RELEASE_TAG" && -n "$SOURCE_ASSETS_DIR" ]]');
+    expect(script).toContain('elif [[ -z "$RELEASE_TAG" && -z "$SOURCE_ASSETS_DIR" ]]');
+    expect(script).toContain('elif [[ "$DIST_TAG" == "latest" && -z "$RELEASE_TAG" ]]');
+    expect(script).toContain('elif [[ "$DIST_TAG" == "nightly" && -z "$SOURCE_ASSETS_DIR" ]]');
+    expect(script).toContain('ASSETS_DIR="$SOURCE_ASSETS_DIR"');
+  });
+
+  it("publishes all packages under the requested dist-tag and pins the launcher version", () => {
+    const script = readRepoFile("scripts/release/publish-npm.sh");
+    const packages = readRepoFile("scripts/release/npm-packages.sh");
+
+    const loopStart = script.indexOf('for pkg in "${RUNTIME_PACKAGES[@]}"; do');
+    const loopEnd = script.indexOf("\ndone", loopStart);
+    expect(loopStart).toBeGreaterThanOrEqual(0);
+    expect(loopEnd).toBeGreaterThan(loopStart);
+    const runtimePublishLoop = script.slice(loopStart, loopEnd);
+
+    expect(runtimePublishLoop).toContain(
+      'npm publish --access public --provenance --tag "$DIST_TAG"',
     );
-    expect(script).toMatch(
-      /if package_already_published "kandev"; then\s+record_already_published "kandev"/,
+    const mainPublish = script.slice(script.indexOf("Publishing kandev@$VERSION"));
+    expect(mainPublish).toContain('npm publish --access public --provenance --tag "$DIST_TAG"');
+    expect(script).toContain("pkg.version = version;");
+    expect(script).toContain('CLI_PACKAGE_BACKUP="$WORK_DIR/cli-package.json"');
+    expect(script).toContain('cp "$CLI_PACKAGE_BACKUP" "$CLI_PACKAGE_JSON"');
+    for (const packageName of [
+      "@kdlbs/runtime-linux-x64",
+      "@kdlbs/runtime-linux-arm64",
+      "@kdlbs/runtime-darwin-x64",
+      "@kdlbs/runtime-darwin-arm64",
+      "@kdlbs/runtime-win32-x64",
+    ]) {
+      expect(packages).toContain(`"${packageName}"`);
+    }
+    expect(packages).toContain('NIGHTLY_PACKAGES=("kandev" "${RUNTIME_PACKAGES[@]}")');
+    expect(script).toContain('source "$ROOT_DIR/scripts/release/npm-packages.sh"');
+  });
+
+  it("keeps every runtime package consumer aligned with the publishing inventory", () => {
+    const inventory = runtimePackagesIn(readRepoFile("scripts/release/npm-packages.sh"));
+    expect(inventory.length).toBeGreaterThan(0);
+
+    for (const path of [
+      "apps/cli/src/runtime.ts",
+      "apps/cli/bin/native-shim.js",
+      "apps/cli/package.json",
+    ]) {
+      expect(runtimePackagesIn(readRepoFile(path)), path).toEqual(inventory);
+    }
+    expect(readRepoFile("scripts/release/package-npm-runtime.sh")).toContain(
+      'source "$ROOT_DIR/scripts/release/npm-packages.sh"',
     );
+    expect(readRepoFile("scripts/release/publish-npm.test.mjs")).toContain("loadRuntimeInventory");
+  });
+
+  it("only treats an existing nightly version as idempotent when the nightly tag matches", () => {
+    const script = readRepoFile("scripts/release/publish-npm.sh");
+
+    expect(script).toContain('npm_view_version "${pkg}@${VERSION}"');
+    expect(script).toContain('npm_view_version "${pkg}@${DIST_TAG}"');
+    expect(script).toContain('if [[ "$DIST_TAG" == "nightly" ]]');
+    expect(script).toContain('if [[ "$tagged_version" != "$VERSION" ]]');
+    expect(script).toContain("refusing idempotent success");
     expect(script).toContain("EPUBLISHCONFLICT");
     expect(script).toContain("treated as idempotent success");
   });
@@ -390,7 +457,9 @@ describe("release desktop artifacts", () => {
     expect(workflow).toContain("persist-credentials: false");
     expect(workflow).toContain("Desktop validation summary");
     expect(workflow).toContain("No release PR, tag, GitHub release, public container tags");
-    expect(workflow).toContain("if: ${{ !inputs.dry_run && !inputs.desktop_validation_only }}");
+    expect(workflow).toContain(
+      "if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !inputs.desktop_validation_only }}",
+    );
     expect(workflow).toContain('if [ "$DESKTOP_VALIDATION_ONLY" = "true" ]; then');
     expect(workflow).toContain("scripts/release/desktop-signing-ready.sh macos");
     expect(workflow).toContain("scripts/release/desktop-signing-ready.sh windows");

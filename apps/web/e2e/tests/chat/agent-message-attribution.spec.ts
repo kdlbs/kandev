@@ -190,7 +190,10 @@ test.describe("Cross-task agent message attribution", () => {
     await expect(panel.getByTestId("queue-entry-edit")).toHaveCount(0);
     await expect(panel.getByTestId("queue-entry-remove")).toHaveCount(10);
 
-    await panel.getByTestId("queue-entry-remove").first().click();
+    const firstAgentEntry = panel.getByTestId("queue-entry").filter({
+      has: testPage.getByTestId("queue-entry-text").filter({ hasText: /^agent queued 1$/ }),
+    });
+    await firstAgentEntry.getByTestId("queue-entry-remove").click();
     await expect(entries).toHaveCount(9, { timeout: 10_000 });
     await expect(panel).toContainText("9 of 10");
 

@@ -67,20 +67,20 @@ test.describe("Session stream overload isolation", () => {
     const quietSessionNoisyFrames = noisyReceivedFrames(quietCapture.frames, noisyTask.session_id);
     expect(
       noisyFrames.length,
-      "noisy session must produce observable update frames",
+      "noisy session must produce observable message frames",
     ).toBeGreaterThan(0);
     expect(noisyFrames.length, "gateway delivery must be below source chunk count").toBeLessThan(
       REASONING_BURST_COUNT,
     );
     expect(
       quietSessionNoisyFrames,
-      "quiet page must not receive noisy-session updates",
+      "quiet page must not receive noisy-session message frames",
     ).toHaveLength(0);
 
     const evidence = {
       sourceChunks: exact.sourceChunks,
       reasoningBytes: exact.reasoningBytes,
-      gatewayReceivedUpdatedFrames: noisyFrames.length,
+      gatewayReceivedMessageFrames: noisyFrames.length,
       quietSessionResponse: "quiet-session-followup",
       quietGateway: summarizeGatewayTraffic(quietCapture.frames),
       noisyGateway: summarizeGatewayTraffic(noisyCapture.frames),

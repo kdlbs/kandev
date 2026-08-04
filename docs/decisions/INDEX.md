@@ -93,6 +93,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-07-30-session-owned-mcp-observability | [Keep MCP Attachment Evidence Session Owned](2026-07-30-session-owned-mcp-observability.md) | accepted | backend, frontend, protocol, security | 2026-07-30 |
 | 2026-07-30-file-backed-diagnostic-bundles | [File-backed diagnostic bundles](2026-07-30-file-backed-diagnostic-bundles.md) | accepted | backend, frontend, infra, protocol, workflow | 2026-07-30 |
 | 2026-07-30-runtime-task-state-before-running-event | [Publish Task State Before Running Session State](2026-07-30-runtime-task-state-before-running-event.md) | accepted | backend, frontend, protocol, workflow | 2026-07-30 |
+| 2026-07-31-npm-nightly-release-channel | [Publish deterministic npm-only nightlies](2026-07-31-npm-nightly-release-channel.md) | accepted (amended 2026-08-03) | workflow, backend, frontend, cli | 2026-07-31 |
 | 2026-07-31-isolate-manual-pr-review-content | [Isolate Manual PR Review Content](2026-07-31-isolate-manual-pr-review-content.md) | accepted | infra, workflow, security | 2026-07-31 |
 | 2026-07-31-agent-generated-task-titles | [Bind Agent Title Generation to Pending Tasks](2026-07-31-agent-generated-task-titles.md) | accepted | backend, frontend, protocol | 2026-07-31 |
 | 2026-07-31-system-service-user-continuity | [Preserve System Service Identity Across Reinstallation](2026-07-31-system-service-user-continuity.md) | accepted | backend, cli, security, operations | 2026-07-31 |
@@ -101,6 +102,7 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-01-validate-mcp-tool-arguments | [Validate MCP Tool Arguments at the Shared Server Boundary](2026-08-01-validate-mcp-tool-arguments.md) | accepted | backend, protocol | 2026-08-01 |
 | 2026-08-01-separate-task-summary-session-stream-traffic | [Separate Task Summary and Session Stream Traffic](2026-08-01-separate-task-summary-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-01 |
 | 2026-08-01-global-run-scheduler-ownership | [Separate Global Run Dispatch from Office Maintenance](2026-08-01-global-run-scheduler-ownership.md) | accepted | backend, workflow | 2026-08-01 |
+| 2026-08-01-architecture-lint-budgets | [Architecture Lint Budgets and Compatibility Expiry](2026-08-01-architecture-lint-budgets.md) | accepted (amended 2026-08-02) | infra | 2026-08-01 |
 | 2026-08-01-release-toggle-gating-contract | [Release Toggles Are Install-Wide Fail-Closed Gates](2026-08-01-release-toggle-gating-contract.md) | proposed | backend, frontend, workflow | 2026-08-01 |
 | 2026-08-01-share-artifact-locale | [Shared-Task Artifacts Render in the Creator's Locale](2026-08-01-share-artifact-locale.md) | accepted | backend | 2026-08-01 |
 | 2026-08-02-new-workspace-github-access-defaults | [Bootstrap New Workspaces From Host GitHub Access](2026-08-02-new-workspace-github-access-defaults.md) | accepted | backend, frontend, security | 2026-08-02 |
@@ -109,4 +111,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-02-agent-terminal-diagnostics-over-stderr | [Capture Agent Terminal Diagnostics From Managed Stderr](2026-08-02-agent-terminal-diagnostics-over-stderr.md) | accepted | backend, frontend, protocol, security | 2026-08-02 |
 | 2026-08-02-class-aware-git-subprocess-admission | [Class-Aware Git Subprocess Admission](2026-08-02-class-aware-git-subprocess-admission.md) | accepted | backend, agentctl, observability | 2026-08-02 |
 | 2026-08-02-isolate-replaceable-session-stream-traffic | [Isolate Replaceable Session Stream Traffic](2026-08-02-isolate-replaceable-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-02 |
+| 2026-08-03-backend-owned-cancellation-progress | [Keep Cancellation Progress Backend Owned](2026-08-03-backend-owned-cancellation-progress.md) | accepted | backend, frontend, protocol | 2026-08-03 |
 | 2026-08-03-separate-message-queue-provenance-cancellation-and-capacity | [Separate Message Queue Provenance, Cancellation, and Capacity](2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md) | accepted | backend, frontend, protocol, security | 2026-08-03 |

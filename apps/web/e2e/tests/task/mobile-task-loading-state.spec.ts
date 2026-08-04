@@ -117,4 +117,43 @@ test.describe("Mobile task loading state", () => {
       await testPage.unroute(sessionPattern, sessionRoute);
     }
   });
+
+  test("returns to task overview from a missing task route", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const title = "Mobile missing route sibling";
+    await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/missing-task-route-mobile?workspaceId=${seedData.workspaceId}`);
+    await expect(testPage.getByTestId("task-load-error-state")).toBeVisible({ timeout: 10_000 });
+
+    const overviewLink = testPage.getByTestId("task-unavailable-overview-link");
+    await expect(overviewLink).toBeVisible();
+    const linkBox = await overviewLink.boundingBox();
+    const viewport = testPage.viewportSize();
+    expect(linkBox).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    if (linkBox && viewport) {
+      expect(linkBox.height).toBeGreaterThanOrEqual(44);
+      expect(linkBox.x).toBeGreaterThanOrEqual(0);
+      expect(linkBox.x + linkBox.width).toBeLessThanOrEqual(viewport.width + 1);
+    }
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+
+    await overviewLink.tap();
+    await expect(testPage).toHaveURL(
+      new RegExp(`/\\?home=overview&workspaceId=${seedData.workspaceId}`),
+    );
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.board.waitFor({ state: "visible", timeout: 10_000 });
+    await expect(mobile.taskCardByTitle(title)).toBeVisible({ timeout: 10_000 });
+  });
 });

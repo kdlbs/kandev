@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/registry"
+	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -322,8 +323,25 @@ func (a *lifecycleAdapter) StopAgent(ctx context.Context, agentInstanceID string
 }
 
 // StopAgentWithReason stops a running agent and propagates the stop reason to runtime teardown.
+// The lifecycle-tier not-found sentinel is normalized to the public runtime
+// sentinel at this seam so orchestrator consumers depend only on
+// runtimeapi.ErrNotFound and never import runtime/lifecycle.
 func (a *lifecycleAdapter) StopAgentWithReason(ctx context.Context, agentInstanceID string, reason string, force bool) error {
-	return a.mgr.StopAgentWithReason(ctx, agentInstanceID, reason, force)
+	return normalizeRuntimeStopError(a.mgr.StopAgentWithReason(ctx, agentInstanceID, reason, force))
+}
+
+// normalizeRuntimeStopError maps the backend lifecycle not-found sentinel onto
+// the public runtime not-found sentinel while preserving the original error for
+// diagnostics. Unrelated errors (and nil) pass through unchanged so a transient
+// runtime failure is never mistaken for an absent runtime.
+func normalizeRuntimeStopError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, lifecycle.ErrExecutionNotFound) {
+		return errors.Join(runtimeapi.ErrNotFound, err)
+	}
+	return err
 }
 
 // RowLiveness classifies the liveness of the OS process backing an

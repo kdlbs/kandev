@@ -150,6 +150,50 @@ func TestSQLiteRepository_ReserveHeadMarksLifecycleRowInFlight(t *testing.T) {
 	}
 }
 
+func TestSQLiteRepository_ReserveHeadUsesStoredMetadataGuard(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+
+	msg := &QueuedMessage{
+		SessionID: "s1", TaskID: "t1", Content: "pr merged", QueuedBy: QueuedByWorkflow,
+		Metadata: map[string]interface{}{
+			MetadataLifecycleDurable: true,
+			"priority":               float64(1),
+		},
+	}
+	if err := repo.Insert(ctx, msg, 0); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	sqliteRepo, ok := repo.(*sqliteRepository)
+	if !ok {
+		t.Fatalf("repository type = %T, want *sqliteRepository", repo)
+	}
+	const storedMetadata = `{ "priority": 1.0, "lifecycle_durable_until_accepted": true }`
+	if _, err := sqliteRepo.db.ExecContext(ctx, sqliteRepo.db.Rebind(`
+		UPDATE queued_messages SET metadata_json = ? WHERE id = ?
+	`), storedMetadata, msg.ID); err != nil {
+		t.Fatalf("rewrite metadata representation: %v", err)
+	}
+
+	reserved, err := repo.ReserveHead(ctx, "s1")
+	if err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if reserved == nil {
+		t.Fatal("reserve returned nil for semantically valid non-canonical metadata JSON")
+	}
+	if !reserved.IsReservedLifecycleDelivery() {
+		t.Fatal("reserved copy lost process-local lifecycle reservation evidence")
+	}
+	entries, err := repo.ListBySession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(entries) != 1 || !entries[0].IsReservedInFlight() {
+		t.Fatalf("stored row was not marked in flight: %+v", entries)
+	}
+}
+
 func TestSQLiteRepository_ReserveAfterRestartReturnsRetryableLifecycleMetadata(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "queue.db")

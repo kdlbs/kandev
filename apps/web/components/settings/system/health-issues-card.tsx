@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Button } from "@kandev/ui/button";
@@ -23,11 +24,19 @@ function severityIcon(severity: HealthSeverity) {
   return <IconInfoCircle className="h-4 w-4 text-blue-500" />;
 }
 
-function severityLabel(severity: HealthSeverity): string {
-  return severity.charAt(0).toUpperCase() + severity.slice(1);
-}
+/**
+ * `severity` is a wire enum; only the badge label is copy. Title-casing the
+ * raw token was English-shaped by accident. Unknown severities from a newer
+ * backend fall back to the token itself.
+ */
+const SEVERITY_LABEL_KEYS: Record<string, string> = {
+  error: "system:healthSeverityError",
+  warning: "system:healthSeverityWarning",
+  info: "system:healthSeverityInfo",
+};
 
 function HealthIssueRow({ issue }: { issue: HealthIssue }) {
+  const { t } = useTranslation();
   const router = useRouter();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const resolveUrl = (url: string) => url.replace("{workspaceId}", workspaceId ?? "");
@@ -40,9 +49,12 @@ function HealthIssueRow({ issue }: { issue: HealthIssue }) {
         {severityIcon(issue.severity)}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2">
+            {/* title, message and fix_label are all rendered by the backend. */}
             <span className="font-medium text-sm">{issue.title}</span>
             <Badge variant="outline" className="text-[10px]">
-              {severityLabel(issue.severity)}
+              {SEVERITY_LABEL_KEYS[issue.severity]
+                ? t(SEVERITY_LABEL_KEYS[issue.severity])
+                : issue.severity}
             </Badge>
           </div>
           {issue.message && <p className="text-xs text-muted-foreground mt-1">{issue.message}</p>}
@@ -64,13 +76,14 @@ function HealthIssueRow({ issue }: { issue: HealthIssue }) {
 }
 
 function ChecksPopover({ checks }: { checks: HealthCheckSummary[] }) {
+  const { t } = useTranslation();
   if (checks.length === 0) return null;
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          aria-label="What's monitored"
+          aria-label={t("system:healthWhatsMonitored")}
           className="cursor-pointer text-muted-foreground hover:text-foreground transition-colors"
           data-testid="system-health-checks-trigger"
         >
@@ -78,7 +91,7 @@ function ChecksPopover({ checks }: { checks: HealthCheckSummary[] }) {
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-72" data-testid="system-health-checks-popover">
-        <p className="text-xs font-medium mb-2">System checks</p>
+        <p className="text-xs font-medium mb-2">{t("system:healthSystemChecks")}</p>
         <ul className="space-y-1.5">
           {checks.map((c) => (
             <li
@@ -91,9 +104,10 @@ function ChecksPopover({ checks }: { checks: HealthCheckSummary[] }) {
               ) : (
                 <IconX className="h-3.5 w-3.5 text-amber-500 shrink-0" />
               )}
+              {/* `c.name` is the backend's check name. */}
               <span>{c.name}</span>
               <span className="ml-auto text-[10px] text-muted-foreground">
-                {c.passing ? "Passing" : "Issue"}
+                {c.passing ? t("system:healthPassing") : t("system:healthIssue")}
               </span>
             </li>
           ))}
@@ -104,6 +118,7 @@ function ChecksPopover({ checks }: { checks: HealthCheckSummary[] }) {
 }
 
 export function HealthIssuesCard() {
+  const { t } = useTranslation();
   const { issues, checks, loaded } = useSystemHealth();
   const nonInfo = issues.filter((i) => i.severity !== "info");
   const hasIssues = nonInfo.length > 0;
@@ -113,10 +128,12 @@ export function HealthIssuesCard() {
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
         <CardTitle className="text-base flex items-center gap-2">
           <IconActivity className="h-4 w-4" />
-          Health
+          {t("system:healthTitle")}
           {loaded && (
             <Badge variant={hasIssues ? "destructive" : "secondary"} className="text-[10px]">
-              {hasIssues ? `${nonInfo.length} issue${nonInfo.length === 1 ? "" : "s"}` : "Healthy"}
+              {hasIssues
+                ? t("system:healthIssueCount", { count: nonInfo.length })
+                : t("system:healthHealthy")}
             </Badge>
           )}
         </CardTitle>
@@ -125,7 +142,7 @@ export function HealthIssuesCard() {
       <CardContent className="space-y-3">
         {!loaded && (
           <p className="text-xs text-muted-foreground" data-testid="system-health-loading">
-            Loading health checks...
+            {t("system:healthLoading")}
           </p>
         )}
         {loaded && issues.length === 0 && (
@@ -134,7 +151,7 @@ export function HealthIssuesCard() {
             data-testid="system-health-empty"
           >
             <IconCircleCheck className="h-4 w-4 text-emerald-500" />
-            All system checks pass.
+            {t("system:healthAllPass")}
           </div>
         )}
         {loaded && issues.map((issue) => <HealthIssueRow key={issue.id} issue={issue} />)}

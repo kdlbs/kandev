@@ -111,6 +111,30 @@ describe("useTaskPR — permanent flag", () => {
   });
 });
 
+describe("useTaskPR — loading state", () => {
+  it("marks terminal retry failures as loaded after keeping transient failures pending", async () => {
+    requestMock.mockRejectedValue(new Error("sync unavailable"));
+
+    const { result } = renderHook(() => useTaskPR("task-1"), { wrapper });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(result.current.loaded).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000 * 5);
+    });
+    expect(result.current.loaded).toBe(false);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000);
+    });
+    expect(requestMock).toHaveBeenCalledTimes(7);
+    expect(result.current.loaded).toBe(true);
+  });
+});
+
 describe("useTaskPR — unlink", () => {
   it("rejects without a task or active workspace and skips the API", async () => {
     const noTask = renderHook(() => useTaskPR(null), {

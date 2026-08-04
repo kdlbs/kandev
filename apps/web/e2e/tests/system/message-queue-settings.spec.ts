@@ -40,7 +40,8 @@ test.describe.serial("Message Queue general settings", () => {
   }) => {
     const updated = baseline === 17 ? 18 : 17;
     await testPage.goto("/settings/general/appearance");
-    await testPage.locator('a[href="/settings/general/message-queue"]').first().click();
+    const settingsNav = testPage.getByTestId("app-sidebar-settings-mode");
+    await settingsNav.getByRole("link", { name: "Message Queue" }).click();
 
     await expect(testPage).toHaveURL(
       (url) => new URL(url).pathname === "/settings/general/message-queue",
@@ -106,7 +107,8 @@ test.describe.serial("Message Queue general settings", () => {
         ssoProviders: [],
       });
     });
-    await testPage.locator('a[href="/settings/general/message-queue"]').first().click();
+    const settingsNav = testPage.getByTestId("app-sidebar-settings-mode");
+    await settingsNav.getByRole("link", { name: "Message Queue" }).click();
 
     await expect(testPage.getByTestId("message-queue-max-per-session")).toBeDisabled();
     await expect(testPage.getByText("Only administrators can change this setting.")).toBeVisible();

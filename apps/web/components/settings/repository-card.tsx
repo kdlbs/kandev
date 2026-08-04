@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { IconEdit, IconGitBranch, IconTrash, IconX } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { CardContent } from "@kandev/ui/card";
@@ -24,6 +26,23 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import { defaultWorktreeBranchTemplate } from "@/lib/worktree-branch-template";
 
 type RepositoryWithScripts = Repository & { scripts: RepositoryScript[] };
+
+/**
+ * The environment variable the dev script reads to learn its allocated port. It
+ * is an identifier the user types into a shell command verbatim, so it travels
+ * as an interpolated value rather than sitting inside the message.
+ */
+const DEV_SCRIPT_PORT_VAR = "$PORT";
+
+/**
+ * Shell script samples. Each is code the user edits and the executor runs
+ * verbatim, so none of it is copy — the same call as `DEFAULT_DOCKERFILE` in the
+ * executor profile editor. Hoisted out of the JSX so the intent is explicit
+ * rather than resting on a guard exclusion pattern.
+ */
+const SETUP_SCRIPT_PLACEHOLDER = "#!/bin/bash\n# any manual setup you need";
+const CLEANUP_SCRIPT_PLACEHOLDER = "#!/bin/bash\n# any manual clean up you need";
+const DEV_SCRIPT_PLACEHOLDER = "#!/bin/bash\nnpm run dev -- --port $PORT";
 
 type RepoFieldsBaseProps = {
   repositoryId: string;
@@ -49,11 +68,14 @@ function RepositoryBasicFields({
   worktreeBranchTemplate,
   pullBeforeWorktree,
 }: RepositoryBasicFieldsProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Repository Name</Label>
+          <Label>{t("workspaces:repositoryName")}</Label>
+          {/* Both placeholders are value shapes — a git repository name and an
+              absolute filesystem path — so they stay in English. */}
           <Input
             value={repositoryName}
             onChange={(e) => onUpdate(repositoryId, { name: e.target.value })}
@@ -62,7 +84,7 @@ function RepositoryBasicFields({
           />
         </div>
         <div className="space-y-2">
-          <Label>Local Path</Label>
+          <Label>{t("workspaces:localPath")}</Label>
           <Input
             value={repositoryLocalPath}
             onChange={(e) => onUpdate(repositoryId, { local_path: e.target.value })}
@@ -75,7 +97,7 @@ function RepositoryBasicFields({
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
           <div className="flex items-center gap-1.5">
-            <Label>Worktree Branch Template</Label>
+            <Label>{t("workspaces:worktreeBranchTemplate")}</Label>
             <RepositoryBranchTemplateHelp />
           </div>
           <Input
@@ -89,7 +111,7 @@ function RepositoryBasicFields({
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor={`repo-pull-before-${repositoryId}`}>Worktree Sync</Label>
+          <Label htmlFor={`repo-pull-before-${repositoryId}`}>{t("workspaces:worktreeSync")}</Label>
           <div className="flex items-start gap-2 pt-2">
             <Checkbox
               id={`repo-pull-before-${repositoryId}`}
@@ -106,7 +128,7 @@ function RepositoryBasicFields({
                 htmlFor={`repo-pull-before-${repositoryId}`}
                 className="text-sm text-muted-foreground cursor-pointer"
               >
-                Always pull before creating a new worktree
+                {t("workspaces:alwaysPullBeforeWorktree")}
               </Label>
             </div>
           </div>
@@ -133,52 +155,52 @@ function RepositoryScriptFields({
   devScript,
   copyFiles,
 }: RepositoryScriptFieldsProps) {
+  const { t } = useTranslation();
   return (
     <>
+      {/* Every script placeholder below is a shell sample — a shebang plus a
+          command the executor runs verbatim — so it is code, not copy. */}
       <div className="grid gap-4 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Setup Script</Label>
+          <Label>{t("workspaces:setupScript")}</Label>
           <Textarea
             value={setupScript}
             onChange={(e) => onUpdate(repositoryId, { setup_script: e.target.value })}
-            placeholder="#!/bin/bash&#10;# any manual setup you need"
+            placeholder={SETUP_SCRIPT_PLACEHOLDER}
             rows={3}
             className="font-mono text-sm"
             data-settings-dirty={setupScript !== (savedRepository?.setup_script ?? "")}
           />
-          <p className="text-xs text-muted-foreground">
-            Runs when the repo is cloned or a git worktree is created.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("workspaces:setupScriptHelp")}</p>
         </div>
         <div className="space-y-2">
-          <Label>Cleanup Script</Label>
+          <Label>{t("workspaces:cleanupScript")}</Label>
           <Textarea
             value={cleanupScript}
             onChange={(e) => onUpdate(repositoryId, { cleanup_script: e.target.value })}
-            placeholder="#!/bin/bash&#10;# any manual clean up you need"
+            placeholder={CLEANUP_SCRIPT_PLACEHOLDER}
             rows={3}
             className="font-mono text-sm"
             data-settings-dirty={cleanupScript !== (savedRepository?.cleanup_script ?? "")}
           />
-          <p className="text-xs text-muted-foreground">
-            Runs when the task is completed to clean up the workspace.
-          </p>
+          <p className="text-xs text-muted-foreground">{t("workspaces:cleanupScriptHelp")}</p>
         </div>
       </div>
 
       <div className="space-y-2">
-        <Label>Dev Script</Label>
+        <Label>{t("workspaces:devScript")}</Label>
         <Textarea
           value={devScript}
           onChange={(e) => onUpdate(repositoryId, { dev_script: e.target.value })}
-          placeholder="#!/bin/bash&#10;npm run dev -- --port $PORT"
+          placeholder={DEV_SCRIPT_PLACEHOLDER}
           rows={3}
           className="font-mono text-sm"
           data-settings-dirty={devScript !== (savedRepository?.dev_script ?? "")}
         />
         <p className="text-xs text-muted-foreground">
-          Used to start the preview dev server for this repository. Use{" "}
-          <code className="px-1 py-0.5 bg-muted rounded">$PORT</code> for automatic port allocation.
+          <Trans i18nKey="workspaces:devScriptHelp" values={{ port: DEV_SCRIPT_PORT_VAR }}>
+            <code className="px-1 py-0.5 bg-muted rounded" />
+          </Trans>
         </p>
       </div>
 
@@ -219,6 +241,7 @@ function RepositoryEditView({
   deleteLoading,
   close,
 }: RepositoryEditViewProps) {
+  const { t } = useTranslation();
   return (
     <SettingsCard isDirty={isDirty}>
       <CardContent className="pt-6">
@@ -227,7 +250,7 @@ function RepositoryEditView({
             <div className="flex items-center gap-2">
               <IconGitBranch className="h-4 w-4 text-muted-foreground" />
               <Label className="flex items-center gap-2">
-                <span>Repository</span>
+                <span>{t("workspaces:repository")}</span>
                 {isDirty && <UnsavedChangesBadge />}
               </Label>
             </div>
@@ -236,7 +259,7 @@ function RepositoryEditView({
               variant="ghost"
               size="icon"
               className="cursor-pointer"
-              aria-label="Close repository editor"
+              aria-label={t("workspaces:closeRepositoryEditor")}
               onClick={close}
             >
               <IconX className="h-4 w-4" />
@@ -284,7 +307,7 @@ function RepositoryEditView({
               disabled={deleteLoading}
             >
               <IconTrash className="h-4 w-4 mr-2" />
-              Delete Repository
+              {t("workspaces:deleteRepository")}
             </Button>
           </div>
         </div>
@@ -301,7 +324,11 @@ type RepositoryPreviewProps = {
   open: () => void;
 };
 
-function buildRepoScriptsSummary(repository: RepositoryWithScripts) {
+// These two build every string in the collapsed card, and neither holds JSX, so
+// `i18next/no-literal-string` could never see any of it — the lint count for this
+// file reported zero for the whole block. `t` is a parameter rather than the
+// module-level import so each label resolves when the card renders.
+function buildRepoScriptsSummary(t: TFunction, repository: RepositoryWithScripts) {
   const setupScript = repository.setup_script ?? "";
   const cleanupScript = repository.cleanup_script ?? "";
   const devScript = repository.dev_script ?? "";
@@ -310,10 +337,12 @@ function buildRepoScriptsSummary(repository: RepositoryWithScripts) {
   const hasCleanupScript = Boolean(cleanupScript.trim());
   const hasDevScript = Boolean(devScript.trim());
   const showScriptsSummary = scriptsCount > 0 || hasSetupScript || hasCleanupScript || hasDevScript;
+  // Was `custom script${count === 1 ? "" : "s"}` — an English morpheme built at
+  // the call site, which leaves a translator no way to express a third form.
   const scriptsLabel =
     scriptsCount === 0
-      ? "No custom scripts"
-      : `${scriptsCount} custom script${scriptsCount === 1 ? "" : "s"}`;
+      ? t("workspaces:noCustomScripts")
+      : t("workspaces:customScripts", { count: scriptsCount });
   return {
     scriptsCount,
     hasSetupScript,
@@ -324,20 +353,24 @@ function buildRepoScriptsSummary(repository: RepositoryWithScripts) {
   };
 }
 
-function buildRepoPreviewData(repository: RepositoryWithScripts) {
+function buildRepoPreviewData(t: TFunction, repository: RepositoryWithScripts) {
   const repositoryName = repository.name ?? "";
-  const sourceLabel = repository.source_type === "local" ? "Local" : "Remote";
+  // `source_type` is the wire value; only its badge label is copy.
+  const sourceLabel =
+    repository.source_type === "local" ? t("workspaces:sourceLocal") : t("workspaces:sourceRemote");
+  // The path and the `owner/name` slug are user data / git metadata; only the
+  // two "nothing recorded" fallbacks are copy.
   const subtitle =
     repository.source_type === "local"
-      ? repository.local_path || "Local path not set"
+      ? repository.local_path || t("workspaces:localPathNotSet")
       : [repository.provider_owner, repository.provider_name].filter(Boolean).join("/") ||
         repository.provider ||
-        "Remote repository";
+        t("workspaces:remoteRepository");
   return {
     repositoryName,
     sourceLabel,
     subtitle,
-    ...buildRepoScriptsSummary(repository),
+    ...buildRepoScriptsSummary(t, repository),
   };
 }
 
@@ -348,6 +381,7 @@ function RepositoryPreview({
   onOpenDelete,
   open,
 }: RepositoryPreviewProps) {
+  const { t } = useTranslation();
   const {
     repositoryName,
     scriptsCount,
@@ -358,7 +392,7 @@ function RepositoryPreview({
     scriptsLabel,
     sourceLabel,
     subtitle,
-  } = buildRepoPreviewData(repository);
+  } = buildRepoPreviewData(t, repository);
 
   return (
     <SettingsCard isDirty={isDirty}>
@@ -370,7 +404,9 @@ function RepositoryPreview({
             </div>
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <h4 className="font-medium truncate">{repositoryName || "Untitled repository"}</h4>
+                <h4 className="font-medium truncate">
+                  {repositoryName || t("workspaces:untitledRepository")}
+                </h4>
                 <Badge variant="secondary" className="text-xs">
                   {sourceLabel}
                 </Badge>
@@ -380,9 +416,9 @@ function RepositoryPreview({
               {showScriptsSummary ? (
                 <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground mt-1">
                   {scriptsCount > 0 && <span>{scriptsLabel}</span>}
-                  {hasSetupScript && <span>build script</span>}
-                  {hasCleanupScript && <span>cleanup script</span>}
-                  {hasDevScript && <span>dev script</span>}
+                  {hasSetupScript && <span>{t("workspaces:buildScriptChip")}</span>}
+                  {hasCleanupScript && <span>{t("workspaces:cleanupScriptChip")}</span>}
+                  {hasDevScript && <span>{t("workspaces:devScriptChip")}</span>}
                 </div>
               ) : null}
             </div>
@@ -399,7 +435,7 @@ function RepositoryPreview({
               }}
             >
               <IconEdit className="h-4 w-4" />
-              Edit
+              {t("workspaces:edit")}
             </Button>
             <Button
               type="button"
@@ -413,7 +449,7 @@ function RepositoryPreview({
               disabled={deleteLoading}
             >
               <IconTrash className="h-4 w-4" />
-              Delete
+              {t("workspaces:delete")}
             </Button>
           </div>
         </div>
@@ -442,6 +478,7 @@ function useRepositoryDelete(
   onDeleted: () => void,
 ) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [activeSessionCount, setActiveSessionCount] = useState(0);
   const [checkingCount, setCheckingCount] = useState(false);
@@ -465,8 +502,8 @@ function useRepositoryDelete(
       setDeleteOpen(true);
     } catch (error) {
       toast({
-        title: "Failed to check repository sessions",
-        description: error instanceof Error ? error.message : "Request failed",
+        title: t("workspaces:failedToCheckRepositorySessions"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
     } finally {
@@ -481,8 +518,8 @@ function useRepositoryDelete(
       onDeleted();
     } catch (error) {
       toast({
-        title: "Failed to delete repository",
-        description: error instanceof Error ? error.message : "Request failed",
+        title: t("workspaces:failedToDeleteRepository"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
     }
@@ -513,6 +550,7 @@ export function RepositoryCard({
   onDelete,
 }: RepositoryCardProps) {
   const { toast } = useToast();
+  const { t } = useTranslation();
   const [isEditing, setIsEditing] = useState(() => autoOpen);
   const saveRequest = useRequest(() => onSave(repository.id));
   const isDirty = isRepositoryDirty || areScriptsDirty;
@@ -523,8 +561,8 @@ export function RepositoryCard({
       await saveRequest.run();
     } catch (error) {
       toast({
-        title: "Failed to save repository",
-        description: error instanceof Error ? error.message : "Request failed",
+        title: t("workspaces:failedToSaveRepository"),
+        description: error instanceof Error ? error.message : t("common:requestFailed"),
         variant: "error",
       });
       throw error;

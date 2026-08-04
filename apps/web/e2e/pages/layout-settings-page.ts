@@ -40,6 +40,18 @@ export class LayoutSettingsPage {
     await expect(this.actions).toHaveAccessibleName(`Actions for ${name}`);
   }
 
+  async addPanel(name: string, touch = false): Promise<void> {
+    const trigger = this.page.getByTestId("layout-editor-add-panel").getByRole("button", {
+      name: "Add panel",
+    });
+    if (touch) await trigger.tap();
+    else await trigger.click();
+    const item = this.page.getByRole("menuitem", { name, exact: true });
+    if (touch) await item.tap();
+    else await item.click();
+    await expect(this.editor.locator(".dv-tab", { hasText: name })).toBeVisible();
+  }
+
   async removePanel(name: string): Promise<void> {
     await this.selectPanel(name);
     const button = this.actions.getByRole("button", { name: "Remove panel" });

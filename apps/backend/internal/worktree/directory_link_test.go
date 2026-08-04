@@ -6,8 +6,19 @@ import (
 	"testing"
 )
 
+// canonicalTempDir resolves symlinks in t.TempDir() so tests hand production
+// code a canonical owned control root (macOS /var -> /private/var).
+func canonicalTempDir(t *testing.T) string {
+	t.Helper()
+	d, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(TempDir): %v", err)
+	}
+	return d
+}
+
 func TestCreateOwnedDirectoryLinkCreatesLiveLinkInsideOwnedRoot(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "tasks", "task-1")
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	target := filepath.Join(t.TempDir(), "source")
 	if err := os.MkdirAll(target, 0o755); err != nil {
 		t.Fatal(err)
@@ -72,7 +83,7 @@ func seedOwnedDirectoryLink(t *testing.T, root, name, target string) {
 // inspected entry is still on disk afterwards, since it may be a link the user
 // or the repository keeps on purpose.
 func TestIsSelfReferentialDirectoryLinkDetectsSelfLink(t *testing.T) {
-	root := t.TempDir()
+	root := canonicalTempDir(t)
 	seedOwnedDirectoryLink(t, root, "self", root)
 
 	selfLink, err := IsSelfReferentialDirectoryLink(root, "self")
@@ -85,7 +96,7 @@ func TestIsSelfReferentialDirectoryLinkDetectsSelfLink(t *testing.T) {
 }
 
 func TestIsSelfReferentialDirectoryLinkIgnoresForeignLink(t *testing.T) {
-	root, target := t.TempDir(), t.TempDir()
+	root, target := canonicalTempDir(t), t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "live.txt"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +141,7 @@ func TestIsSelfReferentialDirectoryLinkIgnoresMissingEntry(t *testing.T) {
 // call must be a no-op. A path-text comparison rejected Windows junctions here
 // because filepath.EvalSymlinks does not traverse them.
 func TestEnsureOwnedDirectoryLinkIsIdempotent(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "tasks", "task-1")
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	target := t.TempDir()
 	if err := os.WriteFile(filepath.Join(target, "live.txt"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
@@ -156,7 +167,7 @@ func TestEnsureOwnedDirectoryLinkIsIdempotent(t *testing.T) {
 }
 
 func TestEnsureOwnedDirectoryLinkRejectsDifferentTarget(t *testing.T) {
-	root := filepath.Join(t.TempDir(), "tasks", "task-1")
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	target, other := t.TempDir(), t.TempDir()
 	if _, _, err := EnsureOwnedDirectoryLink(root, "api", target); err != nil {
 		t.Fatalf("EnsureOwnedDirectoryLink: %v", err)

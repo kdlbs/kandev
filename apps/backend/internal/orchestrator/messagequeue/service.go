@@ -66,6 +66,13 @@ func (s *Service) QueueMessage(ctx context.Context, sessionID, taskID, content, 
 // is propagated to the resulting Message row when the queued message is
 // drained (e.g. sender_task_id for messages sent via message_task_kandev).
 func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}) (*QueuedMessage, error) {
+	return s.queueMessageWithMetadata(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
+		s.MaxPerSession(),
+	)
+}
+
+func (s *Service) queueMessageWithMetadata(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, maxPerSession int) (*QueuedMessage, error) {
 	metadataCopy := copyMessageMetadata(metadata, 0)
 	msg := &QueuedMessage{
 		SessionID:   sessionID,
@@ -77,7 +84,6 @@ func (s *Service) QueueMessageWithMetadata(ctx context.Context, sessionID, taskI
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	maxPerSession := s.MaxPerSession()
 	if err := s.repo.Insert(ctx, msg, maxPerSession); err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.logger.Info("queue full",
@@ -120,6 +126,13 @@ func (s *Service) RestoreMessage(ctx context.Context, msg *QueuedMessage) (*Queu
 // inserts a new tail entry if allowInsert is true; otherwise ErrEntryNotFound is
 // returned. The returned bool is true when an existing entry was replaced.
 func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool) (*QueuedMessage, bool, error) {
+	return s.queueMessageWithCoalesceKey(
+		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
+		coalesceKey, allowInsert, s.MaxPerSession(),
+	)
+}
+
+func (s *Service) queueMessageWithCoalesceKey(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, coalesceKey string, allowInsert bool, maxPerSession int) (*QueuedMessage, bool, error) {
 	metadataCopy := copyMessageMetadata(metadata, 1)
 	metadataCopy[MetadataCoalesceKey] = coalesceKey
 	msg := &QueuedMessage{
@@ -132,7 +145,6 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 		Metadata:    metadataCopy,
 		QueuedBy:    userID,
 	}
-	maxPerSession := s.MaxPerSession()
 	queued, replaced, err := s.repo.InsertOrReplaceByCoalesceKey(ctx, msg, coalesceKey, maxPerSession, allowInsert)
 	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
@@ -151,6 +163,26 @@ func (s *Service) QueueMessageWithCoalesceKey(ctx context.Context, sessionID, ta
 		zap.Int64("position", queued.Position),
 		zap.Int("content_length", len(content)))
 	return queued, replaced, nil
+}
+
+// RequeueMessage retries work that was already admitted. It bypasses the
+// current admission cap so lowering capacity while a message is in flight
+// cannot discard that message. Coalesced retries retain replacement semantics.
+func (s *Service) RequeueMessage(ctx context.Context, msg *QueuedMessage, queuedBy, coalesceKey string) (*QueuedMessage, bool, error) {
+	if msg == nil {
+		return nil, false, errors.New("queued message is nil")
+	}
+	if coalesceKey != "" {
+		return s.queueMessageWithCoalesceKey(
+			ctx, msg.SessionID, msg.TaskID, msg.Content, msg.Model, queuedBy, msg.PlanMode,
+			msg.Attachments, msg.Metadata, coalesceKey, true, 0,
+		)
+	}
+	queued, err := s.queueMessageWithMetadata(
+		ctx, msg.SessionID, msg.TaskID, msg.Content, msg.Model, queuedBy, msg.PlanMode,
+		msg.Attachments, msg.Metadata, 0,
+	)
+	return queued, false, err
 }
 
 // QueueLifecycleMessageWithCoalesceKey accepts a lifecycle entry only while

@@ -422,7 +422,7 @@ function DisplayView({
     [entityReferences],
   );
   return (
-    <div className="group flex items-start gap-2 py-1.5">
+    <div className="group flex items-start gap-2 py-1.5" data-testid="queue-entry">
       <span className="flex items-center gap-1.5 mt-0.5 text-muted-foreground">
         <span
           aria-label={`Position ${positionLabel}`}

@@ -2,17 +2,140 @@ package orchestrator
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// TestBuildReviewTaskRequest_TruncatesTitle is the regression test for the
+// dropped-review-task bug: a PR whose "PR #<n>: <title>" string exceeds the
+// 60-rune task title limit must be shortened (prefix kept, ≤60 runes, trailing
+// ellipsis) so CreateReviewTask accepts it instead of rejecting the whole task.
+func TestBuildReviewTaskRequest_TruncatesTitle(t *testing.T) {
+	tests := []struct {
+		name      string
+		prTitle   string
+		wantExact string // when non-empty, the full expected title
+		wantTrunc bool
+	}{
+		{
+			name:      "short ascii unchanged",
+			prTitle:   "Fix login bug",
+			wantExact: "PR #42: Fix login bug",
+		},
+		{
+			name:      "long ascii truncated",
+			prTitle:   strings.Repeat("a", 100),
+			wantTrunc: true,
+		},
+		{
+			name:      "long multibyte not split",
+			prTitle:   strings.Repeat("é", 100),
+			wantTrunc: true,
+		},
+		{
+			// Prefix "PR #42: " is 8 runes, so a 52-rune PR title yields exactly
+			// the 60-rune limit and must pass through untouched (boundary case).
+			name:      "exactly at limit unchanged",
+			prTitle:   strings.Repeat("a", taskservice.TaskTitleMaxLength-len("PR #42: ")),
+			wantExact: "PR #42: " + strings.Repeat("a", taskservice.TaskTitleMaxLength-len("PR #42: ")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			evt := newReviewEvent()
+			evt.PR.Title = tt.prTitle
+			req := buildReviewTaskRequest(evt, nil, "acme/widget")
+
+			if got := utf8.RuneCountInString(req.Title); got > taskservice.TaskTitleMaxLength {
+				t.Fatalf("title = %d runes, want ≤ %d", got, taskservice.TaskTitleMaxLength)
+			}
+			if !utf8.ValidString(req.Title) {
+				t.Fatalf("title %q is not valid UTF-8; byte-based truncation split a rune", req.Title)
+			}
+			if err := taskservice.ValidateTaskTitle(req.Title); err != nil {
+				t.Fatalf("ValidateTaskTitle: %v", err)
+			}
+			if !strings.HasPrefix(req.Title, "PR #42:") {
+				t.Errorf("title %q lost the PR prefix", req.Title)
+			}
+			if tt.wantExact != "" && req.Title != tt.wantExact {
+				t.Errorf("title = %q, want %q", req.Title, tt.wantExact)
+			}
+			if tt.wantTrunc && !strings.HasSuffix(req.Title, "…") {
+				t.Errorf("truncated title %q should end with ellipsis", req.Title)
+			}
+		})
+	}
+}
+
+// TestBuildIssueTaskTitle_TruncatesTitle mirrors the review-title regression for
+// the GitHub issue watcher's "Issue #<n>: <title>" builder.
+func TestBuildIssueTaskTitle_TruncatesTitle(t *testing.T) {
+	tests := []struct {
+		name       string
+		issueTitle string
+		wantExact  string
+		wantTrunc  bool
+	}{
+		{
+			name:       "short ascii unchanged",
+			issueTitle: "Broken export",
+			wantExact:  "Issue #7: Broken export",
+		},
+		{
+			name:       "long ascii truncated",
+			issueTitle: strings.Repeat("b", 100),
+			wantTrunc:  true,
+		},
+		{
+			name:       "long multibyte not split",
+			issueTitle: strings.Repeat("ü", 100),
+			wantTrunc:  true,
+		},
+		{
+			// Prefix "Issue #7: " is 10 runes, so a 50-rune issue title yields
+			// exactly the 60-rune limit and must pass through untouched.
+			name:       "exactly at limit unchanged",
+			issueTitle: strings.Repeat("b", taskservice.TaskTitleMaxLength-len("Issue #7: ")),
+			wantExact:  "Issue #7: " + strings.Repeat("b", taskservice.TaskTitleMaxLength-len("Issue #7: ")),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := buildIssueTaskTitle(7, tt.issueTitle)
+
+			if n := utf8.RuneCountInString(got); n > taskservice.TaskTitleMaxLength {
+				t.Fatalf("title = %d runes, want ≤ %d", n, taskservice.TaskTitleMaxLength)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("title %q is not valid UTF-8; byte-based truncation split a rune", got)
+			}
+			if err := taskservice.ValidateTaskTitle(got); err != nil {
+				t.Fatalf("ValidateTaskTitle: %v", err)
+			}
+			if !strings.HasPrefix(got, "Issue #7:") {
+				t.Errorf("title %q lost the Issue prefix", got)
+			}
+			if tt.wantExact != "" && got != tt.wantExact {
+				t.Errorf("title = %q, want %q", got, tt.wantExact)
+			}
+			if tt.wantTrunc && !strings.HasSuffix(got, "…") {
+				t.Errorf("truncated title %q should end with ellipsis", got)
+			}
+		})
+	}
+}
 
 // countingReviewTaskCreator records how many times CreateReviewTask was called.
 type countingReviewTaskCreator struct {

@@ -149,7 +149,7 @@ describe("SettingsLayoutClient integrations actions", () => {
         </SettingsLayoutClient>,
       );
 
-      expect(screen.getByTestId("page-topbar-title").textContent).not.toBe("Message Queue");
+      expect(screen.getByTestId("page-topbar-title").textContent).toBe("Ḿēśśàĝē Qũēũē");
       expect(screen.getByTestId("settings-scroll-container").className).toContain(
         "overflow-y-auto",
       );

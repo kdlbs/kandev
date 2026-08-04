@@ -11,7 +11,9 @@ package system
 
 import (
 	"context"
+	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -35,6 +37,8 @@ import (
 	"github.com/kandev/kandev/internal/system/updates"
 	"go.uber.org/zap"
 )
+
+const e2eNPMRegistryURLEnv = "KANDEV_E2E_NPM_REGISTRY_URL"
 
 // BuildInfo holds the ldflag-injected build metadata that cmd/kandev
 // passes to Provide.
@@ -110,6 +114,12 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 				queuesettings.NewStore(settingsStore), wiring.MessageQueue, nil, log,
 			)
 		}
+		updatesOpts = append(updatesOpts, updates.WithSettingsStore(settingsStore))
+	}
+
+	updatesSvc := updates.NewService(pool, build.Version, nil, log, updatesOpts...)
+	if registryURL := e2eNPMRegistryURL(); registryURL != "" {
+		updatesSvc.SetNightlyURL(registryURL)
 	}
 
 	return &Service{
@@ -125,9 +135,16 @@ func Provide(cfg *config.Config, log *logger.Logger, pool *db.Pool, eventBus bus
 		FrontendErrors: frontenderrors.New(log, nil),
 		Metrics:        metricsSvc,
 		MessageQueue:   queueSettingsSvc,
-		Updates:        updates.NewService(pool, build.Version, nil, log, updatesOpts...),
+		Updates:        updatesSvc,
 		Restart:        restart.NewManagerFromEnv(),
 	}
+}
+
+func e2eNPMRegistryURL() string {
+	if os.Getenv("KANDEV_E2E_MOCK") != "true" {
+		return ""
+	}
+	return strings.TrimSpace(os.Getenv(e2eNPMRegistryURLEnv))
 }
 
 // RegisterRoutes mounts every system endpoint under /api/v1/system.
@@ -172,6 +189,7 @@ func (s *Service) RegisterRoutes(router *gin.Engine, log *logger.Logger) {
 
 	g.GET("/updates", updates.HandleGet(s.Updates))
 	admin.POST("/updates/check", updates.HandleCheck(s.Updates))
+	admin.PATCH("/updates/channel", updates.HandleSetChannel(s.Updates))
 	admin.POST("/updates/apply", updates.HandleApply(s.Updates))
 	g.GET("/restart-capability", restart.HandleCapability(s.Restart))
 	admin.POST("/restart", restart.HandleRequest(s.Restart))

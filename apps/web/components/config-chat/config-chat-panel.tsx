@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useCallback, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useShallow } from "zustand/react/shallow";
 import { IconArrowsMaximize, IconSparkles, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -24,11 +25,12 @@ function useConfigChatPanelStore() {
 }
 
 function PanelHeader({ onExpand, onClose }: { onExpand: () => void; onClose: () => void }) {
+  const { t } = useTranslation();
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-muted/30 pl-3">
       <div className="flex min-w-0 items-center gap-2">
         <IconSparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
-        <span className="truncate text-sm font-medium">Configuration Chat</span>
+        <span className="truncate text-sm font-medium">{t("common:configurationChat")}</span>
       </div>
       <div className="flex items-center">
         <Tooltip>
@@ -38,19 +40,19 @@ function PanelHeader({ onExpand, onClose }: { onExpand: () => void; onClose: () 
               variant="ghost"
               className="h-11 w-11 cursor-pointer rounded-none"
               onClick={onExpand}
-              aria-label="Open in Quick Chat"
+              aria-label={t("configChat:openInQuickChat")}
             >
               <IconArrowsMaximize className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Open in Quick Chat</TooltipContent>
+          <TooltipContent>{t("configChat:openInQuickChat")}</TooltipContent>
         </Tooltip>
         <Button
           size="icon"
           variant="ghost"
           className="h-11 w-11 cursor-pointer rounded-none"
           onClick={onClose}
-          aria-label="Close configuration chat"
+          aria-label={t("configChat:closePanel")}
         >
           <IconX className="h-4 w-4" />
         </Button>
@@ -133,6 +135,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
   setFloatingActionsHost,
 }: ConfigChatPanelProps) {
   const panel = useConfigChatPanelController(workspaceId);
+  const { t } = useTranslation();
 
   return (
     <Popover open={panel.isOpen} onOpenChange={panel.handleOpenChange}>
@@ -147,15 +150,15 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
                 "fixed bottom-[calc(1.5rem+var(--app-status-bar-height))] right-6 z-50 h-12 w-12 cursor-pointer rounded-full shadow-lg",
                 panel.isOpen && "pointer-events-none opacity-0",
               )}
-              aria-label="Configuration Chat"
+              aria-label={t("common:configurationChat")}
             >
               <IconSparkles className="h-6 w-6" />
             </Button>
           </PopoverTrigger>
         </TooltipTrigger>
         <TooltipContent side="left">
-          <p className="font-medium">Configuration Chat</p>
-          <p className="text-xs text-muted-foreground">Configure Kandev with natural language</p>
+          <p className="font-medium">{t("common:configurationChat")}</p>
+          <p className="text-xs text-muted-foreground">{t("configChat:tagline")}</p>
         </TooltipContent>
       </Tooltip>
       <PopoverContent

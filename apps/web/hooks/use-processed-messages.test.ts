@@ -421,3 +421,60 @@ describe("reconcileRenderItems", () => {
     expect(result).toHaveLength(2);
   });
 });
+
+function subagentCall(id: string, subagentType: string, turnId = "turn-1"): Message {
+  return {
+    ...makeMessage(id, "tool_call", {
+      status: "complete",
+      normalized: { kind: "subagent_task", subagent_task: { subagent_type: subagentType } },
+    }),
+    content: `${subagentType} on diff`,
+    turn_id: turnId,
+  };
+}
+
+// A subagent is another agent's turn, not a tool the agent used. Collapsing one
+// into a turn group hid entire review waves behind a "4 tool calls, 2 subagents"
+// row 50 messages up the transcript.
+describe("buildGroupedRenderItems subagent hoisting", () => {
+  it("renders subagents at top level and groups only the remaining tool calls", () => {
+    const items = buildGroupedRenderItems(
+      [
+        toolExecute("t1"),
+        toolExecute("t2"),
+        subagentCall("s1", "code-reviewer"),
+        subagentCall("s2", "test-supervisor"),
+      ],
+      "s1",
+      { canAnchorPrepareProgress: false },
+    );
+    expect(items.map((i) => i.type)).toEqual(["turn_group", "message", "message"]);
+    const group = items[0] as Extract<RenderItem, { type: "turn_group" }>;
+    expect(group.messages.map((m) => m.id)).toEqual(["t1", "t2"]);
+    expect(items.slice(1).map((i) => (i as { message: Message }).message.id)).toEqual(["s1", "s2"]);
+  });
+
+  it("emits no group when a turn's only activity is subagents", () => {
+    const items = buildGroupedRenderItems(
+      [subagentCall("s1", "code-reviewer"), subagentCall("s2", "test-supervisor")],
+      "s1",
+      { canAnchorPrepareProgress: false },
+    );
+    expect(items.map((i) => i.type)).toEqual(["message", "message"]);
+  });
+
+  it("keeps tool calls on both sides of a subagent grouped separately", () => {
+    const items = buildGroupedRenderItems(
+      [
+        toolExecute("t1"),
+        toolExecute("t2"),
+        subagentCall("s1", "code-reviewer"),
+        toolExecute("t3"),
+        toolExecute("t4"),
+      ],
+      "s1",
+      { canAnchorPrepareProgress: false },
+    );
+    expect(items.map((i) => i.type)).toEqual(["turn_group", "message", "turn_group"]);
+  });
+});

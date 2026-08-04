@@ -119,3 +119,9 @@ this task, `plan.md`, and spec status when the feature is genuinely complete.
   durable positions `4–7`; the live feature UI displays compact positions
   `#1–#4`. General navigation, the legacy redirect, and browser console are
   clean.
+- PR fixup GREEN: synced current `main`; preserved raw SQLite metadata guards;
+  made ordinary accepted-message retries bypass a lowered cap; corrected the
+  General route, redirect coverage, drain compaction, and environment
+  precedence docs; and scoped strict Playwright locators. Focused Go tests, 40
+  frontend unit tests, typecheck, both i18n gates, 58 public-doc tests, the
+  exact desktop queue scenario, and both mobile queue/settings scenarios pass.

@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { applyUpdate, fetchSystemInfo, fetchSystemJob } from "@/lib/api/domains/system-api";
+// Module-level `t`: resolved at call time, no JSX in this file for lint to see.
+import { t } from "@/lib/i18n";
 
 /**
  * Lifecycle of an in-UI self-update, from the user's perspective:
@@ -107,11 +109,11 @@ export function useSelfUpdate({
     setPhase("starting");
     writePersisted({ target: latestVersion, startedAt: Date.now() });
     try {
-      const res = await applyUpdate("UPDATE");
+      const res = await applyUpdate("UPDATE", latestVersion);
       setJobId(res.job_id);
       setPhase("installing");
     } catch (e) {
-      fail(e instanceof Error ? e.message : "Failed to start the update");
+      fail(e instanceof Error ? e.message : t("system:selfUpdateStartFailed"));
     }
   }, [latestVersion, fail]);
 
@@ -153,12 +155,12 @@ export function useSelfUpdate({
     const tick = async () => {
       if (Date.now() - startedAt > MAX_DURATION_MS) {
         if (!cancelled) {
-          fail("Update is taking longer than expected. Refresh to check the current version.");
+          fail(t("system:selfUpdateTimedOut"));
         }
         return;
       }
       if (await launchFailed(jobId)) {
-        if (!cancelled) fail("The update helper failed to start. Check the service logs.");
+        if (!cancelled) fail(t("system:selfUpdateHelperFailed"));
         return;
       }
       try {

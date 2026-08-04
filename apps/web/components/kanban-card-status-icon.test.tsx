@@ -7,7 +7,8 @@ import {
   IconMessageQuestion,
   IconShieldQuestion,
 } from "@tabler/icons-react";
-import { renderTaskStatusIcon } from "./kanban-card-content";
+import { renderToStaticMarkup } from "react-dom/server";
+import { renderSubagentCountChip, renderTaskStatusIcon } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
 
 function task(overrides: Partial<Task>): Task {
@@ -88,5 +89,47 @@ describe("renderTaskStatusIcon — waiting-for-input variants", () => {
       true,
     );
     expect(iconType(node)).toBe(IconShieldQuestion);
+  });
+});
+
+// active_subagent_count has been published end-to-end since the background-work
+// liveness work, and reached the store with no component reading it — rendering
+// it was an explicit non-goal of that spec. This is the follow-up.
+describe("renderSubagentCountChip", () => {
+  it("renders a chip carrying the count while subagents are live", () => {
+    const node = renderSubagentCountChip(task({ activeSubagentCount: 3 }), "3 subagents running");
+    expect(isValidElement(node)).toBe(true);
+    expect(renderToStaticMarkup(node)).toContain("3");
+  });
+
+  it("renders nothing at zero", () => {
+    expect(
+      renderSubagentCountChip(task({ activeSubagentCount: 0 }), "0 subagents running"),
+    ).toBeNull();
+  });
+
+  it("renders nothing when the field is absent", () => {
+    expect(renderSubagentCountChip(task({}), "0 subagents running")).toBeNull();
+  });
+
+  it("labels the chip with a pluralized count for assistive tech", () => {
+    expect(
+      renderToStaticMarkup(
+        renderSubagentCountChip(task({ activeSubagentCount: 1 }), "1 subagent running"),
+      ),
+    ).toContain('aria-label="1 subagent running"');
+    expect(
+      renderToStaticMarkup(
+        renderSubagentCountChip(task({ activeSubagentCount: 2 }), "2 subagents running"),
+      ),
+    ).toContain('aria-label="2 subagents running"');
+  });
+
+  it("uses the locale-subscribed label supplied by its component", () => {
+    expect(
+      renderToStaticMarkup(
+        renderSubagentCountChip(task({ activeSubagentCount: 1 }), "1 pšëúđø šûɓåĝëñŧ"),
+      ),
+    ).toContain('aria-label="1 pšëúđø šûɓåĝëñŧ"');
   });
 });

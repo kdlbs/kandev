@@ -54,6 +54,28 @@ npx -y kandev@latest
 
 If an npm policy such as `--omit=optional` prevents optional dependencies from being installed, Kandev cannot find its native runtime.
 
+### npm nightly
+
+Stable remains npm's default `latest` tag. To opt into the current prerelease from `main`, install
+or run the `nightly` tag explicitly:
+
+```bash
+npm install -g kandev@nightly
+kandev --version
+
+# One-off launch
+npx -y kandev@nightly
+```
+
+A nightly version has the form `X.Y.(Z+1)-nightly.sha<12-hex-character SHA prefix>`, based on the latest
+stable `X.Y.Z`. The launcher and all five platform runtime packages use that same immutable
+version. Nightlies are best-effort daily snapshots. A new one appears only when `main` has changed
+since the latest Stable release, so some days may have no new Nightly.
+
+Nightly does not move `latest` and does not publish a Homebrew formula, Desktop updater feed,
+container tag, Git tag, or GitHub Release. Use it for prerelease testing, not unattended production
+rollout.
+
 ## Start and stop
 
 `run` is the default command. These are equivalent:
@@ -205,13 +227,18 @@ Uninstalling the package does not remove `<home>`. Before removing that director
 
 ## Update
 
-The installer owns CLI updates:
+The installer owns CLI updates. Update persistent Stable installs with:
 
 ```bash
 brew upgrade kandev
 npm install -g kandev@latest
-npx -y kandev@latest
 ```
+
+Use `npm install -g kandev@nightly` for a persistent npm Nightly install. `npx -y kandev@latest`
+and `npx -y kandev@nightly` launch one-off copies from the requested channel; they do not update a
+global package. A verified managed npm/npx user service can also select **Nightly** under
+**Settings > System > Updates**. Stable is selected by default; Desktop, Homebrew, system-service,
+unmanaged, local-checkout, and unknown installs cannot change this setting.
 
 Release packages pin the shim and native runtime packages to the same SemVer. Do not copy only one binary from a different release into a bundle. A service unit contains installation-specific executable and bundle paths; after the package upgrade, reinstall it with the same service flags and restart it as described above.
 

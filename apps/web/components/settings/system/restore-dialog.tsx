@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Trans, useTranslation } from "react-i18next";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,12 @@ type Props = {
   name: string;
 };
 
+/**
+ * Never translated, for the same reason as the factory-reset token: the confirm
+ * button is gated on `typed === CONFIRM_TOKEN` and the token is sent to
+ * `restoreBackup`, and writing a snapshot over the live database is
+ * destructive. It travels as an interpolated value into every place it is shown.
+ */
 const CONFIRM_TOKEN = "RESTORE";
 
 function ConfirmView({
@@ -43,21 +50,27 @@ function ConfirmView({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <IconAlertTriangle className="h-5 w-5 text-destructive" />
-          Restore snapshot
+          {t("system:restoreTitle")}
         </DialogTitle>
         <DialogDescription className="space-y-2">
           <span>
-            Restore <code className="font-mono">{name}</code> over the current database. After the
-            staged copy is in place you will be asked to quit and relaunch Kandev so the new data is
-            loaded fresh - the backend does not auto-restart.
+            {/* `name` is the backup filename — a value, never translated. */}
+            <Trans i18nKey="system:restoreBody" values={{ name }}>
+              Restore <code className="font-mono">{name}</code> over the current database. After the
+              staged copy is in place you will be asked to quit and relaunch Kandev so the new data
+              is loaded fresh - the backend does not auto-restart.
+            </Trans>
           </span>
           <span className="block font-medium text-foreground">
-            Type <code>RESTORE</code> to enable the confirm button.
+            <Trans i18nKey="system:restoreTypeToConfirm" values={{ token: CONFIRM_TOKEN }}>
+              Type <code>{CONFIRM_TOKEN}</code> to enable the confirm button.
+            </Trans>
           </span>
         </DialogDescription>
       </DialogHeader>
@@ -65,7 +78,8 @@ function ConfirmView({
       <div className="space-y-3">
         <Input
           autoFocus
-          placeholder="Type RESTORE to confirm"
+          placeholder={t("system:restorePlaceholder", { token: CONFIRM_TOKEN })}
+          aria-label={t("system:restorePlaceholder", { token: CONFIRM_TOKEN })}
           value={typed}
           onChange={(e) => onTyped(e.target.value)}
           disabled={submitting}
@@ -81,7 +95,7 @@ function ConfirmView({
             className="flex items-center gap-2 text-sm text-muted-foreground"
             data-testid="system-restore-pending"
           >
-            <Spinner className="size-4" /> Writing the snapshot over the live database...
+            <Spinner className="size-4" /> {t("system:restoreWriting")}
           </div>
         )}
       </div>
@@ -94,7 +108,7 @@ function ConfirmView({
           className="cursor-pointer"
           data-testid="system-restore-cancel"
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           variant="destructive"
@@ -103,7 +117,7 @@ function ConfirmView({
           className="cursor-pointer"
           data-testid="system-restore-confirm"
         >
-          Restore
+          {t("system:restoreAction")}
         </Button>
       </DialogFooter>
     </>
@@ -111,18 +125,21 @@ function ConfirmView({
 }
 
 function SuccessView({ name, onClose }: { name: string; onClose: () => void }) {
+  const { t } = useTranslation();
   return (
     <>
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2">
           <IconCircleCheck className="h-5 w-5 text-emerald-500" />
-          Restore complete
+          {t("system:restoreCompleteTitle")}
         </DialogTitle>
         <DialogDescription>
           <span>
-            <code className="font-mono">{name}</code> has been written over the current database.
-            Quit and relaunch Kandev to load the restored data - the running backend still holds
-            connections to the previous version and will serve stale rows until you restart.
+            <Trans i18nKey="system:restoreCompleteBody" values={{ name }}>
+              <code className="font-mono">{name}</code> has been written over the current database.
+              Quit and relaunch Kandev to load the restored data - the running backend still holds
+              connections to the previous version and will serve stale rows until you restart.
+            </Trans>
           </span>
         </DialogDescription>
       </DialogHeader>
@@ -133,7 +150,7 @@ function SuccessView({ name, onClose }: { name: string; onClose: () => void }) {
           className="cursor-pointer"
           data-testid="system-restore-close"
         >
-          Close
+          {t("system:close")}
         </Button>
       </DialogFooter>
     </>
@@ -141,6 +158,7 @@ function SuccessView({ name, onClose }: { name: string; onClose: () => void }) {
 }
 
 export function RestoreDialog({ open, onOpenChange, name }: Props) {
+  const { t } = useTranslation();
   const [typed, setTyped] = useState("");
   const [jobId, setJobId] = useState<string | null>(null);
   const [requestPending, setRequestPending] = useState(false);
@@ -151,7 +169,8 @@ export function RestoreDialog({ open, onOpenChange, name }: Props) {
   const failed = job?.state === "failed";
   // submitting spans both the HTTP roundtrip and the in-flight backend job.
   const submitting = requestPending || (jobId !== null && !succeeded && !failed);
-  const error = requestError ?? (failed ? (job?.message ?? "Restore failed") : null);
+  // `job.message` is the backend's own diagnostic text and stays as sent.
+  const error = requestError ?? (failed ? (job?.message ?? t("system:restoreFailed")) : null);
   const enabled = typed === CONFIRM_TOKEN && !submitting && !succeeded;
 
   const handleClose = (next: boolean) => {
@@ -172,7 +191,7 @@ export function RestoreDialog({ open, onOpenChange, name }: Props) {
       const res = await restoreBackup(name, CONFIRM_TOKEN);
       setJobId(res.job_id);
     } catch (err) {
-      setRequestError(err instanceof Error ? err.message : "Restore request failed");
+      setRequestError(err instanceof Error ? err.message : t("system:restoreRequestFailed"));
     } finally {
       setRequestPending(false);
     }

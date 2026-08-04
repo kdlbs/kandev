@@ -53,6 +53,11 @@ export type MessageListProps = {
    * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
    * when the setting is off or on mobile. */
   stickyPromptBar?: ReactNode;
+  /** Current rendered height (px) of the anchored last-prompt bar's pinned
+   * overlay, or 0/undefined when it isn't showing. Lets a target scrolled
+   * to the top of the transcript (e.g. the unread "New" divider) reserve
+   * room for the overlay instead of being covered by it. */
+  anchoredBarHeight?: number;
 };
 
 /** Imperative handle exposed by `MessageList` and both rendering strategies,
@@ -180,6 +185,16 @@ export function isElementFullyVisible(container: HTMLElement, target: HTMLElemen
   const t = target.getBoundingClientRect();
   const tolerance = 0.5;
   return t.top >= c.top - tolerance && t.bottom <= c.bottom + tolerance;
+}
+
+/** Pixel offset to reserve at the top of the transcript for the anchored
+ * last-prompt bar's pinned overlay, so a scroll-into-view target (namely
+ * the unread "New" divider) lands below it instead of underneath it.
+ * Clamps an unmeasured/negative height to zero and rounds to whole pixels
+ * — callers feed this straight into a CSS `scroll-margin-top` or a
+ * Virtuoso `scrollToIndex` offset. */
+export function anchoredBarScrollOffsetPx(anchoredBarHeight: number | undefined): number {
+  return Math.max(0, Math.round(anchoredBarHeight ?? 0));
 }
 
 /** Only the latest ordinary agent row in the active turn can be the streaming reply. */

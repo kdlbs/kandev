@@ -47,7 +47,7 @@ function registerUpdateLifecycleTests() {
     await act(async () => {
       await result.current.start();
     });
-    expect(mocks.applyUpdate).toHaveBeenCalledWith("UPDATE");
+    expect(mocks.applyUpdate).toHaveBeenCalledWith("UPDATE", "v1.0.1");
     expect(result.current.phase).toBe("installing");
     expect(result.current.isUpdating).toBe(true);
     expect(JSON.parse(localStorage.getItem(STORAGE_KEY) as string).target).toBe("v1.0.1");

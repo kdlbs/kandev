@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
+import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent } from "@kandev/ui/card";
@@ -10,6 +11,7 @@ import { IconInfoCircle, IconPower, IconRotateClockwise } from "@tabler/icons-re
 import { useToast } from "@/components/toast-provider";
 import { useKandevRestart } from "@/hooks/domains/system/use-kandev-restart";
 import { fetchRuntimeFlags, updateRuntimeFlag } from "@/lib/api/domains/runtime-flags-api";
+import type { TFunction } from "i18next";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import type { RestartCapability } from "@/lib/types/system";
 import { FeatureToggleCard } from "./feature-toggle-card";
@@ -69,6 +71,7 @@ export function FeatureTogglesSettings({ initialFlags, restartCapability }: Prop
 }
 
 function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
+  const { t } = useTranslation();
   const [flags, setFlags] = useState(initialFlags);
   const [savedFlags, setSavedFlags] = useState(initialFlags);
   const [isLoadingFlags, setIsLoadingFlags] = useState(initialFlags.length === 0);
@@ -88,7 +91,7 @@ function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
         }
       } catch (err) {
         toast({
-          title: "Failed to load feature toggles",
+          title: t("system:featureTogglesLoadFailed"),
           description: errorMessage(err),
           variant: "error",
         });
@@ -98,7 +101,7 @@ function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
         }
       }
     },
-    [toast],
+    [toast, t],
   );
 
   useEffect(() => {
@@ -144,7 +147,7 @@ function useRuntimeFlagsDraft(initialFlags: RuntimeFlagState[]) {
       }
       setSavedFlags(persisted);
       setFlags((current) => (current === submitted ? persisted : current));
-      toast({ title: "Feature toggles saved", variant: "success" });
+      toast({ title: t("system:featureTogglesSaved"), variant: "success" });
     },
     discard: () => setFlags(savedFlags),
   });
@@ -169,12 +172,13 @@ function FeatureTogglesEmptyState({
   isLoading: boolean;
   onRetry: () => void;
 }) {
+  const { t } = useTranslation();
   if (isLoading) {
     return (
       <Card>
         <CardContent className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
           <Spinner className="size-4" />
-          Loading feature toggles...
+          {t("system:featureTogglesLoading")}
         </CardContent>
       </Card>
     );
@@ -182,9 +186,9 @@ function FeatureTogglesEmptyState({
   return (
     <Card>
       <CardContent className="py-6 text-sm text-muted-foreground">
-        Feature toggles could not be loaded.
+        {t("system:featureTogglesLoadError")}
         <Button variant="link" className="h-auto px-1 cursor-pointer" onClick={onRetry}>
-          Retry
+          {t("system:featureTogglesRetry")}
         </Button>
       </CardContent>
     </Card>
@@ -200,18 +204,19 @@ function RestartRequiredAlert({
   restarting: boolean;
   onRestart: () => void;
 }) {
+  const { t } = useTranslation();
   const supported = capability?.supported === true;
   return (
     <Alert className="border-border/70 bg-muted/30">
       <IconRotateClockwise className="h-4 w-4 text-muted-foreground" />
       <AlertTitle className="flex items-center gap-2">
-        Restart required
+        {t("system:restartRequired")}
         <RestartSupportInfo supported={supported} reason={capability?.reason} />
       </AlertTitle>
       <AlertDescription className="flex flex-col gap-3 text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
         <span>
-          Saved toggle changes will apply the next time Kandev starts.
-          {!supported && " Restart it from your terminal or service manager when convenient."}
+          {t("system:restartPendingChanges")}
+          {!supported && ` ${t("system:restartManualHint")}`}
         </span>
         {supported && (
           <Button
@@ -221,7 +226,7 @@ function RestartRequiredAlert({
             className="w-full cursor-pointer sm:w-auto"
           >
             <IconPower className="mr-1 h-3.5 w-3.5" />
-            Restart
+            {t("system:restartAction")}
           </Button>
         )}
       </AlertDescription>
@@ -236,32 +241,33 @@ function RestartSupportInfo({
   supported: boolean;
   reason: string | undefined;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-label="Restart support details"
+          aria-label={t("system:restartSupportDetails")}
           className="inline-flex h-6 w-6 cursor-help items-center justify-center rounded-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <IconInfoCircle className="h-4 w-4" />
         </button>
       </TooltipTrigger>
       <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
-        {restartSupportMessage(supported, reason)}
+        {restartSupportMessage(supported, reason, t)}
       </TooltipContent>
     </Tooltip>
   );
 }
 
-function restartSupportMessage(supported: boolean, reason: string | undefined): string {
-  if (supported) {
-    return "Restart from this page is available when Kandev is running under a supported local supervisor.";
-  }
-  return (
-    reason ??
-    "Automatic restart is not available in deploy previews, unmanaged terminal runs, or launch modes without a restart supervisor."
-  );
+/** `reason`, when present, is the backend's own explanation and stays as sent. */
+function restartSupportMessage(
+  supported: boolean,
+  reason: string | undefined,
+  t: TFunction,
+): string {
+  if (supported) return t("system:restartSupportedHelp");
+  return reason ?? t("system:restartUnsupportedHelp");
 }
 
 function errorMessage(err: unknown): string {
