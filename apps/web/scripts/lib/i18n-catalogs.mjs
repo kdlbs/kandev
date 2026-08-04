@@ -78,7 +78,7 @@ function messageParityIssues(sourceMessage, translatedMessage, context) {
   return issues;
 }
 
-export function realLocaleParityIssues(source, translated, locale) {
+function translatedValueIssues(translated, locale) {
   const issues = [];
   for (const [namespace, translatedMessages] of translated) {
     for (const [key, value] of translatedMessages) {
@@ -86,6 +86,11 @@ export function realLocaleParityIssues(source, translated, locale) {
       if (valueIssue) issues.push(valueIssue);
     }
   }
+  return issues;
+}
+
+function namespaceParityIssues(source, translated, locale) {
+  const issues = [];
   for (const namespace of source.keys()) {
     if (!translated.has(namespace)) {
       issues.push({ locale, namespace, type: "missing namespace" });
@@ -93,30 +98,51 @@ export function realLocaleParityIssues(source, translated, locale) {
     }
     const sourceMessages = source.get(namespace);
     const translatedMessages = translated.get(namespace);
-    for (const key of sourceMessages.keys()) {
-      if (!translatedMessages.has(key)) {
-        issues.push({ locale, namespace, type: "missing key", key });
-        continue;
-      }
-      const sourceMessage = sourceMessages.get(key);
-      const translatedMessage = translatedMessages.get(key);
-      if (typeof sourceMessage !== "string" || typeof translatedMessage !== "string") continue;
-      issues.push(
-        ...messageParityIssues(sourceMessage, translatedMessage, { locale, namespace, key }),
-      );
+    issues.push(
+      ...messageParityIssuesForNamespace(sourceMessages, translatedMessages, locale, namespace),
+    );
+  }
+  return issues;
+}
+
+function messageParityIssuesForNamespace(sourceMessages, translatedMessages, locale, namespace) {
+  const issues = [];
+  for (const key of sourceMessages.keys()) {
+    if (!translatedMessages.has(key)) {
+      issues.push({ locale, namespace, type: "missing key", key });
+      continue;
     }
-    for (const key of translatedMessages.keys()) {
-      if (!sourceMessages.has(key)) {
-        issues.push({ locale, namespace, type: "extra key", key });
-      }
+    const sourceMessage = sourceMessages.get(key);
+    const translatedMessage = translatedMessages.get(key);
+    if (typeof sourceMessage !== "string" || typeof translatedMessage !== "string") continue;
+    issues.push(
+      ...messageParityIssues(sourceMessage, translatedMessage, { locale, namespace, key }),
+    );
+  }
+  for (const key of translatedMessages.keys()) {
+    if (!sourceMessages.has(key)) {
+      issues.push({ locale, namespace, type: "extra key", key });
     }
   }
+  return issues;
+}
+
+function extraNamespaceIssues(source, translated, locale) {
+  const issues = [];
   for (const namespace of translated.keys()) {
     if (!source.has(namespace)) {
       issues.push({ locale, namespace, type: "extra namespace" });
     }
   }
   return issues;
+}
+
+export function realLocaleParityIssues(source, translated, locale) {
+  return [
+    ...translatedValueIssues(translated, locale),
+    ...namespaceParityIssues(source, translated, locale),
+    ...extraNamespaceIssues(source, translated, locale),
+  ];
 }
 
 export function formatParityIssue(issue) {
