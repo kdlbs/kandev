@@ -57,6 +57,23 @@ type GitHubPageClientProps = {
   repositories: Repository[];
 };
 
+function MobileFiltersButton({ show, onClick }: { show: boolean; onClick: () => void }) {
+  const { t } = useTranslation();
+  if (!show) return null;
+  return (
+    <Button
+      variant="outline"
+      size="icon-lg"
+      onClick={onClick}
+      className="md:hidden cursor-pointer"
+      data-testid="github-mobile-menu-button"
+      aria-label={t("github:openGithubFilters")}
+    >
+      <IconMenu2 className="h-4 w-4" />
+    </Button>
+  );
+}
+
 function NotAuthenticatedNotice({
   workspaceId,
   personalRequired,
@@ -509,21 +526,7 @@ export function GitHubPageClient({
       subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
       icon={<IconBrandGithub className="h-4 w-4" />}
       scroll="none"
-      actions={
-        loaded &&
-        authed && (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            onClick={onOpenMobileSidebar}
-            className="md:hidden cursor-pointer"
-            data-testid="github-mobile-menu-button"
-            aria-label={t("github:openGithubFilters")}
-          >
-            <IconMenu2 className="h-4 w-4" />
-          </Button>
-        )
-      }
+      actions={<MobileFiltersButton show={loaded && authed} onClick={onOpenMobileSidebar} />}
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
         {!loaded && (
