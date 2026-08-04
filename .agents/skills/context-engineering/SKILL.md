@@ -17,11 +17,10 @@ Feed the agent the right information at the right time. Too little context cause
 
 ## Kandev Loading Checklist
 
-Use one bootstrap action before any other shell command: run `rtk --version`
-and read `/root/.codex/RTK.md` through `rtk`, then resolve every `@path` import
-in the root or scoped `AGENTS.md`/`CLAUDE.md` files before subsequent actions.
-If `rtk` or the imported file is unavailable, use the direct shell only to load
-the missing instructions, report the fallback, and return to `rtk` where possible.
+Before running shell commands, resolve every `@path` import in the root or
+scoped `AGENTS.md`/`CLAUDE.md` files and read the referenced instructions.
+If an imported file is unavailable, note the missing guidance and continue with
+the best available local instructions.
 
 Before changing code:
 - Read the scoped `AGENTS.md` for the subtree you will touch, e.g. `apps/backend/AGENTS.md`, `apps/web/AGENTS.md`, or integration-specific guidance.

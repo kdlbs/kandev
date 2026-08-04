@@ -100,12 +100,12 @@ Run the focused checks appropriate to the change:
 
 - In a fresh worktree, run `pnpm install --frozen-lockfile` from `apps/` before
   any pnpm-based checks, tests, lint, or commits.
-- from `apps/backend`: `rtk go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`;
-- from the repository root: `rtk make -C apps/backend lint`;
-- from `apps`: `rtk pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts`;
-- from `apps/web`: `rtk pnpm run typecheck` and `rtk pnpm run lint`;
+- from `apps/backend`: `go test ./internal/runtimeflags ./internal/common/config ./internal/profiles`;
+- from the repository root: `make -C apps/backend lint`;
+- from `apps`: `pnpm --filter @kandev/web test -- lib/state/slices/features/features-contract.test.ts`;
+- from `apps/web`: `pnpm run typecheck` and `pnpm run lint`;
 - run affected E2E coverage when the gated surface is user-visible;
-- run `rtk git diff --check` before handoff.
+- run `git diff --check` before handoff.
 
 Report the flag key/env identity, profile defaults, every gated entry path,
 disabled/enabled test evidence, restart requirements, and whether the change is

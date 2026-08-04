@@ -125,20 +125,13 @@ qualifies as a successful hook receipt.
    changed copy and fail. Localize it and add matching `en`/`pseudo` catalog
    entries before retrying; verify with `cd apps/web && pnpm run i18n:check` and
    the normal hook receipt.
-   `rtk git commit` may emit only a condensed `ok <sha>` and hide hook output.
-   When a hook receipt is required, use the `rtk proxy git commit` capture
-   pattern below and report the hook IDs and results.
    Capture the normal hook stream in a temporary log while committing and use
    that log to record each hook ID and result. Do not infer hook results from a
    condensed launcher summary. For example:
    ```bash
    COMMIT_LOG="$(mktemp "${TMPDIR:-/tmp}/kandev-commit.XXXXXX.log")"
    set -o pipefail
-   if command -v rtk >/dev/null 2>&1; then
-     rtk proxy git commit -m "type(scope): description"
-   else
-     git commit -m "type(scope): description"
-   fi 2>&1 | tee "$COMMIT_LOG" >/dev/null
+   git commit -m "type(scope): description" 2>&1 | tee "$COMMIT_LOG" >/dev/null
    ```
    Read the log to extract the hook receipt, rather than printing the full
    stream again. Remove the exact temporary file after copying the receipt into

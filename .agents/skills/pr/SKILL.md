@@ -164,21 +164,14 @@ required screenshot embedding in step 7 is complete.
    ```bash
    set -euo pipefail
    PAYLOAD="/tmp/pr-body-<PR_NUMBER>-payload.json"
-   if command -v rtk >/dev/null 2>&1; then
-     rtk proxy jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
-     rtk proxy jq empty "$PAYLOAD"
-   else
-     jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
-     jq empty "$PAYLOAD"
-   fi
+   jq -n --rawfile body "<body-file>" '{body: $body}' > "$PAYLOAD"
+   jq empty "$PAYLOAD"
    gh api --method PATCH repos/:owner/:repo/pulls/<PR_NUMBER> --input "$PAYLOAD"
    ```
-   **RTK and JSON payloads:** RTK is optional. If it is installed, it
-   summarizes normal stdout, so it must not sit between a JSON producer and a
-   redirected file or another parser. The conditional recipe above keeps the
-   REST fallback byte-preserving whether or not RTK is installed.
-   The same rule applies to command substitutions, `xargs`, and any other
-   consumer that expects unmodified Git or JSON output.
+   **JSON payloads:** Use `jq` (or an equivalent JSON tool) to build and
+   validate payloads without interpolating untrusted Markdown into shell
+   syntax. Keep the REST fallback byte-preserving for command substitutions,
+   `xargs`, and any other consumer that expects unmodified Git or JSON output.
 
    **Preserve the existing PR description:** The PR body is a shared, mutable
    document. Preview automation and other bots may add sections after the PR
