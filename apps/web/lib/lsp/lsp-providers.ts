@@ -17,6 +17,10 @@ type LspRange = {
   end: { line: number; character: number };
 };
 
+type LspLocation = { uri: string; range: LspRange };
+type LspLocationLink = { targetUri: string; targetSelectionRange: LspRange };
+type LspDefinition = LspLocation | LspLocationLink;
+
 type JsonRpcConnection = {
   sendRequest(method: string, params: unknown): Promise<unknown>;
 };
@@ -50,6 +54,13 @@ function toMonacoRange(r: LspRange) {
 
 function toLspPosition(lineNumber: number, column: number) {
   return { line: lineNumber - 1, character: column - 1 };
+}
+
+function normalizeDefinitionLocation(definition: LspDefinition): LspLocation {
+  if ("targetUri" in definition) {
+    return { uri: definition.targetUri, range: definition.targetSelectionRange };
+  }
+  return definition;
 }
 
 function toMonacoCompletionKind(lspKind: number | undefined): number {
@@ -208,12 +219,13 @@ function registerDefinitionProvider(ctx: ProviderCtx): IDisposable {
           position: toLspPosition(position.lineNumber, position.column),
         });
         if (token.isCancellationRequested || !result) return null;
-        const defs = Array.isArray(result) ? result : [result];
-        ensureModelsExist(defs.map((d: { uri: string }) => d.uri));
-        return defs.flatMap((d: { uri: string; range: LspRange }) => {
-          const modelUri = getModelUri(d.uri);
+        const definitions = (Array.isArray(result) ? result : [result]) as LspDefinition[];
+        const locations = definitions.map(normalizeDefinitionLocation);
+        ensureModelsExist(locations.map((location) => location.uri));
+        return locations.flatMap((location) => {
+          const modelUri = getModelUri(location.uri);
           return modelUri
-            ? [{ uri: monaco.Uri.parse(modelUri), range: toMonacoRange(d.range) }]
+            ? [{ uri: monaco.Uri.parse(modelUri), range: toMonacoRange(location.range) }]
             : [];
         });
       } catch {
