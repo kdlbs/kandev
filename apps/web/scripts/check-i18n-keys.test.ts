@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 
 import { describe, expect, it } from "vitest";
 
-type Namespace = Record<string, string>;
+type Namespace = Record<string, string | number>;
 type Locale = Record<string, Namespace>;
 type Fixture = Record<string, Locale>;
 

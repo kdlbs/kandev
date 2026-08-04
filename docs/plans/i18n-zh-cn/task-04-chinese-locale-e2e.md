@@ -17,6 +17,9 @@ spec: "../../specs/platform/i18n.md"
 
 - Playwright proves selecting 简体中文 changes stable migrated copy and
   `<html lang>`, survives reload through the locale cookie, and restores English.
+- The `mobile-chrome` project proves the same selection, translated copy,
+  cookie persistence, reload, and English restoration on the supplied Pixel 5
+  viewport without a per-test viewport override.
 - The existing pseudo-locale scenario remains intact and passing.
 - A fresh desktop Chinese Appearance screenshot is captured, inspected for
   secrets and layout problems, stored under ignored `apps/web/.pr-assets/`, and
@@ -25,7 +28,8 @@ spec: "../../specs/platform/i18n.md"
 ## Verification
 
 ```bash
-cd apps/web && pnpm e2e:run tests/i18n/language-switch.spec.ts
+(cd apps/web && pnpm e2e:run --host --project chromium -- tests/i18n/language-switch.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome -- tests/i18n/mobile-language-switch.spec.ts)
 ```
 
 Add the Chinese scenario first and observe its expected RED result before the
@@ -35,6 +39,7 @@ relevant edit.
 ## Files likely touched
 
 - `apps/web/e2e/tests/i18n/language-switch.spec.ts`
+- `apps/web/e2e/tests/i18n/mobile-language-switch.spec.ts`
 - Ignored screenshot assets under `apps/web/.pr-assets/` only; never commit them
   to the feature branch.
 
@@ -61,24 +66,16 @@ files changed, blockers/risks, and synchronized task/plan status.
 
 ## Results
 
-- Added a Simplified Chinese scenario covering the `简体中文` option, canonical
-  `lang="zh-cn"`, stable `显示语言` copy, `kandev_locale=zh-cn`, reload
-  persistence, and restoration to English. The existing English and pseudo
-  scenarios remain unchanged and passing.
-- The Windows host run exposed an existing fixture cleanup defect: the POSIX
-  negative-PID signal path left the backend process tree alive. Added a
-  taskkill-based Windows branch with three focused lifecycle tests.
-- RED: `pnpm exec vitest run lib/e2e/backend-process.test.ts` failed 3/3 before
-  the Windows process-tree implementation existed. GREEN: the same command
-  passed 3/3.
-- The repository runner built all artifacts but its Windows global setup looked
-  for extensionless binaries. After using the built `.exe` through the existing
-  `KANDEV_E2E_BIN` override and installed Chrome through a temporary local-only
-  config, `pnpm exec playwright test --config
-e2e/playwright.local-chrome.config.ts --project=chromium
-tests/i18n/language-switch.spec.ts` passed 3/3 in 15.4 seconds. The temporary
-  config was removed after the run.
+- Desktop `language-switch.spec.ts` passed 3/3, including the existing pseudo
+  scenario and the Simplified Chinese selection, canonical `lang="zh-cn"`,
+  stable `显示语言` copy, `kandev_locale=zh-cn`, reload persistence, and
+  restoration to English.
+- Mobile `mobile-language-switch.spec.ts` passed 1/1 under the
+  `mobile-chrome` Pixel 5 project. It scopes options through the active listbox,
+  checks the Chinese label and cookie after selection and reload, then restores
+  English to prevent cookie leakage.
 - Captured
   `apps/web/.pr-assets/language-switch--simplified-chinese-locale-desktop.png`.
-  Manual review found no secrets, raw keys, broken layout, or overflow. English
-  copy on unmigrated sidebar surfaces is the documented migration boundary.
+  Manual review found no secrets, raw keys, broken interpolation, or overflow.
+  English copy on unmigrated sidebar surfaces is the documented migration
+  boundary. The screenshot remains ignored and is excluded from the branch.

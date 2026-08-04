@@ -35,8 +35,8 @@ checks without changing unrelated i18n migration scope.
 
 ### Catalogs and locale runtime
 
-- Add `apps/web/src/locales/zh-cn/*.json` for all 17 current namespaces,
-  mirroring all 3,100 current English keys while preserving interpolation
+- Add `apps/web/src/locales/zh-cn/*.json` for all 18 current namespaces,
+  mirroring all 3,300 current English keys while preserving interpolation
   variables, plural key suffixes, `<Trans>` tags, code tokens, shortcuts, and
   brand names.
 - `apps/web/lib/i18n/index.ts`: register `zh-cn`, label it with the fixed endonym
@@ -86,31 +86,28 @@ checks without changing unrelated i18n migration scope.
 - **Scenario:** GIVEN Appearance settings, WHEN 简体中文 is selected, THEN
   migrated copy and `<html lang="zh-cn">` appear, reload preserves both through
   the locale cookie, and the test restores English.
-- **File:** `apps/web/e2e/tests/i18n/language-switch.spec.ts`.
+- **Files:** `apps/web/e2e/tests/i18n/language-switch.spec.ts` and
+  `apps/web/e2e/tests/i18n/mobile-language-switch.spec.ts`.
 - **What to verify:** stable translated text, canonical document locale, cookie
-  persistence, reload behavior, and isolation from the existing pseudo test.
+  persistence, reload behavior, and isolation from the existing pseudo test on
+  both desktop and the `mobile-chrome` Pixel 5 project.
 - Capture a clean Chinese Appearance screenshot for the PR and manually inspect
   translated surfaces for raw keys, broken interpolation/tags, and overflow.
 
 ## Verification Results
 
 Implementation and focused verification are complete. The locale catalogs have
-exact parity across 17 namespaces and 3,100 frontend keys; the backend catalogs
-have exact parity across 34 messages. Focused frontend tests passed 28/28,
-backend locale/webapp packages passed, strict web lint and TypeScript checks
-passed, both i18n gates passed, the production web build passed, public-docs
-validation passed 58/58 across 41 pages, and the Chinese language-switch E2E
-passed 3/3 with a manually reviewed screenshot.
+exact parity across 18 namespaces and 3,300 frontend keys; the backend catalogs
+have exact parity across 34 messages. The focused frontend contract suite passed
+32/32, both i18n gates passed, web typecheck passed, the affected backend system
+suite and changed-code lint passed, and desktop and mobile language-switch E2E
+passed 3/3 and 1/1 respectively. The Chinese Appearance capture was manually
+reviewed and remains an ignored asset.
 
-The full Vitest run passed 8,408 tests with four skipped. The affected backend
-locale, webapp, and backendapp packages also passed. The repository-wide backend
-suite still fails in unrelated tests on this native Windows host because they
-require POSIX commands, Unix file modes, symlink privileges, or Unix path
-semantics. Root Make targets are also blocked by their POSIX `printf`
-dependency, so their underlying cross-platform commands were run directly.
-`golangci-lint` and `pre-commit` are not installed. The implementation was
-committed and pushed to the contributor fork; PR creation remains behind the
-user's explicit metadata review gate.
+The full repository Make wrappers were not rerun for this focused rebase fixup;
+their statuses and approved focused alternatives are recorded in Task 06. The
+branch remains limited to the locale catalogs, validator/tests, mobile E2E
+coverage, the backend test synchronization fix, and synchronized documentation.
 
 ---
 
@@ -142,7 +139,7 @@ Wave 5:
 
 ## Risks
 
-- Human review is required for 3,100 Chinese messages; key parity alone cannot
+- Human review is required for 3,300 Chinese messages; key parity alone cannot
   prove natural wording, preserved semantic tokens, or layout fit.
 - Node 24 and Corepack select pnpm 9.15.9 from `apps/package.json`. Go 1.26.0 is
   installed under the current user's program directory and registered in the

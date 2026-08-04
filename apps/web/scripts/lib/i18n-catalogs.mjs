@@ -52,6 +52,16 @@ function sameItems(left, right) {
   return left !== null && right !== null && JSON.stringify(left) === JSON.stringify(right);
 }
 
+function translatedValueIssue(value, context) {
+  if (typeof value !== "string") {
+    return { ...context, type: "non-string translated value" };
+  }
+  if (value.trim().length === 0) {
+    return { ...context, type: "empty translated value" };
+  }
+  return null;
+}
+
 function messageParityIssues(sourceMessage, translatedMessage, context) {
   const issues = [];
   if (
@@ -70,6 +80,12 @@ function messageParityIssues(sourceMessage, translatedMessage, context) {
 
 export function realLocaleParityIssues(source, translated, locale) {
   const issues = [];
+  for (const [namespace, translatedMessages] of translated) {
+    for (const [key, value] of translatedMessages) {
+      const valueIssue = translatedValueIssue(value, { locale, namespace, key });
+      if (valueIssue) issues.push(valueIssue);
+    }
+  }
   for (const namespace of source.keys()) {
     if (!translated.has(namespace)) {
       issues.push({ locale, namespace, type: "missing namespace" });
@@ -84,6 +100,7 @@ export function realLocaleParityIssues(source, translated, locale) {
       }
       const sourceMessage = sourceMessages.get(key);
       const translatedMessage = translatedMessages.get(key);
+      if (typeof sourceMessage !== "string" || typeof translatedMessage !== "string") continue;
       issues.push(
         ...messageParityIssues(sourceMessage, translatedMessage, { locale, namespace, key }),
       );

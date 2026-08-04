@@ -14,7 +14,7 @@ spec: "../../specs/platform/i18n.md"
 
 - `zh-cn` is supported and selectable in production with fixed label `简体中文`;
   only `pseudo` remains production-hidden.
-- All 17 Chinese namespace catalogs exactly mirror the English catalogs and
+- All 18 Chinese namespace catalogs exactly mirror the English catalogs and
   preserve variables, plural suffixes, `<Trans>` tags, tokens, and brand names.
 - Activation and boot restoration set i18next, `<html lang>`, and the locale
   cookie to `zh-cn`; Intl wrappers use Chinese locale data while pseudo uses en.
@@ -64,7 +64,7 @@ task/plan status.
 
 - RED: `pnpm exec vitest run lib/i18n/index.test.ts lib/i18n/boot.test.ts lib/i18n/formats.test.ts` failed 8 of 20 tests because `zh-cn` normalized to `en`, was absent from both selectable lists, and formatted with English Intl data.
 - GREEN: the same focused command passed 20 of 20 tests after registering the locale, loading the catalogs, and configuring i18next to retain the lowercase canonical resource id.
-- Catalogs: 17 namespaces and 3,100 keys; every namespace, key, and key order
+- Catalogs: 18 namespaces and 3,300 keys; every namespace, key, and key order
   matches English, with identical interpolation-placeholder and `<Trans>` tag
   sets. Two messages reorder named placeholders to follow natural Chinese
   grammar without changing their values or markup.

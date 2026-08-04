@@ -59,8 +59,10 @@ status.
 ## Results
 
 - RED: `pnpm exec vitest run scripts/check-i18n-keys.test.ts` passed only the complete fixture and failed four assertions because missing/extra real-locale namespaces and keys were ignored.
-- GREEN: the same command passed 5 of 5 fixture cases after extracting the locale catalog comparison helper and discovering every real locale except `en` and generated `pseudo`.
-- `pnpm run i18n:check` passed against current catalogs: 2,646 referenced keys,
-  3,100 English entries, 4 orphans (pre-existing), `pseudo` and `zh-cn` in sync,
-  50 `<Trans>` elements valid, and no inline plural or module-scope translation
+- GREEN: `pnpm exec vitest run scripts/check-i18n-keys.test.ts` passed all 12
+  fixture tests, including placeholder/tag drift and empty, whitespace-only, and
+  non-string translated values.
+- `pnpm run i18n:check` passed against current catalogs: 2,790 referenced keys,
+  3,300 English entries, 4 orphans (pre-existing), `pseudo` and `zh-cn` in sync,
+  53 `<Trans>` elements valid, and no inline plural or module-scope translation
   defects.
