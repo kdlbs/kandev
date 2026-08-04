@@ -21,6 +21,8 @@ spec: "../../specs/quick-terminal/spec.md"
 ## Files
 
 - `apps/web/components/settings/pty-terminal-dialog.tsx`
+- `apps/web/components/app-sidebar/app-sidebar-new-task-item.tsx`
+- `apps/web/components/app-sidebar/app-sidebar-new-task-item.test.tsx`
 - `apps/web/e2e/tests/terminal/quick-terminal.spec.ts`
 - `apps/web/e2e/tests/terminal/mobile-quick-terminal.spec.ts`
 - `docs/specs/quick-terminal/spec.md`
@@ -29,10 +31,14 @@ spec: "../../specs/quick-terminal/spec.md"
 ## Verification
 
 ```bash
-cd apps/web && pnpm exec vitest run components/quick-terminal/quick-terminal-provider.test.tsx
+cd apps/web && pnpm exec vitest run components/quick-terminal/quick-terminal-provider.test.tsx components/app-sidebar/app-sidebar-new-task-item.test.tsx components/kanban/kanban-header-mobile.test.tsx
 cd apps/web && pnpm run typecheck
+cd apps/web && pnpm exec eslint components/app-sidebar/app-sidebar-new-task-item.tsx components/app-sidebar/app-sidebar-new-task-item.test.tsx e2e/tests/terminal/quick-terminal.spec.ts
+cd apps && pnpm --filter @kandev/web run i18n:ratchet
+cd apps && pnpm --filter @kandev/web run i18n:check
 cd apps/web && pnpm e2e:run tests/terminal/quick-terminal.spec.ts tests/settings/host-shell-pty.spec.ts
 cd apps/web && pnpm e2e:run --project mobile-chrome tests/terminal/mobile-quick-terminal.spec.ts
+cd apps/backend && go test ./internal/agent/loginpty
 ```
 
 ## Root-cause reproduction
