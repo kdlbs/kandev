@@ -22,14 +22,11 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
   getMonacoInstance: mocks.getMonacoInstance,
   waitForMonacoInstance: mocks.waitForMonacoInstance,
 }));
-
 vi.mock("@/components/editors/monaco/builtin-providers", () => ({
   setBuiltinTsSuppressed: mocks.setBuiltinTsSuppressed,
+  withLspProviderRegistration: <T>(register: () => T) => register(),
 }));
-
-vi.mock("./lsp-providers", () => ({
-  registerLspProviders: mocks.registerLspProviders,
-}));
+vi.mock("./lsp-providers", () => ({ registerLspProviders: mocks.registerLspProviders }));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: mocks.getWebSocketClient,
@@ -110,6 +107,7 @@ describe("LSP editor readiness", () => {
     await Promise.resolve();
 
     expect(mocks.registerLspProviders).not.toHaveBeenCalled();
+    expect(mocks.setBuiltinTsSuppressed).not.toHaveBeenCalled();
     expect(lspClientManager.getStatus("session", "typescript")).toEqual({ state: "starting" });
     lspClientManager.openDocument("session", "typescript", {
       uri: primaryUri,

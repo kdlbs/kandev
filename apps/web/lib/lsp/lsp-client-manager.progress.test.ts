@@ -17,6 +17,7 @@ vi.mock("@/components/editors/monaco/monaco-init", () => ({
 
 vi.mock("@/components/editors/monaco/builtin-providers", () => ({
   setBuiltinTsSuppressed: mocks.setBuiltinTsSuppressed,
+  withLspProviderRegistration: <T>(register: () => T) => register(),
 }));
 
 vi.mock("./lsp-providers", () => ({

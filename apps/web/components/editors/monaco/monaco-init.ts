@@ -118,9 +118,9 @@ export function setMonacoDiagnostics(enabled: boolean) {
  * completions, definitions, references, etc.). When LSP is active these
  * should be suppressed to avoid duplicate results.
  *
- * Uses the shared flag in builtin-providers.ts which is checked both at
- * registration time (to decide whether to wrap a provider) and at call time
- * (to decide whether wrapped providers return empty results).
+ * Uses shared state in builtin-providers.ts: an explicit registration guard
+ * distinguishes LSP providers, while the suppression flag controls wrapped
+ * built-ins at call time.
  */
 export function setMonacoBuiltinProviders(enabled: boolean) {
   import("./builtin-providers").then(({ setBuiltinTsSuppressed }) => {

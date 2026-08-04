@@ -2,7 +2,7 @@ import * as monacoImport from "monaco-editor";
 import type { Monaco } from "@monaco-editor/react";
 import type { IDisposable } from "monaco-editor";
 import { loader } from "@monaco-editor/react";
-import { isBuiltinTsSuppressed } from "./builtin-providers";
+import { isBuiltinTsSuppressed, isLspProviderRegistrationActive } from "./builtin-providers";
 
 // Cast to Monaco type (from @monaco-editor/react) which has the full
 // languages.typescript typings. The main 'monaco-editor' export marks
@@ -19,10 +19,9 @@ const monaco = monacoImport as unknown as Monaco;
 // to wrap built-in TS/JS providers with a suppression flag check. When LSP
 // is active, the wrappers return null/empty instead of calling the original.
 //
-// Key: we check `isBuiltinTsSuppressed()` at REGISTRATION time. If the flag
-// is already true when a provider is registered, it means the LSP client is
-// registering its own providers — those should NOT be wrapped. Only providers
-// registered while the flag is false (Monaco's built-in ones) get wrapped.
+// Key: the LSP client marks its own synchronous provider registration with a
+// dedicated guard. Every other TS/JS provider is treated as a Monaco built-in
+// and wrapped, even if it loads lazily while runtime suppression is already on.
 // ---------------------------------------------------------------------------
 
 const TS_LANGUAGES = new Set(["typescript", "javascript", "typescriptreact", "javascriptreact"]);
@@ -92,15 +91,13 @@ if (typeof window !== "undefined") {
     emptyResult: unknown,
   ): ProviderRegistrationFn {
     return function (selector: string, provider: Record<string, unknown>, ...rest: unknown[]) {
-      // Only wrap providers for TS/JS languages that are registered while
-      // suppression is OFF (= Monaco's built-in providers). When suppression
-      // is already ON at registration time, it means the LSP client is
-      // registering its own providers — pass those through unwrapped.
+      // Only the LSP client's explicitly guarded registrations pass through.
+      // Lazy Monaco registrations remain wrapped regardless of suppression.
       if (
         typeof selector === "string" &&
         TS_LANGUAGES.has(selector) &&
         typeof provider[methodName] === "function" &&
-        !isBuiltinTsSuppressed()
+        !isLspProviderRegistrationActive()
       ) {
         const origMethod = (provider[methodName] as (...a: unknown[]) => unknown).bind(provider);
         const wrapped = Object.create(provider);

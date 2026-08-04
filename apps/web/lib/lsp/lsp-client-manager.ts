@@ -1,6 +1,9 @@
 import type { editor as monacoEditor, IDisposable } from "monaco-editor";
 import { getMonacoInstance, waitForMonacoInstance } from "@/components/editors/monaco/monaco-init";
-import { setBuiltinTsSuppressed } from "@/components/editors/monaco/builtin-providers";
+import {
+  setBuiltinTsSuppressed,
+  withLspProviderRegistration,
+} from "@/components/editors/monaco/builtin-providers";
 import { registerLspProviders } from "./lsp-providers";
 import { canonicalFileUri } from "./file-uri";
 import {
@@ -304,11 +307,6 @@ class LSPClientManager {
         this.editorState.handleDiagnostics(conn, params as PublishDiagnosticsParams);
       });
 
-      // Suppress Monaco's built-in TS/JS providers BEFORE registering our LSP providers.
-      if (lspLanguage === "typescript") {
-        this.addTypeScriptConnection(conn.ownerId);
-      }
-
       // Collect callbacks for semantic token refresh
       const semanticRefreshCallbacks: (() => void)[] = [];
       rpc.onRequest("workspace/semanticTokens/refresh", () => {
@@ -335,14 +333,23 @@ class LSPClientManager {
         this.editorState.applyCachedDiagnostics(conn, model);
       }
 
-      // Register Monaco providers for this language
+      // Monaco's provider wrappers are installed once its module is ready.
+      // Only then suppress built-ins and explicitly mark our registration so
+      // lazy built-ins that arrive later are still wrapped.
+      if (lspLanguage === "typescript") {
+        this.addTypeScriptConnection(conn.ownerId);
+      }
+
+      // Register Monaco providers for this language.
       conn.providerDisposables.push(
-        ...this.registerProviders(
-          rpc,
-          lspLanguage,
-          conn,
-          conn.serverCapabilities,
-          semanticRefreshCallbacks,
+        ...withLspProviderRegistration(() =>
+          this.registerProviders(
+            rpc,
+            lspLanguage,
+            conn,
+            conn.serverCapabilities,
+            semanticRefreshCallbacks,
+          ),
         ),
       );
       conn.initialized = true;
