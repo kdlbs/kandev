@@ -39,3 +39,13 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the fixture paths and shape, which spec failure
   modes each one pins, exact commands/results, and update only this task's
   status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/agentctl/server/adapter/transport/acp/...`: passed.
+- Fixtures live under
+  `apps/backend/internal/agentctl/server/adapter/transport/acp/testdata/` and are
+  replayed by `fold_handoff_fixture_test.go`, pinning the observed fold-handoff
+  wire shape and background-work survival across the turn boundary.

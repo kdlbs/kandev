@@ -42,3 +42,27 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the ADR path, the scenario→test coverage table with
   any gaps named, the public-docs decision, exact commands/results, and update
   only this task's status plus the plan's overall status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/...`: every package this feature
+  touches passed. Three unrelated packages failed on this host and none is
+  touched by the PR:
+  - `internal/agentctl/server/config` — `TestCollectAgentEnvGitHubCLIShimSurvivesLoginShell`
+    reproduces identically on clean `main`; it resolves the host's real
+    `gh` (`/opt/homebrew/bin/gh`), so it is host-environment dependent.
+  - `internal/agent/runtime/routingerr` and `internal/repoclone` — both pass when
+    re-run in isolation; they are parallel-load flakes under the full `-race` run.
+- `make -C apps/backend lint`: `0 issues.`
+- `cd apps/web && pnpm run typecheck`: passed.
+- `cd apps/web && pnpm lint`: passed.
+- `cd apps/web && pnpm test`: 8431 passed. The 6 failures are pre-existing on
+  clean `main` in files this PR does not touch (see task-02's record).
+- `cd apps/web && pnpm run i18n:check`: passed.
+- `cd apps/web && pnpm e2e`: not run locally (see task-08) — CI on head `33a4dc3`
+  passed all 14 E2E shards and all 6 container shards.
+- ADR: `docs/decisions/2026-08-04-mid-turn-steering.md`, indexed in
+  `docs/decisions/INDEX.md`, superseding ADR-0049's mid-turn-steering non-goal
+  for the steer-capable case.

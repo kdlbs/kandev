@@ -37,3 +37,20 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the affordance states and their conditions, the new
   i18n keys, the pseudo-locale check, exact commands/results, and update only
   this task's status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/web && pnpm run typecheck`: passed.
+- `cd apps/web && pnpm lint`: passed (`eslint --max-warnings 0`).
+- `cd apps/web && pnpm test`: passed for every steering-related suite —
+  `use-chat-input-container.test.ts` (7/7, including the steer-placeholder
+  precedence case) and `session-input-mode.test.ts`. The 6 failures in the full
+  run are pre-existing on clean `main` in untouched files (see task-02's record).
+- `cd apps/web && pnpm run i18n:check`: passed — keys OK, `<Trans>` indices OK,
+  no inline English plurals, no module-scope `t()`.
+- `cd apps/web && pnpm run i18n:ratchet`: passed — 0 added + 9 modified files
+  clean, guard allowlist intact (243 entries).
+- New key: `chat:composerSteerPlaceholder`, present in `en` and in sync in the
+  pseudo-locale (confirmed by `i18n:check`).

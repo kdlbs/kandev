@@ -38,3 +38,12 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the admission predicate, the order and
   single-steer rules, the concurrency test evidence, `-race` results, and update
   only this task's status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/orchestrator/...`: passed.
+- Admission predicate, order rule (never jumps a non-empty queue) and the
+  single-in-flight-steer rule are covered by `orchestrator/steer_test.go`,
+  including its concurrent-submission case, under `-race`.

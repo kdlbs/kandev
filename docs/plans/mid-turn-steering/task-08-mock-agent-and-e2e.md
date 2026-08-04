@@ -36,3 +36,15 @@ spec: "../../specs/platform/mid-turn-steering.md"
   nothing about task 01.
 - **Output contract:** Report the mock's replay modes, the four E2E scenarios and
   their assertions, exact commands/results, and update only this task's status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./cmd/mock-agent/...`: passed.
+- `cd apps/web && pnpm e2e`: **not run locally** — the full Playwright suite is
+  CI-owned for this branch. CI on head `33a4dc3` passed all 14 E2E shards plus
+  the 6 container shards, which covers `e2e/tests/chat/mid-turn-steering.spec.ts`
+  (delivers-mid-turn with the flag on, queues-when-off with it off).
+- The mock agent advertises `_meta.claudeCode.promptQueueing` so the e2e session
+  negotiates steer-eligibility over the same path a real bridge uses.

@@ -154,6 +154,19 @@ a steer is the single new reason a `RUNNING` session accepts direct input.
   ineligible before dispatch, or there was no live turn to fold into — degrades to
   an ordinary prompt.
 
+### Outcome taxonomy
+
+Four distinct outcomes are specified above, and only the last one is an error.
+Collapsing them is the mistake this table exists to prevent — in particular,
+"the agent refused the concurrent prompt" is a **success**, not a failure.
+
+| Outcome | When | Operator sees |
+|---|---|---|
+| **Steered** | The agent accepted the concurrent prompt and folded it into the running turn. | The message acts on the running turn. |
+| **Deferred** | The agent accepted the concurrent prompt but ran it as the next turn — including an agent that refuses concurrency outright, and an installation whose CLI is too old to fold. | Reported as queued. Correct transcript, **no error**. |
+| **Degraded to an ordinary prompt** | The steer provably never reached the agent: the session became ineligible before dispatch, or there was no live dispatched turn to fold into (admitted-but-not-dispatched, or already completed). | Ordinary queue behavior, in submission order. **No error.** |
+| **Errored** | The write or its acknowledgement failed *ambiguously* — delivery to the agent cannot be ruled out. | The error surfaces. The message is **never** re-sent, because it may already be in flight. |
+
 ## Known residuals
 
 These are narrow, accepted windows inherent to opportunistic steering over an

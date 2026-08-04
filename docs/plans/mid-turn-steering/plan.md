@@ -225,3 +225,18 @@ cd apps && pnpm install --frozen-lockfile
 
 - [`assets/mid-turn-steering-composer.png`](assets/mid-turn-steering-composer.png) — the
   composer showing the steer-delivery affordance on a steer-eligible session.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`. Per-task command
+results are recorded in each task file's own `## Validation Results` section.
+
+- `cd apps/backend && go test -race ./internal/...`: passed for every package
+  this plan touches; three unrelated failures on this host are itemized and
+  attributed in `task-09-adr-and-verification.md`.
+- `make -C apps/backend lint`: `0 issues.`
+- `cd apps/web && pnpm run typecheck && pnpm lint && pnpm run i18n:check && pnpm run i18n:ratchet`: all passed.
+- `cd apps/web && pnpm test`: 8431 passed; the 6 failures are pre-existing on
+  clean `main` in files this plan does not touch.
+- `cd apps/web && pnpm e2e`: CI-owned for this branch; green on head `33a4dc3`
+  across all 14 E2E shards and all 6 container shards.

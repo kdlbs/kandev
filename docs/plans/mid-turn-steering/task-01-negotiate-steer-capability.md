@@ -42,3 +42,16 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the capability-read helper's contract, the
   fail-closed cases covered, that both former name-comparison sites are gone,
   exact commands/results, and update only this task's status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/agentctl/server/adapter/transport/acp/... ./internal/agentctl/types/streams/... ./internal/orchestrator/...`: passed.
+- Capability read: `acp/prompt_queueing.go` reads
+  `agentCapabilities._meta.claudeCode.promptQueueing` once at `initialize` and
+  caches it on the adapter.
+- Fail-closed cases covered by test: nil `_meta`, wrong-typed `claudeCode`,
+  non-bool `promptQueueing`, and absent key — all resolve to ineligible without
+  panicking.
+- Both former `agentID ==` name comparisons are gone; `grep -rn 'agentID ==' internal/agentctl/server/adapter/transport/acp/` returns no capability gate.

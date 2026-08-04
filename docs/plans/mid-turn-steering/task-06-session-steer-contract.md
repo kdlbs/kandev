@@ -35,3 +35,17 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the field name and type on each of the four
   payloads, the derivation predicate, restart behavior, exact commands/results,
   and update only this task's status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/orchestrator/... ./internal/backendapp/...`: passed.
+- `cd apps/web && pnpm run typecheck`: passed.
+- `cd apps/web && pnpm test`: passed for every steering-related suite; the 6
+  failures in the full run are pre-existing on clean `main` in untouched files
+  (see task-02's record).
+- Contract: `supports_steering` (bool) is carried on the session DTO and the
+  session-scoped WS payloads, derived from flag ∧ negotiated capability ∧
+  RUNNING-and-generating. It is a runtime projection, never persisted, so a
+  restart re-derives it rather than resurrecting a stale value.

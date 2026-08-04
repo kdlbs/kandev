@@ -47,3 +47,19 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the steer transfer trigger, how predecessor
   finalization is suppressed, the cancel and session-replacement behavior,
   `-race` results, and update only this task's status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/agentctl/server/adapter/transport/acp/...`: passed.
+- Steer transfer trigger: `beginSteerHandoff` (`adapter_prompt_cancel.go`) hands
+  the in-flight turn off at the operator's send; the successor then inherits the
+  gate token via `tryTransferPromptTurn`. Synthetic (generation 0) prompts set
+  `allowHandoff=false` and can neither trigger nor consume the transfer.
+- Predecessor finalization is suppressed by `claimPromptTurnCompletion`, which
+  refuses a turn that no longer owns the gate, and by
+  `protectActiveBackgroundWorkForHandoff`, which keeps the predecessor's live
+  background work out of the successor's prompt-end sweep.
+- Cancel and session-replacement behavior is covered by the adapter tests;
+  `finishPromptTurn` releases the gate on every exit path, handed off or not.

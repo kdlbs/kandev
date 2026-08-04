@@ -35,3 +35,21 @@ spec: "../../specs/platform/mid-turn-steering.md"
 - **Output contract:** Report the registration, the three profile values, the
   precedence test evidence, exact commands/results, and update only this task's
   status.
+
+## Validation Results
+
+Re-run on 2026-08-04 against the branch merged with `main`.
+
+- `cd apps/backend && go test -race ./internal/runtimeflags/... ./internal/profiles/... ./internal/common/config/...`: passed.
+- `cd apps/web && pnpm test`: passed for every steering-related suite. The full
+  run reports 8431 passed / 6 failed, and all 6 failures are pre-existing on
+  clean `main` in files this PR does not touch
+  (`lib/http-git-server.test.ts`, which needs a running Docker bridge, and
+  `hooks/domains/settings/use-automation-runs.test.ts`).
+- Registration: `features.claudeMidTurnSteering` in
+  `runtimeflags/registry.go`, env `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
+  high-risk, restart-required.
+- Profile values: `prod: "false"`, `dev: "false"`, `e2e: "false"` — off in all
+  three shipped profiles.
+- Precedence (explicit env > SQLite override > profile default) is covered by
+  the existing registry/config tests, which pass unchanged.
