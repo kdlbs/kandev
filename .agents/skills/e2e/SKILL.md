@@ -251,7 +251,7 @@ Before writing an E2E test, validate the feature works interactively using `play
 
 ### Start the dev environment
 
-Multiple agents may run in parallel, so use random ports to avoid collisions. Fixture ports auto-offset from 18080 (backend) and 13000 (frontend) using `E2E_PORT_OFFSET` (derived from `PID % 30` by default) — stay outside those ranges. Parallel E2E test runs are safe by default.
+Multiple agents may run in parallel, so use random ports for dev servers. Managed runner shards are isolated, but separate raw Playwright processes are not automatically safe: fixture ports are backend `18080 + E2E_PORT_OFFSET + workerIndex` and agentctl `30001 + E2E_PORT_OFFSET*1000 + workerIndex*200`; `--repeat-each` advances `workerIndex`, so nearby fixed offsets can overlap later.
 
 ```bash
 OFFSET=$((RANDOM % 100))
@@ -421,7 +421,7 @@ When a test fails:
 
 - **"Backend did not become healthy"** — run `make build-backend build-web`, check with `E2E_DEBUG=1`
 - **"Cannot find module"** — run `cd apps && pnpm install --frozen-lockfile`
-- **Port conflicts** — backends use 18080+ and frontends use 13000+ (per worker), auto-offset by `E2E_PORT_OFFSET` (derived from PID). Set `E2E_PORT_OFFSET=0` for deterministic ports
+- **Port conflicts** — run raw repeat/stress invocations sequentially, or prove both computed port ranges are disjoint and check listeners. A totally white screenshot plus `ERR_CONNECTION_REFUSED` is a port/lifecycle signature to rule out before changing waits; never fix it with longer locator timeouts.
 - **Responsive layout stays stale after `page.setViewportSize()`** — record
   `window.innerWidth`, the affected element and parent `clientWidth`, and any
   layout-library width before changing waits. Headless Chromium reliably

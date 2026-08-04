@@ -14,6 +14,9 @@ Apply this guidance whenever editing `.github/**`.
   normalized repository-relative paths, regular-file type, response path,
   size, encoding, and content. Do not grant generic `gh api`, arbitrary
   interpreters, or broad Bash merely to read PR files.
+- PR label/metadata cleanup jobs that operate on pull requests must declare
+  `pull-requests: write`, not `issues: write`; mirror the permission shape used
+  by `preview-env.yml`.
 - For workflow security changes, run the relevant raw workflow-contract tests,
   `python3 .github/scripts/lint-action-pinning_test.py`, `zizmor .github/workflows`,
   and `git diff --check`.

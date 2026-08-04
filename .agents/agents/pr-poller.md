@@ -4,7 +4,7 @@ description: Read-only, low-cost PR monitor. Use only after the user explicitly 
 tools: Bash
 model: haiku
 effort: low
-maxTurns: 12
+maxTurns: 44
 ---
 
 # PR Poller

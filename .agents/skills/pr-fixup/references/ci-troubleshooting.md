@@ -173,6 +173,18 @@ past a valid race, leak, or product defect because it appears unrelated; fix it
 and exercise the affected package without retry masking. Only an evidenced
 external dependency or infrastructure fault is exempt from code remediation.
 
+If a Backend Tests shard log names only `fail: github.com/.../package` without
+the test name, download its matching `backend-test-results-<shard>` artifact:
+
+```bash
+gh run download <run-id> --name backend-test-results-<shard> --dir <temp>
+rg -n '"Action":"fail"' <temp>
+```
+
+The artifact JSONL may start with `go: downloading ...` or other non-JSON
+preamble lines; skip those lines when parsing so the recorded test name can be
+reproduced exactly.
+
 ## E2E Failures
 
 If any failing check is an E2E test:
@@ -215,3 +227,17 @@ instead of repeatedly dumping the full checks table:
 gh run view <run-id> --json status,conclusion,jobs \
   --jq '{status, conclusion, remaining: [.jobs[] | select(.status != "completed" or .conclusion != "success") | {name, status, conclusion}]}'
 ```
+
+For an explicit user requirement that an E2E run contain no flakes or retries,
+run the deterministic blob audit after the exact-head E2E merge report
+completes:
+
+```bash
+python3 scripts/playwright-blob-audit <downloaded-blob-report-dir>
+```
+
+It recursively reads `report-*.zip` and `report.jsonl` artifacts, reports
+attempts, retry attempts, `onTestEnd` status counts, and results with errors,
+and exits nonzero for retries, errors, parse failures, or unexpected statuses.
+Do not make this extra artifact audit part of ordinary PR fixup; a normal green
+aggregate check is sufficient unless the no-flakes requirement is explicit.

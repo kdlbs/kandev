@@ -220,6 +220,11 @@ and compare local `HEAD`, the upstream branch tip, and `pr.head_ref_oid`. Then
 rerun `scripts/pr-resolve list <PR>` and `scripts/pr-state --summary <PR>`;
 distinguish stale failures from current-head failures and report pending checks
 separately. Use `--force-with-lease`, never an unconditional force-push.
+If the rebase or conflict resolution touched `AGENTS.md`, `CLAUDE.md`, or a
+skill/reference file, also run `python3 scripts/lint-harness-files.test.py` and
+`python3 .github/scripts/lint-harness-files.py --all` before pushing. Run
+`git diff --check` and inspect `wc -l` for each changed harness file so upstream
+additions cannot push a file past its line budget.
 
 ## 5. Re-check
 

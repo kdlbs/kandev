@@ -501,6 +501,7 @@ test-scripts:
 	@python3 scripts/opencode-code-review.test.py
 	@python3 scripts/lint-harness-files.test.py
 	@python3 scripts/lint-architecture.test.py
+	@python3 scripts/playwright-blob-audit.test.py
 	@bash scripts/release-desktop.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py

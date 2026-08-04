@@ -120,6 +120,11 @@ qualifies as a successful hook receipt.
 5. **Commit:** Write a commit message following the format above. If changes span multiple concerns, consider separate commits.
    If a formatter changes files and prevents the commit, review and re-stage
    those files, then create a new commit attempt; do not use `--amend`.
+   If a JSX layout-only edit touches an element containing an existing
+   hardcoded user-facing literal, `i18n-new-code` may classify that literal as
+   changed copy and fail. Localize it and add matching `en`/`pseudo` catalog
+   entries before retrying; verify with `cd apps/web && pnpm run i18n:check` and
+   the normal hook receipt.
    `rtk git commit` may emit only a condensed `ok <sha>` and hide hook output.
    When a hook receipt is required, use the `rtk proxy git commit` capture
    pattern below and report the hook IDs and results.
@@ -141,6 +146,9 @@ qualifies as a successful hook receipt.
    ```bash
    unlink "$COMMIT_LOG"
    ```
+   If the commit exits nonzero, preserve and print the full or bounded log
+   before cleanup so hook diagnostics are not lost. Remove the temporary log
+   only after copying a successful hook receipt or recording the failed output.
 
    If a hook fails only because another worktree is already running
    golangci-lint (for example, `parallel golangci-lint is running`), wait for
