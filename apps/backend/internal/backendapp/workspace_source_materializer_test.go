@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 type remoteWorkspaceMaterializerStub struct {
@@ -475,6 +476,37 @@ func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *te
 	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
 	if err != nil || env.WorkspacePath != source {
 		t.Fatalf("workspace path = %q, %v; want original %q", env.WorkspacePath, err, source)
+	}
+}
+
+func TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails(t *testing.T) {
+	ctx := context.Background()
+	repo := newMaterializerRepo(t)
+	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
+	root := filepath.Join(tasksBase, "task-1")
+	mgr := newMaterializerWorktreeMgr(t, root)
+	original := filepath.Join(canonicalTempDir(t), "original-notes")
+	replacement := filepath.Join(canonicalTempDir(t), "replacement-notes")
+	for path, content := range map[string]string{original: "before", replacement: "after"} {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(path, "note.txt"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	seedWorkspaceSourceTask(t, repo, original)
+	if _, err := worktree.CreateOwnedDirectoryLink(root, "notes", original); err != nil {
+		t.Fatalf("seed owned directory link: %v", err)
+	}
+
+	materializer := &workspaceSourceMaterializer{repo: repo, worktreeMgr: mgr, rescanner: &workspaceSourceRescanStub{err: os.ErrPermission}, logger: newTestLogger()}
+	batch := &models.WorkspaceSourceBatch{TaskID: "task-1", Sources: []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{DisplayName: "notes", LocalPath: replacement}}}}
+	if _, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", batch); err == nil {
+		t.Fatal("MaterializeWorkspaceSources succeeded despite failed adoption")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "notes", "note.txt")); err != nil || string(got) != "before" {
+		t.Fatalf("repointed link after rollback = %q, %v; want original target restored", got, err)
 	}
 }
 

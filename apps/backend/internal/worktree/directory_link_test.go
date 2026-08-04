@@ -3,7 +3,10 @@ package worktree
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 // canonicalTempDir resolves symlinks in t.TempDir() so tests hand production
@@ -79,6 +82,19 @@ func seedOwnedDirectoryLink(t *testing.T, root, name, target string) {
 	}
 }
 
+func testOwnedDirectoryLinkOwner() OwnedDirectoryLinkOwner {
+	return OwnedDirectoryLinkOwner{TaskID: "task-1", TaskDirName: "task-1"}
+}
+
+func writeOwnershipMarker(t *testing.T, root string, owner OwnedDirectoryLinkOwner) {
+	t.Helper()
+	if err := storageworkspaces.WriteOwnershipMarker(root, storageworkspaces.OwnershipMarker{
+		TaskID: owner.TaskID, TaskDirName: owner.TaskDirName, LayoutVersion: storageworkspaces.LayoutVersionSemantic,
+	}); err != nil {
+		t.Fatalf("WriteOwnershipMarker: %v", err)
+	}
+}
+
 // The predicate only reports. Every case below additionally asserts that the
 // inspected entry is still on disk afterwards, since it may be a link the user
 // or the repository keeps on purpose.
@@ -146,22 +162,22 @@ func TestEnsureOwnedDirectoryLinkIsIdempotent(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(target, "live.txt"), []byte("one"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	first, created, err := EnsureOwnedDirectoryLink(root, "api", target)
-	if err != nil || !created {
-		t.Fatalf("first EnsureOwnedDirectoryLink: created=%v err=%v", created, err)
+	first, err := EnsureOwnedDirectoryLink(root, "api", target, testOwnedDirectoryLinkOwner())
+	if err != nil || !first.Created {
+		t.Fatalf("first EnsureOwnedDirectoryLink: created=%v err=%v", first.Created, err)
 	}
 
-	second, created, err := EnsureOwnedDirectoryLink(root, "api", target)
+	second, err := EnsureOwnedDirectoryLink(root, "api", target, testOwnedDirectoryLinkOwner())
 	if err != nil {
 		t.Fatalf("second EnsureOwnedDirectoryLink: %v; an unchanged link must be reused", err)
 	}
-	if created {
+	if second.Created {
 		t.Fatal("second EnsureOwnedDirectoryLink reported creation")
 	}
-	if second != first {
-		t.Fatalf("second link = %q, want %q", second, first)
+	if second.Path != first.Path {
+		t.Fatalf("second link = %q, want %q", second.Path, first.Path)
 	}
-	if got, err := os.ReadFile(filepath.Join(second, "live.txt")); err != nil || string(got) != "one" {
+	if got, err := os.ReadFile(filepath.Join(second.Path, "live.txt")); err != nil || string(got) != "one" {
 		t.Fatalf("read through reused link = %q, %v", got, err)
 	}
 }
@@ -177,14 +193,14 @@ func TestEnsureOwnedDirectoryLinkRepointsOwnedLinkOnMismatch(t *testing.T) {
 	}
 	seedOwnedDirectoryLink(t, root, "api", target)
 
-	link, created, err := EnsureOwnedDirectoryLink(root, "api", other)
+	result, err := EnsureOwnedDirectoryLink(root, "api", other, testOwnedDirectoryLinkOwner())
 	if err != nil {
 		t.Fatalf("EnsureOwnedDirectoryLink repoint: %v", err)
 	}
-	if !created {
+	if !result.Created {
 		t.Fatal("EnsureOwnedDirectoryLink did not report a recreate on mismatch")
 	}
-	linkInfo, err := os.Stat(link)
+	linkInfo, err := os.Stat(result.Path)
 	if err != nil {
 		t.Fatalf("stat repointed link: %v", err)
 	}
@@ -195,8 +211,121 @@ func TestEnsureOwnedDirectoryLinkRepointsOwnedLinkOnMismatch(t *testing.T) {
 	if !os.SameFile(linkInfo, otherInfo) {
 		t.Fatal("link was not repointed to the new target")
 	}
-	if got, err := os.ReadFile(filepath.Join(link, "live.txt")); err != nil || string(got) != "two" {
+	if got, err := os.ReadFile(filepath.Join(result.Path, "live.txt")); err != nil || string(got) != "two" {
 		t.Fatalf("read through repointed link = %q, %v", got, err)
+	}
+}
+
+func TestEnsureOwnedDirectoryLinkRepointsOwnedLinkWithMatchingMarker(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	current, other := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(other, "live.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", current)
+	writeOwnershipMarker(t, root, testOwnedDirectoryLinkOwner())
+
+	result, err := EnsureOwnedDirectoryLink(root, "api", other, testOwnedDirectoryLinkOwner())
+	if err != nil {
+		t.Fatalf("EnsureOwnedDirectoryLink with matching marker: %v", err)
+	}
+	if !result.Created || result.PriorTarget == "" {
+		t.Fatalf("result = %+v, want Created with a prior target", result)
+	}
+	if got, err := os.ReadFile(filepath.Join(result.Path, "live.txt")); err != nil || string(got) != "two" {
+		t.Fatalf("read through matching-marker repoint = %q, %v", got, err)
+	}
+}
+
+func TestEnsureOwnedDirectoryLinkRejectsMarkerConflictOnMismatch(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	current, other := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(current, "live.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "live.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", current)
+	writeOwnershipMarker(t, root, testOwnedDirectoryLinkOwner())
+
+	_, err := EnsureOwnedDirectoryLink(root, "api", other, OwnedDirectoryLinkOwner{TaskID: "task-2", TaskDirName: "task-2"})
+	if err == nil || !strings.Contains(err.Error(), errWorkspaceOwnershipMarkerConflict) {
+		t.Fatalf("EnsureOwnedDirectoryLink error = %v, want marker conflict", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "api", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("marker-conflict repoint disturbed original link = %q, %v", got, err)
+	}
+}
+
+func TestEnsureOwnedDirectoryLinkRejectsTraversalBeforeRepoint(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	current, other := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(current, "live.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "live.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", current)
+
+	if _, err := EnsureOwnedDirectoryLink(root, "../api", other, testOwnedDirectoryLinkOwner()); err == nil {
+		t.Fatal("EnsureOwnedDirectoryLink accepted a traversal entry name")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "api", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("traversal attempt disturbed original link = %q, %v", got, err)
+	}
+}
+
+func TestEnsureOwnedDirectoryLinkKeepsOriginalLinkWhenReplacementTargetIsInvalid(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	current := t.TempDir()
+	if err := os.WriteFile(filepath.Join(current, "live.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", current)
+
+	if _, err := EnsureOwnedDirectoryLink(root, "api", filepath.Join(t.TempDir(), "missing"), testOwnedDirectoryLinkOwner()); err == nil {
+		t.Fatal("EnsureOwnedDirectoryLink accepted a missing replacement target")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "api", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("failed replacement disturbed original link = %q, %v", got, err)
+	}
+}
+
+func TestRenameInspectedDirectoryLinkRejectsChangedEntry(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	current, other := t.TempDir(), t.TempDir()
+	if err := os.WriteFile(filepath.Join(current, "live.txt"), []byte("one"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "live.txt"), []byte("two"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedOwnedDirectoryLink(t, root, "api", current)
+	inspected, err := os.Lstat(filepath.Join(root, "api"))
+	if err != nil {
+		t.Fatalf("Lstat(api): %v", err)
+	}
+	tempLink := filepath.Join(root, "api.tmp")
+	if err := createPlatformDirectoryLink(other, tempLink); err != nil {
+		t.Fatalf("create temp replacement link: %v", err)
+	}
+	if err := os.Remove(filepath.Join(root, "api")); err != nil {
+		t.Fatalf("remove original link: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "api"), 0o755); err != nil {
+		t.Fatalf("create replacement directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "api", "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := renameInspectedDirectoryLink(tempLink, filepath.Join(root, "api"), inspected); err == nil {
+		t.Fatal("renameInspectedDirectoryLink accepted a changed entry")
+	}
+	if got, err := os.ReadFile(filepath.Join(root, "api", "keep.txt")); err != nil || string(got) != "keep" {
+		t.Fatalf("changed entry was disturbed = %q, %v", got, err)
 	}
 }
 
@@ -211,7 +340,7 @@ func TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, _, err := EnsureOwnedDirectoryLink(root, "api", t.TempDir()); err == nil {
+	if _, err := EnsureOwnedDirectoryLink(root, "api", t.TempDir(), testOwnedDirectoryLinkOwner()); err == nil {
 		t.Fatal("EnsureOwnedDirectoryLink overwrote a non-link entry")
 	}
 	if got, err := os.ReadFile(filepath.Join(root, "api", "keep.txt")); err != nil || string(got) != "keep" {
@@ -224,7 +353,7 @@ func TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry(t *testing.T) {
 	if err := os.WriteFile(file, []byte("keep"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := EnsureOwnedDirectoryLink(root, "web", t.TempDir()); err == nil {
+	if _, err := EnsureOwnedDirectoryLink(root, "web", t.TempDir(), testOwnedDirectoryLinkOwner()); err == nil {
 		t.Fatal("EnsureOwnedDirectoryLink overwrote a non-link file")
 	}
 	if got, err := os.ReadFile(file); err != nil || string(got) != "keep" {

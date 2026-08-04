@@ -38,7 +38,9 @@ manually moving files into the task workspace.
 - A source file rename may stay within its canonical workspace/source root; a cross-root move or
   rename is rejected before either source is mutated.
 - A multi-source submission is atomic from the user's perspective: either every source is attached
-  and materialized in the current task environment, or none of the new attachments remain.
+  and materialized in the current task environment, or none of the new attachments remain. When an
+  attachment repointed a pre-existing Kandev-owned entry, a failed submission restores that entry to
+  the target it had before the attachment rather than deleting it.
 - Repository attachment works for every executor that can run the task. Arbitrary folders are
   available only to Local and Worktree tasks, where the selected host paths remain live. Container
   and remote pickers do not offer the folder source kind, and the backend rejects a forged folder
@@ -193,6 +195,9 @@ persisted in source URLs or copied into agent-visible metadata.
 | A persisted local folder later disappears                      | The current live environment keeps its existing materialization; a new/reset environment surfaces the missing source and does not silently omit it. |
 | The client disconnects during materialization                  | Rollback runs on a detached bounded context and the eventual task event reflects durable state.                                                     |
 | A Kandev-owned task-root entry already points at a different directory than the current durable spec (e.g. a stale entry left by an earlier launch) | Because the task root is Kandev-owned and the entry is a directory link, reconciliation repoints it to the current spec target and the launch/resume proceeds; it does not fail closed forever. |
+| A Kandev-owned task-root entry's ownership marker names a different task than the one reconciling | Reconciliation does not repoint the entry; it fails closed with a marker-conflict error and leaves the other task's entry pointing at its existing target. |
+| A multi-source attachment that repointed a pre-existing owned entry later fails during materialization | Rollback restores each repointed entry to the target it had before the attachment and deletes only entries this attachment created; no pre-existing entry is left deleted. |
+| A safe replacement would overwrite a non-owned or out-of-root entry, or its recreate fails after removal | A non-owned or changed entry, or a traversal path, is rejected before any removal, and a failed recreate restores the entry to its prior target rather than leaving it missing. |
 
 ## Persistence guarantees
 
@@ -202,12 +207,13 @@ checkouts from durable repository attachments; they never persist folder attachm
 conversations and source records survive an environment restart even when runtime materialization
 must be retried.
 
-Each task that materializes a Kandev-owned task root under the tasks base directory owns a task-root
-directory name that no other task resolves to. The name incorporates task identity so that two
+Each task that materializes a Kandev-owned task root under the tasks base directory derives its
+task-root directory name from task identity. The name is collision-resistant, not injective: two
 distinct tasks — including two tasks whose titles sanitize to the same slug, or a local task and a
-worktree task sharing a title — never contend over the same task root or its sibling entries. The
-task-root name is computed once and persisted; every relaunch and resume of that task reuses the
-persisted name.
+worktree task sharing a title — are overwhelmingly unlikely to resolve to the same task root, and any
+residual collision is caught by the fail-closed ownership marker, which verifies task identity before
+any Kandev-owned entry under a shared root is repointed. The task-root name is computed once and
+persisted; every relaunch and resume of that task reuses the persisted name.
 
 ## Scenarios
 
@@ -298,6 +304,16 @@ persisted name.
 - **GIVEN** a Kandev-owned task-root entry that is not a directory link (a real file or directory a
   reconcile did not create), **WHEN** the task launches or resumes, **THEN** reconciliation does not
   delete or overwrite it and the launch surfaces an error identifying the conflicting entry.
+- **GIVEN** two persisted legacy tasks whose environments share one Kandev-owned task root, **WHEN**
+  the second task launches or resumes and its ownership marker does not match the root's marker,
+  **THEN** reconciliation fails closed with a marker-conflict error and does not redirect the first
+  task's live entry.
+- **GIVEN** a multi-source attachment that repointed a pre-existing Kandev-owned entry, **WHEN** a
+  later source in the same submission fails to materialize, **THEN** rollback restores the repointed
+  entry to its prior target and no pre-existing entry is left deleted.
+- **GIVEN** a Kandev-owned entry whose recreate could fail after the old link is removed, **WHEN**
+  reconciliation replaces it, **THEN** a traversal or out-of-root name is rejected before any removal
+  and a failed recreate leaves the original entry intact rather than missing.
 
 ## Out of scope
 

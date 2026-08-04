@@ -475,11 +475,12 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	if info == nil {
 		return nil, fmt.Errorf("workspace info is required")
 	}
-	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders); err != nil {
+	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return nil, err
 		}
 	}

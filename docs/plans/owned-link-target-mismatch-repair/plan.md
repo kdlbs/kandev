@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/attach-workspace-sources.md
 created: 2026-08-04
-status: complete
+status: completed
 ---
 
 # Implementation Plan: Owned Link Target Mismatch Repair
@@ -99,15 +99,90 @@ This fix has two parts, in dependency order:
 - Task 01 (`config.go` + executor call sites): `go test ./internal/worktree/... ./internal/orchestrator/executor/...` → all `ok`. New `TestTaskDirSuffix` and `TestSemanticWorktreeNameTaskUnique` failed red (build: `undefined: TaskDirSuffix`) before the helper, pass after.
 - Task 02 (`directory_link.go`): `go test ./internal/worktree/... ./internal/agent/runtime/lifecycle/...` → all `ok`. `TestEnsureOwnedDirectoryLinkRepointsOwnedLinkOnMismatch` failed red (`owned link target mismatch: api`) before, passes after; `TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry` passes.
 - Changed-file lint: `golangci-lint run ./internal/worktree/... ./internal/orchestrator/executor/... --new-from-rev=<base>` → `0 issues`.
+- Task 03 (`ownership-aware repoint`): `go test ./internal/worktree/... ./internal/agent/runtime/lifecycle/... ./internal/backendapp/...` → all `ok`. Added marker-absent, marker-match, and marker-conflict coverage around `EnsureOwnedDirectoryLink`, and threaded the new owner/result contract through lifecycle reconcile and host materialization.
+- Task 04 (`rollback-faithful repoint`): `go test ./internal/backendapp/... ./internal/worktree/...` → all `ok`. `TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails` proves rollback restores the prior target instead of deleting the pre-existing owned entry.
+- Task 05 (`safe atomic replacement`): `go test ./internal/worktree/... ./internal/agent/runtime/lifecycle/... ./internal/backendapp/...` → all `ok`. New traversal-before-repoint, invalid-target-keeps-original-link, and changed-entry rename-guard tests pass. Changed-file lint with base `d6b95500eb3662ecd7fd41f67a5ae4c0ddbfb376`: `golangci-lint run ./internal/worktree/... ./internal/agent/runtime/lifecycle/... ./internal/backendapp/... --new-from-rev=<base> --timeout=5m` → `0 issues`.
 
 ---
 
+## PR #2253 review remediation
+
+An automated review of the landed fix (head `5c2873d76`, before the review-fixup commit) raised four
+blockers. Findings 1-3 are genuine gaps the two landed tasks did not fully close; Finding 4 was
+already corrected by the fixup and needs no further code change. Tasks 03-05 address them.
+
+**Finding 1 — legacy-colliding roots reassigned; repoint does no identity check (Task 03).** Resume
+reuses the persisted legacy `TaskDirName`
+(`apps/backend/internal/orchestrator/executor/executor_resume.go:1285-1286`), so two roots created
+under the old random suffix still collide. `EnsureOwnedDirectoryLink`
+(`apps/backend/internal/worktree/directory_link.go:104-133`) receives no task identity and never reads
+the ownership marker before repointing, so on a shared legacy root the task that reconciles last can
+redirect another task's live entry. The marker
+(`WriteOwnershipMarker`/`existingMarkerMatches`/`ReadOwnershipMarker`,
+`apps/backend/internal/system/storage/workspaces/marker.go:17-62,79-91,120-122`) already fails closed
+on a `TaskID`/`TaskDirName` conflict, but it is written only in `prepareTaskWorktreePath`
+(`apps/backend/internal/worktree/manager_lifecycle.go:324-329`) and for scratch workspaces
+(`manager_launch.go:418-421`) — **not** on the plain local reconcile path — so the repoint helper must
+verify it itself. Reconcile runs at `manager_launch.go:1077-1083` and `manager_execution.go:471-477`,
+calling `reconcileWorkspaceSources`/`reconcileWorkspaceRepositories`
+(`apps/backend/internal/agent/runtime/lifecycle/workspace_sources_reconcile.go:32,67`), both of which
+already hold the identity to thread through.
+
+**Finding 2 — repointing breaks workspace-source rollback (Task 04, most serious).**
+`materializeDirectoryLinks` (`apps/backend/internal/backendapp/workspace_source_materializer.go:200-212`)
+and `materializeWorktreeSources` (`:569-574`) append an entry to the `created` slice whenever
+`wasCreated==true`. Task 02 now returns `created=true` for a **repointed** pre-existing link, and
+`rollbackHostWorkspaceMaterialization` (`:229-244`) `os.Remove`s every `created` entry (`:231-233`) on
+a later failure (rescan/persist/adopt at `:134,:139,:145`). So a failed submission **deletes** a link
+that existed before the attachment instead of restoring its prior target — violating the spec's
+atomicity guarantee (`docs/specs/tasks/attach-workspace-sources.md:40-43`,`:51`,`:62`). The two
+reconcile call sites ignore the return values, so the rollback bug is confined to the two
+`materialize*` sites.
+
+**Finding 3 — remove-and-recreate not atomic; containment validated after the destructive remove
+(Task 05).** In the repoint branch, `removeInspectedDirectoryLink` (`directory_link.go:122`) runs
+**before** `CreateOwnedDirectoryLink`'s containment check (`isOwnedDirectoryLinkPath`,
+`directory_link.go:15`, reached at `:125`), so a traversal/out-of-root name is rejected only after the
+remove. A create failure after the remove leaves the entry missing with no restore. There is no atomic
+temp+rename wrapper for directory links (see the file pattern at
+`apps/backend/internal/agent/usage/fileutil.go:11-33`); Unix `os.Symlink` is a single atomic syscall,
+but a Windows junction cannot be atomically renamed over an existing target
+(`directory_link_unix.go`, `directory_link_windows.go`).
+
+**Finding 4 — suffix uniqueness (reviewed, no code change).** The review read the pre-fixup comments.
+`config.go:382-407` already states the 8-char base-36 projection of `sha256(taskID)` is
+collision-resistant (~36^8 ≈ 2.8e12), not injective, and that residual owned-root contention is caught
+by the fail-closed ownership marker; `config_test.go` already asserts the exact suffix length. The
+suffix stays intentionally probabilistic; Task 03 is what makes that marker backstop effective on the
+reconcile path. No change required.
+
+### Single-signature-change decision
+
+Tasks 03-05 all touch `EnsureOwnedDirectoryLink`. Rather than three overlapping signature edits, Task
+03 changes it **once**: it takes an ownership descriptor (`TaskID`, `TaskDirName`) and returns a result
+struct (`{Path string; Created bool; PriorTarget string}`). Task 04 consumes `PriorTarget` for
+rollback-faithful undo; Task 05 adds the containment-before-remove ordering and the safe/atomic
+replacement inside that same function. The four call sites are updated in Task 03; the two reconcile
+sites keep ignoring the extra result fields.
+
+### Tests (Tasks 03-05)
+
+- **Marker-mismatch repoint fails closed** — `directory_link_test.go`: seed an owned link under a root
+  whose `.kandev-workspace.json` names task A; `EnsureOwnedDirectoryLink` for task B fails closed with
+  a marker-conflict error and leaves the entry unchanged. Marker absent and marker-matches-this-task
+  both allow the repoint. (Task 03)
+- **Rollback restores a repointed link's prior target** — `workspace_source_materializer` test: repoint
+  a pre-existing entry (A→B), force a later rescan/persist failure, assert the entry is restored to A
+  (not deleted); a genuinely created entry is still deleted. (Task 04)
+- **Containment before remove + recreate-failure restore** — `directory_link_test.go`: a traversal /
+  out-of-root name is rejected before any removal; a forced recreate failure leaves the original link
+  intact; the existing swap-race guard still holds. (Task 05)
+
 ## Implementation Waves And Parallel Candidates
 
-Two tasks touch different files (`config.go` + executor call sites vs `directory_link.go`) and could
-run in parallel, but Task 01 is the root-cause fix and Task 02 is defense in depth; keep them
-sequential by default. The default is sequential execution in the primary conversation; waves do not
-authorize subagents.
+Tasks 01-02 landed. Tasks 03-05 all touch `EnsureOwnedDirectoryLink` and its callers and must run
+sequentially in dependency order (03 defines the shared signature; 04 and 05 build on it). The default
+is sequential execution in the primary conversation; waves do not authorize subagents.
 
 ```text
 Wave 1:
@@ -115,4 +190,13 @@ Wave 1:
 
 Wave 2:
 - [x] [task-02-owned-link-self-heal](task-02-owned-link-self-heal.md)
+
+Wave 3:
+- [x] [task-03-ownership-aware-repoint](task-03-ownership-aware-repoint.md)
+
+Wave 4:
+- [x] [task-04-rollback-faithful-repoint](task-04-rollback-faithful-repoint.md)
+
+Wave 5:
+- [x] [task-05-safe-atomic-link-replacement](task-05-safe-atomic-link-replacement.md)
 ```
