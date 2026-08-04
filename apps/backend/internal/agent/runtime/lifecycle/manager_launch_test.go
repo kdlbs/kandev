@@ -1653,9 +1653,11 @@ func TestLaunch_RollsBackRuntimeWhenSessionEndsDuringCreate(t *testing.T) {
 }
 
 type launchRegistrationGateReader struct {
-	reads      atomic.Int32
-	secondRead chan struct{}
-	release    chan struct{}
+	reads         atomic.Int32
+	cleanupActive atomic.Bool
+	finalState    models.TaskSessionState
+	secondRead    chan struct{}
+	release       chan struct{}
 }
 
 type launchRegistrationWriter struct {
@@ -1683,11 +1685,19 @@ func (*launchRegistrationWriter) RepairExecutorRunningDead(context.Context, stri
 
 func (r *launchRegistrationGateReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
 	if r.reads.Add(1) == 1 {
-		return &models.TaskSession{ID: id, State: models.TaskSessionStateStarting}, nil
+		return &models.TaskSession{ID: id, TaskID: "task-registration-race", State: models.TaskSessionStateStarting}, nil
 	}
 	close(r.secondRead)
 	<-r.release
-	return &models.TaskSession{ID: id, State: models.TaskSessionStateCancelled}, nil
+	state := r.finalState
+	if state == "" {
+		state = models.TaskSessionStateCancelled
+	}
+	return &models.TaskSession{ID: id, TaskID: "task-registration-race", State: state}, nil
+}
+
+func (r *launchRegistrationGateReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return r.cleanupActive.Load(), nil
 }
 
 func (*launchRegistrationGateReader) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
@@ -1756,6 +1766,64 @@ func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
 	}
 	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); exists {
 		t.Fatal("terminal session runtime must be removed after registration race")
+	}
+	if got := writer.deleted.Load(); got != 1 {
+		t.Fatalf("executor-running delete count = %d, want 1", got)
+	}
+}
+
+func TestLaunch_RollsBackWhenTaskCleanupBeginsDuringRegistration(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	reader := &launchRegistrationGateReader{
+		finalState: models.TaskSessionStateStarting,
+		secondRead: make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	mgr.SetExecutorProfileReader(reader)
+	writer := &launchRegistrationWriter{upserted: make(chan struct{})}
+	mgr.SetExecutorRunningWriter(writer)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-registration-race",
+			SessionID:      "session-cleanup-race",
+			AgentProfileID: "profile-1",
+			IsEphemeral:    true,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-reader.secondRead:
+	case err := <-errCh:
+		t.Fatalf("Launch returned before post-registration validation: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for post-registration session validation")
+	}
+	reader.cleanupActive.Store(true)
+	close(reader.release)
+
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "cleanup is active") {
+		t.Fatalf("Launch error = %v, want active-cleanup validation", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-cleanup-race"); exists {
+		t.Fatal("runtime must be removed when task cleanup wins registration race")
 	}
 	if got := writer.deleted.Load(); got != 1 {
 		t.Fatalf("executor-running delete count = %d, want 1", got)

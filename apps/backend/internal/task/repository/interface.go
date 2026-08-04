@@ -260,6 +260,7 @@ type SessionWorktreeRepository interface {
 // TaskResourceCleanupRepository persists restart-safe task lifecycle cleanup.
 type TaskResourceCleanupRepository interface {
 	CreateTaskResourceCleanupJob(ctx context.Context, job *models.TaskResourceCleanupJob) error
+	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	GetTaskResourceCleanupJob(ctx context.Context, id string) (*models.TaskResourceCleanupJob, error)
 	GetTaskResourceCleanupJobByOperationID(ctx context.Context, operationID string) (*models.TaskResourceCleanupJob, error)
 	ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error)

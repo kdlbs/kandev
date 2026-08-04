@@ -1273,9 +1273,10 @@ func (m *Manager) registerAndPublishExecution(
 
 // ensureLaunchSessionStillActive closes the remote-runtime creation race: SSH,
 // Docker, and other remote CreateInstance calls can outlive a concurrent task
-// delete. Callers read both immediately before and after registration: the two
-// reads bracket Add so either the launch observes deletion or deletion cleanup
-// observes the registered execution.
+// delete. Callers read both immediately before and after registration. The
+// durable cleanup-intent check is the admission boundary between them: either
+// launch persists first and cleanup's final inventory observes it, or cleanup
+// persists first and launch rolls the runtime back.
 func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
 	if m.executorProfileReader == nil || sessionID == "" {
 		return nil
@@ -1286,6 +1287,13 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	}
 	if session == nil {
 		return fmt.Errorf("verify session before registering execution: session %q not found", sessionID)
+	}
+	cleanupActive, err := m.executorProfileReader.HasActiveTaskResourceCleanupJob(ctx, session.TaskID)
+	if err != nil {
+		return fmt.Errorf("verify task cleanup before registering execution: %w", err)
+	}
+	if cleanupActive {
+		return fmt.Errorf("verify task cleanup before registering execution: cleanup is active for task %q", session.TaskID)
 	}
 	switch session.State {
 	case models.TaskSessionStateCancelled,

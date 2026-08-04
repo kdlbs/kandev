@@ -273,6 +273,10 @@ func (s *stubExecutorProfileReader) GetTaskEnvironment(_ context.Context, _ stri
 	return s.env, nil
 }
 
+func (*stubExecutorProfileReader) HasActiveTaskResourceCleanupJob(context.Context, string) (bool, error) {
+	return false, nil
+}
+
 func (s *stubExecutorProfileReader) GetExecutorProfile(_ context.Context, _ string) (*taskmodels.ExecutorProfile, error) {
 	return s.profile, nil
 }

@@ -12,6 +12,7 @@ import (
 // Implemented by the task repository; wired via SetExecutorProfileReader.
 type ExecutorProfileReader interface {
 	GetTaskSession(ctx context.Context, id string) (*models.TaskSession, error)
+	HasActiveTaskResourceCleanupJob(ctx context.Context, taskID string) (bool, error)
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetExecutorProfile(ctx context.Context, id string) (*models.ExecutorProfile, error)
 }
