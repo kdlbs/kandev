@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef, useEffect } from "react";
 import { Input } from "@kandev/ui/input";
-import { IconDownload, IconPencil, IconTrash } from "@tabler/icons-react";
+import { IconDownload, IconMessageDots, IconPencil, IconTrash } from "@tabler/icons-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +22,7 @@ import {
 } from "@kandev/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/components/toast-provider";
+import { useTranslation } from "react-i18next";
 import type { FileTreeNode } from "@/lib/types/backend";
 import type { FileInfo } from "@/lib/state/store";
 import {
@@ -149,6 +150,157 @@ function FileContextMenuItems({
   );
 }
 
+function ChatContextMenuItem({
+  node,
+  onAddToChatContext,
+}: {
+  node: FileTreeNode;
+  onAddToChatContext: (node: FileTreeNode) => void;
+}) {
+  const { t } = useTranslation("chat");
+  return (
+    <ContextMenuItem
+      data-testid="file-context-add-to-chat"
+      className="cursor-pointer"
+      onSelect={() => onAddToChatContext(node)}
+    >
+      <IconMessageDots className="h-3.5 w-3.5" />
+      {t("chat:addToChatContext")}
+    </ContextMenuItem>
+  );
+}
+
+function useFileContextMenuDelete({
+  tree,
+  setTree,
+  node,
+  isBulk,
+  needsConfirmation,
+  onDeleteFile,
+  selectedPaths,
+}: {
+  tree: FileTreeNode | null;
+  setTree: React.Dispatch<React.SetStateAction<FileTreeNode | null>>;
+  node: FileTreeNode;
+  isBulk: boolean;
+  needsConfirmation: boolean;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  selectedPaths?: Set<string>;
+}) {
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+
+  const handleConfirmDelete = useCallback(() => {
+    setDeleteDialogOpen(false);
+    if (!onDeleteFile) return;
+    if (isBulk && selectedPaths) {
+      const snapshot = tree;
+      const paths = [...selectedPaths];
+      setTree((prev) => {
+        let nextTree = prev;
+        for (const path of paths) {
+          nextTree = nextTree ? removeNodeFromTree(nextTree, path) : nextTree;
+        }
+        return nextTree;
+      });
+      Promise.all(paths.map((path) => onDeleteFile(path)))
+        .then((results) => {
+          if (results.some((ok) => !ok)) setTree(snapshot);
+        })
+        .catch(() => setTree(snapshot));
+      return;
+    }
+    deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
+  }, [tree, setTree, node.path, onDeleteFile, isBulk, selectedPaths]);
+
+  const handleDelete = useCallback(() => {
+    if (!onDeleteFile) return;
+    if (needsConfirmation) {
+      setDeleteDialogOpen(true);
+      return;
+    }
+    deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
+  }, [tree, setTree, node.path, onDeleteFile, needsConfirmation]);
+
+  return { deleteDialogOpen, setDeleteDialogOpen, handleConfirmDelete, handleDelete };
+}
+
+type FileContextMenuSurfaceProps = {
+  children: React.ReactNode;
+  node: FileTreeNode;
+  onDeleteFile?: (path: string) => Promise<boolean>;
+  onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
+  onDownloadFile?: (path: string) => Promise<boolean>;
+  onStartRename: () => void;
+  onAddToChatContext?: (node: FileTreeNode) => void;
+  selectedCount: number;
+  isBulk: boolean;
+  needsConfirmation: boolean;
+  showOpenInEditor: boolean;
+  hasFileActions: boolean;
+  showAddToChatContext: boolean;
+  deleteDialogOpen: boolean;
+  setDeleteDialogOpen: (open: boolean) => void;
+  onConfirmDelete: () => void;
+  onDelete: () => void;
+};
+
+function FileContextMenuSurface({
+  children,
+  node,
+  onDeleteFile,
+  onRenameFile,
+  onDownloadFile,
+  onStartRename,
+  onAddToChatContext,
+  selectedCount,
+  isBulk,
+  needsConfirmation,
+  showOpenInEditor,
+  hasFileActions,
+  showAddToChatContext,
+  deleteDialogOpen,
+  setDeleteDialogOpen,
+  onConfirmDelete,
+  onDelete,
+}: FileContextMenuSurfaceProps) {
+  return (
+    <>
+      <ContextMenu>
+        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+        <ContextMenuContent>
+          {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
+          {showOpenInEditor && (hasFileActions || showAddToChatContext) && <ContextMenuSeparator />}
+          {showAddToChatContext && onAddToChatContext && (
+            <ChatContextMenuItem node={node} onAddToChatContext={onAddToChatContext} />
+          )}
+          {showAddToChatContext && hasFileActions && <ContextMenuSeparator />}
+          <FileContextMenuItems
+            node={node}
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            onDeleteFile={onDeleteFile}
+            onRenameFile={onRenameFile}
+            onDownloadFile={onDownloadFile}
+            onStartRename={onStartRename}
+            onDelete={onDelete}
+          />
+        </ContextMenuContent>
+      </ContextMenu>
+      {needsConfirmation && (
+        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+          <DeleteConfirmDialog
+            isBulk={isBulk}
+            selectedCount={selectedCount}
+            node={node}
+            fileCount={countFilesInTree(node)}
+            onConfirm={onConfirmDelete}
+          />
+        </AlertDialog>
+      )}
+    </>
+  );
+}
+
 /** Context menu for file nodes with Download, Rename, and Delete options */
 export function FileContextMenu({
   children,
@@ -159,6 +311,7 @@ export function FileContextMenu({
   onRenameFile,
   onDownloadFile,
   onStartRename,
+  onAddToChatContext,
   selectedCount = 0,
   selectedPaths,
 }: {
@@ -170,82 +323,55 @@ export function FileContextMenu({
   onRenameFile?: (oldPath: string, newPath: string) => Promise<boolean>;
   onDownloadFile?: (path: string) => Promise<boolean>;
   onStartRename: () => void;
+  onAddToChatContext?: (node: FileTreeNode) => void;
   selectedCount?: number;
   selectedPaths?: Set<string>;
 }) {
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const editorActions = useFileTreeEditorActions();
   const isBulk = selectedCount > 1;
   const needsConfirmation = node.is_dir || isBulk;
   // A bulk selection would make a single-node "Open in <editor>" ambiguous.
   const showOpenInEditor = !isBulk && canOpenNodeInEditor(editorActions, node);
   const hasFileActions = !!onDeleteFile || !!onRenameFile || !!onDownloadFile;
+  const showAddToChatContext = !isBulk && !!onAddToChatContext;
+  const { deleteDialogOpen, setDeleteDialogOpen, handleConfirmDelete, handleDelete } =
+    useFileContextMenuDelete({
+      tree,
+      setTree,
+      node,
+      isBulk,
+      needsConfirmation,
+      onDeleteFile,
+      selectedPaths,
+    });
 
-  const handleConfirmDelete = useCallback(() => {
-    setDeleteDialogOpen(false);
-    if (!onDeleteFile) return;
-    if (isBulk && selectedPaths) {
-      // Remove all nodes optimistically, then call APIs.
-      // Rollback entire tree only if any individual delete fails.
-      const snapshot = tree;
-      const paths = [...selectedPaths];
-      setTree((prev) => {
-        let t = prev;
-        for (const p of paths) t = t ? removeNodeFromTree(t, p) : t;
-        return t;
-      });
-      Promise.all(paths.map((p) => onDeleteFile(p)))
-        .then((results) => {
-          if (results.some((ok) => !ok)) setTree(snapshot);
-        })
-        .catch(() => setTree(snapshot));
-    } else {
-      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
-    }
-  }, [tree, setTree, node.path, onDeleteFile, isBulk, selectedPaths]);
-
-  const handleDelete = useCallback(() => {
-    if (!onDeleteFile) return;
-    if (needsConfirmation) {
-      setDeleteDialogOpen(true);
-    } else {
-      deleteNodeOptimistically(tree, setTree, node.path, onDeleteFile);
-    }
-  }, [tree, setTree, node.path, onDeleteFile, needsConfirmation]);
-
-  if (!hasFileActions && !showOpenInEditor) return <>{children}</>;
+  if (!hasFileActions && !showOpenInEditor && !showAddToChatContext) return <>{children}</>;
 
   return (
-    <>
-      <ContextMenu>
-        <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
-        <ContextMenuContent>
-          {showOpenInEditor && <OpenInEditorMenuItems node={node} />}
-          {showOpenInEditor && hasFileActions && <ContextMenuSeparator />}
-          <FileContextMenuItems
-            node={node}
-            isBulk={isBulk}
-            selectedCount={selectedCount}
-            onDeleteFile={onDeleteFile}
-            onRenameFile={onRenameFile}
-            onDownloadFile={onDownloadFile}
-            onStartRename={onStartRename}
-            onDelete={handleDelete}
-          />
-        </ContextMenuContent>
-      </ContextMenu>
-      {needsConfirmation && (
-        <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-          <DeleteConfirmDialog
-            isBulk={isBulk}
-            selectedCount={selectedCount}
-            node={node}
-            fileCount={countFilesInTree(node)}
-            onConfirm={handleConfirmDelete}
-          />
-        </AlertDialog>
-      )}
-    </>
+    <FileContextMenuSurface
+      {...{
+        children,
+        node,
+        tree,
+        setTree,
+        onDeleteFile,
+        onRenameFile,
+        onDownloadFile,
+        onStartRename,
+        onAddToChatContext,
+        selectedCount,
+        selectedPaths,
+        isBulk,
+        needsConfirmation,
+        showOpenInEditor,
+        hasFileActions,
+        showAddToChatContext,
+        deleteDialogOpen,
+        setDeleteDialogOpen,
+        onConfirmDelete: handleConfirmDelete,
+        onDelete: handleDelete,
+      }}
+    />
   );
 }
 

@@ -25,7 +25,8 @@ export type PlanContextItem = ContextItemBase & {
 export type FileContextItem = ContextItemBase & {
   kind: "file";
   path: string;
-  onOpen: (path: string) => void;
+  isDirectory: boolean;
+  onOpen?: (path: string) => void;
 };
 
 export type PromptContextItem = ContextItemBase & {

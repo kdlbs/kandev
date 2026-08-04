@@ -156,6 +156,19 @@ describe("buildTaskMentionsContext", () => {
 });
 
 describe("buildContextFilesContext", () => {
+  it("describes attached files and directories while preserving their paths", () => {
+    const out = buildContextFilesContext(
+      [
+        { path: "src/app.ts", name: "app.ts" },
+        { path: "src/components", name: "components", isDirectory: true } as never,
+      ],
+      [],
+    );
+
+    expect(out).toContain("- file: src/app.ts");
+    expect(out).toContain("- directory: src/components");
+  });
+
   it("preserves saved prompt references and appends their expansion as hidden context", () => {
     const out = buildContextFilesContext(
       [{ path: "prompt:outer", name: "outer" }],
@@ -525,5 +538,36 @@ describe("useMessageHandler input routing", () => {
     });
     expect(queueMock).not.toHaveBeenCalled();
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+});
+
+describe("directory context file submission", () => {
+  it("keeps directory identity out of outbound metadata while describing it in the prompt", async () => {
+    selectedSession("CREATED");
+    const request = vi.fn().mockResolvedValue(undefined);
+    getWebSocketClientMock.mockReturnValue({ request });
+    const { result } = renderHook(() =>
+      useMessageHandler({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        sessionModel: null,
+        activeModel: null,
+        contextFiles: [{ path: "src/components", name: "components", isDirectory: true } as never],
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage(submit("Inspect this"));
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      MESSAGE_ADD_ACTION,
+      expect.objectContaining({
+        content: expect.stringContaining("- directory: src/components"),
+        context_files: [{ path: "src/components", name: "components" }],
+      }),
+      10000,
+    );
+    expect(request.mock.calls[0][1].context_files[0]).not.toHaveProperty("isDirectory");
   });
 });

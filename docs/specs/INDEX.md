@@ -170,6 +170,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
 | [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
+| [file-tree-chat-context](ui/file-tree-chat-context.md) | draft |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | archived; superseded by embedded-vscode-executor-availability |

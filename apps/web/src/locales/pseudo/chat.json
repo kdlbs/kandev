@@ -1,4 +1,6 @@
 {
+  "addToChatContext": "Àďď ţō ćĥàţ ćōńţēxţ",
+  "addedToChatContext": "{{name}} àďďēď ţō ćĥàţ ćōńţēxţ",
   "collapseMessage": "Ćōĺĺàƥśē ḿēśśàĝē",
   "collapseQueuedMessages": "Ćōĺĺàƥśē qũēũēď ḿēśśàĝēś",
   "clearAll": "Ćĺēàŕ àĺĺ",
@@ -22,6 +24,7 @@
   "failedToMergeQueuedMessages": "Ƒàĩĺēď ţō ḿēŕĝē qũēũēď ḿēśśàĝēś.",
   "failedToRemoveQueuedMessage": "Ƒàĩĺēď ţō ŕēḿōvē qũēũēď ḿēśśàĝē.",
   "failedToRunQueuedMessage": "Ƒàĩĺēď ţō ŕũń qũēũēď ḿēśśàĝē.",
+  "fileTreeActions": "Ƒĩĺē àćţĩōńś",
   "mergeReferenceOverflow": "Ţōō ḿàńŷ ēńţĩţŷ ŕēƒēŕēńćēś ţō ḿēŕĝē ţĥēśē qũēũēď ḿēśśàĝēś.",
   "mergeWithAbove": "Ḿēŕĝē ŵĩţĥ àƀōvē",
   "queueCapacity_one": "{{count}} ōƒ {{max}}",

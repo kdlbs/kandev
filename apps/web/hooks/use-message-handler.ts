@@ -104,8 +104,10 @@ export function buildContextFilesContext(
   let context = "";
 
   if (files.length > 0) {
-    const fileList = files.map((f) => `- ${f.path}`).join("\n");
-    context += `\n\n<kandev-system>\nCONTEXT FILES: The user has attached the following files as context. Read these files to understand what the user is referring to:\n${fileList}\n</kandev-system>`;
+    const pathList = files
+      .map((f) => `- ${f.isDirectory ? "directory" : "file"}: ${f.path}`)
+      .join("\n");
+    context += `\n\n<kandev-system>\nCONTEXT PATHS: The user has attached the following file and directory paths as context. Inspect these paths to understand what the user is referring to:\n${pathList}\n</kandev-system>`;
   }
 
   if (promptFiles.length > 0) {

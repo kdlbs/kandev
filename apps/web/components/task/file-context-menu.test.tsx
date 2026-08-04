@@ -7,6 +7,12 @@ vi.mock("@/components/toast-provider", () => ({
   useToast: () => ({ toast: vi.fn() }),
 }));
 
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) => ({ "chat:addToChatContext": "Add to chat context" })[key] ?? key,
+  }),
+}));
+
 import { FileContextMenu } from "./file-context-menu";
 
 const FILE_NODE: FileTreeNode = { name: "README.md", path: "README.md", is_dir: false, size: 0 };
@@ -97,5 +103,53 @@ describe("FileContextMenu Download item", () => {
 
     openMenu("file-row");
     expect(screen.queryByText("Download")).toBeNull();
+  });
+});
+
+describe("FileContextMenu chat context item", () => {
+  it.each([
+    ["file", FILE_NODE],
+    ["directory", DIR_NODE],
+  ] as const)("shows and selects Add to chat context for a single %s", (_kind, node) => {
+    const onAddToChatContext = vi.fn();
+    render(
+      <FileContextMenu
+        node={node}
+        tree={null}
+        setTree={() => {}}
+        onAddToChatContext={onAddToChatContext}
+        onStartRename={() => {}}
+      >
+        <div data-testid="file-row">row</div>
+      </FileContextMenu>,
+    );
+
+    openMenu("file-row");
+    const item = screen.getByTestId("file-context-add-to-chat");
+    fireEvent.click(item);
+
+    expect(onAddToChatContext).toHaveBeenCalledTimes(1);
+    expect(onAddToChatContext).toHaveBeenCalledWith(node);
+  });
+
+  it("hides Add to chat context for bulk selections", () => {
+    render(
+      <FileContextMenu
+        node={FILE_NODE}
+        tree={null}
+        setTree={() => {}}
+        onDeleteFile={vi.fn().mockResolvedValue(true)}
+        onAddToChatContext={vi.fn()}
+        onStartRename={() => {}}
+        selectedCount={2}
+        selectedPaths={new Set(["README.md", "src"])}
+      >
+        <div data-testid="file-row">row</div>
+      </FileContextMenu>,
+    );
+
+    openMenu("file-row");
+
+    expect(screen.queryByTestId("file-context-add-to-chat")).toBeNull();
   });
 });
