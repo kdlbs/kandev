@@ -483,6 +483,45 @@ function AuthenticatedLayout({
   );
 }
 
+function MobileFiltersSheet({
+  open,
+  onOpenChange,
+  state,
+  onSelect,
+  onSaveCurrent,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  state: GitHubPageState;
+  onSelect: (s: Parameters<GitHubPageState["onSelect"]>[0]) => void;
+  onSaveCurrent: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent
+        side="right"
+        className="w-full sm:max-w-sm overflow-y-auto p-0"
+        data-testid="github-mobile-sidebar"
+      >
+        <SheetHeader className="px-4 pt-4 pb-2">
+          <SheetTitle>{t("github:filters")}</SheetTitle>
+        </SheetHeader>
+        <PresetsSidebar
+          selected={state.selection}
+          onSelect={onSelect}
+          savedPresets={state.savedPresets}
+          onDeleteSaved={state.onDeleteSaved}
+          canSaveCurrent={state.canSaveCurrent}
+          onSaveCurrent={onSaveCurrent}
+          prPresets={state.resolvedPrPresets}
+          issuePresets={state.resolvedIssuePresets}
+        />
+      </SheetContent>
+    </Sheet>
+  );
+}
+
 export function GitHubPageClient({
   workspaceId,
   workflows,
@@ -551,27 +590,13 @@ export function GitHubPageClient({
           />
         )}
       </div>
-      <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-        <SheetContent
-          side="right"
-          className="w-full sm:max-w-sm overflow-y-auto p-0"
-          data-testid="github-mobile-sidebar"
-        >
-          <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle>{t("github:filters")}</SheetTitle>
-          </SheetHeader>
-          <PresetsSidebar
-            selected={state.selection}
-            onSelect={onMobileSidebarSelect}
-            savedPresets={state.savedPresets}
-            onDeleteSaved={state.onDeleteSaved}
-            canSaveCurrent={state.canSaveCurrent}
-            onSaveCurrent={onMobileSaveCurrent}
-            prPresets={state.resolvedPrPresets}
-            issuePresets={state.resolvedIssuePresets}
-          />
-        </SheetContent>
-      </Sheet>
+      <MobileFiltersSheet
+        open={mobileSidebarOpen}
+        onOpenChange={setMobileSidebarOpen}
+        state={state}
+        onSelect={onMobileSidebarSelect}
+        onSaveCurrent={onMobileSaveCurrent}
+      />
       <QuickTaskLauncher
         workspaceId={workspaceId ?? null}
         workflows={workflows}
