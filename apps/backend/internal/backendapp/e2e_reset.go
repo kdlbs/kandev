@@ -499,29 +499,55 @@ type e2eSetTaskOriginRequest struct {
 	Origin string `json:"origin"`
 }
 
+// e2eForceColumn is the shape both force-set seeders share: bind one field,
+// write one column by id, and translate "no rows" into a 404 so a spec that
+// seeds against a typo fails where the mistake is rather than three assertions
+// later. Extracted because the two handlers were byte-for-byte alike apart
+// from the table, and a copied handler is a handler that drifts.
+func e2eForceColumn(
+	c *gin.Context,
+	repo *sqliterepo.Repository,
+	log *logger.Logger,
+	opts e2eForceColumnOpts,
+) {
+	result, err := repo.DB().ExecContext(c.Request.Context(), opts.query, opts.value, time.Now().UTC(), opts.id)
+	if err != nil {
+		log.Error("e2e: "+opts.failLog, zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+		return
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		c.JSON(http.StatusNotFound, gin.H{errKey: opts.subject + " not found: " + opts.id})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": opts.id, opts.responseKey: opts.value})
+}
+
+type e2eForceColumnOpts struct {
+	query       string
+	id          string
+	value       any
+	subject     string
+	responseKey string
+	failLog     string
+}
+
 func handleE2ESetTaskOrigin(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		taskID := c.Param("id")
 		var body e2eSetTaskOriginRequest
 		if err := c.ShouldBindJSON(&body); err != nil || body.Origin == "" {
 			c.JSON(http.StatusBadRequest, gin.H{errKey: "origin is required"})
 			return
 		}
-		result, err := repo.DB().ExecContext(c.Request.Context(),
-			`UPDATE tasks SET origin = ?, updated_at = ? WHERE id = ?`,
-			body.Origin, time.Now().UTC(), taskID,
-		)
-		if err != nil {
-			log.Error("e2e: failed to set task origin", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
-			return
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			c.JSON(http.StatusNotFound, gin.H{errKey: "task not found: " + taskID})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"id": taskID, "origin": body.Origin})
+		e2eForceColumn(c, repo, log, e2eForceColumnOpts{
+			query:       `UPDATE tasks SET origin = ?, updated_at = ? WHERE id = ?`,
+			id:          c.Param("id"),
+			value:       body.Origin,
+			subject:     "task",
+			responseKey: "origin",
+			failLog:     "failed to set task origin",
+		})
 	}
 }
 
@@ -533,20 +559,13 @@ func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logg
 			c.JSON(http.StatusBadRequest, gin.H{errKey: "message_id is required"})
 			return
 		}
-		result, err := repo.DB().ExecContext(c.Request.Context(),
-			`UPDATE task_sessions SET last_read_message_id = ?, updated_at = ? WHERE id = ?`,
-			body.MessageID, time.Now().UTC(), sessionID,
-		)
-		if err != nil {
-			log.Error("e2e: failed to force-set session read cursor", zap.Error(err))
-			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
-			return
-		}
-		rows, _ := result.RowsAffected()
-		if rows == 0 {
-			c.JSON(http.StatusNotFound, gin.H{errKey: "session not found: " + sessionID})
-			return
-		}
-		c.JSON(http.StatusOK, gin.H{"id": sessionID, "last_read_message_id": body.MessageID})
+		e2eForceColumn(c, repo, log, e2eForceColumnOpts{
+			query:       `UPDATE task_sessions SET last_read_message_id = ?, updated_at = ? WHERE id = ?`,
+			id:          sessionID,
+			value:       body.MessageID,
+			subject:     "session",
+			responseKey: "last_read_message_id",
+			failLog:     "failed to force-set session read cursor",
+		})
 	}
 }
