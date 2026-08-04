@@ -96,7 +96,11 @@ func (e *Executor) resolveLaunchEnvironment(
 	if req == nil {
 		return errors.New("launch request is required")
 	}
-	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
+	var preferredShellApplied bool
+	req.Env, preferredShellApplied = e.applyPreferredShellEnvWithStatus(ctx, req.ExecutorType, req.Env)
+	if preferredShellApplied {
+		profileEnvVars = withoutPreferredShellProfileEnvVars(profileEnvVars)
+	}
 	sources, err := e.taskEnvironmentSources(req.WorkspaceID, req.Env, profileEnvVars, repositories)
 	if err != nil {
 		return fmt.Errorf("build task environment sources: %w", err)
@@ -132,6 +136,21 @@ func (e *Executor) resolveLaunchEnvironment(
 	}
 	sort.Strings(req.ApprovedSecretEnvKeys)
 	return nil
+}
+
+func withoutPreferredShellProfileEnvVars(values []models.ProfileEnvVar) []models.ProfileEnvVar {
+	filtered := make([]models.ProfileEnvVar, 0, len(values))
+	for _, value := range values {
+		if isPreferredShellEnvKey(value.Key) {
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
+func isPreferredShellEnvKey(key string) bool {
+	return key == "SHELL" || key == "AGENTCTL_SHELL_COMMAND"
 }
 
 func (e *Executor) revealGlobalSecret(ctx context.Context, secretID string) (string, error) {

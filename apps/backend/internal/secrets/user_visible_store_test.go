@@ -98,12 +98,12 @@ func TestUserVisibleStoreWorkspaceOperationsFilterInternalSecrets(t *testing.T) 
 	if err != nil {
 		t.Fatalf("begin cleanup transaction: %v", err)
 	}
+	t.Cleanup(func() { _ = tx.Rollback() })
 	transactional, ok := wrapped.(WorkspaceSecretTransactionalDeleter)
 	if !ok {
 		t.Fatal("user-visible store is not transactional")
 	}
 	if err := transactional.DeleteWorkspaceSecretsTx(ctx, tx, "workspace-a"); err != nil {
-		_ = tx.Rollback()
 		t.Fatalf("transactional workspace cleanup: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

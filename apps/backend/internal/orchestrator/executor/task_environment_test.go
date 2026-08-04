@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestResolveEnvironmentSources_DeduplicatesSameSecretAndIgnoresOrder(t *testing.T) {
@@ -85,6 +87,30 @@ func TestResolveEnvironmentSources_ReportsEveryConflictingOrigin(t *testing.T) {
 	want := []string{"executor profile", "repository app", "repository tools"}
 	if !reflect.DeepEqual(conflictErr.Origins, want) {
 		t.Fatalf("conflict origins = %#v, want %#v", conflictErr.Origins, want)
+	}
+}
+
+func TestResolveLaunchEnvironment_PreferredShellWinsOverProfileShell(t *testing.T) {
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	req := &LaunchAgentRequest{
+		WorkspaceID:  "workspace-1",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Env:          map[string]string{},
+	}
+
+	err := executor.resolveLaunchEnvironment(context.Background(), req, []models.ProfileEnvVar{
+		{Key: "SHELL", Value: "/bin/zsh"},
+		{Key: "AGENTCTL_SHELL_COMMAND", Value: "/bin/fish"},
+		{Key: "PROFILE_TOKEN", Value: "profile-value"},
+	}, nil)
+	if err != nil {
+		t.Fatalf("resolve launch environment: %v", err)
+	}
+	if req.Env["SHELL"] != "/bin/bash" || req.Env["AGENTCTL_SHELL_COMMAND"] != "/bin/bash" {
+		t.Fatalf("preferred shell environment = %#v, want bash values", req.Env)
+	}
+	if len(req.EnvironmentDefinitions) != 3 {
+		t.Fatalf("environment definitions = %#v, want preferred shell and profile token", req.EnvironmentDefinitions)
 	}
 }
 

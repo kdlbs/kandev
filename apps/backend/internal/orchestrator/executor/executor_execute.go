@@ -615,26 +615,31 @@ func (e *Executor) getSessionLock(sessionID string) *sync.Mutex {
 }
 
 func (e *Executor) applyPreferredShellEnv(ctx context.Context, executorType string, env map[string]string) map[string]string {
+	result, _ := e.applyPreferredShellEnvWithStatus(ctx, executorType, env)
+	return result
+}
+
+func (e *Executor) applyPreferredShellEnvWithStatus(ctx context.Context, executorType string, env map[string]string) (map[string]string, bool) {
 	if e.capabilities == nil || !e.capabilities.ShouldApplyPreferredShell(executorType) {
-		return env
+		return env, false
 	}
 	if e.shellPrefs == nil {
-		return env
+		return env, false
 	}
 	preferred, err := e.shellPrefs.PreferredShell(ctx)
 	if err != nil {
-		return env
+		return env, false
 	}
 	preferred = strings.TrimSpace(preferred)
 	if preferred == "" {
-		return env
+		return env, false
 	}
 	if env == nil {
 		env = make(map[string]string)
 	}
 	env["AGENTCTL_SHELL_COMMAND"] = preferred
 	env["SHELL"] = preferred
-	return env
+	return env, true
 }
 
 // Execute starts agent execution for a task

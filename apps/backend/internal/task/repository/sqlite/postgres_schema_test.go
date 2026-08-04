@@ -564,8 +564,15 @@ func TestPostgresRepositorySecretBindingsSchemaReplay(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get repository after replay: %v", err)
 	}
-	if len(got.SecretBindings) != 1 || got.SecretBindings[0] != bindings[0] {
-		t.Fatalf("repository bindings = %+v, want %+v", got.SecretBindings, bindings)
+	if len(got.SecretBindings) != 1 {
+		t.Fatalf("repository bindings = %+v, want one binding", got.SecretBindings)
+	}
+	gotBinding := got.SecretBindings[0]
+	if gotBinding.RepositoryID != repository.ID || gotBinding.Key != bindings[0].Key || gotBinding.SecretID != bindings[0].SecretID {
+		t.Fatalf("repository binding = %+v, want repository=%q key=%q secret=%q", gotBinding, repository.ID, bindings[0].Key, bindings[0].SecretID)
+	}
+	if gotBinding.CreatedAt.IsZero() || gotBinding.UpdatedAt.IsZero() {
+		t.Fatalf("repository binding timestamps = %+v, want persisted timestamps", gotBinding)
 	}
 }
 
