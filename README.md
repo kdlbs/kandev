@@ -127,6 +127,16 @@ brew install kdlbs/kandev/kandev
 kandev
 ```
 
+### Scoop (Windows)
+
+```bash
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev
+```
+
+Installs the native bundle — no Node.js required.
+
 ### NPX
 
 ```bash
@@ -145,6 +155,7 @@ kandev
 ### Updates
 
 - `brew upgrade kandev`
+- `scoop update kandev`
 - `npx kandev@latest` (always uses the latest published version)
 - `npm install -g kandev@latest`
 
@@ -160,8 +171,8 @@ npm install -g kandev@nightly
 installed Kandev until you reinstall `kandev@latest`.
 
 Nightlies are best-effort builds scheduled for 12:00 UTC when `main` has changed since the latest
-stable release. They do not move `latest`, and no Homebrew or Desktop nightly channel is published.
-A verified Kandev-managed npm/npx user service can switch between Stable and Nightly in
+stable release. They do not move `latest`, and no Homebrew, Scoop, or Desktop nightly channel is
+published. A verified Kandev-managed npm/npx user service can switch between Stable and Nightly in
 **Settings > System > Updates**. Other install types expose only Stable in that page; npm/npx users
 can still invoke `@nightly` directly with the commands above.
 

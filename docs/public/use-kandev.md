@@ -32,6 +32,11 @@ Choose one release channel:
 brew install kdlbs/kandev/kandev
 kandev
 
+# Scoop on Windows
+scoop bucket add kandev https://github.com/kdlbs/scoop-kandev
+scoop install kandev
+kandev
+
 # One-off npm launch
 npx kandev@latest
 
