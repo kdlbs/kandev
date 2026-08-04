@@ -30,7 +30,11 @@ vi.mock("@/lib/routing/client-router", () => ({
   usePathname: () => "/automations",
 }));
 
+import { STATE_DOT_CLASS } from "./automation-rows";
 import { RunsListPage } from "./runs-list-page";
+
+/** The dot class the shared derivation paints a `running` automation with. */
+const STATE_DOT_RUNNING = STATE_DOT_CLASS.running;
 
 function scheduled(id: string, cron: string) {
   return [{ id, type: "scheduled", enabled: true, config: { cron_expression: cron } }];
@@ -98,6 +102,11 @@ describe("RunsListPage", () => {
   });
 
   it("orders the agenda by when things fire, soonest first", async () => {
+    // Time is pinned away from the hour before midnight UTC. There, an hourly
+    // and a daily-at-midnight schedule resolve to the same instant, the sort is
+    // a tie, and this case failed for an hour a day on the wall clock alone.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-31T10:00:00Z"));
     const soon = mkAutomation({
       id: "soon",
       name: "Hourly",
@@ -112,7 +121,7 @@ describe("RunsListPage", () => {
 
     render(<RunsListPage workspaceId={WORKSPACE_ID} />);
 
-    await screen.findByTestId("agenda-row-soon");
+    await vi.waitFor(() => screen.getByTestId("agenda-row-soon"));
     const rows = screen.getAllByTestId(/^agenda-row-/);
     expect(rows[0].getAttribute("data-testid")).toBe("agenda-row-soon");
   });
@@ -196,8 +205,10 @@ describe("RunsListPage", () => {
 describe("RunsListPage live refresh", () => {
   it("keeps a running automation current without the user reloading", async () => {
     vi.useFakeTimers();
-    // A scheduled automation held at its cap: the row reads as running, which
-    // is what gates the polling.
+    // A scheduled automation with a run open: the row reads as running, which
+    // is what gates the polling. Asserted on the dot rather than on the
+    // next-run note — one open run against one slot is the ordinary steady
+    // state and says nothing about the cap.
     mocks.listAutomations.mockResolvedValue([
       mkAutomation({ triggers: scheduled("t1", "0 0 * * *") }),
     ]);
@@ -205,7 +216,9 @@ describe("RunsListPage live refresh", () => {
 
     render(<RunsListPage workspaceId={WORKSPACE_ID} />);
     await vi.waitFor(() =>
-      expect(screen.getByTestId("automation-next-run").textContent).toContain("Paused"),
+      expect(
+        screen.getByTestId(`agenda-row-${AUTOMATION_ID}`).innerHTML.includes(STATE_DOT_RUNNING),
+      ).toBe(true),
     );
     const before = mocks.listAutomationSummaries.mock.calls.length;
 

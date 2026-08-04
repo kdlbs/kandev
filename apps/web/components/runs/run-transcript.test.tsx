@@ -1,4 +1,4 @@
-import { render, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockFetchTaskSession = vi.hoisted(() => vi.fn());
@@ -33,6 +33,10 @@ function transcript() {
   );
 }
 
+function sessionInState(state: string) {
+  return { session: { id: SESSION_ID, task_id: TASK_ID, state } };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockFetchTaskSession.mockResolvedValue({
@@ -41,6 +45,9 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  // Each case renders the whole chat stack; without this the trees stack up and
+  // a by-test-id lookup starts matching the previous case's composer.
+  cleanup();
   vi.restoreAllMocks();
 });
 
@@ -67,5 +74,52 @@ describe("RunTranscript session hydration", () => {
     rerender(transcript());
 
     expect(mockFetchTaskSession).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("RunTranscript live-session controls", () => {
+  // Replying to a run starts the agent, it works the prompt, and it shuts down
+  // again. Controls that speak to a live ACP session — the model picker above
+  // all — must not outlive the turn: they still look operable, and changing a
+  // model on a process that no longer exists silently does nothing.
+  it("offers the model selector while a turn is running", async () => {
+    mockFetchTaskSession.mockResolvedValue(sessionInState("RUNNING"));
+
+    render(transcript());
+
+    await waitFor(() => expect(screen.getByTestId("toolbar-item-model")).toBeTruthy());
+  });
+
+  it("unmounts the model selector once the turn ends and the run parks", async () => {
+    // WAITING_FOR_INPUT is the state a finished automation run parks in — it is
+    // what keeps the run repliable, and it is exactly the state with no agent
+    // behind it.
+    mockFetchTaskSession.mockResolvedValue(sessionInState("WAITING_FOR_INPUT"));
+
+    render(transcript());
+
+    await waitFor(() => expect(screen.getByTestId("chat-input-area")).toBeTruthy());
+    expect(screen.queryByTestId("toolbar-item-model")).toBeNull();
+  });
+
+  it("keeps the composer itself, because the run is still repliable", async () => {
+    mockFetchTaskSession.mockResolvedValue(sessionInState("WAITING_FOR_INPUT"));
+
+    render(transcript());
+
+    await waitFor(() => expect(screen.getByTestId("chat-input-area")).toBeTruthy());
+    expect(screen.getByTestId("chat-input-toolbar")).toBeTruthy();
+  });
+
+  it("draws the composer on the page's own background, not the workbench plate", async () => {
+    // A lighter strip along the bottom of a `bg-background` page read as a
+    // panel that had been left behind.
+    mockFetchTaskSession.mockResolvedValue(sessionInState("WAITING_FOR_INPUT"));
+
+    render(transcript());
+
+    const area = await screen.findByTestId("chat-input-area");
+    expect(area.className).toContain("bg-background");
+    expect(area.className).not.toContain("bg-card");
   });
 });

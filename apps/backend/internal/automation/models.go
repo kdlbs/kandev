@@ -83,6 +83,20 @@ type Automation struct {
 	CreatedAt         time.Time  `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time  `json:"updated_at" db:"updated_at"`
 
+	// LegacyBoardCard reports that this automation was created while the
+	// withdrawn execution_mode still decided where a firing landed, and that
+	// its stored value is `task` — the DEFAULT, so this covers every
+	// automation nobody explicitly set to `run`. Those firings used to put a
+	// card on the kanban and no longer do; the UI uses this to say so once,
+	// per workspace, instead of leaving the cards to just stop appearing.
+	//
+	// Derived in SQL (`execution_mode = 'task'`) rather than by reading the
+	// column into a field, so the raw mode never enters the Go model and
+	// cannot grow a firing-path branch: this is a migration-window notice,
+	// not a second destination. See docs/specs/office/automations-settings.md
+	// § Migration.
+	LegacyBoardCard bool `json:"legacy_board_card" db:"legacy_board_card"`
+
 	// Hydrated separately, not stored as columns on this table.
 	Triggers []AutomationTrigger `json:"triggers" db:"-"`
 	// RepositoryIDs is the ordered list of repositories to use for trigger

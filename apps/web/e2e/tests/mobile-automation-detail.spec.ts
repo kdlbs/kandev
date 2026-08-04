@@ -17,6 +17,9 @@ import type { ApiClient } from "../helpers/api-client";
 
 type Seed = { workspaceId: string; workflowId: string; startStepId: string };
 
+/** The standing instruction, seeded so the run-detail panel has one to show. */
+const STANDING_INSTRUCTION = "Check the overnight drift report and summarise what changed.";
+
 /** An automation with two finished runs, newest last. */
 async function seedAutomationWithRuns(apiClient: ApiClient, seed: Seed, name: string) {
   const automation = await apiClient.seedAutomation({
@@ -24,6 +27,7 @@ async function seedAutomationWithRuns(apiClient: ApiClient, seed: Seed, name: st
     name,
     workflowId: seed.workflowId,
     workflowStepId: seed.startStepId,
+    prompt: STANDING_INSTRUCTION,
   });
 
   const older = await apiClient.createTask(seed.workspaceId, `${name} — older run`, {
@@ -82,6 +86,32 @@ test.describe("Automation detail on mobile", () => {
     // it open would cover the transcript the user just asked for.
     await expect(testPage).toHaveURL(/[?&]run=/, { timeout: 10_000 });
     await expect(testPage.getByTestId("run-group-completed")).toHaveCount(0, { timeout: 10_000 });
+  });
+
+  test("keeps the run detail in the drawer, not above the transcript", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { automation } = await seedAutomationWithRuns(apiClient, seedData, "Mobile Detail");
+    await openDetail(testPage, automation.id);
+    await expect(testPage.getByTestId("run-transcript")).toBeVisible({ timeout: 15_000 });
+
+    // The standing instruction is the same long text on every run; on a 393px
+    // viewport pinning it above the conversation costs most of the screen.
+    await expect(testPage.getByTestId("automation-prompt")).toHaveCount(0);
+    await expect(testPage.getByTestId("run-detail-toggle")).toHaveCount(0);
+
+    await testPage.getByTestId("runs-drawer-trigger").click();
+    const toggle = testPage.getByTestId("run-detail-toggle");
+    await expect(toggle).toBeVisible({ timeout: 10_000 });
+    await toggle.click();
+
+    const panel = testPage.getByTestId("run-detail-panel");
+    await expect(panel.getByTestId("automation-prompt")).toContainText(STANDING_INSTRUCTION);
+    // The topbar drops the next-firing note on a phone for want of width, so
+    // this is where it said it went.
+    await expect(panel.getByTestId("run-detail-next-run")).not.toHaveText("");
   });
 
   test("offers a composer on a run with a conversation", async ({

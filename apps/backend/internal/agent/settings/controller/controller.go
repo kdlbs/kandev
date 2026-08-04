@@ -147,7 +147,16 @@ type AutomationReference struct {
 }
 
 // AutomationDependencyChecker enumerates enabled automations bound to an agent
-// profile.
+// profile and disables them when that profile is deleted.
+//
+// ListEnabledAutomationsByAgentProfile feeds the confirmation dialog.
+// DisableAutomationsByAgentProfile runs on the delete path *before* the profile
+// row is removed and its error aborts the delete — unlike the watcher
+// equivalent, which runs after and is best-effort. The asymmetry is deliberate:
+// a watcher left enabled against a deleted profile is repaired by the dispatch
+// coordinator's preflight on the next poll, and an automation has no such
+// backstop, so the only safe moment to disable it is while the delete can still
+// be called off.
 type AutomationDependencyChecker interface {
 	ListEnabledAutomationsByAgentProfile(ctx context.Context, agentProfileID string) ([]AutomationReference, error)
 	DisableAutomationsByAgentProfile(ctx context.Context, agentProfileID string) ([]AutomationReference, error)

@@ -430,3 +430,95 @@ test.describe("Automations settings page", () => {
     await expect(openRow.getByText("Running", { exact: true })).toBeVisible();
   });
 });
+
+/**
+ * The one-time notice that automation runs stopped landing on the kanban.
+ *
+ * Withdrawing execution modes made every firing land in one hidden place, but
+ * `task` was the stored default — so on upgrade a working setup simply stops
+ * producing the cards someone built their day around. The server derives
+ * `legacy_board_card` from the retained `execution_mode` column, and the API
+ * ignores that field on input by design, so these tests backdate the column
+ * through the E2E seeding endpoint (`seedAutomation({ legacyBoardCard: true })`)
+ * — the same on-disk state a real upgraded install carries. The flag the UI
+ * reads is then produced by the production SQL, not by a stub.
+ */
+test.describe("Automations board-move migration notice", () => {
+  test("tells a workspace whose automations used to put cards on the board", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Legacy Board Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      legacyBoardCard: true,
+    });
+
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    const notice = testPage.getByTestId("automation-board-move-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await expect(notice).toContainText("no longer appear on the board");
+    // Above the table, because it explains why the table's automations stopped
+    // showing up where the reader last saw them.
+    await expect(automations.table).toBeVisible();
+    const [noticeTop, tableTop] = await Promise.all([
+      notice.evaluate((el) => el.getBoundingClientRect().top),
+      automations.table.evaluate((el) => el.getBoundingClientRect().top),
+    ]);
+    expect(noticeTop).toBeLessThan(tableTop);
+  });
+
+  test("stays gone once dismissed, across a reload", async ({ testPage, seedData, apiClient }) => {
+    await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Dismissible Legacy Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+      legacyBoardCard: true,
+    });
+
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    const notice = testPage.getByTestId("automation-board-move-notice");
+    await expect(notice).toBeVisible({ timeout: 15_000 });
+    await testPage.getByTestId("automation-board-move-notice-dismiss").click();
+    await expect(notice).toHaveCount(0);
+
+    // The dismissal is durable — a migration notice that came back on every
+    // visit would be worse than not shipping it.
+    await testPage.reload();
+    await expect(automations.table).toBeVisible({ timeout: 15_000 });
+    await expect(notice).toHaveCount(0);
+  });
+
+  test("says nothing to a workspace that never ran in the withdrawn mode", async ({
+    testPage,
+    seedData,
+    apiClient,
+  }) => {
+    // Created the way everything is created now: nothing was lost here, so
+    // there is no news to break.
+    await apiClient.seedAutomation({
+      workspaceId: seedData.workspaceId,
+      name: "Run Mode Automation",
+      workflowId: seedData.workflowId,
+      workflowStepId: seedData.startStepId,
+    });
+
+    const automations = new AutomationsPage(testPage, seedData.workspaceId);
+    await automations.goto();
+
+    // Assert against a rendered table, not an empty page — the notice sits
+    // beside the automations it is about, and an empty list would hide it for
+    // the wrong reason.
+    await expect(automations.table).toBeVisible({ timeout: 15_000 });
+    await expect(testPage.getByText("Run Mode Automation")).toBeVisible();
+    await expect(testPage.getByTestId("automation-board-move-notice")).toHaveCount(0);
+  });
+});

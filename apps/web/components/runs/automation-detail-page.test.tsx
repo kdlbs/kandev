@@ -12,6 +12,10 @@ const WORKSPACE_ID = "workspace-1";
 const ACTIVITY = "automation-activity";
 const TRANSCRIPT = "run-transcript";
 const SESSION_ATTR = "data-session-id";
+const RUN_NOW = "automation-run-now";
+const NEXT_RUN = "automation-next-run";
+const DETAIL_TOGGLE = "run-detail-toggle";
+const PROMPT = "automation-prompt";
 const SESSION_OLDER = "session-older";
 const SESSION_NEWEST = "session-newest";
 const OLDER_AT = "2026-07-29T00:00:00Z";
@@ -166,10 +170,37 @@ describe("AutomationDetailPage", () => {
     expect(screen.queryByTestId("runs-rail")).toBeNull();
   });
 
-  it("shows the automation's standing instruction above its transcript", async () => {
+  it("puts nothing above the transcript — the conversation is what the page is for", async () => {
+    // The standing instruction is the same text on every run and it is long, so
+    // pinning it here pushed what the agent actually said down the page on
+    // every visit.
     render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
 
-    await waitFor(() => expect(screen.getByTestId("automation-prompt")).toBeTruthy());
+    await screen.findByTestId(TRANSCRIPT);
+    expect(screen.queryByTestId(PROMPT)).toBeNull();
+  });
+
+  it("keeps the standing instruction one click away in the rail", async () => {
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+
+    const toggle = await screen.findByTestId(DETAIL_TOGGLE);
+    expect(screen.queryByTestId("run-detail-panel")).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(screen.getByTestId(PROMPT).textContent).toContain("/ksdd:drift");
+  });
+
+  it("offers the same detail from the drawer on mobile", async () => {
+    mockIsMobile.value = true;
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await screen.findByTestId(TRANSCRIPT);
+
+    fireEvent.click(screen.getByTestId("runs-drawer-trigger"));
+
+    fireEvent.click(await screen.findByTestId(DETAIL_TOGGLE));
+    expect(screen.getByTestId(PROMPT)).toBeTruthy();
   });
 
   it("honours an explicitly requested run", async () => {
@@ -225,7 +256,7 @@ describe("AutomationDetailPage", () => {
     render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
     await waitFor(() => expect(mocks.listAutomationRuns).toHaveBeenCalledTimes(1));
 
-    fireEvent.click(screen.getByTestId("automation-run-now"));
+    fireEvent.click(screen.getByTestId(RUN_NOW));
 
     await waitFor(() => expect(mocks.triggerAutomation).toHaveBeenCalledWith(AUTOMATION_ID));
     await waitFor(() => expect(mocks.listAutomationRuns).toHaveBeenCalledTimes(2));
@@ -234,7 +265,7 @@ describe("AutomationDetailPage", () => {
   it("keeps Run now inert until the automation it would fire has loaded", () => {
     render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
 
-    expect(screen.getByTestId("automation-run-now").hasAttribute("disabled")).toBe(true);
+    expect(screen.getByTestId(RUN_NOW).hasAttribute("disabled")).toBe(true);
   });
 });
 
@@ -325,5 +356,84 @@ describe("AutomationDetailPage run switching", () => {
     expect(screen.getByTestId("automation-error").textContent).toContain("automation not found");
     // A blank Activity list under an error would read as "it has never run".
     expect(screen.queryByTestId(ACTIVITY)).toBeNull();
+  });
+});
+
+/**
+ * The page has to keep itself current across a manual fire — the run row is
+ * written after the fire returns, so anything it renders from a pre-trigger
+ * snapshot is stale the moment the run exists.
+ */
+describe("AutomationDetailPage freshness", () => {
+  it("clears the paused note once the triggered run settles", async () => {
+    // The reported bug: the amber note appeared when a run was fired and stayed
+    // there. It has to come down on its own, from the page's own polling, with
+    // nobody pressing Refresh.
+    vi.useFakeTimers();
+    mocks.getAutomation.mockResolvedValue({
+      ...AUTOMATION,
+      max_concurrent_runs: 2,
+      // A real scheduled trigger: without one the note reads "No schedule",
+      // which would pass a "not Paused" assertion for the wrong reason.
+      triggers: [
+        {
+          id: "trigger-1",
+          automation_id: AUTOMATION_ID,
+          type: "scheduled",
+          enabled: true,
+          config: { cron_expression: "0 0 * * *", timezone: "Asia/Singapore" },
+        },
+      ],
+    });
+    mocks.getAutomationSummary.mockResolvedValue({ automation_id: AUTOMATION_ID, open_runs: 2 });
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await vi.waitFor(() => expect(screen.getByTestId(NEXT_RUN).textContent).toContain("Paused"));
+
+    mocks.getAutomationSummary.mockResolvedValue({ automation_id: AUTOMATION_ID, open_runs: 0 });
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    await vi.waitFor(() =>
+      expect(screen.getByTestId(NEXT_RUN).textContent).not.toContain("Paused"),
+    );
+    vi.useRealTimers();
+  });
+
+  it("keeps re-asking after a manual fire even before the run row exists", async () => {
+    // The run row is written on the orchestrator's own goroutine after the fire
+    // returns. A page that only polls while it can already see an open run
+    // would stop asking here, and then render its pre-trigger snapshot — and
+    // everything derived from it — until someone reloaded.
+    vi.useFakeTimers();
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await vi.waitFor(() => screen.getByTestId(TRANSCRIPT));
+
+    fireEvent.click(screen.getByTestId(RUN_NOW));
+    await vi.advanceTimersByTimeAsync(4_000);
+    const afterRetryBurst = mocks.getAutomationSummary.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    expect(mocks.getAutomationSummary.mock.calls.length).toBeGreaterThan(afterRetryBurst);
+    vi.useRealTimers();
+  });
+
+  it("stops re-asking once the settling window closes with nothing open", async () => {
+    // The window is a bounded hedge against a slow write, not a licence to poll
+    // an idle automation forever.
+    vi.useFakeTimers();
+
+    render(<AutomationDetailPage automationId={AUTOMATION_ID} tab="activity" />);
+    await vi.waitFor(() => screen.getByTestId(TRANSCRIPT));
+
+    fireEvent.click(screen.getByTestId(RUN_NOW));
+    await vi.advanceTimersByTimeAsync(70_000);
+    const afterWindow = mocks.getAutomationSummary.mock.calls.length;
+
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(mocks.getAutomationSummary.mock.calls.length).toBe(afterWindow);
+    vi.useRealTimers();
   });
 });

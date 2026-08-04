@@ -8,6 +8,7 @@ import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from 
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import Link from "@/components/routing/app-link";
 import { describeAutomationSchedule, scheduleBinding } from "./automation-schedule";
+import { RunDetailDisclosure } from "./run-detail-disclosure";
 import { groupRunsByState } from "./run-status";
 import { RunGroup } from "./runs-rail";
 import { detailTabHref } from "./runs-view";
@@ -29,11 +30,14 @@ export function RunsDrawer({
   runs,
   selectedRunId,
   onSelect,
+  openRuns,
 }: {
   automation: Automation;
   runs: AutomationRun[];
   selectedRunId: string | null;
   onSelect: (run: AutomationRun) => void;
+  /** Feeds the run-detail panel's next-firing line. */
+  openRuns: number;
 }) {
   const { t } = useTranslation();
   // Controlled, because picking a run only changes a query parameter — the page
@@ -81,6 +85,13 @@ export function RunsDrawer({
             </p>
           )}
         </DrawerHeader>
+        {/* The run view's old header block. The topbar drops the next-firing
+            note on a phone for want of width; this is where it said it went. */}
+        <RunDetailDisclosure
+          automation={automation}
+          openRuns={openRuns}
+          className="shrink-0 px-1.5 pt-2"
+        />
         <div className="max-h-[60vh] overflow-y-auto px-1.5 pb-6">
           {runs.length === 0 ? (
             <p

@@ -46,8 +46,12 @@ const createTablesSQL = `
 		repository_id TEXT NOT NULL DEFAULT '',
 		prompt TEXT DEFAULT '',
 		task_title_template TEXT DEFAULT '',
-		-- execution_mode is retained so existing rows need no migration; the
-		-- task/run execution-mode choice is withdrawn and nothing reads it.
+		-- execution_mode is retained so existing rows need no migration. The
+		-- task/run choice is withdrawn: no firing path consults it. The one
+		-- surviving reader is the migration notice, which derives a single
+		-- boolean from it (see automationColumns). New rows are written with
+		-- an explicit '' — the 'task' DEFAULT below only ever describes rows
+		-- that predate the withdrawal.
 		execution_mode TEXT NOT NULL DEFAULT 'task',
 		enabled BOOLEAN DEFAULT 1,
 		max_concurrent_runs INTEGER DEFAULT 1,
@@ -119,6 +123,10 @@ const createTablesSQL = `
 // this package doesn't have yet. Every query that scans a full Automation
 // row uses the explicit automationColumns list, which omits it, so its
 // continued presence in the table is inert.
+//
+// migrateExecutionModeSQL still runs because the notice derivation in
+// automationColumns needs the column to exist on every DB it queries,
+// including one initialised before the column was ever added.
 const (
 	migrateTaskTitleSQL     = `ALTER TABLE automations ADD COLUMN task_title_template TEXT DEFAULT ''`
 	migrateExecutionModeSQL = `ALTER TABLE automations ADD COLUMN execution_mode TEXT NOT NULL DEFAULT 'task'`
@@ -127,13 +135,23 @@ const (
 
 // automationColumns is the explicit column list for every query that scans a
 // full Automation row. Spelled out rather than `SELECT *` because the table
-// carries two columns the Automation struct does not: the legacy repository_id
+// carries columns the Automation struct does not: the legacy repository_id
 // (superseded by automation_repositories — see the comment above
-// migrateRepositoryIDSQL) and the withdrawn execution_mode. sqlx would fail to
-// map either.
+// migrateRepositoryIDSQL) and the withdrawn execution_mode, neither of which
+// sqlx could map. sqlx runs in safe mode, so a returned column with no struct
+// destination is a runtime error, not a compile-time one.
+//
+// execution_mode is read here, and only here, as the comparison
+// `execution_mode = 'task'` aliased to legacy_board_card. The raw value is
+// deliberately never selected: what the reader needs is the one bit "did this
+// automation used to put a card on the board", for a migration notice that
+// closes once. Projecting the mode itself would hand every future caller a
+// mode to branch on, and the whole point of withdrawing it is that no firing
+// path has one. See docs/specs/office/automations-settings.md § Migration.
 const automationColumns = `id, workspace_id, name, description, workflow_id, workflow_step_id,
 	agent_profile_id, executor_profile_id, prompt, task_title_template,
-	enabled, max_concurrent_runs, webhook_secret, last_triggered_at, created_at, updated_at`
+	enabled, max_concurrent_runs, webhook_secret, last_triggered_at, created_at, updated_at,
+	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
@@ -210,15 +228,21 @@ func (s *Store) CreateAutomation(ctx context.Context, a *Automation) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	// execution_mode is omitted deliberately — the column's NOT NULL DEFAULT
-	// fills it and no code path reads it back.
+	// execution_mode is written as the empty string rather than left to the
+	// column's DEFAULT. Nothing reads the mode to decide anything — but the
+	// DEFAULT is 'task', which is exactly the value the migration notice
+	// treats as "this automation used to put a card on the board". Letting
+	// the DEFAULT fill it would make every automation created from here on
+	// indistinguishable from a pre-upgrade one, and the one-time notice would
+	// never stop being true. Empty means "no mode was ever chosen", which is
+	// the honest record for a row created after the choice was withdrawn.
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO automations (id, workspace_id, name, description, workflow_id, workflow_step_id,
 			agent_profile_id, executor_profile_id,
-			prompt, task_title_template,
+			prompt, task_title_template, execution_mode,
 			enabled, max_concurrent_runs,
 			webhook_secret, last_triggered_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
 		a.ID, a.WorkspaceID, a.Name, a.Description, a.WorkflowID, a.WorkflowStepID,
 		a.AgentProfileID, a.ExecutorProfileID,
 		a.Prompt, a.TaskTitleTemplate,

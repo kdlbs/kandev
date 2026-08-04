@@ -49,7 +49,7 @@ func registerE2EResetRoutes(
 	// Automation seeding helpers for E2E tests that need runs without going
 	// through the WS API (works on any Node version).
 	if automationSvc != nil {
-		api.POST("/automations", handleE2ECreateAutomation(automationSvc, log))
+		api.POST("/automations", handleE2ECreateAutomation(automationSvc, repo, log))
 		api.POST("/automation-runs", handleE2ECreateAutomationRun(automationSvc, log))
 	}
 	// Seeds a task_sessions row directly (e.g. a CANCELLED primary session)
@@ -61,6 +61,12 @@ func registerE2EResetRoutes(
 	// seed "the user last read up through an earlier message" without a real
 	// background agent turn.
 	api.PATCH("/task-sessions/:id/read-cursor", handleE2ESetSessionReadCursor(repo, log))
+	// Stamps a task's origin. Production sets origin=automation_run inside the
+	// automation firing path, so a task seeded through the ordinary task API is
+	// an ordinary task — it shows on the kanban and in task lists, which is the
+	// opposite of what an automation run does. Specs that assert on (or
+	// photograph) that hiding need the seeded state to match production.
+	api.PATCH("/tasks/:id/origin", handleE2ESetTaskOrigin(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
 }
@@ -326,11 +332,30 @@ type e2eCreateAutomationRequest struct {
 	Name           string `json:"name"`
 	WorkflowID     string `json:"workflow_id"`
 	WorkflowStepID string `json:"workflow_step_id"`
+	// Prompt is the automation's standing instruction. Optional, but the run
+	// view only renders the instruction card when there is one, so a spec
+	// asserting on where that card lives has to seed it.
+	Prompt string `json:"prompt"`
+	// LegacyBoardCard rewrites the row's execution_mode to 'task' after
+	// creation, reproducing on disk exactly what an install that predates the
+	// withdrawal of execution modes carries. There is no input path to this:
+	// CreateAutomation deliberately writes the empty string so a row created
+	// today can never be mistaken for a pre-upgrade one (see
+	// automation.Store.CreateAutomation), and the field is ignored on the
+	// wire. The migration notice is derived from this column by production
+	// SQL (`execution_mode = 'task' AS legacy_board_card`), so seeding the
+	// column is the only honest way to put a workspace in the state the
+	// notice exists to explain.
+	LegacyBoardCard bool `json:"legacy_board_card"`
 }
 
 // handleE2ECreateAutomation seeds an automation for E2E tests via HTTP so tests
 // don't require Node 24 (WS API requires a global WebSocket that isn't in Node 20).
-func handleE2ECreateAutomation(svc *automation.Service, log *logger.Logger) gin.HandlerFunc {
+func handleE2ECreateAutomation(
+	svc *automation.Service,
+	repo *sqliterepo.Repository,
+	log *logger.Logger,
+) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var body e2eCreateAutomationRequest
 		if err := c.ShouldBindJSON(&body); err != nil || body.WorkspaceID == "" || body.Name == "" {
@@ -342,12 +367,23 @@ func handleE2ECreateAutomation(svc *automation.Service, log *logger.Logger) gin.
 			Name:              body.Name,
 			WorkflowID:        body.WorkflowID,
 			WorkflowStepID:    body.WorkflowStepID,
+			Prompt:            body.Prompt,
 			MaxConcurrentRuns: 10,
 		})
 		if err != nil {
 			log.Error("e2e: failed to create automation", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
 			return
+		}
+		if body.LegacyBoardCard {
+			// Automations live in the same SQLite database the task repository
+			// holds open, so no second handle is needed.
+			if _, err := repo.DB().ExecContext(c.Request.Context(),
+				`UPDATE automations SET execution_mode = 'task' WHERE id = ?`, a.ID); err != nil {
+				log.Error("e2e: failed to backdate automation execution_mode", zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+				return
+			}
 		}
 		c.JSON(http.StatusCreated, gin.H{"id": a.ID, "workspace_id": a.WorkspaceID, "name": a.Name})
 	}
@@ -459,6 +495,36 @@ type e2eSetSessionReadCursorRequest struct {
 // read up through an earlier message" deterministically, since replaying an
 // older messageId through the real mark-read endpoint is now a rejected
 // no-op rather than a rewind.
+type e2eSetTaskOriginRequest struct {
+	Origin string `json:"origin"`
+}
+
+func handleE2ESetTaskOrigin(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		taskID := c.Param("id")
+		var body e2eSetTaskOriginRequest
+		if err := c.ShouldBindJSON(&body); err != nil || body.Origin == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "origin is required"})
+			return
+		}
+		result, err := repo.DB().ExecContext(c.Request.Context(),
+			`UPDATE tasks SET origin = ?, updated_at = ? WHERE id = ?`,
+			body.Origin, time.Now().UTC(), taskID,
+		)
+		if err != nil {
+			log.Error("e2e: failed to set task origin", zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: err.Error()})
+			return
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			c.JSON(http.StatusNotFound, gin.H{errKey: "task not found: " + taskID})
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"id": taskID, "origin": body.Origin})
+	}
+}
+
 func handleE2ESetSessionReadCursor(repo *sqliterepo.Repository, log *logger.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		sessionID := c.Param("id")

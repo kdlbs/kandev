@@ -7,6 +7,7 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { cn } from "@/lib/utils";
 import { describeAutomationSchedule, scheduleBinding } from "./automation-schedule";
+import { RunDetailDisclosure } from "./run-detail-disclosure";
 import { groupRunsByState, statusDotClass, statusLabelKey } from "./run-status";
 import { detailTabHref } from "./runs-view";
 
@@ -23,6 +24,8 @@ type RunsRailProps = {
   runs: AutomationRun[];
   selectedRunId: string | null;
   onSelect: (run: AutomationRun) => void;
+  /** Feeds the run-detail panel's next-firing line. */
+  openRuns: number;
   width: number;
   resizing: boolean;
   onResizeStart: (event: React.MouseEvent) => void;
@@ -119,6 +122,7 @@ export function RunsRail({
   runs,
   selectedRunId,
   onSelect,
+  openRuns,
   width,
   resizing,
   onResizeStart,
@@ -167,6 +171,12 @@ export function RunsRail({
           {t("automations:details")}
         </Link>
       </div>
+      {/* The run view's old header block, now asked for rather than imposed. */}
+      <RunDetailDisclosure
+        automation={automation}
+        openRuns={openRuns}
+        className="shrink-0 border-b border-border/60 px-1.5 py-1"
+      />
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-3">
         {runs.length === 0 ? (
           <p className="px-2.5 py-6 text-xs text-muted-foreground" data-testid="runs-rail-empty">

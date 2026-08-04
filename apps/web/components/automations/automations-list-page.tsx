@@ -9,6 +9,7 @@ import { toast } from "@/lib/toast/sonner";
 import { t } from "@/lib/i18n";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
+import { AutomationBoardMoveNotice } from "./board-move-notice";
 import { useAutomationEnabledDrafts } from "./use-automation-enabled-drafts";
 
 type AutomationsListPageProps = {
@@ -65,6 +66,10 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         </Button>
       </div>
       <Separator />
+      {/* Above the table on purpose: it explains why the table's automations
+          stopped showing up where the reader last saw them, so it has to be
+          read before the table, not after it. */}
+      <AutomationBoardMoveNotice workspaceId={workspaceId} automations={items} />
       {loading && items.length === 0 ? (
         <div className="py-12 text-center text-muted-foreground">
           {t("automations:loadingAutomations")}

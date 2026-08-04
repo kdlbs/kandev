@@ -15,7 +15,8 @@ import { useAutomationSummaries } from "@/components/runs/use-automation-summari
 import { useWorkspaceAutomations } from "@/components/runs/use-workspace-automations";
 import { AUTOMATIONS_HREF } from "@/components/runs/runs-view";
 import { usePathname } from "@/lib/routing/client-router";
-import { cn } from "@/lib/utils";
+import { useNow } from "@/hooks/use-now";
+import { cn, formatRelativeTime } from "@/lib/utils";
 import {
   APP_SIDEBAR_SECTION_IDS,
   SIDEBAR_ITEM_ACTIVE,
@@ -53,10 +54,21 @@ function OpenListShortcut() {
  * One automation. The dot answers "is this thing okay" at a glance — the same
  * question the runs list answers, from the same derivation, so the sidebar and
  * the list cannot disagree about an automation's health.
+ *
+ * The trailing time answers the other one: an automation is a thing that is
+ * supposed to keep happening, and "when did it last happen" is what tells you
+ * whether it is. It comes from the same `formatRelativeTime` the runs rail
+ * prints beside each run, so the two surfaces phrase an age identically.
  */
 function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolean }) {
-  const { automation, state } = row;
+  const { automation, state, lastRun } = row;
   const { t } = useTranslation();
+  // "4m ago" is the one thing here the websocket pipeline will never push an
+  // update for: nothing about the automation changed, the clock did. An idle
+  // sidebar re-renders only when its data does, so without a tick this label
+  // freezes at whatever it said when the section was first opened — and a
+  // stale age is worse than no age, because it reads as a fresh reading.
+  useNow(30_000);
   return (
     <Link
       href={`${AUTOMATIONS_HREF}/${automation.id}`}
@@ -72,7 +84,16 @@ function AutomationRowLink({ row, active }: { row: AutomationRow; active: boolea
       />
       {/* The dot is decorative, so the state reaches a screen reader here. */}
       <span className="sr-only">{`${t(STATE_LABEL_KEY[state])}.`}</span>
-      <span className="flex-1 truncate">{automation.name}</span>
+      <span className="min-w-0 flex-1 truncate">{automation.name}</span>
+      {lastRun && (
+        <span
+          className="shrink-0 text-[11px] font-normal tabular-nums text-muted-foreground/70"
+          data-testid={`sidebar-automation-last-run-${automation.id}`}
+          title={t("automations:lastRan", { when: formatRelativeTime(lastRun.created_at) })}
+        >
+          {formatRelativeTime(lastRun.created_at)}
+        </span>
+      )}
     </Link>
   );
 }
@@ -97,17 +118,23 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
   const { t } = useTranslation();
   const pathname = usePathname();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
+  // Folded until asked for. Automations are a background concern — they run
+  // whether or not anyone is looking — so they should not push the tasks
+  // someone came here to work on off the bottom of the rail.
   const expanded = useAppStore(
-    (s) => s.appSidebar.sectionExpanded[APP_SIDEBAR_SECTION_IDS.automations] ?? true,
+    (s) => s.appSidebar.sectionExpanded[APP_SIDEBAR_SECTION_IDS.automations] ?? false,
   );
 
-  // The sidebar is mounted on every page, so the fetches are gated on the list
-  // actually being on screen. A collapsed rail or a folded section asks for
-  // nothing.
+  // The sidebar is mounted on every page, so the fetches are gated on what is
+  // actually being shown. The names list is cheap and a folded section still
+  // has to say how many it is hiding — a section that starts shut and shows
+  // nothing reads as empty, and nobody opens it. Health summaries are the
+  // heavier read and buy nothing until the rows themselves are on screen.
   const showing = !collapsed && expanded;
-  const scope = showing ? (workspaceId ?? undefined) : undefined;
-  const { automations } = useWorkspaceAutomations(scope);
-  const { summaries } = useAutomationSummaries(scope);
+  const listScope = collapsed ? undefined : (workspaceId ?? undefined);
+  const summaryScope = showing ? (workspaceId ?? undefined) : undefined;
+  const { automations } = useWorkspaceAutomations(listScope);
+  const { summaries } = useAutomationSummaries(summaryScope);
   const rows = buildAutomationRows(automations, summaries);
 
   return (
@@ -118,7 +145,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
       icon={IconBolt}
       headerAction={<OpenListShortcut />}
       headerActionVisibility="always"
-      defaultExpanded
+      collapsedSummary={rows.length > 0 ? rows.length : undefined}
     >
       {rows.length === 0 ? (
         <EmptyRow />

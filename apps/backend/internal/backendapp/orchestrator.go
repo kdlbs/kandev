@@ -110,6 +110,10 @@ func provideOrchestrator(
 	taskSvc.SetRowLivenessProber(agentManagerClient)
 	taskSvc.SetContextWindowResetter(orchestratorSvc.ResetContextWindow)
 	taskSvc.SetGitArchiveCapture(orchestratorSvc)
+	// Automation runs keep their worktrees so they stay repliable, which makes
+	// them the one task kind nothing else ever cleans up; the orchestrator needs
+	// the manager to enforce the per-automation retention window.
+	orchestratorSvc.SetWorktreeManager(lifecycleMgr.WorktreeManager())
 
 	msgCreator := &messageCreatorAdapter{svc: taskSvc, logger: log}
 	orchestratorSvc.SetMessageCreator(msgCreator)

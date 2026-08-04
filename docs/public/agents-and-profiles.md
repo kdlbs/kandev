@@ -200,8 +200,9 @@ Kandev does not validate a server-name syntax centrally, so blank or unusual nam
 Deleting a profile is irreversible. Kandev checks references before deletion:
 
 - active sessions and watcher references are soft conflicts; force bypasses the active-session check and soft-deletes the profile, while disabling affected watchers is best effort rather than guaranteed cleanup;
+- enabled automations bound to the profile are disabled **before** it is deleted, and a failure to disable them aborts the deletion. Unlike watchers, an automation has no preflight that would notice a profile had vanished, so it would otherwise keep firing at a profile that no longer exists;
 - feature-flagged Office routing-tier references are hard conflicts and cannot be forced;
-- Kandev attempts to clean every ephemeral task with a session using the profile, including matching Quick Chat, Configuration Chat, and Run-mode automation work. A cleanup failure is logged and does not prevent profile deletion, so audit leftover resources afterward.
+- Kandev attempts to clean every ephemeral task with a session using the profile, including matching Quick Chat and Configuration Chat. A cleanup failure is logged and does not prevent profile deletion, so audit leftover resources afterward.
 
 Only custom TUI agents can be deleted from the agent list. Built-in definitions remain registered even when their CLI is not installed.
 

@@ -43,6 +43,17 @@ var ErrRepositoryLookupUnavailable = errors.New("automation: repository validati
 // the caller cannot reach, so authorization never leaks which of the two it is.
 var ErrAutomationNotFound = errors.New("automation: not found")
 
+// ErrAgentProfileNotFound is returned when a create or update names an agent
+// profile ID that does not resolve to a live profile row.
+//
+// Deleting a profile disables the automations bound to it before the row goes
+// away, which only ever covered bindings that were valid to begin with. A
+// request naming a profile that never existed — or one deleted long enough ago
+// that nothing remembers it — sailed straight past that, and the result is the
+// exact shape the delete ordering was built to prevent: an enabled automation
+// pointed at a profile that isn't there, failing quietly on a schedule.
+var ErrAgentProfileNotFound = errors.New("automation: agent profile not found")
+
 // TaskDeleter deletes a task and cleans up its resources.
 // Satisfied by *taskservice.Service; injected to avoid a cyclic import.
 // Implementations should return errors wrapping ErrTaskNotFound when the
@@ -61,6 +72,26 @@ type WorkflowLocator interface {
 	WorkflowWorkspaceID(ctx context.Context, workflowID string) (string, error)
 }
 
+// AgentProfileLookup answers whether an agent profile ID resolves to a live
+// (not soft-deleted) profile row. Satisfied by an adapter over the agent
+// settings store and injected rather than imported, for the same reason
+// TaskDeleter and WorkflowLocator are: the agent settings controller already
+// reaches into this package to disable automations before a profile delete, so
+// importing it back here would close the cycle.
+//
+// Existence only, deliberately. Agent profiles are either workspace-scoped or
+// global (an empty workspace_id), and an automation's binding has never been
+// checked against either, so answering the narrower "does this row exist" is
+// what closes the defect without retroactively invalidating bindings that are
+// merely cross-workspace.
+//
+// The (bool, error) split is load-bearing: a definitive "no such profile" is
+// what this rejects, a driver failure is not, and collapsing the two would let
+// one flaky read reject a perfectly good binding.
+type AgentProfileLookup interface {
+	AgentProfileExists(ctx context.Context, profileID string) (bool, error)
+}
+
 // Service coordinates automation operations.
 type Service struct {
 	store       *Store
@@ -75,6 +106,11 @@ type Service struct {
 	// resolve to a repository belonging to the automation's workspace. Nil
 	// = validation skipped (not yet wired at startup, or an isolated test).
 	repoLookup RepositoryLookup
+
+	// agentProfileLookup validates agent_profile_id on create/update. Nil =
+	// validation skipped, like workflowLocator above and unlike repoLookup —
+	// see validateAgentProfileID for why this one does not fail closed.
+	agentProfileLookup AgentProfileLookup
 
 	// authorizeWorkspace gates automation access by workspace ownership
 	// (opt-in auth). Nil = unscoped (internal schedulers/pollers, auth
@@ -127,6 +163,50 @@ func (s *Service) authorizeWorkflowOwnership(ctx context.Context, workspaceID, w
 	}
 	if owner != workspaceID {
 		return fmt.Errorf("workflow does not belong to this workspace")
+	}
+	return nil
+}
+
+// SetAgentProfileLookup wires the agent-profile existence check applied to
+// agent_profile_id on create/update.
+func (s *Service) SetAgentProfileLookup(l AgentProfileLookup) {
+	s.agentProfileLookup = l
+}
+
+// validateAgentProfileID rejects a binding to an agent profile that is not
+// there. Without it the only enforcement is executor.PrepareSession at launch
+// time — long after the automation has been persisted, scheduled and fired —
+// so the automation looks configured on screen and dies on every firing.
+//
+// Two skips, for different reasons:
+//
+//   - No lookup wired: skip, matching workflowLocator rather than repoLookup's
+//     fail-closed. repoLookup guards cross-workspace repository access, so
+//     "unconfigured" must not mean "unchecked" there. This check is referential
+//     integrity over an ID that grants nothing, and it applies to nearly every
+//     automation rather than only those carrying a repository list — so failing
+//     closed would turn one missing wire into "no automation can be saved at
+//     all", in a subsystem whose startup is explicitly non-fatal.
+//
+//   - Empty profileID: accepted, because it is a *different* defect and this is
+//     not the change that should fix it. An empty ID is not an inherit-the-
+//     default path — nothing on the firing path substitutes a workspace default,
+//     and the launch fails with ErrNoAgentProfileID — but the editor's save
+//     button still allows it and most of this package's tests construct
+//     automations without one. Rejecting it here would refuse data the UI is
+//     currently able to produce, which is a product decision, not a defect fix.
+func (s *Service) validateAgentProfileID(ctx context.Context, profileID string) error {
+	if s.agentProfileLookup == nil || profileID == "" {
+		return nil
+	}
+	exists, err := s.agentProfileLookup.AgentProfileExists(ctx, profileID)
+	if err != nil {
+		// Surfaced, not swallowed into "missing": a driver failure must not be
+		// reported to the user as a profile that does not exist.
+		return fmt.Errorf("resolve agent profile %q: %w", profileID, err)
+	}
+	if !exists {
+		return fmt.Errorf("%w: %s", ErrAgentProfileNotFound, profileID)
 	}
 	return nil
 }
@@ -217,6 +297,9 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := s.validateRepositoryIDs(ctx, req.WorkspaceID, req.RepositoryIDs); err != nil {
 		return nil, err
 	}
+	if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
+		return nil, err
+	}
 	if err := s.store.CreateAutomation(ctx, a); err != nil {
 		return nil, fmt.Errorf("create automation: %w", err)
 	}
@@ -266,6 +349,17 @@ func (s *Service) ListAutomations(ctx context.Context, workspaceID string) ([]*A
 func (s *Service) UpdateAutomation(ctx context.Context, id string, req *UpdateAutomationRequest) (*Automation, error) {
 	if err := s.authorizeAutomation(ctx, id); err != nil {
 		return nil, err
+	}
+	// Checked here rather than inside authorizeUpdatedReferences because,
+	// unlike the workflow and repository checks there, profile existence is not
+	// asked relative to the automation's workspace and so needs no stored row
+	// to answer. Rebinding is the path that matters most: an automation is
+	// edited far more often than it is created, and a profile that has since
+	// been deleted is still offered by any stale editor tab.
+	if req.AgentProfileID != nil {
+		if err := s.validateAgentProfileID(ctx, *req.AgentProfileID); err != nil {
+			return nil, err
+		}
 	}
 	if err := s.authorizeUpdatedReferences(ctx, id, req); err != nil {
 		return nil, err
@@ -724,6 +818,26 @@ func (s *Service) MarkRunFailedByTaskID(ctx context.Context, taskID, errMsg stri
 // into the succeeded state when the launched agent finishes cleanly.
 func (s *Service) MarkRunSucceededByTaskID(ctx context.Context, taskID string) error {
 	return s.store.MarkRunSucceededByTaskID(ctx, taskID)
+}
+
+// PrunableRunTaskIDs names the tasks whose workspaces the caller may reclaim
+// now that finalizedTaskID's run has reached a terminal status. See the store
+// method for what counts as prunable.
+//
+// Unauthorized on purpose, like RecordRun and MarkRun{Failed,Succeeded}ByTaskID
+// beside it: the only caller is the orchestrator's own run finalization, which
+// runs on a background goroutine with no user in its context. An authorized
+// call there would fail for every automation rather than for none.
+func (s *Service) PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, keep int) ([]string, error) {
+	return s.store.PrunableRunTaskIDs(ctx, finalizedTaskID, keep)
+}
+
+// RunWorkspaceInUse reports whether an agent is holding the given task's
+// workspace right now. Unauthorized for the same reason as PrunableRunTaskIDs:
+// its only caller is the orchestrator's own sweep, re-checking the answer that
+// PrunableRunTaskIDs gave it before it deletes anything.
+func (s *Service) RunWorkspaceInUse(ctx context.Context, taskID string) (bool, error) {
+	return s.store.RunWorkspaceInUse(ctx, taskID)
 }
 
 // GetWebhookSecret returns the webhook secret for an automation.

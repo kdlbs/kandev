@@ -3,7 +3,10 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"os"
+	"sort"
 	"strings"
 
 	"go.uber.org/zap"
@@ -14,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
+	"github.com/kandev/kandev/internal/worktree"
 )
 
 const automationDefaultBaseBranch = "main"
@@ -35,9 +39,47 @@ type taskCleaner interface {
 	DeleteTask(ctx context.Context, id string) error
 }
 
+// automationRunRetention names the runs whose workspaces have aged out, and
+// answers whether one of them has since gone live. Kept off AutomationService
+// and asserted at the call site for the same reason taskCleaner is kept off
+// repoStore: several test stubs implement that interface and none of them
+// should grow a method for a path they never take.
+//
+// Both halves live on one interface on purpose. Selection and the pre-removal
+// re-check are two readings of the same question a moment apart, and a service
+// that could answer only the first would hand the sweep a list it has no way
+// to re-validate — the assertion failing (and nothing being reclaimed) is the
+// safe outcome, so it must be all or nothing.
+type automationRunRetention interface {
+	PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, keep int) ([]string, error)
+	RunWorkspaceInUse(ctx context.Context, taskID string) (bool, error)
+}
+
+// automationWorktreeReaper is the slice of worktree.Manager that retention
+// uses. Narrowed to an interface so the sweep can be tested without a real
+// git checkout on disk, and so the orchestrator states exactly which two
+// capabilities it depends on.
+type automationWorktreeReaper interface {
+	GetAllByTaskID(ctx context.Context, taskID string) ([]*worktree.Worktree, error)
+	RemoveByID(ctx context.Context, worktreeID string, removeBranch bool) error
+}
+
 // SetAutomationService sets the automation service for handling automation triggers.
 func (s *Service) SetAutomationService(svc AutomationService) {
 	s.automationService = svc
+}
+
+// SetWorktreeManager wires the worktree manager used to reclaim the workspaces
+// of automation runs that have aged out of the retention window.
+//
+// Takes the concrete manager rather than the interface so a nil manager stays
+// nil here: assigning a typed-nil pointer into an interface field produces a
+// non-nil interface, and every nil check downstream would then pass and panic.
+func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
+	if mgr == nil {
+		return
+	}
+	s.worktreeReaper = mgr
 }
 
 // subscribeAutomationEvents subscribes to automation-related events on the event bus.
@@ -514,6 +556,239 @@ func (s *Service) markAutomationRunTerminal(ctx context.Context, taskID string, 
 				zap.Error(markErr))
 		}
 	}
+	// Every terminal transition is also the moment one more run enters the
+	// retention window and pushes the oldest one out, so this is the only hook
+	// that keeps up with the firing rate on its own — no sweeper, no schedule.
+	s.pruneAutomationRunWorktrees(ctx, taskID)
+}
+
+// pruneAutomationRunWorktrees reclaims the workspaces of the runs that just
+// aged out of this automation's retention window. Run rows, error messages and
+// transcripts are untouched: an old run stays readable, it just no longer has a
+// checkout to be replied in.
+//
+// Nothing here can fail the run. The firing already happened and its outcome is
+// already recorded; a reclaim that doesn't happen costs disk, while an error
+// propagated from here would turn a successful automation into a failed one and
+// leave the run row disagreeing with what the agent actually did.
+func (s *Service) pruneAutomationRunWorktrees(ctx context.Context, taskID string) {
+	if s.worktreeReaper == nil || taskID == "" {
+		return
+	}
+	retention, ok := s.automationService.(automationRunRetention)
+	if !ok {
+		return
+	}
+	agedOut, err := retention.PrunableRunTaskIDs(ctx, taskID, automation.DefaultRunWorktreeRetention)
+	if err != nil {
+		// Warned, not returned. The retry queue drained below holds workspaces
+		// already known to have survived a removal, and they are owed
+		// regardless of whether this automation's aged-out lookup succeeded —
+		// a failed query is no reason to keep sitting on disk nobody wants.
+		s.logger.Warn("failed to list automation runs past the worktree retention window",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+	}
+	for _, agedOutTaskID := range s.automationWorkspaceSweepOrder(agedOut) {
+		s.reclaimAutomationRunWorkspace(ctx, retention, agedOutTaskID)
+	}
+}
+
+// reclaimAutomationRunWorkspace removes one aged-out run's worktrees, leaving
+// its branch behind: the commits a run produced are usually the reason it was
+// worth running, and they cost a ref rather than a checkout. A run's task can
+// own several worktrees (one per repository), so all of them go.
+func (s *Service) reclaimAutomationRunWorkspace(
+	ctx context.Context, retention automationRunRetention, taskID string,
+) {
+	worktrees, err := s.worktreeReaper.GetAllByTaskID(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("failed to list worktrees of an aged-out automation run",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return
+	}
+	for _, wt := range worktrees {
+		if wt == nil || !automationWorkspaceNeedsReclaiming(wt) {
+			continue
+		}
+		// Re-asked per worktree rather than once per task, because every
+		// removal before this one widened the gap since selection. The whole
+		// task is abandoned the moment it looks live: its worktrees are one
+		// agent's working set, and reclaiming the rest of them out from under
+		// a live turn is the same data loss in a smaller package.
+		if s.automationRunWentLive(ctx, retention, taskID) {
+			return
+		}
+		s.removeAgedOutRunWorktree(ctx, taskID, wt)
+	}
+}
+
+// automationWorkspaceNeedsReclaiming decides whether a worktree row is still
+// costing disk, from the disk rather than from the row.
+//
+// GetAllByTaskID reports deleted rows too, so some skip rule is needed or an
+// already-reclaimed checkout would be handed back to git on every firing. The
+// tempting rule — skip anything the row calls deleted — trusts a claim the
+// worktree manager does not actually stand behind: removeWorktree logs a
+// failed directory removal at Warn and then marks the row deleted and returns
+// nil regardless. A row saying "deleted" therefore means "somebody tried",
+// not "the bytes are gone", and taking it at face value is how a retention
+// feature ends up freeing nothing while reporting that it freed everything.
+//
+// So a deleted row still gets reclaimed if its directory is there, which is
+// also what makes such a failure retryable rather than terminal.
+func automationWorkspaceNeedsReclaiming(wt *worktree.Worktree) bool {
+	if wt.Status != worktree.StatusDeleted {
+		return true
+	}
+	return automationWorkspaceOnDisk(wt.Path)
+}
+
+// automationWorkspaceOnDisk reports whether a worktree's directory is still
+// present. Lstat, not Stat: a dangling symlink left where a checkout used to
+// be is still an entry that has to go, and following the link would call it
+// gone. An empty path names nothing, so there is nothing to reclaim.
+func automationWorkspaceOnDisk(path string) bool {
+	if path == "" {
+		return false
+	}
+	_, err := os.Lstat(path)
+	return err == nil
+}
+
+// automationRunWentLive re-checks, immediately before a removal, whether the
+// run has gone back to work since it was selected. See
+// automation.Store.RunWorkspaceInUse for why the check cannot live in the
+// selection query alone and why the worktree manager's own reference count
+// does not cover this case.
+//
+// A failed check counts as live. The cost of being wrong that way is one
+// checkout kept until the next firing; the cost of being wrong the other way
+// is a user's agent losing its working tree mid-turn.
+func (s *Service) automationRunWentLive(
+	ctx context.Context, retention automationRunRetention, taskID string,
+) bool {
+	inUse, err := retention.RunWorkspaceInUse(ctx, taskID)
+	if err != nil {
+		s.logger.Warn("could not re-check whether an aged-out automation run went live; keeping its workspace",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return true
+	}
+	if inUse {
+		s.logger.Info("kept the workspace of an aged-out automation run that went live before it could be reclaimed",
+			zap.String("task_id", taskID))
+	}
+	return inUse
+}
+
+// removeAgedOutRunWorktree removes one worktree and verifies the result before
+// claiming anything.
+//
+// The verification is the point. RemoveByID returning nil is not evidence that
+// the checkout is gone — the manager swallows a failed directory removal (see
+// automationWorkspaceNeedsReclaiming) — so a sweep that logged success on a nil
+// error was reporting reclaimed disk that was still fully occupied, and the run
+// then dropped out of the candidate set for good. Stat-ing the path afterwards
+// is the only honest confirmation available from this side of the interface.
+//
+// Neither failure path is fatal to the run: the firing already happened and its
+// outcome is already recorded. They are queued instead, so the next
+// finalization tries again rather than writing the workspace off.
+func (s *Service) removeAgedOutRunWorktree(ctx context.Context, taskID string, wt *worktree.Worktree) {
+	if err := s.worktreeReaper.RemoveByID(ctx, wt.ID, false); err != nil {
+		if errors.Is(err, worktree.ErrWorktreeNotFound) {
+			return
+		}
+		s.logger.Warn("failed to reclaim the workspace of an aged-out automation run",
+			zap.String("task_id", taskID),
+			zap.String("worktree_id", wt.ID),
+			zap.Error(err))
+		s.queueAutomationWorkspaceReclaim(taskID)
+		return
+	}
+	if automationWorkspaceOnDisk(wt.Path) {
+		s.logger.Error("workspace of an aged-out automation run survived its removal; no disk was reclaimed",
+			zap.String("task_id", taskID),
+			zap.String("worktree_id", wt.ID),
+			zap.String("path", wt.Path))
+		s.queueAutomationWorkspaceReclaim(taskID)
+		return
+	}
+	s.logger.Info("reclaimed the workspace of an aged-out automation run",
+		zap.String("task_id", taskID),
+		zap.String("worktree_id", wt.ID),
+		zap.Int("retention", automation.DefaultRunWorktreeRetention))
+}
+
+// maxPendingAutomationWorkspaceReclaims bounds the retry queue. An install
+// where dozens of removals are failing has a problem retention cannot fix by
+// remembering more of them, and the queue must not become the leak it exists
+// to stop.
+const maxPendingAutomationWorkspaceReclaims = 64
+
+// queueAutomationWorkspaceReclaim marks a run's workspace as still owed.
+//
+// Retention's candidate set is "runs that still have a live worktree row", and
+// a removal that fails after the manager has already marked the row deleted
+// leaves a run that no query will ever offer again — its directory is on disk,
+// invisible to the sweep that was supposed to reclaim it. This queue is that
+// run's only way back, so the next finalization retries it alongside the runs
+// that aged out naturally.
+//
+// In-memory on purpose: it is a retry hint, not a record. A restart loses it,
+// which costs the disk one directory until something else cleans it up — the
+// Error log above is what a human is meant to act on in that case.
+func (s *Service) queueAutomationWorkspaceReclaim(taskID string) {
+	s.unreclaimedWorkspacesMu.Lock()
+	defer s.unreclaimedWorkspacesMu.Unlock()
+	if _, queued := s.unreclaimedWorkspaces[taskID]; queued {
+		return
+	}
+	if len(s.unreclaimedWorkspaces) >= maxPendingAutomationWorkspaceReclaims {
+		s.logger.Warn("dropping an automation workspace from the reclaim retry queue; too many removals are failing",
+			zap.String("task_id", taskID),
+			zap.Int("queued", len(s.unreclaimedWorkspaces)))
+		return
+	}
+	if s.unreclaimedWorkspaces == nil {
+		s.unreclaimedWorkspaces = map[string]struct{}{}
+	}
+	s.unreclaimedWorkspaces[taskID] = struct{}{}
+}
+
+// automationWorkspaceSweepOrder is what this finalization will actually try:
+// the runs whose removal previously failed, then the ones that have just aged
+// out, with the overlap collapsed so a run in both lists is attempted once.
+//
+// The retries lead because they are known-wasted disk, whereas an aged-out run
+// is merely eligible. Draining unconditionally keeps the queue from outliving
+// the problem — a task that fails again re-queues itself from
+// removeAgedOutRunWorktree, and one that has since been cleaned up simply
+// finds nothing to do.
+func (s *Service) automationWorkspaceSweepOrder(agedOut []string) []string {
+	s.unreclaimedWorkspacesMu.Lock()
+	pending := make([]string, 0, len(s.unreclaimedWorkspaces))
+	for taskID := range s.unreclaimedWorkspaces {
+		pending = append(pending, taskID)
+	}
+	clear(s.unreclaimedWorkspaces)
+	s.unreclaimedWorkspacesMu.Unlock()
+	// Map iteration order is random; the sweep's log and its test both read
+	// better when the same failures are retried in the same order every time.
+	sort.Strings(pending)
+
+	seen := make(map[string]struct{}, len(pending)+len(agedOut))
+	order := make([]string, 0, len(pending)+len(agedOut))
+	for _, taskID := range append(pending, agedOut...) {
+		if _, duplicate := seen[taskID]; duplicate {
+			continue
+		}
+		seen[taskID] = struct{}{}
+		order = append(order, taskID)
+	}
+	return order
 }
 
 func (s *Service) stopAutomationAgent(

@@ -24,6 +24,12 @@ func createTasksTable(t *testing.T, store *Store) {
 	if _, err := store.db.Exec(`CREATE TABLE task_session_messages (id TEXT PRIMARY KEY, task_id TEXT NOT NULL DEFAULT '', author_type TEXT NOT NULL DEFAULT 'user', content TEXT NOT NULL DEFAULT '', type TEXT NOT NULL DEFAULT 'message', created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)`); err != nil {
 		t.Fatal(err)
 	}
+	// PrunableRunTaskIDs only offers runs that still hold a checkout, and a
+	// checkout is reached task → session → worktree row. Without this table the
+	// query fails outright rather than returning nothing.
+	if _, err := store.db.Exec(`CREATE TABLE task_session_worktrees (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, worktree_id TEXT NOT NULL, repository_id TEXT NOT NULL DEFAULT '', worktree_path TEXT DEFAULT '', status TEXT NOT NULL DEFAULT 'active', deleted_at TIMESTAMP)`); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func insertTask(t *testing.T, store *Store, id string, archived bool) {

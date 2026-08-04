@@ -12,7 +12,6 @@ import { useRouter } from "@/lib/routing/client-router";
 import { cn } from "@/lib/utils";
 import type { Automation, AutomationRun } from "@/lib/types/automation";
 import { nextFiring } from "./automation-rows";
-import { AutomationPromptCard } from "./automation-prompt-card";
 import { RunsDrawer } from "./runs-drawer";
 import { RunsRail } from "./runs-rail";
 import { RunTranscript } from "./run-transcript";
@@ -170,13 +169,20 @@ function ConfigureView({ automation }: { automation: Automation }) {
   );
 }
 
+/**
+ * The conversation, and nothing above it.
+ *
+ * The standing instruction used to be pinned here as a header block. It is the
+ * same text on every run and it is long, so it pushed what the agent actually
+ * said down the page on every visit. It now lives behind the run-detail button
+ * in the rail (or the drawer, on a phone) — asked for once, rather than paid
+ * for every time.
+ */
 function ActivityView({
-  automation,
   selected,
   hasRuns,
   loading,
 }: {
-  automation: Automation;
   selected: AutomationRun | null;
   hasRuns: boolean;
   loading: boolean;
@@ -193,9 +199,6 @@ function ActivityView({
   }
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="automation-activity">
-      <div className="shrink-0 px-4 pt-4">
-        <AutomationPromptCard prompt={automation.prompt ?? ""} />
-      </div>
       {/* Keyed on the session so switching runs remounts the conversation
           rather than letting one run's messages animate into another's. */}
       <RunTranscript
@@ -219,6 +222,7 @@ function DetailBody({
   tab,
   runs,
   selected,
+  openRuns,
   loading,
   isMobile,
   rail,
@@ -228,6 +232,7 @@ function DetailBody({
   tab: AutomationDetailTab;
   runs: AutomationRun[];
   selected: AutomationRun | null;
+  openRuns: number;
   loading: boolean;
   isMobile: boolean;
   rail: ReturnType<typeof useRailWidth>;
@@ -239,6 +244,7 @@ function DetailBody({
       runs={runs}
       selectedRunId={selected?.id ?? null}
       onSelect={onSelectRun}
+      openRuns={openRuns}
     />
   ) : (
     <RunsRail
@@ -246,6 +252,7 @@ function DetailBody({
       runs={runs}
       selectedRunId={selected?.id ?? null}
       onSelect={onSelectRun}
+      openRuns={openRuns}
       width={rail.width}
       resizing={rail.resizing}
       onResizeStart={rail.onResizeStart}
@@ -268,12 +275,7 @@ function DetailBody({
         {tab === "configure" ? (
           <ConfigureView automation={automation} />
         ) : (
-          <ActivityView
-            automation={automation}
-            selected={selected}
-            hasRuns={runs.length > 0}
-            loading={loading}
-          />
+          <ActivityView selected={selected} hasRuns={runs.length > 0} loading={loading} />
         )}
       </main>
       {!isMobile && switcher}
@@ -293,10 +295,15 @@ export function AutomationDetailPage({
   const router = useRouter();
   const { automation, runs, openRuns, loading, error, refresh } =
     useAutomationActivity(automationId);
-  const { runNow, triggering } = useManualTrigger(automationId, refresh);
+  const { runNow, triggering, settling } = useManualTrigger(automationId, refresh);
   const leaveForList = useCallback(() => router.push(AUTOMATIONS_HREF), [router]);
   const foreign = useWorkspaceGuard(automation, leaveForList);
-  useLiveRefresh(!foreign && openRuns > 0, refresh);
+  // `settling` as well as `openRuns`: the run row is written after the fire
+  // returns, so gating only on what the page can already see leaves a window
+  // where a just-fired run appears and finishes without the page ever asking
+  // again — and every note derived from that snapshot, including the amber one
+  // explaining why the automation will not fire next, goes stale with it.
+  useLiveRefresh(!foreign && (openRuns > 0 || settling), refresh);
   const rail = useRailWidth();
   const { isMobile } = useResponsiveBreakpoint();
 
@@ -321,6 +328,7 @@ export function AutomationDetailPage({
           tab={tab}
           runs={runs}
           selected={selected}
+          openRuns={openRuns}
           loading={loading}
           isMobile={isMobile}
           rail={rail}

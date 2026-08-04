@@ -21,6 +21,7 @@ type ComposerPropsArgs = {
   onClarificationResolved: () => void;
   hideSessionsDropdown?: boolean;
   minimalToolbar?: boolean;
+  hideAgentControls?: boolean;
   hidePlanMode?: boolean;
 };
 
@@ -45,6 +46,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     onClarificationResolved,
     hideSessionsDropdown,
     minimalToolbar,
+    hideAgentControls,
     hidePlanMode,
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
@@ -93,6 +95,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     onImplementPlan: implementPlanHandler,
     hideSessionsDropdown,
     minimalToolbar,
+    hideAgentControls,
     hidePlanMode,
   };
 }

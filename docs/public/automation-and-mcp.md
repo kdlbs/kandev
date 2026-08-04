@@ -52,7 +52,7 @@ The form can save an empty agent, executor, or repository selection, but launch 
 
 ### What a firing produces
 
-Every automation produces the same thing: an ordinary, persistent task tagged `origin = automation_run`. That origin — not `is_ephemeral` — is what keeps it off the kanban and out of task lists, which means the task keeps its worktree and stays repliable. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
+Every automation produces the same thing: an ordinary, persistent task tagged `origin = automation_run`. That origin — not `is_ephemeral` — is what keeps it off the kanban and out of task lists, which means the task keeps its worktree and stays repliable. Worktrees are retained for the ten most recent finished runs of each automation and reclaimed beyond that, so an older run stays readable but can no longer be answered. The trigger is the start signal, so the agent starts immediately rather than waiting for a workflow step's `auto_start_agent` action.
 
 A finished run parks in `WAITING_FOR_INPUT` rather than `COMPLETED`, so you can reply to it and the agent continues in the same session and worktree. A run is a thread, not a receipt.
 

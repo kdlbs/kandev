@@ -26,7 +26,7 @@ An earlier revision offered two execution flavours, `task` and `run`. That choic
   - Automations created via the WS API directly (bypassing the editor) may still combine an incompatible executor with multiple repository IDs; this is a client-side authoring guard, not a backend rejection. Task launch on an incompatible executor fails the same way manual multi-repo task creation would.
 - A trigger fires → a task is created with `origin = "automation_run"` so the existing session pipeline launches an agent. That task:
   - **SHALL NOT appear on the kanban or in the task list.** It is hidden by its `origin`, not by ephemerality. Automation output has its own destination (`automation-runs.md`); the board stays the human work list.
-  - **SHALL keep its worktree.** It is not reaped when the turn ends. The files a run writes are usually the point of running it, and an agent that ends by asking a question needs a workspace in which to be answered.
+  - **SHALL keep its worktree when the turn ends**, subject to [Run retention](#run-retention). The files a run writes are usually the point of running it, and an agent that ends by asking a question needs a workspace in which to be answered. What is withdrawn is the *unconditional, permanent* retention of the original design — not reaping at end-of-turn.
   - **SHALL be repliable.** A run is a thread the user can open and continue, not a fire-and-forget transcript.
   - **SHALL reach a terminal run status on its own**, keyed on `origin`, so `max_concurrent_runs` frees up without a human archiving anything.
 - A firing produces **both** a task and its run row, or neither. The run row is the only thing that makes the work reachable — the task is hidden from every board and list by its `origin` — so a task without one is invisible, unfinalizable, and holds no concurrency slot anyone can see. If the run row cannot be written, the task created for it is deleted rather than left behind.
@@ -46,11 +46,13 @@ An earlier revision offered two execution flavours, `task` and `run`. That choic
 
 ## Data model
 
-Builds on PR #406's `internal/automation/` schema. `execution_mode` is retained in the canonical `CREATE TABLE` so existing rows need no migration, but nothing reads it. Repository selection moved from a single column to a join table:
+Builds on PR #406's `internal/automation/` schema. `execution_mode` is retained in the canonical `CREATE TABLE` so no *schema* migration is required, but nothing reads it. That is a narrower claim than it looks: the column being safe to leave in place says nothing about behaviour, and withdrawing it **does** change what existing automations do. See [Migration](#migration).
 
 ```sql
-automations.execution_mode TEXT NOT NULL DEFAULT 'task'   -- retained for existing rows; no longer read
+automations.execution_mode TEXT NOT NULL DEFAULT 'task'   -- retained so no schema migration is needed; no longer read
 ```
+
+Repository selection moved from a single column to a join table:
 
 ```text
 automation_repositories
@@ -74,7 +76,7 @@ The `tasks.origin` column already exists (used by quick-chat); the origin consta
 
 ## API surface
 
-PR #406's WS-based API gets `repository_ids` (an ordered `string[]`, replacing the old singular `repository_id`) on the payloads below. `execution_mode` is accepted and ignored on input, and omitted from responses; the column stays only so existing rows need no migration.
+PR #406's WS-based API gets `repository_ids` (an ordered `string[]`, replacing the old singular `repository_id`) on the payloads below. `execution_mode` is accepted and ignored on input, and omitted from responses; the column stays only so no schema migration is needed. Accepting-and-ignoring is deliberate — an older client that still sends the field gets a successful write rather than a validation error it cannot act on. The behavioural consequence of ignoring it is covered in [Migration](#migration).
 
 - `automation.create` payload (input) — `repository_ids?: string[]`
 - `automation.update` payload (input) — `repository_ids?: string[]`; a present-but-empty array clears the automation's repositories, an absent field leaves them unchanged (matches the existing task-update `repositories` convention)
@@ -125,13 +127,80 @@ Inherits PR #406's model (no per-action authorization gates). The flat `/setting
 
 ## Persistence guarantees
 
-AutomationRuns and their tasks persist normally, worktree included — an automation run survives a restart exactly as a hand-created task does. `automation_repositories` rows survive restart and automation edits (replaced transactionally on update, cascade-deleted with the automation). The board filter is applied at query time against `origin`, not at write time, so the hiding is a read-side decision and nothing about the task row is special-cased on write.
+**Deleting an agent profile does not strand the automations bound to it.** Deleting a profile disables every automation referencing it *before* the profile row is removed, and a failed disable aborts the delete rather than proceeding. The ordering is the guarantee: the reverse order — delete, then best-effort disable — leaves a live automation firing at a profile that no longer exists, silently, on every future schedule, with no reconciliation path to notice. Watchers are handled the other way round on purpose; the dispatch coordinator's preflight genuinely re-resolves them on the next poll, so eager-disable-after-delete is safe there. Automations have no such preflight, and assuming they did was the original defect.
+
+Note the shape of that claim. It is about the **deletion path**, and it is deliberately not the stronger sentence "an enabled automation is never bound to a deleted profile" — that stronger version is what an earlier draft of this spec asserted, and it was false. Deletion is not the only way to reach the bad state: an automation is bound by `agent_profile_id`, so the write path has to refuse a profile that does not exist or the invariant can be broken directly, without any deletion involved. Ordering the delete correctly and leaving the write path open would have produced a spec that reads as a guarantee and is not one.
+
+Two residuals, stated rather than implied:
+
+- The disable and the delete are ordered but **not transactional**, so a process death between the two writes is uncovered. That direction is the safe one — an automation disabled against a live profile, visible on the automations page and re-enabled with one toggle.
+- Nothing serialises a concurrent enable or rebind against an in-flight delete. The window is small and both outcomes are recoverable and visible, but it is a window, not an impossibility.
+
+AutomationRuns and their tasks persist normally, worktree included (within [Run retention](#run-retention)) — an automation run survives a restart exactly as a hand-created task does. `automation_repositories` rows survive restart and automation edits (replaced transactionally on update, cascade-deleted with the automation). The board filter is applied at query time against `origin`, not at write time, so the hiding is a read-side decision and nothing about the task row is special-cased on write.
+
+## Run retention
+
+Keeping every run's worktree forever is not a policy, it is a leak. A five-minute schedule produces ~288 runs a day, and each one is a full checkout; left unbounded that exhausts the disk of an install that was working fine before the upgrade. The original design said "keep the worktree" as a correction to `run` mode reaping it instantly, and that correction was right — but "not instantly" was mistaken for "never".
+
+**Policy: the newest `DefaultRunWorktreeRetention` (10) terminal runs per automation keep their worktree. Older terminal runs have their checkout reclaimed.**
+
+What is reclaimed is only the working copy. The run row, its status and error message, the task, and the full transcript all survive, and the branch is left intact (`removeBranch=false`) so commits a run produced remain reachable as a ref. A pruned run is still readable history; it is only no longer *repliable*, because replying needs a workspace to reply in. That is the accepted cost of the policy, and the reason the window is per-automation rather than global — a rarely-firing automation keeps its whole history live.
+
+Mechanics that matter:
+
+- The sweep hangs off `markAutomationRunTerminal`, which every finalize path funnels through. That is precisely the moment one run enters the window and pushes another out, so no scheduler is needed.
+- `WAITING_FOR_INPUT` is deliberately **not** treated as "in use". It is where successful runs park, so excluding it would make the policy a no-op — every prunable run is in exactly that state.
+- **Any** session in `STARTING` or `RUNNING` protects the task, not merely its primary one. A resume racing the primary flag, or a passthrough session running alongside, is still an agent holding that checkout.
+- Liveness is re-checked immediately before *each* removal, not once per sweep. Selecting candidates and then deleting them is a time-of-check/time-of-use window, and a user replying to an aged-out run lands in exactly that gap. The worktree manager is no help here: its reference guard excludes the worktree's own session, which for an automation run is precisely the session that would be live. A run that has gone live aborts the whole task and waits for a later sweep; a failed check counts as live.
+- Candidates are restricted to runs that still *have* a live checkout. Without that, every finalize re-attempted the same ~200 already-reclaimed runs forever while anything past that window was never reached at all. With it, reclaimed runs drop out, the window slides, and a pre-existing backlog drains across successive firings.
+- A removal is not believed on its word. The manager logs a failed directory removal at warn level and then marks the row deleted anyway, so a nil error does not mean the disk was freed. The path is checked afterwards; a surviving directory is logged as an error, not a reclaim, and queued for retry.
+- Every prune failure is logged and stepped over. Reclaiming disk is never allowed to fail a run.
+
+Known residuals, stated rather than implied:
+
+- A run stranded at `task_created` — for instance by a backend crash mid-flight — never becomes terminal and so is never pruned. Its worktree persists.
+- The time-of-check window is narrowed to a single query before a single removal, not eliminated. Closing it entirely needs a lock the worktree manager does not offer.
+- The retry queue for removals that silently failed is in-memory and bounded. A restart drops it, and the directory then persists until someone acts on the error log — there is no sweeper to collect it, because the office garbage collector is never constructed in production.
+- Branches accumulate. If ref growth becomes a problem it needs its own policy; conflating it with worktree retention would silently discard commits.
+
+### Retention scenarios
+
+- **GIVEN** an automation with 13 terminal runs, **WHEN** the 13th finalizes, **THEN** the 3 oldest have their worktrees reclaimed and the newest 10 keep theirs.
+- **GIVEN** a run whose worktree has been reclaimed, **WHEN** the user opens it, **THEN** its transcript, status and error message are still shown.
+- **GIVEN** a run whose agent is still `RUNNING`, **WHEN** another run for the same automation finalizes, **THEN** the running run's worktree is not touched regardless of its age.
+- **GIVEN** the worktree manager returns an error while reclaiming, **WHEN** a run finalizes, **THEN** the run still reaches its terminal status and the failure is logged.
+- **GIVEN** a run that becomes live *after* it was selected as a candidate, **WHEN** the sweep reaches it, **THEN** its checkout is left alone.
+- **GIVEN** a removal that reports success but leaves the directory in place, **WHEN** the sweep completes, **THEN** it is not reported as reclaimed and it is retried.
+- **GIVEN** an automation whose backlog exceeds one sweep window, **WHEN** successive runs finalize, **THEN** the oldest are eventually reached rather than stranded.
+
+## Migration
+
+Withdrawing `execution_mode` is a behaviour change for existing installs, and the size of it is easy to understate. `task` was the **default**, so this is not an exotic minority: every automation created before this change that nobody explicitly set to `run` was producing a visible kanban card, and after upgrade it will not. The automations feature has been in the product since 2026-05-22, long enough for that to be somebody's working setup rather than a hypothetical.
+
+The runs are not lost — they move. A firing still creates a real, persistent, repliable task with its worktree; it is hidden from the board by `origin` and surfaced at `/automations/:id` and in the sidebar's Automations section instead. What disappears is the board card, not the work.
+
+**Decision: one destination, migrated loudly.** Honouring the stored `execution_mode` was considered and rejected. It would reinstate exactly the dual-destination split this change exists to remove, and would charge for it permanently — two write paths, two places a run can live, and every future automations surface built twice — in order to serve a migration window that closes once. The complexity would outlive the problem.
+
+What we do instead:
+
+1. On upgrade, identify automations whose stored `execution_mode` is `task` (still readable — the column is retained, just unread by the runtime).
+2. Show a one-time, dismissible notice on the automations surface for workspaces that own such automations, stating that their runs now appear here rather than on the board. The notice is per-workspace and dismissal is durable, so it informs once instead of nagging.
+3. Carry the same statement in the release notes for the version that ships this.
+
+The detection is a **read of a retained column at migration time only**. It deliberately does not become a runtime branch — nothing in the firing path consults `execution_mode`, so the single-destination invariant holds from the first line of the change.
+
+### Migration scenarios
+
+- **GIVEN** an install with an automation whose stored `execution_mode` is `task`, **WHEN** the user next opens the automations surface for that workspace, **THEN** a dismissible notice states that automation runs now appear there instead of on the kanban.
+- **GIVEN** that notice has been dismissed, **WHEN** the user returns to the same surface later, **THEN** it does not reappear.
+- **GIVEN** an install whose automations were all `run` mode, **WHEN** the user opens the automations surface, **THEN** no notice is shown — nothing changed for them.
+- **GIVEN** any automation at all, **WHEN** a trigger fires after upgrade, **THEN** the run is created at the single automation-run destination regardless of the stored `execution_mode` value.
 
 ## Scenarios
 
 - **GIVEN** any automation with a cron trigger, **WHEN** the cron fires, **THEN** a task is created that does NOT appear on the kanban or in the task list, the agent starts automatically, and the run appears in the automation's activity.
-- **GIVEN** an automation run whose agent ended by asking a question, **WHEN** the user opens that run, **THEN** they can reply to it and the agent continues in the same worktree.
-- **GIVEN** an automation run that wrote files, **WHEN** the run finishes, **THEN** those files are still present in its worktree.
+- **GIVEN** an automation run whose agent ended by asking a question and whose worktree is still within the retention window, **WHEN** the user opens that run, **THEN** they can reply to it and the agent continues in the same worktree.
+- **GIVEN** an automation run that wrote files, **WHEN** the run finishes, **THEN** those files are still present in its worktree, and remain so until the run falls outside the retention window.
 - **GIVEN** an automation at `max_concurrent_runs = 1` whose run has completed, **WHEN** the next scheduled firing is due, **THEN** it runs — no archiving required.
 - **GIVEN** an automation agent finishes a turn with `stop_reason = "end_turn"`, **WHEN** the complete event is handled, **THEN** the AutomationRun row is marked `succeeded`, the agent execution is stopped instead of waiting for process exit, and the session is left answerable rather than `COMPLETED`.
 - **GIVEN** a firing whose task is created but whose launch then fails, **WHEN** the error is handled, **THEN** the AutomationRun is marked `failed` with the launch error, so the automation's concurrency slot is released instead of jamming permanently.

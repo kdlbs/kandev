@@ -44,8 +44,28 @@ export const STATE_LABEL_KEY: Record<AutomationActivityState, string> = {
   paused: "automations:statePaused",
 };
 
+/**
+ * Whether the cap is genuinely holding a firing back in a way worth saying.
+ *
+ * A single-slot automation with one run open is the ordinary steady state of
+ * every run it will ever do — the moment it starts, it is "at the cap". Calling
+ * that Paused made the normal case look broken, and it said it in amber right
+ * next to a dot already reporting `running`. The cap is only news once it is
+ * queueing something: more than one slot configured, and every slot taken.
+ *
+ * Known and deliberate: `max=2/open=2` is just as much "at capacity" as
+ * `max=1/open=1`, so the rule is not symmetric, and `openRuns` is not evidence
+ * that anything is actually queued behind the cap. The honest version warns
+ * only when a firing was really turned away — those runs already exist, with a
+ * reason, as `skipped` rows — but the summary this derivation reads carries no
+ * skip count, so saying so would take a new backend field. Until then this
+ * errs toward silence in the one case that is always benign, rather than
+ * toward an amber note on every healthy single-slot automation.
+ */
 function atConcurrencyCap(automation: Automation, openRuns: number): boolean {
-  return openRuns >= Math.max(1, automation.max_concurrent_runs);
+  const max = Math.max(1, automation.max_concurrent_runs);
+  if (max === 1 && openRuns <= 1) return false;
+  return openRuns >= max;
 }
 
 /** A time when one can be resolved, otherwise the schedule described in words. */

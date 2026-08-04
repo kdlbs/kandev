@@ -29,6 +29,18 @@ export type Automation = {
   created_at: string;
   updated_at: string;
   triggers: AutomationTrigger[];
+  /**
+   * This automation predates the withdrawal of execution modes and was stored
+   * in the `task` mode — the default — so its firings used to put a card on
+   * the kanban and no longer do. The server derives it from a column nothing
+   * else reads; it exists to explain the change once, not to describe how the
+   * automation runs now, which is the same for every automation.
+   *
+   * Optional because a backend older than the migration doesn't send it, and
+   * because it stops being interesting the moment the notice is dismissed —
+   * absent means "nothing changed for this automation".
+   */
+  legacy_board_card?: boolean;
 };
 
 export type AutomationTrigger = {

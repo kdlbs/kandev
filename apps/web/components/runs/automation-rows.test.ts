@@ -102,11 +102,30 @@ describe("nextFiring", () => {
   });
 
   it("explains a firing blocked by the concurrency cap, naming the cap", () => {
-    const next = nextFiring(mkAutomation({ max_concurrent_runs: 1 }), 1, NOW);
+    const next = nextFiring(mkAutomation({ max_concurrent_runs: 2 }), 2, NOW);
 
     expect(next.kind).toBe("reason");
-    expect(next.text).toBe(concurrencyReason(1));
-    expect(next.text).toContain("max 1 at a time");
+    expect(next.text).toBe(concurrencyReason(2));
+    expect(next.text).toContain("max 2 at a time");
+  });
+
+  it("says nothing about the cap when one run is open and one slot is configured", () => {
+    // The default shape. Every run a single-slot automation ever does is "at
+    // the cap" the moment it starts, so reporting that as Paused — in amber,
+    // beside a dot already reading `running` — made the normal case look
+    // broken. The cap is only news once it is actually queueing something.
+    const next = nextFiring(mkAutomation({ max_concurrent_runs: 1 }), 1, NOW);
+
+    expect(next.kind).toBe("time");
+    expect(next.text).not.toContain("Paused");
+  });
+
+  it("still reports a single-slot automation that has somehow gone past its slot", () => {
+    // Two open runs against a cap of one is a real jam, not the steady state.
+    expect(nextFiring(mkAutomation({ max_concurrent_runs: 1 }), 2, NOW)).toEqual({
+      kind: "reason",
+      text: concurrencyReason(1),
+    });
   });
 
   it("still resolves a time while below the cap", () => {
@@ -211,7 +230,19 @@ describe("buildAutomationRows", () => {
   });
 
   it("reports a jammed automation as running with the cap as its reason", () => {
-    // The scenario the spec calls out: one open run, max_concurrent_runs of 1.
+    const rows = buildAutomationRows(
+      [mkAutomation({ max_concurrent_runs: 2 })],
+      [mkSummary({ open_runs: 2, last_run: mkRun({ id: "open", status: "task_created" }) })],
+      NOW,
+    );
+
+    expect(rows[0].state).toBe("running");
+    expect(rows[0].next).toEqual({ kind: "reason", text: concurrencyReason(2) });
+  });
+
+  it("reports a single-slot automation with one run open as running, and says nothing else", () => {
+    // The everyday case. `running` is the whole story; there is no second
+    // amber sentence claiming the automation is Paused as well.
     const rows = buildAutomationRows(
       [mkAutomation({ max_concurrent_runs: 1 })],
       [mkSummary({ open_runs: 1, last_run: mkRun({ id: "open", status: "task_created" }) })],
@@ -219,7 +250,7 @@ describe("buildAutomationRows", () => {
     );
 
     expect(rows[0].state).toBe("running");
-    expect(rows[0].next).toEqual({ kind: "reason", text: concurrencyReason(1) });
+    expect(rows[0].next.kind).toBe("time");
   });
 
   it("trusts the server's open count rather than re-deriving it from statuses", () => {

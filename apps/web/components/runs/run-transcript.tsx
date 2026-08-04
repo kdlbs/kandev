@@ -46,6 +46,17 @@ export function RunTranscript({ sessionId, taskId }: { sessionId: string; taskId
   const { isSending, handleSubmit } = useSubmitHandler(panelState, undefined);
   const { handleCancelTurn } = useChatPanelHandlers(panelState.resolvedSessionId, chatInputRef);
 
+  // An automation run is not a session anyone is sitting in: replying starts
+  // the agent, it works the prompt, and it shuts down again. Controls that talk
+  // to a live ACP session — the model picker above all, but also mode, MCP and
+  // reset context — are meaningless once that has happened, and worse than
+  // meaningless while they still look operable, since changing a model on a
+  // process that no longer exists silently does nothing. `isWorking` is the
+  // signal rather than the session row, which parks in WAITING_FOR_INPUT
+  // precisely so the run stays repliable — parked is exactly the state with no
+  // agent behind it.
+  const agentIsLive = panelState.isWorking;
+
   const handleClarificationResolved = useCallback(() => setClarificationKey((k) => k + 1), []);
   const handleScopeMouseDown = useCallback(
     (event: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(event, scopeRef),
@@ -86,8 +97,14 @@ export function RunTranscript({ sessionId, taskId }: { sessionId: string; taskId
         panelState={panelState}
         isSending={isSending}
         hideSessionsDropdown
+        hideAgentControls={!agentIsLive}
         hidePlanMode
         placeholderOverride={t("automations:replyToThisRun")}
+        // The composer's default `bg-card` is a lighter plate meant to lift it
+        // off the task workbench. This surface is the run's own page, which is
+        // `bg-background` from the topbar down, and a lighter strip along the
+        // bottom read as a panel that had been left behind.
+        surfaceClassName="bg-background"
       />
     </div>
   );

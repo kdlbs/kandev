@@ -2716,12 +2716,29 @@ export class ApiClient {
     name: string;
     workflowId?: string;
     workflowStepId?: string;
+    /**
+     * The automation's standing instruction. The run view only renders the
+     * instruction card when there is one, so specs asserting on where that
+     * card lives have to seed it.
+     */
+    prompt?: string;
+    /**
+     * Backdate the row's `execution_mode` to `task` after creation, which is
+     * what an install predating the withdrawal of execution modes carries on
+     * disk. The API ignores `execution_mode` on input by design, so this is
+     * the only way to stand up the state the board-move migration notice
+     * exists to explain; the `legacy_board_card` flag the UI reads is then
+     * derived by the same production SQL a real upgraded install goes through.
+     */
+    legacyBoardCard?: boolean;
   }): Promise<{ id: string; workspace_id: string; name: string }> {
     return this.request("POST", "/api/v1/e2e/automations", {
       workspace_id: opts.workspaceId,
       name: opts.name,
       workflow_id: opts.workflowId ?? "",
       workflow_step_id: opts.workflowStepId ?? "",
+      prompt: opts.prompt ?? "",
+      legacy_board_card: opts.legacyBoardCard ?? false,
     });
   }
 
@@ -2729,6 +2746,16 @@ export class ApiClient {
    * Seed an automation run row via the E2E HTTP endpoint.
    * Only works when KANDEV_MOCK_AGENT is active.
    */
+  /**
+   * Stamps a seeded task with an origin. Production tags automation runs
+   * `automation_run` inside the firing path; a task created through the
+   * ordinary task API has no origin and therefore still shows on the kanban
+   * and in task lists, which is exactly what the origin is supposed to prevent.
+   */
+  async setTaskOrigin(taskId: string, origin: string): Promise<void> {
+    await this.request("PATCH", `/api/v1/e2e/tasks/${taskId}/origin`, { origin });
+  }
+
   async seedAutomationRun(
     automationId: string,
     status = "skipped",
