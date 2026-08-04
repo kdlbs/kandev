@@ -3996,6 +3996,8 @@ type cancellationIdentity struct {
 
 type cancelOperation struct {
 	done                       chan struct{}
+	joined                     chan struct{}
+	joinObserved               bool
 	err                        error
 	projectionRelease          func()
 	kind                       cancellationKind
@@ -4079,6 +4081,7 @@ func (s *Service) claimCancellationWithAction(
 		s.cancellationOperations = make(map[string]*cancelOperation)
 	}
 	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		operation.markJoinedLocked()
 		if action == nil {
 			return operation, false, nil
 		}
@@ -4086,7 +4089,7 @@ func (s *Service) claimCancellationWithAction(
 		operation.actions = append(operation.actions, registered)
 		return operation, false, registered
 	}
-	operation := &cancelOperation{done: make(chan struct{}), kind: kind}
+	operation := &cancelOperation{done: make(chan struct{}), joined: make(chan struct{}), kind: kind}
 	var registered *cancellationAction
 	if action != nil {
 		registered = &cancellationAction{done: make(chan struct{}), run: action}
@@ -4106,6 +4109,7 @@ func (s *Service) claimExplicitCancellation(
 		s.cancellationOperations = make(map[string]*cancelOperation)
 	}
 	if operation, ok := s.cancellationOperations[sessionID]; ok {
+		operation.markJoinedLocked()
 		if operation.kind == cancellationKindExplicit || action == nil {
 			return operation, false, nil
 		}
@@ -4113,9 +4117,23 @@ func (s *Service) claimExplicitCancellation(
 		operation.actions = append(operation.actions, registered)
 		return operation, false, registered
 	}
-	operation := &cancelOperation{done: make(chan struct{}), kind: cancellationKindExplicit}
+	operation := &cancelOperation{
+		done:   make(chan struct{}),
+		joined: make(chan struct{}),
+		kind:   cancellationKindExplicit,
+	}
 	s.cancellationOperations[sessionID] = operation
 	return operation, true, nil
+}
+
+// markJoinedLocked records that another accepted cancellation source has
+// attached to this operation. cancellationOperationsMu must be held.
+func (operation *cancelOperation) markJoinedLocked() {
+	if operation == nil || operation.joinObserved {
+		return
+	}
+	operation.joinObserved = true
+	close(operation.joined)
 }
 
 func (s *Service) currentCancellation(sessionID string) *cancelOperation {

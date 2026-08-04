@@ -1574,6 +1574,7 @@ func TestCancelAgent_JoinedSilentCancellationRunsExplicitReconciliation(t *testi
 	go func() {
 		explicitDone <- svc.CancelAgent(ctx, "session1")
 	}()
+	waitForCancellationJoin(t, svc, "session1")
 	close(agentMgr.cancelAgentBlock)
 
 	select {
@@ -1651,6 +1652,7 @@ func TestCancelAgent_OwnerDisconnectDoesNotAbortJoinedOperation(t *testing.T) {
 
 	joinedDone := make(chan error, 1)
 	go func() { joinedDone <- svc.CancelAgent(context.Background(), "session-owner-disconnect") }()
+	waitForCancellationJoin(t, svc, "session-owner-disconnect")
 	close(agentMgr.cancelAgentBlock)
 	select {
 	case err := <-joinedDone:
@@ -2175,12 +2177,9 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		close(secondDone)
 	}()
 
-	// Wait until the second message is visible. This deterministically proves
-	// the second call reached the yielded lifecycle interval and joined the
-	// first operation before that operation is released.
-	require.Eventually(t, func() bool {
-		return svc.messageQueue.GetStatus(ctx, "session1").Count == 2
-	}, 2*time.Second, 10*time.Millisecond, "expected the second peer message to join the in-flight cancellation")
+	// Wait until the second call has joined the first operation before that
+	// operation is released.
+	waitForCancellationJoin(t, svc, "session1")
 
 	// A joined caller must still wait for the owner to settle cancellation and
 	// run its registered action.
@@ -2237,6 +2236,19 @@ func TestQueueAndInterruptForPeerMessage_WaitsForConcurrentHolderThenDelivers(t 
 		}
 		return svc.messageQueue.GetStatus(ctx, "session1").Count == 1
 	}, 2*time.Second, 10*time.Millisecond, "expected the second message to either be dispatched or settle back into the queue via requeueMessage")
+}
+
+func waitForCancellationJoin(t *testing.T, svc *Service, sessionID string) {
+	t.Helper()
+	svc.cancellationOperationsMu.Lock()
+	operation := svc.cancellationOperations[sessionID]
+	svc.cancellationOperationsMu.Unlock()
+	require.NotNil(t, operation, "expected an in-flight cancellation for %s", sessionID)
+	select {
+	case <-operation.joined:
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for a cancellation join on %s", sessionID)
+	}
 }
 
 // erroringTakeByIDRepository wraps a messagequeue.Repository and returns a
