@@ -62,9 +62,10 @@ func (s *NpmStrategy) Install(ctx context.Context) (*InstallResult, error) {
 		return nil, fmt.Errorf("npm install failed: %w\nOutput: %s", err, string(output))
 	}
 
-	binaryPath := filepath.Join(s.binDir, "node_modules", ".bin", s.binary)
-	if _, err := os.Stat(binaryPath); err != nil {
-		return nil, fmt.Errorf("binary not found after install: %s", binaryPath)
+	binaryDir := filepath.Join(s.binDir, "node_modules", ".bin")
+	binaryPath, err := FindCommandInDirectory(s.binary, binaryDir, s.runner)
+	if err != nil {
+		return nil, fmt.Errorf("binary not found after install in %s: %w", binaryDir, err)
 	}
 
 	s.logger.Info("npm install completed", zap.String("binary", binaryPath))

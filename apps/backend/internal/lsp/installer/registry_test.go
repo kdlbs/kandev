@@ -3,7 +3,6 @@ package installer
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"testing"
@@ -101,10 +100,22 @@ func TestLspCommand(t *testing.T) {
 }
 
 func TestCanAutoInstall(t *testing.T) {
-	for _, language := range []string{"typescript", "go", "rust", "python"} {
+	for _, language := range []string{"typescript", "go", "python"} {
 		if !CanAutoInstall(language) {
 			t.Errorf("CanAutoInstall(%q) = false, want true", language)
 		}
+	}
+	for _, goos := range []string{darwinOS, linuxOS} {
+		if !canAutoInstallOnPlatform("rust", goos) {
+			t.Errorf("canAutoInstallOnPlatform(rust, %q) = false, want true", goos)
+		}
+	}
+	if canAutoInstallOnPlatform("rust", windowsOS) {
+		t.Error("canAutoInstallOnPlatform(rust, windows) = true, want false")
+	}
+	wantRust := runtime.GOOS == darwinOS || runtime.GOOS == linuxOS
+	if got := CanAutoInstall("rust"); got != wantRust {
+		t.Errorf("CanAutoInstall(rust) = %v, want %v on %s", got, wantRust, runtime.GOOS)
 	}
 	for _, language := range []string{"kotlin", "java", ""} {
 		if CanAutoInstall(language) {
@@ -140,8 +151,11 @@ func TestBinaryName(t *testing.T) {
 func TestStrategyFor(t *testing.T) {
 	r := NewRegistry("", testLogger())
 
-	// Supported languages should return a strategy
-	for _, lang := range []string{"typescript", "go", "rust", "python"} {
+	installable := []string{"typescript", "go", "python"}
+	if CanAutoInstall("rust") {
+		installable = append(installable, "rust")
+	}
+	for _, lang := range installable {
 		s, err := r.StrategyFor(lang)
 		if err != nil {
 			t.Errorf("StrategyFor(%q) returned error: %v", lang, err)
@@ -153,6 +167,11 @@ func TestStrategyFor(t *testing.T) {
 		}
 		if s.Name() == "" {
 			t.Errorf("StrategyFor(%q).Name() is empty", lang)
+		}
+	}
+	if !CanAutoInstall("rust") {
+		if _, err := r.StrategyFor("rust"); err == nil {
+			t.Error("StrategyFor(rust) should reject auto-install on this platform")
 		}
 	}
 
@@ -178,8 +197,13 @@ func TestBinaryPath_InPATH(t *testing.T) {
 
 func TestBinaryPath_InBinDir(t *testing.T) {
 	// Create a temp bin directory with a fake binary
+	t.Setenv("PATH", t.TempDir())
 	tmpDir := t.TempDir()
-	fakeBinary := filepath.Join(tmpDir, "node_modules", ".bin", "typescript-language-server")
+	binaryName := "typescript-language-server"
+	if runtime.GOOS == windowsOS {
+		binaryName += ".cmd"
+	}
+	fakeBinary := filepath.Join(tmpDir, "node_modules", ".bin", binaryName)
 	if err := os.MkdirAll(filepath.Dir(fakeBinary), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -194,20 +218,21 @@ func TestBinaryPath_InBinDir(t *testing.T) {
 
 	p, err := r.BinaryPath("typescript")
 	if err != nil {
-		// Only fail if it's not in PATH either
-		if _, lookErr := exec.LookPath("typescript-language-server"); lookErr != nil {
-			t.Errorf("BinaryPath(\"typescript\") error = %v (expected to find in binDir)", err)
-		}
-		return
+		t.Fatalf("BinaryPath(typescript) error = %v", err)
 	}
-	if p == "" {
-		t.Error("BinaryPath(\"typescript\") returned empty path")
+	if p != fakeBinary {
+		t.Errorf("BinaryPath(typescript) = %q, want %q", p, fakeBinary)
 	}
 }
 
 func TestBinaryPath_DirectBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	tmpDir := t.TempDir()
-	fakeBinary := filepath.Join(tmpDir, "rust-analyzer")
+	binaryName := "rust-analyzer"
+	if runtime.GOOS == windowsOS {
+		binaryName += ".exe"
+	}
+	fakeBinary := filepath.Join(tmpDir, binaryName)
 	if err := os.WriteFile(fakeBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -219,13 +244,10 @@ func TestBinaryPath_DirectBinary(t *testing.T) {
 
 	p, err := r.BinaryPath("rust")
 	if err != nil {
-		if _, lookErr := exec.LookPath("rust-analyzer"); lookErr != nil {
-			t.Errorf("BinaryPath(\"rust\") error = %v (expected to find direct binary)", err)
-		}
-		return
+		t.Fatalf("BinaryPath(rust) error = %v", err)
 	}
-	if p == "" {
-		t.Error("BinaryPath(\"rust\") returned empty path")
+	if p != fakeBinary {
+		t.Errorf("BinaryPath(rust) = %q, want %q", p, fakeBinary)
 	}
 }
 

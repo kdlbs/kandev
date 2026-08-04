@@ -30,6 +30,16 @@ func FindCommand(binary string, runner CommandRunner) (string, error) {
 	return lookPathInEnvironment(binary, env)
 }
 
+// FindCommandInDirectory resolves a binary in one trusted directory with the
+// task environment's platform-specific executable extensions.
+func FindCommandInDirectory(binary, directory string, runner CommandRunner) (string, error) {
+	env, _, err := commandEnvironment(runner)
+	if err != nil {
+		return "", err
+	}
+	return findCommandInDirectory(binary, directory, env)
+}
+
 func commandEnvironment(runner CommandRunner) (map[string]string, map[string]string, error) {
 	env := processEnvironment()
 	if runner == nil {
@@ -91,11 +101,21 @@ func lookPathInEnvironment(binary string, env map[string]string) (string, error)
 		if directory == "" || !filepath.IsAbs(directory) {
 			continue
 		}
-		for _, name := range executableNames(binary, env) {
-			candidate := filepath.Join(directory, name)
-			if isExecutableFile(candidate) {
-				return candidate, nil
-			}
+		if candidate, err := findCommandInDirectory(binary, directory, env); err == nil {
+			return candidate, nil
+		}
+	}
+	return "", &exec.Error{Name: binary, Err: exec.ErrNotFound}
+}
+
+func findCommandInDirectory(binary, directory string, env map[string]string) (string, error) {
+	if !filepath.IsAbs(directory) {
+		return "", &exec.Error{Name: binary, Err: exec.ErrNotFound}
+	}
+	for _, name := range executableNames(binary, env) {
+		candidate := filepath.Join(directory, name)
+		if isExecutableFile(candidate) {
+			return candidate, nil
 		}
 	}
 	return "", &exec.Error{Name: binary, Err: exec.ErrNotFound}

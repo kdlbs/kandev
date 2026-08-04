@@ -51,16 +51,47 @@ func putFakeExecutableOnPath(t *testing.T, name string) string {
 	return path
 }
 
+func putFakeNpmShim(t *testing.T, binDir, binary string) string {
+	t.Helper()
+	name := binary
+	if runtime.GOOS == windowsOS {
+		name += ".cmd"
+	}
+	path := filepath.Join(binDir, "node_modules", ".bin", name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestFindCommandInDirectoryUsesPlatformExtensions(t *testing.T) {
+	directory := t.TempDir()
+	name := "language-server"
+	if runtime.GOOS == windowsOS {
+		name += ".cmd"
+	}
+	want := filepath.Join(directory, name)
+	if err := os.WriteFile(want, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{environment: map[string]string{"PATHEXT": ".CMD;.EXE"}}
+
+	got, err := FindCommandInDirectory("language-server", directory, runner)
+	if err != nil {
+		t.Fatalf("FindCommandInDirectory() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("FindCommandInDirectory() = %q, want %q", got, want)
+	}
+}
+
 func TestNpmStrategyUsesInjectedCommandRunner(t *testing.T) {
 	npmPath := putFakeExecutableOnPath(t, "npm")
 	binDir := t.TempDir()
-	binaryPath := filepath.Join(binDir, "node_modules", ".bin", "pyright-langserver")
-	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(binaryPath, []byte("fixture"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	binaryPath := putFakeNpmShim(t, binDir, "pyright-langserver")
 	runner := &recordingCommandRunner{}
 	strategy := NewNpmStrategy(binDir, "pyright-langserver", []string{"pyright"}, installStrategyTestLogger(t), runner)
 
@@ -97,13 +128,7 @@ func TestNpmStrategyUsesRunnerEnvironmentForLookup(t *testing.T) {
 		t.Fatal(err)
 	}
 	binDir := t.TempDir()
-	binaryPath := filepath.Join(binDir, "node_modules", ".bin", "pyright-langserver")
-	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(binaryPath, []byte("fixture"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	putFakeNpmShim(t, binDir, "pyright-langserver")
 	runner := &recordingCommandRunner{environment: map[string]string{"PATH": taskBin}}
 	strategy := NewNpmStrategy(
 		binDir,

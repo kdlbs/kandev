@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	tools "github.com/kandev/kandev/internal/tools/installer"
@@ -25,6 +26,9 @@ const (
 	rustLanguageServer       = "rust-analyzer"
 	pythonLanguageServer     = "pyright-langserver"
 	stdioArgument            = "--stdio"
+	darwinOS                 = "darwin"
+	linuxOS                  = "linux"
+	windowsOS                = "windows"
 )
 
 // languageConfig holds the binary name and CLI arguments for a language server.
@@ -62,8 +66,15 @@ func IsSupported(language string) bool {
 // A language can be supported for manually installed binaries without being
 // safe or practical for Kandev to install automatically.
 func CanAutoInstall(language string) bool {
+	return canAutoInstallOnPlatform(language, runtime.GOOS)
+}
+
+func canAutoInstallOnPlatform(language, goos string) bool {
 	cfg, ok := languages[language]
-	return ok && cfg.autoInstall
+	if !ok || !cfg.autoInstall {
+		return false
+	}
+	return language != languageRust || goos == darwinOS || goos == linuxOS
 }
 
 // LspCommand returns the binary name and arguments for a language server.
@@ -177,15 +188,14 @@ func (r *Registry) BinaryPath(language string) (string, error) {
 
 	if r.binDir != "" {
 		// Check Kandev bin directory (npm node_modules/.bin/)
-		npmBinPath := filepath.Join(r.binDir, "node_modules", ".bin", binary)
-		if _, err := os.Stat(npmBinPath); err == nil {
-			return npmBinPath, nil
+		npmBinDir := filepath.Join(r.binDir, "node_modules", ".bin")
+		if p, err := tools.FindCommandInDirectory(binary, npmBinDir, r.commandRunner); err == nil {
+			return p, nil
 		}
 
 		// Check Kandev bin directory (direct binary)
-		directPath := filepath.Join(r.binDir, binary)
-		if _, err := os.Stat(directPath); err == nil {
-			return directPath, nil
+		if p, err := tools.FindCommandInDirectory(binary, r.binDir, r.commandRunner); err == nil {
+			return p, nil
 		}
 	}
 
