@@ -505,7 +505,6 @@ export function GitHubPageClient({
 
   const onStartTask = useCallback((payload: LaunchPayload) => setLaunchPayload(payload), []);
   const onCloseLaunch = useCallback(() => setLaunchPayload(null), []);
-  const onOpenMobileSidebar = useCallback(() => setMobileSidebarOpen(true), []);
   // Close the mobile sheet after any sidebar selection. KindToggle clicks also
   // route through onSelect — closing on every selection is acceptable UX since
   // the user always wants to see the list after picking a kind or preset.
@@ -526,7 +525,9 @@ export function GitHubPageClient({
       subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
       icon={<IconBrandGithub className="h-4 w-4" />}
       scroll="none"
-      actions={<MobileFiltersButton show={loaded && authed} onClick={onOpenMobileSidebar} />}
+      actions={
+        <MobileFiltersButton show={loaded && authed} onClick={() => setMobileSidebarOpen(true)} />
+      }
     >
       <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
         {!loaded && (
