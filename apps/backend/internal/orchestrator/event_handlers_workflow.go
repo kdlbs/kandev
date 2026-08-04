@@ -1686,6 +1686,26 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt, true, planMode, true, attachments, references,
 		)
 		if err != nil {
+			// recordAutoStartMessage already wrote the prompt to chat history,
+			// but requeueTaken only restores a taken handoff message — so a
+			// launch that loses to a concurrent start leaves the prompt as a
+			// chat row no agent will ever receive. Queue it for the boot-ready
+			// drain, matching the retry loop below, which queues on the same
+			// conditions. Permanent rejections (Office scheduler guard, missing
+			// profile) are deliberately not queued: nothing would drain them.
+			if shouldQueueIfBusy && (isAgentAlreadyRunningError(err) ||
+				isSessionBusyError(err) || isTransientPromptError(err)) {
+				if queueErr := s.queueAutoStartPrompt(
+					ctx, taskID, sessionID, prompt, planMode,
+					attachments, origin, userMsgRecorded, references,
+				); queueErr != nil {
+					s.logger.Warn("failed to queue auto-start prompt after launch failure",
+						zap.String("task_id", taskID),
+						zap.String("session_id", sessionID),
+						zap.String("step_name", stepName),
+						zap.Error(queueErr))
+				}
+			}
 			requeueTaken()
 		}
 		return err
@@ -2140,6 +2160,22 @@ func (s *Service) markIdleAfterReset(
 // the agent's conversation context. The workspace environment is preserved.
 func (s *Service) resetAgentContext(ctx context.Context, taskID string, session *models.TaskSession, stepName string) bool {
 	sessionID := session.ID
+
+	// A CREATED session has never been prompted, so there is no agent
+	// conversation to clear. Its execution may still be workspace-only
+	// (prepared, never started), in which case a "restart" here would *start*
+	// the subprocess — and auto_start_agent, which reads State==CREATED as
+	// "the agent was never started", would then start it a second time. The
+	// second start is rejected by agentctl's running-process guard, failing
+	// the task and dropping the step prompt. Leave the start to
+	// autoStartStepPrompt: the process it launches begins on a fresh ACP
+	// session regardless, so nothing is lost by skipping.
+	if session.State == models.TaskSessionStateCreated {
+		s.logger.Debug("session has no agent context to reset, skipping",
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName))
+		return true
+	}
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
 	if err != nil || executionID == "" {

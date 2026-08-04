@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
@@ -525,5 +526,81 @@ func TestAutoStartTransientError_AutoResumesWhenAgentDead(t *testing.T) {
 	}
 	if mergeUserMsgs != 1 {
 		t.Errorf("expected exactly 1 Merge user_message, got %d", mergeUserMsgs)
+	}
+}
+
+// TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning covers the
+// CREATED branch of autoStartStepPrompt, which short-circuits before the
+// PromptTask retry loop and therefore never reached that loop's
+// isAgentAlreadyRunningError → queue handling.
+//
+// recordAutoStartMessage has already written the prompt to chat history by the
+// time StartCreatedSession fails. Before the fix the only recovery was
+// requeueTaken(), which restores a *taken handoff* message and not the recorded
+// prompt — so the prompt existed as a chat row that no agent would ever be
+// given, and the session sat idle after recovery booted a fresh agent.
+//
+// ErrAgentAlreadyRunning is the synchronous shape of exactly that collision:
+// a concurrent path already owns a start for this session.
+func TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-created"
+		sessionID = "session-created"
+		profile   = "profile-created"
+	)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, Title: "Created Task", State: v1.TaskStateInProgress,
+	}
+
+	// No in-memory execution (the shape after a backend restart), so
+	// startAgentOnExistingWorkspace returns ErrStaleExecution and the full
+	// LaunchAgent path runs — the one route that can still fail synchronously.
+	// A concurrent path already owns the start for this session.
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, lifecycle.ErrAgentAlreadyRunning
+		},
+	}
+
+	step := &wfmodels.WorkflowStep{ID: "step-work", WorkflowID: "wf1", Name: "Work"}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	msgCreator := &mockMessageCreator{}
+	svc.messageCreator = msgCreator
+
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = profile
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session profile: %v", err)
+	}
+
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, "Do the work", false, true)
+	if err == nil {
+		t.Fatal("expected autoStartStepPrompt to return the launch error")
+	}
+	if !isAgentAlreadyRunningError(err) {
+		t.Fatalf("expected an already-running launch error, got %v", err)
+	}
+
+	// The recorded prompt must survive as a queued message the boot-ready
+	// drain can deliver, not only as an undeliverable chat row.
+	if got := svc.messageQueue.GetStatus(ctx, sessionID).Count; got != 1 {
+		t.Fatalf("expected the prompt to be queued for redelivery, queue count = %d", got)
+	}
+
+	// The chat row was already written, so the drain must not write a second.
+	if len(msgCreator.userMessages) != 1 {
+		t.Fatalf("expected exactly 1 recorded user message, got %d", len(msgCreator.userMessages))
 	}
 }
