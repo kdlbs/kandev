@@ -108,8 +108,9 @@ suite still fails in unrelated tests on this native Windows host because they
 require POSIX commands, Unix file modes, symlink privileges, or Unix path
 semantics. Root Make targets are also blocked by their POSIX `printf`
 dependency, so their underlying cross-platform commands were run directly.
-`golangci-lint` and `pre-commit` are not installed. Commit, push, and PR creation
-remain behind the user's explicit review gate.
+`golangci-lint` and `pre-commit` are not installed. The implementation was
+committed and pushed to the contributor fork; PR creation remains behind the
+user's explicit metadata review gate.
 
 ---
 

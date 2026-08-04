@@ -103,5 +103,6 @@ task/plan status, and readiness for commit, push, and PR creation.
   differences on `origin/main`; only changed code/catalog files were checked to
   avoid an unrelated rewrite. `golangci-lint` and `pre-commit` are not installed
   on this host.
-- `git diff --check` passed. Final commit, push, and PR creation are intentionally
-  pending user review of the English metadata and its Chinese translation.
+- `git diff --check` passed. Commit `b33d41729` was pushed to
+  `BillChenIDY/kandev:feat/i18n-zh-cn`; PR creation remains pending user review
+  of the English metadata and its Chinese translation.
