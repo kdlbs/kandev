@@ -195,13 +195,21 @@ func (s *Service) collectTaskBaseBranches(ctx context.Context, taskID string) (m
 		if tr.BaseBranch == "" {
 			continue
 		}
+		// A row that records a base branch but cannot resolve its repository
+		// makes the map INCOMPLETE, not merely smaller. agentctl's
+		// SetBaseBranches replaces the stored map wholesale, so pushing a
+		// partial map silently drops the base branch of every repository that
+		// failed to resolve — and the caller's len(map) > 0 guard cannot detect
+		// it, because the map is non-empty. Fail instead: callers already skip
+		// the push on error, leaving the previously-correct map in place.
 		repo, err := s.repoEntities.GetRepository(ctx, tr.RepositoryID)
-		if err != nil || repo == nil {
-			continue
+		if err != nil {
+			return nil, fmt.Errorf("resolve repository %s for base-branch map: %w", tr.RepositoryID, err)
 		}
-		if repo.Name != "" {
-			out[repo.Name] = tr.BaseBranch
+		if repo == nil || repo.Name == "" {
+			return nil, fmt.Errorf("repository %s for base-branch map is missing or unnamed", tr.RepositoryID)
 		}
+		out[repo.Name] = tr.BaseBranch
 	}
 	// Single-repo legacy fallback: when only one row, duplicate under the
 	// empty key so the root WorkspaceTracker (repositoryName == "") picks it

@@ -506,27 +506,43 @@ type baseBranchResolution struct {
 	reason baseBranchReason
 }
 
-// log emits one line when the resolution fell back to an integration branch.
-// The stored case is the norm and stays silent; this runs on a status poll,
-// so only the noteworthy outcomes are reported, at debug level to match the
-// surrounding poll logging.
+// log reports a fallback resolution once per change. The stored case is the
+// norm and stays silent.
+//
+// Two constraints shape this. resolveBaseBranch runs on every status poll — as
+// often as every couple of seconds, per repository — so logging unconditionally
+// would bury the signal in its own repetition; only a *changed* outcome is
+// reported. And a recorded base branch that does not resolve is an anomaly the
+// operator needs to see without turning on debug logging, so it warns, while a
+// task that simply has no recorded base is ordinary and stays at debug.
 func (r baseBranchResolution) log(wt *WorkspaceTracker) {
-	switch r.reason {
-	case baseBranchStored:
+	if r.reason == baseBranchStored {
 		return
+	}
+	key := strconv.Itoa(int(r.reason)) + "|" + r.ref
+	wt.baseBranchLogMu.Lock()
+	repeat := wt.lastBaseBranchLog == key
+	wt.lastBaseBranchLog = key
+	wt.baseBranchLogMu.Unlock()
+	if repeat {
+		return
+	}
+
+	switch r.reason {
 	case baseBranchFallbackNoStored:
 		wt.logger.Debug("no base branch recorded for workspace, using integration fallback for diff stats",
 			zap.String("repository", wt.repositoryName),
 			zap.String("candidate", r.ref))
 	case baseBranchFallbackStoredUnresolved:
-		wt.logger.Debug("recorded base branch does not resolve in git, using integration fallback for diff stats",
+		wt.logger.Warn("recorded base branch does not resolve in git, diff stats fall back to an integration branch",
 			zap.String("repository", wt.repositoryName),
 			zap.String("stored_base_branch", r.stored),
 			zap.String("candidate", r.ref))
 	case baseBranchUnresolved:
-		wt.logger.Debug("no base branch or integration candidate resolved, diff stats unavailable",
+		wt.logger.Warn("no base branch or integration candidate resolved, diff stats unavailable",
 			zap.String("repository", wt.repositoryName),
 			zap.String("stored_base_branch", r.stored))
+	case baseBranchStored:
 	}
 }
 

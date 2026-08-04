@@ -306,3 +306,69 @@ func TestUpdateRepositoryBaseBranch_NotFound(t *testing.T) {
 		}
 	})
 }
+
+// Regression: collectTaskBaseBranches skipped any task_repositories row whose
+// Repository could not be resolved. For a multi-repo task that yields a
+// non-empty but INCOMPLETE map — and since agentctl's SetBaseBranches replaces
+// the stored map wholesale, pushing it silently drops the base branch of every
+// repository that was skipped. The len>0 guard does not catch this, because the
+// map is not empty; it is just missing entries. A partial hydration must be
+// treated as a failure, not pushed.
+func TestUpdateRepositoryBaseBranch_PartialHydrationIsNotPushed(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "backend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Multi repo",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "repo-2", BaseBranch: "main", CheckoutBranch: "feature/b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("ListTaskRepositories: %v, rows=%d", err, len(rows))
+	}
+
+	// Delete one repository so its task_repositories row can no longer resolve
+	// a Name — the shape a failed GetRepository produces.
+	if err := repo.DeleteRepository(ctx, "repo-2"); err != nil {
+		t.Fatalf("DeleteRepository: %v", err)
+	}
+
+	var target string
+	for _, r := range rows {
+		if r.RepositoryID == "repo-1" {
+			target = r.ID
+		}
+	}
+
+	if _, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+		TaskID:           task.ID,
+		TaskRepositoryID: target,
+		BaseBranch:       "staging",
+	}); err != nil {
+		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+
+	// The push must be skipped entirely. Pushing {frontend: staging} alone
+	// would replace the map and wipe backend's recorded base branch.
+	if calls := pusher.snapshot(); len(calls) != 0 {
+		t.Fatalf("expected no push for an incomplete hydration, got %d calls: %+v", len(calls), calls)
+	}
+}

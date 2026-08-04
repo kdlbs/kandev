@@ -92,6 +92,23 @@ workspace *was* created through the full launch path, displayed correctly.
   `git diff --numstat <merge-base with the recorded base>` plus untracked-file
   additions.
 
+## Known gap
+
+agentctl starts its workspace trackers during **instance creation**, and each
+tracker runs one unconditional scan immediately — before the HTTP server the
+backend waits on is reachable. The seeding push therefore cannot land before the
+very first status computation, so a workspace created outside the launch path
+can publish one fallback-based stat before its base branch arrives.
+
+The window is bounded and self-healing: `SetBaseBranches` stamps the new ref
+synchronously and kicks a background `RefreshGitStatus`, which emits a corrected
+`GitStatusUpdate` over the same stream. So the wrong value is transient rather
+than the indefinite one this repair fixes.
+
+Closing it entirely means supplying the map at instance-creation time, or gating
+tracker polling until hydration completes — a change to the instance-creation
+contract, deliberately not bundled here.
+
 ## Out of scope
 
 - Changing the integration-branch candidate list or making it configurable. The
