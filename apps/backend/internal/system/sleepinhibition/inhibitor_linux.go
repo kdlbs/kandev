@@ -46,6 +46,19 @@ func newLinuxInhibitor(open linuxDBusOpener) Inhibitor { return &linuxInhibitor{
 func (i *linuxInhibitor) Platform() Platform { return PlatformLinux }
 func (i *linuxInhibitor) Supported() bool    { return true }
 
+func (i *linuxInhibitor) Probe(context.Context) error {
+	connection, err := i.open()
+	if err != nil {
+		return NewIssueError(IssueSystemServiceUnavailable, err)
+	}
+	defer func() { _ = connection.Close() }()
+	call := connection.Object(login1Name, login1Path).Call("org.freedesktop.DBus.Peer.Ping", 0)
+	if call.Err != nil {
+		return NewIssueError(IssueSystemServiceUnavailable, call.Err)
+	}
+	return nil
+}
+
 func (i *linuxInhibitor) Acquire(context.Context) (Lease, error) {
 	connection, err := i.open()
 	if err != nil {

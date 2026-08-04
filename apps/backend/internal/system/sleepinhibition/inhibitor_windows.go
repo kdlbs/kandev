@@ -42,18 +42,24 @@ func (i *windowsInhibitor) Supported() bool    { return true }
 
 func (i *windowsInhibitor) Acquire(ctx context.Context) (Lease, error) {
 	result := make(chan windowsAcquireResult, 1)
+	handoff := make(chan struct{})
+	abort := make(chan struct{})
 	go func() {
 		runtime.LockOSThread()
 		defer runtime.UnlockOSThread()
 		if _, err := i.call(esInhibitionState); err != nil {
-			result <- windowsAcquireResult{err: NewIssueError(IssueRequestFailed, err)}
+			select {
+			case result <- windowsAcquireResult{err: NewIssueError(IssueRequestFailed, err)}:
+			case <-ctx.Done():
+			}
 			return
 		}
 		lease := &windowsLease{release: make(chan struct{}), done: make(chan error, 1)}
 		result <- windowsAcquireResult{lease: lease}
 		select {
-		case <-lease.release:
-		case <-ctx.Done():
+		case <-handoff:
+			<-lease.release
+		case <-abort:
 		}
 		_, err := i.call(esContinuous)
 		lease.done <- err
@@ -65,8 +71,10 @@ func (i *windowsInhibitor) Acquire(ctx context.Context) (Lease, error) {
 		if response.err != nil {
 			return nil, response.err
 		}
+		close(handoff)
 		return response.lease, nil
 	case <-ctx.Done():
+		close(abort)
 		return nil, ctx.Err()
 	}
 }

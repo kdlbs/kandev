@@ -213,6 +213,10 @@ func (s *Service) reconcile(ctx context.Context) <-chan error {
 		return nil
 	}
 
+	if !s.probeCapability(ctx) {
+		return s.currentLeaseDone()
+	}
+
 	working, err := s.hasWorkingSession(ctx)
 	if err != nil {
 		s.warn("Unable to read active task sessions for sleep inhibition", err)
@@ -261,6 +265,31 @@ func (s *Service) reconcile(ctx context.Context) <-chan error {
 		status.Issue = ""
 	})
 	return lease.Done()
+}
+
+type capabilityProber interface {
+	Probe(context.Context) error
+}
+
+func (s *Service) probeCapability(ctx context.Context) bool {
+	prober, ok := s.inhibitor.(capabilityProber)
+	if !ok {
+		return true
+	}
+	if err := prober.Probe(ctx); err != nil {
+		s.mu.Lock()
+		lease := s.lease
+		s.mu.Unlock()
+		if lease == nil {
+			s.setStatus(func(status *Status) {
+				status.Active = false
+				status.Issue = IssueFromError(err)
+			})
+		}
+		s.warn("Unable to probe task sleep inhibition service", err)
+		return false
+	}
+	return true
 }
 
 func (s *Service) clearLeaseStatus(ctx context.Context) {

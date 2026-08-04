@@ -137,6 +137,27 @@ func TestServiceKeepsLeaseWhenRepositoryReadFails(t *testing.T) {
 	}
 }
 
+func TestServiceReportsCapabilityFailureBeforeAWorkingSessionExists(t *testing.T) {
+	reader := &fakeSessionReader{}
+	inhibitor := &fakeInhibitor{
+		platform:  PlatformLinux,
+		supported: true,
+		probeErr:  NewIssueError(IssueSystemServiceUnavailable, errors.New("logind unavailable")),
+	}
+	service := newTestService(t, reader, inhibitor)
+
+	response, err := service.Update(context.Background(), Settings{Enabled: true})
+	if err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if response.Status.Active {
+		t.Fatal("capability failure reported an active lease")
+	}
+	if response.Status.Issue != IssueSystemServiceUnavailable {
+		t.Fatalf("capability issue = %q, want %q", response.Status.Issue, IssueSystemServiceUnavailable)
+	}
+}
+
 func newTestService(t *testing.T, reader *fakeSessionReader, inhibitor *fakeInhibitor, options ...Option) *Service {
 	t.Helper()
 	eventBus := bus.NewMemoryEventBus(logger.Default())
@@ -224,6 +245,7 @@ type fakeInhibitor struct {
 	mu         sync.Mutex
 	platform   Platform
 	supported  bool
+	probeErr   error
 	acquireErr error
 	leases     []*fakeLease
 	acquires   int
@@ -232,6 +254,11 @@ type fakeInhibitor struct {
 
 func (i *fakeInhibitor) Platform() Platform { return i.platform }
 func (i *fakeInhibitor) Supported() bool    { return i.supported }
+func (i *fakeInhibitor) Probe(context.Context) error {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.probeErr
+}
 
 func (i *fakeInhibitor) Acquire(context.Context) (Lease, error) {
 	i.mu.Lock()

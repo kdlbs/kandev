@@ -53,6 +53,45 @@ func TestLinuxInhibitorMapsSystemBusFailure(t *testing.T) {
 	}
 }
 
+func TestLinuxInhibitorProbesLogin1(t *testing.T) {
+	connection := &fakeLinuxDBus{
+		object: &fakeLinuxDBusObject{call: &dbus.Call{}},
+	}
+	inhibitor := newLinuxInhibitor(func() (linuxDBus, error) { return connection, nil })
+	prober, ok := inhibitor.(capabilityProber)
+	if !ok {
+		t.Fatal("linux inhibitor does not expose capability probe")
+	}
+
+	if err := prober.Probe(context.Background()); err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	if connection.object.method != "org.freedesktop.DBus.Peer.Ping" {
+		t.Fatalf("probe method = %q", connection.object.method)
+	}
+	if !connection.closed {
+		t.Fatal("probe did not close the D-Bus connection")
+	}
+}
+
+func TestLinuxInhibitorMapsProbeFailure(t *testing.T) {
+	connection := &fakeLinuxDBus{
+		object: &fakeLinuxDBusObject{call: &dbus.Call{Err: errors.New("name has no owner")}},
+	}
+	inhibitor := newLinuxInhibitor(func() (linuxDBus, error) { return connection, nil })
+	prober, ok := inhibitor.(capabilityProber)
+	if !ok {
+		t.Fatal("linux inhibitor does not expose capability probe")
+	}
+
+	if err := prober.Probe(context.Background()); err == nil || IssueFromError(err) != IssueSystemServiceUnavailable {
+		t.Fatalf("probe error = %v, want system service unavailable", err)
+	}
+	if !connection.closed {
+		t.Fatal("failed probe did not close the D-Bus connection")
+	}
+}
+
 type fakeLinuxDBus struct {
 	object *fakeLinuxDBusObject
 	closed bool
