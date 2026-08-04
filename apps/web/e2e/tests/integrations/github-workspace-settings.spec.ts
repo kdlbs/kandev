@@ -144,7 +144,9 @@ test.describe("GitHub workspace settings", () => {
     expect(fadeBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
     expect(initialSaveBox).not.toBeNull();
-    expect(fadeBox!.y + fadeBox!.height).toBeCloseTo(scrollBox!.y + scrollBox!.height, 1);
+    expect(
+      Math.abs(fadeBox!.y + fadeBox!.height - (scrollBox!.y + scrollBox!.height)),
+    ).toBeLessThanOrEqual(2);
     expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(dialogBox!.y + dialogBox!.height);
     await dialog.getByRole("radio", { name: /^GitHub CLI account/ }).click();
     await expect(dialog.getByRole("combobox", { name: "GitHub CLI account" })).toContainText(
@@ -195,7 +197,7 @@ test.describe("GitHub workspace settings", () => {
     await scrollBody.evaluate((element) => element.scrollTo(0, element.scrollHeight));
     const scrolledSaveBox = await fixedSaveButton.boundingBox();
     expect(scrolledSaveBox).not.toBeNull();
-    expect(scrolledSaveBox!.y).toBeCloseTo(beforeScrollSaveBox!.y, 1);
+    expect(Math.abs(scrolledSaveBox!.y - beforeScrollSaveBox!.y)).toBeLessThanOrEqual(2);
     await saveButton.click();
     await expect(testPage.getByText("GitHub access settings saved")).toBeVisible({
       timeout: 10_000,

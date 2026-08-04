@@ -172,7 +172,16 @@ describe("TokenUsageDisplay context source", () => {
     const { getByText, getByLabelText } = render(<TokenUsageDisplay sessionId="sess-1" />);
 
     expect(getByText("API")).toBeDefined();
-    expect(getByLabelText("About context window source")).toBeDefined();
+    const helpButton = getByLabelText("About context window source");
+    const helpId = helpButton.getAttribute("aria-describedby");
+    if (!helpId) throw new Error("Expected source help to be described");
+    const help = document.getElementById(helpId);
+    if (!help) throw new Error("Expected source help element");
+
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-100");
+    fireEvent.click(helpButton);
+    expect(help.className).toContain("opacity-0");
     expect(getByText(/model's advertised maximum from the catalogue/i)).toBeDefined();
   });
 });

@@ -582,11 +582,20 @@ func TestBuildClarificationPrompt(t *testing.T) {
 }
 
 func TestHandleClarificationPrimaryAnswered_SchedulesWatchdog(t *testing.T) {
-	svc := &Service{
-		logger:                       testLogger(),
-		clarificationWatchdogTimeout: 500 * time.Millisecond,
-	}
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateRunning)
+	taskRepo := newMockTaskRepo()
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		&mockAgentManager{isAgentRunning: true},
+	)
+	svc.clarificationWatchdogTimeout = 500 * time.Millisecond
 	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
+	if err := repo.UpdateTaskState(context.Background(), "t1", v1.TaskStateReview); err != nil {
+		t.Fatalf("set task review state: %v", err)
+	}
 
 	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{
 		"session_id":  "s1",
@@ -603,13 +612,21 @@ func TestHandleClarificationPrimaryAnswered_SchedulesWatchdog(t *testing.T) {
 	if got := countClarificationWatchdogs(svc); got != 1 {
 		t.Fatalf("expected 1 active watchdog, got %d", got)
 	}
+	if got := taskRepo.updatedStates["t1"]; got != v1.TaskStateInProgress {
+		t.Fatalf("task state = %q, want %q", got, v1.TaskStateInProgress)
+	}
 }
 
 func TestHandleAgentStreamEvent_CancelsClarificationWatchdogs(t *testing.T) {
-	svc := &Service{
-		logger:                       testLogger(),
-		clarificationWatchdogTimeout: time.Second,
-	}
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateRunning)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		&mockAgentManager{isAgentRunning: true},
+	)
+	svc.clarificationWatchdogTimeout = time.Second
 	t.Cleanup(func() { svc.cancelAllClarificationWatchdogs() })
 
 	event := bus.NewEvent("clarification.primary_answered", "test", map[string]any{

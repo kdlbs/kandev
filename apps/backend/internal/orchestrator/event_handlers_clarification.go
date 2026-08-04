@@ -141,6 +141,12 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 		zap.String("session_id", data.SessionID),
 		zap.Bool("rejected", data.Rejected))
 
+	// The primary MCP request can keep the session RUNNING while the task was
+	// moved to REVIEW for the pending question. Reassert runtime ownership at
+	// the answer boundary; terminal and archived sessions remain protected by
+	// reconcileTaskStateForRuntime.
+	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
+
 	if _, err := s.PromptTask(ctx, data.TaskID, data.SessionID, prompt, "", false, nil, false); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {
 			s.logger.Error("failed to resume agent with clarification answer",
@@ -152,7 +158,7 @@ func (s *Service) handleClarificationAnswered(ctx context.Context, event *bus.Ev
 	return nil
 }
 
-func (s *Service) handleClarificationPrimaryAnswered(_ context.Context, event *bus.Event) error {
+func (s *Service) handleClarificationPrimaryAnswered(ctx context.Context, event *bus.Event) error {
 	dataBytes, err := json.Marshal(event.Data)
 	if err != nil {
 		s.logger.Error("failed to marshal primary clarification event data", zap.Error(err))
@@ -171,6 +177,10 @@ func (s *Service) handleClarificationPrimaryAnswered(_ context.Context, event *b
 		return nil
 	}
 
+	// A directly answered MCP request does not transition the session through
+	// WAITING_FOR_INPUT, so no ordinary turn-start event exists to move a task
+	// out of REVIEW. The active runtime still owns that projection.
+	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
 	s.scheduleClarificationWatchdog(data)
 	return nil
 }

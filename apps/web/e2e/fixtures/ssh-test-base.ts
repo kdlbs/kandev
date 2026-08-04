@@ -124,12 +124,24 @@ export const sshTest = backendFixture.extend<
 
 async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
   await apiClient.e2eReset(seedData.workspaceId, [seedData.workflowId]);
+  let emptySince = 0;
   await expect
-    .poll(async () => (await apiClient.listSSHSessions(seedData.sshExecutorId)).length, {
-      message: "previous SSH runtime rows should be torn down before the next test",
-      timeout: 60_000,
-    })
-    .toBe(0);
+    .poll(
+      async () => {
+        const count = (await apiClient.listSSHSessions(seedData.sshExecutorId)).length;
+        if (count > 0) {
+          emptySince = 0;
+          return false;
+        }
+        if (emptySince === 0) emptySince = Date.now();
+        return Date.now() - emptySince >= 1_500;
+      },
+      {
+        message: "previous SSH runtime rows should stay empty before the next test",
+        timeout: 60_000,
+      },
+    )
+    .toBe(true);
 }
 
 // Run for API-only tests as well as browser tests. Playwright fixtures are

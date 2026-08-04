@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -13,6 +14,11 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 )
 
+// ErrAgentStreamNotConnected identifies requests that cannot be delivered
+// because the agent updates stream has already disconnected. Callers use this
+// to distinguish an already-stopped agent from a live transport failure.
+var ErrAgentStreamNotConnected = errors.New("agent stream not connected")
+
 // sendStreamRequest sends a request over the agent WebSocket stream and waits for a response.
 // It creates a ws.Message with a UUID, registers a pending response channel,
 // writes the message to the stream, and blocks until a response arrives or context is cancelled.
@@ -22,7 +28,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	c.mu.RUnlock()
 
 	if conn == nil {
-		return nil, fmt.Errorf("agent stream not connected")
+		return nil, ErrAgentStreamNotConnected
 	}
 
 	reqID := uuid.New().String()
@@ -72,7 +78,7 @@ func (c *Client) sendStreamRequest(ctx context.Context, action string, payload i
 	select {
 	case resp := <-respCh:
 		if resp == nil {
-			disconnErr := fmt.Errorf("agent stream disconnected while waiting for response")
+			disconnErr := fmt.Errorf("%w while waiting for response", ErrAgentStreamNotConnected)
 			tracing.TraceWSResponse(span, "", disconnErr)
 			return nil, disconnErr
 		}

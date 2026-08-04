@@ -163,21 +163,36 @@ func TestDockerStopInstanceStopsContainerWhenAgentStopFailed(t *testing.T) {
 	}
 }
 
-func TestDockerStopInstanceStopsContainerOnStaleCleanup(t *testing.T) {
-	log := newTestDockerLogger()
-	exec := NewDockerExecutor(config.DockerConfig{}, "", log)
-	exec.newClientFunc = failingClientFactory("docker required for stale cleanup")
+func TestDockerStopInstanceStopsButPreservesContainerOnStaleCleanup(t *testing.T) {
+	requests := make(chan string, 2)
+	dockerDaemon := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead && r.URL.Path == "/_ping" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		requests <- r.Method + " " + r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(dockerDaemon.Close)
 
-	err := exec.StopInstance(context.Background(), &ExecutorInstance{
-		InstanceID:  "inst-1",
-		ContainerID: "container-1",
+	dockerExec := NewDockerExecutor(config.DockerConfig{
+		Host: "tcp://" + strings.TrimPrefix(dockerDaemon.URL, "http://"),
+	}, "", newTestDockerLogger())
+	t.Cleanup(func() { require.NoError(t, dockerExec.Close()) })
+
+	require.NoError(t, dockerExec.StopInstance(context.Background(), &ExecutorInstance{
+		InstanceID:  "stale-instance",
+		ContainerID: "stale-container",
 		StopReason:  stopReasonStaleExecutionCleanup,
-	}, false)
-	if err == nil {
-		t.Fatal("StopInstance should attempt Docker cleanup for stale executions")
+	}, false))
+
+	got := make([]string, 0, len(requests))
+	for len(requests) > 0 {
+		got = append(got, <-requests)
 	}
-	if !strings.Contains(err.Error(), "docker required for stale cleanup") {
-		t.Fatalf("StopInstance error = %v", err)
+	requireDockerRequest(t, got, http.MethodPost, "/containers/stale-container/stop")
+	for _, request := range got {
+		require.NotEqual(t, http.MethodDelete, strings.Fields(request)[0], request)
 	}
 }
 

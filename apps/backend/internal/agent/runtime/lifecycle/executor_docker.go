@@ -685,8 +685,19 @@ func (r *DockerExecutor) StopInstance(ctx context.Context, instance *ExecutorIns
 		return nil
 	}
 
-	if err := containerMgr.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
-		return fmt.Errorf("failed to stop and remove container: %w", err)
+	if shouldRunExecutorCleanup(instance.StopReason) {
+		if err := containerMgr.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
+			return fmt.Errorf("failed to stop and remove container: %w", err)
+		}
+		return nil
+	}
+
+	// Stale execution cleanup deliberately stops but preserves the container.
+	// A page refresh may still recover the durable task environment by starting
+	// that same container; only destructive task/session lifecycle reasons own
+	// removal. Failed-launch rollback uses the force branch above.
+	if err := dockerClient.StopContainer(cleanupCtx, instance.ContainerID, dockerStopContainerTimeout); err != nil {
+		return fmt.Errorf("failed to stop container: %w", err)
 	}
 
 	return nil

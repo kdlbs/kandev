@@ -110,8 +110,6 @@ test.describe("Mobile chat model selector", () => {
       })
       .toBe("medium");
 
-    await seedLongReasoningMenu(testPage, task.session_id!);
-
     const leftActions = testPage.getByTestId("mobile-chat-toolbar-left-actions");
     await expect(leftActions).toBeVisible({ timeout: 15_000 });
     await expect(testPage.getByTestId("toolbar-overflow-menu")).not.toBeVisible();
@@ -135,6 +133,10 @@ test.describe("Mobile chat model selector", () => {
         .getByTitle("Smart mock model for testing"),
     ).toBeVisible();
 
+    // Seed after the selector opens so a late task-page hydration cannot
+    // replace the synthetic long menu before this test exercises it.
+    await seedLongReasoningMenu(testPage, task.session_id!);
+
     const effortTrigger = testPage.getByTestId("config-option-trigger-effort");
     await expect(effortTrigger).toBeVisible();
     await expect(
@@ -143,12 +145,23 @@ test.describe("Mobile chat model selector", () => {
     await effortTrigger.tap();
     const effortSection = testPage.getByTestId("config-option-section-effort");
     await expect(effortSection).toBeVisible();
-    await expect(effortSection.getByText("Reasoning level 10", { exact: true })).toBeVisible();
+    const lastReasoningLevel = effortSection.getByText("Reasoning level 10", { exact: true });
+    await expect
+      .poll(
+        async () => {
+          if (await lastReasoningLevel.isVisible()) return true;
+          await seedLongReasoningMenu(testPage, task.session_id!);
+          return false;
+        },
+        { message: "waiting for the synthetic long reasoning menu" },
+      )
+      .toBe(true);
     const overflow = await effortSection.evaluate((element) => ({
       clientHeight: element.clientHeight,
       overflowY: getComputedStyle(element).overflowY,
       scrollHeight: element.scrollHeight,
     }));
+    await expect(lastReasoningLevel).toBeVisible();
     expect(overflow.overflowY).toBe("auto");
     expect(overflow.scrollHeight).toBeGreaterThan(overflow.clientHeight);
     const effortBox = await effortSection.boundingBox();

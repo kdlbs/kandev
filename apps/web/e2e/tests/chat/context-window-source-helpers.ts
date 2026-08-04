@@ -6,6 +6,8 @@ import { SessionPage } from "../../pages/session-page";
 type ContextWindowStore = Window & {
   __KANDEV_E2E_STORE__?: {
     getState: () => {
+      taskSessions: { items: Record<string, { state?: string }> };
+      clearContextWindow: (sessionId: string) => void;
       setContextWindow: (
         sessionId: string,
         contextWindow: {
@@ -18,6 +20,7 @@ type ContextWindowStore = Window & {
         },
       ) => void;
     };
+    setState: (partial: { clearContextWindow: (sessionId: string) => void }) => void;
   };
 };
 
@@ -58,6 +61,40 @@ export async function seedContextWindowTask(
     )
     .toBe("WAITING_FOR_INPUT");
 
+  // The backend transition can beat this page's WS subscription. Reload from
+  // the persisted idle state before injecting runtime-only context data, or a
+  // late hydration can purge the fixture while a touch interaction is in
+  // progress.
+  await testPage.reload();
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+  await expect
+    .poll(() =>
+      testPage.evaluate(
+        (sessionId) =>
+          (window as ContextWindowStore).__KANDEV_E2E_STORE__?.getState().taskSessions.items[
+            sessionId
+          ]?.state,
+        task.session_id!,
+      ),
+    )
+    .toBe("WAITING_FOR_INPUT");
+
+  // Context metadata is runtime-only in this fixture. Protect the synthetic
+  // value from duplicate late session/model hydration frames that carry an
+  // explicit empty context window; those frames are unrelated to the touch UI
+  // contract under test and otherwise detach the trigger mid-tap.
+  await testPage.evaluate((sessionId) => {
+    const store = (window as ContextWindowStore).__KANDEV_E2E_STORE__;
+    if (!store) throw new Error("E2E store bridge is unavailable");
+    const clearContextWindow = store.getState().clearContextWindow;
+    store.setState({
+      clearContextWindow: (candidateId) => {
+        if (candidateId !== sessionId) clearContextWindow(candidateId);
+      },
+    });
+  }, task.session_id!);
+
   await testPage.evaluate((sessionId) => {
     const store = (window as ContextWindowStore).__KANDEV_E2E_STORE__;
     if (!store) throw new Error("E2E store bridge is unavailable");
@@ -69,7 +106,8 @@ export async function seedContextWindowTask(
       compactionCount: 2,
       source: "acp",
     });
-  }, task.session_id);
+  }, task.session_id!);
+  await expect(testPage.getByRole("button", { name: "Context window: 21% used" })).toBeVisible();
 }
 
 export async function expectCompactionCount(contextTooltip: Locator): Promise<void> {

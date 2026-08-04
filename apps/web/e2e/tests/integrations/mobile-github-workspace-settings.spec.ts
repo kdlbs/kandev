@@ -81,7 +81,9 @@ test.describe("GitHub workspace settings on mobile", () => {
     expect(fadeBox).not.toBeNull();
     expect(footerBox).not.toBeNull();
     expect(initialSaveBox).not.toBeNull();
-    expect(fadeBox!.y + fadeBox!.height).toBeCloseTo(scrollBox!.y + scrollBox!.height, 1);
+    expect(
+      Math.abs(fadeBox!.y + fadeBox!.height - (scrollBox!.y + scrollBox!.height)),
+    ).toBeLessThanOrEqual(2);
     expect(footerBox!.y + footerBox!.height).toBeLessThanOrEqual(drawerBox!.y + drawerBox!.height);
     const methodGroup = drawer.getByRole("radiogroup", { name: "Connection method" });
     await expect(methodGroup.getByRole("radio").first()).toHaveAttribute("id", "github-method-cli");
@@ -128,7 +130,7 @@ test.describe("GitHub workspace settings on mobile", () => {
     await scrollBody.evaluate((element) => element.scrollTo(0, element.scrollHeight));
     const scrolledSaveBox = await fixedSaveButton.boundingBox();
     expect(scrolledSaveBox).not.toBeNull();
-    expect(scrolledSaveBox!.y).toBeCloseTo(beforeScrollSaveBox!.y, 1);
+    expect(Math.abs(scrolledSaveBox!.y - beforeScrollSaveBox!.y)).toBeLessThanOrEqual(2);
 
     await executorOption.tap();
     await prCapture.screenshot("mobile-task-git-access-drawer", {

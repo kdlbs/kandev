@@ -115,10 +115,9 @@ test.describe("Clarification flow", () => {
     await session.waitForLoad();
     await expect(session.clarificationOverlay()).toBeVisible({ timeout: 30_000 });
 
-    // The pending clarification is the precondition under test. Its durable
-    // overlay can be ready before the separate session-state projection parks,
-    // so synchronizing on WAITING_FOR_INPUT made this UI test depend on an
-    // unrelated projector under shard load.
+    // The overlay is the durable pending-question precondition. Depending on
+    // whether the primary MCP response path is still connected, the session
+    // may correctly remain RUNNING or park in WAITING_FOR_INPUT.
     await apiClient.updateTaskState(task.id, "REVIEW");
     await expect.poll(async () => (await apiClient.getTask(task.id)).state).toBe("REVIEW");
 
