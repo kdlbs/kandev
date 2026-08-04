@@ -21,6 +21,7 @@ import {
   computeIsTaskStarted,
   findDuplicateRemoteRepo,
   validateCreateInputs,
+  hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 
@@ -202,6 +203,7 @@ export function useTaskSubmitHandlers({
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
     const attachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(attachments)) return;
     if (!agentProfileId) return;
     if (!trimmedDescription) return;
 
@@ -477,7 +479,9 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
-    const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
+    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(selectedAttachments)) return;
+    const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
@@ -518,7 +522,9 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
-    const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
+    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(selectedAttachments)) return;
+    const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();

@@ -125,7 +125,7 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 
 | Behavior | Current value | Client consequence |
 |----------|---------------|--------------------|
-| Maximum inbound message | 32 MiB | A larger request closes/fails the connection. Base64 attachments consume the same limit. |
+| Maximum inbound message | 32 MiB | A larger request closes/fails the connection. Current file-backed attachments use HTTP staging and send only descriptors over this socket; legacy inline base64 data still consumes the limit. |
 | Write deadline | 10 seconds | A peer that cannot accept a frame in time is disconnected. |
 | Pong deadline | 60 seconds | The connection closes if the peer stops answering pings. |
 | Server ping interval | 54 seconds | WebSocket libraries must process ping/pong control frames. Browsers do this automatically. |
@@ -134,6 +134,20 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 | Request dispatch | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`. |
 
 There is no sequence number, durable replay, acknowledgement, or exactly-once guarantee. Notifications are invalidation hints: after a reconnect, gap, or dropped frame, refetch authoritative state through the appropriate list/get request or HTTP route.
+
+### Prompt attachments
+
+The web client uploads prompt files with authenticated multipart HTTP at
+`POST /api/v1/attachments` before sending `task.create`, `session.launch`,
+`message.add`, or `message.queue.*`. Those WebSocket payloads carry an opaque
+`attachment_id` plus `name`, `mime_type`, `type`, `delivery_mode`, and raw
+`size_bytes`; they do not carry file bytes or host paths. A submission may
+contain up to ten files and up to 100 MiB in raw bytes per file and in total.
+
+Older clients may still send inline `data` descriptors during the compatibility
+window, but they must stay within the existing lower inline-data validation and
+the 32 MiB frame limit. Inline data is not a way to bypass the 100 MiB staged
+upload contract.
 
 Request handlers use the server hub's lifetime context, not the socket's lifetime. If a client disconnects after sending a mutation, Git command, or `session.launch`, that work normally continues until completion even though its response cannot reach the old socket. Do not blindly retry an uncertain mutation. First reconcile state with a get/list/status request; use application-level idempotency only where the specific handler provides it.
 

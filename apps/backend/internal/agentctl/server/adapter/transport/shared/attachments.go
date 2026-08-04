@@ -77,6 +77,26 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 			m.logger.Warn("skipping attachment with invalid name", zap.String("original_name", att.Name))
 			continue
 		}
+		if att.AttachmentID != "" && att.Data == "" {
+			// Descriptor attachments are materialized by the backend before the
+			// prompt reaches agentctl. Reuse that file instead of trying to
+			// decode an empty base64 payload (which would create a zero-byte file).
+			absPath := filepath.Join(dir, name)
+			info, statErr := os.Stat(absPath)
+			if statErr != nil || !info.Mode().IsRegular() {
+				m.logger.Warn("materialized attachment is missing",
+					zap.String("attachment_id", att.AttachmentID), zap.String("path", absPath), zap.Error(statErr))
+				continue
+			}
+			usedNames[name] = true
+			relPath := filepath.Join(".kandev", "attachments", m.sessionID, name)
+			saved = append(saved, SavedAttachment{
+				RelPath: relPath, AbsPath: absPath, Name: name,
+				MimeType: att.MimeType, Type: att.Type,
+			})
+			m.logger.Debug("reused materialized attachment", zap.String("path", relPath), zap.Int64("size", info.Size()))
+			continue
+		}
 		decoded, err := base64.StdEncoding.DecodeString(att.Data)
 		if err != nil {
 			m.logger.Warn("failed to decode attachment", zap.String("name", name), zap.Error(err))

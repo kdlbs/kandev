@@ -362,6 +362,7 @@ export type DialogPromptSectionProps = {
   isTaskStarted: boolean;
   initialDescription: string;
   fs: DialogFormState;
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
   enhance?: DialogPromptEnhance;
   workspaceId?: string | null;
@@ -401,6 +402,7 @@ export function DialogPromptSection({
   isTaskStarted,
   initialDescription,
   fs,
+  onPendingAttachmentUploadsChange,
   handleKeyDown,
   enhance,
   workspaceId,
@@ -421,9 +423,11 @@ export function DialogPromptSection({
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
+        workspaceId={workspaceId}
         autoFocus={shouldAutoFocus}
         initialDescription={initialDescription}
         onDescriptionChange={fs.setHasDescription}
+        onPendingAttachmentUploadsChange={onPendingAttachmentUploadsChange}
         onKeyDown={handleKeyDown}
         descriptionValueRef={fs.descriptionInputRef}
         disabled={isTaskStarted}

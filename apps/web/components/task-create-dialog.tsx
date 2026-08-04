@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Dialog, DialogContent, DialogHeader, DialogFooter } from "@kandev/ui/dialog";
 import type { Task } from "@/lib/types/http";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
@@ -157,6 +158,7 @@ function CreateModeBody(props: DialogFormBodyProps) {
         isTaskStarted={isTaskStarted}
         initialDescription={props.initialDescription}
         fs={fs}
+        onPendingAttachmentUploadsChange={fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
         workspaceId={workspaceId}
@@ -196,6 +198,7 @@ function SessionModeBody(props: DialogFormBodyProps) {
         isTaskStarted={props.isTaskStarted}
         initialDescription={props.initialDescription}
         fs={props.fs}
+        onPendingAttachmentUploadsChange={props.fs.setHasPendingAttachmentUploads}
         handleKeyDown={props.handleKeyDown}
         enhance={props.enhance}
         workspaceId={props.workspaceId}
@@ -246,6 +249,7 @@ function DialogFormBody(props: DialogFormBodyProps) {
 const VOICE_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
+  const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
   const preserveQueuedLastUsedOnCloseRef = useRef<{
     syncedSettings: TaskCreateLastUsedState | null | undefined;
@@ -314,7 +318,15 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
               onVoiceAutoSend={handleVoiceAutoSend}
             />
             <DialogFooter className="border-t border-border pt-3 flex-col gap-3 sm:flex-row sm:gap-2">
-              <TaskCreateDialogFooter {...buildDialogFooterProps(setup, props)} />
+              <TaskCreateDialogFooter
+                {...buildDialogFooterProps(
+                  setup,
+                  props,
+                  setup.fs.hasPendingAttachmentUploads
+                    ? t("chat:attachmentUploadPendingSubmit")
+                    : null,
+                )}
+              />
             </DialogFooter>
           </form>
           <PendingDiscardModal pending={setup.submitHandlers.pendingDiscard} />

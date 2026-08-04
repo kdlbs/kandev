@@ -42,6 +42,7 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   buildRepositoriesPayload: vi.fn(() => []),
+  hasPendingAttachmentUploads: vi.fn(() => false),
   toMessageAttachments: vi.fn(() => []),
 }));
 

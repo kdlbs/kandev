@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Badge } from "@kandev/ui/badge";
 import {
   Select,
@@ -29,6 +29,8 @@ import {
   useUnreadablePastedImageFeedback,
 } from "./chat/use-attachment-file-feedback";
 import type { ContextItem, ImageContextItem, FileAttachmentContextItem } from "@/lib/types/context";
+import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
+import { ApiError } from "@/lib/api/client";
 
 export function EnvironmentBadges({
   executorLabel,
@@ -176,7 +178,8 @@ export function ContextSelect({
   );
 }
 
-export function useDialogAttachments(disabled: boolean) {
+// eslint-disable-next-line max-lines-per-function
+export function useDialogAttachments(disabled: boolean, workspaceId?: string | null) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const warnAttachmentCountLimit = useAttachmentCountFeedback();
@@ -184,6 +187,50 @@ export function useDialogAttachments(disabled: boolean) {
   const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
   const attachmentsRef = useRef<FileAttachment[]>([]);
+
+  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
+    setAttachments((prev) => {
+      const next = prev.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...update } : attachment,
+      );
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const uploadPendingAttachment = useCallback(
+    async (attachment: FileAttachment) => {
+      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
+      updateAttachment(attachment.id, { uploadStatus: "uploading" });
+      try {
+        const uploaded = await uploadAttachment(attachment.file, {
+          workspaceId,
+          kind: attachment.isImage ? "image" : "resource",
+          deliveryMode: attachment.deliveryMode,
+        });
+        updateAttachment(attachment.id, {
+          attachmentId: uploaded.attachment_id,
+          uploadStatus: "ready",
+          size: uploaded.size_bytes,
+        });
+      } catch (error) {
+        updateAttachment(attachment.id, {
+          uploadStatus: "failed",
+          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+        });
+      }
+    },
+    [updateAttachment, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    for (const attachment of attachmentsRef.current) {
+      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
+        void uploadPendingAttachment(attachment);
+      }
+    }
+  }, [uploadPendingAttachment, workspaceId]);
 
   const addFiles = useCallback(
     async (files: File[]) => {
@@ -198,20 +245,39 @@ export function useDialogAttachments(disabled: boolean) {
         attachmentsRef.current,
         processed,
       );
+      const added = next.slice(attachmentsRef.current.length);
       attachmentsRef.current = next;
       setAttachments(next);
+      for (const attachment of added) {
+        void uploadPendingAttachment(attachment);
+      }
       if (rejection === "count") warnAttachmentCountLimit();
       if (rejection === "total-size") warnAttachmentTotalSizeLimit();
     },
-    [rejectOversizedFile, warnAttachmentCountLimit, warnAttachmentTotalSizeLimit],
+    [
+      rejectOversizedFile,
+      warnAttachmentCountLimit,
+      warnAttachmentTotalSizeLimit,
+      uploadPendingAttachment,
+    ],
   );
   const { fileInputRef, handleAttachClick, handleFileInputChange } = useDialogFileInput(addFiles);
 
   const handleRemoveAttachment = useCallback((id: string) => {
+    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
     const next = attachmentsRef.current.filter((attachment) => attachment.id !== id);
     attachmentsRef.current = next;
     setAttachments(next);
+    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
+
+  const handleRetryAttachment = useCallback(
+    (id: string) => {
+      const attachment = attachmentsRef.current.find((item) => item.id === id);
+      if (attachment) void uploadPendingAttachment(attachment);
+    },
+    [uploadPendingAttachment],
+  );
 
   const handlePaste = useCallback(
     (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
@@ -270,6 +336,7 @@ export function useDialogAttachments(disabled: boolean) {
     isDragging,
     fileInputRef,
     handleRemoveAttachment,
+    handleRetryAttachment,
     handlePaste,
     handleDragOver,
     handleDragLeave,
@@ -303,6 +370,7 @@ export function AttachButton({ onClick, disabled }: { onClick: () => void; disab
 export function toContextItems(
   attachments: FileAttachment[],
   onRemove: (id: string) => void,
+  onRetry?: (id: string) => void,
 ): ContextItem[] {
   return attachments.map((att) =>
     att.isImage
@@ -312,6 +380,7 @@ export function toContextItems(
           label: `Image (${formatBytes(att.size)})`,
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: onRetry ? () => onRetry(att.id) : undefined,
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
@@ -319,6 +388,7 @@ export function toContextItems(
           label: att.fileName,
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: onRetry ? () => onRetry(att.id) : undefined,
         } as FileAttachmentContextItem),
   );
 }

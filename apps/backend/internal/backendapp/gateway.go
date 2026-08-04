@@ -160,6 +160,7 @@ func provideGateway(
 		taskSvc,
 		referenceValidator,
 	)
+	queueHandlers.SetAttachmentClaimer(taskSvc)
 	queueHandlers.RegisterHandlers(gateway.Dispatcher)
 
 	if lifecycleMgr != nil && agentRegistry != nil {

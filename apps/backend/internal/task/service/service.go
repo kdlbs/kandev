@@ -214,6 +214,7 @@ type Repos struct {
 	WorkspaceFolders  repository.TaskWorkspaceFolderRepository
 	Workflows         repository.WorkflowRepository
 	Messages          repository.MessageRepository
+	Attachments       repository.AttachmentRepository
 	Turns             repository.TurnRepository
 	Sessions          repository.SessionRepository
 	GitSnapshots      repository.GitSnapshotRepository
@@ -235,6 +236,7 @@ type Service struct {
 	workspaceFolders            repository.TaskWorkspaceFolderRepository
 	workflows                   repository.WorkflowRepository
 	messages                    repository.MessageRepository
+	attachments                 repository.AttachmentRepository
 	turns                       repository.TurnRepository
 	sessions                    repository.SessionRepository
 	gitSnapshots                repository.GitSnapshotRepository
@@ -246,6 +248,7 @@ type Service struct {
 	reviews                     repository.ReviewRepository
 	resourceCleanups            repository.TaskResourceCleanupRepository
 	statusSummaries             repository.TaskStatusSummaryRepository
+	attachmentSvc               *AttachmentService
 	statusSummaryPRs            TaskStatusSummaryPRReader
 	eventBus                    bus.EventBus
 	logger                      *logger.Logger
@@ -311,6 +314,26 @@ type Service struct {
 	repoResolveMu sync.Mutex
 }
 
+// SetAttachmentService wires the file-backed prompt attachment owner into the
+// task service. It is optional for focused unit-test harnesses that never send
+// file-backed descriptors.
+func (s *Service) SetAttachmentService(attachments *AttachmentService) {
+	s.attachmentSvc = attachments
+}
+
+// AttachmentService returns the optional file-backed attachment owner wired
+// into this task service. It lets route and maintenance composition reuse the
+// same storage boundary instead of creating competing service instances.
+func (s *Service) AttachmentService() *AttachmentService {
+	return s.attachmentSvc
+}
+
+// AttachmentRepository returns the attachment registry repository used by the
+// task service. It is exposed for composition of the storage maintenance hook.
+func (s *Service) AttachmentRepository() repository.AttachmentRepository {
+	return s.attachments
+}
+
 // NewService creates a new task service
 func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discoveryConfig RepositoryDiscoveryConfig) *Service {
 	return &Service{
@@ -320,6 +343,7 @@ func NewService(repos Repos, eventBus bus.EventBus, log *logger.Logger, discover
 		workspaceFolders:      repos.WorkspaceFolders,
 		workflows:             repos.Workflows,
 		messages:              repos.Messages,
+		attachments:           repos.Attachments,
 		turns:                 repos.Turns,
 		sessions:              repos.Sessions,
 		gitSnapshots:          repos.GitSnapshots,

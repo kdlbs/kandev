@@ -753,7 +753,8 @@ func validateAttachments(items []v1.MessageAttachment) error {
 	if len(items) > maxCreateTaskAttachments {
 		return fmt.Errorf("too many attachments (max %d)", maxCreateTaskAttachments)
 	}
-	var totalSize int
+	var totalSize int64
+	var legacyTotalSize int
 	for i, a := range items {
 		typ := strings.TrimSpace(a.Type)
 		if _, ok := allowedAttachmentTypes[typ]; !ok {
@@ -762,18 +763,35 @@ func validateAttachments(items []v1.MessageAttachment) error {
 		if strings.TrimSpace(a.MimeType) == "" {
 			return fmt.Errorf("attachment[%d] mime_type is required", i)
 		}
+		if !a.HasValidDeliveryMode() {
+			return fmt.Errorf("attachment[%d] delivery_mode must be prompt or path", i)
+		}
+		if a.AttachmentID != "" {
+			if a.Data != "" {
+				return fmt.Errorf("attachment[%d] descriptors cannot include inline data", i)
+			}
+			if strings.TrimSpace(a.Name) == "" || strings.TrimSpace(a.MimeType) == "" {
+				return fmt.Errorf("attachment[%d] descriptor name and mime_type are required", i)
+			}
+			if err := service.ValidateAttachmentSize(a.SizeBytes); err != nil {
+				return fmt.Errorf("attachment[%d]: %w", i, err)
+			}
+			totalSize += a.SizeBytes
+			continue
+		}
 		if len(a.Data) == 0 {
 			return fmt.Errorf("attachment[%d] data is required", i)
 		}
 		if len(a.Data) > maxAttachmentDataBytes {
 			return fmt.Errorf("attachment[%d] data exceeds size limit", i)
 		}
-		if !a.HasValidDeliveryMode() {
-			return fmt.Errorf("attachment[%d] delivery_mode must be prompt or path", i)
-		}
-		totalSize += len(a.Data)
+		totalSize += int64(len(a.Data))
+		legacyTotalSize += len(a.Data)
 	}
-	if totalSize > maxAttachmentDataBytes {
+	if legacyTotalSize > maxAttachmentDataBytes {
+		return fmt.Errorf("total legacy attachment size exceeds limit")
+	}
+	if totalSize > service.MaxAttachmentBytes {
 		return fmt.Errorf("total attachment size exceeds limit")
 	}
 	return nil
@@ -863,6 +881,13 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
+		return
+	}
+	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
+		if deleteErr := h.service.DeleteTask(c.Request.Context(), task.ID); deleteErr != nil {
+			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 

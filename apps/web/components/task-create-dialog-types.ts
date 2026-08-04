@@ -232,6 +232,8 @@ export type DialogFormState = {
   setHasTitle: (v: boolean) => void;
   hasDescription: boolean;
   setHasDescription: (v: boolean) => void;
+  hasPendingAttachmentUploads: boolean;
+  setHasPendingAttachmentUploads: (v: boolean) => void;
   /** Restored draft description, used as initialDescription for TaskFormInputs */
   draftDescription: string;
   /** Cycle counter incremented each time dialog opens - used in key for remount */

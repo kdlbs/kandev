@@ -18,6 +18,7 @@ import type {
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
   sessionId: string | null;
+  workspaceId?: string | null;
   isSending: boolean;
   isStarting: boolean;
   /** True only during a real Docker/Sprites prepare phase. Different from
@@ -115,6 +116,7 @@ function computeDerivedState(params: {
   onClarificationResolved: (() => void) | undefined;
   pendingCommentsByFile: Record<string, DiffComment[]> | undefined;
   allItemsLength: number;
+  hasPendingAttachmentUploads: boolean;
   isInputFocused: boolean;
   value: string;
   placeholder: string | undefined;
@@ -132,7 +134,7 @@ function computeDerivedState(params: {
     params.isFailed ||
     params.needsRecovery ||
     params.executorUnavailable;
-  const submitDisabled = isDisabled;
+  const submitDisabled = isDisabled || params.hasPendingAttachmentUploads;
   // The "agent still being set up" tooltip is only meaningful while a
   // container/sandbox is actively bootstrapping. The brief STARTING
   // transition for local quick-chat sessions doesn't deserve its own
@@ -185,17 +187,26 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     getContentElement,
   );
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { value, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments } =
-    useChatInputState({
-      sessionId,
-      isSending,
-      contextItems,
-      pendingCommentsByFile,
-      hasContextComments: params.hasContextComments,
-      showRequestChangesTooltip,
-      onRequestChangesTooltipDismiss,
-      onSubmit,
-    });
+  const {
+    value,
+    inputRef,
+    addFiles,
+    handleChange,
+    handleSubmit,
+    allItems,
+    getAttachments,
+    hasPendingAttachmentUploads,
+  } = useChatInputState({
+    sessionId,
+    workspaceId: params.workspaceId,
+    isSending,
+    contextItems,
+    pendingCommentsByFile,
+    hasContextComments: params.hasContextComments,
+    showRequestChangesTooltip,
+    onRequestChangesTooltipDismiss,
+    onSubmit,
+  });
 
   useSyncTipTapRef(tiptapRef, inputRef);
 
@@ -231,6 +242,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     onClarificationResolved,
     pendingCommentsByFile,
     allItemsLength: allItems.length,
+    hasPendingAttachmentUploads,
     isInputFocused,
     value,
     placeholder,
@@ -255,6 +267,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     handleChange: handleChangeWithAutoExpand,
     handleSubmitWithReset,
     allItems,
+    hasPendingAttachmentUploads,
     ...derived,
   };
 }

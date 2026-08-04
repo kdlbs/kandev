@@ -91,9 +91,11 @@ export async function createTask(
     plan_mode?: boolean;
     attachments?: Array<{
       type: string;
-      data: string;
+      data?: string;
+      attachment_id?: string;
       mime_type: string;
       name?: string;
+      size_bytes?: number;
       delivery_mode?: "prompt" | "path";
     }>;
     parent_id?: string;

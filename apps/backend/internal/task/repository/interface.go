@@ -190,6 +190,18 @@ type MessageRepository interface {
 	DeleteMessage(ctx context.Context, id string) error
 }
 
+// AttachmentRepository stores file-backed prompt attachment descriptors.
+// Implementations must keep ownership and aggregate-claim checks in the same
+// transaction as state transitions so a retry cannot partially claim a batch.
+type AttachmentRepository interface {
+	CreateMessageAttachment(ctx context.Context, attachment *models.TaskMessageAttachment) error
+	GetMessageAttachment(ctx context.Context, id string) (*models.TaskMessageAttachment, error)
+	ListMessageAttachments(ctx context.Context, ids []string) ([]*models.TaskMessageAttachment, error)
+	ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error
+	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
+	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error

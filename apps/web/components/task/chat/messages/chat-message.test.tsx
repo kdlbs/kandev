@@ -585,6 +585,27 @@ describe("ChatMessage image attachments", () => {
     expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
     expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
   });
+
+  it("renders staged image descriptors through the authenticated content URL", () => {
+    renderWithSender([], {
+      attachments: [
+        {
+          type: "image",
+          attachment_id: "attachment-staged-1",
+          mime_type: "image/png",
+          name: "diagram.png",
+          size_bytes: 1024,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
+    expect(preview.getAttribute("src")).toContain(
+      "/api/v1/attachments/attachment-staged-1/content",
+    );
+  });
 });
 
 describe("ChatMessage favorite toggle", () => {

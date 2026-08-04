@@ -429,6 +429,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 	req.Content = storedContent
+	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	createRequest := &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,

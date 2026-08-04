@@ -31,9 +31,11 @@ export type { ImageAttachment } from "./image-attachment-preview";
 // Type for message attachments sent to backend
 export type MessageAttachment = {
   type: "image" | "audio" | "resource";
-  data: string;
+  data?: string;
+  attachment_id?: string;
   mime_type: string;
   name?: string;
+  size_bytes?: number;
   delivery_mode?: "prompt" | "path";
 };
 
@@ -126,11 +128,15 @@ async function requestSessionRecover(
   }
 }
 
+// The recovery banner keeps resume/fresh-start controls together for desktop
+// and mobile layouts; its line count is intentionally bounded by that UI.
+// eslint-disable-next-line max-lines-per-function
 function FailedSessionBanner({
   showDialog,
   onShowDialog,
   taskId,
   sessionId,
+  workspaceId,
   message = "This agent has stopped.",
   detail,
   resumeLabel = "Resume",
@@ -140,6 +146,7 @@ function FailedSessionBanner({
   onShowDialog: (open: boolean) => void;
   taskId: string | null;
   sessionId: string | null;
+  workspaceId?: string | null;
   message?: string;
   detail?: string;
   resumeLabel?: string;
@@ -221,7 +228,14 @@ function FailedSessionBanner({
           </div>
         </div>
       </div>
-      {taskId && <NewSessionDialog open={showDialog} onOpenChange={onShowDialog} taskId={taskId} />}
+      {taskId && (
+        <NewSessionDialog
+          open={showDialog}
+          onOpenChange={onShowDialog}
+          taskId={taskId}
+          workspaceId={workspaceId}
+        />
+      )}
     </>
   );
 }
@@ -294,6 +308,7 @@ function buildEditorAreaProps(
     isDisabled: s.isDisabled,
     submitDisabled: s.submitDisabled,
     submitDisabledReason: s.submitDisabledReason,
+    hasPendingAttachmentUploads: s.hasPendingAttachmentUploads,
     planModeEnabled: p.planModeEnabled,
     planModeAvailable: p.planModeAvailable ?? true,
     mcpServers: p.mcpServers ?? [],
@@ -423,6 +438,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
     const s = useChatInputContainer({
       ref,
       sessionId,
+      workspaceId: props.workspaceId,
       isSending,
       isStarting,
       isPreparingEnvironment: props.isPreparingEnvironment ?? false,
@@ -475,6 +491,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           onShowDialog={s.setShowNewSessionDialog}
           taskId={taskId}
           sessionId={sessionId}
+          workspaceId={props.workspaceId}
           {...buildStoppedBannerProps(props)}
         />
       );

@@ -1712,6 +1712,36 @@ type TaskDocumentRevision struct {
 	UpdatedAt          time.Time `json:"updated_at" db:"updated_at"`
 }
 
+// TaskMessageAttachment is the durable registry row for a prompt attachment.
+// Message and queue metadata carry only the public descriptor; the bytes stay
+// in private backend storage addressed by StorageKey.
+type TaskMessageAttachment struct {
+	ID           string    `json:"id" db:"id"`
+	OwnerID      string    `json:"owner_id" db:"owner_id"`
+	WorkspaceID  string    `json:"workspace_id" db:"workspace_id"`
+	TaskID       string    `json:"task_id,omitempty" db:"task_id"`
+	SessionID    string    `json:"session_id,omitempty" db:"session_id"`
+	MessageID    string    `json:"message_id,omitempty" db:"message_id"`
+	QueueID      string    `json:"queue_id,omitempty" db:"queue_id"`
+	Name         string    `json:"name" db:"name"`
+	MimeType     string    `json:"mime_type" db:"mime_type"`
+	Kind         string    `json:"kind" db:"kind"`
+	DeliveryMode string    `json:"delivery_mode" db:"delivery_mode"`
+	SizeBytes    int64     `json:"size_bytes" db:"size_bytes"`
+	StorageKey   string    `json:"-" db:"storage_key"`
+	State        string    `json:"state" db:"state"`
+	ExpiresAt    time.Time `json:"expires_at" db:"expires_at"`
+	CreatedAt    time.Time `json:"created_at" db:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
+}
+
+const (
+	AttachmentStateStaged  = "staged"
+	AttachmentStateClaimed = "claimed"
+	AttachmentStateExpired = "expired"
+	AttachmentStateDeleted = "deleted"
+)
+
 // SessionFileReview tracks per-file review state within a session
 type SessionFileReview struct {
 	ID         string     `json:"id"`

@@ -6,6 +6,7 @@ import { replaceTaskUrl } from "@/lib/links";
 import { useAppStore } from "@/components/state-provider";
 import {
   buildRepositoriesPayload,
+  hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 import { useToast } from "@/components/toast-provider";
@@ -132,6 +133,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
       const trimmedTitle = title.trim();
       const prompt = resolvePrompt().trim();
       if ((!autoTitle && !trimmedTitle) || !prompt || !workspaceId || !workflowId) return;
+      if (hasPendingAttachmentUploads(attachments)) return;
 
       isSubmittingRef.current = true;
       setIsCreating(true);
@@ -193,6 +195,7 @@ export function useSubtaskSubmit(opts: UseSubtaskSubmitOpts) {
  */
 export function useSubtaskPromptZone(opts: {
   parentTaskId: string;
+  workspaceId?: string | null;
   taskTitle: string;
   inputDisabled: boolean;
   contextValue: string;
@@ -203,6 +206,7 @@ export function useSubtaskPromptZone(opts: {
 }) {
   const {
     parentTaskId,
+    workspaceId,
     taskTitle,
     inputDisabled,
     contextValue,
@@ -215,7 +219,7 @@ export function useSubtaskPromptZone(opts: {
   const latestPromptValueRef = useRef(promptValue);
   latestPromptValueRef.current = promptValue;
   const { toast } = useToast();
-  const attachments = useDialogAttachments(inputDisabled);
+  const attachments = useDialogAttachments(inputDisabled, workspaceId);
   const { enhancePrompt, isEnhancingPrompt } = useUtilityAgentGenerator({
     sessionId: null,
     taskTitle,
@@ -248,8 +252,17 @@ export function useSubtaskPromptZone(opts: {
     });
   }, [enhancePrompt, promptResultDelivery, toast]);
   const contextItems = useMemo(
-    () => toContextItems(attachments.attachments, attachments.handleRemoveAttachment),
-    [attachments.attachments, attachments.handleRemoveAttachment],
+    () =>
+      toContextItems(
+        attachments.attachments,
+        attachments.handleRemoveAttachment,
+        attachments.handleRetryAttachment,
+      ),
+    [
+      attachments.attachments,
+      attachments.handleRemoveAttachment,
+      attachments.handleRetryAttachment,
+    ],
   );
   const resolvePrompt = useCallback(() => {
     const typed = promptValue.trim();

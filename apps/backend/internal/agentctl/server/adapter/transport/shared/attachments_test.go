@@ -147,6 +147,38 @@ func TestSaveAttachments_ResourceAttachment(t *testing.T) {
 	}
 }
 
+func TestSaveAttachments_ReusesMaterializedDescriptor(t *testing.T) {
+	workDir := t.TempDir()
+	dir := filepath.Join(workDir, ".kandev", "attachments", "sess-materialized")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	want := []byte("already streamed by backend")
+	path := filepath.Join(dir, "bundle.zip")
+	if err := os.WriteFile(path, want, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mgr := NewAttachmentManager(workDir, testLogger())
+	mgr.SetSessionID("sess-materialized")
+	saved, err := mgr.SaveAttachments([]v1.MessageAttachment{
+		{AttachmentID: "attachment-1", Type: "resource", MimeType: "application/zip", Name: "bundle.zip"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(saved) != 1 || saved[0].AbsPath != path {
+		t.Fatalf("saved = %+v, want materialized path %q", saved, path)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(want) {
+		t.Fatalf("materialized file changed: %q", got)
+	}
+}
+
 func TestSaveAttachments_MultipleAttachments(t *testing.T) {
 	workDir := t.TempDir()
 	mgr := NewAttachmentManager(workDir, testLogger())

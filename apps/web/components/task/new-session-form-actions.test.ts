@@ -19,6 +19,7 @@ vi.mock("@/lib/services/session-launch-helpers", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({
+  hasPendingAttachmentUploads: () => false,
   toMessageAttachments: (...args: Parameters<typeof mockToMessageAttachments>) =>
     mockToMessageAttachments(...args),
 }));
