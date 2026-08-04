@@ -14,7 +14,10 @@ type CursorPosition = { line: number; column: number };
 type CodeMirrorCursorRevealer = (line: number, column: number) => boolean;
 
 const pendingCursorPositions = new Map<string, CursorPosition>();
-const codeMirrorCursorRevealers = new Map<string, Set<CodeMirrorCursorRevealer>>();
+const codeMirrorCursorRevealers = new Map<
+  string,
+  Map<string | undefined, Set<CodeMirrorCursorRevealer>>
+>();
 
 function pendingCursorKey(path: string, repo?: string, sessionId?: string): string {
   const fileKey = buildRepoScopedItemId(path, repo);
@@ -53,15 +56,30 @@ export function registerCodeMirrorCursorRevealer(
   sessionId: string | undefined,
   reveal: CodeMirrorCursorRevealer,
 ): () => void {
-  const key = pendingCursorKey(path, repo, sessionId);
-  const revealers = codeMirrorCursorRevealers.get(key) ?? new Set();
+  const fileKey = buildRepoScopedItemId(path, repo);
+  const revealersBySession = codeMirrorCursorRevealers.get(fileKey) ?? new Map();
+  const revealers = revealersBySession.get(sessionId) ?? new Set();
   revealers.add(reveal);
-  codeMirrorCursorRevealers.set(key, revealers);
+  revealersBySession.set(sessionId, revealers);
+  codeMirrorCursorRevealers.set(fileKey, revealersBySession);
 
   return () => {
     revealers.delete(reveal);
-    if (revealers.size === 0) codeMirrorCursorRevealers.delete(key);
+    if (revealers.size === 0) revealersBySession.delete(sessionId);
+    if (revealersBySession.size === 0) codeMirrorCursorRevealers.delete(fileKey);
   };
+}
+
+function runCodeMirrorRevealers(
+  revealers: Set<CodeMirrorCursorRevealer> | undefined,
+  line: number,
+  column: number,
+): boolean {
+  if (!revealers) return false;
+  for (const reveal of [...revealers].reverse()) {
+    if (reveal(line, column)) return true;
+  }
+  return false;
 }
 
 function revealMountedCodeMirror(
@@ -71,15 +89,25 @@ function revealMountedCodeMirror(
   line: number,
   column: number,
 ): boolean {
-  const revealers = codeMirrorCursorRevealers.get(pendingCursorKey(path, repo, sessionId));
-  if (!revealers) return false;
-
-  for (const reveal of [...revealers].reverse()) {
-    if (!reveal(line, column)) continue;
+  const revealersBySession = codeMirrorCursorRevealers.get(buildRepoScopedItemId(path, repo));
+  if (!revealersBySession) return false;
+  if (runCodeMirrorRevealers(revealersBySession.get(sessionId), line, column)) {
     consumePendingCursorPosition(path, repo, sessionId);
     return true;
   }
-  return false;
+  if (sessionId !== undefined) return false;
+
+  const scopedRevealerSets = [...revealersBySession.entries()]
+    .filter(([registeredSessionId]) => registeredSessionId !== undefined)
+    .map(([, revealers]) => revealers);
+  if (
+    scopedRevealerSets.length !== 1 ||
+    !runCodeMirrorRevealers(scopedRevealerSets[0], line, column)
+  ) {
+    return false;
+  }
+  consumePendingCursorPosition(path, repo);
+  return true;
 }
 
 function pathSegments(path: string): string[] {

@@ -10,6 +10,7 @@ import type { EffectiveLspStatusPlacement } from "@/lib/lsp/lsp-status-placement
 import { usePluginRegistry, type PluginSlotRegistration } from "@/lib/plugins/registry";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useEditorResolverStore, type EditorProvider } from "@/lib/state/editor-resolver-store";
 import { ConnectionStatusItem } from "./connection-status-item";
 import { LspStatusItem } from "./lsp-status-item";
 import { AppStatusBarPluginContribution } from "./app-status-bar-plugin-slots";
@@ -43,6 +44,7 @@ export function useAppStatusItems(
   const registryVersion = registry.getVersion();
   const lspPlacement = useLspStatusPlacement();
   const activeFilePath = useDockviewStore((state) => state.activeFilePath);
+  const codeEditorProvider = useEditorResolverStore((state) => state.providers["code-editor"]);
   const metricsEnabled = useAppStore(
     (state) => state.userSettings.systemMetricsDisplay.showInTopbar,
   );
@@ -52,8 +54,9 @@ export function useAppStatusItems(
         placement: lspPlacement,
         activeSessionId: context.activeSessionId,
         activeFilePath,
+        editorProvider: codeEditorProvider,
       }),
-    [activeFilePath, context.activeSessionId, lspPlacement],
+    [activeFilePath, codeEditorProvider, context.activeSessionId, lspPlacement],
   );
 
   return useMemo(() => {
@@ -79,12 +82,21 @@ export function resolveActiveLspStatusItem({
   placement,
   activeSessionId,
   activeFilePath,
+  editorProvider,
 }: {
   placement: EffectiveLspStatusPlacement;
   activeSessionId: string | null;
   activeFilePath: string | null;
+  editorProvider: EditorProvider;
 }): ActiveLspStatusItem | null {
-  if (placement !== "status_bar" || !activeSessionId || !activeFilePath) return null;
+  if (
+    placement !== "status_bar" ||
+    editorProvider !== "monaco" ||
+    !activeSessionId ||
+    !activeFilePath
+  ) {
+    return null;
+  }
   const monacoLanguage = getMonacoLanguage(activeFilePath);
   if (!toLspLanguage(monacoLanguage)) return null;
   return { sessionId: activeSessionId, monacoLanguage };

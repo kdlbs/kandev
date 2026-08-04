@@ -5,6 +5,7 @@ import { StateProvider } from "@/components/state-provider";
 import { defaultFeaturesState } from "@/lib/state/slices/features/features-slice";
 import { defaultSettingsState } from "@/lib/state/slices/settings/settings-slice";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { useEditorResolverStore } from "@/lib/state/editor-resolver-store";
 import { AppStatusBar } from "./app-status-bar";
 import { APP_STATUS_LSP_ID } from "./app-status-bar-order";
 
@@ -31,6 +32,9 @@ vi.mock("@/hooks/use-lsp", () => ({
 afterEach(() => {
   cleanup();
   useDockviewStore.setState({ activeFilePath: null, activeFileRepo: null });
+  useEditorResolverStore.setState((state) => ({
+    providers: { ...state.providers, "code-editor": "monaco" },
+  }));
 });
 
 function renderBar(location: "toolbar" | "status_bar") {
@@ -74,6 +78,17 @@ describe("active-editor LSP status item integration", () => {
     rendered.unmount();
     useDockviewStore.setState({ activeFilePath: "README.md", activeFileRepo: null });
     renderBar("status_bar");
+    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
+  });
+
+  it("hides when CodeMirror owns the active supported file", () => {
+    useEditorResolverStore.setState((state) => ({
+      providers: { ...state.providers, "code-editor": "codemirror" },
+    }));
+    useDockviewStore.setState({ activeFilePath: "src/Main.kt", activeFileRepo: "app" });
+
+    renderBar("status_bar");
+
     expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
   });
 });

@@ -189,6 +189,42 @@ describe("CodeMirrorCodeEditor pending cursor navigation", () => {
 });
 
 describe("CodeMirrorCodeEditor mounted cursor broker", () => {
+  it("reveals through the sole session-scoped editor for an unscoped caller", () => {
+    const view = createEditorView();
+    renderEditor({ ...baseProps, sessionId: FIRST_SESSION_ID });
+    mountEditorView(view);
+    setPendingCursorPosition(FILE_PATH, 2, 3, FRONTEND_REPO);
+
+    const revealed = scrollEditorIfMounted(FILE_PATH, null, 2, 3, { repo: FRONTEND_REPO });
+
+    expect(revealed).toBe(true);
+    expect(view.dispatch).toHaveBeenCalledWith({
+      selection: { anchor: 8 },
+      effects: expect.anything(),
+    });
+    expect(consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO)).toBeUndefined();
+  });
+
+  it("does not choose between multiple session-scoped editors for an unscoped caller", () => {
+    const firstView = createEditorView();
+    const secondView = createEditorView();
+    renderEditor({ ...baseProps, sessionId: FIRST_SESSION_ID });
+    mountEditorView(firstView);
+    renderEditor({ ...baseProps, sessionId: SECOND_SESSION_ID });
+    mountEditorView(secondView);
+    setPendingCursorPosition(FILE_PATH, 2, 3, FRONTEND_REPO);
+
+    const revealed = scrollEditorIfMounted(FILE_PATH, null, 2, 3, { repo: FRONTEND_REPO });
+
+    expect(revealed).toBe(false);
+    expect(firstView.dispatch).not.toHaveBeenCalled();
+    expect(secondView.dispatch).not.toHaveBeenCalled();
+    expect(consumePendingCursorPosition(FILE_PATH, FRONTEND_REPO)).toEqual({
+      line: 2,
+      column: 3,
+    });
+  });
+
   it("synchronously reveals a pending position in an already-mounted pinned editor", () => {
     const view = createEditorView();
     const rendered = renderEditor();
