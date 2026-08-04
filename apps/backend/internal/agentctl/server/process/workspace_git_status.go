@@ -479,17 +479,76 @@ var aheadBehindFallbackCandidates = integrationBranchRefs(false)
 // stats/commits mismatch even though both sides are computing correctly
 // for the ref name they happened to resolve first.
 func (wt *WorkspaceTracker) resolveBaseBranch(ctx context.Context) string {
-	if stored := wt.BaseBranch(); stored != "" {
+	resolution := wt.resolveBaseBranchWithReason(ctx)
+	resolution.log(wt)
+	return resolution.ref
+}
+
+// baseBranchReason records why resolveBaseBranch landed on the ref it did.
+// The two fallback reasons have different fixes — one means the task's base
+// branch never reached this tracker, the other means it did but no longer
+// exists in git — so a wrong diff stat must be attributable to one of them
+// without re-deriving the resolution by hand.
+type baseBranchReason int
+
+const (
+	baseBranchStored baseBranchReason = iota
+	baseBranchFallbackNoStored
+	baseBranchFallbackStoredUnresolved
+	baseBranchUnresolved
+)
+
+// baseBranchResolution is resolveBaseBranch's decision plus the evidence
+// needed to explain it.
+type baseBranchResolution struct {
+	ref    string
+	stored string
+	reason baseBranchReason
+}
+
+// log emits one line when the resolution fell back to an integration branch.
+// The stored case is the norm and stays silent; this runs on a status poll,
+// so only the noteworthy outcomes are reported, at debug level to match the
+// surrounding poll logging.
+func (r baseBranchResolution) log(wt *WorkspaceTracker) {
+	switch r.reason {
+	case baseBranchStored:
+		return
+	case baseBranchFallbackNoStored:
+		wt.logger.Debug("no base branch recorded for workspace, using integration fallback for diff stats",
+			zap.String("repository", wt.repositoryName),
+			zap.String("candidate", r.ref))
+	case baseBranchFallbackStoredUnresolved:
+		wt.logger.Debug("recorded base branch does not resolve in git, using integration fallback for diff stats",
+			zap.String("repository", wt.repositoryName),
+			zap.String("stored_base_branch", r.stored),
+			zap.String("candidate", r.ref))
+	case baseBranchUnresolved:
+		wt.logger.Debug("no base branch or integration candidate resolved, diff stats unavailable",
+			zap.String("repository", wt.repositoryName),
+			zap.String("stored_base_branch", r.stored))
+	}
+}
+
+// resolveBaseBranchWithReason is resolveBaseBranch's decision, separated so the
+// outcome is assertable in tests rather than only observable through logs.
+func (wt *WorkspaceTracker) resolveBaseBranchWithReason(ctx context.Context) baseBranchResolution {
+	stored := wt.BaseBranch()
+	if stored != "" {
 		if ref := wt.resolveStoredRef(ctx, stored); ref != "" {
-			return ref
+			return baseBranchResolution{ref: ref, stored: stored, reason: baseBranchStored}
 		}
+	}
+	fallbackReason := baseBranchFallbackNoStored
+	if stored != "" {
+		fallbackReason = baseBranchFallbackStoredUnresolved
 	}
 	for _, candidate := range branchDiffCandidates {
 		if err := wt.runGit(ctx, "rev-parse", "--verify", candidate); err == nil {
-			return candidate
+			return baseBranchResolution{ref: candidate, stored: stored, reason: fallbackReason}
 		}
 	}
-	return ""
+	return baseBranchResolution{stored: stored, reason: baseBranchUnresolved}
 }
 
 // resolveAheadBehindRef is the ahead/behind variant of resolveBaseBranch.

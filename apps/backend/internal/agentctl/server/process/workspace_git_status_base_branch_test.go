@@ -293,3 +293,85 @@ func TestLookupBaseBranch_FallbackToEmptyKey(t *testing.T) {
 		})
 	}
 }
+
+// Regression: resolveBaseBranch fell through to the integration-branch list
+// silently. When a task's base branch never reached the tracker, the diff stat
+// was computed against origin/master — a wrong-but-plausible number with
+// nothing in the logs to attribute it. The two fallback reasons need different
+// fixes (propagation vs a branch that no longer exists in git), so they must be
+// distinguishable without re-running git by hand.
+func TestResolveBaseBranchWithReason(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("stored branch resolves", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		defer cleanup()
+
+		runGit(t, repoDir, "checkout", "-b", "develop")
+		runGit(t, repoDir, "checkout", "main")
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+		wt.SetBaseBranch("develop")
+
+		got := wt.resolveBaseBranchWithReason(ctx)
+		if got.ref != "develop" {
+			t.Errorf("ref = %q, want %q", got.ref, "develop")
+		}
+		if got.reason != baseBranchStored {
+			t.Errorf("reason = %v, want baseBranchStored", got.reason)
+		}
+	})
+
+	t.Run("no stored branch falls back", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		defer cleanup()
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+
+		got := wt.resolveBaseBranchWithReason(ctx)
+		if got.ref != "origin/main" {
+			t.Errorf("ref = %q, want %q", got.ref, "origin/main")
+		}
+		if got.reason != baseBranchFallbackNoStored {
+			t.Errorf("reason = %v, want baseBranchFallbackNoStored", got.reason)
+		}
+		if got.stored != "" {
+			t.Errorf("stored = %q, want empty", got.stored)
+		}
+	})
+
+	// A base branch that is recorded but missing from git is a different
+	// failure than one that never arrived — this is the case where the branch
+	// was deleted or never fetched, not a propagation gap.
+	t.Run("stored branch that does not exist falls back and is attributable", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		defer cleanup()
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+		wt.SetBaseBranch("features/never-fetched")
+
+		got := wt.resolveBaseBranchWithReason(ctx)
+		if got.ref != "origin/main" {
+			t.Errorf("ref = %q, want %q", got.ref, "origin/main")
+		}
+		if got.reason != baseBranchFallbackStoredUnresolved {
+			t.Errorf("reason = %v, want baseBranchFallbackStoredUnresolved", got.reason)
+		}
+		if got.stored != "features/never-fetched" {
+			t.Errorf("stored = %q, want the recorded branch", got.stored)
+		}
+	})
+
+	// resolveBaseBranch keeps its exact contract — only observability is added.
+	t.Run("resolveBaseBranch returns the same ref", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		defer cleanup()
+
+		wt := NewWorkspaceTracker(repoDir, newTestLogger(t))
+		wt.SetBaseBranch("features/never-fetched")
+
+		if got := wt.resolveBaseBranch(ctx); got != wt.resolveBaseBranchWithReason(ctx).ref {
+			t.Errorf("resolveBaseBranch diverged from resolveBaseBranchWithReason")
+		}
+	})
+}

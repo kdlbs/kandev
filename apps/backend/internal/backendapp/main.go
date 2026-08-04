@@ -437,6 +437,10 @@ func startAgentInfrastructure(
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
+	// Edit-time pushes flow Task → lifecycle above; this is the reverse
+	// direction, letting every workspace seed itself from the DB once agentctl
+	// is ready rather than only on the full launch path.
+	lifecycleMgr.SetBaseBranchProvider(services.Task.TaskBaseBranches)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,

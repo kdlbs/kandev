@@ -167,6 +167,17 @@ func isSafeBaseBranchRef(ref string) bool {
 	return securityutil.IsValidBranchName(ref)
 }
 
+// TaskBaseBranches exposes the stored per-repo base-branch map so the agent
+// runtime can seed a workspace at agentctl-ready time. Wired as
+// lifecycle.BaseBranchProvider; the launch path builds the same shape from the
+// LaunchRequest, and this is the DB-backed equivalent for every other path.
+func (s *Service) TaskBaseBranches(ctx context.Context, taskID string) (map[string]string, error) {
+	if taskID == "" {
+		return nil, nil
+	}
+	return s.collectTaskBaseBranches(ctx, taskID)
+}
+
 // collectTaskBaseBranches builds the per-repo {RepositoryName → base_branch}
 // map the agentctl WorkspaceTracker reads. Mirrors lifecycle.collectBaseBranches
 // but at update time the LaunchRequest is gone, so we hydrate from the DB:
