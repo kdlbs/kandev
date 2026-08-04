@@ -765,7 +765,8 @@ function useTextareaHandlers(
 ) {
   const { handleChange: mentionHandleChange, handleKeyDown: mentionHandleKeyDown } = mention;
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => mentionHandleChange(e.target.value),
+    (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+      mentionHandleChange(e.target.value, e.target.selectionStart),
     [mentionHandleChange],
   );
   const handleKeyDown = useCallback(
