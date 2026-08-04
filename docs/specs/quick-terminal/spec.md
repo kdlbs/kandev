@@ -39,6 +39,8 @@ utility available without leaving the current workflow.
   surface shows the existing terminal error state and remains dismissible.
 - Closing the surface during startup cancels the pending start and does not leave an unseen shell
   session running.
+- React development effect replays must not stop the session claimed by the current terminal mount;
+  a successful start remains interactive and resize requests stop after the session naturally exits.
 
 ## Scenarios
 
@@ -56,6 +58,10 @@ utility available without leaving the current workflow.
   reported, **THEN** the surface shows the error and still allows the user to close it.
 - **GIVEN** Quick Terminal has an active or starting session, **WHEN** the user closes the surface,
   **THEN** the session is stopped or cancelled and no durable task, chat, or terminal tab is added.
+- **GIVEN** the terminal effect is replayed during startup, **WHEN** an earlier start response settles,
+  **THEN** it cannot stop the session owned by the current mount, and the terminal remains usable.
+- **GIVEN** the host shell sends its exit event, **WHEN** the backend removes the session, **THEN** the
+  client clears its session identity and does not continue resize requests for it.
 - **GIVEN** the desktop sidebar is collapsed or no workspace is active, **WHEN** the relevant
   navigation surface renders, **THEN** it does not show an unusable Quick Terminal shortcut.
 

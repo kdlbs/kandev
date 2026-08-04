@@ -1,7 +1,17 @@
+import { type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertLocatorWithinViewportX } from "../../helpers/layout-assertions";
 
 const QUICK_TERMINAL_TITLE = "Quick terminal";
+
+async function readQuickTerminalBuffer(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const container = document.querySelector('[data-testid="host-shell-terminal"]') as
+      | (HTMLDivElement & { __xtermReadBuffer?: () => string })
+      | null;
+    return container?.__xtermReadBuffer?.() ?? "";
+  });
+}
 
 test.describe("quick terminal", () => {
   test("opens from the desktop sidebar and uses the larger floating surface", async ({
@@ -23,7 +33,23 @@ test.describe("quick terminal", () => {
     await terminalButton.click();
     const dialog = testPage.getByRole("dialog", { name: QUICK_TERMINAL_TITLE });
     await expect(dialog).toBeVisible();
-    await expect(testPage.getByTestId("host-shell-terminal")).toBeVisible();
+    const terminal = testPage.getByTestId("host-shell-terminal");
+    await expect(terminal).toBeVisible();
+    await expect
+      .poll(() => readQuickTerminalBuffer(testPage), {
+        timeout: 15_000,
+        message: "Waiting for Quick Terminal shell prompt",
+      })
+      .not.toBe("");
+    await terminal.click();
+    await testPage.keyboard.type("echo QUICK_TERMINAL_READY");
+    await testPage.keyboard.press("Enter");
+    await expect
+      .poll(() => readQuickTerminalBuffer(testPage), {
+        timeout: 10_000,
+        message: "Waiting for Quick Terminal command output",
+      })
+      .toContain("QUICK_TERMINAL_READY");
 
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();

@@ -26,6 +26,7 @@ import {
 } from "@/lib/api";
 import type { ApiRequestOptions } from "@/lib/api";
 import { openExternalLink } from "@/lib/desktop/external-links";
+import { clearBufferReader, exposeBufferReader } from "@/components/task/terminal-buffer-reader";
 
 type SessionStatus = "connecting" | "running" | "exited" | "error";
 
@@ -92,6 +93,7 @@ function createTerminal(container: HTMLDivElement): { term: Terminal; fit: FitAd
     }),
   );
   term.open(container);
+  exposeBufferReader(container, term);
   fit.fit();
   return { term, fit };
 }
@@ -123,12 +125,13 @@ function wireResize(
   return obs;
 }
 
-function makeWsMessageHandler(term: Terminal, setters: LoginStateSetters) {
+function makeWsMessageHandler(term: Terminal, setters: LoginStateSetters, onExit: () => void) {
   return (ev: MessageEvent) => {
     if (typeof ev.data === "string") {
       try {
         const msg = JSON.parse(ev.data) as { type: string; exit_code?: number };
         if (msg.type === "exit") {
+          onExit();
           setters.setStatus("exited");
           setters.setExitCode(msg.exit_code ?? null);
         }
@@ -146,10 +149,20 @@ function openSessionWebSocket(
   term: Terminal,
   setters: LoginStateSetters,
   initialInput: string | undefined,
+  sessionIDRef: React.RefObject<string | null>,
 ): WebSocket {
   const ws = new WebSocket(agentLoginStreamUrl(sessionID));
   ws.binaryType = "arraybuffer";
-  ws.onmessage = makeWsMessageHandler(term, setters);
+  ws.onmessage = makeWsMessageHandler(term, setters, () => {
+    if (sessionIDRef.current === sessionID) {
+      sessionIDRef.current = null;
+    }
+  });
+  ws.onclose = () => {
+    if (sessionIDRef.current === sessionID) {
+      sessionIDRef.current = null;
+    }
+  };
   ws.onerror = () => {
     setters.setError(translate("agents:ptyConnectionError"));
     setters.setStatus("error");
@@ -174,6 +187,7 @@ type MountArgs = {
   fitRef: React.RefObject<FitAddon | null>;
   wsRef: React.RefObject<WebSocket | null>;
   sessionIDRef: React.RefObject<string | null>;
+  mountGenerationRef: React.MutableRefObject<number>;
   initialInput?: string;
 };
 
@@ -182,6 +196,7 @@ function mountSession(args: MountArgs): () => void {
   args.termRef.current = term.term;
   args.fitRef.current = term.fit;
   let cancelled = false;
+  const mountGeneration = ++args.mountGenerationRef.current;
 
   void (async () => {
     try {
@@ -189,7 +204,12 @@ function mountSession(args: MountArgs): () => void {
       // the response arrives can still be stopped by the cancelled branch.
       const sess = await args.startSession({ cols: term.term.cols, rows: term.term.rows });
       if (cancelled) {
-        await stopAgentLogin(sess.session_id);
+        // React StrictMode runs this effect's cleanup before immediately
+        // mounting it again. Do not stop a session that the newer mount has
+        // already claimed; only the final mount owns cancellation cleanup.
+        if (mountGeneration === args.mountGenerationRef.current) {
+          await stopAgentLogin(sess.session_id);
+        }
         return;
       }
       args.sessionIDRef.current = sess.session_id;
@@ -198,6 +218,7 @@ function mountSession(args: MountArgs): () => void {
         term.term,
         args.setters,
         args.initialInput,
+        args.sessionIDRef,
       );
       args.setters.setStatus("running");
     } catch (err) {
@@ -234,6 +255,7 @@ function mountSession(args: MountArgs): () => void {
       args.wsRef.current.close();
       args.wsRef.current = null;
     }
+    clearBufferReader(args.container);
     term.term.dispose();
     args.termRef.current = null;
     args.fitRef.current = null;
@@ -258,6 +280,7 @@ function PtySessionView({
   const fitRef = useRef<FitAddon | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const sessionIDRef = useRef<string | null>(null);
+  const mountGenerationRef = useRef(0);
   const { t } = useTranslation();
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<SessionStatus>("connecting");
@@ -274,6 +297,7 @@ function PtySessionView({
       fitRef,
       wsRef,
       sessionIDRef,
+      mountGenerationRef,
       initialInput,
     });
   }, [startSession, initialInput]);

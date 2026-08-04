@@ -123,14 +123,33 @@ start, command I/O, idempotent start, and stop.
   **File:** `apps/web/e2e/tests/settings/host-shell-pty.spec.ts`.
   **What to verify:** retain and rerun the existing integration scenarios alongside the new UI path.
 
+## Repair: StrictMode PTY startup race
+
+### Confirmed root cause
+
+The SPA renders under React StrictMode, which replays the terminal effect during development. Two
+idempotent `/host-shell/start` requests can therefore return the same session ID. The stale effect's
+cancelled branch then calls `stopAgentLogin` for that shared ID, killing the session owned by the
+current effect. The backend removes the session, while the surviving `ResizeObserver` continues
+posting `/resize`, producing the observed 404s.
+
+### Repair scope
+
+- Track a mount generation so stale effect cleanup cannot stop a newer mount's session.
+- Clear the session identity when the PTY stream reports exit/close so resize requests stop.
+- Add a regression scenario that opens Quick Terminal, waits through startup, executes a command, and
+  proves the surface remains interactive without stale resize failures.
+
 ## Verification Results
 
-- Focused component tests: 3 files, 22 tests passed.
-- Web typecheck, targeted ESLint, and i18n ratchet passed.
-- Managed Chromium E2E: 4 tests passed (host-shell lifecycle, desktop, and tablet).
+- Focused component tests: 3 files, 23 tests passed.
+- Web typecheck, targeted ESLint, i18n ratchet, and i18n checks passed.
+- Managed Quick Terminal Chromium E2E: 2 tests passed, including shell prompt and command input/output.
+- Managed host-shell lifecycle E2E: 2 tests passed.
 - Managed Pixel 5 E2E: 1 test passed.
-- The managed runner rebuilt backend, Vite assets, and the fixture plugin for both runs and cleaned
-  up each worker-scoped backend/session.
+- Backend `internal/agent/loginpty` tests: 5 passed.
+- The managed runner rebuilt backend, Vite assets, and the fixture plugin for each run and cleaned up
+  each worker-scoped backend/session.
 
 ## Implementation Tasks
 
@@ -141,6 +160,10 @@ Wave 1:
 Wave 2:
 
 - [x] [Task 02: Prove Quick Terminal across viewports](task-02-quick-terminal-e2e.md) (`done`)
+
+Wave 3:
+
+- [x] [Task 03: Fix Quick Terminal startup race](task-03-fix-quick-terminal-startup-race.md) (`done`)
 
 Execution is sequential in the primary conversation. No subagent delegation is planned or
 authorized.
