@@ -117,16 +117,6 @@ test.describe("mobile: session stream overload isolation", () => {
       )
       .toBe(true);
 
-    noisyCapture.frames.length = 0;
-    capture.frames.length = 0;
-    await apiClient.launchSession({
-      task_id: noisyTask.id,
-      session_id: noisySessionId,
-      agent_profile_id: seedData.agentProfileId,
-      prompt: reasoningBurstPrompt(),
-      intent: "start_created",
-    });
-
     const pill = layout.getByTestId("mobile-sessions-pill");
     await expect(pill).toBeVisible({ timeout: 30_000 });
     await pill.tap();
@@ -149,6 +139,16 @@ test.describe("mobile: session stream overload isolation", () => {
         { message: "quiet mobile page must subscribe before the burst", timeout: 10_000 },
       )
       .toBe(true);
+
+    noisyCapture.frames.length = 0;
+    capture.frames.length = 0;
+    await apiClient.launchSession({
+      task_id: noisyTask.id,
+      session_id: noisySessionId,
+      agent_profile_id: seedData.agentProfileId,
+      prompt: reasoningBurstPrompt(),
+      intent: "start_created",
+    });
 
     await session.sendMessageViaButton("mobile-quiet-followup");
     await session.expectChatResponseVisible("mobile-quiet-followup", 0, { timeout: 60_000 });
