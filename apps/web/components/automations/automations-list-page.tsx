@@ -6,7 +6,6 @@ import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
 import { IconPlus, IconBolt } from "@tabler/icons-react";
 import { toast } from "@/lib/toast/sonner";
-import { t } from "@/lib/i18n";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
 import { AutomationsTable } from "./automations-table";
 import { AutomationBoardMoveNotice } from "./board-move-notice";

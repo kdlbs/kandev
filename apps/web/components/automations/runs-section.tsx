@@ -30,22 +30,22 @@ type RunsSectionProps = {
 
 const STATUS_BADGE: Record<
   RunStatus,
-  { variant: "default" | "destructive" | "secondary" | "outline"; label: string }
+  { variant: "default" | "destructive" | "secondary" | "outline"; labelKey: string }
 > = {
-  triggered: { variant: "secondary", label: "Triggered" },
-  task_created: { variant: "secondary", label: "Running" },
-  succeeded: { variant: "default", label: "Succeeded" },
-  failed: { variant: "destructive", label: "Failed" },
-  skipped: { variant: "outline", label: "Skipped" },
+  triggered: { variant: "secondary", labelKey: "automations:runStatusTriggered" },
+  task_created: { variant: "secondary", labelKey: "automations:runStatusRunning" },
+  succeeded: { variant: "default", labelKey: "automations:runStatusSucceeded" },
+  failed: { variant: "destructive", labelKey: "automations:runStatusFailed" },
+  skipped: { variant: "outline", labelKey: "automations:runStatusSkipped" },
   // The generating task was archived — via the UI or by the agent itself
   // (e.g. an "archive this task" instruction). Distinct from a genuine
   // user cancellation: archiving just closes the task out, it doesn't
   // mean the run's work was rejected. See internal/automation.RunStatusArchived.
-  archived: { variant: "outline", label: "Archived" },
+  archived: { variant: "outline", labelKey: "automations:runStatusArchived" },
   // The generating task no longer exists, or its current primary session
   // is CANCELLED — a real cancellation, distinct from archived.
   // See internal/automation.RunStatusCancelled.
-  cancelled: { variant: "outline", label: "Cancelled" },
+  cancelled: { variant: "outline", labelKey: "automations:runStatusCancelled" },
 };
 
 type RunRowProps = {
@@ -55,6 +55,7 @@ type RunRowProps = {
 };
 
 function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
+  const { t } = useTranslation();
   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
   // Any run that produced a task links to it, run-mode included. Run mode
   // keeps the task off the board, which is not a reason to withhold the only
@@ -76,7 +77,7 @@ function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
     >
       <TableCell className="text-sm">{run.trigger_type}</TableCell>
       <TableCell>
-        <Badge variant={badge.variant}>{badge.label}</Badge>
+        <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
       </TableCell>
       <TableCell
         className={`text-sm max-w-[420px] truncate ${
@@ -100,7 +101,7 @@ function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
             e.preventDefault();
             onDelete(run.id);
           }}
-          title="Delete run"
+          title={t("automations:deleteRun")}
           data-testid="delete-run"
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -113,6 +114,7 @@ function RunRow({ run, onDelete, onNavigate }: RunRowProps) {
 type DeleteAllButtonProps = { disabled: boolean; onConfirm: () => void };
 
 function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -121,7 +123,7 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
           size="icon-sm"
           className="cursor-pointer text-destructive hover:text-destructive"
           disabled={disabled}
-          title="Delete all runs"
+          title={t("automations:deleteAllRuns")}
           data-testid="delete-all-runs"
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -129,20 +131,19 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete all runs?</AlertDialogTitle>
+          <AlertDialogTitle>{t("automations:deleteAllRunsTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently remove all run records for this automation — including any not
-            currently loaded — and their associated tasks. This cannot be undone.
+            {t("automations:deleteAllRunsDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={onConfirm}
             data-testid="delete-all-runs-confirm"
           >
-            Delete all
+            {t("automations:deleteAll")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -156,16 +157,16 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
  * nothing else, so without a way to see those a paused automation looks
  * identical to one that was never due.
  */
-const STATUS_FILTERS: { value: RunStatus | "all"; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "task_created", label: "Running" },
-  { value: "succeeded", label: "Succeeded" },
-  { value: "failed", label: "Failed" },
-  { value: "skipped", label: "Skipped" },
+const STATUS_FILTERS: { value: RunStatus | "all"; labelKey: string }[] = [
+  { value: "all", labelKey: "automations:runAll" },
+  { value: "task_created", labelKey: "automations:runStatusRunning" },
+  { value: "succeeded", labelKey: "automations:runStatusSucceeded" },
+  { value: "failed", labelKey: "automations:runStatusFailed" },
+  { value: "skipped", labelKey: "automations:runStatusSkipped" },
   // Both are read-time-derived terminal statuses the table already renders, so
   // leaving them out here made those runs visible but unfilterable.
-  { value: "archived", label: "Archived" },
-  { value: "cancelled", label: "Cancelled" },
+  { value: "archived", labelKey: "automations:runStatusArchived" },
+  { value: "cancelled", labelKey: "automations:runStatusCancelled" },
 ];
 
 function StatusFilter({
@@ -177,6 +178,7 @@ function StatusFilter({
   value: RunStatus | "all";
   onChange: (value: RunStatus | "all") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1 flex-wrap" data-testid="run-status-filter">
       {STATUS_FILTERS.map((filter) => {
@@ -196,7 +198,7 @@ function StatusFilter({
             onClick={() => onChange(filter.value)}
             data-testid={`run-filter-${filter.value}`}
           >
-            {filter.label}
+            {t(filter.labelKey)}
             <span className="ml-1 text-muted-foreground">{count}</span>
           </Button>
         );
@@ -229,7 +231,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
           onClick={() => setExpanded(!expanded)}
         >
           <Label className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer">
-            Recent Runs ({runs.length})
+            {t("automations:recentRuns", { count: runs.length })}
           </Label>
           {expanded ? (
             <IconChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -245,7 +247,7 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
               className="cursor-pointer"
               onClick={refresh}
               disabled={loading}
-              title="Refresh"
+              title={t("automations:refresh")}
             >
               <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
@@ -261,10 +263,10 @@ export function RunsSection({ automationId, workspaceId }: RunsSectionProps) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent focus-within:bg-transparent">
-                <TableHead>Trigger</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>{t("automations:runsColumnTrigger")}</TableHead>
+                <TableHead>{t("automations:runsColumnStatus")}</TableHead>
                 <TableHead>{t("automations:outcome")}</TableHead>
-                <TableHead>Time</TableHead>
+                <TableHead>{t("automations:runsColumnTime")}</TableHead>
                 <TableHead className="w-8" />
               </TableRow>
             </TableHeader>

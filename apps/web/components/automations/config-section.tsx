@@ -170,8 +170,11 @@ function useDiscoveredRepositories(workspaceId: string) {
 
 type StepOption = { id: string; name: string };
 
-function getWorkflowStepHelpText(workflowId: string): string | undefined {
-  if (!workflowId) return "Select a workflow before choosing a step.";
+function getWorkflowStepHelpText(
+  workflowId: string,
+  t: (key: string) => string,
+): string | undefined {
+  if (!workflowId) return t("automations:workflowStepHelpNoWorkflow");
   return undefined;
 }
 
@@ -220,6 +223,7 @@ function useConfigSectionComputed({
   repositories: Repository[];
   discoveredRepos: LocalRepository[];
 }) {
+  const { t } = useTranslation();
   const filteredAgentProfiles = agentProfiles.filter((profile) => !profile.cli_passthrough);
   // Profiles returned by the executors list/boot payload don't always carry
   // their own executor_type/executor_name (only the settings > Executors
@@ -247,8 +251,8 @@ function useConfigSectionComputed({
     };
   });
   const singleRepositoryItems = useMemo(
-    () => buildRepositoryItems(repositories, discoveredRepos),
-    [repositories, discoveredRepos],
+    () => buildRepositoryItems(repositories, discoveredRepos, t),
+    [repositories, discoveredRepos, t],
   );
   return { filteredAgentProfiles, executorItems, supportsMultiRepo, singleRepositoryItems };
 }
@@ -268,6 +272,7 @@ export function ConfigSection({
   onExecutorProfileChange,
   onRepositoriesChange,
 }: ConfigSectionProps) {
+  const { t } = useTranslation();
   useSettingsData(true);
   const { repositories } = useRepositories(workspaceId, true);
   const discoveredRepos = useDiscoveredRepositories(workspaceId);
@@ -291,7 +296,7 @@ export function ConfigSection({
   return (
     <div className="space-y-3">
       <Label className="text-xs uppercase tracking-wider text-muted-foreground">
-        Configuration
+        {t("automations:configurationLabel")}
       </Label>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <WorkflowFields
@@ -307,22 +312,22 @@ export function ConfigSection({
           onStepChange={onStepChange}
         />
         <SelectField
-          label="Agent Profile"
+          label={t("automations:agentProfileLabel")}
           value={agentProfileId}
           isDirty={dirtyFields.agentProfileId}
           onChange={onAgentProfileChange}
-          placeholder="Select agent"
+          placeholder={t("automations:agentProfilePlaceholder")}
           items={filteredAgentProfiles.map((p) => ({
             id: p.id,
             label: p.label,
           }))}
         />
         <SelectField
-          label="Executor Profile"
+          label={t("automations:executorProfileLabel")}
           value={executorProfileId}
           isDirty={dirtyFields.executorProfileId}
           onChange={onExecutorProfileChange}
-          placeholder="Select executor"
+          placeholder={t("automations:executorProfilePlaceholder")}
           items={executorItems}
         />
         <RepositoryPickerField
@@ -364,6 +369,7 @@ function RepositoryPickerField({
   isDirty: boolean;
   onRepositoriesChange: (selections: RepositorySelection[]) => void;
 }) {
+  const { t } = useTranslation();
   if (supportsMultiRepo && !isPRTrigger) {
     return (
       <AutomationRepositoryRows
@@ -379,17 +385,17 @@ function RepositoryPickerField({
   return (
     <SelectField
       testId="repository-selector"
-      label="Repository"
+      label={t("automations:repositoryLabel")}
       value={selectionToOptionId(repositorySelections[0] ?? { kind: "none" })}
       isDirty={isDirty}
       onChange={(v) => {
         const picked = pickSelectionFromOptionId(v, repositories, discoveredRepos);
         onRepositoriesChange(picked.kind === "none" ? [] : [picked]);
       }}
-      placeholder="Auto"
+      placeholder={t("automations:repositoryPlaceholderAuto")}
       items={singleRepositoryItems}
       disabled={isPRTrigger}
-      helpText={isPRTrigger ? "PR triggers always use the PR's own repository." : undefined}
+      helpText={isPRTrigger ? t("automations:prTriggerRepositoryHelp") : undefined}
     />
   );
 }
@@ -438,7 +444,7 @@ function WorkflowFields({
     <>
       <SelectField
         testId="workflow-selector"
-        label="Workflow"
+        label={t("automations:workflowLabel")}
         value={workflowId}
         isDirty={workflowDirty}
         onChange={(value) => onWorkflowChange(value === NONE_OPTION_ID ? "" : value)}
@@ -467,7 +473,7 @@ function WorkflowFields({
       )}
       <SelectField
         testId="workflow-step-selector"
-        label="Workflow Step"
+        label={t("automations:workflowStepLabel")}
         value={workflowStepId}
         isDirty={workflowStepDirty}
         onChange={(value) => onStepChange(value === NONE_OPTION_ID ? "" : value)}
@@ -479,7 +485,7 @@ function WorkflowFields({
           ...steps.map((s) => ({ id: s.id, label: s.name })),
         ]}
         disabled={!hasWorkflow}
-        helpText={getWorkflowStepHelpText(workflowId)}
+        helpText={getWorkflowStepHelpText(workflowId, t)}
       />
     </>
   );
