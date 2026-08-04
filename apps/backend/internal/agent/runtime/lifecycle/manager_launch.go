@@ -1247,6 +1247,15 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	// Close the check-then-Add race with task deletion. If deletion happened
+	// after the pre-registration read, its cleanup inventory either observed
+	// this Add or this second read observes the deleted/terminal session. In
+	// the latter case, remove our entry before rolling the runtime back.
+	if err := m.ensureLaunchSessionStillActive(ctx, sessionID); err != nil {
+		m.executionStore.Remove(execution.ID)
+		m.rollbackLaunchExecution(ctx, rt, execInstance, execution, "session ended during execution registration")
+		return err
+	}
 	m.setRuntimeInterest(execution.SessionID, true)
 
 	m.persistRuntimeSecrets(ctx, execInstance, execution)
@@ -1270,9 +1279,9 @@ func (m *Manager) registerAndPublishExecution(
 
 // ensureLaunchSessionStillActive closes the remote-runtime creation race: SSH,
 // Docker, and other remote CreateInstance calls can outlive a concurrent task
-// delete. Re-read the session immediately before registering the new execution
-// so a runtime created for a now-deleted or terminal session is rolled back
-// instead of becoming an orphan after cleanup already took its inventory.
+// delete. Callers read both immediately before and after registration: the two
+// reads bracket Add so either the launch observes deletion or deletion cleanup
+// observes the registered execution.
 func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID string) error {
 	if m.executorProfileReader == nil || sessionID == "" {
 		return nil

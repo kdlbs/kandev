@@ -1652,6 +1652,83 @@ func TestLaunch_RollsBackRuntimeWhenSessionEndsDuringCreate(t *testing.T) {
 	}
 }
 
+type launchRegistrationGateReader struct {
+	reads      atomic.Int32
+	secondRead chan struct{}
+	release    chan struct{}
+}
+
+func (r *launchRegistrationGateReader) GetTaskSession(_ context.Context, id string) (*models.TaskSession, error) {
+	if r.reads.Add(1) == 1 {
+		return &models.TaskSession{ID: id, State: models.TaskSessionStateStarting}, nil
+	}
+	close(r.secondRead)
+	<-r.release
+	return &models.TaskSession{ID: id, State: models.TaskSessionStateCancelled}, nil
+}
+
+func (*launchRegistrationGateReader) GetTaskEnvironment(context.Context, string) (*models.TaskEnvironment, error) {
+	return nil, nil
+}
+
+func (*launchRegistrationGateReader) GetExecutorProfile(context.Context, string) (*models.ExecutorProfile, error) {
+	return nil, nil
+}
+
+func TestLaunch_RollsBackWhenSessionEndsDuringRegistration(t *testing.T) {
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	execRegistry := NewExecutorRegistry(log)
+	backend := &createInstanceExecutor{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+
+	mgr := NewManager(
+		newTestRegistry(), &MockEventBus{}, execRegistry,
+		&MockCredentialsManager{}, &MockProfileResolver{}, nil,
+		ExecutorFallbackWarn, "", log,
+	)
+	mgr.dataDir = t.TempDir()
+	cleanupManagerStopCh(t, mgr)
+	reader := &launchRegistrationGateReader{
+		secondRead: make(chan struct{}),
+		release:    make(chan struct{}),
+	}
+	mgr.SetExecutorProfileReader(reader)
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := mgr.Launch(context.Background(), &LaunchRequest{
+			TaskID:         "task-registration-race",
+			SessionID:      "session-registration-race",
+			AgentProfileID: "profile-1",
+			IsEphemeral:    true,
+		})
+		errCh <- err
+	}()
+
+	select {
+	case <-reader.secondRead:
+	case err := <-errCh:
+		t.Fatalf("Launch returned before post-registration validation: %v", err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for post-registration session validation")
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); !exists {
+		t.Fatal("execution must be registered before the final session validation")
+	}
+	close(reader.release)
+
+	err := <-errCh
+	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
+		t.Fatalf("Launch error = %v, want terminal-session validation", err)
+	}
+	if got := backend.stopCount.Load(); got != 1 {
+		t.Fatalf("StopInstance called %d times, want 1", got)
+	}
+	if _, exists := mgr.executionStore.GetBySessionID("session-registration-race"); exists {
+		t.Fatal("terminal session runtime must be removed after registration race")
+	}
+}
+
 func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	execRegistry := NewExecutorRegistry(log)

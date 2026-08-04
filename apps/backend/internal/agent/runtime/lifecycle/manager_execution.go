@@ -622,6 +622,11 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 		}
 		return nil, fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
+		m.executionStore.Remove(execution.ID)
+		m.rollbackLaunchExecution(ctx, rt, runtimeInstance, execution, "session ended during execution registration")
+		return nil, err
+	}
 	m.setRuntimeInterest(execution.SessionID, true)
 
 	// Persist executors_running row in lockstep with the in-memory Add so the
