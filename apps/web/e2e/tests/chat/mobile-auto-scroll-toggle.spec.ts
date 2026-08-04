@@ -2,6 +2,7 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 /**
@@ -37,6 +38,12 @@ async function seedOverflowingTask(
   );
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
+  await waitForSessionDone(
+    apiClient,
+    task.id,
+    task.session_id,
+    "mobile overflow seed session should finish before opening the transcript",
+  );
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
   await session.waitForLoad();
