@@ -69,3 +69,10 @@ spec: "../../specs/pr-only-commit-details/spec.md"
   actions; GitHub errors do not fall back locally.
 - Verification: focused Vitest coverage passed (7 files, 72 tests), followed
   by web typecheck, lint, i18n check, i18n ratchet, and `git diff --check`.
+- Review remediation: keyed PR commit results by the complete workspace,
+  repository, pull request, and refresh identity so rapid PR switches cannot
+  reuse stale rows. Unavailable clients and malformed commit responses now
+  remain errors with a retry state, and GitHub detail requests no longer
+  refetch when local agent readiness changes. The remediation suite passed
+  (8 files, 69 tests), with additional focused regressions covering the PR
+  switch, protocol failures, retry rendering, and remote dependency boundary.

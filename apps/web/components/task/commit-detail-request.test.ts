@@ -6,9 +6,10 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   requestCommitDiff: vi.fn(),
 }));
+let websocketClient: { request: typeof mocks.request } | null = { request: mocks.request };
 
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => ({ request: mocks.request }),
+  getWebSocketClient: () => websocketClient,
 }));
 
 vi.mock("./commit-diff-request", () => ({
@@ -16,6 +17,15 @@ vi.mock("./commit-diff-request", () => ({
 }));
 
 import { mapGitHubCommitFiles, requestCommitDetail } from "./commit-detail-request";
+
+const WORKSPACE_ID = "workspace-1";
+const remoteTarget = {
+  source: "github" as const,
+  sha: "abc1234567890",
+  workspaceId: WORKSPACE_ID,
+  owner: "acme",
+  repo: "widget",
+};
 
 const detail: PRCommitDetail = {
   sha: "abc1234567890",
@@ -47,6 +57,7 @@ const detail: PRCommitDetail = {
 afterEach(() => {
   mocks.request.mockReset();
   mocks.requestCommitDiff.mockReset();
+  websocketClient = { request: mocks.request };
 });
 
 describe("requestCommitDetail", () => {
@@ -57,7 +68,7 @@ describe("requestCommitDetail", () => {
       target: {
         source: "github",
         sha: detail.sha,
-        workspaceId: "workspace-1",
+        workspaceId: WORKSPACE_ID,
         owner: "acme",
         repo: "widget",
       },
@@ -72,7 +83,7 @@ describe("requestCommitDetail", () => {
     expect(mocks.request).toHaveBeenCalledWith(
       "github.pr_commit.get",
       {
-        workspace_id: "workspace-1",
+        workspace_id: WORKSPACE_ID,
         owner: "acme",
         repo: "widget",
         sha: detail.sha,
@@ -118,13 +129,7 @@ describe("requestCommitDetail", () => {
 
     await expect(
       requestCommitDetail({
-        target: {
-          source: "github",
-          sha: detail.sha,
-          workspaceId: "workspace-1",
-          owner: "acme",
-          repo: "widget",
-        },
+        target: remoteTarget,
         local: {
           sessionId: "session-1",
           taskId: "task-1",
@@ -133,6 +138,26 @@ describe("requestCommitDetail", () => {
       }),
     ).rejects.toThrow("GitHub unavailable");
     expect(mocks.requestCommitDiff).not.toHaveBeenCalled();
+  });
+
+  it("rejects when the WebSocket client is unavailable", async () => {
+    websocketClient = null;
+
+    await expect(
+      requestCommitDetail({
+        target: remoteTarget,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("rejects a GitHub response without a commit payload", async () => {
+    mocks.request.mockResolvedValue({});
+
+    await expect(
+      requestCommitDetail({
+        target: remoteTarget,
+      }),
+    ).rejects.toThrow();
   });
 });
 

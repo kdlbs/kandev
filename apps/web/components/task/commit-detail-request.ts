@@ -16,6 +16,13 @@ export type CommitDetailRequestResult =
       files?: Record<string, FileInfo>;
     };
 
+export class CommitDetailProtocolError extends Error {
+  constructor(reason: "client_unavailable" | "invalid_response") {
+    super(reason);
+    this.name = "CommitDetailProtocolError";
+  }
+}
+
 function mapGitHubFile(file: PRCommitDetail["files"][number]): FileInfo {
   return {
     path: file.filename,
@@ -34,9 +41,9 @@ export function mapGitHubCommitFiles(detail: PRCommitDetail): Record<string, Fil
 
 async function requestGitHubCommitDetail(
   target: Extract<CommitDetailTarget, { source: "github" }>,
-): Promise<CommitDetailRequestResult | null> {
+): Promise<CommitDetailRequestResult> {
   const ws = getWebSocketClient();
-  if (!ws) return null;
+  if (!ws) throw new CommitDetailProtocolError("client_unavailable");
 
   const response = await ws.request<{ commit?: PRCommitDetail }>(
     "github.pr_commit.get",
@@ -48,7 +55,7 @@ async function requestGitHubCommitDetail(
     },
     10000,
   );
-  if (!response?.commit) return { source: "github", success: false };
+  if (!response?.commit) throw new CommitDetailProtocolError("invalid_response");
   return {
     source: "github",
     success: true,
@@ -64,16 +71,17 @@ export async function requestCommitDetail(params: {
     taskId: string | null;
     agentctlReady: boolean;
   };
-}): Promise<CommitDetailRequestResult | null> {
+}): Promise<CommitDetailRequestResult> {
   if (params.target.source === "github") {
     return requestGitHubCommitDetail(params.target);
   }
 
-  if (!params.local) return null;
+  if (!params.local) throw new CommitDetailProtocolError("client_unavailable");
   const response = await requestCommitDiff({
     ...params.local,
     commitSha: params.target.sha,
     repo: params.target.repo,
   });
-  return response ? { source: "local", ...response } : null;
+  if (!response) throw new CommitDetailProtocolError("client_unavailable");
+  return { source: "local", ...response };
 }

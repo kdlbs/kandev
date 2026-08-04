@@ -5,15 +5,15 @@ import type { FileInfo } from "@/lib/state/store";
 const mocks = vi.hoisted(() => ({
   requestCommitDetail: vi.fn(),
   toast: vi.fn(),
+  state: {
+    tasks: { activeSessionId: "session-1", activeTaskId: "task-1" },
+    taskSessions: { items: { "session-1": { task_id: "task-1" } } },
+    sessionAgentctl: { itemsBySessionId: { "session-1": { status: "ready" } } },
+  },
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({
-      tasks: { activeSessionId: "session-1", activeTaskId: "task-1" },
-      taskSessions: { items: { "session-1": { task_id: "task-1" } } },
-      sessionAgentctl: { itemsBySessionId: { "session-1": { status: "ready" } } },
-    }),
+  useAppStore: (selector: (state: unknown) => unknown) => selector(mocks.state),
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -25,6 +25,7 @@ vi.mock("react-i18next", () => ({
 }));
 
 vi.mock("@/components/task/commit-detail-request", () => ({
+  CommitDetailProtocolError: class CommitDetailProtocolError extends Error {},
   requestCommitDetail: mocks.requestCommitDetail,
 }));
 
@@ -38,11 +39,19 @@ const remoteFiles: Record<string, FileInfo> = {
     diff: "remote patch",
   },
 };
+const remoteTarget = {
+  source: "github" as const,
+  sha: "remote123",
+  workspaceId: "workspace-1",
+  owner: "acme",
+  repo: "widget",
+};
 
 afterEach(() => {
   cleanup();
   mocks.requestCommitDetail.mockReset();
   mocks.toast.mockReset();
+  mocks.state.sessionAgentctl.itemsBySessionId["session-1"].status = "ready";
 });
 
 describe("useCommitDetail", () => {
@@ -64,17 +73,10 @@ describe("useCommitDetail", () => {
       },
     });
 
-    const target = {
-      source: "github" as const,
-      sha: "remote123",
-      workspaceId: "workspace-1",
-      owner: "acme",
-      repo: "widget",
-    };
-    const { result } = renderHook(() => useCommitDetail(target));
+    const { result } = renderHook(() => useCommitDetail(remoteTarget));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(mocks.requestCommitDetail).toHaveBeenCalledWith({ target });
+    expect(mocks.requestCommitDetail).toHaveBeenCalledWith({ target: remoteTarget });
     expect(result.current.files).toEqual(remoteFiles);
     expect(result.current.commit?.message).toBe("remote commit");
   });
@@ -103,14 +105,7 @@ describe("useCommitDetail", () => {
   it("keeps a GitHub error on the remote path and exposes it to the panel", async () => {
     mocks.requestCommitDetail.mockRejectedValue(new Error("GitHub unavailable"));
 
-    const target = {
-      source: "github" as const,
-      sha: "remote123",
-      workspaceId: "workspace-1",
-      owner: "acme",
-      repo: "widget",
-    };
-    const { result } = renderHook(() => useCommitDetail(target));
+    const { result } = renderHook(() => useCommitDetail(remoteTarget));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.files).toBeNull();
@@ -119,16 +114,39 @@ describe("useCommitDetail", () => {
     expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(1);
   });
 
+  it("turns a malformed remote response into a persistent error", async () => {
+    mocks.requestCommitDetail.mockResolvedValue({ source: "github", success: false });
+
+    const { result } = renderHook(() => useCommitDetail(remoteTarget));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.error).toBe("unexpectedResponseFromTheServer");
+    expect(result.current.files).toBeNull();
+    expect(mocks.toast).toHaveBeenCalled();
+  });
+
+  it("does not refetch a GitHub target when local readiness changes", async () => {
+    mocks.requestCommitDetail.mockResolvedValue({
+      source: "github",
+      success: true,
+      files: remoteFiles,
+    });
+
+    const { result, rerender } = renderHook(() => useCommitDetail(remoteTarget));
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(1);
+
+    mocks.state.sessionAgentctl.itemsBySessionId["session-1"].status = "starting";
+    rerender();
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(1);
+  });
+
   it("refetches the same target on demand", async () => {
     mocks.requestCommitDetail.mockResolvedValue({ source: "github", success: false });
-    const target = {
-      source: "github" as const,
-      sha: "remote123",
-      workspaceId: "workspace-1",
-      owner: "acme",
-      repo: "widget",
-    };
-    const { result } = renderHook(() => useCommitDetail(target));
+    const { result } = renderHook(() => useCommitDetail(remoteTarget));
     await waitFor(() => expect(result.current.loading).toBe(false));
 
     await act(async () => {

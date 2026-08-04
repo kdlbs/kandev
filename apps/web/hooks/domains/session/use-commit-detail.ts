@@ -7,7 +7,10 @@ import { useToast } from "@/components/toast-provider";
 import type { PRCommitDetail } from "@/lib/types/github";
 import type { FileInfo } from "@/lib/state/store";
 import type { CommitDetailTarget } from "@/components/task/changes-diff-target";
-import { requestCommitDetail } from "@/components/task/commit-detail-request";
+import {
+  CommitDetailProtocolError,
+  requestCommitDetail,
+} from "@/components/task/commit-detail-request";
 
 export type UseCommitDetailResult = {
   files: Record<string, FileInfo> | null;
@@ -29,14 +32,18 @@ function buildLocalRequest(
   activeTaskId: string | null,
   agentctlReady: boolean,
 ) {
-  if (target.source !== "local" || !activeSessionId) return {};
+  if (target.source !== "local" || !activeSessionId) return undefined;
   return {
-    local: {
-      sessionId: activeSessionId,
-      taskId: sessionTaskId ?? activeTaskId ?? null,
-      agentctlReady,
-    },
+    sessionId: activeSessionId,
+    taskId: sessionTaskId ?? activeTaskId ?? null,
+    agentctlReady,
   };
+}
+
+function detailErrorMessage(error: unknown, unexpectedError: string): string {
+  if (error instanceof CommitDetailProtocolError) return unexpectedError;
+  if (error instanceof Error) return error.message;
+  return unexpectedError;
 }
 
 /**
@@ -65,6 +72,19 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
   const requestSeqRef = useRef(0);
   const key = targetKey(target);
   const stableTarget = useMemo(() => target, [key]);
+  const localRequest = useMemo(
+    () =>
+      stableTarget.source === "local"
+        ? buildLocalRequest(
+            stableTarget,
+            activeSessionId,
+            sessionTaskId,
+            activeTaskId,
+            agentctlReady,
+          )
+        : undefined,
+    [stableTarget, activeSessionId, sessionTaskId, activeTaskId, agentctlReady],
+  );
 
   const fetchDetail = useCallback(async () => {
     const requestSeq = ++requestSeqRef.current;
@@ -73,20 +93,17 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
     try {
       const response = await requestCommitDetail({
         target: stableTarget,
-        ...buildLocalRequest(
-          stableTarget,
-          activeSessionId,
-          sessionTaskId,
-          activeTaskId,
-          agentctlReady,
-        ),
+        ...(localRequest ? { local: localRequest } : {}),
       });
       if (requestSeq !== requestSeqRef.current) return;
-      setFiles(response?.success && response.files ? response.files : null);
-      setCommit(response?.source === "github" ? (response.commit ?? null) : null);
+      if (stableTarget.source === "github" && !response.success) {
+        throw new CommitDetailProtocolError("invalid_response");
+      }
+      setFiles(response.success && response.files ? response.files : null);
+      setCommit(response.source === "github" ? (response.commit ?? null) : null);
     } catch (err) {
       if (requestSeq !== requestSeqRef.current) return;
-      const message = err instanceof Error ? err.message : unexpectedError;
+      const message = detailErrorMessage(err, unexpectedError);
       setFiles(null);
       setCommit(null);
       setError(message);
@@ -98,16 +115,7 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
     } finally {
       if (requestSeq === requestSeqRef.current) setLoading(false);
     }
-  }, [
-    activeSessionId,
-    activeTaskId,
-    agentctlReady,
-    requestFailed,
-    sessionTaskId,
-    stableTarget,
-    toast,
-    unexpectedError,
-  ]);
+  }, [localRequest, requestFailed, stableTarget, toast, unexpectedError]);
 
   useEffect(() => {
     void fetchDetail();

@@ -1,7 +1,9 @@
 "use client";
 
 import { memo, useEffect, useMemo } from "react";
-import { IconLoader2 } from "@tabler/icons-react";
+import { IconAlertCircle, IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
+import { useTranslation } from "react-i18next";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { FileDiffViewer } from "@/components/diff";
 import { DEFAULT_DIFF_WORD_WRAP } from "@/components/diff/diff-defaults";
@@ -94,7 +96,7 @@ export const CommitDiffView = memo(function CommitDiffView({
   wordWrap = DEFAULT_DIFF_WORD_WRAP,
 }: CommitDiffViewProps) {
   const localCommit = useActiveCommit(target);
-  const { files, commit: remoteCommit, loading } = useCommitDetail(target);
+  const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
   const commit = headerCommit(target, localCommit, remoteCommit);
   const fileEntries = useSortedFileEntries(files);
 
@@ -106,6 +108,7 @@ export const CommitDiffView = memo(function CommitDiffView({
       </div>
     );
   }
+  if (error) return <CommitDetailErrorState error={error} onRetry={refetch} />;
 
   return (
     <div className="overflow-y-auto">
@@ -130,7 +133,7 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
   const target = targetFromParams(params);
   const { openFile } = usePanelActions();
   const localCommit = useActiveCommit(target);
-  const { files, commit: remoteCommit, loading } = useCommitDetail(target);
+  const { files, commit: remoteCommit, loading, error, refetch } = useCommitDetail(target);
   const commit = headerCommit(target, localCommit, remoteCommit);
   const fileEntries = useSortedFileEntries(files);
 
@@ -154,6 +157,15 @@ const CommitDetailPanel = memo(function CommitDetailPanel({
             <IconLoader2 className="h-4 w-4 animate-spin" />
             Loading commit...
           </div>
+        </PanelBody>
+      </PanelRoot>
+    );
+  }
+  if (error) {
+    return (
+      <PanelRoot>
+        <PanelBody>
+          <CommitDetailErrorState error={error} onRetry={refetch} />
         </PanelBody>
       </PanelRoot>
     );
@@ -205,6 +217,35 @@ function CommitHeader({
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function CommitDetailErrorState({
+  error,
+  onRetry,
+}: {
+  error: string;
+  onRetry: () => Promise<void>;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div
+      role="alert"
+      className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center text-sm text-muted-foreground"
+    >
+      <IconAlertCircle className="h-5 w-5 text-destructive" />
+      <span>{error}</span>
+      <Button
+        type="button"
+        className="min-h-11 cursor-pointer"
+        variant="outline"
+        size="sm"
+        onClick={() => void onRetry()}
+      >
+        <IconRefresh className="h-4 w-4" />
+        {t("common:retry")}
+      </Button>
     </div>
   );
 }

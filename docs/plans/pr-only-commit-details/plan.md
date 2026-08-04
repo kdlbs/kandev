@@ -192,6 +192,12 @@ git diff --check
   stale local history, hidden unknown statistics/actions, remote metadata, and
   remote patch rendering.
 - `git diff --check` passed.
+- Review remediation: complete PR identity now gates visible commit-list
+  results; unavailable or malformed detail responses show a persistent retry
+  state; and remote detail loading is independent of local agent readiness.
+  The broader focused frontend suite passed (8 files, 69 tests), plus the
+  remediation request/hook/panel tests (4 files, 15 tests), typecheck, lint,
+  i18n checks, and ratchet.
 
 ## Risks and out of scope
 
