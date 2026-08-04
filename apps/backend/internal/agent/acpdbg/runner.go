@@ -214,10 +214,10 @@ func (r *Runner) Request(ctx context.Context, frame Frame) (Frame, error) {
 	if !ok {
 		return nil, fmt.Errorf("request frame has no integer id")
 	}
-	ch := make(chan Frame, 1)
-	r.mu.Lock()
-	r.pending[idNum] = ch
-	r.mu.Unlock()
+	ch, err := r.registerPending(idNum)
+	if err != nil {
+		return nil, err
+	}
 
 	if err := r.rec.Sent(frame); err != nil {
 		return nil, err
@@ -482,6 +482,23 @@ func (r *Runner) readLoop() {
 // errShutdown is what outstanding requests see when the read loop stops because
 // the runner is shutting down rather than because the child died.
 var errShutdown = errors.New("runner shutting down")
+
+// registerPending claims the response channel for a request id, refusing once
+// the read loop is terminal. failPending only closes the waiters that exist
+// when it runs, so a registration racing past it would never be woken: writing
+// the request can still succeed against a child holding stdin open, and the
+// caller would then block until its deadline. The check shares r.mu with
+// failPending so the two cannot interleave.
+func (r *Runner) registerPending(id int) (chan Frame, error) {
+	ch := make(chan Frame, 1)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.readLoopEr != nil {
+		return nil, fmt.Errorf("read loop exited: %w", r.readLoopEr)
+	}
+	r.pending[id] = ch
+	return ch, nil
+}
 
 // failPending closes every outstanding request waiter so callers return instead
 // of blocking on a child nobody is reading any more.

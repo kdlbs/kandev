@@ -287,10 +287,10 @@ func sendPromptAndCollect(ctx context.Context, r *Runner, sessionID, prompt stri
 		return "", err
 	}
 
-	respCh := make(chan Frame, 1)
-	r.mu.Lock()
-	r.pending[promptID] = respCh
-	r.mu.Unlock()
+	respCh, err := r.registerPending(promptID)
+	if err != nil {
+		return "", err
+	}
 	// Every exit path drops the waiter, including the ones that give up before
 	// a response arrives, so the map does not accumulate dead entries.
 	defer func() {

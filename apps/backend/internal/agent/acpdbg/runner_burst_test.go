@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,6 +47,14 @@ func TestACPDBGBurstHelperProcess(t *testing.T) {
 		return
 	}
 	notifications, _ := strconv.Atoi(os.Getenv(burstHelperEnv + "_COUNT"))
+
+	// A broken agent: kills the framer with unparseable stdout, then keeps
+	// stdin open forever so writes to it still succeed.
+	if mode == "garbage" {
+		_, _ = fmt.Fprintln(os.Stdout, "this is not a JSON-RPC frame")
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
 
 	// A wedged agent: never reads stdin, just writes notifications forever.
 	if mode == "flood" {
@@ -196,6 +205,56 @@ func TestPromptReportsChildDeathInsteadOfSuccess(t *testing.T) {
 	}
 }
 
+// TestRequestsRejectedOnceReadLoopIsTerminal pins that a caller arriving after
+// the read loop has already failed gets the read-loop error promptly instead of
+// waiting out its own deadline. failPending only closes the waiters that exist
+// when it runs, and the child here keeps stdin open, so writing the request
+// still succeeds — nothing would ever wake a waiter registered past that point.
+func TestRequestsRejectedOnceReadLoopIsTerminal(t *testing.T) {
+	t.Setenv(burstHelperEnv, "garbage")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	runner, err := NewRunner(ctx, filepath.Join(t.TempDir(), "frames.jsonl"), RunConfig{
+		AgentID: "garbage-helper",
+		Command: burstHelperCommand(t),
+	})
+	if err != nil {
+		t.Fatalf("NewRunner: %v", err)
+	}
+	t.Cleanup(func() { runner.Close("test cleanup") })
+
+	waitForReadLoopFailure(t, runner)
+
+	// Both entry points must refuse, and refuse fast.
+	start := time.Now()
+	req, _ := runner.Framer().NewRequest("session/new", map[string]any{})
+	if _, err := runner.Request(ctx, req); err == nil {
+		t.Fatal("Request accepted a waiter after the read loop went terminal")
+	}
+	if _, err := sendPromptAndCollect(ctx, runner, "s1", "anyone home?"); err == nil {
+		t.Fatal("sendPromptAndCollect accepted a waiter after the read loop went terminal")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("took %s to refuse; expected to fail immediately, not on the deadline", elapsed)
+	}
+}
+
+func waitForReadLoopFailure(t *testing.T, r *Runner) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		r.mu.Lock()
+		failed := r.readLoopEr != nil
+		r.mu.Unlock()
+		if failed {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for the read loop to fail on malformed stdout")
+}
+
 // TestReadLoopStopsQueueingAfterShutdown pins that a wedged agent flooding
 // stdout cannot make us allocate indefinitely once shutdown starts. The queue
 // is unbounded, so the read loop has to stop on its own: nothing will ever
@@ -212,6 +271,9 @@ func TestReadLoopStopsQueueingAfterShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRunner: %v", err)
 	}
+	// Registered immediately: both assertions below can t.Fatalf, and without
+	// this the flooding child would outlive the test.
+	t.Cleanup(func() { runner.Close("test cleanup") })
 
 	// Let the flood get going, then start shutting down.
 	waitForOOBFrames(t, runner, 100)
@@ -224,7 +286,6 @@ func TestReadLoopStopsQueueingAfterShutdown(t *testing.T) {
 	if grown := oobLen(runner); grown != settled {
 		t.Fatalf("queue kept growing after shutdown: %d -> %d", settled, grown)
 	}
-	runner.Close("test cleanup")
 }
 
 func oobLen(r *Runner) int {
