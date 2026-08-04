@@ -1,130 +1,216 @@
 ---
 spec: docs/specs/ui/sidebar-archived-filter.md
 created: 2026-08-04
-status: done
+status: draft
 ---
 
-# Implementation Plan: Sidebar Archived Filter Retirement
+# Implementation Plan: Sidebar Archived Task Views
 
 ## Overview
 
-Retire the filter dimension that cannot be satisfied by the sidebar's active
-workflow snapshots, and use the existing saved-view migration boundary to
-remove stale `archived` clauses safely. Then prove the shared editor behavior
-on desktop and mobile without changing task fetching, archive lifecycle, or
-the synthetic current-archived row.
+Keep active workflow snapshots unchanged and add a separate, workspace-scoped
+archived-task projection for the sidebar. Restore the Archived filter contract,
+load the projection only for views that explicitly request archived tasks, and
+keep it synchronized through the existing task lifecycle WebSocket events.
+Finish by proving the same browse-and-open flow in the desktop sidebar and the
+mobile task-switcher drawer.
 
-## Root cause
-
-PR #644 added `archived` to the filter registry and pure `applyView` engine,
-but the sidebar continued to aggregate `ListTasks` workflow snapshots. That
-repository query deliberately requires `archived_at IS NULL`, and
-`task.updated` removes archived tasks from both Kanban caches. The only
-archived sidebar item is a synthetic placeholder for a directly opened
-archived task, so the normal **Archived: Show** path always filters an
-archived-free collection to an empty list.
+The current branch contains a superseded implementation that removed the
+Archived dimension. The implementation tasks below restore that contract and
+replace the retirement tests; they do not revert unrelated work on the branch.
 
 ## Backend
 
-No backend changes. `ListTasks` remains the active workflow-task contract, and
-`ListTasksByWorkspace(..., includeArchived=true)` remains the full Tasks page
-and command-panel contract.
+### Archived-only workspace task query
+
+- `apps/backend/internal/task/handlers/task_http_handlers.go`: parse
+  `only_archived=true` on `GET /api/v1/workspaces/:id/tasks`. Pass both archive
+  flags through the service; `only_archived` takes precedence when both are
+  present.
+- `apps/backend/internal/task/service/service_tasks.go` and
+  `apps/backend/internal/task/repository/interface.go`: extend
+  `ListTasksByWorkspace` and `prSearchOptions` with `onlyArchived bool` without
+  changing authorization, pagination, enrichment, ephemeral, config-task, or
+  PR-number search behavior.
+- `apps/backend/internal/task/repository/sqlite/task.go`: apply exactly one
+  archive predicate before count/query execution:
+  `archived_at IS NOT NULL` for archived-only, no predicate for
+  include-archived, and `archived_at IS NULL` otherwise. Apply the same mode to
+  search and PR-match augmentation so `total` and page contents agree.
+- Update affected repository mocks mechanically; no schema or migration is
+  required.
 
 ## Frontend
 
-### Filter contract and saved-view migration
+### Restore the saved-view filter contract
 
-- `apps/web/components/task/sidebar-filter/filter-dimension-registry.ts`:
-  remove the `archived` dimension metadata so neither responsive surface can
-  select it.
-- `apps/web/lib/state/slices/ui/sidebar-view-types.ts`: remove `archived` from
-  the supported `FilterDimension` union while leaving archived task display
-  state untouched.
-- `apps/web/lib/state/slices/ui/ui-slice.ts`: remove `archived` from
-  `KNOWN_DIMENSIONS`; the existing `migrateView` behavior then drops legacy
-  clauses while preserving the rest of each view. The shared
-  `migrateSidebarViewDraft` helper applies the same normalization to in-flight
-  drafts before boot merge, hydration, and live WebSocket settings updates.
-- `apps/web/lib/sidebar/apply-view.ts`: remove the unreachable archived
-  extractor from the supported view engine.
-- Update focused unit tests to replace the synthetic archived-filter assertion
-  with migration and registry regressions.
+- Restore `archived` in
+  `apps/web/lib/state/slices/ui/sidebar-view-types.ts`, `KNOWN_DIMENSIONS` in
+  `ui-slice.ts`, the dimension registry, and the `apply-view.ts` extractor.
+- Keep the generic draft migration helper and its boot/hydration/WebSocket
+  calls, but update regressions so valid archived clauses are preserved rather
+  than removed.
+- Add a pure predicate that returns true only when an effective view contains
+  the positive boolean clause `archived is true`. The default view and
+  `Archived: Hide` must not request or merge archived candidates.
+
+### Archived task runtime projection
+
+- `apps/web/lib/api/domains/kanban-api.ts`: add `onlyArchived` to
+  `listTasksByWorkspace` and emit `only_archived=true`.
+- Extend the Kanban slice with a separate runtime cache:
+  `sidebarArchivedTasks.itemsByWorkspaceId`, `loadedByWorkspaceId`,
+  `loadingByWorkspaceId`, and `errorByWorkspaceId`, plus replace/upsert/remove
+  actions. Do not place archived rows in `kanban.tasks` or
+  `kanbanMulti.snapshots`.
+- Extend `TaskLike`/`toKanbanTask` with `workspace_id` and `archived_at` so API
+  and WebSocket rows carry workspace identity and archive state through one
+  mapper.
+- Add `use-sidebar-archived-tasks.ts`. When enabled, page through the
+  archived-only API with `page_size=100`, commit only if workspace and request
+  generation are still current, retain a successful cache on refresh failure,
+  and register a foreground refresh. Multiple desktop/mobile consumers must
+  share the store loading gate rather than issue duplicate requests.
+- `use-workspace-sidebar-tasks.ts` merges the current workspace's archived
+  projection into the active aggregate only when the effective view requires
+  it, deduplicating by task ID. Loading and error state cover the archived
+  request as well as the initial workflow snapshot request.
+- `apps/web/lib/ws/handlers/tasks.ts`: on archived `task.updated`, remove the
+  task from active Kanban caches and upsert it into its workspace's archived
+  cache; on non-archived `task.updated`, remove any archived copy before the
+  existing active upsert; on `task.deleted`, remove it from both projections.
+  These updates must preserve the current redirect, recent-task, sidebar-pref,
+  and Office-refetch behavior.
+
+### Desktop and mobile consumption
+
+- `task-session-sidebar-item.ts` and
+  `mobile/session-task-switcher-sheet-hooks.ts` map cached archived tasks to
+  `TaskSwitcherItem` with `isArchived: true`, full workflow/step/repository
+  labels, and no duplicate synthetic current-task row.
+- Desktop and mobile selection paths look in the archived projection. An
+  archived row navigates directly to task detail and never attempts to prepare
+  or launch a session; the existing detail top bar owns Unarchive.
+- Archived rows remain read-only for active-task operations: modifier clicks
+  navigate instead of entering multi-selection, and active-only rename/edit,
+  pin, link, subtask, archive, detach, and move actions are absent. Existing
+  delete behavior may remain available.
+- Extend the shared task switcher loading/empty treatment with a localized
+  archived-load failure and Retry action. Add keys to
+  `apps/web/src/locales/en/sidebar.json`; do not introduce hardcoded UI copy.
 
 ## Mobile design contract
 
-This is a shared option-retirement change, not a composition or touch change.
-Desktop keeps the existing sidebar filter popover; mobile keeps the existing
-`session-task-switcher-sheet.tsx` entry point and portaled filter popover. The
-shared dimension registry and migration logic remain the single source of
-truth. The nearest mobile exemplar is
-`apps/web/e2e/tests/task/mobile-sidebar-views.spec.ts`; the rendered mobile
-check opens the existing sheet and filter selector and verifies the obsolete
-choice is absent. Scroll ownership, safe-area handling, touch targets, and
-primary task navigation remain unchanged.
+- **Outcome and entry point:** desktop uses the AppSidebar Tasks section;
+  phones use the existing `SessionTaskSwitcherSheet` opened from task chrome.
+  Both edit the same saved view and show the same archived result set.
+- **Nearest exemplar:**
+  `apps/web/components/task/mobile/session-task-switcher-sheet.tsx` remains the
+  shipped inset bottom-drawer composition. Its fixed header, filter bar,
+  `min-h-0` scrolling task body, dismiss behavior, and safe-area handling stay
+  intact.
+- **Hierarchy and action:** the filter remains a temporary popover choice; the
+  task list remains the single scroll owner and selecting an archived row is
+  the primary action. No desktop panel is added or squeezed into the drawer.
+- **Shared logic:** API loading, workspace cache, view predicate, filtering,
+  sorting, grouping, archive state, and navigation guards are shared. Mobile
+  code only adapts the existing drawer presentation and closes it after
+  navigation.
+- **Geometry:** the drawer and portaled filter selector remain within the Pixel
+  5 viewport, long archived results scroll inside the task body, and document
+  horizontal overflow remains zero.
 
 ## Tests
 
-- **Legacy view migration:** an `archived` clause fails the new
-  `migrateView` regression before the code change and is removed afterward,
-  while a neighboring valid clause and all other view fields survive.
-  **File:** `apps/web/lib/state/slices/ui/ui-slice-migration.test.ts`.
-- **Draft migration boundaries:** legacy drafts are normalized at boot merge,
-  hydration, and `user.settings.updated` boundaries so the editor never sees a
-  removed dimension. **Files:** `apps/web/lib/state/hydration/hydrator.test.ts`
-  and `apps/web/lib/ws/handlers/users.test.ts`.
-- **Supported dimension registry:** the registry does not expose `archived`.
-  **File:**
-  `apps/web/components/task/sidebar-filter/filter-dimension-registry.test.ts`.
-- **View-engine cleanup:** existing filtering tests continue to cover every
-  supported dimension after removing the unreachable synthetic archived case.
-  **File:** `apps/web/lib/sidebar/apply-view.test.ts`.
+- **Archived-only repository/API contract:** default, all, and only-archived
+  modes return the correct rows and totals with search/pagination; conflicting
+  flags choose only-archived. **Files:**
+  `apps/backend/internal/task/repository/archive_repository_test.go`,
+  `apps/backend/internal/task/service/service_pr_search_test.go`, and
+  `apps/backend/internal/task/handlers/task_http_handlers_test.go`.
+- **Filter restoration and persistence:** the registry exposes Archived,
+  `applyView` evaluates Show/Hide, and saved views/drafts preserve the clause at
+  every settings boundary. **Files:**
+  `apps/web/components/task/sidebar-filter/filter-dimension-registry.test.ts`,
+  `apps/web/lib/sidebar/apply-view.test.ts`,
+  `apps/web/lib/state/slices/ui/ui-slice-migration.test.ts`,
+  `apps/web/lib/state/hydration/hydrator.test.ts`, and
+  `apps/web/lib/ws/handlers/users.test.ts`.
+- **Archived projection loader:** verifies positive-clause gating, pagination,
+  dedupe, loading/error/cache retention, foreground retry, and stale workspace
+  rejection. **Files:** `apps/web/lib/api/domains/kanban-api.test.ts`,
+  `apps/web/lib/state/slices/kanban/kanban-slice.test.ts`,
+  `apps/web/hooks/domains/kanban/use-sidebar-archived-tasks.test.ts`, and
+  `apps/web/hooks/domains/kanban/use-workspace-sidebar-tasks.test.ts`.
+- **Live lifecycle projection:** archive upserts the archived cache while
+  evicting active caches; unarchive and delete remove the archived copy.
+  **Files:** `apps/web/lib/ws/handlers/tasks-archive.test.ts`,
+  `tasks-unarchive.test.ts`, and `tasks.deleted.test.ts`.
+- **Rendered row behavior:** desktop/mobile mapping sets the archived badge,
+  selection never launches a session, active-only actions are unavailable,
+  and retry state is reachable. **Files:**
+  `apps/web/components/task/task-session-sidebar-item.test.ts`,
+  `apps/web/components/task/mobile/session-task-switcher-sheet-hooks.test.ts`,
+  and `apps/web/components/task/task-switcher.test.tsx`.
 
 ## E2E Tests
 
-- **Desktop scenario:** open the sidebar filter editor, add a clause, open the
-  dimension selector, and verify **Archived** is absent while a supported
-  dimension remains available.
+- **Desktop:** seed one active and one archived task, apply Archived: Show,
+  verify only the archived row remains, select it, and verify archived task
+  detail plus the existing Unarchive action. Then archive another active task
+  and verify the live row appears once without reloading.
   **File:** `apps/web/e2e/tests/task/sidebar-filter.spec.ts`.
-- **Mobile scenario:** open the mobile task-switcher sheet and the same filter
-  selector, then verify **Archived** is absent without horizontal overflow.
+- **Mobile:** from the task-switcher drawer, apply the same filter, verify the
+  archived row and badge, open its detail, and assert the drawer/filter geometry
+  is viewport-contained with no document horizontal overflow.
   **File:** `apps/web/e2e/tests/task/mobile-sidebar-views.spec.ts`.
 
 ## Verification Results
 
-- Task 01 unit suite: 4 files, 98 tests passed.
-- Fixup draft-migration suite: 3 files, 40 tests passed.
-- Task 01 typecheck passed.
-- Task 01 focused ESLint passed with no warnings or errors.
-- Task 02 desktop E2E: 1 Chromium test passed via the managed production runner.
-- Task 02 mobile E2E: 1 Pixel 5/mobile-chrome test passed via the managed production runner, including viewport-containment assertions.
-- `git diff --check` passed.
+Pending. Each implementation task records its exact commands, outcomes, and
+artifact cleanup in its `## Results` section.
 
 ## Implementation Waves And Parallel Candidates
 
-Wave 1:
+Wave 1 (parallel candidates; user authorization required):
 
-- [x] [Task 01 — Retire archived filter contract](task-01-retire-archived-filter.md)
+- [ ] [Task 01 — Add archived-only task query](task-01-archived-only-query.md)
+- [ ] [Task 02 — Restore archived filter contract](task-02-restore-archived-filter.md)
 
 Wave 2:
 
-- [x] [Task 02 — Prove desktop and mobile behavior](task-02-sidebar-filter-e2e.md)
+- [ ] [Task 03 — Build archived sidebar projection](task-03-archived-sidebar-projection.md)
 
-The tasks are sequential because the E2E assertions depend on the shared
-registry and migration change. No parallel-safe task is identified.
+Wave 3:
+
+- [ ] [Task 04 — Integrate archived rows](task-04-integrate-archived-rows.md)
+
+Wave 4:
+
+- [ ] [Task 05 — Prove desktop and mobile flows](task-05-archived-sidebar-e2e.md)
+
+Tasks 01 and 02 are parallel-safe because their backend and frontend contract
+files are disjoint. Task 03 consumes both contracts; Task 04 consumes the
+projection; Task 05 verifies the completed vertical slice.
 
 ## Risks
 
-- Persisted views are backend-owned opaque data, so old `archived` clauses may
-  continue arriving until a later user mutation rewrites the view. Frontend
-  migration must remain idempotent on every hydration.
-- Removing the clause intentionally makes archived-only saved views unfiltered;
-  silently deleting or renaming the whole view would discard unrelated user
-  preferences and diverge from existing removed-dimension migration behavior.
-- The synthetic archived row still needs `TaskSwitcherItem.isArchived` for
-  display and action guards; the repair must remove only filter support.
+- The workspace list API is paginated. The loader must finish all archived
+  pages before declaring a successful empty/complete result and must guard
+  every page against workspace/request changes.
+- Desktop and mobile surfaces can mount concurrently. A store-level loading
+  gate is required to avoid duplicate archived fetches.
+- `archived_at` is omitted after unarchive. The non-archived task update must
+  remove a stale archived cache entry before performing the existing active
+  upsert.
+- Archived task rows can lack a runnable workspace/session. Navigation must
+  bypass prepare/launch logic and let the archived detail route render its
+  existing recovery UI.
+- The current branch's removal tests assert the opposite contract. They must be
+  replaced, not retained alongside the new behavior.
 
 ## Out of scope
 
-- Fetching or paginating archived tasks in the sidebar.
-- Backend, WebSocket, archive lifecycle, and full Tasks page changes.
-- Sidebar layout or mobile interaction redesign.
+- Changing active Kanban snapshot/query semantics.
+- Adding new archive/unarchive mutations or sidebar-specific persistence.
+- Redesigning the desktop sidebar or mobile task-switcher drawer.
