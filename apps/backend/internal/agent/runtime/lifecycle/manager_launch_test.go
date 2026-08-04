@@ -1947,6 +1947,83 @@ func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T
 	}
 }
 
+type failOnceStopExecutor struct {
+	MockExecutor
+	attempts     atomic.Int32
+	retryEntered chan struct{}
+	releaseRetry chan struct{}
+	succeeded    chan struct{}
+}
+
+func (e *failOnceStopExecutor) StopInstance(context.Context, *ExecutorInstance, bool) error {
+	if e.attempts.Add(1) == 1 {
+		return errors.New("transient stop failure")
+	}
+	close(e.retryEntered)
+	<-e.releaseRetry
+	close(e.succeeded)
+	return nil
+}
+
+func TestRegisteredLaunchRollbackRetainsOwnershipUntilStopRetrySucceeds(t *testing.T) {
+	for _, taskCleanupActive := range []bool{false, true} {
+		name := "persistence_failure"
+		if taskCleanupActive {
+			name = "task_cleanup"
+		}
+		t.Run(name, func(t *testing.T) {
+			mgr := newTestManager(t)
+			execution := &AgentExecution{ID: "exec-stop-retry", SessionID: "session-stop-retry"}
+			if err := mgr.executionStore.Add(execution); err != nil {
+				t.Fatalf("Add execution: %v", err)
+			}
+			writer := &invariantWriter{prior: &models.ExecutorRunning{
+				AgentExecutionID: execution.ID,
+				SessionID:        execution.SessionID,
+				ResumeToken:      "resume-token",
+				Status:           models.ExecutorRunningStatusStarting,
+			}}
+			mgr.SetExecutorRunningWriter(writer)
+			backend := &failOnceStopExecutor{
+				MockExecutor: MockExecutor{name: executor.NameStandalone},
+				retryEntered: make(chan struct{}),
+				releaseRetry: make(chan struct{}),
+				succeeded:    make(chan struct{}),
+			}
+
+			mgr.rollbackRegisteredLaunchWithRetry(
+				backend, &ExecutorInstance{InstanceID: execution.ID}, execution,
+				taskCleanupActive, "test rollback",
+			)
+
+			select {
+			case <-backend.retryEntered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for detached stop retry")
+			}
+			if _, exists := mgr.executionStore.Get(execution.ID); !exists {
+				t.Fatal("failed stop retired in-memory cleanup ownership")
+			}
+			if writer.deleted || writer.repaired {
+				t.Fatal("failed stop retired durable cleanup ownership")
+			}
+			close(backend.releaseRetry)
+			select {
+			case <-backend.succeeded:
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for detached stop retry")
+			}
+			require.Eventually(t, func() bool {
+				_, exists := mgr.executionStore.Get(execution.ID)
+				return !exists
+			}, time.Second, 10*time.Millisecond)
+			if writer.deleted || !writer.repaired || writer.prior == nil || writer.prior.ResumeToken != "resume-token" {
+				t.Fatalf("successful retry did not preserve resume state: %#v", writer)
+			}
+		})
+	}
+}
+
 func TestLaunch_PersistsDockerRuntimeSecrets(t *testing.T) {
 	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
 	execRegistry := NewExecutorRegistry(log)

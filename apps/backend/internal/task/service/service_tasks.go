@@ -1563,7 +1563,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 3. Set archived_at in DB
 	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
-		s.cancelTaskResourceCleanupJob(ctx, cleanupJob)
+		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 		return err
 	}
 
@@ -1781,12 +1781,12 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	// 4. Delete from DB (sync, fast)
 	deleted, err := deleteFromDB(ctx, id)
 	if err != nil {
-		s.cancelTaskResourceCleanupJob(ctx, cleanupJob)
+		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return false, err
 	}
 	if !deleted {
-		s.cancelTaskResourceCleanupJob(ctx, cleanupJob)
+		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
 		return false, nil
 	}
 

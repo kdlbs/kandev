@@ -624,9 +624,16 @@ func (m *Manager) createExecution(ctx context.Context, taskID string, info *Work
 	}
 	// Persist before the final session read so concurrent deletion cleanup can
 	// inventory this execution even if it started between Add and validation.
-	m.persistExecutorRunning(ctx, execution)
+	if err := m.persistExecutorRunningResult(ctx, execution); err != nil {
+		m.rollbackRegisteredLaunchAfterPersistFailure(rt, runtimeInstance, execution)
+		return nil, fmt.Errorf("persist execution registration: %w", err)
+	}
 	if err := m.ensureLaunchSessionStillActive(ctx, info.SessionID); err != nil {
-		m.rollbackRegisteredLaunch(rt, runtimeInstance, execution, "session ended during execution registration")
+		if errors.Is(err, errTaskCleanupActive) {
+			m.rollbackRegisteredLaunchForTaskCleanup(rt, runtimeInstance, execution)
+		} else {
+			m.rollbackRegisteredLaunch(rt, runtimeInstance, execution, "session ended during execution registration")
+		}
 		return nil, err
 	}
 	m.setRuntimeInterest(execution.SessionID, true)

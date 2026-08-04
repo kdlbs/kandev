@@ -28,6 +28,14 @@ import (
 
 const legacyExecutorTypeLocalPC = "local_pc"
 
+const registeredLaunchRollbackRetries = 3
+
+var registeredLaunchRollbackRetryDelays = [...]time.Duration{
+	100 * time.Millisecond,
+	500 * time.Millisecond,
+	2 * time.Second,
+}
+
 var errTaskCleanupActive = errors.New("task cleanup is active")
 
 // resolveAgentProfile resolves the agent profile and returns the agent type name and profile info.
@@ -1333,11 +1341,7 @@ func (m *Manager) rollbackRegisteredLaunchForTaskCleanup(
 	execInstance *ExecutorInstance,
 	execution *AgentExecution,
 ) {
-	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
-	cancel()
-	m.executionStore.Remove(execution.ID)
-	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, "task cleanup won execution registration")
+	m.rollbackRegisteredLaunchWithRetry(rt, execInstance, execution, true, "task cleanup won execution registration")
 }
 
 // rollbackRegisteredLaunchAfterPersistFailure preserves any prior durable row
@@ -1349,16 +1353,90 @@ func (m *Manager) rollbackRegisteredLaunchAfterPersistFailure(
 	execInstance *ExecutorInstance,
 	execution *AgentExecution,
 ) {
-	if reader, ok := m.runningWriter.(executorRunningReader); ok {
+	m.rollbackRegisteredLaunchWithRetry(rt, execInstance, execution, false, "execution registration persistence failed")
+}
+
+func (m *Manager) rollbackRegisteredLaunchWithRetry(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+	taskCleanupActive bool,
+	reason string,
+) {
+	if err := m.stopRegisteredLaunchRuntime(rt, execInstance, execution); err == nil {
+		m.finishRegisteredLaunchRollback(execution, taskCleanupActive)
+		return
+	} else {
+		m.logger.Warn("registered launch rollback retained ownership after stop failure",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("reason", reason),
+			zap.Error(err))
+	}
+
+	m.wg.Add(1)
+	go func() {
+		defer m.wg.Done()
+		for attempt := 0; attempt < registeredLaunchRollbackRetries; attempt++ {
+			timer := time.NewTimer(registeredLaunchRollbackRetryDelays[attempt])
+			select {
+			case <-m.stopCh:
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			if _, exists := m.executionStore.Get(execution.ID); !exists {
+				return
+			}
+			if err := m.stopRegisteredLaunchRuntime(rt, execInstance, execution); err == nil {
+				m.finishRegisteredLaunchRollback(execution, taskCleanupActive)
+				return
+			} else {
+				m.logger.Warn("registered launch rollback retry failed",
+					zap.String("execution_id", execution.ID),
+					zap.Int("attempt", attempt+1),
+					zap.Error(err))
+			}
+		}
+		m.logger.Error("registered launch rollback exhausted retries; retaining cleanup ownership",
+			zap.String("execution_id", execution.ID),
+			zap.String("session_id", execution.SessionID),
+			zap.String("reason", reason))
+	}()
+}
+
+func (m *Manager) stopRegisteredLaunchRuntime(
+	rt ExecutorBackend,
+	execInstance *ExecutorInstance,
+	execution *AgentExecution,
+) error {
+	if rt != nil && execInstance != nil {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err := rt.StopInstance(cleanupCtx, execInstance, true)
+		cancel()
+		if err != nil {
+			return err
+		}
+	}
+	if execution.agentctl != nil {
+		execution.agentctl.Close()
+	}
+	execution.EndSessionSpan()
+	return nil
+}
+
+func (m *Manager) finishRegisteredLaunchRollback(execution *AgentExecution, taskCleanupActive bool) {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if taskCleanupActive {
+		m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
+	} else if reader, ok := m.runningWriter.(executorRunningReader); ok {
 		running, err := reader.GetExecutorRunningBySessionID(cleanupCtx, execution.SessionID)
 		if err == nil && running != nil && running.AgentExecutionID == execution.ID {
 			m.deleteExecutorRunning(cleanupCtx, execution.SessionID)
 		}
-		cancel()
 	}
 	m.executionStore.Remove(execution.ID)
-	m.rollbackLaunchExecution(context.Background(), rt, execInstance, execution, "execution registration persistence failed")
 }
 
 func (m *Manager) rollbackLaunchExecution(_ context.Context, rt ExecutorBackend, execInstance *ExecutorInstance, execution *AgentExecution, reason string) {
