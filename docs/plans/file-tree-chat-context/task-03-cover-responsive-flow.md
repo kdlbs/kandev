@@ -77,6 +77,6 @@ Report RED/GREEN evidence, actual files changed, exact discovered/passed test co
 - `cd apps/web && pnpm exec eslint e2e/pages/session-page.ts
   e2e/tests/task/file-tree-chat-context.spec.ts
   e2e/tests/task/mobile-file-tree-chat-context.spec.ts` passed.
-- Files added/updated: `SessionPage` file-tree and chip helpers plus the desktop and mobile task
-  specs. The final managed runs removed temporary E2E results, blob reports, PR assets, and shard
-  logs before execution.
+- Files added/updated: the focused `FileTreePage` composed by `SessionPage`, plus the desktop and
+  mobile task specs. The final managed runs removed temporary E2E results, blob reports, PR
+  assets, and shard logs before execution.

@@ -64,7 +64,7 @@ No backend, database, filesystem, or WebSocket changes are required. `message.ad
 - **Scenario:** given the same task on Pixel 5, a visible file-tree row action adds a directory without right-click or long press.
   **File:** `apps/web/e2e/tests/task/mobile-file-tree-chat-context.spec.ts`.
   **What to verify:** `.tap()` opens the responsive menu, trigger and action rows meet the 44px contract, menu bounds stay inside the viewport, document horizontal overflow is absent, the Chat tab shows the folder chip, and send clears it after recording the path.
-- **Page object:** add focused file-tree context-menu, touch-trigger, and context-chip helpers to `apps/web/e2e/pages/session-page.ts`.
+- **Page object:** add focused file-tree context-menu, touch-trigger, and context-chip helpers through `apps/web/e2e/pages/file-tree-page.ts`, composed by `apps/web/e2e/pages/session-page.ts`.
 - **Targeted commands:**
   - `cd apps/web && pnpm e2e:run tests/task/file-tree-chat-context.spec.ts`
   - `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-file-tree-chat-context.spec.ts`
@@ -72,20 +72,20 @@ No backend, database, filesystem, or WebSocket changes are required. `message.ad
 ## Verification Results
 
 - RED/GREEN frontend coverage: the focused suite first failed on the new directory model and
-  action cases, then passed with 7 files and 49 tests. The final command was
+  action cases, then passed with 7 files and 52 tests after the PR fixup added prompt-path
+  sanitization and interaction coverage. The final command was
   `cd apps && pnpm --filter @kandev/web test -- --run lib/state/context-files-store.test.ts
   components/task/chat-context-items.test.ts components/task/chat/context-items/file-item.test.tsx
   hooks/use-message-handler.test.ts components/task/chat/chat-input-area.test.tsx
   components/task/file-context-menu.test.tsx components/task/file-browser-context-action.test.tsx`.
-- `cd apps/web && pnpm run typecheck` passed. The i18n pseudo-catalog, check, and ratchet commands
-  passed. Targeted ESLint passed with no errors; it retains the existing `file-browser.tsx`
-  max-lines warning.
-- Desktop managed E2E: `file-tree-chat-context.spec.ts` — 1 test passed after narrowing the
-  page-object locator to the open Radix context menu.
+- `cd apps/web && pnpm run typecheck` passed. The i18n pseudo-catalog, key check, ratchet, and
+  Simplified Chinese catalog parity checks passed. Targeted ESLint passed with no errors or
+  warnings.
+- Desktop managed E2E: `file-tree-chat-context.spec.ts` — 1 test passed on the initial run and
+  again after the PR fixup, including the explicit collapsed-directory assertion.
 - Mobile managed E2E: `mobile-file-tree-chat-context.spec.ts` with `mobile-chrome` — 1 test
-  passed after scoping the page-object tree lookup to the visible mobile panel and waiting for
-  the menu scale-in animation to settle. The test observed a 44px row trigger, a settled 44px
-  menu item, viewport-bounded menu geometry, and no document horizontal overflow.
+  passed on the initial run and again after the PR fixup. The test observed a 44px row trigger,
+  a settled 44px menu item, viewport-bounded menu geometry, and no document horizontal overflow.
 - Each managed runner started from a fresh production build and logged cleanup of E2E results,
   blob reports, PR assets, and shard logs. No backend or protocol changes were required.
 

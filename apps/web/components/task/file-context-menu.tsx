@@ -349,29 +349,25 @@ export function FileContextMenu({
 
   return (
     <FileContextMenuSurface
-      {...{
-        children,
-        node,
-        tree,
-        setTree,
-        onDeleteFile,
-        onRenameFile,
-        onDownloadFile,
-        onStartRename,
-        onAddToChatContext,
-        selectedCount,
-        selectedPaths,
-        isBulk,
-        needsConfirmation,
-        showOpenInEditor,
-        hasFileActions,
-        showAddToChatContext,
-        deleteDialogOpen,
-        setDeleteDialogOpen,
-        onConfirmDelete: handleConfirmDelete,
-        onDelete: handleDelete,
-      }}
-    />
+      node={node}
+      onDeleteFile={onDeleteFile}
+      onRenameFile={onRenameFile}
+      onDownloadFile={onDownloadFile}
+      onStartRename={onStartRename}
+      onAddToChatContext={onAddToChatContext}
+      selectedCount={selectedCount}
+      isBulk={isBulk}
+      needsConfirmation={needsConfirmation}
+      showOpenInEditor={showOpenInEditor}
+      hasFileActions={hasFileActions}
+      showAddToChatContext={showAddToChatContext}
+      deleteDialogOpen={deleteDialogOpen}
+      setDeleteDialogOpen={setDeleteDialogOpen}
+      onConfirmDelete={handleConfirmDelete}
+      onDelete={handleDelete}
+    >
+      {children}
+    </FileContextMenuSurface>
   );
 }
 

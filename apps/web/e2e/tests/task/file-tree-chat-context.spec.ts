@@ -80,6 +80,7 @@ test.describe("File tree chat context", () => {
 
     // The secondary action must not open a file or expand a directory.
     await expect(testPage.getByTestId("preview-tab-file-editor")).toHaveCount(0);
+    await expect(session.fileTreeNode(`${directoryPath}/nested.txt`)).toHaveCount(0);
     await session.clickSessionChatTab();
     await expect(session.chatContextFile(filePath)).toHaveCount(1);
     await expect(session.chatContextFile(directoryPath)).toHaveCount(1);

@@ -72,8 +72,9 @@ Report RED/GREEN evidence, actual files changed, exact commands/test counts, tra
   — 2 files, 8 tests passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps/web && pnpm run i18n:pseudo` — regenerated the pseudo chat catalog;
-  `pnpm run i18n:check` and `pnpm run i18n:ratchet` passed.
-- Targeted ESLint exited successfully; it reports the existing
-  `file-browser.tsx` max-lines warning and no errors.
+  `pnpm run i18n:check` and `pnpm run i18n:ratchet` passed. The Simplified Chinese chat
+  catalog also contains the complete key set required by the current `main` catalog.
+- Targeted ESLint exited successfully with no errors or warnings after extracting the file
+  browser header and the focused E2E page object.
 - Localized keys added: `chat:addToChatContext`, `chat:fileTreeActions`, and
-  `chat:addedToChatContext`.
+  `chat:addedToChatContext` in English, pseudo, and Simplified Chinese catalogs.

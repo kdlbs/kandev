@@ -32,6 +32,8 @@ vi.mock("./lazy-file-preview", () => ({
 
 import { FileItem } from "./file-item";
 
+const FILE_PATH = "src/app.ts";
+
 afterEach(() => {
   cleanup();
   contextChipMock.mockReset();
@@ -41,9 +43,9 @@ afterEach(() => {
 function item(overrides: Record<string, unknown> = {}): FileContextItem {
   return {
     kind: "file",
-    id: "src/app.ts",
+    id: FILE_PATH,
     label: "app.ts",
-    path: "src/app.ts",
+    path: FILE_PATH,
     isDirectory: false,
     onOpen: vi.fn(),
     ...overrides,
@@ -52,15 +54,20 @@ function item(overrides: Record<string, unknown> = {}): FileContextItem {
 
 describe("FileItem", () => {
   it("keeps file previews and open behavior for file context", () => {
-    const file = item();
+    const onOpen = vi.fn();
+    const file = item({ onOpen });
 
     render(<FileItem item={file} sessionId="session-1" />);
 
-    expect(lazyPreviewMock).toHaveBeenCalledWith({ path: "src/app.ts", sessionId: "session-1" });
+    expect(lazyPreviewMock).toHaveBeenCalledWith({ path: FILE_PATH, sessionId: "session-1" });
     expect(contextChipMock).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "file", leadingIcon: expect.anything() }),
     );
     expect(renderedIcon("file-icon")).toBe(true);
+    const chipProps = contextChipMock.mock.calls[0]?.[0] as { onClick?: () => void };
+    expect(chipProps.onClick).toEqual(expect.any(Function));
+    chipProps.onClick?.();
+    expect(onOpen).toHaveBeenCalledWith(FILE_PATH);
   });
 
   it("uses a folder icon and no preview or opener for directory context", () => {
