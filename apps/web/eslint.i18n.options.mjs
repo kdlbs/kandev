@@ -1128,4 +1128,56 @@ export const i18nGuardFiles = [
   //     chrome — and `configuration-chat-toggle.tsx`, which `ConfigChatSetup`
   //     renders — is still English and belongs to the quick-chat migration.
   "components/config-chat/*.{ts,tsx}",
+
+  // Automations — `components/automations/**` (incl. `trigger-configs/`) and
+  // the three `app/settings/**/automations/**` routes. Copy lives in a new
+  // `automations` namespace, except three strings reused verbatim from
+  // `common`: `common:automations` (the word SEGMENT_LABEL_KEYS already names
+  // as this settings route's owner), `common:cancel`, `common:status` and
+  // `common:requestFailed` — each diffed byte-for-byte against what the live
+  // surface rendered before reusing it.
+  //
+  // Most of this directory's copy was invisible to the guard. `pnpm run
+  // lint:i18n` reported 116; the migration converted 156. The extra 40 were in
+  // shapes the rule does not inspect: SCREAMING_CASE config tables
+  // (`TRIGGER_LABELS`, `STATUS_BADGE`, `EXECUTION_MODE_ITEMS`, `PRESETS` in two
+  // files, `CRON_PRESETS`/`SIMPLE_SUMMARIES`/`TRIGGER_INFO`, `CI_CONCLUSIONS`,
+  // `PR_EVENTS`, `CATEGORY_META`), plain functions returning copy
+  // (`getTriggerSummary`, `getWorkflowStepHelpText`, `inputValueFor`), toasts
+  // and a save-contributor `invalidReason` in `automation-editor.tsx`, an
+  // `sr-only` "required" the guard's single-lowercase-token pattern skipped,
+  // and `automation-repository-selection.ts` — a `.ts` module with no JSX that
+  // reported 0 and held a picker option label.
+  //
+  // Persisted/protocol strings deliberately left in English, because a
+  // translated one breaks a stored automation with nothing failing until a
+  // locale switch: `DEFAULT_PROMPT` in `automation-editor.tsx` (persisted, sent
+  // to the agent verbatim, and compared with `===`), the `"New Automation"` and
+  // `"New Repository"` name fallbacks (both written to a record), every cron
+  // expression and shorthand, every TriggerType / RunStatus / ExecutionMode /
+  // PR-event / CI-conclusion id, `X-Webhook-Secret`, the `{{webhook.*}}`
+  // placeholder paths, and the example values in `placeholder` attributes
+  // (branch names, CI check names, GitHub usernames, a sample JSON body).
+  // `run.trigger_type` renders raw in the runs table for the same reason.
+  // Where syntax appears inside a sentence it travels as an interpolation
+  // value, so the pseudo-locale cannot accent it into something that no longer
+  // parses.
+  //
+  // NOT listed, and deliberately so:
+  //   - `components/task-create-dialog-multi-repo-guard.ts`. Its three disabled
+  //     -executor explanations render as a `title` in this editor's Executor
+  //     Profile picker, so they are migrated here (into `common:multiRepo*`),
+  //     but the module is shared with the un-migrated task-create dialog and
+  //     belongs to neither. Allowlisting it would claim a completeness that
+  //     dialog has not had; whichever migration takes the dialog adds it.
+  //   - `formatRelativeTime` in `lib/utils.ts`, which the runs table and the
+  //     automations table both render. It is a repo-wide formatter with 21
+  //     consumers and `lib/i18n/formats.ts` already holds its intended
+  //     replacement (`formatRelative`); swapping it is a cross-cutting change,
+  //     not part of a copy migration.
+  "components/automations/*.{ts,tsx}",
+  "components/automations/trigger-configs/*.tsx",
+  "app/settings/automations/page.tsx",
+  "app/settings/workspace/[id]/automations/**/*.tsx",
+  "hooks/domains/settings/use-automation-runs.ts",
 ];

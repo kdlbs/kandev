@@ -125,6 +125,9 @@ export function buildCreatePayload(
 ): CreateAutomationRequest {
   return {
     workspace_id: workspaceId,
+    // Persisted as the automation's name — user data, so it stays English
+    // rather than writing a locale-dependent value into the record. (Unreachable
+    // in practice: canSave requires a non-empty name.)
     name: form.name || "New Automation",
     description: form.description,
     workflow_id: form.workflowId,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useCallback } from "react";
+import { t } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import {
   listAutomationRuns,
@@ -75,7 +76,9 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
           removeRun(automationId, runId);
         })
         .catch((err: unknown) => {
-          const msg = err instanceof Error ? err.message : "Failed to delete run";
+          // An Error message here is an API diagnostic and stays English; the
+          // fallback for a non-Error rejection is copy.
+          const msg = err instanceof Error ? err.message : t("automations:failedToDeleteRun");
           toast.error(msg);
           // revert on failure
           listAutomationRuns(automationId)
@@ -88,7 +91,7 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
               if (deletedRun) {
                 restoreRun(automationId, deletedRun);
               }
-              toast.error("Could not refresh runs — restored from local cache");
+              toast.error(t("automations:couldNotRefreshRuns"));
             });
         });
     },
@@ -108,7 +111,7 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
         clearRuns(automationId);
       })
       .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : "Failed to delete runs";
+        const msg = err instanceof Error ? err.message : t("automations:failedToDeleteRuns");
         toast.error(msg);
         // revert on failure
         listAutomationRuns(automationId)
@@ -118,7 +121,7 @@ export function useAutomationRuns(automationId: string | null, workspaceId: stri
             // would stay permanently empty even though delete-all never
             // succeeded server-side. Fall back to the pre-clear snapshot.
             setRuns(automationId, previousRuns);
-            toast.error("Could not refresh runs — restored from local cache");
+            toast.error(t("automations:couldNotRefreshRuns"));
           });
       });
   }, [automationId, clearRuns, setRuns, storeApi, workspaceId]);

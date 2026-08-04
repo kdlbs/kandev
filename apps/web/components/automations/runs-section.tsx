@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import {
   AlertDialog,
@@ -28,24 +29,27 @@ type RunsSectionProps = {
   workspaceId: string;
 };
 
+// The keys are persisted RunStatus values the backend writes and the frontend
+// matches on; only the catalog key is copy, and it is resolved at render so a
+// locale switch is picked up (a module-scope t() would freeze at boot).
 const STATUS_BADGE: Record<
   RunStatus,
-  { variant: "default" | "destructive" | "secondary" | "outline"; label: string }
+  { variant: "default" | "destructive" | "secondary" | "outline"; labelKey: string }
 > = {
-  triggered: { variant: "secondary", label: "Triggered" },
-  task_created: { variant: "secondary", label: "Running" },
-  succeeded: { variant: "default", label: "Succeeded" },
-  failed: { variant: "destructive", label: "Failed" },
-  skipped: { variant: "outline", label: "Skipped" },
+  triggered: { variant: "secondary", labelKey: "automations:runStatusTriggered" },
+  task_created: { variant: "secondary", labelKey: "automations:runStatusRunning" },
+  succeeded: { variant: "default", labelKey: "automations:runStatusSucceeded" },
+  failed: { variant: "destructive", labelKey: "automations:runStatusFailed" },
+  skipped: { variant: "outline", labelKey: "automations:runStatusSkipped" },
   // The generating task was archived — via the UI or by the agent itself
   // (e.g. an "archive this task" instruction). Distinct from a genuine
   // user cancellation: archiving just closes the task out, it doesn't
   // mean the run's work was rejected. See internal/automation.RunStatusArchived.
-  archived: { variant: "outline", label: "Archived" },
+  archived: { variant: "outline", labelKey: "automations:runStatusArchived" },
   // The generating task no longer exists, or its current primary session
   // is CANCELLED — a real cancellation, distinct from archived.
   // See internal/automation.RunStatusCancelled.
-  cancelled: { variant: "outline", label: "Cancelled" },
+  cancelled: { variant: "outline", labelKey: "automations:runStatusCancelled" },
 };
 
 type RunRowProps = {
@@ -56,6 +60,7 @@ type RunRowProps = {
 };
 
 function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
+  const { t } = useTranslation();
   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
   const rowClickable = taskClickable && !!run.task_id;
   return (
@@ -67,9 +72,11 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
       }
       onClick={rowClickable ? () => onNavigate(run.task_id) : undefined}
     >
+      {/* trigger_type is the persisted TriggerType identifier the backend
+          stored on the run — an id, not copy. */}
       <TableCell className="text-sm">{run.trigger_type}</TableCell>
       <TableCell>
-        <Badge variant={badge.variant}>{badge.label}</Badge>
+        <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
       </TableCell>
       <TableCell className="text-sm font-mono">
         {run.task_id ? run.task_id.slice(0, 8) : "-"}
@@ -90,7 +97,7 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
             e.preventDefault();
             onDelete(run.id);
           }}
-          title="Delete run"
+          title={t("automations:deleteRun")}
           data-testid="delete-run"
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -103,6 +110,7 @@ function RunRow({ run, taskClickable, onDelete, onNavigate }: RunRowProps) {
 type DeleteAllButtonProps = { disabled: boolean; onConfirm: () => void };
 
 function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog>
       <AlertDialogTrigger asChild>
@@ -111,7 +119,7 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
           size="icon-sm"
           className="cursor-pointer text-destructive hover:text-destructive"
           disabled={disabled}
-          title="Delete all runs"
+          title={t("automations:deleteAllRuns")}
           data-testid="delete-all-runs"
         >
           <IconTrash className="h-3.5 w-3.5" />
@@ -119,20 +127,19 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
       </AlertDialogTrigger>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete all runs?</AlertDialogTitle>
+          <AlertDialogTitle>{t("automations:deleteAllRunsTitle")}</AlertDialogTitle>
           <AlertDialogDescription>
-            This will permanently remove all run records for this automation — including any not
-            currently loaded — and their associated tasks. This cannot be undone.
+            {t("automations:deleteAllRunsDescription")}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer bg-destructive text-destructive-foreground hover:bg-destructive/90"
             onClick={onConfirm}
             data-testid="delete-all-runs-confirm"
           >
-            Delete all
+            {t("automations:deleteAll")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -141,6 +148,7 @@ function DeleteAllButton({ disabled, onConfirm }: DeleteAllButtonProps) {
 }
 
 export function RunsSection({ automationId, executionMode, workspaceId }: RunsSectionProps) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
   const { runs, loading, refresh, deleteRun, deleteAllRuns } = useAutomationRuns(
     automationId,
@@ -158,7 +166,7 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
           onClick={() => setExpanded(!expanded)}
         >
           <Label className="text-xs uppercase tracking-wider text-muted-foreground cursor-pointer">
-            Recent Runs ({runs.length})
+            {t("automations:recentRuns", { count: runs.length })}
           </Label>
           {expanded ? (
             <IconChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
@@ -174,7 +182,7 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
               className="cursor-pointer"
               onClick={refresh}
               disabled={loading}
-              title="Refresh"
+              title={t("automations:refresh")}
             >
               <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
             </Button>
@@ -187,11 +195,11 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent focus-within:bg-transparent">
-                <TableHead>Trigger</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Task</TableHead>
-                <TableHead>Time</TableHead>
-                <TableHead>Error</TableHead>
+                <TableHead>{t("automations:runsColumnTrigger")}</TableHead>
+                <TableHead>{t("common:status")}</TableHead>
+                <TableHead>{t("automations:runsColumnTask")}</TableHead>
+                <TableHead>{t("automations:runsColumnTime")}</TableHead>
+                <TableHead>{t("automations:runsColumnError")}</TableHead>
                 <TableHead className="w-8" />
               </TableRow>
             </TableHeader>
@@ -199,7 +207,7 @@ export function RunsSection({ automationId, executionMode, workspaceId }: RunsSe
               {runs.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={6} className="text-center text-muted-foreground py-4">
-                    {loading ? "Loading..." : "No runs yet"}
+                    {loading ? t("automations:loading") : t("automations:noRunsYet")}
                   </TableCell>
                 </TableRow>
               ) : (

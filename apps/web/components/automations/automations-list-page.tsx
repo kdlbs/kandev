@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslation } from "react-i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { Button } from "@kandev/ui/button";
 import { Separator } from "@kandev/ui/separator";
@@ -13,6 +14,7 @@ type AutomationsListPageProps = {
 };
 
 export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const { items, loading, enable, disable, trigger, remove } = useAutomations(workspaceId);
   const enabledDrafts = useAutomationEnabledDrafts({ automations: items, enable, disable });
@@ -31,11 +33,9 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
         <div>
           <h2 className="text-lg font-semibold flex items-center gap-2">
             <IconBolt className="h-5 w-5" />
-            Automations
+            {t("common:automations")}
           </h2>
-          <p className="text-sm text-muted-foreground">
-            Create rules that automatically trigger agent tasks.
-          </p>
+          <p className="text-sm text-muted-foreground">{t("automations:listDescription")}</p>
         </div>
         <Button
           data-testid="new-automation-button"
@@ -43,12 +43,14 @@ export function AutomationsListPage({ workspaceId }: AutomationsListPageProps) {
           onClick={() => router.push(`/settings/workspace/${workspaceId}/automations/new`)}
         >
           <IconPlus className="h-4 w-4 mr-1" />
-          New Automation
+          {t("automations:newAutomation")}
         </Button>
       </div>
       <Separator />
       {loading && items.length === 0 ? (
-        <div className="py-12 text-center text-muted-foreground">Loading automations...</div>
+        <div className="py-12 text-center text-muted-foreground">
+          {t("automations:loadingAutomations")}
+        </div>
       ) : (
         <AutomationsTable
           automations={enabledDrafts.automations}

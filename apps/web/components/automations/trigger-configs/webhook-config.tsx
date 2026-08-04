@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { Trans, useTranslation } from "react-i18next";
+import { t as translate } from "@/lib/i18n";
 import { toast } from "@/lib/toast/sonner";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -14,6 +16,15 @@ type WebhookConfigProps = {
   automationId: string | null;
   workspaceId: string;
 };
+
+// Wire syntax the user copies verbatim: the header the backend checks, and the
+// placeholder paths the prompt renderer resolves. These are interpolated into
+// the help text rather than written into the catalog, so the pseudo-locale
+// cannot accent them into a header or path that no longer resolves.
+const WEBHOOK_SECRET_HEADER = "X-Webhook-Secret";
+const WEBHOOK_PATH_PLACEHOLDER = "{{webhook.<path>}}";
+const WEBHOOK_PATH_EXAMPLE = "{{webhook.pull_request.number}}";
+const codeClass = "bg-muted px-1 rounded";
 
 // extractPaths walks a parsed JSON object two levels deep and returns the
 // dot-paths to leaf scalars (string/number/bool). For nested objects it
@@ -59,6 +70,7 @@ function extractKeys(json: string): string[] {
 }
 
 export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState<"url" | "secret" | null>(null);
   const [samplePayload, setSamplePayload] = useState("");
 
@@ -74,9 +86,7 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
   if (!automationId) {
     return (
       <div className="space-y-3">
-        <p className="text-xs text-muted-foreground">
-          Webhook URL will be available after saving the automation.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("automations:webhookUrlAfterSave")}</p>
         <SamplePayloadSection
           samplePayload={samplePayload}
           onChange={setSamplePayload}
@@ -105,10 +115,18 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
         onCopy={(value) => copyValue(value, "secret")}
       />
       <p className="text-xs text-muted-foreground">
-        Send a POST request with a JSON body and the secret in the{" "}
-        <code className="bg-muted px-1 rounded">X-Webhook-Secret</code> header. Reference fields
-        from the payload with <code className="bg-muted px-1 rounded">{`{{webhook.<path>}}`}</code>,
-        e.g. <code className="bg-muted px-1 rounded">{`{{webhook.pull_request.number}}`}</code>.
+        <Trans
+          i18nKey="automations:webhookUsageHelp"
+          values={{
+            header: WEBHOOK_SECRET_HEADER,
+            placeholder: WEBHOOK_PATH_PLACEHOLDER,
+            example: WEBHOOK_PATH_EXAMPLE,
+          }}
+        >
+          <code className={codeClass} />
+          <code className={codeClass} />
+          <code className={codeClass} />
+        </Trans>
       </p>
       <SamplePayloadSection
         samplePayload={samplePayload}
@@ -120,9 +138,10 @@ export function WebhookConfig({ automationId, workspaceId }: WebhookConfigProps)
 }
 
 function UrlField({ url, copied, onCopy }: { url: string; copied: boolean; onCopy: () => void }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">Webhook URL</Label>
+      <Label className="text-xs">{t("automations:webhookUrlLabel")}</Label>
       <div className="flex gap-2">
         <Input value={url} readOnly className="font-mono text-xs" />
         <Button variant="outline" size="sm" className="cursor-pointer shrink-0" onClick={onCopy}>
@@ -135,13 +154,16 @@ function UrlField({ url, copied, onCopy }: { url: string; copied: boolean; onCop
 
 type SecretState = { status: "loading" } | { status: "ready"; value: string } | { status: "error" };
 
+// A plain function returning copy is invisible to `i18next/no-literal-string`,
+// so the loading label is resolved by the caller and passed in.
 function inputValueFor(
   status: SecretState["status"],
   secret: string | null,
   hidden: boolean,
   masked: string,
+  loadingLabel: string,
 ): string {
-  if (status === "loading") return "Loading…";
+  if (status === "loading") return loadingLabel;
   if (!secret || hidden) return masked;
   return secret;
 }
@@ -157,6 +179,7 @@ function SecretField({
   copied: boolean;
   onCopy: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   // The secret is revealable any time — fetch it once on mount so users
   // landing on a saved automation can see/copy it without an extra click.
   // Combining status + value in one state avoids a setState(true) inside
@@ -173,8 +196,9 @@ function SecretField({
       })
       .catch((err) => {
         if (cancelled) return;
+        // The interpolated value is an API/network diagnostic and stays English.
         const msg = err instanceof Error ? err.message : String(err);
-        toast.error(`Failed to load webhook secret: ${msg}`);
+        toast.error(translate("automations:failedToLoadWebhookSecret", { error: msg }));
         setState({ status: "error" });
       });
     return () => {
@@ -184,11 +208,17 @@ function SecretField({
 
   const secret = state.status === "ready" ? state.value : null;
   const masked = "•".repeat(32);
-  const inputValue = inputValueFor(state.status, secret, hidden, masked);
+  const inputValue = inputValueFor(
+    state.status,
+    secret,
+    hidden,
+    masked,
+    t("automations:webhookSecretLoading"),
+  );
 
   return (
     <div className="space-y-1.5">
-      <Label className="text-xs">Webhook secret</Label>
+      <Label className="text-xs">{t("automations:webhookSecretLabel")}</Label>
       <div className="flex gap-2">
         <Input
           value={inputValue}
@@ -229,10 +259,12 @@ function SamplePayloadSection({
   onChange: (value: string) => void;
   detectedKeys: string[];
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
       <div className="space-y-1.5">
-        <Label className="text-xs">Sample payload (optional)</Label>
+        <Label className="text-xs">{t("automations:samplePayloadLabel")}</Label>
+        {/* An example JSON body — a value, not prose. */}
         <Textarea
           value={samplePayload}
           onChange={(e) => onChange(e.target.value)}
@@ -240,12 +272,10 @@ function SamplePayloadSection({
           className="font-mono text-xs min-h-[60px] resize-y"
           rows={2}
         />
-        <p className="text-xs text-muted-foreground">
-          Paste an example JSON body to discover available placeholders.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("automations:samplePayloadHelp")}</p>
       </div>
       <div className="space-y-1">
-        <Label className="text-xs">Available placeholders</Label>
+        <Label className="text-xs">{t("automations:availablePlaceholders")}</Label>
         <div className="flex flex-wrap gap-1.5">
           <PlaceholderBadge value="webhook.body" />
           {detectedKeys.map((key) => (

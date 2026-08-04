@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Label } from "@kandev/ui/label";
 import type { AutomationTrigger, TriggerType, TriggerTypeInfo } from "@/lib/types/automation";
@@ -31,6 +32,7 @@ export function TriggersSection({
   onToggleTrigger,
   onDeleteTrigger,
 }: TriggersSectionProps) {
+  const { t } = useTranslation();
   const webhookTrigger = useMemo(() => triggers.find((t) => t.type === "webhook"), [triggers]);
   const savedWebhookTrigger = useMemo(
     () => savedTriggers.find((t) => t.type === "webhook"),
@@ -85,7 +87,10 @@ export function TriggersSection({
           onToggleEnabled={(enabled) => onToggleTrigger(webhookTrigger.id, enabled)}
           onDelete={handleRemoveWebhook}
         />
-        <SwitchModeButton label="Switch to scheduled" onClick={handleRemoveWebhook} />
+        <SwitchModeButton
+          label={t("automations:switchToScheduled")}
+          onClick={handleRemoveWebhook}
+        />
       </div>
     );
   }
@@ -108,7 +113,7 @@ export function TriggersSection({
         onToggleTrigger={onToggleTrigger}
         onDeleteTrigger={onDeleteTrigger}
       />
-      <SwitchModeButton label="Or use a webhook instead" onClick={handleAddWebhook} />
+      <SwitchModeButton label={t("automations:orUseWebhookInstead")} onClick={handleAddWebhook} />
     </div>
   );
 }
@@ -122,9 +127,10 @@ function ScheduleArea({
   savedScheduleTrigger: AutomationTrigger | undefined;
   onScheduleChange: (config: Record<string, unknown>) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-medium">Schedule</Label>
+      <Label className="text-xs font-medium">{t("automations:scheduleLabel")}</Label>
       <ScheduleSelector
         config={scheduleTrigger?.config ?? null}
         isDirty={
@@ -158,9 +164,10 @@ function ConditionArea({
   onToggleTrigger: (triggerId: string, enabled: boolean) => void;
   onDeleteTrigger: (triggerId: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-2">
-      <Label className="text-xs font-medium">Watch for</Label>
+      <Label className="text-xs font-medium">{t("automations:watchForLabel")}</Label>
       {trigger ? (
         <div className="space-y-2">
           <TriggerCard
