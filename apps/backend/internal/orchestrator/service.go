@@ -151,6 +151,9 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetPreviousStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 	GetWorkflowAgentProfileID(ctx context.Context, workflowID string) (string, error)
+	// GetWorkflowPrompt returns the optional workflow-level agent instructions
+	// prepended at step entry. Empty string means the workflow has no prompt.
+	GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error)
 }
 
 // PromptReferenceExpander resolves "@name" saved-prompt references embedded in

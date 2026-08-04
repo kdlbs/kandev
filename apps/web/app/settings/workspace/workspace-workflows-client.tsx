@@ -193,7 +193,7 @@ function useWorkflowActions({
 
   const handleUpdateWorkflow = (
     workflowId: string,
-    updates: { name?: string; description?: string; agent_profile_id?: string },
+    updates: { name?: string; description?: string; prompt?: string; agent_profile_id?: string },
   ) => {
     setWorkflowItems((prev) =>
       prev.map((wf) =>

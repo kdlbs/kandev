@@ -53,6 +53,99 @@ func TestBuildWorkflowPrompt_ReplacesTaskPromptPlaceholder(t *testing.T) {
 	}
 }
 
+func TestBuildWorkflowPrompt_PrependsWorkflowPromptBeforeStepPrompt(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Always open a draft PR."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Commit the changes.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nAlways open a draft PR.\n\nCommit the changes."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_PrependsWorkflowPromptWithTaskPromptPlaceholder(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Keep CI green."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Implement this exactly:\n\n{{task_prompt}}",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nKeep CI green.\n\nImplement this exactly:\n\nMigrate Atlantis datasource."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_PrependsWorkflowPromptWhenStepPromptEmpty(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Mention security constraints."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "Migrate Atlantis datasource.", step, "task-1", "session-1", false)
+
+	want := "## Workflow instructions\n\nMention security constraints.\n\nMigrate Atlantis datasource."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_OmitsWorkflowHeadingWhenPromptBlank(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "   "
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Commit the changes.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-1", "session-1", false)
+
+	if strings.Contains(got, "## Workflow instructions") {
+		t.Fatalf("expected blank workflow prompt to be omitted, got %q", got)
+	}
+	if got != "Commit the changes." {
+		t.Fatalf("buildWorkflowPrompt() = %q, want step prompt only", got)
+	}
+}
+
+func TestBuildWorkflowPrompt_InterpolatesWorkflowPromptPlaceholders(t *testing.T) {
+	stepGetter := newMockStepGetter()
+	stepGetter.workflowPrompts["wf-1"] = "Task id is {task_id}."
+	svc := createTestService(setupTestRepo(t), stepGetter, newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{
+		ID:         "step-1",
+		WorkflowID: "wf-1",
+		Prompt:     "Do the work.",
+	}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-99", "session-1", false)
+
+	if !strings.Contains(got, "Task id is task-99.") {
+		t.Fatalf("expected interpolated workflow prompt, got %q", got)
+	}
+	if strings.Contains(got, "{task_id}") {
+		t.Fatalf("expected {task_id} placeholder to be replaced, got %q", got)
+	}
+}
+
 func TestBuildWorkflowPrompt_UsesStepPromptOnlyWithoutTaskPromptPlaceholder(t *testing.T) {
 	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
 	step := &wfmodels.WorkflowStep{

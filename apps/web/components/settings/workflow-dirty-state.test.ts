@@ -36,6 +36,14 @@ describe("workflow dirty state", () => {
 
     expect(isWorkflowFieldDirty(draft, workflow, "name")).toBe(true);
     expect(isWorkflowFieldDirty(draft, workflow, "agent_profile_id")).toBe(false);
+    expect(isWorkflowFieldDirty(draft, workflow, "prompt")).toBe(false);
+  });
+
+  it("marks a changed workflow prompt dirty", () => {
+    const draft = { ...workflow, prompt: "Always open a draft PR." };
+    expect(isWorkflowFieldDirty(draft, workflow, "prompt")).toBe(true);
+    expect(isWorkflowFieldDirty(draft, { ...workflow, prompt: "" }, "prompt")).toBe(true);
+    expect(isWorkflowFieldDirty(draft, draft, "prompt")).toBe(false);
   });
 
   it("marks new and changed steps dirty", () => {

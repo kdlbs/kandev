@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
 import { CardContent } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
+import { Textarea } from "@kandev/ui/textarea";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
@@ -42,6 +43,7 @@ type WorkflowCardProps = {
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
+    prompt?: string;
     agent_profile_id?: string;
   }) => void;
   onDeleteWorkflow: () => Promise<unknown>;
@@ -218,6 +220,7 @@ type WorkflowCardBodyProps = {
   onUpdateWorkflow: (updates: {
     name?: string;
     description?: string;
+    prompt?: string;
     agent_profile_id?: string;
   }) => void;
   workflowLoading: boolean;
@@ -305,6 +308,22 @@ function WorkflowCardBody({
             </SelectContent>
           </Select>
         </div>
+      </div>
+      <div className="space-y-1.5">
+        <Label className="flex items-center gap-1">
+          <span>{t("workflows:workflowPrompt")}</span>
+          <HelpTip text={t("workflows:workflowPromptHelp")} />
+        </Label>
+        <Textarea
+          value={workflow.prompt ?? ""}
+          onChange={(e) => onUpdateWorkflow({ prompt: e.target.value })}
+          disabled={readOnly}
+          placeholder={t("workflows:workflowPromptPlaceholder")}
+          rows={4}
+          className="min-h-24 font-mono text-sm"
+          data-testid="workflow-prompt-input"
+          data-settings-dirty={isWorkflowFieldDirty(workflow, savedWorkflow, "prompt")}
+        />
       </div>
       <div className="space-y-2">
         <Label>{t("workflows:workflowSteps")}</Label>

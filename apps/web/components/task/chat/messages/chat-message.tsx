@@ -10,7 +10,13 @@ import {
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
-import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
+import {
+  IconWand,
+  IconMessageDots,
+  IconFile,
+  IconFolder,
+  IconChevronRight,
+} from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
@@ -40,6 +46,8 @@ import type { EntityReference } from "@/lib/types/entity-reference";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import { t } from "@/lib/i18n";
+import { splitWorkflowInstructions } from "@/lib/utils/workflow-instructions";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 
 type ChatMessageProps = {
   comment: Message;
@@ -109,6 +117,84 @@ type UserMessageBodyOptions = {
   onOpenFile?: (path: string) => void;
 };
 
+function UserMessageMarkdown({
+  content,
+  promptMentionComponents,
+  taskId,
+  worktreePath,
+  onOpenFile,
+}: {
+  content: string;
+  promptMentionComponents?: Components;
+  taskId: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  return (
+    <div className="markdown-body markdown-body-user max-w-none">
+      <MemoizedMarkdown
+        content={content}
+        taskId={taskId}
+        components={promptMentionComponents}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
+    </div>
+  );
+}
+
+function CollapsedWorkflowInstructions({
+  instructions,
+  rest,
+  promptMentionComponents,
+  taskId,
+  worktreePath,
+  onOpenFile,
+}: {
+  instructions: string;
+  rest: string;
+  promptMentionComponents?: Components;
+  taskId: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="space-y-2">
+      <Collapsible open={open} onOpenChange={setOpen}>
+        <CollapsibleTrigger
+          className="flex w-full cursor-pointer items-center gap-1 rounded-md bg-muted/40 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/60"
+          data-testid="workflow-instructions-toggle"
+        >
+          <IconChevronRight
+            className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-90")}
+          />
+          <span>{t("workflows:workflowInstructionsCollapsed")}</span>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="pt-2">
+          <UserMessageMarkdown
+            content={instructions}
+            promptMentionComponents={promptMentionComponents}
+            taskId={taskId}
+            worktreePath={worktreePath}
+            onOpenFile={onOpenFile}
+          />
+        </CollapsibleContent>
+      </Collapsible>
+      {rest.trim() !== "" && (
+        <UserMessageMarkdown
+          content={rest}
+          promptMentionComponents={promptMentionComponents}
+          taskId={taskId}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+        />
+      )}
+    </div>
+  );
+}
+
 function renderUserMessageBody({
   hasContent,
   showRaw,
@@ -124,16 +210,27 @@ function renderUserMessageBody({
     return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
   }
   if (hasContent) {
-    return (
-      <div className="markdown-body markdown-body-user max-w-none">
-        <MemoizedMarkdown
-          content={content}
+    const split = splitWorkflowInstructions(content);
+    if (split.hasInstructions) {
+      return (
+        <CollapsedWorkflowInstructions
+          instructions={split.instructions}
+          rest={split.rest}
+          promptMentionComponents={promptMentionComponents}
           taskId={taskId}
-          components={promptMentionComponents}
           worktreePath={worktreePath}
           onOpenFile={onOpenFile}
         />
-      </div>
+      );
+    }
+    return (
+      <UserMessageMarkdown
+        content={content}
+        promptMentionComponents={promptMentionComponents}
+        taskId={taskId}
+        worktreePath={worktreePath}
+        onOpenFile={onOpenFile}
+      />
     );
   }
   if (!hasAttachments) {

@@ -369,6 +369,11 @@ func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowAgentProfileID(ctx co
 	return a.svc.GetWorkflowAgentProfileID(ctx, workflowID)
 }
 
+// GetWorkflowPrompt implements orchestrator.WorkflowStepGetter.
+func (a *orchestratorWorkflowStepGetterAdapter) GetWorkflowPrompt(ctx context.Context, workflowID string) (string, error) {
+	return a.svc.GetWorkflowPrompt(ctx, workflowID)
+}
+
 // reviewTaskCreatorAdapter adapts the task service to the orchestrator's ReviewTaskCreator interface.
 type reviewTaskCreatorAdapter struct {
 	svc *taskservice.Service
