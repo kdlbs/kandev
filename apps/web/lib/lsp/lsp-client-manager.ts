@@ -214,7 +214,7 @@ class LSPClientManager {
       if (!wasCurrent) return;
 
       const current = this.statuses.get(key);
-      if (current?.state === "ready" || current?.state === "stopping") {
+      if (current?.state === "stopping") {
         this.setStatus(key, { state: "disabled" });
         this.statuses.delete(key);
         return;

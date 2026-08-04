@@ -893,13 +893,16 @@ test.describe("LSP file intelligence", () => {
       (event) => event.event === "crashing" && event.reason === "didOpen",
       "intentional server crash",
     );
-    await expect(statusButton).toHaveAttribute("data-lsp-state", "disabled", {
+    await expect(statusButton).toHaveAttribute("data-lsp-state", "error", {
       timeout: 15_000,
     });
+    const crashStatus = await openLspStatus(testPage);
+    await expect(crashStatus).toContainText("Error");
+    await expect(crashStatus).toContainText("language server exited");
     await expectFakeLspMarkerCount(testPage, 0);
 
     clearFakeKotlinLspModes(backend);
-    await performLspAction(testPage, "start");
+    await performLspAction(testPage, "retry");
     await expect(statusButton).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
     await expectFakeLspMarkerCount(testPage, 1);
     expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(2);
@@ -954,7 +957,7 @@ test.describe("LSP file intelligence", () => {
     await testPage.locator(".dv-default-tab", { hasText: task.filePaths[0] }).click();
     await expect(testPage.locator('[data-testid="lsp-status-button"]:visible')).toHaveAttribute(
       "data-lsp-state",
-      "disabled",
+      "error",
       { timeout: 15_000 },
     );
 

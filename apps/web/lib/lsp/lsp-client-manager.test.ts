@@ -263,6 +263,8 @@ describe("LSP client connection cleanup", () => {
 
     socket.failClosed(1006, "language server crashed");
 
+    const status = lspClientManager.getStatus("session", "typescript");
+    expect(status).toEqual({ state: "error", reason: "language server crashed" });
     expect(providerDispose).toHaveBeenCalledOnce();
     expect(mocks.setBuiltinTsSuppressed).toHaveBeenLastCalledWith(false);
     expect(placeholder.dispose).toHaveBeenCalledOnce();
