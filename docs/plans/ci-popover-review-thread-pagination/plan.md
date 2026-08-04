@@ -37,18 +37,21 @@ In `apps/backend/internal/github/graphql.go`:
 
 In `apps/backend/internal/github/graphql.go`:
 
-- Have both numbered-PR and branch-lookup decoders collect continuations for
-  selected PRs whose review-thread connection has another page.
+- Have the numbered-PR decoder collect continuations when a review-thread
+  connection has another page. Branch lookup only discovers PR metadata and
+  must not fail because an unused review-thread continuation fails; the next
+  numbered-watch sync owns the complete count.
 - Execute follow-up review-thread page queries in bounded batched rounds,
-  reusing `GraphQLExecutor` and the existing chunk size. Each round adds only
-  the unresolved nodes it actually received and advances through GitHub's
-  cursor until `hasNextPage` is false.
+  reusing `GraphQLExecutor` with a dedicated five-PR continuation chunk size.
+  Each round adds only the unresolved nodes it actually received and advances
+  through GitHub's cursor until `hasNextPage` is false.
 - Include the top-level rate-limit selection in follow-up queries so existing
   PAT and `gh` executors continue recording GraphQL quota.
-- Reject an absent, empty, or repeated continuation cursor, a missing/null
-  response alias, a decode failure, or any top-level GraphQL error. Return no
-  partially completed status map on such failure, allowing the existing
-  batched-query fallback to retain the previous complete count.
+- Reject an absent, empty, or repeated continuation cursor, pagination beyond
+  the initial `totalCount` page budget, a missing/null response alias, a decode
+  failure, or any top-level GraphQL error. Return no partially completed status
+  map on such failure, allowing the existing batched-query fallback to retain
+  the previous complete count.
 - Preserve existing partial-success behavior for repositories that are
   independently classified as missing, and issue no follow-up request when all
   selected PRs fit in their first page.
@@ -80,11 +83,12 @@ desktop E2E coverage for that behavior.
   **How:** Drive `runBatchedPRQuery` through a sequenced `GraphQLExecutor` and
   assert the initial query, continuation query, query count, and final
   `UnresolvedReviewThreads` value.
-- **What:** The branch-discovery query uses the same complete pagination
-  behavior for its selected PR.
+- **What:** Branch discovery returns a selected PR without fetching unused
+  review-thread continuation pages.
   **File:** `apps/backend/internal/github/graphql_test.go`.
-  **How:** Return a selected branch PR with a continuation and assert the exact
-  final count from `runBatchedBranchQuery`.
+  **How:** Return a selected branch PR whose review threads have another page,
+  provide no continuation response, and assert the PR is still discovered with
+  one GraphQL query.
 - **What:** A continuation error or invalid cursor never returns a partial
   status map.
   **File:** `apps/backend/internal/github/graphql_test.go`.
@@ -113,9 +117,10 @@ desktop E2E coverage for that behavior.
 
 ## Verification Results
 
-- Exact review-thread pagination is implemented for numbered and
-  branch-selected PRs. Follow-up pages remain batched, cursor cycles and
-  incomplete responses fail closed, and no partial count reaches persistence.
+- Exact review-thread pagination is implemented for numbered PRs. Follow-up
+  pages remain batched, cursor cycles and incomplete responses fail closed, and
+  no partial count reaches persistence. Branch discovery remains independent
+  of unused review-thread continuation pages.
 - Focused regression tests, the full GitHub backend package, scoped Go lint,
   and the existing Chromium popover scenario all pass. Exact commands and
   timings are recorded in the task file.

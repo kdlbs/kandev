@@ -283,6 +283,36 @@ func TestRunBatchedPRQuery_BatchesReviewThreadContinuations(t *testing.T) {
 	}
 }
 
+func TestRunBatchedPRQuery_BoundsReviewThreadContinuationBatchSize(t *testing.T) {
+	initialData := make(map[string]any, 6)
+	refs := make([]graphQLPRRef, 6)
+	pages := make([]map[string]any, 6)
+	for i := range refs {
+		repo := fmt.Sprintf("repo-%d", i)
+		initialData[fmt.Sprintf("repo%d", i)] = map[string]any{
+			"pr0": batchedPRFixture(
+				fmt.Sprintf("PR %d", i), fmt.Sprintf("https://x/%d", i),
+				101, resolvedReviewThreadNodes(100), true, fmt.Sprintf("cursor-%d", i),
+			),
+		}
+		refs[i] = graphQLPRRef{Owner: "o", Repo: repo, Number: i + 1}
+		pages[i] = reviewThreadsFixture(1, resolvedReviewThreadNodes(1), false, "done")
+	}
+
+	exec := &stubGraphQLExecutor{responses: []string{
+		mustJSON(t, map[string]any{"data": initialData}),
+		reviewThreadPagesResponse(t, pages...),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), false, "done"),
+	}}
+
+	if _, err := runBatchedPRQuery(context.Background(), exec, refs); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.queries) != 3 {
+		t.Fatalf("GraphQL query count = %d, want 3", len(exec.queries))
+	}
+}
+
 func TestRunBatchedPRQuery_OneReviewThreadPageSkipsContinuation(t *testing.T) {
 	exec := &stubGraphQLExecutor{
 		response: batchedPRReviewThreadsResponse(
@@ -306,7 +336,7 @@ func TestRunBatchedPRQuery_OneReviewThreadPageSkipsContinuation(t *testing.T) {
 
 func TestRunBatchedPRQuery_RejectsRepeatedReviewThreadCursor(t *testing.T) {
 	exec := &stubGraphQLExecutor{responses: []string{
-		batchedPRReviewThreadsResponse(t, 102, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		batchedPRReviewThreadsResponse(t, 201, resolvedReviewThreadNodes(100), true, "cursor-1"),
 		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), true, "cursor-1"),
 		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), false, "cursor-2"),
 	}}
@@ -317,13 +347,102 @@ func TestRunBatchedPRQuery_RejectsRepeatedReviewThreadCursor(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected repeated review-thread cursor to fail")
 	}
+	if !strings.Contains(err.Error(), "repeated cursor") {
+		t.Fatalf("error = %q, want repeated-cursor failure", err)
+	}
+}
+
+func TestRunBatchedPRQuery_RejectsPagesBeyondInitialTotalCount(t *testing.T) {
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), true, "cursor-2"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(1), false, "cursor-3"),
+	}}
+
+	_, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err == nil {
+		t.Fatal("expected review-thread pages beyond initial totalCount to fail")
+	}
+	if !strings.Contains(err.Error(), "page limit") {
+		t.Fatalf("error = %q, want page-limit failure", err)
+	}
+}
+
+func TestRunBatchedPRQuery_RejectsEmptyReviewThreadCursor(t *testing.T) {
+	tests := []struct {
+		name      string
+		responses []string
+	}{
+		{
+			name: "initial page",
+			responses: []string{
+				batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, ""),
+			},
+		},
+		{
+			name: "continuation page",
+			responses: []string{
+				batchedPRReviewThreadsResponse(t, 201, resolvedReviewThreadNodes(100), true, "cursor-1"),
+				reviewThreadPageResponse(t, resolvedReviewThreadNodes(100), true, ""),
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := &stubGraphQLExecutor{responses: tt.responses}
+			got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+				{Owner: "o", Repo: "r", Number: 42},
+			})
+			if err == nil || got != nil {
+				t.Fatalf("got (%v, %v), want (nil, error)", got, err)
+			}
+			if !strings.Contains(err.Error(), "empty cursor") {
+				t.Fatalf("error = %q, want empty-cursor failure", err)
+			}
+		})
+	}
+}
+
+func TestRunBatchedPRQuery_PaginatesMultipleReviewThreadRounds(t *testing.T) {
+	secondPage := append(
+		[]map[string]bool{{"isResolved": false}},
+		resolvedReviewThreadNodes(99)...,
+	)
+	exec := &stubGraphQLExecutor{responses: []string{
+		batchedPRReviewThreadsResponse(t, 202, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, secondPage, true, "cursor-2"),
+		reviewThreadPageResponse(t, []map[string]bool{
+			{"isResolved": false},
+			{"isResolved": true},
+		}, false, "cursor-3"),
+	}}
+
+	got, err := runBatchedPRQuery(context.Background(), exec, []graphQLPRRef{
+		{Owner: "o", Repo: "r", Number: 42},
+	})
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(exec.queries) != 3 {
+		t.Fatalf("GraphQL query count = %d, want 3", len(exec.queries))
+	}
+	if got[prStatusCacheKey("o", "r", 42)].UnresolvedReviewThreads != 2 {
+		t.Fatalf("UnresolvedReviewThreads = %d, want 2", got[prStatusCacheKey("o", "r", 42)].UnresolvedReviewThreads)
+	}
 }
 
 func TestRunBatchedPRQuery_RejectsNullReviewThreadPage(t *testing.T) {
 	exec := &stubGraphQLExecutor{responses: []string{
 		batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1"),
 		mustJSON(t, map[string]any{
-			"data": map[string]any{"repo0": map[string]any{"pr0": nil}},
+			"data": map[string]any{
+				"repo0": map[string]any{
+					"pr0": map[string]any{"reviewThreads": nil},
+				},
+			},
 		}),
 	}}
 
@@ -461,11 +580,8 @@ func TestRunBatchedBranchQuery_DecodesPRNode(t *testing.T) {
 	}
 }
 
-func TestRunBatchedBranchQuery_PaginatesReviewThreads(t *testing.T) {
-	exec := &stubGraphQLExecutor{responses: []string{
-		batchedBranchReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1"),
-		reviewThreadPageResponse(t, []map[string]bool{{"isResolved": false}}, false, "cursor-2"),
-	}}
+func TestRunBatchedBranchQuery_SkipsUnusedReviewThreadPagination(t *testing.T) {
+	exec := &stubGraphQLExecutor{response: batchedBranchReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1")}
 
 	got, err := runBatchedBranchQuery(context.Background(), exec, []graphQLBranchRef{
 		{Owner: "o", Repo: "r", Branch: "feat"},
@@ -475,8 +591,11 @@ func TestRunBatchedBranchQuery_PaginatesReviewThreads(t *testing.T) {
 	}
 
 	status := got[graphqlBranchKey("o", "r", "feat")]
-	if status.UnresolvedReviewThreads != 1 {
-		t.Fatalf("UnresolvedReviewThreads = %d, want 1", status.UnresolvedReviewThreads)
+	if status == nil || status.PR == nil || status.PR.Number != 7 {
+		t.Fatalf("branch status = %#v, want discovered PR #7", status)
+	}
+	if len(exec.queries) != 1 {
+		t.Fatalf("GraphQL query count = %d, want 1", len(exec.queries))
 	}
 }
 

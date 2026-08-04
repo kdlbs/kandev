@@ -145,6 +145,9 @@ Decision: [ADR-0051](../../decisions/0051-pr-agent-notifications-extend-task-pr-
   count and follows the existing PR-status sync failure path. A partial page
   never replaces the last complete persisted count or becomes fresh automation
   input.
+- Branch-only PR discovery associates PR metadata without fetching unused
+  review-thread continuation pages. Once the watch has a PR number, the next
+  numbered status sync produces the complete review-thread count.
 - Saving PR automation options while any option is enabled immediately
   evaluates the task's current linked PRs instead of waiting for the next PR
   watch poll. Prompt edits do not reset unchanged checkpoints.

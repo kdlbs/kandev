@@ -11,15 +11,17 @@ spec: "../../specs/ui/ci-pr-automation.md"
 # Task 01: Paginate review threads
 
 Implement complete GitHub review-thread pagination for lightweight numbered-PR
-and branch-lookup GraphQL queries, then prove the exact count reaches the
-persisted task PR used by the CI popover and automation.
+GraphQL queries, keep branch discovery independent from unused continuation
+pages, then prove the exact count reaches the persisted task PR used by the CI
+popover and automation.
 
 ## Acceptance
 
 1. PRs with more than 100 fully resolved review threads persist zero
    unresolved threads; unresolved nodes on later pages are counted exactly.
-2. PRs fitting on one page make no follow-up request, while numbered and
-   branch-selected PRs with continuations use bounded batched page queries.
+2. PRs fitting on one page make no follow-up request. Numbered PRs with
+   continuations use bounded batched page queries; branch discovery returns PR
+   metadata without depending on unused continuation pages.
 3. Missing, invalid, or failed continuation data returns no partial populated
    count, preserving the prior complete stored value through existing fallback
    behavior.
@@ -77,20 +79,29 @@ remaining risks. Mark this task `done`, check it in `plan.md`, and synchronize
 
 - Cursor/query design: the initial batched query requests
   `pageInfo { hasNextPage endCursor }`; only connections with another page
-  become continuations. Continuations for up to 50 PRs share each follow-up
-  query round. Each status counts only returned unresolved nodes. Empty or
-  repeated cursors, missing/null aliases, decode failures, executor failures,
-  and top-level GraphQL errors return no status map.
+  become continuations for numbered PRs. Continuations for up to five PRs share
+  each follow-up query round. Each status counts only returned unresolved
+  nodes. Empty or repeated cursors, pages beyond the initial `totalCount`
+  budget, missing/null aliases, decode failures, executor failures, and
+  top-level GraphQL errors return no status map.
+- Branch discovery intentionally skips unused review-thread continuation pages;
+  after association, the next numbered-watch sync owns the complete count.
 - Shared owner/repository grouping now drives initial query aliases, error
   aliases, and response decoding. This keeps aliases deterministic and brought
   the decoder under the repository complexity limit.
 - TDD red evidence: the old logic reported `2` instead of `0` for 102 fully
-  resolved threads, missed an unresolved thread on a branch PR's second page,
-  and accepted repeated-cursor and null-page responses. Each regression turned
-  green after pagination and validation were implemented.
-- Focused final regression command: 9 tests passed in `0.077s`.
+  resolved threads and accepted repeated-cursor and null-page responses. Each
+  regression turned green after pagination and validation were implemented.
+- PR review remediation added a `totalCount`-derived page budget, dedicated
+  five-PR continuation chunks, empty-cursor and three-page coverage, a precise
+  null-connection fixture, and a branch-discovery regression. The duplicated
+  numbered/branch completion tail now shares one helper, and page decoding and
+  advancement are split into focused helpers to stay within complexity limits.
+- Focused final regression command passed all pagination-budget, cursor,
+  multi-round, null-connection, continuation-batching, and branch-discovery
+  cases in `0.184s`.
 - Full backend package: `go test ./internal/github -count=1` passed in
-  `19.500s`.
+  `12.569s`.
 - Scoped lint: `golangci-lint run ./internal/github/...` reported `0 issues`.
 - Workspace install: lockfile unchanged; 1,143 packages reused/installed in
   `4.8s`.

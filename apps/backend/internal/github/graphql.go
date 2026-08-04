@@ -25,13 +25,18 @@ type GraphQLExecutor interface {
 const graphQLPRBatchAlias = "pr"
 
 // graphQLBatchChunkSize bounds the number of aliased fields per request to
-// stay well under GitHub's per-query node-count limit (500). 50 PRs × ~10
-// fields = ~500 nodes, leaving headroom.
+// keep initial status queries and their decoded response size manageable.
 const graphQLBatchChunkSize = 50
+
+// Each continuation can return 100 review-thread nodes. Five continuations
+// keep a follow-up query near 500 connection nodes while preserving batching.
+const graphQLReviewThreadContinuationChunkSize = 5
 
 // graphQLBranchProbeLimit fetches two matches so branch lookup can detect
 // ambiguous fork heads instead of linking the first arbitrary PR.
 const graphQLBranchProbeLimit = 2
+
+const graphQLReviewThreadPageSize = 100
 
 // reviewNode is one PR review entry from the batched GraphQL query.
 type reviewNode struct {
@@ -93,25 +98,38 @@ type reviewThreadConnection struct {
 }
 
 type reviewThreadContinuation struct {
-	Ref         graphQLPRRef
-	Cursor      string
-	SeenCursors map[string]struct{}
-	Status      *PRStatus
+	Ref            graphQLPRRef
+	Cursor         string
+	SeenCursors    map[string]struct{}
+	RemainingPages int
+	Status         *PRStatus
 }
 
 func newReviewThreadContinuation(
 	ref graphQLPRRef,
-	cursor string,
+	connection reviewThreadConnection,
 	status *PRStatus,
 ) (reviewThreadContinuation, error) {
+	cursor := connection.PageInfo.EndCursor
 	if cursor == "" {
 		return reviewThreadContinuation{}, fmt.Errorf(
 			"review thread pagination for %s/%s#%d returned an empty cursor",
 			ref.Owner, ref.Repo, ref.Number,
 		)
 	}
+	remainingThreads := connection.TotalCount - len(connection.Nodes)
+	if remainingThreads <= 0 {
+		return reviewThreadContinuation{}, fmt.Errorf(
+			"review thread pagination for %s/%s#%d exceeded totalCount %d",
+			ref.Owner, ref.Repo, ref.Number, connection.TotalCount,
+		)
+	}
 	return reviewThreadContinuation{
-		Ref: ref, Cursor: cursor, SeenCursors: map[string]struct{}{cursor: {}}, Status: status,
+		Ref:            ref,
+		Cursor:         cursor,
+		SeenCursors:    map[string]struct{}{cursor: {}},
+		RemainingPages: (remainingThreads + graphQLReviewThreadPageSize - 1) / graphQLReviewThreadPageSize,
+		Status:         status,
 	}, nil
 }
 
@@ -125,12 +143,16 @@ type graphQLBranchRef struct {
 // chunkedRefs splits refs into chunks of at most graphQLBatchChunkSize so
 // callers can keep individual GraphQL queries under the node-count limit.
 func chunkedRefs[T any](refs []T) [][]T {
+	return chunkRefs(refs, graphQLBatchChunkSize)
+}
+
+func chunkRefs[T any](refs []T, chunkSize int) [][]T {
 	if len(refs) == 0 {
 		return nil
 	}
-	out := make([][]T, 0, (len(refs)+graphQLBatchChunkSize-1)/graphQLBatchChunkSize)
-	for i := 0; i < len(refs); i += graphQLBatchChunkSize {
-		end := i + graphQLBatchChunkSize
+	out := make([][]T, 0, (len(refs)+chunkSize-1)/chunkSize)
+	for i := 0; i < len(refs); i += chunkSize {
+		end := i + chunkSize
 		if end > len(refs) {
 			end = len(refs)
 		}
@@ -352,7 +374,8 @@ func prFieldsBlock() string {
 		`author { login } createdAt updatedAt mergedAt closedAt ` +
 		`reviews(last: 100) { nodes { state author { login } submittedAt } } ` +
 		`reviewRequests(first: 0) { totalCount } ` +
-		`reviewThreads(first: 100) { totalCount nodes { isResolved } pageInfo { hasNextPage endCursor } } ` +
+		fmt.Sprintf(`reviewThreads(first: %d) { totalCount nodes { isResolved } pageInfo { hasNextPage endCursor } } `,
+			graphQLReviewThreadPageSize) +
 		`commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }`
 }
 
@@ -586,8 +609,19 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	batchErr := wrapBatchedErrors(allMissing, allResidual)
-	if batchErr != nil && (len(allMissing) == 0 || len(allResidual) > 0) {
+	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, continuations)
+}
+
+func finishBatchedQuery(
+	ctx context.Context,
+	exec GraphQLExecutor,
+	result map[string]*PRStatus,
+	missing []repoRef,
+	residual []graphQLError,
+	continuations []reviewThreadContinuation,
+) (map[string]*PRStatus, error) {
+	batchErr := wrapBatchedErrors(missing, residual)
+	if batchErr != nil && (len(missing) == 0 || len(residual) > 0) {
 		return nil, batchErr
 	}
 	if err := completeReviewThreadContinuations(ctx, exec, continuations); err != nil {
@@ -608,8 +642,9 @@ func buildReviewThreadPageQuery(continuations []reviewThreadContinuation) string
 	b.WriteString("query ReviewThreadPages { ")
 	for i, continuation := range continuations {
 		fmt.Fprintf(&b,
-			`repo%d: repository(owner: %q, name: %q) { pr0: pullRequest(number: %d) { reviewThreads(first: 100, after: %q) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } } `,
-			i, continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number, continuation.Cursor,
+			`repo%d: repository(owner: %q, name: %q) { pr0: pullRequest(number: %d) { reviewThreads(first: %d, after: %q) { nodes { isResolved } pageInfo { hasNextPage endCursor } } } } `,
+			i, continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number,
+			graphQLReviewThreadPageSize, continuation.Cursor,
 		)
 	}
 	b.WriteString(`rateLimit { limit remaining resetAt cost } }`)
@@ -623,7 +658,7 @@ func completeReviewThreadContinuations(
 ) error {
 	for len(continuations) > 0 {
 		next := make([]reviewThreadContinuation, 0, len(continuations))
-		for _, chunk := range chunkedRefs(continuations) {
+		for _, chunk := range chunkRefs(continuations, graphQLReviewThreadContinuationChunkSize) {
 			var resp struct {
 				Data   map[string]json.RawMessage `json:"data"`
 				Errors []graphQLError             `json:"errors"`
@@ -651,57 +686,96 @@ func applyReviewThreadPageChunk(
 ) ([]reviewThreadContinuation, error) {
 	next := make([]reviewThreadContinuation, 0, len(continuations))
 	for i, continuation := range continuations {
-		repoAlias := fmt.Sprintf("repo%d", i)
-		rawRepo, ok := data[repoAlias]
-		if !ok || isNullGraphQLValue(rawRepo) {
-			return nil, fmt.Errorf("review thread response missing repository alias %s", repoAlias)
+		page, err := decodeReviewThreadPage(i, data)
+		if err != nil {
+			return nil, err
 		}
-		var repoBlock map[string]json.RawMessage
-		if err := json.Unmarshal(rawRepo, &repoBlock); err != nil {
-			return nil, fmt.Errorf("decode review thread repo alias repo%d: %w", i, err)
+		continuation, hasNext, err := advanceReviewThreadContinuation(continuation, page)
+		if err != nil {
+			return nil, err
 		}
-		rawPR, ok := repoBlock["pr0"]
-		if !ok || isNullGraphQLValue(rawPR) {
-			return nil, fmt.Errorf("review thread response missing PR alias %s.pr0", repoAlias)
-		}
-		var rawPage struct {
-			ReviewThreads json.RawMessage `json:"reviewThreads"`
-		}
-		if err := json.Unmarshal(rawPR, &rawPage); err != nil {
-			return nil, fmt.Errorf("decode review thread PR alias repo%d.pr0: %w", i, err)
-		}
-		if isNullGraphQLValue(rawPage.ReviewThreads) {
-			return nil, fmt.Errorf("review thread response missing connection %s.pr0.reviewThreads", repoAlias)
-		}
-		var page reviewThreadConnection
-		if err := json.Unmarshal(rawPage.ReviewThreads, &page); err != nil {
-			return nil, fmt.Errorf("decode review thread connection %s.pr0: %w", repoAlias, err)
-		}
-		for _, thread := range page.Nodes {
-			if !thread.IsResolved {
-				continuation.Status.UnresolvedReviewThreads++
-			}
-		}
-		if page.PageInfo.HasNextPage {
-			nextCursor := page.PageInfo.EndCursor
-			if nextCursor == "" {
-				return nil, fmt.Errorf(
-					"review thread pagination for %s/%s#%d returned an empty cursor",
-					continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number,
-				)
-			}
-			if _, seen := continuation.SeenCursors[nextCursor]; seen {
-				return nil, fmt.Errorf(
-					"review thread pagination for %s/%s#%d repeated cursor %q",
-					continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number, nextCursor,
-				)
-			}
-			continuation.SeenCursors[nextCursor] = struct{}{}
-			continuation.Cursor = nextCursor
+		if hasNext {
 			next = append(next, continuation)
 		}
 	}
 	return next, nil
+}
+
+func decodeReviewThreadPage(index int, data map[string]json.RawMessage) (reviewThreadConnection, error) {
+	repoAlias := fmt.Sprintf("repo%d", index)
+	rawRepo, ok := data[repoAlias]
+	if !ok || isNullGraphQLValue(rawRepo) {
+		return reviewThreadConnection{}, fmt.Errorf("review thread response missing repository alias %s", repoAlias)
+	}
+	var repoBlock map[string]json.RawMessage
+	if err := json.Unmarshal(rawRepo, &repoBlock); err != nil {
+		return reviewThreadConnection{}, fmt.Errorf("decode review thread repo alias %s: %w", repoAlias, err)
+	}
+	rawPR, ok := repoBlock["pr0"]
+	if !ok || isNullGraphQLValue(rawPR) {
+		return reviewThreadConnection{}, fmt.Errorf("review thread response missing PR alias %s.pr0", repoAlias)
+	}
+	var rawPage struct {
+		ReviewThreads json.RawMessage `json:"reviewThreads"`
+	}
+	if err := json.Unmarshal(rawPR, &rawPage); err != nil {
+		return reviewThreadConnection{}, fmt.Errorf("decode review thread PR alias %s.pr0: %w", repoAlias, err)
+	}
+	if isNullGraphQLValue(rawPage.ReviewThreads) {
+		return reviewThreadConnection{}, fmt.Errorf(
+			"review thread response missing connection %s.pr0.reviewThreads",
+			repoAlias,
+		)
+	}
+	var page reviewThreadConnection
+	if err := json.Unmarshal(rawPage.ReviewThreads, &page); err != nil {
+		return reviewThreadConnection{}, fmt.Errorf("decode review thread connection %s.pr0: %w", repoAlias, err)
+	}
+	return page, nil
+}
+
+func advanceReviewThreadContinuation(
+	continuation reviewThreadContinuation,
+	page reviewThreadConnection,
+) (reviewThreadContinuation, bool, error) {
+	if continuation.RemainingPages <= 0 {
+		return continuation, false, reviewThreadPageLimitError(continuation.Ref)
+	}
+	continuation.RemainingPages--
+	for _, thread := range page.Nodes {
+		if !thread.IsResolved {
+			continuation.Status.UnresolvedReviewThreads++
+		}
+	}
+	if !page.PageInfo.HasNextPage {
+		return continuation, false, nil
+	}
+	if continuation.RemainingPages == 0 {
+		return continuation, false, reviewThreadPageLimitError(continuation.Ref)
+	}
+	nextCursor := page.PageInfo.EndCursor
+	if nextCursor == "" {
+		return continuation, false, fmt.Errorf(
+			"review thread pagination for %s/%s#%d returned an empty cursor",
+			continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number,
+		)
+	}
+	if _, seen := continuation.SeenCursors[nextCursor]; seen {
+		return continuation, false, fmt.Errorf(
+			"review thread pagination for %s/%s#%d repeated cursor %q",
+			continuation.Ref.Owner, continuation.Ref.Repo, continuation.Ref.Number, nextCursor,
+		)
+	}
+	continuation.SeenCursors[nextCursor] = struct{}{}
+	continuation.Cursor = nextCursor
+	return continuation, true, nil
+}
+
+func reviewThreadPageLimitError(ref graphQLPRRef) error {
+	return fmt.Errorf(
+		"review thread pagination for %s/%s#%d exceeded its page limit",
+		ref.Owner, ref.Repo, ref.Number,
+	)
 }
 
 func isNullGraphQLValue(raw json.RawMessage) bool {
@@ -741,7 +815,7 @@ func decodeBatchedPRChunk(
 			result[prStatusCacheKey(ref.Owner, ref.Repo, ref.Number)] = status
 			if raw.ReviewThreads.PageInfo.HasNextPage {
 				continuation, err := newReviewThreadContinuation(
-					ref, raw.ReviewThreads.PageInfo.EndCursor, status,
+					ref, raw.ReviewThreads, status,
 				)
 				if err != nil {
 					return nil, err
@@ -765,7 +839,6 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 	// for the rationale (one dead-repo chunk must not drop later chunks).
 	var allMissing []repoRef
 	var allResidual []graphQLError
-	var continuations []reviewThreadContinuation
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedBranchQuery(chunk)
 		var resp struct {
@@ -776,33 +849,20 @@ func runBatchedBranchQuery(ctx context.Context, exec GraphQLExecutor, refs []gra
 			return nil, err
 		}
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
-		chunkContinuations, err := decodeBatchedBranchChunk(chunk, resp.Data, result)
-		if err != nil {
+		if err := decodeBatchedBranchChunk(chunk, resp.Data, result); err != nil {
 			return nil, err
 		}
-		continuations = append(continuations, chunkContinuations...)
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	batchErr := wrapBatchedErrors(allMissing, allResidual)
-	if batchErr != nil && (len(allMissing) == 0 || len(allResidual) > 0) {
-		return nil, batchErr
-	}
-	if err := completeReviewThreadContinuations(ctx, exec, continuations); err != nil {
-		return nil, err
-	}
-	if batchErr != nil {
-		return result, batchErr
-	}
-	return result, nil
+	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, nil)
 }
 
 func decodeBatchedBranchChunk(
 	refs []graphQLBranchRef,
 	data map[string]json.RawMessage,
 	result map[string]*PRStatus,
-) ([]reviewThreadContinuation, error) {
-	continuations := make([]reviewThreadContinuation, 0)
+) error {
 	for i, ref := range refs {
 		alias := fmt.Sprintf("b%d", i)
 		raw, ok := data[alias]
@@ -815,7 +875,7 @@ func decodeBatchedBranchChunk(
 			} `json:"pullRequests"`
 		}
 		if err := json.Unmarshal(raw, &inner); err != nil {
-			return nil, fmt.Errorf("decode branch alias %s: %w", alias, err)
+			return fmt.Errorf("decode branch alias %s: %w", alias, err)
 		}
 		node, ok := selectBatchedBranchPRNode(inner.PullRequests.Nodes)
 		if !ok {
@@ -823,19 +883,8 @@ func decodeBatchedBranchChunk(
 		}
 		status := convertBatchedPRResult(&node.batchedPRResult, ref.Owner, ref.Repo, node.Number)
 		result[graphqlBranchKey(ref.Owner, ref.Repo, ref.Branch)] = status
-		if node.ReviewThreads.PageInfo.HasNextPage {
-			continuation, err := newReviewThreadContinuation(
-				graphQLPRRef{Owner: ref.Owner, Repo: ref.Repo, Number: node.Number},
-				node.ReviewThreads.PageInfo.EndCursor,
-				status,
-			)
-			if err != nil {
-				return nil, err
-			}
-			continuations = append(continuations, continuation)
-		}
 	}
-	return continuations, nil
+	return nil
 }
 
 func selectBatchedBranchPRNode(nodes []batchedBranchPRNode) (*batchedBranchPRNode, bool) {
