@@ -84,15 +84,7 @@ func (s *Service) Create(ctx context.Context, req *CreateSecretRequest) (*Secret
 		return nil, fmt.Errorf("create secret: %w", err)
 	}
 
-	return &SecretListItem{
-		ID:          secret.ID,
-		Name:        secret.Name,
-		Scope:       secret.Scope,
-		WorkspaceID: secret.WorkspaceID,
-		HasValue:    true,
-		CreatedAt:   secret.CreatedAt,
-		UpdatedAt:   secret.UpdatedAt,
-	}, nil
+	return secretListItem(&secret.Secret), nil
 }
 
 // Get retrieves secret metadata.
@@ -190,15 +182,7 @@ func (s *Service) Update(ctx context.Context, id string, req *UpdateSecretReques
 		return nil, err
 	}
 
-	return &SecretListItem{
-		ID:          secret.ID,
-		Name:        secret.Name,
-		Scope:       secret.Scope,
-		WorkspaceID: secret.WorkspaceID,
-		HasValue:    true,
-		CreatedAt:   secret.CreatedAt,
-		UpdatedAt:   secret.UpdatedAt,
-	}, nil
+	return secretListItem(secret), nil
 }
 
 // UpdateForWorkspace updates a Workspace secret after checking its scope and

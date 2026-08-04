@@ -116,3 +116,27 @@ func TestService_WorkspaceCRUDDoesNotMutateGlobalSecrets(t *testing.T) {
 		t.Fatalf("global name = %q, want %q", item.Name, name)
 	}
 }
+
+func TestService_NormalizesLegacyGlobalScopeOnUpdate(t *testing.T) {
+	store := newTestSQLiteStore(t)
+	svc := NewService(store, nil)
+	ctx := context.Background()
+
+	global, err := svc.Create(ctx, &CreateSecretRequest{Name: "legacy", Value: "value"})
+	if err != nil {
+		t.Fatalf("create global: %v", err)
+	}
+	if _, err := store.db.ExecContext(ctx, store.db.Rebind(`UPDATE secrets SET scope = '' WHERE id = ?`), global.ID); err != nil {
+		t.Fatalf("seed legacy scope: %v", err)
+	}
+
+	updated, err := svc.Update(ctx, global.ID, &UpdateSecretRequest{Name: stringPtr("renamed")})
+	if err != nil {
+		t.Fatalf("update legacy global: %v", err)
+	}
+	if updated.Scope != ScopeGlobal {
+		t.Fatalf("updated scope = %q, want %q", updated.Scope, ScopeGlobal)
+	}
+}
+
+func stringPtr(value string) *string { return &value }

@@ -21,6 +21,18 @@ describe("validateRepositorySecretBindings", () => {
     });
   });
 
+  it("enforces the environment key length boundary", () => {
+    const maximumKey = "A".repeat(256);
+    const tooLongKey = "A".repeat(257);
+
+    expect(
+      validateRepositorySecretBindings([{ key: maximumKey, secret_id: "secret-1" }]),
+    ).toBeNull();
+    expect(
+      validateRepositorySecretBindings([{ key: tooLongKey, secret_id: "secret-1" }]),
+    ).toMatchObject({ kind: "key" });
+  });
+
   it("rejects duplicate keys and missing references", () => {
     expect(
       validateRepositorySecretBindings([
