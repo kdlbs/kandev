@@ -23,6 +23,7 @@ type linuxDBus interface {
 
 type linuxDBusObject interface {
 	Call(method string, flags dbus.Flags, args ...interface{}) *dbus.Call
+	CallWithContext(ctx context.Context, method string, flags dbus.Flags, args ...interface{}) *dbus.Call
 }
 
 type linuxDBusOpener func() (linuxDBus, error)
@@ -46,25 +47,26 @@ func newLinuxInhibitor(open linuxDBusOpener) Inhibitor { return &linuxInhibitor{
 func (i *linuxInhibitor) Platform() Platform { return PlatformLinux }
 func (i *linuxInhibitor) Supported() bool    { return true }
 
-func (i *linuxInhibitor) Probe(context.Context) error {
+func (i *linuxInhibitor) Probe(ctx context.Context) error {
 	connection, err := i.open()
 	if err != nil {
 		return NewIssueError(IssueSystemServiceUnavailable, err)
 	}
 	defer func() { _ = connection.Close() }()
-	call := connection.Object(login1Name, login1Path).Call("org.freedesktop.DBus.Peer.Ping", 0)
+	call := connection.Object(login1Name, login1Path).CallWithContext(ctx, "org.freedesktop.DBus.Peer.Ping", 0)
 	if call.Err != nil {
 		return NewIssueError(IssueSystemServiceUnavailable, call.Err)
 	}
 	return nil
 }
 
-func (i *linuxInhibitor) Acquire(context.Context) (Lease, error) {
+func (i *linuxInhibitor) Acquire(ctx context.Context) (Lease, error) {
 	connection, err := i.open()
 	if err != nil {
 		return nil, NewIssueError(IssueSystemServiceUnavailable, err)
 	}
-	call := connection.Object(login1Name, login1Path).Call(
+	call := connection.Object(login1Name, login1Path).CallWithContext(
+		ctx,
 		login1Interface+".Inhibit",
 		0,
 		"sleep",
@@ -129,4 +131,8 @@ type realLinuxDBusObject struct{ object dbus.BusObject }
 
 func (o realLinuxDBusObject) Call(method string, flags dbus.Flags, args ...interface{}) *dbus.Call {
 	return o.object.Call(method, flags, args...)
+}
+
+func (o realLinuxDBusObject) CallWithContext(ctx context.Context, method string, flags dbus.Flags, args ...interface{}) *dbus.Call {
+	return o.object.CallWithContext(ctx, method, flags, args...)
 }

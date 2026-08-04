@@ -23,13 +23,18 @@ func TestLinuxInhibitorRequestsOnlySystemSleep(t *testing.T) {
 		object: &fakeLinuxDBusObject{call: &dbus.Call{Body: []interface{}{dbus.UnixFD(writeFile.Fd())}}},
 	}
 	inhibitor := newLinuxInhibitor(func() (linuxDBus, error) { return connection, nil })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	lease, err := inhibitor.Acquire(context.Background())
+	lease, err := inhibitor.Acquire(ctx)
 	if err != nil {
 		t.Fatalf("acquire: %v", err)
 	}
 	if connection.object.method != login1Interface+".Inhibit" {
 		t.Fatalf("method = %q", connection.object.method)
+	}
+	if connection.object.context != ctx {
+		t.Fatal("acquire did not propagate its context")
 	}
 	if got := connection.object.args; len(got) != 4 || got[0] != "sleep" || got[1] != "Kandev" || got[2] != "A Kandev task is running" || got[3] != "block" {
 		t.Fatalf("inhibit args = %#v", got)
@@ -63,11 +68,16 @@ func TestLinuxInhibitorProbesLogin1(t *testing.T) {
 		t.Fatal("linux inhibitor does not expose capability probe")
 	}
 
-	if err := prober.Probe(context.Background()); err != nil {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := prober.Probe(ctx); err != nil {
 		t.Fatalf("probe: %v", err)
 	}
 	if connection.object.method != "org.freedesktop.DBus.Peer.Ping" {
 		t.Fatalf("probe method = %q", connection.object.method)
+	}
+	if connection.object.context != ctx {
+		t.Fatal("probe did not propagate its context")
 	}
 	if !connection.closed {
 		t.Fatal("probe did not close the D-Bus connection")
@@ -104,13 +114,19 @@ func (c *fakeLinuxDBus) Close() error {
 }
 
 type fakeLinuxDBusObject struct {
-	call   *dbus.Call
-	method string
-	args   []interface{}
+	call    *dbus.Call
+	method  string
+	args    []interface{}
+	context context.Context
 }
 
 func (o *fakeLinuxDBusObject) Call(method string, _ dbus.Flags, args ...interface{}) *dbus.Call {
 	o.method = method
 	o.args = args
 	return o.call
+}
+
+func (o *fakeLinuxDBusObject) CallWithContext(ctx context.Context, method string, _ dbus.Flags, args ...interface{}) *dbus.Call {
+	o.context = ctx
+	return o.Call(method, 0, args...)
 }

@@ -335,10 +335,10 @@ func (s *Service) handleLeaseExit(err error, ok bool) {
 	s.lease = nil
 	s.status.Active = false
 	switch {
-	case ok:
-		s.status.Issue = IssueRequestFailed
 	case err != nil:
 		s.status.Issue = IssueFromError(err)
+	case ok:
+		s.status.Issue = IssueRequestFailed
 	default:
 		s.status.Issue = IssueRequestFailed
 	}

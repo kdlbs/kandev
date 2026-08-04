@@ -158,6 +158,22 @@ func TestServiceReportsCapabilityFailureBeforeAWorkingSessionExists(t *testing.T
 	}
 }
 
+func TestServiceClassifiesUnexpectedLeaseErrors(t *testing.T) {
+	service := newTestService(t, &fakeSessionReader{}, &fakeInhibitor{platform: PlatformLinux, supported: true})
+	service.mu.Lock()
+	service.lease = newFakeLease(&fakeInhibitor{platform: PlatformLinux, supported: true})
+	service.mu.Unlock()
+
+	service.handleLeaseExit(NewIssueError(IssueSystemServiceUnavailable, errors.New("logind stopped")), true)
+	response, err := service.Get(context.Background())
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if response.Status.Issue != IssueSystemServiceUnavailable {
+		t.Fatalf("lease issue = %q, want %q", response.Status.Issue, IssueSystemServiceUnavailable)
+	}
+}
+
 func newTestService(t *testing.T, reader *fakeSessionReader, inhibitor *fakeInhibitor, options ...Option) *Service {
 	t.Helper()
 	eventBus := bus.NewMemoryEventBus(logger.Default())
