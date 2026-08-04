@@ -206,10 +206,10 @@ Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` dire
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
 - Go runs `go install ...@latest` and therefore needs a working Go toolchain;
-- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 hosts. Windows is not registered for automatic Rust installation;
+- Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 hosts. Windows is not registered for automatic Rust installation, so Editors settings show manual installation instead of an auto-install checkbox;
 - Kotlin is manual-only. Follow the [official Kotlin LSP installation guide](https://kotlinlang.org/docs/kotlin-lsp.html), then verify `command -v kotlin-lsp` and `kotlin-lsp --version` in the task environment.
 
-For a Local PC task, start Kandev from an environment whose `PATH` includes the server executable. For a Local Docker task, the host installation is not visible: add the executable and its runtime requirements to the executor image or prepare script, then recreate the task container. A Kotlin server in a Local Docker task must therefore be resolvable by `command -v kotlin-lsp` inside that container.
+For a Local PC task, start Kandev from an environment whose `PATH` includes the server executable. For a Local Docker task, the host installation is not visible: add the executable and its runtime requirements to the executor image or prepare script, then recreate the task container. A Kotlin server in a Local Docker task must therefore be resolvable by `command -v kotlin-lsp` inside that container. If a managed installation fails, the language-server status preserves the detailed installer output after the connection closes.
 
 The default Go server configuration enables semantic tokens. A custom language-server configuration must be a JSON object; Kandev sends it through the language-server workspace configuration request. Installing a language server does not install project dependencies or make an unsupported language available. If startup fails, check the backend log/status, executable `PATH`, supported host platform, toolchain/network access, project dependencies, and that the file belongs to the active task worktree.
 

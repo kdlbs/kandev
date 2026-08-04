@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment, resolves Windows npm shims through PATHEXT, and rejects Rust auto-install on platforms without a packaged strategy.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment, resolves Windows npm shims through PATHEXT, rejects Rust auto-install on platforms without a packaged strategy, and publishes that platform-filtered capability set in the boot runtime.
 
 ## Frontend
 
@@ -23,6 +23,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Update `lsp-client-manager.ts` to advertise `window.workDoneProgress`, supply a client-generated initialize token, accept `window/workDoneProgress/create`, consume `$/progress`, expose a referentially stable progress snapshot, and notify subscribers.
 - Clear initialization and work state on stop, idle teardown, crash, retry, or connection replacement.
 - Keep runtime TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers.
+- Preserve detailed pre-bridge install errors when the following WebSocket close contains only a generic mapped reason.
 
 ### Status disclosure
 
@@ -30,6 +31,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Replace the one-click toolbar toggle with a disclosure-first `LspStatusButton`.
 - Add a shared progress body that separates connection readiness from project work, renders a determinate bar only for server percentages, uses tabular elapsed time, preserves concurrent-work counts, and avoids project-wide completion claims.
 - Use `useTouchDrawer`: fine pointers receive an anchored popover; coarse-pointer Monaco/tablet layouts receive an inset bottom drawer with one internal scroll owner and touch-sized controls. Phone CodeMirror viewing remains unchanged.
+- Gate each Editors auto-install checkbox with the backend capability list so Windows Rust settings cannot save an unsupported value.
 
 ## Tests
 

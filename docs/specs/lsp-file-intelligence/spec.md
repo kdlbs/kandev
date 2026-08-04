@@ -42,6 +42,7 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Server-reported project titles and messages remain fully readable and wrap within the LSP status surface, including URL-, path-, and identifier-like text without ordinary break points. The desktop popover and coarse-pointer tablet drawer do not clip, truncate, or horizontally overflow this text.
 - Kotlin supports auto-start but not auto-install. `kotlin-lsp` must already be available on the task host's `PATH`.
 - Rust auto-install is available only on supported macOS and Linux task hosts. Windows can still run a manually installed `rust-analyzer` from the task host's `PATH`.
+- The boot runtime advertises the backend's platform-filtered auto-install language set. Editors settings offer a language's auto-install checkbox only when both its static metadata and that backend capability allow it.
 - Language servers run through the task's `agentctl`, with the task workspace as their working directory. This keeps project files, dependencies, and server execution in the same environment.
 - Binary discovery and npm/Go auto-install resolve commands and installation results with that same task environment, including task-provided `PATH`, `GOBIN`, `GOPATH`, and `HOME` values.
 - Managed npm-server lookup resolves the concrete platform launcher, including PATHEXT-backed `.cmd` shims on Windows, both immediately after installation and on later starts.
@@ -143,6 +144,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Unsupported executor:** the file toolbar reports that the task host is unsupported and no process starts.
 - **Missing Kotlin server:** the UI tells the user to install `kotlin-lsp` on the task host; it does not offer or retry auto-install.
 - **Missing auto-installable server:** the UI reports the missing binary or shows install progress when auto-install is enabled.
+- **Installer failure:** the UI preserves the detailed task-host installer error after the WebSocket's generic close frame so toolchain, network, and package output remains actionable.
 - **Task-only toolchain:** binary lookup, installer execution, and installed-binary discovery use the task runtime environment instead of the agentctl host environment.
 - **Windows npm launcher:** installation and later cache lookup return the executable npm shim selected through PATHEXT rather than an unlaunchable extensionless path.
 - **Unsupported Rust installer:** Windows rejects Rust auto-install and continues to discover a manually installed `rust-analyzer` from the task environment.
@@ -165,7 +167,8 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** a local Docker task, **WHEN** an LSP starts, **THEN** the binary is resolved and executed inside the container rather than on the main backend host.
 - **GIVEN** Go and `GOBIN` are available only through the task runtime environment, **WHEN** Kandev discovers or installs `gopls`, **THEN** lookup, `go install`, and result discovery all use those task values.
 - **GIVEN** an npm-managed language server is installed on Windows, **WHEN** installation completes or a later connection reuses the cache, **THEN** Kandev returns and launches the concrete PATHEXT-resolved shim.
-- **GIVEN** a Windows task host, **WHEN** Rust auto-install is requested, **THEN** Kandev rejects that unsupported installer while continuing to allow a `rust-analyzer` already present on `PATH`.
+- **GIVEN** a Windows backend, **WHEN** Editors settings render Rust, **THEN** they show manual installation without an auto-install checkbox; a direct Rust auto-install request remains rejected while a `rust-analyzer` already on `PATH` can run.
+- **GIVEN** agentctl reports a detailed npm, Go, or release installation failure and then closes with the generic install-failed code, **WHEN** the browser handles both frames, **THEN** the detailed installer error remains visible.
 - **GIVEN** TypeScript LSP initializes while Monaco is still loading, **WHEN** Monaco's lazy TypeScript providers register, **THEN** the built-ins are wrapped and suppressed while only the explicitly guarded LSP providers remain active.
 - **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no process starts.
 - **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP, **THEN** the new connection closes with `4005`.

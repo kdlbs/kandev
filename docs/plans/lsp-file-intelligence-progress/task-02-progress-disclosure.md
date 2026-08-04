@@ -56,6 +56,7 @@ Record rendered behavior, accessibility and geometry decisions, files changed, e
 - RED: presentation-helper tests proved elapsed, lifecycle, active, no-report, and completion copy were absent; hook tests also reproduced the mounted-editor Retry failure.
 - GREEN: one snapshot now drives a fine-pointer popover or coarse-pointer drawer, with separate connection/project state, determinate-only percentages, tabular elapsed time, honest completion copy, and explicit lifecycle actions.
 - Review hardening: hour, minute, and second units plus multi-unit composition now come from the active locale catalog, with pseudo-locale coverage.
+- Review hardening: the boot runtime's platform-filtered capability list controls auto-install checkboxes, and the LSP/settings catalogs now retain full Simplified Chinese parity.
 - Verified:
   - focused LSP/editor Vitest suite (75 tests)
   - `pnpm run typecheck`
