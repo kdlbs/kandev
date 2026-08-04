@@ -1,0 +1,205 @@
+package orchestrator
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/require"
+)
+
+type titleBranchRuntimeStub struct {
+	calls        []titleBranchRuntimeCall
+	primaryCalls []bool
+}
+
+type titleBranchRuntimeCall struct {
+	sessionID string
+	newName   string
+	repo      string
+}
+
+func (s *titleBranchRuntimeStub) RenameBranchForSession(_ context.Context, sessionID, newName, repo string) (*agentctlclient.GitOperationResult, error) {
+	s.calls = append(s.calls, titleBranchRuntimeCall{sessionID: sessionID, newName: newName, repo: repo})
+	return &agentctlclient.GitOperationResult{Success: true, Operation: "rename_branch"}, nil
+}
+
+func (s *titleBranchRuntimeStub) RenameBranchForSessionWithPrimary(ctx context.Context, sessionID, newName, repo string, primary bool) (*agentctlclient.GitOperationResult, error) {
+	s.primaryCalls = append(s.primaryCalls, primary)
+	return s.RenameBranchForSession(ctx, sessionID, newName, repo)
+}
+
+func TestRenameGeneratedBranchesForTaskTitleUsesFinalTitleAndPersistsSnapshots(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-title-branch", "session-title-branch", "step1")
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-title-branch", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		WorktreeBranchTemplate: "feature/{title}", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-title-branch", TaskID: "task-title-branch", RepositoryID: "repo-title-branch",
+		BaseBranch: "main", Position: 0,
+	}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-title-branch", TaskID: "task-title-branch", RepositoryID: "repo-title-branch",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: "/tmp/task-title-branch",
+		Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-title-branch", RepositoryID: "repo-title-branch", BranchSlug: "main",
+			WorktreeID: "wt-title-branch", WorktreePath: "/tmp/task-title-branch/backend",
+			WorktreeBranch: "feature/provisional", Position: 0,
+		}},
+	}))
+	require.NoError(t, repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "session-wt-title-branch", SessionID: "session-title-branch", WorktreeID: "wt-title-branch",
+		RepositoryID: "repo-title-branch", BranchSlug: "main", WorktreePath: "/tmp/task-title-branch/backend",
+		WorktreeBranch: "feature/provisional", Position: 0, CreatedAt: now,
+	}))
+	session, err := repo.GetTaskSession(ctx, "session-title-branch")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-title-branch"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	service := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	runtime := &titleBranchRuntimeStub{}
+	service.SetTitleBranchRuntime(runtime)
+
+	result, err := service.RenameGeneratedBranchesForTaskTitle(ctx, "task-title-branch", "session-title-branch", "Final title")
+	require.NoError(t, err)
+	require.Equal(t, TitleBranchStatusRenamed, result.Status)
+	require.Len(t, result.Renamed, 1)
+	require.Equal(t, "feature/final-title", result.Renamed[0].To)
+	require.Equal(t, []titleBranchRuntimeCall{{
+		sessionID: "session-title-branch", newName: "feature/final-title", repo: "",
+	}}, runtime.calls)
+	require.Equal(t, []bool{true}, runtime.primaryCalls)
+
+	worktrees, err := repo.ListTaskSessionWorktrees(ctx, "session-title-branch")
+	require.NoError(t, err)
+	require.Equal(t, "feature/final-title", worktrees[0].WorktreeBranch)
+	env, err := repo.GetTaskEnvironment(ctx, "env-title-branch")
+	require.NoError(t, err)
+	require.Equal(t, "feature/final-title", env.Repos[0].WorktreeBranch)
+}
+
+func TestRenameGeneratedBranchesForTaskTitlePreservesRemoteCheckout(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-remote-branch", "session-remote-branch", "step1")
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-remote-branch", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main",
+		WorktreeBranchTemplate: "feature/{title}", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-remote-branch", TaskID: "task-remote-branch", RepositoryID: "repo-remote-branch",
+		BaseBranch: "main", CheckoutBranch: "pr-42", Position: 0,
+	}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-remote-branch", TaskID: "task-remote-branch", RepositoryID: "repo-remote-branch",
+		ExecutorType: string(models.ExecutorTypeWorktree), WorkspacePath: "/tmp/task-remote-branch",
+		Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID: "env-repo-remote-branch", RepositoryID: "repo-remote-branch", BranchSlug: "pr-42",
+			WorktreeID: "wt-remote-branch", WorktreePath: "/tmp/task-remote-branch/backend",
+			WorktreeBranch: "pr-42", Position: 0,
+		}},
+	}))
+	require.NoError(t, repo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "session-wt-remote-branch", SessionID: "session-remote-branch", WorktreeID: "wt-remote-branch",
+		RepositoryID: "repo-remote-branch", BranchSlug: "pr-42", WorktreePath: "/tmp/task-remote-branch/backend",
+		WorktreeBranch: "pr-42", Position: 0, CreatedAt: now,
+	}))
+	session, err := repo.GetTaskSession(ctx, "session-remote-branch")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-remote-branch"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	service := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	runtime := &titleBranchRuntimeStub{}
+	service.SetTitleBranchRuntime(runtime)
+
+	result, err := service.RenameGeneratedBranchesForTaskTitle(ctx, "task-remote-branch", "session-remote-branch", "Final title")
+	require.NoError(t, err)
+	require.Equal(t, TitleBranchStatusPreserved, result.Status)
+	require.Len(t, result.Preserved, 1)
+	require.Equal(t, "remote_checkout", result.Preserved[0].Reason)
+	require.Empty(t, runtime.calls)
+}
+
+func TestRenameGeneratedBranchesForTaskTitleScopesMixedRepositories(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-mixed-branches", "session-mixed-branches", "step1")
+	now := time.Now().UTC()
+	for _, repository := range []*models.Repository{
+		{ID: "repo-mixed-backend", WorkspaceID: "ws1", Name: "backend", DefaultBranch: "main", WorktreeBranchTemplate: "feature/{title}", CreatedAt: now, UpdatedAt: now},
+		{ID: "repo-mixed-frontend", WorkspaceID: "ws1", Name: "frontend", DefaultBranch: "main", WorktreeBranchTemplate: "feature/{title}", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, repo.CreateRepository(ctx, repository))
+	}
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-mixed-backend", TaskID: "task-mixed-branches", RepositoryID: "repo-mixed-backend", BaseBranch: "main", Position: 0,
+	}))
+	require.NoError(t, repo.CreateTaskRepository(ctx, &models.TaskRepository{
+		ID: "task-repo-mixed-frontend", TaskID: "task-mixed-branches", RepositoryID: "repo-mixed-frontend", BaseBranch: "main", CheckoutBranch: "pr-42", Position: 1,
+	}))
+	require.NoError(t, repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-mixed-branches", TaskID: "task-mixed-branches", ExecutorType: string(models.ExecutorTypeWorktree),
+		WorkspacePath: "/tmp/task-mixed-branches", Status: models.TaskEnvironmentStatusReady,
+		Repos: []*models.TaskEnvironmentRepo{
+			{ID: "env-repo-mixed-backend", RepositoryID: "repo-mixed-backend", BranchSlug: "main", WorktreeID: "wt-mixed-backend", WorktreePath: "/tmp/task-mixed-branches/backend", WorktreeBranch: "feature/provisional-backend", Position: 0},
+			{ID: "env-repo-mixed-frontend", RepositoryID: "repo-mixed-frontend", BranchSlug: "pr-42", WorktreeID: "wt-mixed-frontend", WorktreePath: "/tmp/task-mixed-branches/frontend", WorktreeBranch: "pr-42", Position: 1},
+		},
+	}))
+	for _, worktree := range []*models.TaskSessionWorktree{
+		{ID: "session-wt-mixed-backend", SessionID: "session-mixed-branches", WorktreeID: "wt-mixed-backend", RepositoryID: "repo-mixed-backend", BranchSlug: "main", WorktreePath: "/tmp/task-mixed-branches/backend", WorktreeBranch: "feature/provisional-backend", Position: 0, CreatedAt: now},
+		{ID: "session-wt-mixed-frontend", SessionID: "session-mixed-branches", WorktreeID: "wt-mixed-frontend", RepositoryID: "repo-mixed-frontend", BranchSlug: "pr-42", WorktreePath: "/tmp/task-mixed-branches/frontend", WorktreeBranch: "pr-42", Position: 1, CreatedAt: now},
+	} {
+		require.NoError(t, repo.CreateTaskSessionWorktree(ctx, worktree))
+	}
+	session, err := repo.GetTaskSession(ctx, "session-mixed-branches")
+	require.NoError(t, err)
+	session.TaskEnvironmentID = "env-mixed-branches"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+
+	service := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	runtime := &titleBranchRuntimeStub{}
+	service.SetTitleBranchRuntime(runtime)
+	result, err := service.RenameGeneratedBranchesForTaskTitle(ctx, "task-mixed-branches", "session-mixed-branches", "Final title")
+	require.NoError(t, err)
+	require.Equal(t, TitleBranchStatusRenamed, result.Status)
+	require.Len(t, result.Renamed, 1)
+	require.Equal(t, "repo-mixed-backend", result.Renamed[0].RepositoryID)
+	require.Len(t, result.Preserved, 1)
+	require.Equal(t, "repo-mixed-frontend", result.Preserved[0].RepositoryID)
+	require.Equal(t, []titleBranchRuntimeCall{{sessionID: "session-mixed-branches", newName: "feature/final-title", repo: "backend"}}, runtime.calls)
+	require.Equal(t, []bool{true}, runtime.primaryCalls)
+}
+
+func TestRenameGeneratedBranchesForTaskTitlePreservesLocalExecutor(t *testing.T) {
+	runtime := &titleBranchRuntimeStub{}
+	service := &Service{titleBranchRuntime: runtime}
+	result := TitleBranchRenameResult{}
+	service.renameTitleBranchBinding(
+		context.Background(),
+		&models.Task{ID: "task-local", Title: "Final title"},
+		"Final title",
+		models.ExecutorTypeLocal,
+		nil,
+		false,
+		titleBranchBinding{
+			taskRepository: &models.TaskRepository{RepositoryID: "repo-local"},
+			repository:     &models.Repository{ID: "repo-local", WorktreeBranchTemplate: "feature/{title}"},
+			worktree:       &models.TaskSessionWorktree{SessionID: "session-local", RepositoryID: "repo-local", WorktreeBranch: "user-branch"},
+		},
+		&result,
+	)
+	require.Equal(t, TitleBranchStatusPreserved, aggregateTitleBranchRenameStatus(result.Renamed, result.Preserved, result.Failed))
+	require.Equal(t, "local_executor", result.Preserved[0].Reason)
+	require.Empty(t, runtime.calls)
+}

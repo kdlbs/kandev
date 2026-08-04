@@ -181,6 +181,12 @@ Office sessions, and every later session on the task—even if the owner fails b
 rename wins if it happens first; a late owner call returns `title_not_pending`, while a non-owner call
 returns `title_not_owner`, without changing the title.
 
+When the owner accepts a generated title, Kandev also updates the names of the task's Kandev-managed
+branches from that final title and refreshes the session's branch snapshots. This is evaluated per
+repository: a repository opened from an existing checkout branch (including a GitHub PR) is preserved,
+as is every Local/Local PC checkout. If one managed repository cannot be renamed, the title remains
+accepted and the response reports the successful, preserved, and failed branch outcomes separately.
+
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.

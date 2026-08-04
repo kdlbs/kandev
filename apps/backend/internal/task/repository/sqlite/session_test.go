@@ -815,6 +815,23 @@ func TestUpdateTaskSessionWorktreeBranchByRepositoryScopesUpdate(t *testing.T) {
 	}
 }
 
+func TestUpdateTaskSessionWorktreeBranchByWorktreeScopesRepeatedRepository(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-repeated-repo", "session-repeated-repo", "turn-repeated-repo")
+	for _, wt := range []*models.TaskSessionWorktree{
+		{ID: "wt-repeated-one", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", WorktreeBranch: "feature/one"},
+		{ID: "wt-repeated-two", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", WorktreeBranch: "feature/two"},
+	} {
+		require.NoError(t, repo.CreateTaskSessionWorktree(ctx, wt))
+	}
+	require.NoError(t, repo.UpdateTaskSessionWorktreeBranchByWorktree(ctx, "session-repeated-repo", "worktree-repeated-two", "feature/two-renamed"))
+	worktrees, err := repo.ListTaskSessionWorktrees(ctx, "session-repeated-repo")
+	require.NoError(t, err)
+	require.Equal(t, "feature/one", worktrees[0].WorktreeBranch)
+	require.Equal(t, "feature/two-renamed", worktrees[1].WorktreeBranch)
+}
+
 // TestGetLastAgentMessage_NoMessages verifies that a session with no messages
 // returns an empty string and sql.ErrNoRows.
 func TestGetLastAgentMessage_NoMessages(t *testing.T) {

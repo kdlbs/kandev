@@ -1029,7 +1029,10 @@ the prompt; call this tool even when that provisional title looks usable.
 
 Use a concise title targeting about 6 words.
 Write a short title phrase, not a sentence or a progress update. Your title should
-summarize the requested outcome and will replace the provisional title. Use sentence case:
+summarize the requested outcome and will replace the provisional title. For tasks created
+without a title, Kandev also uses this final title when naming Kandev-generated branches;
+branches checked out from a remote link (such as a GitHub PR) and local-executor branches
+are intentionally preserved. Use sentence case:
 capitalize only the first word and proper nouns (for example, "Improve task title casing", not
 "Improve Task Title Casing").`),
 			mcp.WithString(titleArg, mcp.Required(), mcp.Description("Short sentence-case task title targeting about 6 words.")),

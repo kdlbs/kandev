@@ -155,6 +155,12 @@ type TaskStopper interface {
 	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
+// TaskTitleBranchRenamer performs the best-effort branch side effect after an
+// owner session accepts a prompt-first task title.
+type TaskTitleBranchRenamer interface {
+	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
+}
+
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
 // TakeQueued is exposed so move_task can roll back the hand-off prompt when the
 // underlying MoveTask call fails — without it, a queued "you were moved..."
@@ -193,6 +199,7 @@ type Handlers struct {
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
+	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
 	promptResolver       PromptReferenceResolver
@@ -277,6 +284,12 @@ func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) 
 // SetTaskStopper wires the orchestrator-owned halt operation.
 func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
+}
+
+// SetTaskTitleBranchRenamer wires the best-effort branch rename performed
+// after an accepted agent-generated title.
+func (h *Handlers) SetTaskTitleBranchRenamer(renamer TaskTitleBranchRenamer) {
+	h.titleBranchRenamer = renamer
 }
 
 // SetUserSettingsProvider wires portable user preferences into MCP task creation.
@@ -1361,6 +1374,22 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 	}
 	if !accepted {
 		result["reason"] = reason
+		return ws.NewResponse(msg.ID, msg.Action, result)
+	}
+	if h.titleBranchRenamer != nil {
+		branchResult, branchErr := h.titleBranchRenamer.RenameGeneratedBranchesForTaskTitle(ctx, req.TaskID, req.SessionID, task.Title)
+		if branchErr != nil {
+			if h.logger != nil {
+				h.logger.Warn("failed to rename generated task branches", zap.String("task_id", req.TaskID), zap.Error(branchErr))
+			}
+			branchResult = orchestrator.TitleBranchRenameResult{
+				Status: orchestrator.TitleBranchStatusFailed,
+				Failed: []orchestrator.TitleBranchFailure{{Message: branchErr.Error()}},
+			}
+		}
+		result["branch_rename"] = branchResult
+	} else {
+		result["branch_rename"] = orchestrator.TitleBranchRenameResult{Status: orchestrator.TitleBranchStatusNotApplicable}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }

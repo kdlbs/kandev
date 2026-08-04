@@ -508,6 +508,29 @@ func (r *Repository) UpdateExecutorRunningStatus(ctx context.Context, sessionID,
 	return nil
 }
 
+// UpdateExecutorRunningWorktreeBranch narrowly updates the branch snapshot for
+// a live execution. Lifecycle owns this column, so callers must not replace
+// the full executors_running row after a branch rename.
+func (r *Repository) UpdateExecutorRunningWorktreeBranch(ctx context.Context, sessionID, branch string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE executors_running
+		   SET worktree_branch = ?, updated_at = ?
+		 WHERE session_id = ?
+	`), branch, now, sessionID)
+	if err != nil {
+		return err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("%w for session: %s", models.ErrExecutorRunningNotFound, sessionID)
+	}
+	return nil
+}
+
 func (r *Repository) HasActiveTaskSessionsByExecutor(ctx context.Context, executorID string) (bool, error) {
 	var exists int
 	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`

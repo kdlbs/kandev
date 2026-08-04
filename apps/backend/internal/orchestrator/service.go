@@ -331,6 +331,11 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
+	// an agent resolves a prompt-first task title. It is optional for tests and
+	// installations that do not configure an agent runtime.
+	titleBranchRuntime titleBranchRuntime
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 

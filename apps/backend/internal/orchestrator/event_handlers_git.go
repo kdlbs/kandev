@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -757,7 +758,7 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 	// renaming or switching branches (e.g. `git branch -m`, `git checkout`)
 	// leaves PR auto-association stuck on the original branch.
 	if data.BranchSwitch.CurrentBranch != "" {
-		if err := s.repo.UpdateTaskSessionWorktreeBranch(ctx, data.SessionID, data.BranchSwitch.CurrentBranch); err != nil {
+		if err := s.updateBranchSwitchWorktreeSnapshot(ctx, data.SessionID, data.BranchSwitch.RepositoryName, data.BranchSwitch.CurrentBranch); err != nil {
 			s.logger.Error("failed to update session worktree branch after branch switch",
 				zap.String("session_id", data.SessionID),
 				zap.String("current_branch", data.BranchSwitch.CurrentBranch),
@@ -788,6 +789,71 @@ func (s *Service) handleBranchSwitched(ctx context.Context, data watcher.GitEven
 		})
 		_ = s.eventBus.Publish(ctx, events.BuildGitWSEventSubject(data.SessionID), event)
 	}
+}
+
+// updateBranchSwitchWorktreeSnapshot scopes a multi-repository branch event to
+// the worktree whose path basename matches agentctl's RepositoryName tag. Older
+// events and single-repository rows retain the all-worktrees fallback.
+func (s *Service) updateBranchSwitchWorktreeSnapshot(ctx context.Context, sessionID, repositoryName, branch string) error {
+	if repositoryName == "" {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	scoped, ok := s.repo.(titleBranchScopedSnapshotStore)
+	if !ok {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	lister, ok := s.repo.(interface {
+		ListTaskSessionWorktrees(context.Context, string) ([]*models.TaskSessionWorktree, error)
+	})
+	if !ok {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	worktrees, err := lister.ListTaskSessionWorktrees(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	matched := matchingBranchSwitchWorktrees(worktrees, repositoryName)
+	if len(matched) == 0 {
+		return s.repo.UpdateTaskSessionWorktreeBranch(ctx, sessionID, branch)
+	}
+	return s.persistBranchSwitchWorktrees(ctx, scoped, sessionID, branch, matched)
+}
+
+func matchingBranchSwitchWorktrees(worktrees []*models.TaskSessionWorktree, repositoryName string) map[string]string {
+	matched := make(map[string]string)
+	for _, worktree := range worktrees {
+		if worktree == nil || worktree.RepositoryID == "" {
+			continue
+		}
+		if filepath.Base(filepath.Clean(worktree.WorktreePath)) == repositoryName {
+			matched[worktree.RepositoryID] = worktree.WorktreeID
+		}
+	}
+	if len(matched) == 0 && len(worktrees) == 1 && worktrees[0] != nil {
+		matched[worktrees[0].RepositoryID] = worktrees[0].WorktreeID
+	}
+	return matched
+}
+
+func (s *Service) persistBranchSwitchWorktrees(
+	ctx context.Context,
+	scoped titleBranchScopedSnapshotStore,
+	sessionID string,
+	branch string,
+	matched map[string]string,
+) error {
+	for repositoryID, worktreeID := range matched {
+		if exact, exactOK := s.repo.(titleBranchWorktreeSnapshotStore); exactOK && worktreeID != "" {
+			if err := exact.UpdateTaskSessionWorktreeBranchByWorktree(ctx, sessionID, worktreeID, branch); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := scoped.UpdateTaskSessionWorktreeBranchByRepository(ctx, sessionID, repositoryID, branch); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // resetPRWatchForBranchSwitch re-points the session's existing PR watch to the

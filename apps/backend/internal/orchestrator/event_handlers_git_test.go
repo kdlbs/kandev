@@ -71,6 +71,41 @@ func TestHandleBranchSwitched_UpdatesWorktreeBranch(t *testing.T) {
 	}
 }
 
+func TestHandleBranchSwitched_RepositoryScopedUpdateKeepsSiblingBranch(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now().UTC()
+	testRepo := setupTestRepo(t)
+	seedSession(t, testRepo, "t-multi", "s-multi", "step1")
+	for _, repository := range []*models.Repository{
+		{ID: "repo-backend", WorkspaceID: "ws1", Name: "backend", CreatedAt: now, UpdatedAt: now},
+		{ID: "repo-frontend", WorkspaceID: "ws1", Name: "frontend", CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, testRepo.CreateRepository(ctx, repository))
+	}
+	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "wt-multi-backend", SessionID: "s-multi", WorktreeID: "worktree-backend", RepositoryID: "repo-backend",
+		WorktreePath: "/tmp/task/backend", WorktreeBranch: "feature/backend-old", Position: 0, CreatedAt: now,
+	}))
+	require.NoError(t, testRepo.CreateTaskSessionWorktree(ctx, &models.TaskSessionWorktree{
+		ID: "wt-multi-frontend", SessionID: "s-multi", WorktreeID: "worktree-frontend", RepositoryID: "repo-frontend",
+		WorktreePath: "/tmp/task/frontend", WorktreeBranch: "feature/frontend-old", Position: 1, CreatedAt: now,
+	}))
+
+	svc := createTestService(testRepo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleBranchSwitched(ctx, watcher.GitEventData{
+		TaskID: "t-multi", SessionID: "s-multi",
+		BranchSwitch: &lifecycle.GitBranchSwitchData{
+			PreviousBranch: "feature/backend-old", CurrentBranch: "feature/backend-new", RepositoryName: "backend",
+		},
+	})
+
+	worktrees, err := testRepo.ListTaskSessionWorktrees(ctx, "s-multi")
+	require.NoError(t, err)
+	require.Len(t, worktrees, 2)
+	require.Equal(t, "feature/backend-new", worktrees[0].WorktreeBranch)
+	require.Equal(t, "feature/frontend-old", worktrees[1].WorktreeBranch)
+}
+
 // Regression: when a PR watch already exists for the session and the branch
 // is switched, the watch must be reset (branch updated, pr_number cleared) so
 // the poller re-searches for the PR on the new branch. This covers both
