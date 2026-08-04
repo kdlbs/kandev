@@ -12,6 +12,7 @@ import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
 import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
+import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type {
   GitLabMRApproval,
   GitLabMRCommit,
@@ -1749,9 +1750,14 @@ export class ApiClient {
     });
   }
 
-  async listTasks(
-    workspaceId: string,
-  ): Promise<{ tasks: Array<{ id: string; title: string; workflow_step_id?: string }> }> {
+  async listTasks(workspaceId: string): Promise<{
+    tasks: Array<{
+      id: string;
+      title: string;
+      workflow_step_id?: string;
+      status_summary?: TaskStatusSummary | null;
+    }>;
+  }> {
     return this.request("GET", `/api/v1/workspaces/${workspaceId}/tasks`);
   }
 

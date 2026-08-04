@@ -81,12 +81,18 @@ export async function expectCompactionCount(contextTooltip: Locator): Promise<vo
 
 export async function expectSourceRightOfTokenCount(contextTooltip: Locator): Promise<void> {
   const row = contextTooltip.getByTestId("context-window-token-row").first();
-  const tokenCount = row.getByText("54.1K of 258.4K tokens");
-  const source = row.getByText("ACP", { exact: true });
-  const [tokenBox, sourceBox] = await Promise.all([tokenCount.boundingBox(), source.boundingBox()]);
+  await expect(row).toBeVisible();
+  const positions = await row.evaluate((element) => {
+    const tokenCount = element.firstElementChild;
+    const source = element.lastElementChild;
+    if (!(tokenCount instanceof HTMLElement) || !(source instanceof HTMLElement)) return null;
+    const tokenBox = tokenCount.getBoundingClientRect();
+    const sourceBox = source.getBoundingClientRect();
+    return { sourceLeft: sourceBox.left, tokenRight: tokenBox.right };
+  });
 
-  if (!tokenBox || !sourceBox) throw new Error("Expected token count and source to be rendered");
-  if (sourceBox.x <= tokenBox.x + tokenBox.width) {
+  if (!positions) throw new Error("Expected token count and source to be rendered");
+  if (positions.sourceLeft <= positions.tokenRight) {
     throw new Error("Expected context source to render to the right of the token count");
   }
 }

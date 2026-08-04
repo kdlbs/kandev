@@ -24,6 +24,23 @@ async function waitForPersistedDiffSnapshot(apiClient: ApiClient, sessionId: str
     .toBeGreaterThan(0);
 }
 
+async function waitForPersistedTaskDiffSummary(
+  apiClient: ApiClient,
+  workspaceId: string,
+  taskId: string,
+) {
+  await expect
+    .poll(
+      async () => {
+        const response = await apiClient.listTasks(workspaceId);
+        const git = response.tasks.find((task) => task.id === taskId)?.status_summary?.git;
+        return (git?.additions ?? 0) + (git?.deletions ?? 0);
+      },
+      { timeout: 60_000, message: `Waiting for persisted diff summary for ${taskId}` },
+    )
+    .toBeGreaterThan(0);
+}
+
 /**
  * Regression test for the task sidebar diff badge bug.
  *
@@ -105,6 +122,13 @@ test.describe("Task sidebar diff stats", () => {
     await Promise.all([
       waitForPersistedDiffSnapshot(apiClient, taskAlpha.session_id),
       waitForPersistedDiffSnapshot(apiClient, taskBeta.session_id),
+    ]);
+    // Snapshot persistence and task-summary projection are separate ordered
+    // writes. Restart only after the sidebar's own durable source reflects
+    // both snapshots; otherwise a stale non-null summary is validly reused.
+    await Promise.all([
+      waitForPersistedTaskDiffSummary(apiClient, seedData.workspaceId, taskAlpha.id),
+      waitForPersistedTaskDiffSummary(apiClient, seedData.workspaceId, taskBeta.id),
     ]);
 
     // Restart the backend. This destroys all in-memory executions, so

@@ -134,7 +134,10 @@ test.describe("Unread divider", () => {
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     let session = await openTaskSession(testPage, task.id);
-    await session.waitForChatIdle({ timeout: 60_000, attemptTimeout: 60_000 });
+    // No live-tail observation has happened yet, so the normal reload recovery
+    // is safe here. The post-send wait below stays reload-free because that
+    // interval is the continuously-visible behavior under test.
+    await session.waitForChatIdle({ timeout: 60_000 });
     const initialMessages = await apiClient.listSessionMessages(task.session_id);
     const initialTail = initialMessages.messages[initialMessages.messages.length - 1];
     if (!initialTail) throw new Error("expected the initial transcript to contain a message");

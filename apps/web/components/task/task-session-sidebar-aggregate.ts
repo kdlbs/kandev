@@ -93,6 +93,21 @@ function collectSnapshotTasks(snapshots: WorkflowSnapshotMap, acc: Acc): void {
   }
 }
 
+function activeTaskIsNewer(
+  active: KanbanState["tasks"][number],
+  projected: KanbanState["tasks"][number],
+): boolean {
+  const activeRevision = active.statusSummary?.revision;
+  const projectedRevision = projected.statusSummary?.revision;
+  if (activeRevision !== undefined || projectedRevision !== undefined) {
+    return (activeRevision ?? -1) > (projectedRevision ?? -1);
+  }
+
+  const activeTime = active.updatedAt ? Date.parse(active.updatedAt) : 0;
+  const projectedTime = projected.updatedAt ? Date.parse(projected.updatedAt) : 0;
+  return activeTime >= projectedTime;
+}
+
 function applyActiveKanbanFallback(
   activeWorkflowId: string,
   activeTasks: KanbanState["tasks"],
@@ -112,9 +127,16 @@ function applyActiveKanbanFallback(
   // those leaks don't get re-tagged with the active workflow id.
   const activeStepIds = new Set(activeSteps.map((s) => s.id));
   for (const t of activeTasks) {
-    if (acc.seen.has(t.id)) continue;
     if (activeStepIds.size > 0 && !activeStepIds.has(t.workflowStepId)) continue;
-    acc.tasks.push({ ...t, _workflowId: activeWorkflowId });
+    const activeTask = { ...t, _workflowId: activeWorkflowId };
+    const existingIndex = acc.tasks.findIndex((task) => task.id === t.id);
+    if (existingIndex >= 0) {
+      if (activeTaskIsNewer(t, acc.tasks[existingIndex])) {
+        acc.tasks[existingIndex] = activeTask;
+      }
+    } else {
+      acc.tasks.push(activeTask);
+    }
     acc.seen.add(t.id);
   }
 }

@@ -4,6 +4,17 @@ import type { ApiClient } from "./api-client";
 import { SessionPage } from "../pages/session-page";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
+const FAILED_STATES = ["FAILED", "CANCELLED"];
+
+function sessionDoneOrThrow(session: { state: string; error_message?: string } | undefined) {
+  if (!session) return false;
+  if (FAILED_STATES.includes(session.state)) {
+    throw new Error(
+      `Session reached ${session.state}${session.error_message ? `: ${session.error_message}` : ""}`,
+    );
+  }
+  return DONE_STATES.includes(session.state);
+}
 
 export async function waitForLatestSessionDone(
   apiClient: ApiClient,
@@ -19,7 +30,7 @@ export async function waitForLatestSessionDone(
         if (sessions.length < expectedCount) return false;
         // API returns sessions newest-first.
         const latest = sessions[0];
-        return DONE_STATES.includes(latest?.state ?? "");
+        return sessionDoneOrThrow(latest);
       },
       { timeout, message },
     )
@@ -38,7 +49,7 @@ export async function waitForSessionDone(
       async () => {
         const { sessions } = await apiClient.listTaskSessions(taskId);
         const session = sessions.find((s) => s.id === sessionId);
-        return DONE_STATES.includes(session?.state ?? "");
+        return sessionDoneOrThrow(session);
       },
       { timeout, message },
     )
