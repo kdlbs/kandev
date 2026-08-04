@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -43,7 +44,9 @@ type GitOperator struct {
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
 	// Empty for the workspace-root operator. Stamped on emitted commit
 	// notifications so the frontend can group commits per repo.
-	repoName string
+	repoName              string
+	remoteContribution    *models.RemoteContribution
+	remoteContributionErr error
 
 	mu         sync.Mutex // Prevents concurrent git operations
 	inProgress bool
@@ -72,6 +75,43 @@ func (g *GitOperator) setEnvironmentProvider(provider func() []string) {
 	if provider != nil {
 		g.environment = provider
 	}
+}
+
+func (g *GitOperator) setRemoteContribution(binding *models.RemoteContribution) {
+	if binding == nil {
+		return
+	}
+	if err := binding.Validate(); err != nil {
+		g.remoteContributionErr = fmt.Errorf("invalid remote contribution binding: %w", err)
+		return
+	}
+	copy := *binding
+	g.remoteContribution = &copy
+}
+
+func (g *GitOperator) validateContributionRemote(ctx context.Context) error {
+	if g.remoteContribution == nil {
+		return nil
+	}
+	remoteName := g.remoteContribution.ContributionRemoteName()
+	urlsOutput, err := g.runGitCommand(ctx, "config", "--get-all", "remote."+remoteName+".pushurl")
+	if err != nil {
+		// A remote without an explicit pushurl pushes to its configured URL.
+		urlsOutput, err = g.runGitCommand(ctx, "config", "--get-all", "remote."+remoteName+".url")
+	}
+	if err != nil {
+		return errors.New("contribution remote is unavailable")
+	}
+	urls := strings.Split(strings.TrimSpace(urlsOutput), "\n")
+	if len(urls) == 0 || urls[0] == "" {
+		return errors.New("contribution remote has no configured URL")
+	}
+	for _, configured := range urls {
+		if strings.TrimSpace(configured) != g.remoteContribution.SourceRepository.RemoteURL {
+			return errors.New("contribution remote push URL does not match the validated source")
+		}
+	}
+	return nil
 }
 
 func (g *GitOperator) environmentValues() []string {
@@ -142,6 +182,15 @@ func (g *GitOperator) runGitCommand(ctx context.Context, args ...string) (string
 
 		// Skip commit SHAs (validated elsewhere via validateCommitSHA)
 		if securityutil.LooksLikeCommitSHA(arg) {
+			continue
+		}
+
+		// Contribution pushes use an explicit, non-force refspec. Validate the
+		// branch portion before allowing the colon-bearing argument through.
+		if strings.HasPrefix(arg, "HEAD:refs/heads/") {
+			if !securityutil.IsValidBranchName(strings.TrimPrefix(arg, "HEAD:refs/heads/")) {
+				return "", ErrInvalidBranchName
+			}
 			continue
 		}
 
@@ -348,6 +397,18 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	result := &GitOperationResult{
 		Operation: "push",
 	}
+	if g.remoteContributionErr != nil {
+		result.Error = g.remoteContributionErr.Error()
+		return result, nil
+	}
+	if g.remoteContribution != nil && force {
+		result.Error = "force push is not allowed for a remote contribution"
+		return result, nil
+	}
+	if err := g.validateContributionRemote(ctx); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
 
 	branch, err := g.getCurrentBranch(ctx)
 	if err != nil {
@@ -357,6 +418,13 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 
 	args := []string{"push"}
 	shouldSetUpstream := setUpstream || g.getUpstreamRef(ctx) == ""
+	remote := "origin"
+	refspec := branch
+	if g.remoteContribution != nil {
+		remote = g.remoteContribution.ContributionRemoteName()
+		refspec = "HEAD:refs/heads/" + g.remoteContribution.HeadBranch
+		shouldSetUpstream = setUpstream
+	}
 	if shouldSetUpstream {
 		args = append(args, "--set-upstream")
 	}
@@ -366,7 +434,7 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 		args = append(args, "--force-with-lease")
 	}
 
-	args = append(args, "origin", branch)
+	args = append(args, remote, refspec)
 
 	output, err := g.runGitCommand(ctx, args...)
 	result.Output = output
@@ -379,8 +447,46 @@ func (g *GitOperator) Push(ctx context.Context, force bool, setUpstream bool) (*
 	result.Success = true
 	g.logger.Info("push completed",
 		zap.String("branch", branch),
+		zap.String("remote", remote),
 		zap.Bool("force", force),
 		zap.Bool("set_upstream", shouldSetUpstream))
+	return result, nil
+}
+
+// PushPreflight verifies that the configured contribution remote and final
+// head-branch refspec are writable without mutating the remote or local refs.
+func (g *GitOperator) PushPreflight(ctx context.Context) (*GitOperationResult, error) {
+	if !g.tryLock("push-preflight") {
+		return nil, ErrOperationInProgress
+	}
+	defer g.unlock()
+	result := &GitOperationResult{Operation: "push_preflight"}
+	if g.remoteContributionErr != nil {
+		result.Error = g.remoteContributionErr.Error()
+		return result, nil
+	}
+	if g.remoteContribution == nil {
+		result.Success = true
+		return result, nil
+	}
+	if err := g.validateContributionRemote(ctx); err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	branch, err := g.getCurrentBranch(ctx)
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	refspec := "HEAD:refs/heads/" + g.remoteContribution.HeadBranch
+	output, err := g.runGitCommand(ctx, "push", "--dry-run", g.remoteContribution.ContributionRemoteName(), refspec)
+	result.Output = output
+	if err != nil {
+		result.Error = err.Error()
+		return result, nil
+	}
+	result.Success = true
+	g.logger.Info("contribution push preflight completed", zap.String("branch", branch))
 	return result, nil
 }
 
@@ -1007,6 +1113,34 @@ func (g *GitOperator) CreatePR(ctx context.Context, title, body, baseBranch stri
 	defer g.unlock()
 
 	result := &PRCreateResult{}
+	if g.remoteContributionErr != nil {
+		result.Error = g.remoteContributionErr.Error()
+		return result, nil
+	}
+	if g.remoteContribution != nil {
+		if err := g.validateContributionRemote(ctx); err != nil {
+			result.Error = err.Error()
+			return result, nil
+		}
+		branch, err := g.getCurrentBranch(ctx)
+		if err != nil {
+			result.Error = fmt.Sprintf("failed to get current branch: %s", err.Error())
+			return result, nil
+		}
+		output, err := g.runGitCommand(ctx, "push", g.remoteContribution.ContributionRemoteName(), "HEAD:refs/heads/"+g.remoteContribution.HeadBranch)
+		if err != nil {
+			result.Error = fmt.Sprintf("failed to push contribution branch: %s", g.sanitizePRFailure(output, title, body))
+			result.Output = g.sanitizeGitPushOutput(output)
+			return result, nil
+		}
+		result.Success = true
+		result.BranchPushed = true
+		result.PRURL = g.remoteContribution.CanonicalURL
+		result.Provider = g.remoteContribution.Provider
+		result.Output = g.sanitizeGitPushOutput(output)
+		g.logger.Info("updated existing remote contribution", zap.String("branch", branch), zap.String("provider", result.Provider))
+		return result, nil
+	}
 
 	branch, err := g.getCurrentBranch(ctx)
 	if err != nil {

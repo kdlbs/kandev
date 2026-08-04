@@ -9,6 +9,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 	"golang.org/x/crypto/ssh"
 )
 
@@ -462,6 +463,60 @@ func TestSSHRemoteAgentEnvEmpty(t *testing.T) {
 	}
 	if got := sshRemoteAgentEnv(&ExecutorCreateRequest{}); got != nil {
 		t.Fatalf("expected nil for no credentials, got %v", got)
+	}
+}
+
+func TestSSHRemoteContributionEnvUsesScopedGitCredentialHelper(t *testing.T) {
+	req := &ExecutorCreateRequest{Env: map[string]string{
+		envKeyGitHubCredentialBrokerURL: "https://kandev.example/api/v1/github/credentials/resolve",
+		envKeyGitHubCredentialLease:     "lease",
+		"GIT_CONFIG_COUNT":              "1",
+		"GIT_CONFIG_KEY_0":              "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":            "!agentctl git-credential",
+	}}
+	got := sshRemoteContributionEnv(req, "/home/agent/.kandev/bin/agentctl")
+	if got["GIT_CONFIG_VALUE_0"] != "!/home/agent/.kandev/bin/agentctl git-credential" {
+		t.Fatalf("GitHub helper = %q, want absolute agentctl helper", got["GIT_CONFIG_VALUE_0"])
+	}
+	if got["GIT_CONFIG_COUNT"] != "1" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 1", got["GIT_CONFIG_COUNT"])
+	}
+}
+
+func TestSSHRemoteContributionScriptPinsTargetAndSourceIdentity(t *testing.T) {
+	binding := &models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host:      "github.com",
+			Path:      "contributor/widget",
+			RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	script := sshRemoteContributionScript("/remote/task", "https://github.com/acme/widget.git", binding)
+	for _, want := range []string{
+		"remote add origin",
+		"fetch --no-tags origin",
+		binding.SourceRepository.RemoteURL,
+		"contribution_remote='" + binding.ContributionRemoteName() + "'",
+		"refs/heads/feature/remote",
+		strings.Repeat("a", 40),
+		"branch --set-upstream-to",
+	} {
+		if !strings.Contains(script, want) {
+			t.Errorf("SSH contribution script missing %q", want)
+		}
+	}
+	if strings.Contains(script, "untrusted") {
+		t.Fatal("SSH contribution script contains provider-authored content")
 	}
 }
 

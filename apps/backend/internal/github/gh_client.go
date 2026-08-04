@@ -183,27 +183,43 @@ type ghRequestedReviewer struct {
 
 // ghPR is the JSON shape returned by gh pr list/view.
 type ghPR struct {
-	Number           int                   `json:"number"`
-	Title            string                `json:"title"`
-	URL              string                `json:"url"`
-	State            string                `json:"state"`
-	Body             string                `json:"body"`
-	HeadRefName      string                `json:"headRefName"`
-	HeadRefOid       string                `json:"headRefOid"`
-	BaseRefName      string                `json:"baseRefName"`
-	IsDraft          bool                  `json:"isDraft"`
-	Mergeable        string                `json:"mergeable"`
-	MergeStateStatus string                `json:"mergeStateStatus"`
-	Additions        int                   `json:"additions"`
-	Deletions        int                   `json:"deletions"`
-	CreatedAt        time.Time             `json:"createdAt"`
-	UpdatedAt        time.Time             `json:"updatedAt"`
-	MergedAt         string                `json:"mergedAt"`
-	ClosedAt         string                `json:"closedAt"`
-	ReviewRequests   []ghRequestedReviewer `json:"reviewRequests"`
-	Author           struct {
+	Number              int                   `json:"number"`
+	Title               string                `json:"title"`
+	URL                 string                `json:"url"`
+	State               string                `json:"state"`
+	Body                string                `json:"body"`
+	HeadRefName         string                `json:"headRefName"`
+	HeadRefOid          string                `json:"headRefOid"`
+	BaseRefName         string                `json:"baseRefName"`
+	IsDraft             bool                  `json:"isDraft"`
+	Mergeable           string                `json:"mergeable"`
+	MergeStateStatus    string                `json:"mergeStateStatus"`
+	Additions           int                   `json:"additions"`
+	Deletions           int                   `json:"deletions"`
+	CreatedAt           time.Time             `json:"createdAt"`
+	UpdatedAt           time.Time             `json:"updatedAt"`
+	MergedAt            string                `json:"mergedAt"`
+	ClosedAt            string                `json:"closedAt"`
+	ReviewRequests      []ghRequestedReviewer `json:"reviewRequests"`
+	MaintainerCanModify bool                  `json:"maintainerCanModify"`
+	HeadRepository      ghRepository          `json:"headRepository"`
+	BaseRepository      ghRepository          `json:"baseRepository"`
+	Author              struct {
 		Login string `json:"login"`
 	} `json:"author"`
+}
+
+type ghRepository struct {
+	DefaultBranch string `json:"defaultBranch"`
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	NameWithOwner string `json:"nameWithOwner"`
+	URL           string `json:"url"`
+	CloneURL      string `json:"cloneUrl"`
+	HTTPSURL      string `json:"httpsUrl"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
 }
 
 type ghIssue struct {
@@ -230,7 +246,7 @@ type ghIssue struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,baseRepository")
 	if err != nil {
 		if isNotFoundErr(err) {
 			return nil, &GitHubAPIError{
@@ -1193,29 +1209,57 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		state = prStateMerged
 	}
 	pr := &PR{
-		Number:             raw.Number,
-		Title:              raw.Title,
-		URL:                raw.URL,
-		HTMLURL:            raw.URL,
-		State:              state,
-		Body:               raw.Body,
-		HeadBranch:         raw.HeadRefName,
-		HeadSHA:            raw.HeadRefOid,
-		BaseBranch:         raw.BaseRefName,
-		AuthorLogin:        raw.Author.Login,
-		RepoOwner:          owner,
-		RepoName:           repo,
-		Draft:              raw.IsDraft,
-		Mergeable:          raw.Mergeable == "MERGEABLE",
-		MergeableState:     strings.ToLower(raw.MergeStateStatus),
-		Additions:          raw.Additions,
-		Deletions:          raw.Deletions,
-		RequestedReviewers: convertGHRequestedReviewers(raw.ReviewRequests),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
-		MergedAt:           parseTimePtr(raw.MergedAt),
-		ClosedAt:           parseTimePtr(raw.ClosedAt),
+		Number:              raw.Number,
+		Title:               raw.Title,
+		URL:                 raw.URL,
+		HTMLURL:             raw.URL,
+		State:               state,
+		Body:                raw.Body,
+		HeadBranch:          raw.HeadRefName,
+		HeadSHA:             raw.HeadRefOid,
+		BaseBranch:          raw.BaseRefName,
+		AuthorLogin:         raw.Author.Login,
+		RepoOwner:           owner,
+		RepoName:            repo,
+		MaintainerCanModify: raw.MaintainerCanModify,
+		Draft:               raw.IsDraft,
+		Mergeable:           raw.Mergeable == "MERGEABLE",
+		MergeableState:      strings.ToLower(raw.MergeStateStatus),
+		Additions:           raw.Additions,
+		Deletions:           raw.Deletions,
+		RequestedReviewers:  convertGHRequestedReviewers(raw.ReviewRequests),
+		CreatedAt:           raw.CreatedAt,
+		UpdatedAt:           raw.UpdatedAt,
+		MergedAt:            parseTimePtr(raw.MergedAt),
+		ClosedAt:            parseTimePtr(raw.ClosedAt),
 	}
+	pr.HeadRepoID = raw.HeadRepository.ID
+	pr.HeadRepoOwner = raw.HeadRepository.Owner.Login
+	pr.HeadRepoName = raw.HeadRepository.Name
+	if parts := strings.SplitN(raw.HeadRepository.NameWithOwner, "/", 2); len(parts) == 2 {
+		if pr.HeadRepoOwner == "" {
+			pr.HeadRepoOwner = parts[0]
+		}
+		if pr.HeadRepoName == "" {
+			pr.HeadRepoName = parts[1]
+		}
+	}
+	pr.HeadRepoCloneURL = raw.HeadRepository.CloneURL
+	if pr.HeadRepoCloneURL == "" {
+		pr.HeadRepoCloneURL = raw.HeadRepository.HTTPSURL
+	}
+	pr.BaseRepoID = raw.BaseRepository.ID
+	pr.BaseRepoOwner = raw.BaseRepository.Owner.Login
+	pr.BaseRepoName = raw.BaseRepository.Name
+	if parts := strings.SplitN(raw.BaseRepository.NameWithOwner, "/", 2); len(parts) == 2 {
+		if pr.BaseRepoOwner == "" {
+			pr.BaseRepoOwner = parts[0]
+		}
+		if pr.BaseRepoName == "" {
+			pr.BaseRepoName = parts[1]
+		}
+	}
+	pr.BaseDefaultBranch = raw.BaseRepository.DefaultBranch
 	return pr
 }
 

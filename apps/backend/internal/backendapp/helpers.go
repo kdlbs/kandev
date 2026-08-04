@@ -1482,6 +1482,7 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, wfCtrl,
 		clarificationStore, clarificationCanceller, p.msgCreator, p.taskRepo, p.taskRepo, p.eventBus, planService, walkthroughService, p.orchestratorSvc, p.orchestratorSvc.GetMessageQueue(), p.log,
 	)
+	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)

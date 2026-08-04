@@ -176,6 +176,47 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
+// collectRemoteContributions projects the validated per-repository bindings
+// into the workspace-subpath keys understood by agentctl. The first repository
+// owns the workspace root; sibling destinations use the same deterministic key
+// as base-branch and workspace materialization projection.
+func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteContribution, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.RemoteContribution == nil {
+			return nil, nil
+		}
+		if err := req.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution: %w", err)
+		}
+		return map[string]models.RemoteContribution{"": *req.RemoteContribution}, nil
+	}
+	bindings := make(map[string]models.RemoteContribution)
+	for index, spec := range specs {
+		if spec.RemoteContribution == nil {
+			continue
+		}
+		if err := spec.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := bindings[key]; ok && existing.CanonicalURL != spec.RemoteContribution.CanonicalURL {
+			return nil, fmt.Errorf("multiple remote contributions target workspace repository %q", key)
+		}
+		bindings[key] = *spec.RemoteContribution
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	return bindings, nil
+}
+
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}
 // map that agentctl reads to scope diff stats. Single-repo legacy launches
 // are recorded under the empty key "" so single-repo trackers (which have
@@ -641,6 +682,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
+	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(remoteContributions) > 0 {
+		metadata[MetadataKeyRemoteContributions] = remoteContributions
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -669,6 +717,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
@@ -783,6 +832,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		DefaultBranch:          req.DefaultBranch,
 		CheckoutBranch:         req.CheckoutBranch,
 		PRNumber:               req.PRNumber,
+		RemoteContribution:     req.RemoteContribution,
 		WorktreeBranch:         getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
@@ -812,6 +862,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				DefaultBranch:          r.DefaultBranch,
 				CheckoutBranch:         r.CheckoutBranch,
 				PRNumber:               r.PRNumber,
+				RemoteContribution:     r.RemoteContribution,
 				WorktreeID:             r.WorktreeID,
 				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 				WorktreeBranchTemplate: r.WorktreeBranchTemplate,

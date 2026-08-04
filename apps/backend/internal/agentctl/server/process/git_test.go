@@ -9,7 +9,123 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	taskmodels "github.com/kandev/kandev/internal/task/models"
 )
+
+func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testing.T) {
+	cases := []struct {
+		name         string
+		provider     string
+		kind         string
+		canonicalURL string
+		sourceHost   string
+		sourcePath   string
+		sourceRemote string
+	}{
+		{
+			name:         "github pull request",
+			provider:     taskmodels.RemoteContributionProviderGitHub,
+			kind:         taskmodels.RemoteContributionKindPullRequest,
+			canonicalURL: "https://github.com/acme/widget/pull/7",
+			sourceHost:   "github.com",
+			sourcePath:   "contributor/widget",
+			sourceRemote: "https://github.com/contributor/widget.git",
+		},
+		{
+			name:         "gitlab merge request",
+			provider:     taskmodels.RemoteContributionProviderGitLab,
+			kind:         taskmodels.RemoteContributionKindMergeRequest,
+			canonicalURL: "https://gitlab.example.test/acme/widget/-/merge_requests/7",
+			sourceHost:   "gitlab.example.test",
+			sourcePath:   "contributor/widget",
+			sourceRemote: "https://gitlab.example.test/contributor/widget.git",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir, cleanup := setupTestRepo(t)
+			t.Cleanup(cleanup)
+
+			originDir := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin"))
+			runGit(t, repoDir, "checkout", "-b", "feature/contribution")
+			writeFile(t, repoDir, "contribution.txt", "contribution\n")
+			runGit(t, repoDir, "add", ".")
+			runGit(t, repoDir, "commit", "-m", "contribution")
+			headSHA := strings.TrimSpace(runGit(t, repoDir, "rev-parse", "HEAD"))
+			binding := &taskmodels.RemoteContribution{
+				Version:      taskmodels.RemoteContributionVersion,
+				Provider:     tc.provider,
+				Kind:         tc.kind,
+				CanonicalURL: tc.canonicalURL,
+				Number:       7,
+				State:        taskmodels.RemoteContributionStateOpen,
+				BaseBranch:   "main",
+				HeadBranch:   "feature/contribution",
+				HeadSHA:      headSHA,
+				SourceRepository: taskmodels.RemoteContributionRepository{
+					Host:      tc.sourceHost,
+					Path:      tc.sourcePath,
+					RemoteURL: tc.sourceRemote,
+				},
+				CollaborationAllowed: true,
+			}
+			if err := binding.Validate(); err != nil {
+				t.Fatalf("binding.Validate() = %v", err)
+			}
+			// Keep the test hermetic while exercising the credential-free source URL
+			// that the operator receives from runtime materialization.
+			runGit(t, repoDir, "config", "url."+originDir+".insteadOf", binding.SourceRepository.RemoteURL)
+			runGit(t, repoDir, "remote", "add", binding.ContributionRemoteName(), binding.SourceRepository.RemoteURL)
+
+			operator := NewGitOperator(repoDir, newTestLogger(t), nil)
+			operator.setRemoteContribution(binding)
+
+			preflight, err := operator.PushPreflight(context.Background())
+			if err != nil {
+				t.Fatalf("PushPreflight returned error: %v", err)
+			}
+			if !preflight.Success {
+				t.Fatalf("PushPreflight failed: %+v", preflight)
+			}
+			if _, err := os.Stat(filepath.Join(originDir, "refs", "heads", "feature", "contribution")); !os.IsNotExist(err) {
+				t.Fatalf("preflight mutated source branch, stat error = %v", err)
+			}
+
+			forced, err := operator.Push(context.Background(), true, false)
+			if err != nil {
+				t.Fatalf("forced Push returned error: %v", err)
+			}
+			if forced.Success || !strings.Contains(forced.Error, "force push is not allowed") {
+				t.Fatalf("forced Push = %+v, want a contribution force-push rejection", forced)
+			}
+
+			pushed, err := operator.Push(context.Background(), false, false)
+			if err != nil {
+				t.Fatalf("Push returned error: %v", err)
+			}
+			if !pushed.Success {
+				t.Fatalf("Push failed: %+v", pushed)
+			}
+			remoteHead := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution"))
+			if remoteHead != headSHA {
+				t.Fatalf("source branch head = %q, want %q", remoteHead, headSHA)
+			}
+			if got := strings.TrimSpace(runGit(t, repoDir, "remote", "get-url", "origin")); got != originDir {
+				t.Fatalf("origin URL = %q, want %q", got, originDir)
+			}
+
+			result, err := operator.CreatePR(context.Background(), "untrusted title", "untrusted body", "main", false)
+			if err != nil {
+				t.Fatalf("CreatePR returned error: %v", err)
+			}
+			if !result.Success || !result.BranchPushed || result.PRURL != binding.CanonicalURL || result.Provider != binding.Provider {
+				t.Fatalf("CreatePR = %+v, want reuse of existing contribution", result)
+			}
+		})
+	}
+}
 
 func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)

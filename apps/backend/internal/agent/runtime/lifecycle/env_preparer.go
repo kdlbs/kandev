@@ -33,6 +33,7 @@ type RepoPrepareSpec struct {
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string
 	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeID             string
 	WorktreeBranch         string
 	WorktreeBranchPrefix   string
@@ -52,24 +53,25 @@ type RepoPrepareSpec struct {
 
 // EnvPrepareRequest contains the parameters for environment preparation.
 type EnvPrepareRequest struct {
-	TaskID          string
-	WorkspaceID     string
-	SessionID       string
-	TaskTitle       string
-	ExecutionID     string
-	ExecutorType    executor.Name
-	WorkspacePath   string
-	RepositoryPath  string
-	RepositoryID    string
-	UseWorktree     bool
-	SetupScript     string
-	RepoSetupScript string // Repository-level setup script (e.g. "make install")
-	BaseBranch      string
-	DefaultBranch   string // Repository's default_branch, used as fallback when BaseBranch is missing
-	CheckoutBranch  string
-	PRNumber        int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
-	WorktreeID      string
-	WorktreeBranch  string
+	TaskID             string
+	WorkspaceID        string
+	SessionID          string
+	TaskTitle          string
+	ExecutionID        string
+	ExecutorType       executor.Name
+	WorkspacePath      string
+	RepositoryPath     string
+	RepositoryID       string
+	UseWorktree        bool
+	SetupScript        string
+	RepoSetupScript    string // Repository-level setup script (e.g. "make install")
+	BaseBranch         string
+	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
+	CheckoutBranch     string
+	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution *models.RemoteContribution
+	WorktreeID         string
+	WorktreeBranch     string
 
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -112,6 +114,7 @@ func (r *EnvPrepareRequest) RepoSpecs() []RepoPrepareSpec {
 		DefaultBranch:          r.DefaultBranch,
 		CheckoutBranch:         r.CheckoutBranch,
 		PRNumber:               r.PRNumber,
+		RemoteContribution:     r.RemoteContribution,
 		WorktreeID:             r.WorktreeID,
 		WorktreeBranch:         r.WorktreeBranch,
 		WorktreeBranchPrefix:   r.WorktreeBranchPrefix,

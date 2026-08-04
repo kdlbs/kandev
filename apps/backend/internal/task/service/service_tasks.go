@@ -529,6 +529,21 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 
 	seen := make(map[string]bool, len(repositories))
 	for i, repoInput := range repositories {
+		if repoInput.RemoteContribution != nil {
+			if err := repoInput.RemoteContribution.Validate(); err != nil {
+				return fmt.Errorf("invalid remote contribution: %w", err)
+			}
+			if repoInput.CheckoutBranch == "" {
+				repoInput.CheckoutBranch = repoInput.RemoteContribution.HeadBranch
+			}
+			if repoInput.BaseBranch == "" {
+				repoInput.BaseBranch = repoInput.RemoteContribution.BaseBranch
+			}
+			if repoInput.CheckoutBranch != repoInput.RemoteContribution.HeadBranch ||
+				repoInput.BaseBranch != repoInput.RemoteContribution.BaseBranch {
+				return fmt.Errorf("remote contribution branches do not match the resolved binding")
+			}
+		}
 		repositoryID, baseBranch, _, err := s.resolveRepoInput(ctx, workspaceID, repoInput, repoByPath)
 		if err != nil {
 			return err
@@ -560,6 +575,11 @@ func (s *Service) createTaskRepositories(ctx context.Context, taskID, workspaceI
 		metadata := make(map[string]interface{})
 		if prNum := resolvePRNumber(repoInput); prNum > 0 {
 			metadata["pr_number"] = prNum
+		}
+		if repoInput.RemoteContribution != nil {
+			if err := models.PutRemoteContribution(metadata, repoInput.RemoteContribution); err != nil {
+				return fmt.Errorf("persist remote contribution: %w", err)
+			}
 		}
 		taskRepo := &models.TaskRepository{
 			TaskID:         taskID,
@@ -910,7 +930,10 @@ func (s *Service) resolveRepoInputRemote(
 		defaultBranch = s.probeProviderDefaultBranchIfMissing(ctx, workspaceID, provider, owner, name)
 	}
 	providerHost := remoteProviderHost(provider, canonicalURL)
-	if provider == providerGitLab && providerHost != "https://gitlab.com" {
+	if repoInput.ProviderHost != "" && !strings.EqualFold(strings.TrimRight(repoInput.ProviderHost, "/"), providerHost) {
+		return "", "", false, fmt.Errorf("remote_url provider host %q does not match %q", providerHost, repoInput.ProviderHost)
+	}
+	if provider == providerGitLab && providerHost != "https://gitlab.com" && !repoInput.TrustedRemote {
 		return "", "", false, fmt.Errorf("untrusted GitLab origin %q", providerHost)
 	}
 	repo, repoCreated, createErr := s.FindOrCreateRepository(ctx, &FindOrCreateRepositoryRequest{

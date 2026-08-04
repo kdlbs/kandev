@@ -91,6 +91,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 		existing, err := m.GetBySessionAndRepo(ctx, req.SessionID, req.RepositoryID, reuseSlug)
 		if err == nil && existing != nil {
 			if m.IsValid(existing.Path) {
+				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
+					return nil, true, err
+				}
 				m.logger.Debug("reusing existing worktree by session+repo",
 					zap.String("worktree_id", existing.ID),
 					zap.String("session_id", req.SessionID),
@@ -114,6 +117,9 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 		existing, err := m.GetByID(ctx, req.WorktreeID)
 		if err == nil && existing != nil {
 			if m.IsValid(existing.Path) {
+				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
+					return nil, true, err
+				}
 				m.logger.Info("reusing existing worktree by ID",
 					zap.String("worktree_id", req.WorktreeID),
 					zap.String("session_id", req.SessionID),
@@ -136,6 +142,26 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 	}
 
 	return nil, false, nil
+}
+
+func (m *Manager) validateReusableContribution(ctx context.Context, req CreateRequest, existing *Worktree) error {
+	if req.RemoteContribution == nil {
+		return nil
+	}
+	remoteName, remoteRef, err := m.materializeRemoteContribution(ctx, req.RepositoryPath, req.RemoteContribution)
+	if err != nil {
+		return err
+	}
+	headCmd := m.newNonInteractiveGitCmd(ctx, existing.Path, "rev-parse", "--verify", "HEAD^{commit}")
+	head, err := runGitCmdOutput(ctx, headCmd)
+	if err != nil || !strings.EqualFold(strings.TrimSpace(string(head)), req.RemoteContribution.HeadSHA) {
+		return fmt.Errorf("existing contribution worktree head does not match the validated source")
+	}
+	if err := m.setUpstreamIfExistsRemote(ctx, existing.Path, existing.Branch, remoteName, req.RemoteContribution.HeadBranch); err != nil {
+		return err
+	}
+	_ = remoteRef
+	return nil
 }
 
 func requestBranchIdentitySlug(req CreateRequest) string {
@@ -220,6 +246,9 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 
 	var fetchResult *FetchBranchResult
 	checkoutMode := req
+	if req.RemoteContribution != nil {
+		return m.createContributionInTaskDir(ctx, req, worktreePath, fallbackWarning, fallbackDetail)
+	}
 	if req.CheckoutBranch != "" {
 		// PRNumber != 0 means the caller wants the refs/pull/<N>/head ref;
 		// fork PR branches don't exist as plain refs locally or under
@@ -297,6 +326,35 @@ func (m *Manager) createInTaskDir(ctx context.Context, req CreateRequest, baseRe
 		zap.String("path", worktreePath),
 		zap.String("branch", wt.Branch))
 
+	return wt, nil
+}
+
+func (m *Manager) createContributionInTaskDir(
+	ctx context.Context,
+	req CreateRequest,
+	worktreePath, fallbackWarning, fallbackDetail string,
+) (*Worktree, error) {
+	remoteName, contributionRef, err := m.materializeRemoteContribution(ctx, req.RepositoryPath, req.RemoteContribution)
+	if err != nil {
+		return nil, err
+	}
+	worktreeID, branchName, err := m.addContributionWorktree(ctx, req, worktreePath, contributionRef, remoteName)
+	if err != nil {
+		return nil, err
+	}
+	wt := m.buildWorktreeRecord(worktreeID, req, worktreePath, branchName)
+	if err := m.persistAndCacheWorktree(ctx, wt, req, worktreePath); err != nil {
+		return nil, err
+	}
+	if fallbackWarning != "" {
+		wt.BaseBranchFallbackWarning = fallbackWarning
+		wt.BaseBranchFallbackDetail = fallbackDetail
+	}
+	if req.OnWorktreeCreated != nil {
+		req.OnWorktreeCreated(wt)
+	}
+	m.copyConfiguredFiles(ctx, req, wt)
+	m.runWorktreeSetupScript(ctx, wt, req.ScriptEnv)
 	return wt, nil
 }
 
@@ -1057,19 +1115,42 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		// gone. Propagate so the caller can retry the recreate.
 		return nil, fmt.Errorf("cannot verify worktree branch %q: %w", existing.Branch, probeErr)
 	}
+	contributionRemote := ""
+	contributionRef := ""
+	if req.RemoteContribution != nil {
+		var materializeErr error
+		contributionRemote, contributionRef, materializeErr = m.materializeRemoteContribution(ctx, req.RepositoryPath, req.RemoteContribution)
+		if materializeErr != nil {
+			return nil, materializeErr
+		}
+	}
 	if !exists {
-		if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, req.PRNumber); fetchErr != nil {
-			m.logger.Warn("failed to restore worktree branch during recreate",
-				zap.String("worktree_id", existing.ID),
-				zap.String("branch", existing.Branch),
-				zap.Error(fetchErr))
-			// Only a confirmed-missing remote ref means the work is gone;
-			// transient fetch failures (network, auth) keep their own error
-			// so callers don't treat a reachable branch as unrecoverable.
-			if isRemoteRefMissingError(fetchErr) {
-				return nil, fmt.Errorf("%w: %q", ErrBranchUnrecoverable, existing.Branch)
+		if req.RemoteContribution != nil {
+			branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, contributionRef)
+			if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
+				return nil, fmt.Errorf("restore contribution branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
-			return nil, fetchErr
+		} else {
+			if _, fetchErr := m.fetchBranchToLocal(ctx, req.RepositoryPath, existing.Branch, req.PRNumber); fetchErr != nil {
+				m.logger.Warn("failed to restore worktree branch during recreate",
+					zap.String("worktree_id", existing.ID),
+					zap.String("branch", existing.Branch),
+					zap.Error(fetchErr))
+				// Only a confirmed-missing remote ref means the work is gone;
+				// transient fetch failures (network, auth) keep their own error
+				// so callers don't treat a reachable branch as unrecoverable.
+				if isRemoteRefMissingError(fetchErr) {
+					return nil, fmt.Errorf("%w: %q", ErrBranchUnrecoverable, existing.Branch)
+				}
+				return nil, fetchErr
+			}
+		}
+	}
+	if exists && req.RemoteContribution != nil {
+		branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "rev-parse", "--verify", "refs/heads/"+existing.Branch+"^{commit}")
+		branchHead, branchErr := runGitCmdOutput(ctx, branchCmd)
+		if branchErr != nil || !strings.EqualFold(strings.TrimSpace(string(branchHead)), req.RemoteContribution.HeadSHA) {
+			return nil, fmt.Errorf("existing contribution branch head does not match the validated source")
 		}
 	}
 
@@ -1087,6 +1168,12 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		}
 	} else {
 		m.initSubmodules(ctx, worktreePath)
+	}
+	if contributionRemote != "" {
+		if err := m.setUpstreamIfExistsRemote(ctx, worktreePath, existing.Branch, contributionRemote, req.RemoteContribution.HeadBranch); err != nil {
+			_ = m.removeWorktreeDir(ctx, worktreePath, req.RepositoryPath)
+			return nil, err
+		}
 	}
 
 	// Update record

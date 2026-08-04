@@ -1397,6 +1397,7 @@ func buildRepoSpecs(allRepos []*repoInfo) []RepoSpec {
 			BaseBranch:             info.BaseBranch,
 			CheckoutBranch:         info.CheckoutBranch,
 			PRNumber:               info.PRNumber,
+			RemoteContribution:     info.RemoteContribution,
 			WorktreeBranchPrefix:   info.WorktreeBranchPrefix,
 			WorktreeBranchTemplate: info.WorktreeBranchTemplate,
 			PullBeforeWorktree:     info.PullBeforeWorktree,
@@ -1462,6 +1463,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		req.BaseBranch = repoInfo.BaseBranch
 		req.CheckoutBranch = repoInfo.CheckoutBranch
 		req.PRNumber = repoInfo.PRNumber
+		req.RemoteContribution = repoInfo.RemoteContribution
 		req.WorktreeBranchPrefix = repoInfo.WorktreeBranchPrefix
 		req.WorktreeBranchTemplate = repoInfo.WorktreeBranchTemplate
 		req.PullBeforeWorktree = repoInfo.PullBeforeWorktree

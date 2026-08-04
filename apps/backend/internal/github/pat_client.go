@@ -976,6 +976,43 @@ type patPR struct {
 	Base struct {
 		Ref string `json:"ref"`
 	} `json:"base"`
+	MaintainerCanModify bool           `json:"maintainer_can_modify"`
+	HeadRepository      *patRepository `json:"-"`
+	BaseRepository      *patRepository `json:"-"`
+}
+
+type patRepository struct {
+	ID            int64  `json:"id"`
+	Name          string `json:"name"`
+	FullName      string `json:"full_name"`
+	CloneURL      string `json:"clone_url"`
+	DefaultBranch string `json:"default_branch"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+func (p *patPR) UnmarshalJSON(data []byte) error {
+	type plain patPR
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*p = patPR(decoded)
+	var nested struct {
+		Head struct {
+			Repo *patRepository `json:"repo"`
+		} `json:"head"`
+		Base struct {
+			Repo *patRepository `json:"repo"`
+		} `json:"base"`
+	}
+	if err := json.Unmarshal(data, &nested); err != nil {
+		return err
+	}
+	p.HeadRepository = nested.Head.Repo
+	p.BaseRepository = nested.Base.Repo
+	return nil
 }
 
 type patIssue struct {
@@ -1027,26 +1064,29 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		mergeable = *raw.Mergeable
 	}
 	pr := &PR{
-		Number:             raw.Number,
-		Title:              raw.Title,
-		HTMLURL:            raw.HTMLURL,
-		Body:               raw.Body,
-		State:              state,
-		HeadBranch:         raw.Head.Ref,
-		HeadSHA:            raw.Head.SHA,
-		BaseBranch:         raw.Base.Ref,
-		AuthorLogin:        raw.User.Login,
-		RepoOwner:          owner,
-		RepoName:           repo,
-		Draft:              raw.Draft,
-		Mergeable:          mergeable,
-		MergeableState:     strings.ToLower(raw.MergeableState),
-		Additions:          raw.Additions,
-		Deletions:          raw.Deletions,
-		RequestedReviewers: convertPatRequestedReviewers(raw),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
+		Number:              raw.Number,
+		Title:               raw.Title,
+		HTMLURL:             raw.HTMLURL,
+		Body:                raw.Body,
+		State:               state,
+		HeadBranch:          raw.Head.Ref,
+		HeadSHA:             raw.Head.SHA,
+		BaseBranch:          raw.Base.Ref,
+		AuthorLogin:         raw.User.Login,
+		RepoOwner:           owner,
+		RepoName:            repo,
+		MaintainerCanModify: raw.MaintainerCanModify,
+		Draft:               raw.Draft,
+		Mergeable:           mergeable,
+		MergeableState:      strings.ToLower(raw.MergeableState),
+		Additions:           raw.Additions,
+		Deletions:           raw.Deletions,
+		RequestedReviewers:  convertPatRequestedReviewers(raw),
+		CreatedAt:           raw.CreatedAt,
+		UpdatedAt:           raw.UpdatedAt,
 	}
+	applyPatHeadRepository(pr, raw.HeadRepository)
+	applyPatBaseRepository(pr, raw.BaseRepository)
 	if raw.MergedAt != nil {
 		pr.MergedAt = parseTimePtr(*raw.MergedAt)
 	}
@@ -1054,6 +1094,42 @@ func convertPatPR(raw *patPR, owner, repo string) *PR {
 		pr.ClosedAt = parseTimePtr(*raw.ClosedAt)
 	}
 	return pr
+}
+
+func completePatRepositoryIdentity(owner, name, fullName string) (string, string) {
+	parts := strings.SplitN(fullName, "/", 2)
+	if len(parts) != 2 {
+		return owner, name
+	}
+	if owner == "" {
+		owner = parts[0]
+	}
+	if name == "" {
+		name = parts[1]
+	}
+	return owner, name
+}
+
+func applyPatHeadRepository(pr *PR, repository *patRepository) {
+	if repository == nil {
+		return
+	}
+	pr.HeadRepoID = repository.ID
+	pr.HeadRepoOwner, pr.HeadRepoName = completePatRepositoryIdentity(
+		repository.Owner.Login, repository.Name, repository.FullName,
+	)
+	pr.HeadRepoCloneURL = repository.CloneURL
+}
+
+func applyPatBaseRepository(pr *PR, repository *patRepository) {
+	if repository == nil {
+		return
+	}
+	pr.BaseRepoID = repository.ID
+	pr.BaseRepoOwner, pr.BaseRepoName = completePatRepositoryIdentity(
+		repository.Owner.Login, repository.Name, repository.FullName,
+	)
+	pr.BaseDefaultBranch = repository.DefaultBranch
 }
 
 func convertPatIssue(raw *patIssue, owner, repo string) *Issue {

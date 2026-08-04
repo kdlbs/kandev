@@ -301,6 +301,9 @@ func (r *SpritesExecutor) resolvePrepareScript(req *ExecutorCreateRequest) strin
 		return ""
 	}
 	script += KandevBranchCheckoutPostlude()
+	if binding, ok := req.RemoteContributions[""]; ok {
+		script += scriptengine.RemoteContributionSetupScript(&binding)
+	}
 
 	installScripts := r.collectAgentInstallScripts(req)
 
@@ -437,6 +440,7 @@ func spriteCreateInstanceRequest(req *ExecutorCreateRequest) agentctl.CreateInst
 		RequiresProcessKill: requiresProcessKillFromReq(req),
 		StripEnv:            stripEnvFromReq(req),
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
 		Env:                 cloneStringMap(req.Env),
 	}
 }
