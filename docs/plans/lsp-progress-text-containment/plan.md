@@ -53,6 +53,8 @@ The fixed-width LSP popover currently renders server-controlled project-progress
 - The follow-up Codex review found that definition navigation accepted only LSP `Location` results. Commit `e0058e8440a225c9809a9ac8b350dec41ca0bc8c` normalizes `LocationLink` results with `targetUri` and `targetSelectionRange`; provider tests cover array, scalar, and mixed response shapes.
 - Review-fixup verification passed: all 8 LSP unit files (80 tests), web typecheck, focused ESLint with zero warnings, and `git diff --check`.
 - After the remediation push, PR #1863 was open, ready, and mergeable on exact head `e0058e8440a225c9809a9ac8b350dec41ca0bc8c`, with 0 failed and 15 pending checks, 0 unresolved or hidden review threads, and 0 actionable issue comments. The LocationLink thread was replied to and resolved.
+- A later Codex pass found two editor-ownership regressions. Commit `74f6dfea3e58ab3cdc951e37aaefff6411434e87` lets unscoped navigation use a sole session-scoped CodeMirror revealer without guessing across multiple sessions, and hides the status-bar LSP control when CodeMirror owns the active editor.
+- The editor-ownership RED cases failed in the expected cursor and status-item assertions. GREEN verification passed across 12 affected test files (63 tests), web typecheck, focused ESLint with zero warnings, and `git diff --check`.
 
 ## Implementation Waves And Parallel Candidates
 
