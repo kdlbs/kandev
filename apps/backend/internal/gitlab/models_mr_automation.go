@@ -63,6 +63,14 @@ type TaskMRAutomationResponse struct {
 	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
+// TaskMRAutomationEvaluation is the narrow, internal snapshot consumed by
+// lifecycle evaluation. Unlike TaskMRAutomationResponse, it contains only
+// the target MR checkpoint rather than every checkpoint for the task.
+type TaskMRAutomationEvaluation struct {
+	Options    *TaskMRAutomationResponse
+	Checkpoint *TaskMRLifecycleState
+}
+
 // GetWorkspaceID implements the websocket broadcaster's workspace-routing
 // interface (internal/gateway/websocket.extractWorkspaceID) — a struct
 // payload's fields are otherwise invisible to that generic extractor.

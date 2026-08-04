@@ -183,6 +183,27 @@ returns `title_not_owner`, without changing the title.
 
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
 
+### Provider-scoped review automation tools
+
+Task-mode review automation tools follow the providers attached to the task's
+repositories. Kandev computes their union when the session launches or
+resumes:
+
+| Attached providers | Discoverable tools |
+| ------------------ | ------------------ |
+| GitHub only        | `get_task_pr_automation_kandev`, `update_task_pr_automation_kandev` |
+| GitLab only        | `get_task_mr_automation_kandev`, `update_task_mr_automation_kandev` |
+| GitHub and GitLab   | Both provider-specific pairs |
+| None or unsupported | Neither pair |
+
+Adding a repository source successfully to an idle task can update the live
+session's task MCP tool list after materialization. If live refresh is
+temporarily unavailable, the source attachment remains committed and the next
+launch or resume reconciles the tool list. Tool discovery only describes the
+available surface; backend authorization and task/provider validation remain
+authoritative for every call. The existing automation request and response
+payloads are unchanged.
+
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
 A same-task message requires the sibling's session ID. Normal messages can cross workspaces when the sender knows the full task ID. Delivery to a running session is queued by default. When a direct child must abandon its current approach and receive replacement work now, its parent should use `message_task_kandev` with `delivery_mode: "interrupt"`; another sender receives a hard error rather than a silent downgrade, and a request that cannot dispatch safely remains queued.

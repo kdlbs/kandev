@@ -55,6 +55,40 @@ func TestDecodeTaskMRUpdatedEvent_MapShape(t *testing.T) {
 	}
 }
 
+// TestDecodeTaskMRUpdatedEvent_ReviewerObservationRoundTrip keeps the
+// ephemeral reviewer observation intact across the map shape used by NATS.
+// The explicit validity marker is required because an observed empty list is
+// different from an old event that carried no reviewer observation at all.
+func TestDecodeTaskMRUpdatedEvent_ReviewerObservationRoundTrip(t *testing.T) {
+	raw := map[string]interface{}{
+		"workspace_id":    "ws-1",
+		"task_id":         "task-1",
+		"project_path":    "group/a",
+		"mr_iid":          float64(1),
+		"reviewers":       []interface{}{},
+		"reviewers_valid": true,
+	}
+
+	got, ok := decodeTaskMRUpdatedEvent(raw)
+	if !ok || got == nil {
+		t.Fatalf("expected a decoded event, got %+v ok=%v", got, ok)
+	}
+	encoded, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal decoded event: %v", err)
+	}
+	var roundTripped map[string]interface{}
+	if err := json.Unmarshal(encoded, &roundTripped); err != nil {
+		t.Fatalf("unmarshal decoded event: %v", err)
+	}
+	if valid, ok := roundTripped["reviewers_valid"].(bool); !ok || !valid {
+		t.Fatalf("reviewer validity was not preserved: %s", encoded)
+	}
+	if reviewers, ok := roundTripped["reviewers"].([]interface{}); !ok || len(reviewers) != 0 {
+		t.Fatalf("observed empty reviewer list was not preserved: %s", encoded)
+	}
+}
+
 // TestDecodeTaskMRUpdatedEvent_UnknownShape covers the same-defensive-default
 // as the original direct type assertion: an unrelated payload is ignored,
 // not misinterpreted.

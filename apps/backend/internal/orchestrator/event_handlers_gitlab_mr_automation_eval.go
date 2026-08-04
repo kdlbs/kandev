@@ -14,6 +14,23 @@ import (
 	taskrepo "github.com/kandev/kandev/internal/task/repository"
 )
 
+// ciAutomationFollowUpTimeout bounds best-effort work that must continue
+// after the durable prompt side effect, while keeping a stalled store or
+// event bus from holding the detached MR evaluation forever. It is a var so
+// blocking fakes can exercise the timeout without waiting for the production
+// interval.
+var ciAutomationFollowUpTimeout = 5 * time.Second
+
+func runTaskMRAutomationFollowUp(
+	parent context.Context,
+	timeout time.Duration,
+	operation func(context.Context) error,
+) error {
+	followUpCtx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+	defer cancel()
+	return operation(followUpCtx)
+}
+
 // handleTaskMRLifecycleAutomation is the evaluation entrypoint invoked for
 // every observed MR change. It fails closed (AC31): a transient error from
 // the task lookup or options load is returned to the caller (who logs and
@@ -21,6 +38,12 @@ import (
 // definitive ErrTaskNotFound, a nil task, or an archived task discards the
 // event.
 func (s *Service) handleTaskMRLifecycleAutomation(ctx context.Context, mr *gitlab.TaskMR) error {
+	return s.handleTaskMRLifecycleAutomationWithObservation(ctx, mr, nil)
+}
+
+func (s *Service) handleTaskMRLifecycleAutomationWithObservation(
+	ctx context.Context, mr *gitlab.TaskMR, observation *taskMRReviewerObservation,
+) error {
 	if s.gitlabMRAutomation == nil || mr == nil {
 		return nil
 	}
@@ -34,14 +57,22 @@ func (s *Service) handleTaskMRLifecycleAutomation(ctx context.Context, mr *gitla
 	if task == nil || task.ArchivedAt != nil {
 		return nil
 	}
-	options, err := s.gitlabMRAutomation.GetTaskMRAutomationResponse(ctx, mr.TaskID)
+	evaluation, err := s.gitlabMRAutomation.GetTaskMRAutomationEvaluation(
+		ctx, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID,
+	)
 	if err != nil {
 		return err
 	}
+	if evaluation == nil || evaluation.Options == nil {
+		return nil
+	}
+	options := evaluation.Options
 	if !options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed {
 		return nil
 	}
-	delivered, err := s.evalTaskMRLifecycle(ctx, mr, options, s.gitlabMRAutomation)
+	delivered, err := s.evalTaskMRLifecycleAtCheckpoint(
+		ctx, mr, options, evaluation.Checkpoint, observation, s.gitlabMRAutomation,
+	)
 	if err != nil {
 		s.logger.Debug("task MR lifecycle automation failed",
 			zap.String("task_id", mr.TaskID),
@@ -65,19 +96,24 @@ func (s *Service) evalTaskMRLifecycle(
 	options *gitlab.TaskMRAutomationResponse,
 	automation taskMRAgentAutomationService,
 ) (bool, error) {
-	terminal := mr.State == gitlabMRStateMerged || mr.State == gitlabMRStateClosed
-	if !terminal && options.PromptOnReviewRequested {
-		username, _, err := automation.RebindTaskMRReviewer(ctx, mr.TaskID)
-		if err != nil {
-			return false, err
-		}
-		options.ReviewReviewerUsername = username
-	}
-	checkpoint, err := automation.GetTaskMRLifecycleState(ctx, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID)
+	checkpoint, err := automation.GetTaskMRLifecycleState(
+		ctx, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID,
+	)
 	if err != nil {
 		return false, err
 	}
-	reviewRequested, err := currentTaskMRReviewRequest(ctx, automation, mr, options)
+	return s.evalTaskMRLifecycleAtCheckpoint(ctx, mr, options, checkpoint, nil, automation)
+}
+
+func (s *Service) evalTaskMRLifecycleAtCheckpoint(
+	ctx context.Context,
+	mr *gitlab.TaskMR,
+	options *gitlab.TaskMRAutomationResponse,
+	checkpoint *gitlab.TaskMRLifecycleState,
+	observation *taskMRReviewerObservation,
+	automation taskMRAgentAutomationService,
+) (bool, error) {
+	reviewRequested, err := currentTaskMRReviewRequest(ctx, automation, mr, options, observation)
 	if err != nil {
 		return false, err
 	}
@@ -96,22 +132,22 @@ func (s *Service) evalTaskMRLifecycle(
 	if err != nil {
 		return false, fmt.Errorf("dispatch %s prompt: %w", decision.Event, err)
 	}
-	// Detached context: the durable prompt has already been queued/drained
-	// (the user-visible side effect). A context cancellation racing this
-	// checkpoint write must not leave it unstamped — that would make the next
-	// poll re-evaluate the same transition and re-dispatch a duplicate
-	// notification. Matches recordMRAutomationError's use of WithoutCancel
-	// below for the same reason.
-	err = automation.RecordTaskMRLifecyclePrompt(context.WithoutCancel(ctx), gitlab.TaskMRLifecyclePrompt{
-		TaskID:          mr.TaskID,
-		RepositoryID:    mr.RepositoryID,
-		ProjectPath:     mr.ProjectPath,
-		MRIID:           mr.MRIID,
-		Event:           decision.Event,
-		SessionID:       sessionID,
-		PromptedAt:      time.Now().UTC(),
-		ReviewRequested: decision.ReviewRequested != nil && *decision.ReviewRequested,
-		ObservedState:   decision.ObservedState,
+	// The durable prompt has already been queued/drained (the user-visible
+	// side effect). A cancellation racing this checkpoint write must not leave
+	// it unstamped, but a stalled store must not hold the detached MR
+	// evaluation forever. The next poll may retry this at-least-once operation.
+	err = runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUpCtx context.Context) error {
+		return automation.RecordTaskMRLifecyclePrompt(followUpCtx, gitlab.TaskMRLifecyclePrompt{
+			TaskID:          mr.TaskID,
+			RepositoryID:    mr.RepositoryID,
+			ProjectPath:     mr.ProjectPath,
+			MRIID:           mr.MRIID,
+			Event:           decision.Event,
+			SessionID:       sessionID,
+			PromptedAt:      time.Now().UTC(),
+			ReviewRequested: decision.ReviewRequested != nil && *decision.ReviewRequested,
+			ObservedState:   decision.ObservedState,
+		})
 	})
 	return err == nil, err
 }
@@ -120,9 +156,11 @@ func (s *Service) recordMRAutomationError(ctx context.Context, mr *gitlab.TaskMR
 	if s.gitlabMRAutomation == nil {
 		return
 	}
-	if err := s.gitlabMRAutomation.RecordTaskMRAutomationError(
-		context.WithoutCancel(ctx), mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID, cause.Error(),
-	); err != nil {
+	if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUpCtx context.Context) error {
+		return s.gitlabMRAutomation.RecordTaskMRAutomationError(
+			followUpCtx, mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID, cause.Error(),
+		)
+	}); err != nil {
 		s.logger.Debug("record MR automation error failed", zap.String("task_id", mr.TaskID), zap.Error(err))
 	}
 }
@@ -131,13 +169,20 @@ func (s *Service) publishTaskMRAutomationState(ctx context.Context, taskID strin
 	if s.gitlabMRAutomation == nil || s.eventBus == nil || taskID == "" {
 		return
 	}
-	resp, err := s.gitlabMRAutomation.GetTaskMRAutomationResponse(context.WithoutCancel(ctx), taskID)
+	var resp *gitlab.TaskMRAutomationResponse
+	err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUpCtx context.Context) error {
+		var err error
+		resp, err = s.gitlabMRAutomation.GetTaskMRAutomationResponse(followUpCtx, taskID)
+		return err
+	})
 	if err != nil {
 		s.logger.Debug("load task MR options for state publish failed", zap.String("task_id", taskID), zap.Error(err))
 		return
 	}
 	event := bus.NewEvent(events.GitLabTaskMROptionsUpdated, mrAutomationStateEventSource, resp)
-	if err := s.eventBus.Publish(context.WithoutCancel(ctx), events.GitLabTaskMROptionsUpdated, event); err != nil {
+	if err := runTaskMRAutomationFollowUp(ctx, ciAutomationFollowUpTimeout, func(followUpCtx context.Context) error {
+		return s.eventBus.Publish(followUpCtx, events.GitLabTaskMROptionsUpdated, event)
+	}); err != nil {
 		s.logger.Debug("publish task MR automation state failed", zap.String("task_id", taskID), zap.Error(err))
 	}
 }

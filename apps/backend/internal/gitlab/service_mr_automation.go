@@ -35,6 +35,66 @@ func (s *Service) GetTaskMRAutomationResponse(ctx context.Context, taskID string
 	return taskMRAutomationResponseFromOptions(opts, states, workspaceID), nil
 }
 
+// GetTaskMRAutomationEvaluation returns the narrow snapshot needed for one
+// lifecycle evaluation. It intentionally avoids the task-wide checkpoint scan
+// used by the public response and takes reviewer identity from the persisted
+// workspace configuration, whose save and health flows own identity refresh.
+func (s *Service) GetTaskMRAutomationEvaluation(
+	ctx context.Context, taskID, repositoryID, projectPath string, mrIID int,
+) (*TaskMRAutomationEvaluation, error) {
+	if err := s.authorizeTaskMRAccess(ctx, taskID); err != nil {
+		return nil, err
+	}
+	store := s.requireStore()
+	if store == nil {
+		return nil, errStoreUnavailable
+	}
+	workspaceID, err := store.WorkspaceIDForTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	cfg, err := store.GetConfigForWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	reviewerUsername := ""
+	if cfg != nil {
+		reviewerUsername = strings.TrimSpace(cfg.Username)
+	}
+	// Rebind before reading the target checkpoint. The store updates the
+	// persisted reviewer and clears review-request baselines in one transaction,
+	// so an account change cannot be evaluated against the previous account's
+	// edge state.
+	if _, err := s.rebindTaskMRReviewerFromConfig(ctx, taskID, reviewerUsername); err != nil {
+		return nil, err
+	}
+	opts, err := store.GetTaskMRAutomationOptions(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	checkpoint, err := store.GetTaskMRLifecycleState(ctx, taskID, repositoryID, projectPath, mrIID)
+	if err != nil {
+		return nil, err
+	}
+	// Evaluation uses the workspace config as the authoritative current
+	// identity; a missing config/username therefore fails closed without
+	// probing GitLab for every MR.
+	evaluationOpts := *opts
+	evaluationOpts.ReviewReviewerUsername = reviewerUsername
+	return &TaskMRAutomationEvaluation{
+		Options:    taskMRAutomationResponseFromOptions(&evaluationOpts, nil, workspaceID),
+		Checkpoint: checkpoint,
+	}, nil
+}
+
+func (s *Service) rebindTaskMRReviewerFromConfig(ctx context.Context, taskID, username string) (bool, error) {
+	store := s.requireStore()
+	if store == nil {
+		return false, errStoreUnavailable
+	}
+	return store.RebindTaskMRReviewer(ctx, taskID, username)
+}
+
 func taskMRAutomationResponseFromOptions(
 	opts *TaskMRAutomationOptions, states []*TaskMRLifecycleState, workspaceID string,
 ) *TaskMRAutomationResponse {

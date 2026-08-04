@@ -56,6 +56,7 @@ type CreateInstanceRequest struct {
 	AssumeMcpSse           bool              `json:"assume_mcp_sse,omitempty"`       // Assume agent supports SSE MCP servers
 	AssumeMcpHttp          bool              `json:"assume_mcp_http,omitempty"`      // Assume agent supports HTTP MCP servers
 	McpMode                string            `json:"mcp_mode,omitempty"`             // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders           []string          `json:"mcp_providers,omitempty"`        // Supported review-automation providers
 	// RequiresProcessKill tells agentctl to skip the graceful stdin-close wait
 	// and reap the agent process group immediately. Required for agents whose
 	// runtime keeps child processes (e.g. MCP servers) alive when stdin closes

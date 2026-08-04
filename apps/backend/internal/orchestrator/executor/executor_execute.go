@@ -1286,6 +1286,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
+		McpProviders:      deriveMCPProviders(allRepos),
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)

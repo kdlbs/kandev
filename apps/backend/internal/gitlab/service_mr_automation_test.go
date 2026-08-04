@@ -192,3 +192,66 @@ func TestUpdateTaskMRAutomationOptions_ResolvesAndClearsReviewer(t *testing.T) {
 		t.Fatalf("expected cleared reviewer, got %+v", resp)
 	}
 }
+
+func TestGetTaskMRAutomationEvaluation_UsesConfigUsernameAndExactCheckpoint(t *testing.T) {
+	store := newTestStore(t)
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	if err := store.SaveConfigForWorkspace(context.Background(), "ws-1", &GitLabConfig{
+		Host: "https://gitlab.example.com", AuthMethod: AuthMethodPAT, Username: "config-user",
+	}); err != nil {
+		t.Fatalf("save config: %v", err)
+	}
+	staleUsername := "stale-task-option"
+	if _, err := store.UpdateTaskMRAutomationOptions(context.Background(), "task-1", TaskMRAutomationPatch{
+		PromptOnReviewRequested: boolPtr(true),
+	}, &staleUsername); err != nil {
+		t.Fatalf("enable review switch: %v", err)
+	}
+	if err := store.SetTaskMRObservedState(context.Background(), "task-1", "repo-1", "group/one", 1, "open"); err != nil {
+		t.Fatalf("seed first checkpoint: %v", err)
+	}
+	if err := store.SetTaskMRObservedState(context.Background(), "task-1", "repo-2", "group/two", 2, "closed"); err != nil {
+		t.Fatalf("seed target checkpoint: %v", err)
+	}
+	if err := store.SetTaskMRReviewRequestState(context.Background(), "task-1", "repo-2", "group/two", 2, true); err != nil {
+		t.Fatalf("seed target review baseline: %v", err)
+	}
+
+	svc := newWorkspaceConfigService(t, store, &configTestSecrets{values: make(map[string]string)})
+	evaluation, err := svc.GetTaskMRAutomationEvaluation(
+		context.Background(), "task-1", "repo-2", "group/two", 2,
+	)
+	if err != nil {
+		t.Fatalf("get evaluation snapshot: %v", err)
+	}
+	if evaluation == nil || evaluation.Options == nil || evaluation.Checkpoint == nil {
+		t.Fatalf("incomplete evaluation snapshot: %+v", evaluation)
+	}
+	if got := evaluation.Options.ReviewReviewerUsername; got != "config-user" {
+		t.Fatalf("reviewer username = %q, want persisted workspace config username", got)
+	}
+	if got := evaluation.Checkpoint.ProjectPath; got != "group/two" {
+		t.Fatalf("checkpoint project = %q, want target checkpoint", got)
+	}
+	if got := evaluation.Checkpoint.LastObservedState; got != "closed" {
+		t.Fatalf("checkpoint state = %q, want target checkpoint state", got)
+	}
+	persistedOptions, err := store.GetTaskMRAutomationOptions(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("read persisted automation options: %v", err)
+	}
+	if persistedOptions.ReviewReviewerUsername != "config-user" {
+		t.Fatalf("persisted reviewer username = %q, want config-user", persistedOptions.ReviewReviewerUsername)
+	}
+	persistedCheckpoint, err := store.GetTaskMRLifecycleState(context.Background(), "task-1", "repo-2", "group/two", 2)
+	if err != nil {
+		t.Fatalf("read persisted target checkpoint: %v", err)
+	}
+	if persistedCheckpoint == nil || persistedCheckpoint.ReviewRequestInitialized || persistedCheckpoint.LastReviewRequested {
+		t.Fatalf("changed-account evaluation must reset the persisted review baseline: %+v", persistedCheckpoint)
+	}
+	if evaluation.Options.MRStates != nil {
+		t.Fatalf("evaluation loaded task-wide MR states: %+v", evaluation.Options.MRStates)
+	}
+}

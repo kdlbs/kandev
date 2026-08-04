@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"sync"
 	"testing"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	githubsvc "github.com/kandev/kandev/internal/github"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/repoclone"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -24,6 +26,14 @@ func newTestLogger() *logger.Logger {
 		Format: "json",
 	})
 	return log
+}
+
+func TestBuildLifecycleLaunchRequestCarriesMCPProviders(t *testing.T) {
+	want := []string{"github", "gitlab"}
+	got := buildLifecycleLaunchRequest(&executor.LaunchAgentRequest{McpProviders: want})
+	if !reflect.DeepEqual(got.McpProviders, want) {
+		t.Fatalf("McpProviders = %#v, want %#v", got.McpProviders, want)
+	}
 }
 
 func TestDetectGitDefaultBranchDetachedHEADReturnsEmpty(t *testing.T) {

@@ -898,6 +898,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err

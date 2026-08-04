@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
+	mcpsrv "github.com/mark3labs/mcp-go/server"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -91,7 +93,7 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	require.NotNil(t, s)
 
 	tools := getRegisteredToolNames(s)
@@ -244,6 +246,147 @@ func TestServerModeDefault_DefaultsToTask(t *testing.T) {
 	assert.NotContains(t, tools, "create_workflow_step_kandev")
 }
 
+func TestServerModeTask_AbsentProvidersFailClosedForReviewAutomation(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	tools := getRegisteredToolNames(s)
+
+	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+	assert.NotContains(t, tools, "update_task_pr_automation_kandev")
+	assert.NotContains(t, tools, "get_task_mr_automation_kandev")
+	assert.NotContains(t, tools, "update_task_mr_automation_kandev")
+}
+
+func TestServerModeTask_ProviderMembership(t *testing.T) {
+	log := newTestLogger(t)
+
+	tests := []struct {
+		name      string
+		providers []string
+		wantPR    bool
+		wantMR    bool
+	}{
+		{name: "github only", providers: []string{" GITHUB "}, wantPR: true},
+		{name: "gitlab only", providers: []string{"gitlab"}, wantMR: true},
+		{name: "mixed", providers: []string{"gitlab", "github", "github"}, wantPR: true, wantMR: true},
+		{name: "empty", providers: []string{}, wantPR: false, wantMR: false},
+		{name: "unsupported", providers: []string{"local", "azure"}, wantPR: false, wantMR: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			backend := NewChannelBackendClient(log)
+			t.Cleanup(backend.Close)
+			s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, tt.providers)
+			tools := getRegisteredToolNames(s)
+			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
+			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
+			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
+			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
+			assert.Contains(t, tools, "stop_task_kandev")
+		})
+	}
+}
+
+func TestServerSetProvidersPreservesModeAndRebuildsTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTaskTitlePending, []string{"github"})
+	s.SetProviders([]string{"gitlab"})
+
+	tools := getRegisteredToolNames(s)
+	assert.Equal(t, ModeTaskTitlePending, s.mode)
+	assert.Contains(t, tools, "set_task_title_kandev")
+	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+}
+
+type providerRefreshTestSession struct {
+	id            string
+	notifications chan mcplib.JSONRPCNotification
+}
+
+func (s *providerRefreshTestSession) Initialize() {}
+
+func (s *providerRefreshTestSession) Initialized() bool { return true }
+
+func (s *providerRefreshTestSession) NotificationChannel() chan<- mcplib.JSONRPCNotification {
+	return s.notifications
+}
+
+func (s *providerRefreshTestSession) SessionID() string { return s.id }
+
+var _ mcpsrv.ClientSession = (*providerRefreshTestSession)(nil)
+
+func TestServerSetProvidersNotifiesInitializedSessionOnceWithCompleteTools(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github"})
+	session := &providerRefreshTestSession{
+		id:            "initialized-provider-refresh",
+		notifications: make(chan mcplib.JSONRPCNotification, 128),
+	}
+	require.NoError(t, s.mcpServer.RegisterSession(context.Background(), session))
+
+	s.SetProviders([]string{"gitlab"})
+
+	var notifications []mcplib.JSONRPCNotification
+	for {
+		select {
+		case notification := <-session.notifications:
+			notifications = append(notifications, notification)
+		default:
+			goto drained
+		}
+	}
+
+drained:
+	require.Len(t, notifications, 1, "a live provider rebuild must emit one tools/list_changed notification")
+	require.Equal(t, mcplib.MethodNotificationToolsListChanged, notifications[0].Method)
+	tools := getRegisteredToolNames(s)
+	require.Len(t, tools, 32, "final registry should contain the complete GitLab-only task tool set")
+	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+}
+
+func TestServerSetProvidersAndModeSkipNormalizedNoOps(t *testing.T) {
+	log := newTestLogger(t)
+	backend := NewChannelBackendClient(log)
+	defer backend.Close()
+
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
+	session := &providerRefreshTestSession{
+		id:            "initialized-noop-refresh",
+		notifications: make(chan mcplib.JSONRPCNotification, 128),
+	}
+	require.NoError(t, s.mcpServer.RegisterSession(context.Background(), session))
+
+	s.SetProviders([]string{" GITLAB ", "github", "github"})
+	s.SetMode("unknown-mode")
+
+	select {
+	case notification := <-session.notifications:
+		t.Fatalf("normalized no-op emitted notification %q", notification.Method)
+	default:
+	}
+}
+
+func containsTool(tools []string, name string) bool {
+	for _, tool := range tools {
+		if tool == name {
+			return true
+		}
+	}
+	return false
+}
+
 func TestServerModeConfig_DisableAskQuestion(t *testing.T) {
 	log := newTestLogger(t)
 	backend := NewChannelBackendClient(log)
@@ -330,7 +473,7 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	backend := NewChannelBackendClient(log)
 	defer backend.Close()
 
-	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask)
+	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 	tools := getRegisteredToolNames(s)
 	// 19 kanban (incl. delete + archive task + stop_task + spawn_session + PR
 	// automation + MR automation) + 1 add_branch_to_task +

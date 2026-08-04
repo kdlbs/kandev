@@ -10,6 +10,8 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
@@ -58,6 +60,19 @@ type WorkspaceSourceMaterializationResult struct {
 type WorkspaceSourceMaterializer interface {
 	MaterializeWorkspaceSources(context.Context, string, *models.WorkspaceSourceBatch) (*WorkspaceSourceMaterializationResult, error)
 }
+
+// WorkspaceSourceProviderRefresher reconciles the live task-mode MCP provider
+// set after a durable source attachment has been materialized. Refresh errors
+// are best-effort: the source attachment remains committed and the next
+// launch/resume recomputes the authoritative provider union.
+type WorkspaceSourceProviderRefresher interface {
+	RefreshTaskMCPProviders(context.Context, string) error
+}
+
+// workspaceSourceProviderRefreshTimeout bounds the best-effort live update
+// after a source batch is committed. The attachment remains authoritative when
+// a database or agentctl dependency does not finish within this window.
+var workspaceSourceProviderRefreshTimeout = 5 * time.Second
 
 func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspaceSourcesRequest) (*AttachWorkspaceSourcesResult, error) {
 	if req.TaskID == "" || len(req.Sources) == 0 {
@@ -450,12 +465,24 @@ func (s *Service) commitWorkspaceSourceBatch(ctx context.Context, task *models.T
 		result.WorktreePath = materialized.WorktreePath
 		result.SessionIDs = materialized.SessionIDs
 	}
+	if s.workspaceSourceProviderRefresher != nil {
+		if err := s.refreshWorkspaceSourceProviders(ctx, task.ID); err != nil {
+			s.logger.Warn("workspace source committed but live MCP provider refresh failed",
+				zap.String("task_id", task.ID), zap.Error(err))
+		}
+	}
 	s.publishTaskEvent(context.WithoutCancel(ctx), events.TaskUpdated, result.Task, nil)
 	if materialized != nil {
 		s.PublishWorkspaceSourcesAdopted(context.WithoutCancel(ctx), task.ID, result.WorkspacePath, result.SessionIDs)
 	}
 	succeeded = true
 	return result, nil
+}
+
+func (s *Service) refreshWorkspaceSourceProviders(ctx context.Context, taskID string) error {
+	refreshCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), workspaceSourceProviderRefreshTimeout)
+	defer cancel()
+	return s.workspaceSourceProviderRefresher.RefreshTaskMCPProviders(refreshCtx, taskID)
 }
 
 func (s *Service) hydrateWorkspaceSourceResult(ctx context.Context, task *models.Task, store taskrepository.TaskWorkspaceFolderRepository) (*AttachWorkspaceSourcesResult, error) {

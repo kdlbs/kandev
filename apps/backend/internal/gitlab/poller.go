@@ -163,7 +163,9 @@ func (p *Poller) runMRLifecycleSync(ctx context.Context) {
 }
 
 func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
-	updated, err := p.service.SyncTaskMRStrict(ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID, row.Host)
+	result, err := p.service.syncTaskMRStrictWithObservation(
+		ctx, row.TaskID, row.RepositoryID, row.ProjectPath, row.MRIID, row.Host,
+	)
 	if err != nil {
 		p.logger.Debug("gitlab poller: MR lifecycle sync failed",
 			zap.String("task_id", row.TaskID), zap.String("project", row.ProjectPath),
@@ -180,7 +182,7 @@ func (p *Poller) syncOneLifecycleMR(ctx context.Context, row *TaskMR) {
 	); clearErr != nil {
 		p.logger.Debug("gitlab poller: clear MR lifecycle error failed", zap.Error(clearErr))
 	}
-	p.service.publishTaskMRLifecycleSyncEvent(ctx, updated)
+	p.service.publishTaskMRLifecycleSyncEvent(ctx, result.taskMR, result.reviewers, result.reviewersValid)
 }
 
 // --- Review watcher loop ---

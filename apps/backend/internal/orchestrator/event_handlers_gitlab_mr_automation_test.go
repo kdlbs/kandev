@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,11 +34,21 @@ type mockGitLabMRAutomationService struct {
 	observedStateErr  error
 	reviewStateErr    error
 	recordedErrorMsgs []string
+	responseStarted   chan struct{}
+	responseBlocks    bool
+	recordPromptStart chan struct{}
+	recordPromptBlock bool
+	recordErrorStart  chan struct{}
+	recordErrorBlock  bool
 
 	prompts []gitlab.TaskMRLifecyclePrompt
 
 	taskMRs    []*gitlab.TaskMR
 	taskMRsErr error
+
+	evaluationCalls atomic.Int32
+	rebindCalls     atomic.Int32
+	reviewerCalls   atomic.Int32
 
 	// checkpointCalls, when non-nil, receives a value on every
 	// GetTaskMRLifecycleState call — an observable, timing-independent
@@ -47,7 +58,10 @@ type mockGitLabMRAutomationService struct {
 	checkpointCalls chan struct{}
 }
 
-func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(context.Context, string) (*gitlab.TaskMRAutomationResponse, error) {
+func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(ctx context.Context, _ string) (*gitlab.TaskMRAutomationResponse, error) {
+	if m.responseBlocks {
+		return nil, waitForGitLabAutomationContext(ctx, m.responseStarted)
+	}
 	if m.optionsErr != nil {
 		return nil, m.optionsErr
 	}
@@ -55,6 +69,29 @@ func (m *mockGitLabMRAutomationService) GetTaskMRAutomationResponse(context.Cont
 		return &gitlab.TaskMRAutomationResponse{}, nil
 	}
 	return m.options, nil
+}
+
+func (m *mockGitLabMRAutomationService) GetTaskMRAutomationEvaluation(
+	ctx context.Context, _ string, _ string, _ string, _ int,
+) (*gitlab.TaskMRAutomationEvaluation, error) {
+	m.evaluationCalls.Add(1)
+	if m.optionsErr != nil {
+		return nil, m.optionsErr
+	}
+	if m.checkpointCalls != nil {
+		select {
+		case m.checkpointCalls <- struct{}{}:
+		default:
+		}
+	}
+	if m.checkpointErr != nil {
+		return nil, m.checkpointErr
+	}
+	options := m.options
+	if options == nil {
+		options = &gitlab.TaskMRAutomationResponse{}
+	}
+	return &gitlab.TaskMRAutomationEvaluation{Options: options, Checkpoint: m.checkpoint}, nil
 }
 
 func (m *mockGitLabMRAutomationService) GetTaskMRLifecycleState(context.Context, string, string, string, int) (*gitlab.TaskMRLifecycleState, error) {
@@ -71,6 +108,7 @@ func (m *mockGitLabMRAutomationService) GetTaskMRLifecycleState(context.Context,
 }
 
 func (m *mockGitLabMRAutomationService) RebindTaskMRReviewer(context.Context, string) (string, bool, error) {
+	m.rebindCalls.Add(1)
 	if m.rebindErr != nil {
 		return "", false, m.rebindErr
 	}
@@ -78,6 +116,7 @@ func (m *mockGitLabMRAutomationService) RebindTaskMRReviewer(context.Context, st
 }
 
 func (m *mockGitLabMRAutomationService) IsReviewerOnMR(context.Context, string, string, int, string) (bool, error) {
+	m.reviewerCalls.Add(1)
 	if m.reviewRequestErr != nil {
 		return false, m.reviewRequestErr
 	}
@@ -92,7 +131,10 @@ func (m *mockGitLabMRAutomationService) SetTaskMRObservedState(context.Context, 
 	return m.observedStateErr
 }
 
-func (m *mockGitLabMRAutomationService) RecordTaskMRLifecyclePrompt(_ context.Context, prompt gitlab.TaskMRLifecyclePrompt) error {
+func (m *mockGitLabMRAutomationService) RecordTaskMRLifecyclePrompt(ctx context.Context, prompt gitlab.TaskMRLifecyclePrompt) error {
+	if m.recordPromptBlock {
+		return waitForGitLabAutomationContext(ctx, m.recordPromptStart)
+	}
 	if m.recordErr != nil {
 		return m.recordErr
 	}
@@ -102,7 +144,10 @@ func (m *mockGitLabMRAutomationService) RecordTaskMRLifecyclePrompt(_ context.Co
 	return nil
 }
 
-func (m *mockGitLabMRAutomationService) RecordTaskMRAutomationError(_ context.Context, _, _, _ string, _ int, message string) error {
+func (m *mockGitLabMRAutomationService) RecordTaskMRAutomationError(ctx context.Context, _, _, _ string, _ int, message string) error {
+	if m.recordErrorBlock {
+		return waitForGitLabAutomationContext(ctx, m.recordErrorStart)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.recordedErrorMsgs = append(m.recordedErrorMsgs, message)
@@ -119,6 +164,17 @@ func (m *mockGitLabMRAutomationService) recordedErrors() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.recordedErrorMsgs...)
+}
+
+func waitForGitLabAutomationContext(ctx context.Context, started chan struct{}) error {
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (m *mockGitLabMRAutomationService) ListTaskMRsByTask(context.Context, string) ([]*gitlab.TaskMR, error) {
@@ -490,6 +546,57 @@ func TestEvalTaskMRLifecycle_ArchivedTaskRefusesAcceptance(t *testing.T) {
 	}
 }
 
+func TestEvalTaskMRLifecycle_UsesPollReviewerObservationWithoutProviderReads(t *testing.T) {
+	automation := &mockGitLabMRAutomationService{
+		options: &gitlab.TaskMRAutomationResponse{
+			PromptOnReviewRequested: true,
+			ReviewReviewerUsername:  "alice",
+		},
+	}
+	mr := &gitlab.TaskMR{
+		TaskID: "task-1", RepositoryID: "repo-1", Host: "https://gitlab.example.com",
+		ProjectPath: "group/project", MRIID: 42, State: gitlabMRStateOpen,
+	}
+
+	_, err := (&Service{}).evalTaskMRLifecycleAtCheckpoint(
+		context.Background(), mr, automation.options, nil,
+		&taskMRReviewerObservation{reviewers: []gitlab.MRReviewer{{Username: "alice"}}},
+		automation,
+	)
+	if err != nil {
+		t.Fatalf("evaluation with poll observation: %v", err)
+	}
+	if got := automation.reviewerCalls.Load(); got != 0 {
+		t.Fatalf("provider reviewer reads = %d, want 0 when poll observation is present", got)
+	}
+	if got := automation.rebindCalls.Load(); got != 0 {
+		t.Fatalf("authenticated-user/rebind calls = %d, want 0 during evaluation", got)
+	}
+}
+
+func TestEvalTaskMRLifecycle_AbsentPollObservationUsesStrictFallback(t *testing.T) {
+	automation := &mockGitLabMRAutomationService{
+		options: &gitlab.TaskMRAutomationResponse{
+			PromptOnReviewRequested: true,
+			ReviewReviewerUsername:  "alice",
+		},
+	}
+	mr := &gitlab.TaskMR{
+		TaskID: "task-1", RepositoryID: "repo-1", Host: "https://gitlab.example.com",
+		ProjectPath: "group/project", MRIID: 42, State: gitlabMRStateOpen,
+	}
+
+	_, err := (&Service{}).evalTaskMRLifecycleAtCheckpoint(
+		context.Background(), mr, automation.options, nil, nil, automation,
+	)
+	if err != nil {
+		t.Fatalf("evaluation without poll observation: %v", err)
+	}
+	if got := automation.reviewerCalls.Load(); got != 1 {
+		t.Fatalf("provider reviewer reads = %d, want 1 for absent-observation fallback", got)
+	}
+}
+
 // --- AC31: fail-closed on transient errors ---
 
 func TestHandleTaskMRLifecycleAutomation_TransientTaskLookupErrorIsReturned(t *testing.T) {
@@ -548,11 +655,11 @@ func TestHandleTaskMRLifecycleAutomation_PublishesStateOnEvaluationError(t *test
 	eb := &recordingEventBus{}
 	svc.eventBus = eb
 	automation := &mockGitLabMRAutomationService{
-		options:       &gitlab.TaskMRAutomationResponse{PromptOnMerged: true},
-		checkpointErr: errors.New("checkpoint store unavailable"),
+		options:          &gitlab.TaskMRAutomationResponse{PromptOnReviewRequested: true, ReviewReviewerUsername: "alice"},
+		reviewRequestErr: errors.New("reviewer read unavailable"),
 	}
 	svc.gitlabMRAutomation = automation
-	mr := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/project", MRIID: 1, State: gitlabMRStateMerged}
+	mr := &gitlab.TaskMR{TaskID: "task-1", RepositoryID: "repo-1", ProjectPath: "group/project", MRIID: 1, State: gitlabMRStateOpen}
 
 	if err := svc.handleTaskMRLifecycleAutomation(ctx, mr); err != nil {
 		t.Fatalf("unexpected error: %v", err)

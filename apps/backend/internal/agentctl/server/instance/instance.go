@@ -162,6 +162,9 @@ type CreateRequest struct {
 	// McpMode controls which MCP tools are registered: "task" (default), "config", or "office".
 	McpMode string `json:"mcp_mode,omitempty"`
 
+	// McpProviders limits task-mode review automation tools to attached providers.
+	McpProviders []string `json:"mcp_providers,omitempty"`
+
 	// RequiresProcessKill forces the agent's process group to be killed on
 	// shutdown instead of relying on stdin close. Required for agents whose
 	// runtime keeps child processes alive when stdin closes (notably

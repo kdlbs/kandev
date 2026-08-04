@@ -15,7 +15,7 @@ import (
 func newTaskModeServer(t *testing.T, backend BackendClient, taskID string) *Server {
 	t.Helper()
 	log := newTestLogger(t)
-	return New(backend, "test-session", taskID, 10005, log, "", false, ModeTask)
+	return New(backend, "test-session", taskID, 10005, log, "", false, ModeTask, []string{"github", "gitlab"})
 }
 
 func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {

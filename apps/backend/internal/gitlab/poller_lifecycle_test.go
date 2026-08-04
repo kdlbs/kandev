@@ -27,7 +27,11 @@ func TestPoller_RunMRLifecycleSync_SyncsSubscribedRowsAndPublishes(t *testing.T)
 	secrets := &configTestSecrets{values: map[string]string{SecretKeyForWorkspace("ws-1"): "token"}}
 	svc := newWorkspaceConfigService(t, store, secrets)
 	mock := NewMockClient("https://gitlab.example.com")
-	mock.SeedMR("group/subscribed", &MR{IID: 1, State: "opened", HeadBranch: "feat", BaseBranch: "main", WebURL: "https://gitlab.example.com/group/subscribed/-/merge_requests/1"})
+	mock.SeedMR("group/subscribed", &MR{
+		IID: 1, State: "opened", HeadBranch: "feat", BaseBranch: "main",
+		WebURL:    "https://gitlab.example.com/group/subscribed/-/merge_requests/1",
+		Reviewers: []MRReviewer{{Username: "alice"}},
+	})
 	// Seeded (not just omitted) so a filter regression that wrongly included
 	// the unsubscribed row would still succeed the sync and publish a second
 	// event, rather than failing for an unrelated reason (no seeded MR) and
@@ -73,6 +77,9 @@ func TestPoller_RunMRLifecycleSync_SyncsSubscribedRowsAndPublishes(t *testing.T)
 	}
 	if received[0].TaskID != "task-1" || received[0].ProjectPath != "group/subscribed" {
 		t.Fatalf("unexpected published MR: %+v", received[0])
+	}
+	if !received[0].ReviewersValid || len(received[0].Reviewers) != 1 || received[0].Reviewers[0].Username != "alice" {
+		t.Fatalf("expected reviewer observation on lifecycle event, got valid=%v reviewers=%+v", received[0].ReviewersValid, received[0].Reviewers)
 	}
 	// The doc comment's "left untouched" claim only holds if nothing evaluated
 	// the unsubscribed row either — verify no checkpoint exists for it, not

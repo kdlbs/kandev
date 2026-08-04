@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -133,6 +134,220 @@ func (m blockingWorkspaceSourceMaterializer) MaterializeWorkspaceSources(context
 	close(m.started)
 	<-m.release
 	return &WorkspaceSourceMaterializationResult{}, nil
+}
+
+type recordingWorkspaceSourceProviderRefresher struct {
+	calls  int
+	taskID string
+	err    error
+}
+
+func (r *recordingWorkspaceSourceProviderRefresher) RefreshTaskMCPProviders(_ context.Context, taskID string) error {
+	r.calls++
+	r.taskID = taskID
+	return r.err
+}
+
+type blockingWorkspaceSourceProviderRefresher struct {
+	started     chan struct{}
+	release     chan struct{}
+	once        sync.Once
+	releaseOnce sync.Once
+}
+
+func (r *blockingWorkspaceSourceProviderRefresher) RefreshTaskMCPProviders(ctx context.Context, _ string) error {
+	r.once.Do(func() { close(r.started) })
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-r.release:
+		return nil
+	}
+}
+
+func (r *blockingWorkspaceSourceProviderRefresher) stop() {
+	r.releaseOnce.Do(func() { close(r.release) })
+}
+
+func TestAttachWorkspaceSources_RefreshesProvidersOncePerBatch(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-provider-batch", Name: "Providers"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-provider-batch", WorkspaceID: "ws-provider-batch", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-provider-batch", WorkspaceID: "ws-provider-batch", Name: "app", Provider: "github", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-provider-batch", WorkflowID: "wf-provider-batch", WorkflowStepID: "step", Title: "Task",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-provider-batch", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresher := &recordingWorkspaceSourceProviderRefresher{}
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+
+	_, err = svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{
+		{Kind: WorkspaceSourceRepository, RepositoryID: "repo-provider-batch", BaseBranch: "main", CheckoutBranch: "feature/one"},
+		{Kind: WorkspaceSourceRepository, RepositoryID: "repo-provider-batch", BaseBranch: "main", CheckoutBranch: "feature/two"},
+	}})
+	if err != nil {
+		t.Fatalf("AttachWorkspaceSources: %v", err)
+	}
+	if refresher.calls != 1 || refresher.taskID != task.ID {
+		t.Fatalf("provider refresh calls = %d for task %q, want one call for %q", refresher.calls, refresher.taskID, task.ID)
+	}
+}
+
+func TestAddBranchToTask_RefreshesProvidersAfterCommit(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-provider-branch", Name: "Providers"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-provider-branch", WorkspaceID: "ws-provider-branch", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-provider-branch", WorkspaceID: "ws-provider-branch", Name: "app", Provider: "gitlab", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-provider-branch", WorkflowID: "wf-provider-branch", WorkflowStepID: "step", Title: "Task",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-provider-branch", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresher := &recordingWorkspaceSourceProviderRefresher{}
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+
+	if _, err := svc.AddBranchToTask(ctx, AddBranchToTaskRequest{
+		TaskID: task.ID, RepositoryID: "repo-provider-branch", BaseBranch: "main", CheckoutBranch: "feature/live",
+	}); err != nil {
+		t.Fatalf("AddBranchToTask: %v", err)
+	}
+	if refresher.calls != 1 || refresher.taskID != task.ID {
+		t.Fatalf("provider refresh calls = %d for task %q, want one call for %q", refresher.calls, refresher.taskID, task.ID)
+	}
+}
+
+func TestAttachWorkspaceSources_RefreshFailureDoesNotRollBackAttachment(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-provider-failure", Name: "Providers"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-provider-failure", WorkspaceID: "ws-provider-failure", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-provider-failure", WorkspaceID: "ws-provider-failure", Name: "app", Provider: "github", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-provider-failure", WorkflowID: "wf-provider-failure", WorkflowStepID: "step", Title: "Task",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-provider-failure", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.SetWorkspaceSourceProviderRefresher(&recordingWorkspaceSourceProviderRefresher{err: errors.New("agentctl unavailable")})
+
+	if _, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceFolder, LocalPath: t.TempDir(), DisplayName: "docs",
+	}}}); err != nil {
+		t.Fatalf("AttachWorkspaceSources should succeed when live refresh fails: %v", err)
+	}
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != 1 || folders[0].DisplayName != "docs" {
+		t.Fatalf("folders after refresh failure = %#v, want committed attachment", folders)
+	}
+}
+
+func TestAttachWorkspaceSources_BoundsLiveProviderRefresh(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-provider-timeout", Name: "Providers"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-provider-timeout", WorkspaceID: "ws-provider-timeout", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: "repo-provider-timeout", WorkspaceID: "ws-provider-timeout", Name: "app", Provider: "github", DefaultBranch: "main"}); err != nil {
+		t.Fatal(err)
+	}
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-provider-timeout", WorkflowID: "wf-provider-timeout", WorkflowStepID: "step", Title: "Task",
+		Repositories: []TaskRepositoryInput{{RepositoryID: "repo-provider-timeout", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refresher := &blockingWorkspaceSourceProviderRefresher{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	svc.SetWorkspaceSourceProviderRefresher(refresher)
+	previousTimeout := workspaceSourceProviderRefreshTimeout
+	workspaceSourceProviderRefreshTimeout = 10 * time.Millisecond
+	t.Cleanup(func() {
+		workspaceSourceProviderRefreshTimeout = previousTimeout
+		refresher.stop()
+	})
+	eventBus.ClearEvents()
+
+	type attachResult struct {
+		result *AttachWorkspaceSourcesResult
+		err    error
+	}
+	done := make(chan attachResult, 1)
+	go func() {
+		result, attachErr := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{
+			TaskID:  task.ID,
+			Sources: []WorkspaceSourceInput{{Kind: WorkspaceSourceFolder, LocalPath: t.TempDir(), DisplayName: "docs"}},
+		})
+		done <- attachResult{result: result, err: attachErr}
+	}()
+	select {
+	case <-refresher.started:
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("AttachWorkspaceSources did not invoke the provider refresher")
+	}
+
+	select {
+	case attached := <-done:
+		if attached.err != nil {
+			t.Fatalf("AttachWorkspaceSources: %v", attached.err)
+		}
+		if attached.result == nil || attached.result.Task == nil {
+			t.Fatalf("AttachWorkspaceSources result = %#v", attached.result)
+		}
+	case <-time.After(500 * time.Millisecond):
+		refresher.stop()
+		<-done
+		t.Fatal("AttachWorkspaceSources remained blocked by live provider refresh")
+	}
+
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(folders) != 1 || folders[0].DisplayName != "docs" {
+		t.Fatalf("folders after bounded refresh = %#v", folders)
+	}
+	published := eventBus.GetPublishedEvents()
+	if len(published) == 0 || published[0].Type != events.TaskUpdated {
+		t.Fatalf("published events = %#v, want task.updated after refresh timeout", published)
+	}
 }
 
 func TestAttachWorkspaceSources_CancellationBeforeMaterializationPreventsMutation(t *testing.T) {

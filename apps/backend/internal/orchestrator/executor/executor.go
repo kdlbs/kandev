@@ -344,6 +344,7 @@ type LaunchAgentRequest struct {
 	ExecutorConfig       map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID  string            // Previous execution ID for runtime reconnect
 	McpMode              string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders         []string          // Normalized provider capabilities attached to the task
 	IsEphemeral          bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath        string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 

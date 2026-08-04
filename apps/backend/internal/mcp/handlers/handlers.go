@@ -300,6 +300,8 @@ func (h *Handlers) SetConfigDeps(
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
+	before := d.HandlerCount()
+
 	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
@@ -335,13 +337,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 26
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
-		count++
 	}
-	count += h.registerReviewHandlers(d)
-	count += 2 // task PR automation get/update
+	h.registerReviewHandlers(d)
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -353,7 +352,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
@@ -362,43 +360,38 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
-		count += 6
 	}
 	// Executor discovery/profile listing is always available (read-only, used in task mode for create_task)
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
 		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
-		count += 2
 	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
-		count += 2
 	}
 	if h.handoffSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListRelatedTasks, h.handleListRelatedTasks)
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-		count += 4
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
 		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-		count += 4
 
 		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 3
 		}
 	}
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", count))
+	after := d.HandlerCount()
+	h.logger.Info("registered MCP handlers", zap.Int("count", after-before))
 }
 
 // handleListWorkspaces lists all workspaces.

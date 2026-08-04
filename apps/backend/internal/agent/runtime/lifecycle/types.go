@@ -667,6 +667,7 @@ type LaunchRequest struct {
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders        []string          // Normalized provider capabilities attached to the task
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts

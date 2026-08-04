@@ -61,6 +61,7 @@ var (
 // s.gitlabMRAutomation, mirroring taskPRAgentAutomationService.
 type taskMRAgentAutomationService interface {
 	GetTaskMRAutomationResponse(ctx context.Context, taskID string) (*gitlab.TaskMRAutomationResponse, error)
+	GetTaskMRAutomationEvaluation(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*gitlab.TaskMRAutomationEvaluation, error)
 	GetTaskMRLifecycleState(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int) (*gitlab.TaskMRLifecycleState, error)
 	RebindTaskMRReviewer(ctx context.Context, taskID string) (string, bool, error)
 	IsReviewerOnMR(ctx context.Context, taskID, projectPath string, mrIID int, username string) (bool, error)
@@ -69,6 +70,14 @@ type taskMRAgentAutomationService interface {
 	RecordTaskMRLifecyclePrompt(ctx context.Context, prompt gitlab.TaskMRLifecyclePrompt) error
 	RecordTaskMRAutomationError(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error
 	ListTaskMRsByTask(ctx context.Context, taskID string) ([]*gitlab.TaskMR, error)
+}
+
+// taskMRReviewerObservation is present only when the poller's status fetch
+// supplied a reviewer list. A non-nil observation with zero reviewers is an
+// authoritative empty observation; nil means legacy/manual events must use
+// the strict provider-read fallback.
+type taskMRReviewerObservation struct {
+	reviewers []gitlab.MRReviewer
 }
 
 type taskMRAgentPromptDecision struct {
@@ -175,10 +184,21 @@ func currentTaskMRReviewRequest(
 	automation taskMRAgentAutomationService,
 	mr *gitlab.TaskMR,
 	options *gitlab.TaskMRAutomationResponse,
+	observation *taskMRReviewerObservation,
 ) (*bool, error) {
 	if mr.State != gitlabMRStateOpen || !options.PromptOnReviewRequested ||
 		strings.TrimSpace(options.ReviewReviewerUsername) == "" {
 		return nil, nil
+	}
+	if observation != nil {
+		requested := false
+		for _, reviewer := range observation.reviewers {
+			if strings.EqualFold(reviewer.Username, options.ReviewReviewerUsername) {
+				requested = true
+				break
+			}
+		}
+		return &requested, nil
 	}
 	requested, err := automation.IsReviewerOnMR(ctx, mr.TaskID, mr.ProjectPath, mr.MRIID, options.ReviewReviewerUsername)
 	if err != nil {

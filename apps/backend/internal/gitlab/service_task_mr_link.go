@@ -308,7 +308,9 @@ func taskMRFromStatus(taskID, repositoryID, host, projectPath string, status *MR
 // notably the MR lifecycle automation pass — can type-assert event.Data
 // without reaching into an unexported gitlab-package type.
 type TaskMRUpdatedEvent struct {
-	WorkspaceID string `json:"workspace_id"`
+	WorkspaceID    string       `json:"workspace_id"`
+	Reviewers      []MRReviewer `json:"reviewers"`
+	ReviewersValid bool         `json:"reviewers_valid,omitempty"`
 	*TaskMR
 }
 
@@ -329,7 +331,9 @@ func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
 // workspace ID), this path resolves the workspace itself — a lookup failure
 // skips publishing rather than emitting an event the websocket layer could
 // broadcast instance-wide; the next poll retries.
-func (s *Service) publishTaskMRLifecycleSyncEvent(ctx context.Context, mr *TaskMR) {
+func (s *Service) publishTaskMRLifecycleSyncEvent(
+	ctx context.Context, mr *TaskMR, reviewers []MRReviewer, reviewersValid bool,
+) {
 	if mr == nil {
 		return
 	}
@@ -347,8 +351,10 @@ func (s *Service) publishTaskMRLifecycleSyncEvent(ctx context.Context, mr *TaskM
 		return
 	}
 	event := bus.NewEvent(events.GitLabTaskMRUpdated, eventSource, &TaskMRUpdatedEvent{
-		WorkspaceID: workspaceID,
-		TaskMR:      mr,
+		WorkspaceID:    workspaceID,
+		Reviewers:      reviewers,
+		ReviewersValid: reviewersValid,
+		TaskMR:         mr,
 	})
 	if err := eventBus.Publish(ctx, events.GitLabTaskMRUpdated, event); err != nil {
 		s.logger.Debug("publish GitLab task MR lifecycle sync event", zap.Error(err))

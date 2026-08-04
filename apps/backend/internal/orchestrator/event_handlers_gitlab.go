@@ -75,8 +75,17 @@ func (s *Service) handleGitLabTaskMRUpdated(ctx context.Context, event *bus.Even
 	if !ok || payload == nil || payload.TaskMR == nil {
 		return nil
 	}
-	s.startTaskMRLifecycleAutomation(ctx, payload.TaskMR)
+	s.startTaskMRLifecycleAutomationWithObservation(
+		ctx, payload.TaskMR, taskMRReviewerObservationFromEvent(payload),
+	)
 	return nil
+}
+
+func taskMRReviewerObservationFromEvent(event *gitlab.TaskMRUpdatedEvent) *taskMRReviewerObservation {
+	if event == nil || !event.ReviewersValid {
+		return nil
+	}
+	return &taskMRReviewerObservation{reviewers: append([]gitlab.MRReviewer(nil), event.Reviewers...)}
 }
 
 // decodeTaskMRUpdatedEvent accepts either the in-process pointer shape or the
@@ -161,6 +170,12 @@ func mrAutomationInFlightKey(mr *gitlab.TaskMR) string {
 // detached, single-flight goroutine keyed by (task, repository, project,
 // iid) — mirrors startTaskPRCIAutomationWithRefresh (AC23).
 func (s *Service) startTaskMRLifecycleAutomation(ctx context.Context, mr *gitlab.TaskMR) {
+	s.startTaskMRLifecycleAutomationWithObservation(ctx, mr, nil)
+}
+
+func (s *Service) startTaskMRLifecycleAutomationWithObservation(
+	ctx context.Context, mr *gitlab.TaskMR, observation *taskMRReviewerObservation,
+) {
 	if mr == nil {
 		return
 	}
@@ -176,7 +191,7 @@ func (s *Service) startTaskMRLifecycleAutomation(ctx context.Context, mr *gitlab
 		defer s.mrAutomationInFlight.Delete(key)
 		automationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), ciAutomationDetachedTimeout)
 		defer cancel()
-		if err := s.handleTaskMRLifecycleAutomation(automationCtx, mr); err != nil {
+		if err := s.handleTaskMRLifecycleAutomationWithObservation(automationCtx, mr, observation); err != nil {
 			s.logger.Debug("MR lifecycle automation handling failed", zap.String("task_id", mr.TaskID), zap.Error(err))
 		}
 	}()

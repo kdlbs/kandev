@@ -543,7 +543,11 @@ func (s *Service) SyncTaskMR(ctx context.Context, taskID, repositoryID, projectP
 	if client == nil {
 		return nil, ErrNoClient
 	}
-	return s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)
+	result, err := s.syncTaskMRWithClient(ctx, client, taskID, repositoryID, projectPath, iid)
+	if err != nil {
+		return nil, err
+	}
+	return result.taskMR, nil
 }
 
 // ErrTaskMRHostMismatch marks every rejection path of the SyncTaskMRStrict
@@ -568,6 +572,25 @@ var ErrTaskMRHostMismatch = errors.New("gitlab: workspace host does not match th
 // provider-identity rule treats an empty host as unknown identity, not as
 // "skip the check."
 func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, projectPath string, iid int, existingHost string) (*TaskMR, error) {
+	result, err := s.syncTaskMRStrictWithObservation(ctx, taskID, repositoryID, projectPath, iid, existingHost)
+	if err != nil {
+		return nil, err
+	}
+	return result.taskMR, nil
+}
+
+// taskMRSyncResult keeps reviewer membership from the status response beside
+// the durable task-MR row. The observation is intentionally internal and is
+// only carried to lifecycle evaluation; it is not persisted on TaskMR.
+type taskMRSyncResult struct {
+	taskMR         *TaskMR
+	reviewers      []MRReviewer
+	reviewersValid bool
+}
+
+func (s *Service) syncTaskMRStrictWithObservation(
+	ctx context.Context, taskID, repositoryID, projectPath string, iid int, existingHost string,
+) (*taskMRSyncResult, error) {
 	client, err := s.clientForTaskStrict(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -586,7 +609,7 @@ func (s *Service) SyncTaskMRStrict(ctx context.Context, taskID, repositoryID, pr
 
 func (s *Service) syncTaskMRWithClient(
 	ctx context.Context, client Client, taskID, repositoryID, projectPath string, iid int,
-) (*TaskMR, error) {
+) (*taskMRSyncResult, error) {
 	s.mu.RLock()
 	store := s.store
 	s.mu.RUnlock()
@@ -631,7 +654,11 @@ func (s *Service) syncTaskMRWithClient(
 	if err := store.UpsertTaskMR(ctx, row); err != nil {
 		return nil, fmt.Errorf("upsert task MR: %w", err)
 	}
-	return row, nil
+	return &taskMRSyncResult{
+		taskMR:         row,
+		reviewers:      append([]MRReviewer(nil), mr.Reviewers...),
+		reviewersValid: true,
+	}, nil
 }
 
 // ListTaskMRsByWorkspace surfaces all MR associations under a workspace,

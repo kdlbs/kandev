@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
 	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
+	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
 	"go.uber.org/zap"
@@ -208,6 +209,7 @@ func (s *Server) setupRoutes() {
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
+		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 	}
 
 	// pprof + memory stats (enabled via KANDEV_DEBUG_PPROF_ENABLED=true)
@@ -323,6 +325,21 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	}
 	s.mcpServer.SetMode(req.Mode)
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
+}
+
+// handleSetMcpProviders replaces the provider capabilities advertised by the
+// task-mode MCP server. Unknown providers are ignored by the MCP boundary.
+func (s *Server) handleSetMcpProviders(c *gin.Context) {
+	var req struct {
+		Providers []string `json:"mcp_providers"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	providers := mcpproviders.Normalize(req.Providers)
+	s.mcpServer.SetProviders(providers)
+	c.JSON(http.StatusOK, gin.H{"mcp_providers": providers})
 }
 
 // Status response
