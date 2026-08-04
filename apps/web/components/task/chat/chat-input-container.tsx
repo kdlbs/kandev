@@ -74,6 +74,9 @@ type ChatInputContainerProps = {
   mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
+  /** True when a send would be delivered into the running turn (mid-turn
+   * steering) rather than queued. Defaults to false. */
+  supportsSteering?: boolean;
   isStarting: boolean;
   /** True only while a containerized executor is bootstrapping (Docker
    * prepare, Sprites sandbox spin-up). Distinct from the brief STARTING
@@ -447,6 +450,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       needsRecovery: props.needsRecovery ?? false,
       executorUnavailable,
       isAgentBusy,
+      supportsSteering: props.supportsSteering ?? false,
       hasAgentCommands: p.hasAgentCommands,
       placeholder: props.placeholder,
       contextItems: p.contextItems,

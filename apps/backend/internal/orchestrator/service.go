@@ -60,6 +60,11 @@ type ServiceConfig struct {
 	QueueSize                     int
 	QueueGroup                    string
 	ClaudeBackgroundPromptHandoff bool
+
+	// ClaudeMidTurnSteering enables delivering a prompt into a still-generating
+	// turn for an agent that advertised prompt queueing. Independent of
+	// ClaudeBackgroundPromptHandoff, which covers the foreground-idle handoff.
+	ClaudeMidTurnSteering bool
 }
 
 // AttachmentReader is the narrow attachment-store seam needed when the
@@ -559,6 +564,12 @@ type Service struct {
 	// execution. Claims expire with the same bounded grace period used for
 	// completed-execution stream markers.
 	executionTeardownClaims sync.Map
+
+	// steerInFlight tracks sessions with an unacknowledged mid-turn steer.
+	// The spec allows at most one in-flight steer per session; a second attempt
+	// while one is outstanding queues instead. Keyed by sessionID, cleared when
+	// the steer dispatch is accepted or fails.
+	steerInFlight sync.Map
 
 	// Session reset flags: sessionID -> true while resetAgentContext is restarting process.
 	// Used to suppress stale ready events and avoid draining queued prompts mid-reset.

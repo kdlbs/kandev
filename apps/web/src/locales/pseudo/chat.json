@@ -49,5 +49,6 @@
   "providerQuotaResetUnknown": "Ţŕŷ àĝàĩń ŵĥēń ţĥē ƥŕōvĩďēŕ ḿàķēś ćàƥàćĩţŷ àvàĩĺàƀĺē.",
   "providerQuotaProviderFallback": "Ƥŕōvĩďēŕ",
   "turnGroupToolCalls_one": "{{count}} ţōōĺ ćàĺĺ",
-  "turnGroupToolCalls_other": "{{count}} ţōōĺ ćàĺĺś"
+  "turnGroupToolCalls_other": "{{count}} ţōōĺ ćàĺĺś",
+  "composerSteerPlaceholder": "Śēńď ńōŵ — ďēĺĩvēŕēď ţō ţĥē ŕũńńĩńĝ ţũŕń"
 }

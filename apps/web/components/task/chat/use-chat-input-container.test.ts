@@ -19,6 +19,7 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
         needsRecovery: false,
         executorUnavailable: false,
         isAgentBusy: false,
+        supportsSteering: false,
         hasAgentCommands: true,
         placeholder: undefined,
         contextItems: [],

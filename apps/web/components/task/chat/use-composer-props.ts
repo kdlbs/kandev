@@ -48,6 +48,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hidePlanMode,
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
     panelState.planComments.length > 0 ||
     panelState.pendingPRFeedback.length > 0 ||
@@ -67,6 +68,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     mcpAttachmentHistory: panelState.mcpAttachmentHistory,
     onPlanModeChange: panelState.handlePlanModeChange,
     isAgentBusy,
+    supportsSteering,
     isStarting: panelState.isStarting,
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,

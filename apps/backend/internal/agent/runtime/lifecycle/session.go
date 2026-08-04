@@ -861,7 +861,7 @@ func (sm *SessionManager) SendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, nil, false)
 }
 
 // SendPromptWithDispatchCallback reports the point at which agentctl accepted
@@ -875,7 +875,23 @@ func (sm *SessionManager) SendPromptWithDispatchCallback(
 	dispatchOnly bool,
 	onDispatched func(),
 ) (*PromptResult, error) {
-	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched)
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, false)
+}
+
+// SendPromptSteerWithDispatchCallback delivers a steer: it asks agentctl to hand
+// the prompt into a turn that is still generating rather than serializing behind
+// it. Delivery is opportunistic (see the ACP adapter's PromptSteer); agentctl
+// falls back to an ordinary prompt when its agent cannot steer.
+func (sm *SessionManager) SendPromptSteerWithDispatchCallback(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	validateStatus bool,
+	attachments []v1.MessageAttachment,
+	dispatchOnly bool,
+	onDispatched func(),
+) (*PromptResult, error) {
+	return sm.sendPrompt(ctx, execution, prompt, validateStatus, attachments, dispatchOnly, onDispatched, true)
 }
 
 func (sm *SessionManager) sendPrompt(
@@ -886,6 +902,7 @@ func (sm *SessionManager) sendPrompt(
 	attachments []v1.MessageAttachment,
 	dispatchOnly bool,
 	onDispatched func(),
+	steer bool,
 ) (*PromptResult, error) {
 	if execution.agentctl == nil {
 		return nil, fmt.Errorf("execution %q has no agentctl client", execution.ID)
@@ -929,7 +946,7 @@ func (sm *SessionManager) sendPrompt(
 	if err != nil {
 		return nil, err
 	}
-	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration); err != nil {
+	if err := sm.triggerPrompt(preparedCtx, execution, effectivePrompt, materializedAttachments, promptGeneration, steer); err != nil {
 		return nil, err
 	}
 	return sm.finishAcceptedPrompt(preparedCtx, execution, dispatchOnly, onDispatched, promptGeneration)
@@ -1070,8 +1087,9 @@ func (sm *SessionManager) triggerPrompt(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
+	steer bool,
 ) error {
-	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration)
+	err := sm.dispatchPrompt(ctx, execution, prompt, attachments, promptGeneration, steer)
 	if err == nil {
 		return nil
 	}
@@ -1118,21 +1136,39 @@ func (sm *SessionManager) finishAcceptedPrompt(
 	return sm.waitForPromptDone(ctx, execution, promptGeneration)
 }
 
+// callAgentctlPrompt selects the steer or ordinary prompt RPC. Kept in one place
+// so the initial dispatch and the post-reconnect retry cannot diverge on which
+// one they send.
+func (sm *SessionManager) callAgentctlPrompt(
+	ctx context.Context,
+	execution *AgentExecution,
+	prompt string,
+	attachments []v1.MessageAttachment,
+	promptGeneration uint64,
+	steer bool,
+) error {
+	if steer {
+		return execution.agentctl.PromptSteer(ctx, prompt, attachments, promptGeneration)
+	}
+	return execution.agentctl.Prompt(ctx, prompt, attachments, promptGeneration)
+}
+
 func (sm *SessionManager) dispatchPrompt(
 	ctx context.Context,
 	execution *AgentExecution,
 	prompt string,
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
+	steer bool,
 ) error {
-	err := execution.agentctl.Prompt(ctx, prompt, attachments, promptGeneration)
+	err := sm.callAgentctlPrompt(ctx, execution, prompt, attachments, promptGeneration, steer)
 	if err == nil || !isAgentStreamNotConnectedErr(err) || sm.streamManager == nil {
 		return err
 	}
 
 	sm.logger.Warn("agent stream not connected, reconnecting and retrying prompt once",
 		zap.String("execution_id", execution.ID))
-	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration)
+	retryErr := sm.retryPromptAfterReconnect(ctx, execution, prompt, attachments, promptGeneration, steer)
 	if retryErr == nil {
 		return nil
 	}
@@ -1159,6 +1195,7 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 	prompt string,
 	attachments []v1.MessageAttachment,
 	promptGeneration uint64,
+	steer bool,
 ) error {
 	reconnectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -1180,8 +1217,8 @@ func (sm *SessionManager) retryPromptAfterReconnect(
 		}
 
 		if execution.agentctl.HasAgentStream() {
-			if err := execution.agentctl.Prompt(
-				reconnectCtx, prompt, attachments, promptGeneration,
+			if err := sm.callAgentctlPrompt(
+				reconnectCtx, execution, prompt, attachments, promptGeneration, steer,
 			); err == nil {
 				return nil
 			} else if !isAgentStreamNotConnectedErr(err) {

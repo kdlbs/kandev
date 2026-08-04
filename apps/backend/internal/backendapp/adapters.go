@@ -711,6 +711,14 @@ func (w *orchestratorWrapper) ForegroundActivity(sessionID string) v1.Foreground
 	return w.svc.ForegroundActivity(sessionID)
 }
 
+func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskSessionState) bool {
+	return w.svc.SteerEligible(sessionID, state)
+}
+
+func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
 // messageCreatorAdapter adapts the task service to the orchestrator.MessageCreator interface
 type messageCreatorAdapter struct {
 	svc    *taskservice.Service

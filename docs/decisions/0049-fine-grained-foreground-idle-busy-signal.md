@@ -17,7 +17,7 @@ Because both read as `RUNNING`, a session that kicked off a long background job 
 
 Upstream idle-turn completion narrows but does not close this window: a synthetic turn-complete only fires after async content has been idle for a debounce interval, it never arms while the foreground prompt exchange is still in flight (a genuinely held-open subagent turn), and a chatty Monitor re-extends the debounce on every event burst. The residual lockout windows are real.
 
-Mid-turn steering — delivering a message *into* a turn while the model is actively generating — is explicitly out of scope here; it needs ACP concurrent-prompt support and per-agent capability gating and is tracked separately.
+Mid-turn steering — delivering a message *into* a turn while the model is actively generating — is explicitly out of scope here; it needs ACP concurrent-prompt support and per-agent capability gating and is tracked separately. **(Superseded for the steer-capable case by [ADR-2026-08-04-mid-turn-steering](2026-08-04-mid-turn-steering.md): the concurrent-prompt precondition is satisfied by the shipped Claude bridge, and the negotiated capability gate is implemented there.)**
 
 ## Decision
 

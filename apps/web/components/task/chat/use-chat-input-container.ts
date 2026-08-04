@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState, useEffect, useImperativeHandle } from "react";
 import type React from "react";
+import { useTranslation } from "react-i18next";
 import { useResizableInput } from "@/hooks/use-resizable-input";
 import { useChatInputState } from "./use-chat-input-state";
 import type { TipTapInputHandle } from "./tiptap-input";
@@ -34,6 +35,10 @@ type UseChatInputContainerParams = {
   needsRecovery: boolean;
   executorUnavailable: boolean;
   isAgentBusy: boolean;
+  // supportsSteering is true when a send would be delivered into the running
+  // turn (mid-turn steering) instead of queued. Drives the composer's
+  // delivery-now affordance.
+  supportsSteering: boolean;
   hasAgentCommands: boolean;
   placeholder: string | undefined;
   contextItems: ContextItem[];
@@ -82,9 +87,14 @@ function getInputPlaceholder(
   isAgentBusy: boolean,
   hasAgentCommands: boolean,
   isStarting: boolean,
+  steerPlaceholder: string | undefined,
 ): string {
   if (isStarting) return "Preparing workspace...";
   if (placeholder) return placeholder;
+  // A steer-eligible session is not "busy" (the send is delivered, not queued),
+  // so this must be checked before the agent-commands/default copy. The label
+  // promises delivery into the running turn, never that the agent will fold it.
+  if (steerPlaceholder) return steerPlaceholder;
   if (isAgentBusy) return "Queue more instructions...";
   if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
   return "Ask to make changes, @mention files";
@@ -122,6 +132,7 @@ function computeDerivedState(params: {
   placeholder: string | undefined;
   isAgentBusy: boolean;
   hasAgentCommands: boolean;
+  steerPlaceholder: string | undefined;
 }) {
   const hasClarification = !!(params.pendingClarification && params.onClarificationResolved);
   // STARTING blocks regular messages until the session reaches RUNNING. An
@@ -156,6 +167,7 @@ function computeDerivedState(params: {
     params.isAgentBusy,
     params.hasAgentCommands,
     params.isStarting && !hasClarification,
+    params.steerPlaceholder,
   );
   return {
     isDisabled,
@@ -170,8 +182,10 @@ function computeDerivedState(params: {
 }
 
 export function useChatInputContainer(params: UseChatInputContainerParams) {
+  const { t } = useTranslation("chat");
   const { ref, sessionId, isSending, isStarting, isPreparingEnvironment, isMoving } = params;
   const { isFailed, needsRecovery, executorUnavailable, isAgentBusy, hasAgentCommands } = params;
+  const { supportsSteering } = params;
   const { placeholder, contextItems, pendingClarification, onClarificationResolved } = params;
   const { pendingCommentsByFile, showRequestChangesTooltip } = params;
   const { onRequestChangesTooltipDismiss, onSubmit } = params;
@@ -248,6 +262,7 @@ export function useChatInputContainer(params: UseChatInputContainerParams) {
     placeholder,
     isAgentBusy,
     hasAgentCommands,
+    steerPlaceholder: supportsSteering ? t("composerSteerPlaceholder") : undefined,
   });
 
   return {

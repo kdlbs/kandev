@@ -128,6 +128,13 @@ type Adapter struct {
 	agentInfo    *AgentInfo
 	capabilities acp.AgentCapabilities
 
+	// promptQueueing caches the negotiated prompt-queueing advertisement from the
+	// initialize response. It is derived once under `mu` rather than re-read from
+	// `capabilities` on each prompt because the prompt path reads it concurrently
+	// with nothing else holding the write side, and a plain read of the untyped
+	// `capabilities.Meta` map would race.
+	promptQueueing bool
+
 	// Update channel
 	updatesCh chan AgentEvent
 
@@ -436,22 +443,26 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		a.agentInfo.Version = resp.AgentInfo.Version
 	}
 	a.capabilities = resp.AgentCapabilities
+	promptQueueing := agentAdvertisesPromptQueueing(resp.AgentCapabilities)
 
 	span.SetAttributes(
 		attribute.String("agent_name", a.agentInfo.Name),
 		attribute.String("agent_version", a.agentInfo.Version),
 		attribute.Bool("supports_load_session", a.capabilities.LoadSession),
+		attribute.Bool("supports_prompt_queueing", promptQueueing),
 	)
 
 	a.logger.Info("ACP adapter initialized",
 		zap.String("agent_name", a.agentInfo.Name),
 		zap.String("agent_version", a.agentInfo.Version),
-		zap.Bool("supports_load_session", a.capabilities.LoadSession))
+		zap.Bool("supports_load_session", a.capabilities.LoadSession),
+		zap.Bool("supports_prompt_queueing", promptQueueing))
 
 	// Cache auth methods so we can re-emit them on auth_required without re-running initialize.
 	authMethods := convertAuthMethods(resp.AuthMethods)
 	a.mu.Lock()
 	a.availableAuthMethods = authMethods
+	a.promptQueueing = promptQueueing
 	a.mu.Unlock()
 
 	// Emit agent capabilities event with prompt capabilities and auth methods
@@ -460,6 +471,7 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 		SupportsImage:           a.capabilities.PromptCapabilities.Image,
 		SupportsAudio:           a.capabilities.PromptCapabilities.Audio,
 		SupportsEmbeddedContext: a.capabilities.PromptCapabilities.EmbeddedContext,
+		SupportsPromptQueueing:  promptQueueing,
 		AuthMethods:             authMethods,
 	})
 

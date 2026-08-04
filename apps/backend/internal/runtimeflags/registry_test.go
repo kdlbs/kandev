@@ -400,3 +400,22 @@ func assertFeatureConfigRoundTrips(t *testing.T, fields map[string]featureFieldB
 		}
 	}
 }
+
+func TestDefinitionsIncludeClaudeMidTurnSteeringMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.claudeMidTurnSteering")
+	if !ok {
+		t.Fatal("features.claudeMidTurnSteering definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want experimental", def.Stability)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want high", def.RiskLevel)
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+}

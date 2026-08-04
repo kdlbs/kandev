@@ -241,6 +241,9 @@ function buildSessionUpdate(payload: any): Record<string, unknown> {
     update.cancellation_pending = payload.cancellation_pending;
   if (payload.cancellation_revision !== undefined)
     update.cancellation_revision = payload.cancellation_revision;
+  // Carry the live steer-eligibility flip so the composer can switch its
+  // affordance without waiting for a refetch.
+  if (payload.supports_steering !== undefined) update.supports_steering = payload.supports_steering;
   return update;
 }
 
@@ -570,10 +573,8 @@ function applyForegroundActivity(
     started_at: existing.started_at ?? "",
     updated_at: existing.updated_at ?? "",
     foreground_activity: payload.foreground_activity ?? null,
-    active_subagent_count:
-      payload.active_subagent_count !== undefined
-        ? payload.active_subagent_count
-        : (existing.active_subagent_count ?? 0),
+    active_subagent_count: pickActiveSubagentCount(payload, existing),
+    supports_steering: pickSupportsSteering(payload, existing),
   });
 }
 
@@ -601,6 +602,23 @@ function applyCancellationPending(
     cancellation_pending: payload.cancellation_pending,
     cancellation_revision: payload.cancellation_revision,
   });
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pickActiveSubagentCount(payload: any, existing: TaskSession): number {
+  return payload.active_subagent_count !== undefined
+    ? payload.active_subagent_count
+    : (existing.active_subagent_count ?? 0);
+}
+
+function pickSupportsSteering(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any,
+  existing: TaskSession,
+): boolean | undefined {
+  return payload.supports_steering !== undefined
+    ? payload.supports_steering
+    : existing.supports_steering;
 }
 
 function handleWorkspaceSourcesUpdated(

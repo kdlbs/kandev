@@ -1,0 +1,505 @@
+#!/usr/bin/env python3
+# probe-acp-midturn-fold — what does the ACP bridge do with a second
+# session/prompt issued while the first one is still in flight?
+#
+# Companion to scripts/probe-claude-midturn-fold, which proved the Claude CLI
+# folds a stream-json message into a running turn (one `result` for two prompts,
+# and the model obeyed the second one). That probe bypassed the bridge. This one
+# adds the layer Kandev actually talks to: it speaks raw ACP JSON-RPC to
+# `npx @agentclientprotocol/claude-agent-acp`, the same command
+# agents/claude_acp.go builds.
+#
+# What we are trying to distinguish:
+#
+#   FOLD_HANDOFF  Prompt A's session/prompt resolves `end_turn` EARLY — at the
+#                 moment B's echo reaches the bridge, before the model has said
+#                 anything final — and the steered answer is then attributed to
+#                 B's request. This is the shape acp-agent.js's `user` handler
+#                 implies: on a replayed user message that matches a queued
+#                 turn, it settles the active turn and activates the new one.
+#                 Kandev's promptGate/promptTurn would see a completion for A
+#                 that is not really A's.
+#   SERIALIZED    A resolves only after its own final text, then B runs as its
+#                 own turn. This is what issue #1607 assumes today.
+#   REJECTED      The bridge refuses the concurrent session/prompt outright.
+#
+# The tell is WHEN A's response arrives relative to the assistant text, not just
+# the order of the two responses. Prompt A asks for two sequential sleeps and
+# the word DONE; prompt B says skip the second sleep and say STEERED. So:
+#   - final text STEERED and no second sleep  => the model was steered mid-turn
+#   - A resolved before any final text        => the bridge handed the turn off
+#
+# Usage:
+#   scripts/probe-acp-midturn-fold [options]
+#
+#   --out <path>        JSONL frame log (default: ./acp-fold-<ts>.jsonl)
+#   --sleep <seconds>   Length of each sleep in prompt A (default: 20)
+#   --delay <seconds>   Wait after A's first tool_call before sending B (default: 3)
+#   --linger <seconds>  How long to keep reading after the first prompt response
+#                       resolves (default: 90)
+#   --timeout <seconds> Hard kill (default: 360; npx cold start is slow)
+#   --cwd <path>        Session cwd sent in session/new (default: a fresh temp dir)
+#   --deny             Reject permission requests instead of allowing them
+#   --prompt-a <text>   Override prompt A
+#   --prompt-b <text>   Override prompt B
+#   --dry-run           Print the command and prompts, spend nothing.
+#
+# Permission requests are auto-answered with the first allow_* option the bridge
+# offers, so a Bash call does not stall the probe. Any other client-side request
+# (fs/*, terminal/*) is refused with -32601, and the probe declares no fs or
+# terminal capability so the bridge should not ask.
+#
+# Output: the JSONL log plus a verdict block. One paid turn per run.
+
+import argparse
+import json
+import os
+import queue
+import re
+import shlex
+import subprocess
+import sys
+import tempfile
+import threading
+import time
+
+PROMPT_A = (
+    "Run exactly this shell command with the Bash tool: sleep {s}\n"
+    "When it finishes, run exactly this one: sleep {s}\n"
+    "Then reply with the single word DONE. Do not run anything else and do not "
+    "combine the two commands."
+)
+
+PROMPT_B = (
+    "Change of plan: skip the second sleep and reply with the single word "
+    "STEERED instead."
+)
+
+BRIDGE_CMD = [
+    "npx", "--yes", "--prefer-offline",
+    "@agentclientprotocol/claude-agent-acp",
+]
+
+ID_INIT, ID_NEW, ID_PROMPT_A, ID_PROMPT_B = 1, 2, 3, 4
+
+
+def parse_args():
+    p = argparse.ArgumentParser(add_help=True)
+    p.add_argument("--out")
+    p.add_argument("--sleep", type=int, default=20)
+    p.add_argument("--delay", type=float, default=3.0)
+    p.add_argument("--linger", type=float, default=90.0)
+    p.add_argument("--watch-after", dest="watch_after", type=float, default=0.0,
+                   help="After BOTH prompts resolve, keep reading this many "
+                        "seconds. Needed to see whether a predecessor's "
+                        "backgrounded tool calls survive the handoff boundary.")
+    p.add_argument("--timeout", type=float, default=360.0)
+    p.add_argument("--cwd")
+    p.add_argument("--exec", dest="exec_cmd",
+                   help="Run this command instead of the bridge (probe self-test).")
+    p.add_argument("--deny", action="store_true")
+    p.add_argument("--prompt-a")
+    p.add_argument("--prompt-b")
+    p.add_argument("--dry-run", action="store_true")
+    return p.parse_args()
+
+
+class Recorder:
+    def __init__(self):
+        self.t0 = time.monotonic()
+        self.entries = []
+        self.lock = threading.Lock()
+
+    def ms(self):
+        return round((time.monotonic() - self.t0) * 1000)
+
+    def add(self, direction, frame=None, raw=None, **extra):
+        entry = {"t_ms": self.ms(), "direction": direction, **extra}
+        if frame is not None:
+            entry["frame"] = frame
+        if raw is not None:
+            entry["raw"] = raw
+        with self.lock:
+            self.entries.append(entry)
+        return entry
+
+    def note(self, event, **fields):
+        return self.add("meta", frame={"probe_event": event, **fields})
+
+    def write(self, path):
+        with open(path, "w", encoding="utf-8") as fh:
+            with self.lock:
+                for e in self.entries:
+                    fh.write(json.dumps(e, ensure_ascii=False) + "\n")
+
+
+def reader(stream, direction, rec, events, is_json):
+    # readline(), not iteration: iteration fills a read-ahead buffer and
+    # destroys the arrival timing this probe measures.
+    while True:
+        line = stream.readline()
+        if line == "":
+            break
+        line = line.strip()
+        if not line:
+            continue
+        if not is_json:
+            rec.add(direction, raw=line)
+            continue
+        try:
+            frame = json.loads(line)
+        except json.JSONDecodeError:
+            rec.add(direction, raw=line)
+            continue
+        entry = rec.add(direction, frame=frame)
+        events.put((entry["t_ms"], frame))
+    events.put(None)
+
+
+def main():
+    args = parse_args()
+    prompt_a = args.prompt_a or PROMPT_A.format(s=args.sleep)
+    prompt_b = args.prompt_b or PROMPT_B
+    cmd = shlex.split(args.exec_cmd) if args.exec_cmd else list(BRIDGE_CMD)
+
+    if args.dry_run:
+        print(" ".join(cmd))
+        print("\n--- prompt A ---\n" + prompt_a)
+        print("\n--- prompt B ---\n" + prompt_b)
+        return 0
+
+    cwd = args.cwd or tempfile.mkdtemp(prefix="acp-fold-probe-")
+    os.makedirs(cwd, exist_ok=True)
+    out_path = args.out or os.path.abspath(f"acp-fold-{int(time.time())}.jsonl")
+
+    rec = Recorder()
+    rec.note("start", cmd=cmd, session_cwd=cwd)
+
+    proc = subprocess.Popen(
+        cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True, bufsize=1, cwd=cwd,
+    )
+    events = queue.Queue()
+    threading.Thread(target=reader, args=(proc.stdout, "received", rec, events, True),
+                     daemon=True).start()
+    threading.Thread(target=reader, args=(proc.stderr, "stderr", rec, events, False),
+                     daemon=True).start()
+
+    write_lock = threading.Lock()
+
+    def send(frame, label=None):
+        with write_lock:
+            rec.add("sent", frame=frame)
+            if label:
+                rec.note(label)
+            try:
+                proc.stdin.write(json.dumps(frame) + "\n")
+                proc.stdin.flush()
+                return True
+            except (BrokenPipeError, ValueError):
+                rec.note("send_failed", label=label)
+                return False
+
+    def request(rid, method, params, label=None):
+        return send({"jsonrpc": "2.0", "id": rid, "method": method,
+                     "params": params}, label)
+
+    def reply(rid, result):
+        return send({"jsonrpc": "2.0", "id": rid, "result": result})
+
+    def reply_error(rid, code, message):
+        return send({"jsonrpc": "2.0", "id": rid,
+                     "error": {"code": code, "message": message}})
+
+    request(ID_INIT, "initialize", {
+        "protocolVersion": 1,
+        # Declare nothing we cannot serve, so the bridge uses its own fs and
+        # never asks us for terminals.
+        "clientCapabilities": {"fs": {"readTextFile": False, "writeTextFile": False}},
+        "clientInfo": {"name": "kandev-acp-fold-probe", "version": "0.1.0"},
+    }, "sent_initialize")
+
+    # --- observation state -------------------------------------------------
+    init_result = None
+    session_id = None
+    sent_b_at = None
+    first_tool_at = None
+    responses = {}            # rid -> {t_ms, stopReason|error}
+    texts = []                # (t_ms, text, in_flight_after_a_resolved)
+    tool_calls = []           # (t_ms, title, status)
+    tool_timeline = {}        # toolCallId -> lifecycle + post-handoff activity
+    permissions = 0
+    b_echo_at = None
+    a_resolved_before_any_text = None
+    verdict_deadline = None
+    hard_deadline = rec.t0 + args.timeout
+
+    def settle(label):
+        """Both prompts are done. Exit unless asked to keep watching the
+        session, which is how background survival gets observed."""
+        nonlocal verdict_deadline
+        if args.watch_after > 0:
+            rec.note("watching_after_resolution", trigger=label,
+                     seconds=args.watch_after)
+            verdict_deadline = time.monotonic() + args.watch_after
+            return False
+        return True
+
+    def maybe_send_b():
+        nonlocal sent_b_at
+        if sent_b_at is not None or session_id is None or first_tool_at is None:
+            return
+        if rec.ms() >= first_tool_at + args.delay * 1000:
+            if request(ID_PROMPT_B, "session/prompt",
+                       {"sessionId": session_id,
+                        "prompt": [{"type": "text", "text": prompt_b}]},
+                       "sent_prompt_b"):
+                sent_b_at = rec.ms()
+
+    while True:
+        if time.monotonic() > hard_deadline:
+            rec.note("hard_timeout")
+            break
+        try:
+            item = events.get(timeout=0.25)
+        except queue.Empty:
+            maybe_send_b()
+            if verdict_deadline and time.monotonic() > verdict_deadline:
+                rec.note("linger_expired")
+                break
+            continue
+        if item is None:
+            break
+        t_ms, frame = item
+
+        # --- agent -> client requests we must answer -----------------------
+        method = frame.get("method")
+        if method and frame.get("id") is not None:
+            params = frame.get("params") or {}
+            if method == "session/request_permission":
+                permissions += 1
+                opts = params.get("options") or []
+                want = "reject" if args.deny else "allow"
+                chosen = next(
+                    (o.get("optionId") for o in opts
+                     if str(o.get("kind", "")).startswith(want)),
+                    (opts[0].get("optionId") if opts else None),
+                )
+                rec.note("permission_answered", option_id=chosen,
+                         kinds=[o.get("kind") for o in opts])
+                if chosen is None:
+                    reply(frame["id"], {"outcome": {"outcome": "cancelled"}})
+                else:
+                    reply(frame["id"],
+                          {"outcome": {"outcome": "selected", "optionId": chosen}})
+            else:
+                rec.note("client_request_refused", method=method)
+                reply_error(frame["id"], -32601, f"method not found: {method}")
+            maybe_send_b()
+            continue
+
+        # --- responses to our requests -------------------------------------
+        if "id" in frame and method is None:
+            rid = frame["id"]
+            if "error" in frame:
+                responses[rid] = {"t_ms": t_ms, "error": frame["error"]}
+                rec.note("response_error", rid=rid, error=frame["error"])
+            else:
+                result = frame.get("result") or {}
+                responses[rid] = {"t_ms": t_ms, "stopReason": result.get("stopReason")}
+                if rid == ID_INIT:
+                    init_result = result
+                    request(ID_NEW, "session/new", {"cwd": cwd, "mcpServers": []},
+                            "sent_session_new")
+                elif rid == ID_NEW:
+                    session_id = result.get("sessionId")
+                    rec.note("session_created", session_id=session_id)
+                    request(ID_PROMPT_A, "session/prompt",
+                            {"sessionId": session_id,
+                             "prompt": [{"type": "text", "text": prompt_a}]},
+                            "sent_prompt_a")
+                elif rid == ID_PROMPT_A:
+                    # The load-bearing observation: had the model produced any
+                    # final text yet when A's own request resolved?
+                    a_resolved_before_any_text = not texts
+                    rec.note("prompt_a_resolved",
+                             stop_reason=result.get("stopReason"),
+                             texts_so_far=len(texts),
+                             before_any_text=a_resolved_before_any_text)
+                    if ID_PROMPT_B in responses:
+                        if settle("prompt_a_last"):
+                            break
+                    else:
+                        verdict_deadline = time.monotonic() + args.linger
+                elif rid == ID_PROMPT_B:
+                    rec.note("prompt_b_resolved", stop_reason=result.get("stopReason"))
+                    if ID_PROMPT_A in responses:
+                        if settle("prompt_b_last"):
+                            break
+                    else:
+                        verdict_deadline = time.monotonic() + args.linger
+            maybe_send_b()
+            continue
+
+        # --- session/update notifications ----------------------------------
+        if method == "session/update":
+            upd = (frame.get("params") or {}).get("update") or {}
+            kind = upd.get("sessionUpdate")
+            if kind == "agent_message_chunk":
+                content = upd.get("content") or {}
+                if content.get("type") == "text":
+                    txt = content.get("text", "")
+                    texts.append((t_ms, txt))
+            elif kind == "user_message_chunk":
+                content = upd.get("content") or {}
+                txt = content.get("text", "") if isinstance(content, dict) else ""
+                if prompt_b[:24] in txt and b_echo_at is None:
+                    b_echo_at = t_ms
+                    rec.note("b_echo_observed",
+                             before_a_resolved=ID_PROMPT_A not in responses)
+            elif kind in ("tool_call", "tool_call_update"):
+                tool_calls.append((t_ms, upd.get("title") or upd.get("toolCallId"),
+                                   upd.get("status")))
+                tcid = upd.get("toolCallId") or "?"
+                rowe = tool_timeline.setdefault(tcid, {
+                    "first_ms": t_ms, "last_ms": t_ms, "title": None,
+                    "status": None, "after_a": 0, "after_b": 0, "updates": 0,
+                })
+                rowe["last_ms"] = t_ms
+                rowe["updates"] += 1
+                if upd.get("title"):
+                    rowe["title"] = upd["title"]
+                if upd.get("status"):
+                    rowe["status"] = upd["status"]
+                # Activity arriving after a prompt resolved is the survival
+                # evidence: the boundary did not kill this tool call.
+                if ID_PROMPT_A in responses:
+                    rowe["after_a"] += 1
+                if ID_PROMPT_B in responses:
+                    rowe["after_b"] += 1
+                if first_tool_at is None and kind == "tool_call":
+                    first_tool_at = t_ms
+                    rec.note("first_tool_call_observed", title=upd.get("title"))
+        maybe_send_b()
+        if verdict_deadline and time.monotonic() > verdict_deadline:
+            rec.note("linger_expired")
+            break
+
+    # --- shutdown ----------------------------------------------------------
+    try:
+        proc.stdin.close()
+    except (BrokenPipeError, ValueError):
+        pass
+    try:
+        proc.wait(timeout=15)
+    except subprocess.TimeoutExpired:
+        rec.note("kill_after_stdin_close")
+        proc.kill()
+        proc.wait(timeout=10)
+
+    ra, rb = responses.get(ID_PROMPT_A), responses.get(ID_PROMPT_B)
+    # Assistant text streams as chunks ("ST" + "EERED"), so concatenate with no
+    # separator — joining on a space hides the sentinel word.
+    all_text = "".join(t for _, t in texts)
+    steered = "STEERED" in all_text
+
+    def text_after(ms):
+        return "".join(txt for t, txt in texts if ms is not None and t > ms)
+
+    def text_before(ms):
+        return "".join(txt for t, txt in texts if ms is None or t <= ms)
+
+    def says(word, blob):
+        # Standalone uppercase token only. Prompt A's narration legitimately
+        # contains lowercase "done" ("Step 1 done. Now step 2..."), which must
+        # not be mistaken for A delivering its own final answer.
+        return re.search(r"\b" + word + r"\b", blob) is not None
+
+    a_ms = ra["t_ms"] if ra and "t_ms" in ra else None
+    b_ms = rb["t_ms"] if rb and "t_ms" in rb else None
+    # The load-bearing attribution question: did the answer that responds to B
+    # stream in AFTER A's own request had already resolved end_turn? A prompt
+    # that narrates its steps produces text before the handoff too, so "any text
+    # at all" is too crude a test — look for the steered answer specifically.
+    steered_after_a = says("STEERED", text_after(a_ms))
+    # Did A deliver its own final answer before resolving? If it did, this is an
+    # ordinary serialized pair, not a handoff.
+    done_before_a = says("DONE", text_before(a_ms))
+    said_done = says("DONE", all_text)
+    # Background survival shows up on the TEXT channel, not the tool channel: a
+    # settled background workload wakes a task-notification model cycle with no
+    # owning prompt RPC. Count activity after BOTH prompts resolved.
+    orphan_ms = max([m for m in (a_ms, b_ms) if m is not None], default=None)
+    orphan_texts = [(t, txt) for t, txt in texts
+                    if orphan_ms is not None and t > orphan_ms]
+    sleeps = sum(1 for _, title, _ in tool_calls
+                 if title and "sleep" in str(title).lower())
+
+    if sent_b_at is None:
+        verdict = "INCONCLUSIVE — prompt B was never sent (no tool_call seen)"
+    elif rb and "error" in rb:
+        verdict = "REJECTED — the bridge refused the concurrent session/prompt"
+    elif not ra:
+        verdict = "INCONCLUSIVE — prompt A never resolved; walk the log"
+    elif steered and steered_after_a and not done_before_a:
+        verdict = ("FOLD_HANDOFF — the model was steered mid-turn and the steered "
+                   "answer streamed AFTER A resolved end_turn: the bridge handed "
+                   "the turn off and A's completion is not A's")
+    elif steered and done_before_a:
+        verdict = ("SERIALIZED — A delivered its own answer before resolving, then "
+                   "B ran as its own turn")
+    elif steered:
+        verdict = ("FOLD — the model was steered mid-turn, but the steered answer "
+                   "preceded A's response; check attribution in the log")
+    elif said_done and steered:
+        verdict = "SERIALIZED — A completed on its own terms, then B ran as its own turn"
+    elif said_done:
+        verdict = "SERIALIZED — A completed; B produced no steered answer"
+    else:
+        verdict = "INCONCLUSIVE — neither DONE nor STEERED observed"
+
+    rec.note("verdict", text=verdict)
+    rec.write(out_path)
+
+    caps = (init_result or {}).get("agentCapabilities") or {}
+    meta = (caps.get("_meta") or {}).get("claudeCode") or {}
+    print(f"\nverdict: {verdict}\n")
+    print(f"  bridge protocolVersion  {(init_result or {}).get('protocolVersion')}")
+    print(f"  promptQueueing          {meta.get('promptQueueing')}")
+    print(f"  agent _meta.claudeCode  {json.dumps(meta)}")
+    print(f"  session                 {session_id}")
+    print(f"  permission requests     {permissions}")
+    print(f"  first tool_call at      {first_tool_at} ms")
+    print(f"  B sent at               {sent_b_at} ms")
+    print(f"  B echo seen at          {b_echo_at} ms")
+    print(f"  prompt A resolved       {ra}")
+    print(f"    before any text?      {a_resolved_before_any_text}")
+    print(f"    steered text after A? {steered_after_a}")
+    print(f"    A answered on its own? {done_before_a}")
+    print(f"  prompt B resolved       {rb}")
+    print(f"  orphan text after both  {len(orphan_texts)} chunk(s)"
+          + (f", first at {orphan_texts[0][0]} ms" if orphan_texts else ""))
+    if orphan_texts:
+        print("    -> background work outlived both prompts and woke a model "
+              "cycle with no owning session/prompt RPC")
+        print(f"    {''.join(t for _, t in orphan_texts)[:150]!r}")
+    print(f"  sleep tool_calls        {sleeps}  (2 = not steered, 1 = steered)")
+    print(f"  assistant text          {all_text[:160]!r}")
+    print("  text timeline           " +
+          ", ".join(f"{t}ms:{txt.strip()[:24]!r}" for t, txt in texts[:8]))
+    if tool_timeline:
+        survivors = [k for k, v in tool_timeline.items() if v["after_a"] > 0]
+        print("\n  tool calls (updates after a prompt resolved = survived it):")
+        print(f"    {'toolCallId':<26} {'title':<22} {'status':<10} "
+              f"{'first':>7} {'last':>7} {'upd':>4} {'aftA':>5} {'aftB':>5}")
+        for tcid, v in sorted(tool_timeline.items(), key=lambda kv: kv[1]["first_ms"]):
+            print(f"    {tcid[:26]:<26} {str(v['title'])[:22]:<22} "
+                  f"{str(v['status'])[:10]:<10} {v['first_ms']:>7} {v['last_ms']:>7} "
+                  f"{v['updates']:>4} {v['after_a']:>5} {v['after_b']:>5}")
+        print(f"    survived A's resolution: {len(survivors)} tool call(s)")
+    print(f"\n  frames: {out_path}\n")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

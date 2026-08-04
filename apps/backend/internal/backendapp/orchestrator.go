@@ -74,6 +74,8 @@ func provideOrchestrator(
 	serviceCfg := orchestrator.DefaultServiceConfig()
 	serviceCfg.ClaudeBackgroundPromptHandoff =
 		cfg != nil && cfg.Features.ClaudeBackgroundPromptHandoff
+	serviceCfg.ClaudeMidTurnSteering =
+		cfg != nil && cfg.Features.ClaudeMidTurnSteering
 	namespace := resolveEventNamespace(cfg)
 	serviceCfg.QueueGroup = "orchestrator." + namespace
 	busMode := "memory"

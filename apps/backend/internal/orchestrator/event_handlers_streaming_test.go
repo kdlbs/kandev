@@ -357,6 +357,7 @@ func TestUpdateTaskSessionState_EnabledClaudePublishesSettledBackground(t *testi
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 	enableClaudeBackgroundPromptHandoffForTest(t, svc)
 	setSessionAgentNameForTest(t, svc, "session-state-claude", "claude-acp")
+	advertisePromptQueueingForTest(t, svc, "session-state-claude")
 	svc.eventBus = eb
 	svc.registerBackgroundTask("session-state-claude", "background-1")
 	svc.markForegroundIdle("session-state-claude")

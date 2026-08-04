@@ -122,6 +122,16 @@ func (*firstTurnCaptureOrchestrator) ForegroundActivity(string) v1.ForegroundAct
 	return ""
 }
 
+func (*firstTurnCaptureOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*firstTurnCaptureOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
 func TestWSAddMessage_CreatedSessionPreservesReferencesThroughCanonicalizationAndDispatch(t *testing.T) {
 	now := time.Now().UTC()
 	reference := v1.EntityReference{
@@ -525,6 +535,16 @@ func (o *switchingTurnStartOrchestrator) ForegroundActivity(string) v1.Foregroun
 	return v1.ForegroundActivityGenerating
 }
 
+func (*switchingTurnStartOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*switchingTurnStartOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
 func (o *switchingTurnStartOrchestrator) StepRequiresCompletionSignal(context.Context, string) bool {
 	return false
 }
@@ -736,6 +756,14 @@ type recordingAdmissionOrchestrator struct {
 	prompted chan string
 }
 
+func (fgActivityOrchestrator) SteerEligible(string, models.TaskSessionState) bool { return false }
+
+func (fgActivityOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
+}
+
 func (o *recordingAdmissionOrchestrator) PromptTask(_ context.Context, _ string, sessionID string, _ string, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
 	o.prompted <- sessionID
 	return &orchestrator.PromptResult{}, nil
@@ -754,6 +782,16 @@ func (*recordingAdmissionOrchestrator) StepRequiresCompletionSignal(context.Cont
 }
 func (o *recordingAdmissionOrchestrator) ForegroundActivity(string) v1.ForegroundActivity {
 	return o.activity
+}
+
+func (*recordingAdmissionOrchestrator) SteerEligible(string, models.TaskSessionState) bool {
+	return false
+}
+
+func (*recordingAdmissionOrchestrator) SteerTask(
+	context.Context, string, string, string, string, bool, []v1.MessageAttachment,
+) (*orchestrator.PromptResult, error) {
+	return &orchestrator.PromptResult{}, nil
 }
 
 func TestWSAddMessage_ForegroundActivityAdmissionWiring(t *testing.T) {

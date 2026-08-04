@@ -178,6 +178,7 @@ type AgentStreamEventData struct {
 	SupportsImage           bool                     `json:"supports_image"`
 	SupportsAudio           bool                     `json:"supports_audio"`
 	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
 	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods,omitempty"`
 
 	// Session models (from "session_models" event)
@@ -509,6 +510,7 @@ type AgentCapabilitiesEventPayload struct {
 	SupportsImage           bool                     `json:"supports_image"`
 	SupportsAudio           bool                     `json:"supports_audio"`
 	SupportsEmbeddedContext bool                     `json:"supports_embedded_context"`
+	SupportsPromptQueueing  bool                     `json:"supports_prompt_queueing"`
 	AuthMethods             []streams.AuthMethodInfo `json:"auth_methods"`
 	Timestamp               string                   `json:"timestamp"`
 }

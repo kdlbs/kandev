@@ -400,6 +400,15 @@ type FeaturesConfig struct {
 	// foreground handoff while background work remains live. It is off in every
 	// embedded profile and must fail closed for every other provider.
 	ClaudeBackgroundPromptHandoff bool `mapstructure:"claude_background_prompt_handoff" json:"claudeBackgroundPromptHandoff"`
+
+	// ClaudeMidTurnSteering gates the high-risk experiment that delivers operator
+	// input into a turn that is still generating, for an agent that advertised
+	// prompt queueing. It is independent of ClaudeBackgroundPromptHandoff: that
+	// flag covers the foreground-idle handoff, this one covers a foreground that
+	// has not yielded. Off in every embedded profile, and it remains the
+	// kill-switch after rollout because the agent-side fold is undocumented and
+	// can regress without notice.
+	ClaudeMidTurnSteering bool `mapstructure:"claude_mid_turn_steering" json:"claudeMidTurnSteering"`
 }
 
 // LoggingConfig holds logging configuration.
