@@ -225,7 +225,6 @@ test.describe("Workflow automation", () => {
     // Session transitions to idle — plan mode input placeholder visible
     await expect(session.planModeInput()).toBeVisible({ timeout: 15_000 });
 
-    // The active kanban projection must win over any stale all-workflow
     // snapshot that was already in flight when the turn completed. That
     // reconciliation is exactly what this waits on, so it needs the same
     // explicit budget as the assertions above — on the default expect timeout

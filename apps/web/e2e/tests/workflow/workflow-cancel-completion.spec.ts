@@ -61,7 +61,7 @@ async function startWorkingTurn(
 
   await testPage.goto(`/t/${task.id}`);
   const session = new SessionPage(testPage);
-  await session.waitForLoad();
+  await session.showSessionContext();
   await expect(session.stepperStep("Working")).toHaveAttribute("aria-current", "step", {
     timeout: 15_000,
   });

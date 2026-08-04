@@ -7,7 +7,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/task/models"
@@ -95,7 +94,3 @@ func sessionEligibleForMCPRefresh(session *models.TaskSession) bool {
 var _ interface {
 	RefreshTaskMCPProviders(context.Context, string) error
 } = (*taskMCPProviderRefresher)(nil)
-
-var _ interface {
-	SetMcpProvidersForSession(context.Context, string, []string) error
-} = (*lifecycle.Manager)(nil)
