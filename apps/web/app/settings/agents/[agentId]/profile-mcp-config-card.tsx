@@ -65,11 +65,10 @@ const POPULAR_SERVERS: Record<string, Record<string, unknown>> = {
     },
   },
   github: {
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-github"],
-    env: {
-      GITHUB_TOKEN: "your_token_here",
+    type: "http",
+    url: "https://api.githubcopilot.com/mcp/",
+    headers: {
+      Authorization: "Bearer your_token_here",
     },
   },
 };
