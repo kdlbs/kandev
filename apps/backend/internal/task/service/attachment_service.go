@@ -155,7 +155,7 @@ func (s *AttachmentService) writeAttachmentBytes(storageKey string, src io.Reade
 }
 
 func ValidateAttachmentMetadata(name, mimeType, kind, deliveryMode string) error {
-	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, `/\\\x00`) {
+	if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "/\\\x00") {
 		return fmt.Errorf("%w: invalid name", ErrAttachmentInvalid)
 	}
 	if strings.TrimSpace(mimeType) == "" {

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -68,6 +69,10 @@ type QueueAttachmentClaimer interface {
 
 type QueueAttachmentReleaser interface {
 	ReleaseMessageAttachments(ctx context.Context, taskID, sessionID string, attachments []v1.MessageAttachment) error
+}
+
+type queueEntryTaker interface {
+	TakeQueuedEntry(context.Context, string, string) (*messagequeue.QueuedMessage, bool, error)
 }
 
 // QueueHandlers handles WebSocket message-queue operations.
@@ -191,7 +196,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	}
 	if h.attachmentClaimer != nil && len(req.Attachments) > 0 {
 		if err := h.attachmentClaimer.ClaimMessageAttachments(ctx, req.TaskID, req.SessionID, queueAttachmentsToV1(req.Attachments)); err != nil {
-			_ = h.queueService.RemoveEntry(ctx, req.SessionID, queued.ID)
+			if rollbackErr := h.rollbackQueuedAttachmentClaim(ctx, req.SessionID, queued.ID); rollbackErr != nil {
+				return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to roll back queued attachment", nil)
+			}
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "Attachment is no longer available", nil)
 		}
 	}
@@ -426,6 +433,21 @@ func (h *QueueHandlers) validateSubmittedReferences(
 	return h.referenceValidator.ValidateForSubmission(ctx, sessionID, taskID, references)
 }
 
+func (h *QueueHandlers) rollbackQueuedAttachmentClaim(ctx context.Context, sessionID, entryID string) error {
+	if err := h.queueService.RemoveEntry(ctx, sessionID, entryID); err == nil {
+		return nil
+	} else {
+		h.logger.Error("failed to remove queue entry after attachment claim failure",
+			zap.String("entry_id", entryID), zap.Error(err))
+	}
+	taker, ok := h.queueService.(queueEntryTaker)
+	if !ok {
+		return errors.New("queue service cannot atomically remove a queued entry")
+	}
+	_, _, err := taker.TakeQueuedEntry(ctx, sessionID, entryID)
+	return err
+}
+
 func firstInvalidDeliveryMode(attachments []messagequeue.MessageAttachment) int {
 	for i, att := range attachments {
 		if att.DeliveryMode != "" && att.DeliveryMode != "prompt" && att.DeliveryMode != "path" {
@@ -444,24 +466,36 @@ func firstInvalidAttachment(attachments []messagequeue.MessageAttachment) int {
 		if attachment.Type != "image" && attachment.Type != "audio" && attachment.Type != "resource" {
 			return i
 		}
-		if attachment.AttachmentID != "" {
-			if attachment.Data != "" {
-				return i
-			}
-			if attachment.Name == "" || attachment.MimeType == "" || attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
-				return i
-			}
-			total += attachment.SizeBytes
-			if total > models.MaxMessageAttachmentBytes {
-				return i
-			}
-			continue
+		bytes, valid := attachmentPayloadBytes(attachment)
+		if !valid {
+			return i
 		}
-		if attachment.Data == "" || len(attachment.Data) > 10*1024*1024 {
+		total += bytes
+		if total > models.MaxMessageAttachmentBytes {
 			return i
 		}
 	}
 	return -1
+}
+
+func attachmentPayloadBytes(attachment messagequeue.MessageAttachment) (int64, bool) {
+	if attachment.AttachmentID != "" {
+		if attachment.Data != "" || attachment.Name == "" || attachment.MimeType == "" {
+			return 0, false
+		}
+		if attachment.SizeBytes < 0 || attachment.SizeBytes > models.MaxMessageAttachmentBytes {
+			return 0, false
+		}
+		return attachment.SizeBytes, true
+	}
+	if attachment.Data == "" || len(attachment.Data) > 10*1024*1024 {
+		return 0, false
+	}
+	decoded, err := base64.StdEncoding.DecodeString(attachment.Data)
+	if err != nil {
+		return 0, false
+	}
+	return int64(len(decoded)), true
 }
 
 func queueAttachmentsToV1(attachments []messagequeue.MessageAttachment) []v1.MessageAttachment {

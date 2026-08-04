@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -12,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/assert"
@@ -431,6 +433,15 @@ func TestFirstInvalidDeliveryMode(t *testing.T) {
 			assert.Equal(t, tt.want, got)
 		})
 	}
+}
+
+func TestFirstInvalidAttachmentCountsInlineDataInAggregate(t *testing.T) {
+	inline := base64.StdEncoding.EncodeToString([]byte("inline"))
+	attachments := []messagequeue.MessageAttachment{
+		{Type: "resource", AttachmentID: "descriptor", Name: "large.bin", MimeType: "application/octet-stream", SizeBytes: models.MaxMessageAttachmentBytes},
+		{Type: "resource", Data: inline, Name: "inline.txt", MimeType: "text/plain"},
+	}
+	assert.Equal(t, 1, firstInvalidAttachment(attachments))
 }
 
 func TestWsCancelAll(t *testing.T) {

@@ -3,15 +3,21 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { UtilityGenerationResult } from "@/hooks/use-utility-agent-generator";
+import type { FileAttachment } from "./chat/file-attachment";
 
-const { mockCreateTask, mockReplaceTaskUrl, mockSetActiveTask, mockSetActiveSession } = vi.hoisted(
-  () => ({
-    mockCreateTask: vi.fn(),
-    mockReplaceTaskUrl: vi.fn(),
-    mockSetActiveTask: vi.fn(),
-    mockSetActiveSession: vi.fn(),
-  }),
-);
+const {
+  mockCreateTask,
+  mockReplaceTaskUrl,
+  mockSetActiveTask,
+  mockSetActiveSession,
+  mockHasPendingAttachmentUploads,
+} = vi.hoisted(() => ({
+  mockCreateTask: vi.fn(),
+  mockReplaceTaskUrl: vi.fn(),
+  mockSetActiveTask: vi.fn(),
+  mockSetActiveSession: vi.fn(),
+  mockHasPendingAttachmentUploads: vi.fn(),
+}));
 
 const mockToast = vi.fn();
 const mockEnhancePrompt = vi.fn();
@@ -42,7 +48,8 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   buildRepositoriesPayload: vi.fn(() => []),
-  hasPendingAttachmentUploads: vi.fn(() => false),
+  hasPendingAttachmentUploads: (...args: Parameters<typeof mockHasPendingAttachmentUploads>) =>
+    mockHasPendingAttachmentUploads(...args),
   toMessageAttachments: vi.fn(() => []),
 }));
 
@@ -241,6 +248,7 @@ function makeSubmitOptions(
 describe("useSubtaskSubmit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHasPendingAttachmentUploads.mockReturnValue(false);
     mockCreateTask.mockResolvedValue({ id: CREATED_TASK_ID, session_id: CREATED_SESSION_ID });
   });
 
@@ -296,6 +304,30 @@ describe("useSubtaskSubmit", () => {
     });
 
     expect(mockCreateTask).not.toHaveBeenCalled();
+  });
+
+  it("does not create while an attachment upload is pending", async () => {
+    mockHasPendingAttachmentUploads.mockReturnValue(true);
+    const pendingAttachment = {
+      id: "pending-attachment",
+      file: new File(["pending"], "pending.txt"),
+      data: "",
+      mimeType: "text/plain",
+      fileName: "pending.txt",
+      size: 7,
+      isImage: false,
+      deliveryMode: "path",
+    } satisfies FileAttachment;
+    const opts = makeSubmitOptions({ attachments: [pendingAttachment] });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(mockHasPendingAttachmentUploads).toHaveBeenCalledWith([pendingAttachment]);
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(opts.setIsCreating).not.toHaveBeenCalled();
   });
 
   it("cleans up the creating state after a request failure", async () => {

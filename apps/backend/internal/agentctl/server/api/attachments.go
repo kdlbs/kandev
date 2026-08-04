@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/task/models"
@@ -121,12 +120,8 @@ func (s *Server) persistMaterializedAttachment(upload materializedAttachmentUplo
 	if destinationName == "" {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment name is invalid")
 	}
-	destinationName = uniqueAttachmentName(dir, destinationName)
-	destination, err := safeAttachmentPath(dir, destinationName)
+	destinationName, err = installMaterializedAttachment(dir, tmpPath, destinationName)
 	if err != nil {
-		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusBadRequest, "attachment name is invalid")
-	}
-	if err := os.Rename(tmpPath, destination); err != nil {
 		return materializedAttachmentResponse{}, newMaterializedAttachmentError(http.StatusInternalServerError, "attachment storage unavailable")
 	}
 	return materializedAttachmentResponse{Name: destinationName, SizeBytes: n}, nil
@@ -182,29 +177,29 @@ func safeAttachmentPath(root string, components ...string) (string, error) {
 	return path, nil
 }
 
-func uniqueAttachmentName(dir, name string) string {
-	namePath, pathErr := safeAttachmentPath(dir, name)
-	if pathErr != nil {
-		return ""
-	}
-	if _, err := os.Stat(namePath); err == nil || !errors.Is(err, os.ErrNotExist) {
-		// An existing file (or an error other than not-exist) must not be
-		// overwritten. Continue with a deterministic suffix; the final rename
-		// remains atomic and therefore safe against concurrent materializers.
-	} else {
-		return name
-	}
+func installMaterializedAttachment(dir, tmpPath, name string) (string, error) {
 	ext := filepath.Ext(name)
 	base := strings.TrimSuffix(name, ext)
-	for i := 2; i <= 10000; i++ {
-		candidate := fmt.Sprintf("%s-%d%s", base, i, ext)
-		candidatePath, pathErr := safeAttachmentPath(dir, candidate)
-		if pathErr != nil {
-			return ""
+	for i := 1; i <= 10000; i++ {
+		candidate := name
+		if i > 1 {
+			candidate = fmt.Sprintf("%s-%d%s", base, i, ext)
 		}
-		if _, err := os.Stat(candidatePath); errors.Is(err, os.ErrNotExist) {
-			return candidate
+		candidatePath, err := safeAttachmentPath(dir, candidate)
+		if err != nil {
+			return "", err
 		}
+		if err := os.Link(tmpPath, candidatePath); err != nil {
+			if errors.Is(err, os.ErrExist) {
+				continue
+			}
+			return "", err
+		}
+		if err := os.Remove(tmpPath); err != nil {
+			_ = os.Remove(candidatePath)
+			return "", err
+		}
+		return candidate, nil
 	}
-	return fmt.Sprintf("%s-%d%s", base, time.Now().UnixNano(), ext)
+	return "", fmt.Errorf("no available attachment destination")
 }

@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
@@ -148,5 +150,49 @@ func TestMaterializeAttachment_RejectsPathTraversalIdentity(t *testing.T) {
 
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, body = %s", response.Code, response.Body.String())
+	}
+}
+
+func TestInstallMaterializedAttachment_NeverOverwritesConcurrentNames(t *testing.T) {
+	dir := t.TempDir()
+	type result struct {
+		name string
+		err  error
+		data []byte
+	}
+	results := make(chan result, 8)
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			tmpPath := filepath.Join(dir, "upload-"+strconv.Itoa(i))
+			content := []byte("content-" + strconv.Itoa(i))
+			if err := os.WriteFile(tmpPath, content, 0o600); err != nil {
+				results <- result{err: err}
+				return
+			}
+			name, err := installMaterializedAttachment(dir, tmpPath, "same.txt")
+			var got []byte
+			if err == nil {
+				got, err = os.ReadFile(filepath.Join(dir, name))
+			}
+			results <- result{name: name, err: err, data: got}
+		}(i)
+	}
+	wg.Wait()
+	close(results)
+	seen := make(map[string]struct{})
+	for got := range results {
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		if _, exists := seen[got.name]; exists {
+			t.Fatalf("duplicate destination name %q", got.name)
+		}
+		seen[got.name] = struct{}{}
+		if len(got.data) == 0 {
+			t.Fatalf("empty installed file for %q", got.name)
+		}
 	}
 }

@@ -32,3 +32,14 @@ func TestValidateAttachmentBatchEnforcesCountAndAggregate(t *testing.T) {
 		t.Fatalf("expected attachment count error, got %v", err)
 	}
 }
+
+func TestValidateAttachmentMetadataAcceptsXAndZeroAndRejectsNUL(t *testing.T) {
+	for _, name := range []string{"x-ray0.png", "index0.log"} {
+		if err := ValidateAttachmentMetadata(name, "image/png", "image", "prompt"); err != nil {
+			t.Fatalf("name %q rejected: %v", name, err)
+		}
+	}
+	if err := ValidateAttachmentMetadata("bad"+string(rune(0))+"name", "image/png", "image", "prompt"); !errors.Is(err, ErrAttachmentInvalid) {
+		t.Fatalf("NUL name error = %v, want ErrAttachmentInvalid", err)
+	}
+}

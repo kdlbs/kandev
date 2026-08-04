@@ -382,6 +382,10 @@ function useFileAttachments(
           kind: attachment.isImage ? "image" : "resource",
           deliveryMode: attachment.deliveryMode,
         });
+        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
+          return;
+        }
         updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
           uploadStatus: "ready",
@@ -414,8 +418,7 @@ function useFileAttachments(
 
   useEffect(() => {
     onPendingAttachmentUploadsChange?.(
-      Boolean(workspaceId) &&
-        attachments.some((attachment) => attachment.file && !attachment.attachmentId),
+      attachments.some((attachment) => attachment.file && !attachment.attachmentId),
     );
   }, [attachments, onPendingAttachmentUploadsChange, workspaceId]);
 

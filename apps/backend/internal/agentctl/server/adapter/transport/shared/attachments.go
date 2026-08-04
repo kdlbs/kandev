@@ -35,6 +35,8 @@ type AttachmentManager struct {
 	logger    *zap.Logger
 }
 
+var ErrMaterializedAttachmentMissing = errors.New("materialized attachment is missing")
+
 // NewAttachmentManager creates a new AttachmentManager.
 // sessionID can be empty initially and set later via SetSessionID.
 func NewAttachmentManager(workDir string, logger *zap.Logger) *AttachmentManager {
@@ -93,9 +95,7 @@ func (m *AttachmentManager) SaveAttachments(attachments []v1.MessageAttachment) 
 			}
 			info, statErr := os.Stat(absPath)
 			if statErr != nil || !info.Mode().IsRegular() {
-				m.logger.Warn("materialized attachment is missing",
-					zap.String("attachment_id", att.AttachmentID), zap.String("path", absPath), zap.Error(statErr))
-				continue
+				return nil, fmt.Errorf("%w: %s", ErrMaterializedAttachmentMissing, att.AttachmentID)
 			}
 			usedNames[name] = true
 			relPath := filepath.Join(".kandev", "attachments", m.sessionID, name)

@@ -966,13 +966,8 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
 	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
 		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
-	} else if p.homeDir != "" {
-		if attachmentSvc, err := taskservice.NewAttachmentService(p.taskRepo, p.homeDir, p.taskSvc.AuthorizeWorkspaceAccess, p.log); err != nil {
-			p.log.Warn("prompt attachment routes disabled", zap.Error(err))
-		} else {
-			p.taskSvc.SetAttachmentService(attachmentSvc)
-			taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
-		}
+	} else {
+		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
 	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	if p.services != nil {

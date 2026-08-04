@@ -208,6 +208,10 @@ export function useDialogAttachments(disabled: boolean, workspaceId?: string | n
           kind: attachment.isImage ? "image" : "resource",
           deliveryMode: attachment.deliveryMode,
         });
+        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
+          return;
+        }
         updateAttachment(attachment.id, {
           attachmentId: uploaded.attachment_id,
           uploadStatus: "ready",

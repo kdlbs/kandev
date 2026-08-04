@@ -2,6 +2,7 @@ package shared
 
 import (
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,6 +187,18 @@ func TestSaveAttachments_ReusesMaterializedDescriptor(t *testing.T) {
 	}
 	if string(got) != string(want) {
 		t.Fatalf("materialized file changed: %q", got)
+	}
+}
+
+func TestSaveAttachments_ReturnsTypedErrorForMissingMaterializedDescriptor(t *testing.T) {
+	mgr := NewAttachmentManager(t.TempDir(), testLogger())
+	mgr.SetSessionID("sess-missing")
+
+	_, err := mgr.SaveAttachments([]v1.MessageAttachment{{
+		AttachmentID: "missing", Type: "resource", MimeType: "text/plain", Name: "missing.txt",
+	}})
+	if !errors.Is(err, ErrMaterializedAttachmentMissing) {
+		t.Fatalf("error = %v, want ErrMaterializedAttachmentMissing", err)
 	}
 }
 
