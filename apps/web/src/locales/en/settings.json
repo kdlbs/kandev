@@ -374,7 +374,7 @@
   "sleepInhibitionInfoLabel": "How host sleep prevention works",
   "sleepInhibitionInfoTitle": "How Kandev prevents host sleep",
   "sleepInhibitionInfoTrigger": "The backend holds one sleep-prevention request while any task is starting or running.",
-  "sleepInhibitionInfoMacos": "macOS runs <0>{{command}}</0>. The <1>-i</1> option prevents idle system sleep. The <2>-w</2> option stops the helper when the backend exits.",
+  "sleepInhibitionInfoMacos": "macOS runs <0>{{command}}</0>. The <1>{{idleOption}}</1> option prevents idle system sleep. The <2>{{waitOption}}</2> option stops the helper when the backend exits.",
   "sleepInhibitionInfoWindows": "Windows calls <0>{{api}}</0> with system-sleep flags. Kandev clears the request when no working task remains.",
   "sleepInhibitionInfoLinux": "Linux asks systemd-logind through D-Bus with <0>{{method}}</0>. Kandev keeps the returned file open until no working task remains.",
   "sleepInhibitionInfoRelease": "The request does not keep the display awake or override an explicit user sleep action.",
