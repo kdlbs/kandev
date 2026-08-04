@@ -36,7 +36,7 @@ const TRIGGER_LABEL_KEYS: Record<TriggerType, string> = {
   github_pr: "automations:triggerLabelGithubPr",
   github_push: "automations:triggerLabelGithubPush",
   github_ci: "automations:triggerLabelGithubCi",
-  webhook: "automations:webhook",
+  webhook: "automations:triggerLabelWebhook",
 };
 
 function TriggerBadges({ triggers }: { triggers: Automation["triggers"] }) {

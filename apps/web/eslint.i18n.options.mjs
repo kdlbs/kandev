@@ -1135,7 +1135,11 @@ export const i18nGuardFiles = [
   // `common`: `common:automations` (the word SEGMENT_LABEL_KEYS already names
   // as this settings route's owner), `common:cancel`, `common:status` and
   // `common:requestFailed` — each diffed byte-for-byte against what the live
-  // surface rendered before reusing it.
+  // surface rendered before reusing it. Inside the namespace the reverse call
+  // was made for "Webhook": the badge, the card summary and the picker's group
+  // heading get one key each rather than sharing one, because they are three
+  // different grammatical contexts and a language that inflects them
+  // differently would otherwise have nowhere to say so.
   //
   // Most of this directory's copy was invisible to the guard. `pnpm run
   // lint:i18n` reported 116; the migration converted 156. The extra 40 were in
@@ -1175,9 +1179,18 @@ export const i18nGuardFiles = [
   //     consumers and `lib/i18n/formats.ts` already holds its intended
   //     replacement (`formatRelative`); swapping it is a cross-cutting change,
   //     not part of a copy migration.
+  //
+  // NOTE the `[[]id[]]` escaping on the dynamic route. Written as `[id]`, the
+  // brackets are a glob CHARACTER CLASS matching a single `i` or `d`, so the
+  // pattern matches nothing and the route is silently unguarded — verified by
+  // putting a hardcoded literal in `automations/new/page.tsx` and watching
+  // `pnpm lint` report 0 errors. `check-guard-allowlist.mjs` cannot catch this:
+  // it only inspects entries that LEFT the array, so an entry that never
+  // matched anything looks identical to a healthy one. `fs.globSync` on the
+  // escaped form is what proves an entry is live.
   "components/automations/*.{ts,tsx}",
   "components/automations/trigger-configs/*.tsx",
   "app/settings/automations/page.tsx",
-  "app/settings/workspace/[id]/automations/**/*.tsx",
+  "app/settings/workspace/[[]id[]]/automations/**/*.tsx",
   "hooks/domains/settings/use-automation-runs.ts",
 ];

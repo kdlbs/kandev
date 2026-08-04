@@ -62,7 +62,7 @@ const CRON_PRESET_KEYS: Record<string, string> = {
 const SIMPLE_SUMMARY_KEYS: Partial<Record<TriggerType, string>> = {
   github_push: "automations:summaryPushToBranch",
   github_ci: "automations:summaryCiCompleted",
-  webhook: "automations:webhook",
+  webhook: "automations:summaryWebhook",
 };
 
 const TRIGGER_INFO_KEYS: Record<TriggerType, string> = {

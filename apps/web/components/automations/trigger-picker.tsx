@@ -28,7 +28,7 @@ const CATEGORY_META: Record<string, CategoryMeta> = {
     color: "text-purple-400",
   },
   webhook: {
-    headingKey: "automations:webhook",
+    headingKey: "automations:triggerCategoryWebhook",
     icon: IconWebhook,
     color: "text-blue-400",
   },

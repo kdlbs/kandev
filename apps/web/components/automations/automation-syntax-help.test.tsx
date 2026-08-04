@@ -1,4 +1,4 @@
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { ScheduleSelector } from "./schedule-selector";
@@ -74,6 +74,20 @@ describe("ScheduleSelector syntax help", () => {
 
     const labels = Array.from(container.querySelectorAll("button")).map((b) => text(b));
     expect(labels).toEqual(["5 min", "15 min", "30 min", "1 hour", "6 hours", "Daily", "Weekly"]);
+  });
+
+  it("keeps @every verbatim in the invalid-expression error", async () => {
+    const { container, findByText } = renderSchedule();
+
+    const input = container.querySelector('[data-testid="schedule-custom-input"]')!;
+    fireEvent.change(input, { target: { value: "not a cron" } });
+    fireEvent.blur(input);
+
+    // The token travels as an interpolation value, so an accented pseudo build
+    // still tells the user to type the string the scheduler actually accepts.
+    await findByText(
+      "Invalid expression. Use @every with a duration, a shorthand, or a 5-field cron.",
+    );
   });
 
   it("keeps the cron expression out of the preset's persisted value", () => {

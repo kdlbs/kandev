@@ -82,7 +82,11 @@ export function ScheduleSelector({ config, isDirty = false, onChange }: Schedule
       return;
     }
     if (!isValidExpression(trimmed)) {
-      setError(t("automations:invalidExpression"));
+      // `@every` is the token the scheduler accepts and the user must type, so
+      // it is interpolated rather than left in the catalog — otherwise the
+      // pseudo-locale renders `@ēvēŕŷ` and the error tells them to type
+      // something that can never parse.
+      setError(t("automations:invalidExpression", { every: CRON_EVERY }));
       return;
     }
     setError(null);

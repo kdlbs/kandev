@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
 import { useRouter } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
@@ -278,12 +279,18 @@ function useAutomationSaveContributor(options: {
   discard: () => void;
 }) {
   const { isNew, currentId, revision, savedRevision, canSave, save, discard } = options;
+  // `invalidReason` is resolved during RENDER, so it needs the hook rather than
+  // the module-level `t` the toasts below use: nothing else in AutomationEditor
+  // calls useTranslation(), so without this subscription the tooltip would keep
+  // the previous locale's text until some unrelated re-render. (The toasts are
+  // fine on the module-level `t` — they resolve at call time inside a callback.)
+  const { t: translate } = useTranslation();
   useSettingsSaveContributor({
     id: `automation:${currentId ?? "new"}`,
     revision,
     isDirty: isNew || revision !== savedRevision,
     canSave,
-    invalidReason: canSave ? undefined : t("automations:completeRequiredFields"),
+    invalidReason: canSave ? undefined : translate("automations:completeRequiredFields"),
     save,
     discard,
   });
