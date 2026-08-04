@@ -645,6 +645,80 @@ func TestTryBatchedPRWatchCheck_NumberedWatch_AppliesStatus(t *testing.T) {
 	}
 }
 
+func TestTryBatchedPRWatchCheck_PersistsExactReviewThreadCount(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	gh.prResponses = []string{
+		batchedPRReviewThreadsResponse(t, 102, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		reviewThreadPageResponse(t, resolvedReviewThreadNodes(2), false, "cursor-2"),
+	}
+
+	watch := &PRWatch{
+		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat",
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42,
+		PRURL: "https://x/42", PRTitle: "Busy PR", HeadBranch: "feat", BaseBranch: "main", State: "open",
+		UnresolvedReviewThreads: 154,
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	if !poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatal("expected batched path to succeed")
+	}
+
+	updated, err := store.GetTaskPR(ctx, "t1")
+	if err != nil || updated == nil {
+		t.Fatalf("get task PR: err=%v, pr=%v", err, updated)
+	}
+	if updated.UnresolvedReviewThreads != 0 {
+		t.Fatalf("UnresolvedReviewThreads = %d, want 0", updated.UnresolvedReviewThreads)
+	}
+}
+
+func TestTryBatchedPRWatchCheck_PreservesReviewThreadCountOnPaginationFailure(t *testing.T) {
+	poller, _, gh, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+
+	gh.prResponses = []string{
+		batchedPRReviewThreadsResponse(t, 101, resolvedReviewThreadNodes(100), true, "cursor-1"),
+		mustJSON(t, map[string]any{
+			"data":   map[string]any{},
+			"errors": []map[string]any{{"message": "review thread page failed"}},
+		}),
+	}
+
+	watch := &PRWatch{
+		SessionID: "s1", TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42, Branch: "feat",
+	}
+	if err := store.CreatePRWatch(ctx, withTestWorkspace(watch)); err != nil {
+		t.Fatalf("create PR watch: %v", err)
+	}
+	if err := store.CreateTaskPR(ctx, &TaskPR{
+		TaskID: "t1", Owner: "o", Repo: "r", PRNumber: 42,
+		PRURL: "https://x/42", PRTitle: "Busy PR", HeadBranch: "feat", BaseBranch: "main", State: "open",
+		UnresolvedReviewThreads: 154,
+	}); err != nil {
+		t.Fatalf("create task PR: %v", err)
+	}
+
+	if poller.tryBatchedPRWatchCheck(ctx, []*PRWatch{watch}) {
+		t.Fatal("expected batched path to fail")
+	}
+	updated, err := store.GetTaskPR(ctx, "t1")
+	if err != nil || updated == nil {
+		t.Fatalf("get task PR: err=%v, pr=%v", err, updated)
+	}
+	if updated.UnresolvedReviewThreads != 154 {
+		t.Fatalf("UnresolvedReviewThreads = %d, want preserved value 154", updated.UnresolvedReviewThreads)
+	}
+}
+
 func TestTryBatchedPRWatchCheck_PublishesOnPRFeedbackWatermarkChange(t *testing.T) {
 	poller, _, gh, store := setupBatchedPollerTest(t)
 	ctx := context.Background()
