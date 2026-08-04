@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -120,6 +121,22 @@ func TestCanAutoInstall(t *testing.T) {
 	for _, language := range []string{"kotlin", "java", ""} {
 		if CanAutoInstall(language) {
 			t.Errorf("CanAutoInstall(%q) = true, want false", language)
+		}
+	}
+}
+
+func TestAutoInstallLanguagesForPlatform(t *testing.T) {
+	tests := []struct {
+		goos string
+		want []string
+	}{
+		{goos: linuxOS, want: []string{"go", "python", "rust", "typescript"}},
+		{goos: darwinOS, want: []string{"go", "python", "rust", "typescript"}},
+		{goos: windowsOS, want: []string{"go", "python", "typescript"}},
+	}
+	for _, tc := range tests {
+		if got := autoInstallLanguagesForPlatform(tc.goos); !slices.Equal(got, tc.want) {
+			t.Errorf("autoInstallLanguagesForPlatform(%q) = %v, want %v", tc.goos, got, tc.want)
 		}
 	}
 }

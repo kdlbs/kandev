@@ -1,19 +1,10 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import {
-  IconEdit,
-  IconTrash,
-  IconChevronDown,
-  IconExternalLink,
-  IconInfoCircle,
-} from "@tabler/icons-react";
+import { IconEdit, IconTrash, IconChevronDown, IconExternalLink } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
-import { Checkbox } from "@kandev/ui/checkbox";
 import { Separator } from "@kandev/ui/separator";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import { Switch } from "@kandev/ui/switch";
 import { Textarea } from "@kandev/ui/textarea";
 import { SettingsPageTemplate } from "@/components/settings/settings-page-template";
 import { Combobox, type ComboboxOption } from "@/components/combobox";
@@ -43,7 +34,8 @@ import {
   type EditorsSettingsState,
 } from "@/components/settings/editors-settings-state";
 import { isDraftEntryDirty, isEditorsSettingsDirty } from "./settings-dirty";
-import { LSP_LANGUAGE_OPTIONS, lspLanguageDisplayLabel } from "./lsp-language-options";
+import { LspLanguageCards } from "./lsp-language-cards";
+import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
 import { Trans, useTranslation } from "react-i18next";
 
 /**
@@ -52,129 +44,7 @@ import { Trans, useTranslation } from "react-i18next";
  * is part of the message a translator edits, and translating a command name or
  * an LSP method breaks the thing it names.
  */
-const NPM_INSTALL_COMMAND = "npm install";
 const LSP_CONFIG_METHOD = "workspace/configuration";
-
-type LspLanguageCardsProps = {
-  lspAutoStartLanguages: string[];
-  lspAutoInstallLanguages: string[];
-  baselineLspAutoStart: string[];
-  baselineLspAutoInstall: string[];
-  toggleAutoStart: (langId: string, checked: boolean) => void;
-  toggleAutoInstall: (langId: string, checked: boolean) => void;
-};
-
-function LspLanguageCard({
-  language,
-  lspAutoStartLanguages,
-  lspAutoInstallLanguages,
-  baselineLspAutoStart,
-  baselineLspAutoInstall,
-  toggleAutoStart,
-  toggleAutoInstall,
-}: LspLanguageCardsProps & {
-  language: (typeof LSP_LANGUAGE_OPTIONS)[number];
-}) {
-  const { t } = useTranslation();
-  const languageLabel = lspLanguageDisplayLabel(language, (key, options) => t(key, options));
-  const autoInstallSupported = language.autoInstallSupported;
-  const autoStartDirty =
-    lspAutoStartLanguages.includes(language.id) !== baselineLspAutoStart.includes(language.id);
-  const autoInstallDirty =
-    autoInstallSupported &&
-    lspAutoInstallLanguages.includes(language.id) !== baselineLspAutoInstall.includes(language.id);
-
-  return (
-    <div
-      className="rounded-lg border border-border/60 bg-background px-4 py-3 space-y-2.5"
-      data-settings-dirty={autoStartDirty || autoInstallDirty}
-      data-testid={`lsp-language-card-${language.id}`}
-    >
-      <div>
-        <div className="text-sm font-medium text-foreground">{languageLabel}</div>
-        <div className="text-xs text-muted-foreground">{language.binary}</div>
-      </div>
-      <div className="flex items-center justify-between">
-        <span className="text-xs text-muted-foreground">{t("settings:autoStart")}</span>
-        <Switch
-          checked={lspAutoStartLanguages.includes(language.id)}
-          onCheckedChange={(checked) => toggleAutoStart(language.id, checked === true)}
-          data-settings-dirty={autoStartDirty}
-          data-testid={`lsp-auto-start-${language.id}`}
-          aria-label={t("settings:autoStartLanguageServer", { language: languageLabel })}
-        />
-      </div>
-      <div className="flex items-center gap-2">
-        {autoInstallSupported && (
-          <Checkbox
-            id={`lsp-install-${language.id}`}
-            checked={lspAutoInstallLanguages.includes(language.id)}
-            onCheckedChange={(checked) => toggleAutoInstall(language.id, checked === true)}
-            className="h-3.5 w-3.5"
-            data-settings-dirty={autoInstallDirty}
-            data-testid={`lsp-auto-install-${language.id}`}
-          />
-        )}
-        {autoInstallSupported ? (
-          <label
-            htmlFor={`lsp-install-${language.id}`}
-            className="text-xs text-muted-foreground cursor-pointer"
-          >
-            {t("settings:autoInstallIfNotFound")}
-          </label>
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            {t("settings:manualInstallRequired")}
-          </span>
-        )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-[260px] text-xs">
-            {t(language.installHintKey, language.installHintValues)}
-          </TooltipContent>
-        </Tooltip>
-      </div>
-      {!autoInstallSupported && (
-        <p
-          className="text-[11px] leading-relaxed text-muted-foreground"
-          data-testid={`lsp-install-guidance-${language.id}`}
-        >
-          {t(language.installHintKey, language.installHintValues)}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function LspLanguageCards(props: LspLanguageCardsProps) {
-  const { t } = useTranslation();
-  return (
-    <div className="space-y-3">
-      <div>
-        <div className="text-sm font-medium text-foreground">{t("settings:languageServers")}</div>
-        <div className="text-xs text-muted-foreground">
-          {t("settings:autoStartLanguageServersWhenOpening")}
-          <br />
-          <Trans
-            i18nKey="settings:whenEnabledInstallYourProjectS"
-            values={{ command: NPM_INSTALL_COMMAND }}
-          >
-            When enabled, install your project&apos;s dependencies (e.g.{" "}
-            <code className="text-[11px] bg-muted px-1 rounded">{NPM_INSTALL_COMMAND}</code> via
-            repository setup scripts) to avoid missing type errors.
-          </Trans>
-        </div>
-      </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {LSP_LANGUAGE_OPTIONS.map((language) => (
-          <LspLanguageCard key={language.id} language={language} {...props} />
-        ))}
-      </div>
-    </div>
-  );
-}
 
 type LspServerConfigSectionProps = {
   lspConfigStrings: Record<string, string>;

@@ -67,6 +67,9 @@ test.describe("LSP file intelligence", () => {
       await expect(kotlinCard).toContainText("Kotlin (experimental)");
       await expect(kotlinCard).toContainText("Manual install required");
       await expect(kotlinCard.getByTestId("lsp-auto-install-kotlin")).toHaveCount(0);
+      await expect(
+        testPage.getByTestId("lsp-language-card-rust").getByTestId("lsp-auto-install-rust"),
+      ).toBeVisible();
 
       const autoStart = kotlinCard.getByTestId("lsp-auto-start-kotlin");
       const shouldEnable = !initialAutoStart.includes("kotlin");

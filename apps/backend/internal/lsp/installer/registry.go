@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	tools "github.com/kandev/kandev/internal/tools/installer"
@@ -67,6 +68,23 @@ func IsSupported(language string) bool {
 // safe or practical for Kandev to install automatically.
 func CanAutoInstall(language string) bool {
 	return canAutoInstallOnPlatform(language, runtime.GOOS)
+}
+
+// AutoInstallLanguages returns the stable set of language installers available
+// on the current host platform for browser capability disclosure.
+func AutoInstallLanguages() []string {
+	return autoInstallLanguagesForPlatform(runtime.GOOS)
+}
+
+func autoInstallLanguagesForPlatform(goos string) []string {
+	result := make([]string, 0, len(languages))
+	for language := range languages {
+		if canAutoInstallOnPlatform(language, goos) {
+			result = append(result, language)
+		}
+	}
+	sort.Strings(result)
+	return result
 }
 
 func canAutoInstallOnPlatform(language, goos string) bool {

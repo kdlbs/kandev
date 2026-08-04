@@ -16,6 +16,7 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  lspAutoInstallSupportedLanguages?: string[];
   debug?: boolean;
   /**
    * True for a dev or e2e build. The e2e harness serves a PRODUCTION bundle, so
@@ -141,6 +142,7 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    lspAutoInstallSupportedLanguages: readStringArray(value.lspAutoInstallSupportedLanguages),
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
@@ -149,6 +151,11 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
 
 function readString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function readStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value) || !value.every((entry) => typeof entry === "string")) return undefined;
+  return value;
 }
 
 function readNonEmptyString(value: unknown): string | undefined {

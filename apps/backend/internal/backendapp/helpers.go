@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
@@ -772,9 +773,10 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // client can activate the right catalog before first paint.
 func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
-		APIPrefix:     "/api/v1",
-		WebSocketPath: "/ws",
-		Debug:         debug,
+		APIPrefix:                        "/api/v1",
+		WebSocketPath:                    "/ws",
+		LSPAutoInstallSupportedLanguages: lspinstaller.AutoInstallLanguages(),
+		Debug:                            debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
