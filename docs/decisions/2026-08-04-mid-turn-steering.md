@@ -103,10 +103,10 @@ deferred) are specified as correct, the observed wire shapes are pinned as
 fixtures, and two overlapping RPCs reuse the generation-keyed attribution that
 already shipped for foreground-idle handoff.
 
-Public docs are intentionally unchanged: like `claudeBackgroundPromptHandoff`,
-this is a default-off, contributor-facing experiment, and the feature-status
-page tracks capabilities rather than individual runtime flags. It graduates to
-public documentation when the flag is promoted.
+Public docs record the runtime flag: `docs/public/configuration.md` carries a
+`claudeMidTurnSteering` row in both config-key tables, matching how
+`claudeBackgroundPromptHandoff` is documented. The row states the default-off,
+high-risk, experimental nature and that folding is the agent's decision.
 
 ## Alternatives Considered
 
