@@ -28,7 +28,7 @@ From the repository worktree:
 cd apps && pnpm install --frozen-lockfile
 cd apps && pnpm --filter @kandev/web test -- components/quick-terminal/quick-terminal-provider.test.tsx components/app-sidebar/app-sidebar-new-task-item.test.tsx components/kanban/kanban-header-mobile.test.tsx
 cd apps/web && pnpm run typecheck
-cd apps && pnpm --filter @kandev/web exec eslint components/settings/pty-terminal-dialog.tsx components/settings/host-shell-dialog.tsx components/quick-terminal/quick-terminal-provider.tsx hooks/use-quick-terminal-launcher.ts components/app-sidebar/app-sidebar-new-task-item.tsx components/kanban/kanban-header.tsx components/kanban/kanban-header-mobile.tsx app/layout.tsx
+cd apps && pnpm --filter @kandev/web exec eslint components/settings/pty-terminal-dialog.tsx components/settings/host-shell-dialog.tsx components/quick-terminal/quick-terminal-provider.tsx hooks/use-quick-terminal-launcher.ts components/app-sidebar/app-sidebar-new-task-item.tsx components/kanban/kanban-header.tsx components/kanban/kanban-header-mobile.tsx app/layout.tsx src/app-shell.tsx
 cd apps && pnpm --filter @kandev/web i18n:ratchet
 ```
 
@@ -40,6 +40,7 @@ cd apps && pnpm --filter @kandev/web i18n:ratchet
 - `apps/web/components/quick-terminal/quick-terminal-provider.test.tsx`
 - `apps/web/hooks/use-quick-terminal-launcher.ts`
 - `apps/web/app/layout.tsx`
+- `apps/web/src/app-shell.tsx`
 - `apps/web/components/app-sidebar/app-sidebar-new-task-item.tsx`
 - `apps/web/components/app-sidebar/app-sidebar-new-task-item.test.tsx`
 - `apps/web/components/kanban/kanban-header.tsx`
@@ -90,8 +91,9 @@ targeted command passes.
 ## Results
 
 - `cd apps && pnpm install --frozen-lockfile` — passed; workspace dependencies installed.
-- `cd apps && pnpm --filter @kandev/web test -- --run components/quick-terminal/quick-terminal-provider.test.tsx components/app-sidebar/app-sidebar-new-task-item.test.tsx components/kanban/kanban-header-mobile.test.tsx` — passed; 3 files, 22 tests.
+- `cd apps && pnpm --filter @kandev/web test -- --run components/quick-terminal/quick-terminal-provider.test.tsx components/app-sidebar/app-sidebar-new-task-item.test.tsx components/kanban/kanban-header-mobile.test.tsx` — passed; 3 files, 23 tests.
 - `cd apps/web && pnpm run typecheck` — passed.
 - `cd apps && pnpm --filter @kandev/web exec eslint components/settings/pty-terminal-dialog.tsx components/settings/host-shell-dialog.tsx components/quick-terminal/quick-terminal-provider.tsx hooks/use-quick-terminal-launcher.ts components/app-sidebar/app-sidebar-new-task-item.tsx components/kanban/kanban-header.tsx components/kanban/kanban-header-mobile.tsx app/layout.tsx` — passed with no warnings or errors after extracting tablet actions.
-- `cd apps && pnpm --filter @kandev/web i18n:ratchet` — passed; 0 added hardcoded strings and 6 modified files clean.
-- Security/trust and external side effects: none; this task only adds frontend state and reuses the existing host-shell API.
+- `cd apps && pnpm --filter @kandev/web i18n:ratchet` — passed; 2 added and 7 modified files clean.
+- Security/trust and external side effects: starts and stops the existing host-shell session and
+  accepts shell commands; no new backend or authorization policy was added.
