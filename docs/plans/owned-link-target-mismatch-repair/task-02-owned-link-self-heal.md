@@ -91,3 +91,20 @@ actual diff before marking done.
     → `0 issues`.
 - External side-effect boundaries: the repoint removes and recreates a directory link (a pointer, not
   content) strictly under a Kandev-owned task root; no user-repository entries are touched.
+
+### PR #2253 fixup (automated-review remediation)
+
+- Hardened the repoint against a check→remove race (CodeRabbit "serialize/atomic replace"): the removal
+  now runs through `removeInspectedDirectoryLink`, which re-inspects the entry with a no-follow `Lstat`
+  and removes it only while it is still the same directory link (`isPlatformDirectoryLink` +
+  `os.SameFile` against the originally inspected `FileInfo`). If the entry drifted it fails closed with
+  `owned link entry changed during repoint`, so a concurrent writer's real directory/file can never be
+  deleted underneath it.
+- Extended `TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry` with a regular-file collision case: a file
+  at the entry name still fails closed and its bytes survive untouched.
+- The codex P1 "verify task ownership before repoint" was answered as already-guarded rather than
+  code-changed: `WriteOwnershipMarker` fails closed on a TaskID/TaskDirName conflict at a shared root,
+  and repoint only ever replaces a Kandev-owned directory *link* (a pointer). Threading task identity
+  into `EnsureOwnedDirectoryLink` was judged out of scope for this repair.
+- Re-ran `go test ./internal/worktree/... ./internal/orchestrator/executor/... ./internal/agent/runtime/lifecycle/...`
+  → all `ok`; changed-file `golangci-lint --new-from-rev=<base>` → `0 issues`.

@@ -380,16 +380,20 @@ func SmallSuffix(maxLen int) string {
 }
 
 // taskDirSuffixLen is the number of characters in a task-directory suffix. Eight
-// characters over the 36-symbol branchSuffixAlphabet make cross-task collisions
-// negligible while keeping the on-disk name short.
+// characters over the 36-symbol branchSuffixAlphabet give roughly 36^8 (~2.8e12)
+// values, so cross-task collisions are negligible while the on-disk name stays
+// short. The projection is collision-resistant, not injective.
 const taskDirSuffixLen = 8
 
 // TaskDirSuffix returns a deterministic, filesystem-safe suffix derived from a
 // task ID. Unlike SmallSuffix (a random per-call value used for branch slugs),
-// it is stable for a given ID and unique across distinct IDs, so two tasks whose
-// titles sanitize to the same slug never resolve to the same ~/.kandev/tasks
-// root, and a resume that must recompute the name reproduces the launch value.
-// Returns the empty string for an empty ID.
+// it is stable for a given ID and collision-resistant across distinct IDs, so
+// two tasks whose titles sanitize to the same slug are overwhelmingly unlikely
+// to resolve to the same ~/.kandev/tasks root, and a resume that must recompute
+// the name reproduces the launch value. The suffix is a fixed-width projection
+// of sha256(taskID), so it cannot guarantee uniqueness; a residual owned-root
+// contention is caught downstream by the ownership marker, which fails closed on
+// a TaskID/TaskDirName conflict. Returns the empty string for an empty ID.
 func TaskDirSuffix(taskID string) string {
 	if taskID == "" {
 		return ""

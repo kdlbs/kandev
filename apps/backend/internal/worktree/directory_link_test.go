@@ -217,4 +217,17 @@ func TestEnsureOwnedDirectoryLinkRejectsNonLinkEntry(t *testing.T) {
 	if got, err := os.ReadFile(filepath.Join(root, "api", "keep.txt")); err != nil || string(got) != "keep" {
 		t.Fatalf("non-link entry was disturbed = %q, %v", got, err)
 	}
+
+	// A regular file occupying the entry name is likewise not Kandev's pointer to
+	// replace: it stays fail-closed and its bytes must survive untouched.
+	file := filepath.Join(root, "web")
+	if err := os.WriteFile(file, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := EnsureOwnedDirectoryLink(root, "web", t.TempDir()); err == nil {
+		t.Fatal("EnsureOwnedDirectoryLink overwrote a non-link file")
+	}
+	if got, err := os.ReadFile(file); err != nil || string(got) != "keep" {
+		t.Fatalf("non-link file was disturbed = %q, %v", got, err)
+	}
 }

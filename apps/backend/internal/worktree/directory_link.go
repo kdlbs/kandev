@@ -96,6 +96,11 @@ func verifyCreatedOwnedDirectoryLink(root, link string) error {
 // directory link, so removing and recreating it is safe. This is distinct from
 // IsSelfReferentialDirectoryLink, which stays report-only because it concerns
 // entries inside a user's own repository.
+//
+// The removal re-inspects the entry with a no-follow Lstat and removes it only
+// while it is still the same directory link this call inspected, so a concurrent
+// writer that swapped the entry for a real directory or file between inspection
+// and removal cannot have that content deleted underneath it.
 func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 	link := filepath.Join(root, name)
 	info, err := os.Lstat(link)
@@ -114,8 +119,8 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 		if os.SameFile(actual, expected) {
 			return link, false, nil
 		}
-		if err := os.Remove(link); err != nil {
-			return "", false, fmt.Errorf("repoint owned link: %w", err)
+		if err := removeInspectedDirectoryLink(link, info); err != nil {
+			return "", false, err
 		}
 		created, err := CreateOwnedDirectoryLink(root, name, target)
 		return created, err == nil, err
@@ -125,6 +130,25 @@ func EnsureOwnedDirectoryLink(root, name, target string) (string, bool, error) {
 	}
 	created, err := CreateOwnedDirectoryLink(root, name, target)
 	return created, err == nil, err
+}
+
+// removeInspectedDirectoryLink removes link only while it is still the same
+// directory link identified by inspected. Between the caller's Lstat and this
+// removal another writer could replace the entry with a real directory or file;
+// re-inspecting with a no-follow Lstat and requiring os.SameFile identity means
+// os.Remove never deletes content that is not the pointer we set out to repoint.
+func removeInspectedDirectoryLink(link string, inspected os.FileInfo) error {
+	current, err := os.Lstat(link)
+	if err != nil {
+		return fmt.Errorf("re-inspect owned link: %w", err)
+	}
+	if !isPlatformDirectoryLink(current, link) || !os.SameFile(current, inspected) {
+		return fmt.Errorf("owned link entry changed during repoint: %s", filepath.Base(link))
+	}
+	if err := os.Remove(link); err != nil {
+		return fmt.Errorf("repoint owned link: %w", err)
+	}
+	return nil
 }
 
 // IsSelfReferentialDirectoryLink reports whether root/name is a platform

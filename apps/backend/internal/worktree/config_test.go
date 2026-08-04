@@ -9,6 +9,9 @@ func TestTaskDirSuffix(t *testing.T) {
 	if got == "" {
 		t.Fatal("TaskDirSuffix returned empty string")
 	}
+	if len(got) != taskDirSuffixLen {
+		t.Fatalf("TaskDirSuffix(%q) length = %d, want %d", id, len(got), taskDirSuffixLen)
+	}
 	for _, r := range got {
 		if !isASCIIAlphaNum(r) {
 			t.Errorf("TaskDirSuffix(%q) = %q, contains non-alphanumeric %q", id, got, r)

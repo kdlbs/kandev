@@ -109,7 +109,7 @@ run in parallel, but Task 01 is the root-cause fix and Task 02 is defense in dep
 sequential by default. The default is sequential execution in the primary conversation; waves do not
 authorize subagents.
 
-```
+```text
 Wave 1:
 - [x] [task-01-task-unique-root-name](task-01-task-unique-root-name.md)
 
