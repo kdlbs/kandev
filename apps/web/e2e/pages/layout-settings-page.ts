@@ -18,8 +18,8 @@ export class LayoutSettingsPage {
 
   async openFromMobileMenu(): Promise<void> {
     await this.page.goto("/settings/general/terminal");
-    await this.page.getByTestId("settings-mobile-menu-button").click();
-    const menu = this.page.getByTestId("settings-mobile-menu");
+    await this.page.getByTestId("app-nav-trigger").click();
+    const menu = this.page.getByTestId("app-nav-sheet");
     await expect(menu).toBeVisible();
     await menu.getByRole("link", { name: "Layouts", exact: true }).click();
     await expect(this.page).toHaveURL(/\/settings\/general\/layouts$/);

@@ -8,10 +8,10 @@ vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
 
 const PHONE_HOME = "topbar-phone-home";
 
-describe("PageTopbar phone home crumb", () => {
+describe("PageTopbar home crumb", () => {
   afterEach(cleanup);
 
-  it("renders a phone-only home crumb for a root-level page with no nav of its own", () => {
+  it("renders a phone-only home crumb by default", () => {
     render(<PageTopbar title="Hello E2E" />);
 
     const home = screen.getByTestId(PHONE_HOME);
@@ -21,10 +21,31 @@ describe("PageTopbar phone home crumb", () => {
     expect(home.querySelector("a")?.getAttribute("href")).toBe("/?home=overview");
   });
 
-  it("omits it when the page supplies its own leading nav", () => {
-    render(<PageTopbar title="Plugins" leading={<button type="button">Open menu</button>} />);
+  it("keeps the crumb visible at every width for homeAffordance=always", () => {
+    render(<PageTopbar title="Settings" homeAffordance="always" />);
+
+    const home = screen.getByTestId(PHONE_HOME);
+    expect(home.className).not.toContain("md:hidden");
+  });
+
+  it("suppresses the crumb for homeAffordance=none", () => {
+    render(<PageTopbar title="Board" homeAffordance="none" />);
 
     expect(screen.queryByTestId(PHONE_HOME)).toBeNull();
+  });
+
+  it("points the crumb at homeHref when provided", () => {
+    render(<PageTopbar title="Office" homeHref="/office" />);
+
+    const home = screen.getByTestId(PHONE_HOME);
+    expect(home.querySelector("a")?.getAttribute("href")).toBe("/office");
+  });
+
+  it("still renders the crumb when the page supplies leading content", () => {
+    // The crumb used to be tied to `leading`; the affordance prop owns it now.
+    render(<PageTopbar title="Plugins" leading={<button type="button">Open menu</button>} />);
+
+    expect(screen.getByTestId(PHONE_HOME)).not.toBeNull();
   });
 
   it("omits it when the page already shows a real back link", () => {

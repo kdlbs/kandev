@@ -1,6 +1,9 @@
 {
   "account": "Account",
   "archivedLoadFailed": "Archived tasks could not be loaded",
+  "dashboard": "Dashboard",
+  "orgChart": "Org Chart",
+  "providerRouting": "Provider Routing",
   "retry": "Retry",
   "activeWorkspaceBadge": "Active",
   "activity": "Activity",

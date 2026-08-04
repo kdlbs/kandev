@@ -25,9 +25,9 @@ test.describe("Mobile resource metrics display", () => {
 
   test("renders simplified metrics in the Status drawer", async ({ testPage }) => {
     await testPage.goto("/settings/general/terminal");
-    await testPage.getByTestId("settings-mobile-menu-button").click();
+    await testPage.getByTestId("app-nav-trigger").click();
     await testPage
-      .getByTestId("settings-mobile-menu")
+      .getByTestId("app-nav-sheet")
       .getByRole("link", { name: "Appearance" })
       .click();
 

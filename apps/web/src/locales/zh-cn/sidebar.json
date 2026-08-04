@@ -1,6 +1,9 @@
 {
   "account": "账户",
   "archivedLoadFailed": "无法加载已归档任务",
+  "dashboard": "仪表盘",
+  "orgChart": "组织架构",
+  "providerRouting": "提供方路由",
   "retry": "重试",
   "activeWorkspaceBadge": "活动",
   "activity": "活动",

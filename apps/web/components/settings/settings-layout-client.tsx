@@ -1,14 +1,8 @@
 "use client";
 
-import { useState, type MouseEvent } from "react";
 import { usePathname } from "@/lib/routing/client-router";
-import { Button } from "@kandev/ui/button";
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@kandev/ui/sheet";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { IconActivity, IconHome, IconMenu2 } from "@tabler/icons-react";
-import { useAppStatusDrawer } from "@/components/app-status-bar/app-status-surface-provider";
-import { PageTopbar } from "@/components/page-topbar";
-import Link from "@/components/routing/app-link";
+import { PageShell } from "@/components/page-shell";
 import { SettingsTree } from "@/components/app-sidebar/sections/settings/settings-tree";
 import { useAppStore } from "@/components/state-provider";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
@@ -17,9 +11,7 @@ import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
 import { useTranslation } from "react-i18next";
-import { connectionIssueDetails } from "@/components/app-status-bar/connection-status-item";
-import { linkToTaskOverview } from "@/lib/links";
-import { cn } from "@/lib/utils";
+import { t } from "@/lib/i18n";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
 // app spells these (e.g. "github" → "GitHub", not "Github"). Anything not
@@ -209,152 +201,22 @@ function IntegrationCopyConfigAction() {
   );
 }
 
-/**
- * Status entry in the mobile settings menu. Extracted from SettingsMobileMenu to
- * keep that function under the max-lines-per-function limit.
- */
-function SettingsMobileStatusButton({
-  issueSeverity,
-  issueDescription,
-  dotClass,
-  onClick,
-}: {
-  issueSeverity: string;
-  issueDescription: string | null;
-  dotClass: string | undefined;
-  onClick: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Button
-      type="button"
-      variant="ghost"
-      className={cn(
-        "relative h-11 cursor-pointer justify-start gap-2.5 px-2.5",
-        issueSeverity === "lost" && "text-destructive",
-        issueSeverity === "unstable" && "text-amber-500",
-      )}
-      onClick={onClick}
-      data-testid="settings-mobile-status-button"
-      // Keeps the visible "Status" label inside the accessible name (WCAG 2.5.3):
-      // the raw description alone replaced it.
-      aria-label={
-        issueDescription
-          ? t("settings:statusWithConnectionIssue", { description: issueDescription })
-          : undefined
-      }
-      data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
-    >
-      <IconActivity className="h-4 w-4 shrink-0" />
-      <span>{t("common:status")}</span>
-      {dotClass && (
-        <span className={cn("ml-auto size-2 rounded-full", dotClass)} aria-hidden="true" />
-      )}
-    </Button>
-  );
-}
-
-function SettingsMobileMenu({ pathname }: { pathname: string }) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const { enabled: statusDrawerEnabled, issueSeverity, openStatusDrawer } = useAppStatusDrawer();
-  const issueDetails = issueSeverity === "none" ? null : connectionIssueDetails(issueSeverity);
-  // `connectionIssueDetails` lives in a directory that has not been migrated yet
-  // and returns English, so the severity is mapped to a catalog key here rather
-  // than interpolating its `description` into an otherwise-translated label.
-  const issueDescription =
-    issueSeverity === "none"
-      ? null
-      : t(
-          issueSeverity === "lost"
-            ? "settings:connectionLostDescription"
-            : "settings:connectionUnstableDescription",
-        );
-
-  const closeOnLinkClick = (event: MouseEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest("a[href]")) {
-      setOpen(false);
-    }
-  };
-  const openStatus = () => {
-    setOpen(false);
-    requestAnimationFrame(openStatusDrawer);
-  };
-
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className={cn(
-            "relative h-11 w-11 cursor-pointer md:hidden",
-            issueSeverity === "lost" && "text-destructive",
-            issueSeverity === "unstable" && "text-amber-500",
-          )}
-          aria-label={
-            issueDescription
-              ? t("settings:openSettingsMenuWithConnectionIssue", {
-                  description: issueDescription,
-                })
-              : t("settings:openSettingsMenu")
-          }
-          data-testid="settings-mobile-menu-button"
-          data-connection-severity={issueSeverity === "none" ? undefined : issueSeverity}
-        >
-          <IconMenu2 className="h-4 w-4" />
-          {issueDetails && (
-            <span
-              className={cn(
-                "absolute right-2 top-2 size-2 rounded-full ring-2 ring-background",
-                issueDetails.dotClass,
-              )}
-              aria-hidden="true"
-            />
-          )}
-        </Button>
-      </SheetTrigger>
-      <SheetContent
-        side="left"
-        className="flex w-80 max-w-[85vw] flex-col overflow-hidden p-0"
-        data-testid="settings-mobile-menu"
-      >
-        <SheetHeader className="border-b px-4 py-3 text-left">
-          <SheetTitle>{t("common:settings")}</SheetTitle>
-        </SheetHeader>
-        <nav className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
-          {statusDrawerEnabled && (
-            <SettingsMobileStatusButton
-              issueSeverity={issueSeverity}
-              issueDescription={issueDescription}
-              dotClass={issueDetails?.dotClass}
-              onClick={openStatus}
-            />
-          )}
-          <Link
-            href={linkToTaskOverview()}
-            className="flex h-11 cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-sm font-medium text-foreground/80 transition-colors hover:bg-muted hover:text-foreground"
-            onClick={() => setOpen(false)}
-          >
-            <IconHome className="h-4 w-4 shrink-0" />
-            <span className="truncate">{t("settings:home")}</span>
-          </Link>
-          <div
-            className="flex flex-col gap-0.5 [&_a]:min-h-11 [&_a]:text-sm [&_button]:min-h-11 [&_button]:min-w-11 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4"
-            onClick={closeOnLinkClick}
-          >
-            <SettingsTree pathname={pathname} />
-          </div>
-        </nav>
-      </SheetContent>
-    </Sheet>
-  );
-}
-
 function workspaceIdFromPathname(pathname: string): string | null {
   const match = pathname.match(/^\/settings\/workspace\/([^/]+)(?:\/|$)/);
   return safeDecodePathSegment(match?.[1]);
+}
+
+/**
+ * The settings tree as the nav sheet's page section. The wrapper compacts the
+ * sidebar-styled tree to the sheet's touch-row sizing; link clicks close the
+ * sheet via AppNavSheet's own handler.
+ */
+function SettingsPageNav({ pathname }: { pathname: string }) {
+  return (
+    <div className="flex flex-col gap-0.5 [&_a]:min-h-10 [&_a]:text-sm [&_button]:min-h-10 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4">
+      <SettingsTree pathname={pathname} />
+    </div>
+  );
 }
 
 function SettingsShell({
@@ -378,26 +240,20 @@ function SettingsShell({
     <TooltipProvider>
       <SettingsSaveProvider key={pathname}>
         <SettingsTargetProvider>
-          <main className="flex min-h-0 flex-1 flex-col">
-            <PageTopbar
-              title={title}
-              backHref={backHref}
-              backLabel={backLabel}
-              parents={parents}
-              leading={<SettingsMobileMenu pathname={pathname} />}
-              showStatusTrigger={false}
-              className="h-10"
-              actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
-            />
-            {/* Scroll the content, not the topbar: min-h-0 lets this flex child
-              shrink below its content height so overflow-y-auto can take effect. */}
-            <div
-              data-testid="settings-scroll-container"
-              className="flex min-w-0 min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
-            >
-              {children}
-            </div>
-          </main>
+          <PageShell
+            title={title}
+            backHref={backHref}
+            backLabel={backLabel}
+            parents={parents}
+            showStatusTrigger={false}
+            className="h-10"
+            actions={showIntegrationCopyAction ? <IntegrationCopyConfigAction /> : undefined}
+            pageNav={<SettingsPageNav pathname={pathname} />}
+            contentTestId="settings-scroll-container"
+            contentClassName="flex flex-col gap-4 overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
+          >
+            {children}
+          </PageShell>
         </SettingsTargetProvider>
       </SettingsSaveProvider>
     </TooltipProvider>

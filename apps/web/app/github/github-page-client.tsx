@@ -6,7 +6,7 @@ import { IconBrandGithub, IconMenu2 } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell } from "@/components/page-shell";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
 import { usePRKeyToTasks } from "@/hooks/domains/github/use-pr-key-to-tasks";
 import { useIssueKeyToTasks } from "@/hooks/domains/github/use-issue-key-to-tasks";
@@ -56,31 +56,6 @@ type GitHubPageClientProps = {
   steps: WorkflowStep[];
   repositories: Repository[];
 };
-
-function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void }) {
-  const { t } = useTranslation();
-  return (
-    <PageTopbar
-      title="GitHub"
-      subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
-      icon={<IconBrandGithub className="h-4 w-4" />}
-      actions={
-        onOpenMobileSidebar && (
-          <Button
-            variant="outline"
-            size="icon-lg"
-            onClick={onOpenMobileSidebar}
-            className="md:hidden cursor-pointer"
-            data-testid="github-mobile-menu-button"
-            aria-label={t("github:openGithubFilters")}
-          >
-            <IconMenu2 className="h-4 w-4" />
-          </Button>
-        )
-      }
-    />
-  );
-}
 
 function NotAuthenticatedNotice({
   workspaceId,
@@ -439,7 +414,8 @@ function AuthenticatedLayout({
   const issueKeyToTasks = useIssueKeyToTasks(workspaceId ?? null);
   useAllWorkflowSnapshots(workspaceId ?? null);
   return (
-    <main className="flex-1 flex flex-col min-w-0 overflow-hidden">
+    // Not a <main>: AppShell owns that landmark, one per page.
+    <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       <PresetsScopeBar
         className="hidden md:flex"
         selected={selection}
@@ -486,7 +462,7 @@ function AuthenticatedLayout({
         total={search.total}
         onPageChange={search.setPage}
       />
-    </main>
+    </div>
   );
 }
 
@@ -528,28 +504,49 @@ export function GitHubPageClient({
   };
 
   return (
-    <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
-      {!loaded && (
-        <div className="p-6 text-sm text-muted-foreground">{t("github:checkingGithubStatus")}</div>
-      )}
-      {loaded && !authed && (
-        <div className="p-6 max-w-2xl">
-          <NotAuthenticatedNotice
+    <PageShell
+      title="GitHub"
+      subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
+      icon={<IconBrandGithub className="h-4 w-4" />}
+      scroll="none"
+      actions={
+        loaded &&
+        authed && (
+          <Button
+            variant="outline"
+            size="icon-lg"
+            onClick={onOpenMobileSidebar}
+            className="md:hidden cursor-pointer"
+            data-testid="github-mobile-menu-button"
+            aria-label={t("github:openGithubFilters")}
+          >
+            <IconMenu2 className="h-4 w-4" />
+          </Button>
+        )
+      }
+    >
+      <div className="flex min-h-0 w-full flex-1 flex-col bg-background">
+        {!loaded && (
+          <div className="p-6 text-sm text-muted-foreground">{t("github:checkingGithubStatus")}</div>
+        )}
+        {loaded && !authed && (
+          <div className="p-6 max-w-2xl">
+            <NotAuthenticatedNotice
+              workspaceId={workspaceId}
+              personalRequired={status?.automation?.source === "github_app_installation"}
+            />
+          </div>
+        )}
+        {loaded && authed && (
+          <AuthenticatedLayout
             workspaceId={workspaceId}
-            personalRequired={status?.automation?.source === "github_app_installation"}
+            state={state}
+            prPresets={prPresets}
+            issuePresets={issuePresets}
+            onStartTask={onStartTask}
           />
-        </div>
-      )}
-      {loaded && authed && (
-        <AuthenticatedLayout
-          workspaceId={workspaceId}
-          state={state}
-          prPresets={prPresets}
-          issuePresets={issuePresets}
-          onStartTask={onStartTask}
-        />
-      )}
+        )}
+      </div>
       <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
         <SheetContent
           side="right"
@@ -589,6 +586,6 @@ export function GitHubPageClient({
         suggestedLabel={state.suggestedLabel}
         onSave={state.onConfirmSave}
       />
-    </div>
+    </PageShell>
   );
 }

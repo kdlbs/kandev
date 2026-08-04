@@ -29,28 +29,19 @@ vi.mock("@/components/state-provider", () => ({
     selector(state) ?? fallback,
 }));
 
-vi.mock("@/components/page-topbar", () => ({
-  PageTopbar: ({
-    actions,
-    parents,
-    title,
-  }: {
-    actions?: ReactNode;
-    parents?: Array<{ label: string; href: string }>;
-    title: string;
-  }) => (
-    <div>
-      <nav data-testid="page-topbar-breadcrumbs">
-        {parents?.map((parent) => (
-          <a key={parent.href} href={parent.href}>
-            {parent.label}
-          </a>
-        ))}
-        <span data-testid="page-topbar-title">{title}</span>
-      </nav>
-      <div data-testid="page-topbar-actions">{actions}</div>
-    </div>
-  ),
+// Keep the real PageShell/PageTopbar so the scroll-container and breadcrumb
+// assertions test real markup; stub only the nav sheet (store/plugin-heavy)
+// and the affordance hook (reads sidebar state this test doesn't model).
+vi.mock("@/components/navigation/app-nav-sheet", () => ({
+  AppNavSheet: () => null,
+}));
+
+vi.mock("@/hooks/use-home-affordance", () => ({
+  useHomeAffordance: () => ({ mode: "phone", href: "/?home=overview" }),
+}));
+
+vi.mock("@/components/app-status-bar/app-status-surface-provider", () => ({
+  AppStatusDrawerTrigger: () => null,
 }));
 
 vi.mock("@kandev/ui/tooltip", () => ({
@@ -164,7 +155,7 @@ describe("SettingsLayoutClient", () => {
         </SettingsLayoutClient>,
       );
 
-      expect(screen.getByTestId("page-topbar-title").textContent).toBe("Ḿēśśàĝē Qũēũē");
+      expect(screen.getByText("ḿēśśàĝē Qũēũē")).toBeTruthy();
       expect(screen.getByTestId("settings-scroll-container").className).toContain(
         "overflow-y-auto",
       );

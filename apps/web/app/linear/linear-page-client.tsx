@@ -16,7 +16,7 @@ import {
   PaginationPrevious,
 } from "@kandev/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
-import { PageTopbar } from "@/components/page-topbar";
+import { PageShell as AppPageShell } from "@/components/page-shell";
 import { useLinearAvailable } from "@/hooks/domains/linear/use-linear-availability";
 import {
   formatRelative,
@@ -299,10 +299,9 @@ function PaginationBar({
 
 function PageShell({ children }: { children: React.ReactNode }) {
   return (
-    <div className="flex flex-col h-full">
-      <PageTopbar title="Linear" icon={<IconHexagon className="h-4 w-4" />} />
+    <AppPageShell title="Linear" icon={<IconHexagon className="h-4 w-4" />} scroll="none">
       {children}
-    </div>
+    </AppPageShell>
   );
 }
 
