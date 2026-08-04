@@ -188,5 +188,10 @@ describe("useCumulativeDiff terminal session", () => {
 
     expect(mockRequest).toHaveBeenCalledTimes(2);
     expect(result.current.diff).toEqual(cached);
+
+    // A later subscriber (e.g. another panel mount) must also see the restored
+    // shared cache — not null from the post-invalidation miss.
+    const second = renderHook(() => useCumulativeDiff(sid));
+    expect(second.result.current.diff).toEqual(cached);
   });
 });

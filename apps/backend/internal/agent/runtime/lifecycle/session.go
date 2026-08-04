@@ -231,11 +231,13 @@ func (sm *SessionManager) loadSession(
 		zap.String("session_id", sessionID))
 
 	if err := client.LoadSession(ctx, sessionID, mcpServers); err != nil {
-		// A cancelled/expired context here is caller teardown (WS disconnect,
-		// session already gone) rather than an agent or transport fault, so it
-		// does not warrant an ERROR + stacktrace. The caller still classifies
-		// it as a transport-dead load and skips the session/new fallback.
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// context.Canceled is caller teardown (WS disconnect, session already
+		// gone) rather than an agent or transport fault, so it does not warrant
+		// an ERROR + stacktrace. DeadlineExceeded is a real startup/handshake
+		// timeout and stays ERROR — matching the executor startup-deadline
+		// classification. The caller still classifies canceled loads as
+		// transport-dead and skips the session/new fallback.
+		if errors.Is(err, context.Canceled) {
 			sm.logger.Warn("ACP session/load aborted by context",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("session_id", sessionID),
@@ -403,11 +405,11 @@ func (sm *SessionManager) initializeACPConnection(
 	}
 	result, err := sm.InitializeSession(ctx, execution.agentctl, agentConfig, execution.ACPSessionID, execution.WorkspacePath, mcpServers)
 	if err != nil {
-		// loadSession already logged the root cause. A cancelled/expired
-		// context is caller teardown, so keep this outer boundary at WARN
-		// too — otherwise the intentional load-path downgrade is undone
-		// by a second ERROR stacktrace here.
-		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		// loadSession already logged the root cause. context.Canceled is
+		// caller teardown, so keep this outer boundary at WARN too —
+		// otherwise the intentional load-path downgrade is undone by a
+		// second ERROR stacktrace here. DeadlineExceeded stays ERROR.
+		if errors.Is(err, context.Canceled) {
 			sm.logger.Warn("session initialization aborted by context",
 				zap.String("execution_id", execution.ID), zap.Error(err))
 		} else {

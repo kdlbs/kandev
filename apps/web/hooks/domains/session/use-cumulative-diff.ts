@@ -7,6 +7,9 @@ import type { CumulativeDiff } from "@/lib/state/slices/session-runtime/types";
 const debug = createDebugLogger("review:cumulative");
 
 const cumulativeDiffCache: Record<string, CumulativeDiff | null> = {};
+// Survives invalidateCumulativeDiffCache. Used to restore the shared cache
+// when a terminal-session response means we cannot recompute a fresh diff.
+const lastKnownDiffByEnvKey: Record<string, CumulativeDiff | null> = {};
 const loadingState: Record<string, boolean> = {};
 // Invalidations that arrived while a fetch was in flight. The in-flight
 // request can't be guaranteed to capture the working-tree state it was
@@ -75,6 +78,7 @@ function commitFetchedDiff(
   setDiff: (d: CumulativeDiff | null) => void,
 ) {
   cumulativeDiffCache[envKey] = diff;
+  lastKnownDiffByEnvKey[envKey] = diff;
   setDiff(diff);
   if (isDebug()) {
     debug("fetch.success", {
@@ -97,20 +101,23 @@ type CumulativeDiffResponse = {
 };
 
 // applyCumulativeDiffResponse commits a successful fetch unless the backend
-// reports a permanent terminal-session envelope. Returns true when the
-// response was applied (or intentionally skipped as terminal); false when the
-// caller should treat the response as stale/abandoned.
+// reports a permanent terminal-session envelope. On terminal, restore the
+// last known snapshot into the shared cache so later mounts still see it
+// after invalidateCumulativeDiffCache cleared the live entry.
 function applyCumulativeDiffResponse(
   envKey: string,
   sessionId: string,
   response: CumulativeDiffResponse | null | undefined,
   setDiff: (d: CumulativeDiff | null) => void,
 ): void {
-  // Terminal sessions no longer have an execution. A ready:false envelope
-  // with reason session_terminal is not an authoritative empty diff — keep
-  // any previously cached snapshot instead of clearing the panel.
   if (response?.ready === false && response.reason === "session_terminal") {
-    debug("fetch.terminal", { sessionId, envKey });
+    const known = lastKnownDiffByEnvKey[envKey] ?? null;
+    debug("fetch.terminal", { sessionId, envKey, restored: known != null });
+    // Restore into the live cache + notify subscribers without treating the
+    // terminal envelope as a fresh authoritative empty diff.
+    cumulativeDiffCache[envKey] = known;
+    setDiff(known);
+    listeners.forEach((fn) => fn({ envKey, kind: "populated" }));
     return;
   }
   commitFetchedDiff(envKey, sessionId, response?.cumulative_diff ?? null, setDiff);
