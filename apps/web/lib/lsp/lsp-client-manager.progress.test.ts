@@ -88,6 +88,23 @@ afterEach(() => {
 });
 
 describe("LSP progress handshake and initialization", () => {
+  it("preserves detailed install failures when the socket closes", () => {
+    lspClientManager.connect(SESSION_ID, LANGUAGE);
+    const socket = FakeWebSocket.instances.at(-1);
+    if (!socket) throw new Error(EXPECTED_SOCKET_ERROR);
+    socket.open();
+    socket.emitMessage(
+      JSON.stringify({ status: "install_failed", error: "npm install failed: registry offline" }),
+    );
+
+    socket.failClosed(4003, "install failed");
+
+    expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
+      state: "error",
+      reason: "npm install failed: registry offline",
+    });
+  });
+
   it("reports a bridge close while initialization is pending", async () => {
     const { socket } = beginInitialization();
 
@@ -98,6 +115,21 @@ describe("LSP progress handshake and initialization", () => {
         state: "error",
         reason: "language server crashed during initialize",
       });
+    });
+  });
+
+  it("describes an unexpected bridge close when the proxy omits its reason", async () => {
+    const { initialize, socket } = beginInitialization();
+    completeInitialization(socket, initialize.id);
+    await vi.waitFor(() => {
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({ state: "ready" });
+    });
+
+    socket.failClosed(1000, "");
+
+    expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
+      state: "error",
+      reason: "language server exited",
     });
   });
 

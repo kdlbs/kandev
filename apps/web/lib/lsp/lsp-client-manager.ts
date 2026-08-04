@@ -162,6 +162,7 @@ class LSPClientManager {
     this.setStatus(key, { state: "connecting" });
 
     let bridgeStarted = false;
+    let terminalStatusReceived = false;
 
     ws.onopen = () => {
       if (!this.isCurrentConnection(conn)) return;
@@ -205,6 +206,7 @@ class LSPClientManager {
         );
       } else if (data.status === "install_failed") {
         ws.removeEventListener("message", statusHandler);
+        terminalStatusReceived = true;
         this.setStatus(key, { state: "error", reason: data.error || "Install failed" });
       }
     };
@@ -222,12 +224,14 @@ class LSPClientManager {
         this.statuses.delete(key);
         return;
       }
+      if (terminalStatusReceived) return;
 
       const statusFactory = CLOSE_CODE_STATUS[event.code];
       if (statusFactory) {
         this.setStatus(key, statusFactory(event.reason));
-      } else if (current?.state !== "error" && current?.state !== "unavailable") {
-        this.setStatus(key, { state: "error", reason: event.reason || "Connection closed" });
+      } else {
+        const fallbackReason = bridgeStarted ? "language server exited" : "Connection closed";
+        this.setStatus(key, { state: "error", reason: event.reason || fallbackReason });
       }
     };
 
