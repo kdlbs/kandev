@@ -42,7 +42,7 @@ Smallest deterministic reproduction: install the existing fake Kotlin server wit
 ### Active-editor application status item
 
 - Add `builtin:lsp` to the existing opaque, reorderable application status items.
-- Derive the item from `activeSessionId`, `useDockviewStore().activeFilePath`, and `getMonacoLanguage`; unsupported or non-file panels render no item.
+- Derive the item from `activeSessionId`, the active Dockview panel and loaded text buffer, and `getMonacoLanguage`; loading, static/binary, diff, unsupported, and non-file panels render no item even when the saved editor provider is Monaco.
 - Reuse the browser-owned `(session, language)` LSP connection and lifecycle control. The compact bar summary shows the active language plus readiness, elapsed initialization, or server percentage when available; opening it uses the same anchored details popover.
 - Do not mount a phone LSP lease. Coarse-pointer Monaco layouts keep the existing touch-sized toolbar trigger and bottom drawer.
 
@@ -53,13 +53,13 @@ Smallest deterministic reproduction: install the existing fake Kotlin server wit
 - **Portable backend contract:** focused tests in `apps/backend/internal/user/{dto,service,store}` cover default normalization, valid round-trip, invalid PATCH rejection, omission semantics, and event payload.
 - **Boot and client hydration:** `apps/backend/internal/backendapp/boot_state_user_settings_test.go`, `apps/web/lib/ssr/user-settings.test.ts`, and `apps/web/lib/ws/handlers/users.test.ts` cover missing, saved, and live-updated values.
 - **Editors draft:** `apps/web/components/settings/settings-dirty.test.ts` and focused settings-state tests cover dirty comparison, PATCH payload, saved baseline, and response mapping.
-- **Status item:** focused app-status tests cover `builtin:lsp` ordering identity, active supported file summary, hidden unsupported/non-file state, and lifecycle disclosure reuse.
+- **Status item:** focused app-status tests cover `builtin:lsp` ordering identity, active supported file summary, hidden loading/static/diff/unsupported/non-file states, and lifecycle disclosure reuse.
 
 ## E2E Tests
 
 - **Slow Kotlin initialization:** extend `apps/web/e2e/tests/lsp/lsp-file-intelligence.spec.ts`; a held fake initialize proves the process-started stage immediately and the long-running warning after advancing browser time, with Stop still enabled and no ETA.
 - **Placement persistence and behavior:** the same desktop spec changes the Editors setting to `status_bar`, saves, opens a Kotlin file, proves the toolbar control is absent, operates LSP from `builtin:lsp`, reloads, and proves the preference persists.
-- **Active-file scoping:** switch from the Kotlin editor to a non-file panel and back; the status item hides and restores without starting a different server.
+- **Active-file scoping:** switch from the Kotlin editor to binary Kotlin, unsupported text, and non-file panels and back; the status item hides and restores without exposing an inert lifecycle action or starting a different server.
 - **Tablet fallback:** extend `apps/web/e2e/tests/lsp/mobile-lsp-file-intelligence.spec.ts` with saved `status_bar`; the coarse-pointer tablet still gets the 44px toolbar trigger and contained LSP drawer.
 - **Phone boundary:** save `status_bar` plus Kotlin auto-start, open Kotlin in the phone viewer, and prove no LSP control, status item, WebSocket, or process appears.
 - Restore all user settings changed by a spec so the worker-scoped backend does not leak preferences.

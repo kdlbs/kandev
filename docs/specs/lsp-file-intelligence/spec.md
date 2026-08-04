@@ -32,7 +32,7 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
   - `toolbar` is the default and keeps the control beside the current Monaco editor's actions;
   - `status_bar` moves the active Monaco editor's control and live summary into the application status bar when that feature is enabled on a fine-pointer layout;
   - if the application status bar is disabled or the layout uses a coarse pointer, Kandev falls back to the editor toolbar without overwriting the saved preference;
-  - the status-bar item follows only the active Monaco file's session and language and is not a global dashboard of every live server.
+  - the status-bar item follows only an active, mounted Monaco text editor's session and language and is not a global dashboard of every live server; loading, binary/static, diff, CodeMirror, unsupported, and non-file panels do not expose it.
 - The effective status control remains disclosure-first:
   - fine-pointer toolbar and status-bar controls open the same anchored progress popover;
   - coarse-pointer Monaco layouts use the toolbar and open an inset bottom drawer with the same status, progress, and Start, Stop, or Retry action;
@@ -175,6 +175,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** the saved LSP status location is `status_bar`, the application status bar is enabled, and a supported Monaco file is active on a fine-pointer layout, **WHEN** the editor renders, **THEN** the toolbar control is absent and one reorderable status-bar item shows that active file's language and live LSP summary.
 - **GIVEN** the saved LSP status location is `status_bar`, **WHEN** the application status bar is disabled or the current Monaco layout uses a coarse pointer, **THEN** the toolbar control remains available and the saved `status_bar` preference is unchanged.
 - **GIVEN** the active panel changes from a supported Monaco file to a non-file panel or unsupported file, **WHEN** the status bar is the preferred location, **THEN** the LSP status-bar item hides rather than showing another session or language.
+- **GIVEN** a supported filename is routed to a loading, binary/static, diff, or CodeMirror surface, **WHEN** the status bar is the preferred location, **THEN** no LSP status-bar item or inert Start/Retry action is exposed until an actual Monaco text editor mounts.
 - **GIVEN** a coarse-pointer tablet Monaco editor, **WHEN** the user taps the LSP status control, **THEN** an inset bottom drawer presents the same progress and lifecycle action with a touch-sized trigger and no document-level horizontal overflow.
 - **GIVEN** an LSP server has spawned descendants, **WHEN** the task stops, **THEN** agentctl reaps the full process tree.
 - **GIVEN** auto-install is downloading or running npm/Go, **WHEN** the agentctl instance is torn down, **THEN** the install is canceled and drained without publishing a partial binary or leaving descendants.

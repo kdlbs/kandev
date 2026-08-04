@@ -14,7 +14,7 @@ spec: "../../specs/lsp-file-intelligence/spec.md"
 
 - On a fine-pointer layout with the application bar enabled and `status_bar` saved, `builtin:lsp` replaces the toolbar trigger and summarizes only the active supported Monaco file's LSP.
 - Clicking the item opens the same details and lifecycle actions; it participates in existing opaque status-item ordering.
-- Non-file/unsupported active panels hide the item, while feature-disabled and coarse-pointer layouts retain the toolbar without rewriting the preference or starting a phone LSP lease.
+- Loading, static/binary, diff, non-file, and unsupported active panels hide the item, while feature-disabled and coarse-pointer layouts retain the toolbar without rewriting the preference or starting a phone LSP lease.
 
 ## TDD sequence
 
@@ -70,3 +70,5 @@ Record RED/GREEN evidence, lease/active-editor ownership, responsive behavior, f
 - The item subscribes to the existing `(session, language)` connection without acquiring another lease. Start, Stop, and Retry use a shared request generation consumed by mounted editor leases.
 - Fine-pointer `status_bar` placement suppresses the Monaco toolbar trigger. Feature-disabled and coarse-pointer conditions resolve back to the toolbar without changing the saved preference.
 - The phone application-status drawer does not construct the LSP item or call the status hook, so it cannot start an invisible lease.
+- Review follow-up: the item now also requires an active `file-editor` panel with a loaded text buffer. A supported extension rendered by `StaticFilePanel` can no longer expose Start/Retry without a mounted Monaco `useLsp` lease.
+- RED/GREEN follow-up: the resolver failed the new mounted-editor contract; 34 focused status/store tests now cover loading, Monaco text, binary/static, diff, unsupported, CodeMirror, and responsive drawer boundaries.

@@ -66,3 +66,4 @@ Record failing/passing Playwright evidence, screenshots or exact rendered verifi
 - The mobile Chromium project passed all 3 scenarios: phone creates no control, socket, or process; coarse-pointer tablet preserves `status_bar` while using the 44 px toolbar and contained drawer; mobile Editors guidance persists without horizontal overflow.
 - Every E2E-modified user setting is restored in `finally`, and the shared helper now opens either status trigger.
 - Public docs describe initialization semantics, possible Kotlin Gradle work, no automatic timeout/universal ETA, and responsive placement. All 58 public-doc validator tests and all 41 published pages pass validation.
+- Review follow-up: the production-build desktop placement scenario now opens a binary `.kt` fixture, proves the static viewer is rendered, and proves `builtin:lsp` is absent before continuing through unsupported, non-file, and restored Monaco states.
