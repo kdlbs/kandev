@@ -51,19 +51,25 @@ export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
     requestAnimationFrame(health.openDialog);
   };
 
+  // Mounted only while open: ImproveKandevDialog runs toast/store hooks on
+  // mount, and this hook now sits behind every page's topbar.
   const dialogs = (
     <>
-      <ImproveKandevDialog
-        open={improveOpen}
-        onOpenChange={setImproveOpen}
-        workspaceId={workspaceId}
-        onSuccess={(task) => router.push(linkToTask(task.id))}
-      />
-      <HealthIssuesDialog
-        open={health.dialogOpen}
-        onOpenChange={(open) => (open ? health.openDialog() : health.closeDialog())}
-        issues={health.issues}
-      />
+      {improveOpen && (
+        <ImproveKandevDialog
+          open
+          onOpenChange={setImproveOpen}
+          workspaceId={workspaceId}
+          onSuccess={(task) => router.push(linkToTask(task.id))}
+        />
+      )}
+      {health.dialogOpen && (
+        <HealthIssuesDialog
+          open
+          onOpenChange={(open) => (open ? health.openDialog() : health.closeDialog())}
+          issues={health.issues}
+        />
+      )}
     </>
   );
 
