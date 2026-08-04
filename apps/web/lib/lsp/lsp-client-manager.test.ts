@@ -384,46 +384,6 @@ describe("LSP workspace handshake", () => {
   });
 });
 
-describe("LSP document subscriptions", () => {
-  it("shares synchronization for duplicate logical views of one canonical URI", async () => {
-    const documentUri = "file:///workspace/backend/src/Main.ts";
-    createMonacoHarness([modelUri(documentUri)]);
-    mocks.registerLspProviders.mockReturnValue([]);
-    const socket = await connectReady("session", WORKSPACE_PATH);
-    const document = {
-      uri: documentUri,
-      languageId: "typescript",
-      text: "export const value = 1;",
-    };
-
-    lspClientManager.openDocument("session", "typescript", document);
-    lspClientManager.openDocument("session", "typescript", { ...document, repo: "backend" });
-
-    const notificationCount = (method: string) =>
-      socket.sent.filter((frame) => JSON.parse(frame).method === method).length;
-    expect(notificationCount("textDocument/didOpen")).toBe(1);
-
-    lspClientManager.changeDocument(
-      "session",
-      "typescript",
-      documentUri,
-      "export const value = 2;",
-    );
-    lspClientManager.changeDocument(
-      "session",
-      "typescript",
-      documentUri,
-      "export const value = 2;",
-    );
-    expect(notificationCount("textDocument/didChange")).toBe(1);
-
-    lspClientManager.closeDocument("session", "typescript", documentUri);
-    expect(notificationCount("textDocument/didClose")).toBe(0);
-    lspClientManager.closeDocument("session", "typescript", documentUri);
-    expect(notificationCount("textDocument/didClose")).toBe(1);
-  });
-});
-
 describe("LSP diagnostic URI identity", () => {
   it("matches Windows URI casing while keeping POSIX paths case-sensitive", async () => {
     const windowsDocumentUri = "file:///C:/TaskRoot/src/Main.ts";

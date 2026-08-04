@@ -13,6 +13,7 @@ import { calculateHash, generateUnifiedDiff } from "@/lib/utils/file-diff";
 import { requestFileContent, updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { useToast } from "@/components/toast-provider";
 import { getFileTabKey } from "./task-center-panel-file-tabs";
+import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 
 export type FileTabRestorationOptions = {
   activeSessionId: string | null;
@@ -201,6 +202,7 @@ export function useFileSaveDelete({
           repo: tab.repo,
         });
         if (response.success && response.new_hash) {
+          lspClientManager.saveDocument(activeSessionId, path, tab.repo, tab.content);
           setOpenFileTabs((prev) =>
             prev.map((t) =>
               getFileTabKey(t) === fileKey

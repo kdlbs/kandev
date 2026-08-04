@@ -5,7 +5,7 @@ import {
   withLspProviderRegistration,
 } from "@/components/editors/monaco/builtin-providers";
 import { registerLspProviders } from "./lsp-providers";
-import { canonicalFileUri } from "./file-uri";
+import { canonicalFileUri, joinFileUri } from "./file-uri";
 import {
   JsonRpcConnection,
   getWsBaseUrl,
@@ -42,7 +42,7 @@ import {
 } from "./lsp-client-storage";
 import { DISABLED_LSP_STATUS, LSP_IDLE_TIMEOUT } from "./lsp-client-config";
 import { LSP_DEFAULT_CONFIGS } from "./lsp-client-config";
-import { buildDocumentContentChanges } from "./lsp-document-sync";
+import { buildDocumentContentChanges, buildDocumentSaveParams } from "./lsp-document-sync";
 
 export type { LspStatus } from "./lsp-json-rpc";
 export { toLspLanguage } from "./lsp-json-rpc";
@@ -450,6 +450,30 @@ class LSPClientManager {
       textDocument: { uri: canonicalUri, version: doc.version },
       contentChanges,
     });
+  }
+
+  saveDocument(
+    sessionId: string,
+    documentPath: string,
+    repo: string | undefined,
+    text: string,
+  ): void {
+    for (const conn of this.connections.values()) {
+      if (conn.sessionId !== sessionId || !conn.initialized || !conn.rpc || !conn.workspaceUri) {
+        continue;
+      }
+
+      let documentUri: string;
+      try {
+        documentUri = joinFileUri(conn.workspaceUri, repo, documentPath);
+      } catch {
+        continue;
+      }
+      if (!conn.openDocuments.has(documentUri)) continue;
+
+      const params = buildDocumentSaveParams(conn.serverCapabilities, documentUri, text);
+      if (params) conn.rpc.sendNotification("textDocument/didSave", params);
+    }
   }
 
   closeDocument(sessionId: string, lspLanguage: string, documentUri: string): void {

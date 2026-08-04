@@ -543,6 +543,19 @@ test.describe("LSP file intelligence", () => {
     );
     await expectFakeLspMarkerCount(testPage, 1);
 
+    await testPage.getByRole("button", { name: "Save (Ctrl+S)", exact: true }).click();
+    const didSave = await expectFakeLspEvent(
+      backend,
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/didSave" &&
+        (event.params?.textDocument as { uri?: string } | undefined)?.uri === definitionUri,
+      "document save",
+    );
+    expect(didSave.params?.text).toContain("// e2e change");
+
+    await editor.click();
+    await testPage.keyboard.press("Control+End");
     await testPage.keyboard.type(".");
     const triggeredCompletion = await expectFakeLspEvent(
       backend,

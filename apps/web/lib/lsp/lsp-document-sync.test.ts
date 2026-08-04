@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDocumentContentChanges } from "./lsp-document-sync";
+import { buildDocumentContentChanges, buildDocumentSaveParams } from "./lsp-document-sync";
 
 describe("buildDocumentContentChanges", () => {
   it.each([1, { change: 1 }])("sends full text for full synchronization (%j)", (sync) => {
@@ -56,6 +56,37 @@ describe("buildDocumentContentChanges", () => {
       expect(buildDocumentContentChanges({ textDocumentSync: sync }, "before", "after")).toEqual(
         [],
       );
+    },
+  );
+});
+
+describe("buildDocumentSaveParams", () => {
+  const uri = "file:///workspace/Main.kt";
+  const savedText = "saved text";
+
+  it.each([true, {}, { includeText: false }])(
+    "builds a didSave notification without text for save support (%j)",
+    (save) => {
+      expect(buildDocumentSaveParams({ textDocumentSync: { save } }, uri, savedText)).toEqual({
+        textDocument: { uri },
+      });
+    },
+  );
+
+  it("includes the persisted snapshot when the server requests it", () => {
+    expect(
+      buildDocumentSaveParams(
+        { textDocumentSync: { save: { includeText: true } } },
+        uri,
+        savedText,
+      ),
+    ).toEqual({ textDocument: { uri }, text: savedText });
+  });
+
+  it.each([undefined, 1, { change: 2 }, { save: false }, { save: "invalid" }])(
+    "does not notify when save synchronization is unsupported (%j)",
+    (sync) => {
+      expect(buildDocumentSaveParams({ textDocumentSync: sync }, uri, savedText)).toBeNull();
     },
   );
 });

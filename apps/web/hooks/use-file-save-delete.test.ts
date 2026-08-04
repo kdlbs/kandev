@@ -6,6 +6,7 @@ import type { FileEditorState } from "@/lib/state/dockview-store";
 const mockUpdateFileContent = vi.fn();
 const mockDeleteFile = vi.fn();
 const mockGetWebSocketClient = vi.fn();
+const mockSaveDocument = vi.fn();
 let openFilesMap = new Map<string, FileEditorState>();
 
 vi.mock("@/lib/ws/workspace-files", () => ({
@@ -15,6 +16,12 @@ vi.mock("@/lib/ws/workspace-files", () => ({
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: () => mockGetWebSocketClient(),
+}));
+
+vi.mock("@/lib/lsp/lsp-client-manager", () => ({
+  lspClientManager: {
+    saveDocument: (...args: unknown[]) => mockSaveDocument(...args),
+  },
 }));
 
 vi.mock("@/lib/state/dockview-store", () => ({
@@ -90,6 +97,19 @@ describe("useSaveDeleteActions repo threading", () => {
       SESSION_ID,
       expect.objectContaining({ path: PATH, repo: REPO }),
     );
+    expect(mockSaveDocument).toHaveBeenCalledWith(SESSION_ID, PATH, REPO, "v2");
+  });
+
+  it("does not notify the language server when saving fails", async () => {
+    seedOpenFile({ repo: REPO });
+    mockUpdateFileContent.mockResolvedValueOnce({ success: false, error: "write failed" });
+
+    const { result } = renderActions();
+    await act(async () => {
+      await result.current.saveFile(PATH, REPO);
+    });
+
+    expect(mockSaveDocument).not.toHaveBeenCalled();
   });
 
   it("deleteFile forwards the file's repo", async () => {

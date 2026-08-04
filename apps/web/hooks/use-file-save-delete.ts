@@ -7,6 +7,7 @@ import { updateFileContent, deleteFile } from "@/lib/ws/workspace-files";
 import { generateUnifiedDiff, calculateHash } from "@/lib/utils/file-diff";
 import type { useToast } from "@/components/toast-provider";
 import { buildRepoScopedItemId, PREVIEW_FILE_EDITOR_ID } from "@/lib/state/dockview-panel-actions";
+import { lspClientManager } from "@/lib/lsp/lsp-client-manager";
 
 /** Read openFiles from the store without subscribing to changes. */
 function getOpenFiles() {
@@ -71,6 +72,7 @@ async function performSaveFile(path: string, repo: string | undefined, params: S
       repo: file.repo,
     });
     if (response.success && response.new_hash) {
+      lspClientManager.saveDocument(currentSessionId, file.path, file.repo, file.content);
       // Re-read current state: user may have typed more while the save was
       // in flight. Only mark clean if content still matches what was saved.
       const current = getOpenFiles().get(fileKey);

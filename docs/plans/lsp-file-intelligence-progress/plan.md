@@ -25,6 +25,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Keep runtime TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers.
 - Preserve detailed pre-bridge install errors when the following WebSocket close contains only a generic mapped reason.
 - Translate Monaco completion trigger context into the LSP request context advertised by the client capability.
+- After confirmed persistence, route `textDocument/didSave` to matching open documents for servers that requested save synchronization, including the persisted snapshot only for `includeText` servers.
 
 ### Status disclosure
 
@@ -38,12 +39,14 @@ The progress protocol itself requires no backend payload transform because both 
 
 - **Work progress transitions:** `apps/web/lib/lsp/lsp-progress.test.ts` covers token validation, clamping, omitted-field preservation, independent concurrent tokens, unknown/malformed payloads, completion, and reset.
 - **Protocol integration:** `apps/web/lib/lsp/lsp-client-manager.test.ts` proves initialize capability/token advertisement, pre-initialize progress, server-created numeric tokens, subscriber updates, and stale-generation isolation.
+- **Document synchronization:** focused manager, capability, and save-hook tests prove canonical repo-aware routing, `includeText` handling, successful-save ordering, and no notification after rejected persistence.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
 - **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, and read-only rejection of cold unsupported executors.
 
 ## E2E Tests
 
 - **Desktop reported progress:** extend `apps/web/e2e/tests/lsp/lsp-file-intelligence.spec.ts` and the fake server so a held initialize operation reports title, message, and percentage; verify the popover, incomplete-results warning, completion copy, and Stop action.
+- **Save synchronization:** the full task-host protocol scenario edits and saves a navigated Kotlin file, then verifies canonical `didSave` delivery with the persisted content before continuing editor-provider checks.
 - **Desktop no-report fallback:** verify an initialized server that emits no work progress says so without a percentage or ETA.
 - **Coarse-pointer tablet:** extend `mobile-lsp-file-intelligence.spec.ts` at tablet width to verify the same progress in a bottom drawer, a touch-sized trigger, viewport containment, and no horizontal overflow.
 - Preserve the existing phone assertion that no LSP process or control starts.

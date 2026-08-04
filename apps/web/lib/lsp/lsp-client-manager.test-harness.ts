@@ -144,7 +144,13 @@ export function createLspManagerHarness(manager: LspManager, mocks: LspManagerMo
     return model;
   }
 
-  async function connectReadyWithRelease(sessionId: string, workspacePath?: string) {
+  async function connectReadyWithRelease(
+    sessionId: string,
+    workspacePath?: string,
+    capabilities: Record<string, unknown> = {
+      textDocumentSync: { openClose: true, change: 1 },
+    },
+  ) {
     const release = manager.connect(sessionId, "typescript");
     const socket = FakeWebSocket.instances.at(-1);
     if (!socket) throw new Error("expected an LSP WebSocket");
@@ -155,7 +161,7 @@ export function createLspManagerHarness(manager: LspManager, mocks: LspManagerMo
       JSON.stringify({
         jsonrpc: "2.0",
         id: initializeRequest.id,
-        result: { capabilities: { textDocumentSync: { openClose: true, change: 1 } } },
+        result: { capabilities },
       }),
     );
     await vi.waitFor(() => {
@@ -164,8 +170,12 @@ export function createLspManagerHarness(manager: LspManager, mocks: LspManagerMo
     return { socket, release };
   }
 
-  async function connectReady(sessionId: string, workspacePath?: string): Promise<FakeWebSocket> {
-    return (await connectReadyWithRelease(sessionId, workspacePath)).socket;
+  async function connectReady(
+    sessionId: string,
+    workspacePath?: string,
+    capabilities?: Record<string, unknown>,
+  ): Promise<FakeWebSocket> {
+    return (await connectReadyWithRelease(sessionId, workspacePath, capabilities)).socket;
   }
 
   function createPlaceholder(providerIndex: number, uri: string): void {

@@ -5,6 +5,7 @@ const TEXT_DOCUMENT_SYNC_FULL = 1;
 const TEXT_DOCUMENT_SYNC_INCREMENTAL = 2;
 
 type DocumentContentChange = { text: string; range?: LspRange };
+type DocumentSaveParams = { textDocument: { uri: string }; text?: string };
 
 function textDocumentSyncKind(serverCapabilities: Record<string, unknown> | null): number {
   const sync = serverCapabilities?.textDocumentSync;
@@ -89,4 +90,21 @@ export function buildDocumentContentChanges(
     return [incrementalContentChange(previousText, nextText)];
   }
   return [];
+}
+
+export function buildDocumentSaveParams(
+  serverCapabilities: Record<string, unknown> | null,
+  uri: string,
+  text: string,
+): DocumentSaveParams | null {
+  const sync = serverCapabilities?.textDocumentSync;
+  if (!sync || typeof sync !== "object" || Array.isArray(sync)) return null;
+
+  const save = (sync as { save?: unknown }).save;
+  if (save === true) return { textDocument: { uri } };
+  if (!save || typeof save !== "object" || Array.isArray(save)) return null;
+
+  return (save as { includeText?: unknown }).includeText === true
+    ? { textDocument: { uri }, text }
+    : { textDocument: { uri } };
 }
