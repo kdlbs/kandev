@@ -89,6 +89,12 @@ export async function listExecutors(options?: ApiRequestOptions): Promise<ListEx
   return fetchJson<ListExecutorsResponse>("/api/v1/executors", options);
 }
 
+export type CoderTemplate = { id: string; name: string; display_name?: string };
+
+export async function listCoderTemplates(options?: ApiRequestOptions) {
+  return fetchJson<{ templates: CoderTemplate[] }>("/api/v1/coder/templates", options);
+}
+
 export async function fetchExecutor(
   executorId: string,
   options?: ApiRequestOptions,

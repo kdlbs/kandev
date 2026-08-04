@@ -81,6 +81,10 @@ func provideLifecycleManager(
 	executorRegistry.Register(sshExec)
 	log.Info("SSH runtime registered")
 
+	coderExec := lifecycle.NewCoderExecutor(secretStore, agentRegistry, agentctlResolver, log)
+	executorRegistry.Register(coderExec)
+	log.Info("Coder runtime registered")
+
 	credsMgr := credentials.NewManager(log)
 	if secretStore != nil {
 		credsMgr.AddProvider(secrets.NewSecretStoreProvider(secretStore))
@@ -117,6 +121,7 @@ func provideLifecycleManager(
 	preparerRegistry.Register(models.ExecutorTypeLocalDocker, lifecycle.NewDockerPreparer(log))
 	preparerRegistry.Register(models.ExecutorTypeSprites, lifecycle.NewSpritesPreparer(log))
 	preparerRegistry.Register(models.ExecutorTypeSSH, lifecycle.NewSSHPreparer(log))
+	preparerRegistry.Register(models.ExecutorTypeCoder, lifecycle.NewCoderPreparer(log))
 	lifecycleMgr.SetPreparerRegistry(preparerRegistry)
 	lifecycleMgr.SetSecretStore(secretStore)
 	// Record the standalone agentctl control-server PID (populated by

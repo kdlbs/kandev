@@ -16,7 +16,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
-	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/secrets"
 )
@@ -61,6 +60,8 @@ type SSHExecutor struct {
 	logger           *logger.Logger
 	brokerPreflight  func(context.Context, *ssh.Client, *ExecutorCreateRequest, SSHRemotePlatform) error
 	stopRemote       func(context.Context, *ssh.Client, string, int) error
+	name             executor.Name
+	coder            *CoderWorkspaceManager
 
 	mu       sync.Mutex
 	sessions map[string]*sshSessionState // keyed by ExecutorInstance.InstanceID
@@ -80,13 +81,14 @@ func NewSSHExecutor(
 		agentList:        agentList,
 		logger:           log.WithFields(zap.String("runtime", "ssh")),
 		sessions:         make(map[string]*sshSessionState),
+		name:             executor.NameSSH,
 	}
 	executor.brokerPreflight = executor.preflightGitHubCredentialBroker
 	executor.stopRemote = stopRemoteAgentctl
 	return executor
 }
 
-func (r *SSHExecutor) Name() executor.Name { return executor.NameSSH }
+func (r *SSHExecutor) Name() executor.Name { return r.name }
 
 func (r *SSHExecutor) HealthCheck(_ context.Context) error {
 	// SSH targets are configured per-executor — the runtime itself is always
@@ -120,6 +122,18 @@ func (r *SSHExecutor) Close() error {
 // targetFromMetadata builds an SSHTarget from the executor metadata
 // propagated via buildLaunchMetadata (req.ExecutorConfig keys merged in).
 func (r *SSHExecutor) targetFromMetadata(md map[string]interface{}) (*SSHTarget, error) {
+	if r.name == executor.NameCoder {
+		workspace := getMetadataString(md, MetadataKeyCoderWorkspace)
+		if workspace == "" {
+			return nil, errors.New("coder executor: prepared workspace name is missing")
+		}
+		return &SSHTarget{
+			Host: workspace, Port: 22, User: "coder",
+			IdentitySource: SSHIdentitySourceCoder,
+			CoderWorkspace: workspace,
+			CoderBinary:    getMetadataString(md, MetadataKeyCoderBinary),
+		}, nil
+	}
 	host := getMetadataString(md, MetadataKeySSHHost)
 	hostAlias := getMetadataString(md, MetadataKeySSHHostAlias)
 	if host == "" && hostAlias == "" {
@@ -173,6 +187,16 @@ func (r *SSHExecutor) workdirRoot(md map[string]interface{}) string {
 // backend restart), reuse the resumed SSH client + forwarder + remote pid
 // instead of starting a second remote agentctl on top of the live one.
 func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (*ExecutorInstance, error) {
+	if r.coder != nil {
+		workspace, err := r.coder.Ensure(ctx, req)
+		if err != nil {
+			return nil, err
+		}
+		if req.Metadata == nil {
+			req.Metadata = make(map[string]interface{})
+		}
+		req.Metadata[MetadataKeyCoderWorkspace] = workspace
+	}
 	resumed, ok := r.resumedStateForCreate(req)
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
@@ -847,7 +871,7 @@ func (r *SSHExecutor) preflightAgentBinary(
 		return nil
 	}
 
-	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: agentruntime.RuntimeSSH})
+	cmd := req.AgentConfig.BuildCommand(agents.CommandOptions{Runtime: r.Name()})
 	args := cmd.Args()
 	if len(args) == 0 {
 		return nil

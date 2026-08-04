@@ -39,4 +39,9 @@ export const EXECUTOR_TYPE_MAP: Record<string, ExecutorTypeInfo> = {
     label: "SSH",
     description: "Connects to a remote host over SSH and runs agentctl there.",
   },
+  coder: {
+    executorId: "exec-coder",
+    label: "Coder",
+    description: "Creates or starts a Coder workspace, then runs agentctl through coder ssh.",
+  },
 };

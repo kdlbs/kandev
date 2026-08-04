@@ -44,7 +44,7 @@ func (p lifecycleMetricProvider) MetricExecutions() []metrics.ExecutionSource {
 
 func shouldCollectExecutionMetrics(runtime agentruntime.Runtime) bool {
 	switch runtime {
-	case agentruntime.RuntimeDocker, agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeSprites, agentruntime.RuntimeSSH:
+	case agentruntime.RuntimeDocker, agentruntime.RuntimeRemoteDocker, agentruntime.RuntimeSprites, agentruntime.RuntimeSSH, agentruntime.RuntimeCoder:
 		return true
 	default:
 		return false

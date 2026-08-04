@@ -72,7 +72,8 @@ func isContainerizedExecutor(executorType string) bool {
 // SSH, whose remote agentctl only receives the keys we forward in req.Env.
 func executorNeedsResolvedCredentials(executorType string) bool {
 	return isContainerizedExecutor(executorType) ||
-		models.ExecutorType(executorType) == models.ExecutorTypeSSH
+		models.ExecutorType(executorType) == models.ExecutorTypeSSH ||
+		models.ExecutorType(executorType) == models.ExecutorTypeCoder
 }
 
 // runAgentProcessAsync starts the agent subprocess in a background goroutine.

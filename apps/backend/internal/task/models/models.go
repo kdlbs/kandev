@@ -1154,6 +1154,7 @@ const (
 	ExecutorTypeRemoteDocker ExecutorType = "remote_docker"
 	ExecutorTypeSprites      ExecutorType = "sprites"
 	ExecutorTypeSSH          ExecutorType = "ssh"
+	ExecutorTypeCoder        ExecutorType = "coder"
 	ExecutorTypeMockRemote   ExecutorType = "mock_remote"
 )
 
@@ -1162,7 +1163,7 @@ const (
 // These environments run shells inside the container/VM, not on the host.
 func IsRemoteExecutorType(t ExecutorType) bool {
 	switch t {
-	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeMockRemote:
+	case ExecutorTypeSprites, ExecutorTypeRemoteDocker, ExecutorTypeLocalDocker, ExecutorTypeSSH, ExecutorTypeCoder, ExecutorTypeMockRemote:
 		return true
 	default:
 		return false
@@ -1186,6 +1187,8 @@ func (t ExecutorType) Runtime() agentruntime.Runtime {
 		return agentruntime.RuntimeSprites
 	case ExecutorTypeSSH:
 		return agentruntime.RuntimeSSH
+	case ExecutorTypeCoder:
+		return agentruntime.RuntimeCoder
 	default:
 		return agentruntime.RuntimeStandalone
 	}
@@ -1203,7 +1206,7 @@ func IsContainerizedExecutorType(t ExecutorType) bool {
 // IsAlwaysResumableRuntime reports whether the given runtime represents
 // an executor that can always be resumed even without an explicit resume token.
 func IsAlwaysResumableRuntime(runtime agentruntime.Runtime) bool {
-	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH
+	return runtime == agentruntime.RuntimeSprites || runtime == agentruntime.RuntimeSSH || runtime == agentruntime.RuntimeCoder
 }
 
 const (

@@ -152,7 +152,7 @@ func (a *MockAgent) BuildCommand(opts CommandOptions) Command {
 	// only way the host path works in dev mode (where the shell's $PATH
 	// doesn't include apps/backend/bin). Fall back to the bare name when
 	// no path is set: e2e fixtures prepend the kandev bin dir to PATH.
-	if opts.Runtime.IsContainerized() || opts.Runtime == agentruntime.RuntimeSSH {
+	if opts.Runtime.IsContainerized() || opts.Runtime == agentruntime.RuntimeSSH || opts.Runtime == agentruntime.RuntimeCoder {
 		return Cmd(mockAgentDefaultID).Build()
 	}
 	binary := mockAgentDefaultID

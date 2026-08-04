@@ -81,7 +81,8 @@ function useRemoteExecutorFlags(executorType: ExecutorType) {
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
     executorType === "sprites" ||
-    executorType === "ssh";
+    executorType === "ssh" ||
+    executorType === "coder";
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kevinburke/ssh_config"
@@ -25,6 +28,7 @@ type SSHIdentitySource string
 const (
 	SSHIdentitySourceAgent SSHIdentitySource = "agent" // use SSH_AUTH_SOCK
 	SSHIdentitySourceFile  SSHIdentitySource = "file"  // explicit IdentityFile path
+	SSHIdentitySourceCoder SSHIdentitySource = "coder" // authenticated Coder stdio tunnel
 )
 
 // SSHTarget is a resolved connection target after ~/.ssh/config inheritance.
@@ -43,6 +47,9 @@ type SSHTarget struct {
 	// ObservedFingerprint is set by Dial after the handshake completes.
 	// In test-mode (PinnedFingerprint == "") this is the value to surface to the UI.
 	ObservedFingerprint string
+
+	CoderWorkspace string
+	CoderBinary    string
 }
 
 // SSHConnConfig holds the raw form values used to build an SSHTarget.
@@ -236,6 +243,10 @@ func (e *errHostKeyMismatch) Error() string {
 func buildAuthMethods(target *SSHTarget) ([]ssh.AuthMethod, func(), error) {
 	noop := func() {}
 	switch target.IdentitySource {
+	case SSHIdentitySourceCoder:
+		// Coder authenticates the tunnel before exposing the workspace's SSH
+		// transport. The workspace agent accepts the tunneled SSH "none" auth.
+		return nil, noop, nil
 	case SSHIdentitySourceAgent:
 		sock := os.Getenv("SSH_AUTH_SOCK")
 		if sock == "" {
@@ -334,11 +345,90 @@ func dialSSH(ctx context.Context, target *SSHTarget) (*ssh.Client, error) {
 	// success.
 	defer cleanup()
 	addr := net.JoinHostPort(target.Host, strconv.Itoa(target.Port))
+	if target.CoderWorkspace != "" {
+		return dialCoder(ctx, target, cfg)
+	}
 
 	if target.ProxyJump == "" {
 		return dialDirect(ctx, addr, cfg)
 	}
 	return dialViaJump(ctx, target, addr, cfg)
+}
+
+// commandConn adapts a long-lived `coder ssh --stdio` subprocess to net.Conn.
+// Closing it tears down both pipes and the child process, which gives the SSH
+// client the same ownership semantics as a TCP connection.
+type commandConn struct {
+	stdin     io.WriteCloser
+	stdout    io.ReadCloser
+	cmd       *exec.Cmd
+	closeOnce sync.Once
+	closeErr  error
+}
+
+func (c *commandConn) Read(p []byte) (int, error)  { return c.stdout.Read(p) }
+func (c *commandConn) Write(p []byte) (int, error) { return c.stdin.Write(p) }
+func (c *commandConn) Close() error {
+	c.closeOnce.Do(func() {
+		_ = c.stdin.Close()
+		_ = c.stdout.Close()
+		if c.cmd.Process != nil {
+			_ = c.cmd.Process.Kill()
+		}
+		c.closeErr = c.cmd.Wait()
+	})
+	return c.closeErr
+}
+func (c *commandConn) LocalAddr() net.Addr              { return coderAddr("local") }
+func (c *commandConn) RemoteAddr() net.Addr             { return coderAddr("workspace") }
+func (c *commandConn) SetDeadline(time.Time) error      { return nil }
+func (c *commandConn) SetReadDeadline(time.Time) error  { return nil }
+func (c *commandConn) SetWriteDeadline(time.Time) error { return nil }
+
+type coderAddr string
+
+func (a coderAddr) Network() string { return "coder" }
+func (a coderAddr) String() string  { return string(a) }
+
+func dialCoder(ctx context.Context, target *SSHTarget, cfg *ssh.ClientConfig) (*ssh.Client, error) {
+	binary := target.CoderBinary
+	if binary == "" {
+		binary = "coder"
+	}
+	// Do not bind the subprocess lifetime to the launch context: the stdio
+	// tunnel is the session's transport and must survive after CreateInstance
+	// returns. Context cancellation is observed only until SSH finishes its
+	// handshake; after that commandConn/ssh.Client owns teardown.
+	cmd := exec.Command(binary, "ssh", "--stdio", "--wait", "yes", target.CoderWorkspace)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("coder ssh stdin: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("coder ssh stdout: %w", err)
+	}
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start coder ssh: %w", err)
+	}
+	conn := &commandConn{stdin: stdin, stdout: stdout, cmd: cmd}
+	handshakeDone := make(chan struct{})
+	go func() {
+		select {
+		case <-ctx.Done():
+			_ = conn.Close()
+		case <-handshakeDone:
+		}
+	}()
+	sshConn, chans, reqs, err := ssh.NewClientConn(conn, target.CoderWorkspace, cfg)
+	close(handshakeDone)
+	if err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("coder ssh handshake for %s: %w: %s", target.CoderWorkspace, err, strings.TrimSpace(stderr.String()))
+	}
+	return ssh.NewClient(sshConn, chans, reqs), nil
 }
 
 func dialDirect(ctx context.Context, addr string, cfg *ssh.ClientConfig) (*ssh.Client, error) {

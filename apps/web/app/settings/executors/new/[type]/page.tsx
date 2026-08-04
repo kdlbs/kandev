@@ -46,6 +46,7 @@ import type { Executor, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 
 import { EXECUTOR_TYPE_MAP } from "./executor-types";
 import { SSHCreatePage } from "./ssh-create-page";
+import { CoderCreatePage } from "./coder-create-page";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -66,6 +67,9 @@ export default function CreateProfilePage({ executorType }: { executorType: stri
 
   if (executorType === "ssh") {
     return <SSHCreatePage />;
+  }
+  if (executorType === "coder") {
+    return <CoderCreatePage />;
   }
 
   return <CreateProfileForm executorType={executorType as ExecutorType} typeInfo={typeInfo} />;
@@ -210,7 +214,8 @@ function useCreateRemoteFlags(executorType: ExecutorType) {
   const isRemote =
     executorType === "local_docker" ||
     executorType === "remote_docker" ||
-    executorType === "sprites";
+    executorType === "sprites" ||
+    executorType === "coder";
   return {
     isRemote,
     isDocker: executorType === "local_docker" || executorType === "remote_docker",

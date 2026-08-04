@@ -62,6 +62,11 @@ const EXECUTOR_TYPES = [
     label: "SSH",
     description: "Connect to a remote host over SSH and run agentctl there.",
   },
+  {
+    type: "coder",
+    label: "Coder",
+    description: "Create or reuse a Coder workspace from a template.",
+  },
 ] as const;
 
 function ExecutorIconBadge({ type }: { type: string }) {

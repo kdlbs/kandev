@@ -39,7 +39,7 @@ func (m *Manager) preferNativeBinary(agentConfig agents.Agent, runtime agentrunt
 	case agentruntime.RuntimeStandalone:
 		_, err := exec.LookPath(name)
 		return err == nil
-	case agentruntime.RuntimeSSH:
+	case agentruntime.RuntimeSSH, agentruntime.RuntimeCoder:
 		return getMetadataString(meta, MetadataKeyNativeBinary) == name
 	default:
 		return false

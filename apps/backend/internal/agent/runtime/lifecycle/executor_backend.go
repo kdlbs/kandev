@@ -115,6 +115,14 @@ const (
 	// host can use different shells; flows into req.Metadata via the
 	// standard executor-config merge in buildLaunchMetadata.
 	MetadataKeySSHShell = "ssh_shell"
+
+	// Coder executor metadata keys. The template is the immutable user choice;
+	// the workspace name is derived per task unless an explicit reusable name
+	// is configured. Authentication remains owned by the local Coder CLI.
+	MetadataKeyCoderTemplate        = "coder_template"
+	MetadataKeyCoderWorkspace       = "coder_workspace"
+	MetadataKeyCoderWorkspacePrefix = "coder_workspace_prefix"
+	MetadataKeyCoderBinary          = "coder_binary"
 )
 
 // persistentMetadataKeys lists metadata keys carried forward from a previous
@@ -144,6 +152,10 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHIdentitySource:     true,
 	MetadataKeySSHIdentityFile:       true,
 	MetadataKeySSHShell:              true,
+	MetadataKeyCoderTemplate:         true,
+	MetadataKeyCoderWorkspace:        true,
+	MetadataKeyCoderWorkspacePrefix:  true,
+	MetadataKeyCoderBinary:           true,
 
 	// Executor type marker
 	MetadataKeyIsRemote: true,
@@ -218,16 +230,20 @@ func IsSessionScopedMetadataKey(key string) bool {
 // login shell). Notably it includes ssh_host_alias so alias-only executors
 // (host read from ~/.ssh/config) survive restore.
 var sshWorkspaceFallbackKeys = map[string]bool{
-	MetadataKeySSHHost:            true,
-	MetadataKeySSHHostAlias:       true,
-	MetadataKeySSHPort:            true,
-	MetadataKeySSHUser:            true,
-	MetadataKeySSHHostFingerprint: true,
-	MetadataKeySSHIdentitySource:  true,
-	MetadataKeySSHIdentityFile:    true,
-	MetadataKeySSHProxyJump:       true,
-	MetadataKeySSHWorkdirRoot:     true,
-	MetadataKeySSHShell:           true,
+	MetadataKeySSHHost:              true,
+	MetadataKeySSHHostAlias:         true,
+	MetadataKeySSHPort:              true,
+	MetadataKeySSHUser:              true,
+	MetadataKeySSHHostFingerprint:   true,
+	MetadataKeySSHIdentitySource:    true,
+	MetadataKeySSHIdentityFile:      true,
+	MetadataKeySSHProxyJump:         true,
+	MetadataKeySSHWorkdirRoot:       true,
+	MetadataKeySSHShell:             true,
+	MetadataKeyCoderTemplate:        true,
+	MetadataKeyCoderWorkspace:       true,
+	MetadataKeyCoderWorkspacePrefix: true,
+	MetadataKeyCoderBinary:          true,
 }
 
 // FilterSSHWorkspaceFallbackConfig returns the subset of a stored SSH executor

@@ -432,6 +432,8 @@ func TestExecutorTypeRuntime(t *testing.T) {
 		{ExecutorTypeLocalDocker, agentruntime.RuntimeDocker},
 		{ExecutorTypeRemoteDocker, agentruntime.RuntimeRemoteDocker},
 		{ExecutorTypeSprites, agentruntime.RuntimeSprites},
+		{ExecutorTypeSSH, agentruntime.RuntimeSSH},
+		{ExecutorTypeCoder, agentruntime.RuntimeCoder},
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.in), func(t *testing.T) {

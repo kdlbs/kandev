@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
+	"os/exec"
 
 	"github.com/gin-gonic/gin"
 	"go.uber.org/zap"
@@ -37,6 +39,27 @@ func (h *ExecutorHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/executors/:id", h.httpGetExecutor)
 	api.PATCH("/executors/:id", h.httpUpdateExecutor)
 	api.DELETE("/executors/:id", h.httpDeleteExecutor)
+	api.GET("/coder/templates", h.httpListCoderTemplates)
+}
+
+func (h *ExecutorHandlers) httpListCoderTemplates(c *gin.Context) {
+	cmd := exec.CommandContext(c.Request.Context(), "coder", "templates", "list", "--output", "json")
+	out, err := cmd.Output()
+	if err != nil {
+		h.logger.Warn("failed to list Coder templates", zap.Error(err))
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Coder CLI is unavailable or not authenticated"})
+		return
+	}
+	var rows []struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		DisplayName string `json:"display_name"`
+	}
+	if err := json.Unmarshal(out, &rows); err != nil {
+		c.JSON(http.StatusBadGateway, gin.H{"error": "Coder returned an invalid template list"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"templates": rows})
 }
 
 func (h *ExecutorHandlers) registerWS(dispatcher *ws.Dispatcher) {

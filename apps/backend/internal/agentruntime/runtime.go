@@ -17,6 +17,9 @@ const (
 	RuntimeRemoteDocker Runtime = "remote_docker"
 	RuntimeSprites      Runtime = "sprites"
 	RuntimeSSH          Runtime = "ssh"
+	// RuntimeCoder shares the SSH agentctl protocol, but reaches the remote
+	// host through Coder's authenticated stdio tunnel.
+	RuntimeCoder Runtime = "coder"
 )
 
 // IsContainerized reports whether the runtime hosts the agent

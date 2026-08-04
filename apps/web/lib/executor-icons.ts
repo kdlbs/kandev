@@ -17,6 +17,7 @@ export const EXECUTOR_ICON_MAP: Record<string, typeof IconFolder> = {
   remote_docker: IconBox,
   sprites: IconCloud,
   ssh: IconTerminal2,
+  coder: IconCloud,
 };
 
 export function getExecutorIcon(type: string): typeof IconFolder {
@@ -30,6 +31,7 @@ const EXECUTOR_LABEL_MAP: Record<string, string> = {
   remote_docker: "Remote Docker",
   sprites: "Sprites.dev",
   ssh: "SSH",
+  coder: "Coder",
 };
 
 export function getExecutorLabel(type: string): string {
@@ -58,7 +60,7 @@ export function getExecutorStatusIcon(
       testId: "executor-status-cloud-icon",
     };
   }
-  if (executorType === "ssh") {
+  if (executorType === "ssh" || executorType === "coder") {
     return {
       Icon: hasError ? IconServerOff : IconTerminal2,
       testId: "executor-status-ssh-icon",

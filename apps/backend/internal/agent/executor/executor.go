@@ -19,6 +19,7 @@ const (
 	NameRemoteDocker      = agentruntime.RuntimeRemoteDocker
 	NameSprites           = agentruntime.RuntimeSprites
 	NameSSH               = agentruntime.RuntimeSSH
+	NameCoder             = agentruntime.RuntimeCoder
 )
 
 // ExecutorTypeToBackend maps an ExecutorType to its corresponding executor Name.
@@ -36,6 +37,8 @@ func ExecutorTypeToBackend(execType models.ExecutorType) Name {
 		return NameSprites
 	case models.ExecutorTypeSSH:
 		return NameSSH
+	case models.ExecutorTypeCoder:
+		return NameCoder
 	case models.ExecutorTypeMockRemote:
 		return NameStandalone
 	default:
