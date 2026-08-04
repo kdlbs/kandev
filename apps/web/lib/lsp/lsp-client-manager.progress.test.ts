@@ -85,6 +85,19 @@ afterEach(() => {
 });
 
 describe("LSP progress handshake and initialization", () => {
+  it("reports a bridge close while initialization is pending", async () => {
+    const { socket } = beginInitialization();
+
+    socket.failClosed(1006, "language server crashed during initialize");
+
+    await vi.waitFor(() => {
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
+        state: "error",
+        reason: "language server crashed during initialize",
+      });
+    });
+  });
+
   it("advertises work-done support and tracks initialize until the response", async () => {
     const { initialize, socket } = beginInitialization();
 

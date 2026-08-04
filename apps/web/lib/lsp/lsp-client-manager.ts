@@ -214,13 +214,11 @@ class LSPClientManager {
         return;
       }
 
-      if (!bridgeStarted) {
-        const statusFactory = CLOSE_CODE_STATUS[event.code];
-        if (statusFactory) {
-          this.setStatus(key, statusFactory(event.reason));
-        } else if (current?.state !== "error" && current?.state !== "unavailable") {
-          this.setStatus(key, { state: "error", reason: event.reason || "Connection closed" });
-        }
+      const statusFactory = CLOSE_CODE_STATUS[event.code];
+      if (statusFactory) {
+        this.setStatus(key, statusFactory(event.reason));
+      } else if (current?.state !== "error" && current?.state !== "unavailable") {
+        this.setStatus(key, { state: "error", reason: event.reason || "Connection closed" });
       }
     };
 
