@@ -168,6 +168,7 @@
   "selectAModel": "选择模型…",
   "sessionEnded": "会话已结束。",
   "sessionEndedWithCode": "会话已结束（退出码 {{code}}）。",
+  "sessionUnavailable": "会话已不再可用。",
   "setupProfile": "设置配置",
   "signInToAgent": "登录：{{name}}",
   "startingSession": "正在启动会话…",
