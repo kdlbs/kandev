@@ -117,6 +117,64 @@ describe("buildWatchPayload", () => {
     const payload = buildWatchPayload(readyForm({ sortBy: "created_desc" }));
     expect(payload?.sortBy).toBe("created_desc");
   });
+
+  it("emits the repository bindings in order", () => {
+    const payload = buildWatchPayload(
+      readyForm({
+        repositories: [
+          { repositoryId: "repo-a", baseBranch: "main" },
+          { repositoryId: "repo-b", baseBranch: "" },
+        ],
+      }),
+    );
+    expect(payload?.repositories).toEqual([
+      { repositoryId: "repo-a", baseBranch: "main" },
+      { repositoryId: "repo-b", baseBranch: "" },
+    ]);
+  });
+
+  it("drops half-filled rows with no repository chosen", () => {
+    const payload = buildWatchPayload(
+      readyForm({
+        repositories: [
+          { repositoryId: "", baseBranch: "main" },
+          { repositoryId: "repo-a", baseBranch: "develop" },
+        ],
+      }),
+    );
+    expect(payload?.repositories).toEqual([{ repositoryId: "repo-a", baseBranch: "develop" }]);
+  });
+
+  it("emits an empty list for an unbound watch", () => {
+    const payload = buildWatchPayload(readyForm({ repositories: [] }));
+    expect(payload?.repositories).toEqual([]);
+  });
+});
+
+describe("repository bindings form mapping", () => {
+  it("maps the canonical repositories list through from the watch", () => {
+    expect(
+      watchForm({
+        repositories: [
+          { repositoryId: "repo-a", baseBranch: "main" },
+          { repositoryId: "repo-b", baseBranch: "develop" },
+        ],
+      }).repositories,
+    ).toEqual([
+      { repositoryId: "repo-a", baseBranch: "main" },
+      { repositoryId: "repo-b", baseBranch: "develop" },
+    ]);
+  });
+
+  it("falls back to the legacy singular binding for a pre-multi-repo watch", () => {
+    expect(watchForm({ repositoryId: "repo-legacy", baseBranch: "old-main" }).repositories).toEqual(
+      [{ repositoryId: "repo-legacy", baseBranch: "old-main" }],
+    );
+  });
+
+  it("maps an unbound watch to an empty list", () => {
+    expect(watchForm({}).repositories).toEqual([]);
+  });
 });
 
 describe("sortBy form mapping", () => {

@@ -138,8 +138,7 @@ func TestLinearSource_BuildTaskRequest(t *testing.T) {
 func TestLinearSource_BuildTaskRequest_RepositoryBinding(t *testing.T) {
 	src := &LinearWatcherSource{}
 	evt := sampleLinearEvent()
-	evt.RepositoryID = "repo-9"
-	evt.BaseBranch = "develop"
+	evt.Repositories = []linear.IssueWatchRepository{{RepositoryID: "repo-9", BaseBranch: "develop"}}
 	req, err := src.BuildTaskRequest(evt)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -149,6 +148,31 @@ func TestLinearSource_BuildTaskRequest_RepositoryBinding(t *testing.T) {
 	}
 	if req.Repositories[0].RepositoryID != "repo-9" || req.Repositories[0].BaseBranch != "develop" {
 		t.Errorf("repository binding wrong: %+v", req.Repositories[0])
+	}
+}
+
+// TestLinearSource_BuildTaskRequest_MultipleRepositories pins the multi-repo
+// path: every binding is carried onto the task request in order, first entry
+// primary.
+func TestLinearSource_BuildTaskRequest_MultipleRepositories(t *testing.T) {
+	src := &LinearWatcherSource{}
+	evt := sampleLinearEvent()
+	evt.Repositories = []linear.IssueWatchRepository{
+		{RepositoryID: "repo-front", BaseBranch: "main"},
+		{RepositoryID: "repo-back", BaseBranch: "develop"},
+	}
+	req, err := src.BuildTaskRequest(evt)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(req.Repositories) != 2 {
+		t.Fatalf("expected 2 repositories, got %d", len(req.Repositories))
+	}
+	if req.Repositories[0].RepositoryID != "repo-front" || req.Repositories[0].BaseBranch != "main" {
+		t.Errorf("primary repository wrong: %+v", req.Repositories[0])
+	}
+	if req.Repositories[1].RepositoryID != "repo-back" || req.Repositories[1].BaseBranch != "develop" {
+		t.Errorf("second repository wrong: %+v", req.Repositories[1])
 	}
 }
 

@@ -64,6 +64,29 @@ describe("clearWorkspaceScopedForm", () => {
     });
   });
 
+  it("clears the multi-repo binding when the form carries repositories", () => {
+    const next = clearWorkspaceScopedForm(
+      {
+        workspaceId: "ws-1",
+        workflowId: "wf-1",
+        workflowStepId: "step-1",
+        repositories: [
+          { repositoryId: "repo-a", baseBranch: "main" },
+          { repositoryId: "repo-b", baseBranch: "develop" },
+        ],
+        prompt: "keep me",
+      },
+      "ws-2",
+    );
+    expect(next).toEqual({
+      workspaceId: "ws-2",
+      workflowId: "",
+      workflowStepId: "",
+      repositories: [],
+      prompt: "keep me",
+    });
+  });
+
   it("returns the previous object unchanged when the workspace is the same", () => {
     const next = clearWorkspaceScopedForm(base, "ws-1");
     // Same reference: no-op so the user's selections are preserved.

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -21,6 +22,7 @@ type issueWatchRow struct {
 	WorkflowStepID      string        `db:"workflow_step_id"`
 	RepositoryID        string        `db:"repository_id"`
 	BaseBranch          string        `db:"base_branch"`
+	RepositoriesJSON    string        `db:"repositories_json"`
 	FilterJSON          string        `db:"filter_json"`
 	AgentProfileID      string        `db:"agent_profile_id"`
 	ExecutorProfileID   string        `db:"executor_profile_id"`
@@ -43,6 +45,10 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 			return nil, fmt.Errorf("decode filter: %w", err)
 		}
 	}
+	repositories, err := decodeRepositories(r)
+	if err != nil {
+		return nil, err
+	}
 	var maxInflight *int
 	if r.MaxInflightTasks.Valid {
 		v := int(r.MaxInflightTasks.Int64)
@@ -53,6 +59,7 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 		WorkspaceID:         r.WorkspaceID,
 		WorkflowID:          r.WorkflowID,
 		WorkflowStepID:      r.WorkflowStepID,
+		Repositories:        repositories,
 		RepositoryID:        r.RepositoryID,
 		BaseBranch:          r.BaseBranch,
 		Filter:              filter,
@@ -71,6 +78,47 @@ func (r *issueWatchRow) toIssueWatch() (*IssueWatch, error) {
 	}, nil
 }
 
+// decodeRepositories parses the repositories_json column into the watch's
+// canonical binding list. An empty column is unbound unless the legacy
+// repository_id / base_branch columns carry a binding (a row written before the
+// multi-repo migration backfill), in which case the legacy pair becomes a
+// one-entry list.
+func decodeRepositories(row *issueWatchRow) ([]IssueWatchRepository, error) {
+	if strings.TrimSpace(row.RepositoriesJSON) == "" {
+		if row.RepositoryID != "" {
+			return []IssueWatchRepository{{RepositoryID: row.RepositoryID, BaseBranch: row.BaseBranch}}, nil
+		}
+		return nil, nil
+	}
+	var out []IssueWatchRepository
+	if err := json.Unmarshal([]byte(row.RepositoriesJSON), &out); err != nil {
+		return nil, fmt.Errorf("decode repositories: %w", err)
+	}
+	return out, nil
+}
+
+// encodeRepositories serializes the canonical binding list. nil/empty encodes
+// to the empty string so unbound rows keep the column default.
+func encodeRepositories(repos []IssueWatchRepository) (string, error) {
+	if len(repos) == 0 {
+		return "", nil
+	}
+	b, err := json.Marshal(repos)
+	if err != nil {
+		return "", fmt.Errorf("encode repositories: %w", err)
+	}
+	return string(b), nil
+}
+
+// legacyBinding mirrors the canonical binding list into the legacy singular
+// pair: the first entry, or empty when unbound.
+func legacyBinding(repos []IssueWatchRepository) (repositoryID, baseBranch string) {
+	if len(repos) == 0 {
+		return "", ""
+	}
+	return repos[0].RepositoryID, repos[0].BaseBranch
+}
+
 func encodeFilter(f SearchFilter) (string, error) {
 	b, err := json.Marshal(f)
 	if err != nil {
@@ -84,14 +132,15 @@ func encodeFilter(f SearchFilter) (string, error) {
 // COALESCE so older databases (pre-self-heal migration) read back as empty
 // strings rather than NULL.
 const issueWatchInsertColumns = `id, workspace_id, workflow_id, workflow_step_id,
-	repository_id, base_branch, filter_json,
+	repository_id, base_branch, repositories_json, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, sort_by, last_polled_at,
 	last_error, last_error_at,
 	created_at, updated_at`
 
 const issueWatchSelectColumns = `id, workspace_id, workflow_id, workflow_step_id,
-	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch, filter_json,
+	COALESCE(repository_id, '') AS repository_id, COALESCE(base_branch, '') AS base_branch,
+	COALESCE(repositories_json, '') AS repositories_json, filter_json,
 	agent_profile_id, executor_profile_id, prompt, enabled,
 	poll_interval_seconds, max_inflight_tasks, sort_by, last_polled_at,
 	COALESCE(last_error, '') AS last_error, last_error_at,
@@ -113,11 +162,19 @@ func (s *Store) CreateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	if err != nil {
 		return err
 	}
+	repositoriesJSON, err := encodeRepositories(w.Repositories)
+	if err != nil {
+		return err
+	}
+	// The legacy singular columns mirror the first entry so downgraded binaries
+	// and the read fallback see a coherent binding regardless of how the caller
+	// populated the struct.
+	legacyRepoID, legacyBranch := legacyBinding(w.Repositories)
 	_, err = s.db.ExecContext(ctx, `
 		INSERT INTO linear_issue_watches (`+issueWatchInsertColumns+`)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		w.ID, w.WorkspaceID, w.WorkflowID, w.WorkflowStepID,
-		w.RepositoryID, w.BaseBranch, filterJSON,
+		legacyRepoID, legacyBranch, repositoriesJSON, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt, w.Enabled,
 		w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks), string(w.SortBy), w.LastPolledAt,
 		w.LastError, w.LastErrorAt,
@@ -209,15 +266,20 @@ func (s *Store) UpdateIssueWatch(ctx context.Context, w *IssueWatch) error {
 	if err != nil {
 		return err
 	}
+	repositoriesJSON, err := encodeRepositories(w.Repositories)
+	if err != nil {
+		return err
+	}
+	legacyRepoID, legacyBranch := legacyBinding(w.Repositories)
 	_, err = s.db.ExecContext(ctx, `
 		UPDATE linear_issue_watches SET workflow_id = ?, workflow_step_id = ?,
-			repository_id = ?, base_branch = ?, filter_json = ?,
+			repository_id = ?, base_branch = ?, repositories_json = ?, filter_json = ?,
 			agent_profile_id = ?, executor_profile_id = ?, prompt = ?,
 			enabled = ?, poll_interval_seconds = ?, max_inflight_tasks = ?,
 			sort_by = ?, last_polled_at = ?, updated_at = ?
 		WHERE id = ?`,
 		w.WorkflowID, w.WorkflowStepID,
-		w.RepositoryID, w.BaseBranch, filterJSON,
+		legacyRepoID, legacyBranch, repositoriesJSON, filterJSON,
 		w.AgentProfileID, w.ExecutorProfileID, w.Prompt,
 		w.Enabled, w.PollIntervalSeconds, nullableInt(w.MaxInflightTasks),
 		string(w.SortBy), w.LastPolledAt, w.UpdatedAt, w.ID)

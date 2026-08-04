@@ -41,7 +41,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 	if err := s.authorizeWorkspaceAccess(ctx, req.WorkspaceID); err != nil {
 		return nil, err
 	}
-	repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, req.WorkspaceID, req.RepositoryID, req.BaseBranch)
+	repositories, err := s.resolveRepositoryBindings(ctx, req.WorkspaceID, createBindings(req))
 	if err != nil {
 		return nil, err
 	}
@@ -49,8 +49,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		WorkspaceID:         req.WorkspaceID,
 		WorkflowID:          req.WorkflowID,
 		WorkflowStepID:      req.WorkflowStepID,
-		RepositoryID:        repositoryID,
-		BaseBranch:          baseBranch,
+		Repositories:        repositories,
 		Filter:              normalizeFilter(req.Filter),
 		AgentProfileID:      req.AgentProfileID,
 		ExecutorProfileID:   req.ExecutorProfileID,
@@ -60,6 +59,7 @@ func (s *Service) CreateIssueWatch(ctx context.Context, req *CreateIssueWatchReq
 		SortBy:              req.SortBy,
 		Enabled:             true,
 	}
+	syncLegacyBinding(w)
 	if req.Enabled != nil {
 		w.Enabled = *req.Enabled
 	}
@@ -144,7 +144,7 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 	if err := s.authorizeWorkspaceAccess(ctx, w.WorkspaceID); err != nil {
 		return nil, err
 	}
-	prevRepositoryID, prevBaseBranch := w.RepositoryID, w.BaseBranch
+	prevRepositories := w.Repositories
 	applyIssueWatchPatch(w, req)
 	if filterIsEmpty(w.Filter) {
 		return nil, fmt.Errorf("%w: filter must specify at least one of query, teamKey, stateIds, assigned, priorities, labelIds, creatorId, or estimate range", ErrInvalidConfig)
@@ -165,16 +165,16 @@ func (s *Service) UpdateIssueWatch(ctx context.Context, id string, req *UpdateIs
 		return nil, err
 	}
 	// Only validate/resolve the binding when its value actually changed. The
-	// dialog re-sends repositoryId/baseBranch on every PATCH, and an unchanged
+	// dialog re-sends the repositories on every PATCH, and an unchanged
 	// binding whose repo was since soft-deleted must not block edits to other
 	// fields (prompt, filter, …).
-	if w.RepositoryID != prevRepositoryID || w.BaseBranch != prevBaseBranch {
-		repositoryID, baseBranch, err := s.resolveRepositoryBinding(ctx, w.WorkspaceID, w.RepositoryID, w.BaseBranch)
+	if !sameRepositories(prevRepositories, w.Repositories) {
+		resolved, err := s.resolveRepositoryBindings(ctx, w.WorkspaceID, w.Repositories)
 		if err != nil {
 			return nil, err
 		}
-		w.RepositoryID = repositoryID
-		w.BaseBranch = baseBranch
+		w.Repositories = resolved
+		syncLegacyBinding(w)
 	}
 	if err := s.store.UpdateIssueWatch(ctx, w); err != nil {
 		return nil, err
@@ -326,8 +326,7 @@ func (s *Service) publishNewLinearIssueEvent(ctx context.Context, w *IssueWatch,
 		WorkspaceID:       w.WorkspaceID,
 		WorkflowID:        w.WorkflowID,
 		WorkflowStepID:    w.WorkflowStepID,
-		RepositoryID:      w.RepositoryID,
-		BaseBranch:        w.BaseBranch,
+		Repositories:      w.Repositories,
 		AgentProfileID:    w.AgentProfileID,
 		ExecutorProfileID: w.ExecutorProfileID,
 		Prompt:            w.Prompt,
@@ -359,39 +358,124 @@ const (
 	MaxIssueWatchPollInterval = 3600
 )
 
-// resolveRepositoryBinding validates the watch's optional repository binding
-// against its workspace and fills an empty base branch with the repository's
-// default branch. An empty repositoryID clears the binding (and forces an empty
-// base branch), preserving the historical repo-less behaviour. When no
-// RepositoryLookup is wired (unit tests, early boot), the binding is accepted
+// resolveRepositoryBindings validates a watch's repository bindings against
+// its workspace and fills each empty base branch with the repository's default
+// branch. nil/empty input yields nil (unbound), preserving the historical
+// repo-less behaviour. Entries with an empty repositoryId are dropped and
+// duplicate repositoryIds collapse to the first occurrence. When no
+// RepositoryLookup is wired (unit tests, early boot), bindings are accepted
 // as-is and the default-branch fill is skipped.
-func (s *Service) resolveRepositoryBinding(ctx context.Context, workspaceID, repositoryID, baseBranch string) (string, string, error) {
-	repositoryID = strings.TrimSpace(repositoryID)
-	baseBranch = strings.TrimSpace(baseBranch)
+func (s *Service) resolveRepositoryBindings(ctx context.Context, workspaceID string, reqs []IssueWatchRepository) ([]IssueWatchRepository, error) {
+	if len(reqs) == 0 {
+		return nil, nil
+	}
+	out := make([]IssueWatchRepository, 0, len(reqs))
+	seen := make(map[string]bool, len(reqs))
+	for _, r := range reqs {
+		r.RepositoryID = strings.TrimSpace(r.RepositoryID)
+		r.BaseBranch = strings.TrimSpace(r.BaseBranch)
+		if r.RepositoryID == "" {
+			continue
+		}
+		if seen[r.RepositoryID] {
+			continue
+		}
+		// Reject a non-empty base branch that isn't a safe git ref before it can be
+		// persisted and copied into watcher-created tasks (then fail at worktree
+		// launch). Empty defers to the repo's default branch below.
+		if r.BaseBranch != "" && !securityutil.IsValidBaseBranchRef(r.BaseBranch) {
+			return nil, fmt.Errorf("%w: base branch %q is not a valid git ref", ErrInvalidConfig, r.BaseBranch)
+		}
+		rl := s.getRepositoryLookup()
+		if rl != nil {
+			repoWorkspace, defaultBranch, ok := rl.GetRepository(ctx, r.RepositoryID)
+			if !ok {
+				return nil, fmt.Errorf("%w: repository %q not found", ErrInvalidConfig, r.RepositoryID)
+			}
+			if repoWorkspace != workspaceID {
+				return nil, fmt.Errorf("%w: repository %q does not belong to this workspace", ErrInvalidConfig, r.RepositoryID)
+			}
+			if r.BaseBranch == "" {
+				r.BaseBranch = defaultBranch
+			}
+		}
+		seen[r.RepositoryID] = true
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// createBindings merges the plural and legacy singular repository fields of a
+// create request. The plural field wins when non-empty; otherwise the legacy
+// singular pair becomes a one-entry binding (backward compat with the
+// pre-multi-repo client).
+func createBindings(req *CreateIssueWatchRequest) []IssueWatchRepository {
+	if len(req.Repositories) > 0 {
+		return req.Repositories
+	}
+	if req.RepositoryID != "" {
+		return []IssueWatchRepository{{RepositoryID: req.RepositoryID, BaseBranch: req.BaseBranch}}
+	}
+	return nil
+}
+
+// syncLegacyBinding mirrors the canonical Repositories list into the legacy
+// singular columns (first entry, or empty when unbound) so older readers and
+// downgraded binaries see a coherent binding. The service is the single writer
+// of both representations; the store treats repositories_json as canonical.
+func syncLegacyBinding(w *IssueWatch) {
+	if len(w.Repositories) > 0 {
+		w.RepositoryID = w.Repositories[0].RepositoryID
+		w.BaseBranch = w.Repositories[0].BaseBranch
+		return
+	}
+	w.RepositoryID = ""
+	w.BaseBranch = ""
+}
+
+// bindingFromLegacy converts the legacy singular pair into the canonical list.
+// An empty repositoryId is unbound (nil).
+func bindingFromLegacy(repositoryID, baseBranch string) []IssueWatchRepository {
 	if repositoryID == "" {
-		return "", "", nil
+		return nil
 	}
-	// Reject a non-empty base branch that isn't a safe git ref before it can be
-	// persisted and copied into watcher-created tasks (then fail at worktree
-	// launch). Empty defers to the repo's default branch below.
-	if baseBranch != "" && !securityutil.IsValidBaseBranchRef(baseBranch) {
-		return "", "", fmt.Errorf("%w: base branch %q is not a valid git ref", ErrInvalidConfig, baseBranch)
+	return []IssueWatchRepository{{RepositoryID: repositoryID, BaseBranch: baseBranch}}
+}
+
+// sameRepositories reports whether two binding lists are element-wise equal.
+// Order matters — the first entry is the task's primary repository.
+func sameRepositories(a, b []IssueWatchRepository) bool {
+	if len(a) != len(b) {
+		return false
 	}
-	rl := s.getRepositoryLookup()
-	if rl == nil {
-		return repositoryID, baseBranch, nil
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
 	}
-	repoWorkspace, defaultBranch, ok := rl.GetRepository(ctx, repositoryID)
-	if !ok {
-		return "", "", fmt.Errorf("%w: repository %q not found", ErrInvalidConfig, repositoryID)
+	return true
+}
+
+// applyRepositoryBindingPatch applies the repository-binding part of a PATCH.
+// The plural field wins when present; otherwise the legacy singular fields
+// apply with the old rebind/reset-branch semantics and are converted back
+// into the canonical list (an empty singular repositoryId unbinds).
+func applyRepositoryBindingPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
+	if req.Repositories != nil {
+		w.Repositories = req.Repositories
+		syncLegacyBinding(w)
+		return
 	}
-	if repoWorkspace != workspaceID {
-		return "", "", fmt.Errorf("%w: repository %q does not belong to this workspace", ErrInvalidConfig, repositoryID)
+	if req.RepositoryID != nil {
+		if *req.RepositoryID != w.RepositoryID && req.BaseBranch == nil {
+			w.BaseBranch = ""
+		}
+		w.RepositoryID = *req.RepositoryID
 	}
-	if baseBranch == "" {
-		baseBranch = defaultBranch
+	if req.BaseBranch != nil {
+		w.BaseBranch = *req.BaseBranch
 	}
-	return repositoryID, baseBranch, nil
+	w.Repositories = bindingFromLegacy(w.RepositoryID, w.BaseBranch)
 }
 
 func validateIssueWatchCreate(req *CreateIssueWatchRequest) error {
@@ -540,20 +624,10 @@ func applyIssueWatchPatch(w *IssueWatch, req *UpdateIssueWatchRequest) {
 	if req.WorkflowStepID != nil {
 		w.WorkflowStepID = *req.WorkflowStepID
 	}
-	// RepositoryID / BaseBranch are applied here; UpdateIssueWatch then runs them
-	// through resolveRepositoryBinding (workspace check + default-branch fill, or
-	// clear when empty). An empty RepositoryID unbinds the watch. Switching to a
-	// different repository without an explicit base branch resets the branch so
-	// the new repo's default is used instead of carrying the old repo's branch.
-	if req.RepositoryID != nil {
-		if *req.RepositoryID != w.RepositoryID && req.BaseBranch == nil {
-			w.BaseBranch = ""
-		}
-		w.RepositoryID = *req.RepositoryID
-	}
-	if req.BaseBranch != nil {
-		w.BaseBranch = *req.BaseBranch
-	}
+	// Repositories is the canonical binding. The plural field wins when present;
+	// otherwise the legacy singular fields apply with the old rebind/reset-branch
+	// semantics and are converted back into the list.
+	applyRepositoryBindingPatch(w, req)
 	if req.Filter != nil {
 		w.Filter = normalizeFilter(*req.Filter)
 	}

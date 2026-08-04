@@ -15,8 +15,7 @@ func TestStore_IssueWatch_RepositoryBindingRoundTrip(t *testing.T) {
 	ctx := context.Background()
 
 	w := newTestIssueWatch("ws-1")
-	w.RepositoryID = "repo-123"
-	w.BaseBranch = "develop"
+	w.Repositories = []IssueWatchRepository{{RepositoryID: "repo-123", BaseBranch: "develop"}}
 	if err := store.CreateIssueWatch(ctx, w); err != nil {
 		t.Fatalf("create: %v", err)
 	}
@@ -25,13 +24,15 @@ func TestStore_IssueWatch_RepositoryBindingRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
+	if len(got.Repositories) != 1 || got.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-123", BaseBranch: "develop"}) {
+		t.Fatalf("repository binding lost on round-trip: %+v", got.Repositories)
+	}
 	if got.RepositoryID != "repo-123" || got.BaseBranch != "develop" {
-		t.Fatalf("repository binding lost on round-trip: repo=%q branch=%q", got.RepositoryID, got.BaseBranch)
+		t.Fatalf("legacy columns should mirror the binding, got repo=%q branch=%q", got.RepositoryID, got.BaseBranch)
 	}
 
 	// Update clears the binding (unbind path).
-	got.RepositoryID = ""
-	got.BaseBranch = ""
+	got.Repositories = nil
 	if err := store.UpdateIssueWatch(ctx, got); err != nil {
 		t.Fatalf("update: %v", err)
 	}
@@ -39,8 +40,180 @@ func TestStore_IssueWatch_RepositoryBindingRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get after update: %v", err)
 	}
-	if after.RepositoryID != "" || after.BaseBranch != "" {
-		t.Fatalf("expected binding cleared, got repo=%q branch=%q", after.RepositoryID, after.BaseBranch)
+	if len(after.Repositories) != 0 || after.RepositoryID != "" || after.BaseBranch != "" {
+		t.Fatalf("expected binding cleared, got %+v (legacy repo=%q branch=%q)", after.Repositories, after.RepositoryID, after.BaseBranch)
+	}
+}
+
+// TestStore_IssueWatch_MultiRepositoryRoundTrip pins the multi-repository
+// binding: several (repository, branch) pairs survive create/get/update, and
+// the legacy singular columns mirror the first entry.
+func TestStore_IssueWatch_MultiRepositoryRoundTrip(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	w := newTestIssueWatch("ws-1")
+	w.Repositories = []IssueWatchRepository{
+		{RepositoryID: "repo-123", BaseBranch: "develop"},
+		{RepositoryID: "repo-456", BaseBranch: "main"},
+	}
+	if err := store.CreateIssueWatch(ctx, w); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	got, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Repositories) != 2 {
+		t.Fatalf("expected 2 repositories, got %d: %+v", len(got.Repositories), got.Repositories)
+	}
+	if got.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-123", BaseBranch: "develop"}) ||
+		got.Repositories[1] != (IssueWatchRepository{RepositoryID: "repo-456", BaseBranch: "main"}) {
+		t.Fatalf("repository list lost on round-trip: %+v", got.Repositories)
+	}
+	if got.RepositoryID != "repo-123" || got.BaseBranch != "develop" {
+		t.Fatalf("legacy columns should mirror the first entry, got repo=%q branch=%q", got.RepositoryID, got.BaseBranch)
+	}
+
+	// Update replaces the whole binding.
+	got.Repositories = []IssueWatchRepository{{RepositoryID: "repo-789", BaseBranch: "release/v2"}}
+	got.RepositoryID = "repo-789"
+	got.BaseBranch = "release/v2"
+	if err := store.UpdateIssueWatch(ctx, got); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	after, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get after update: %v", err)
+	}
+	if len(after.Repositories) != 1 || after.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-789", BaseBranch: "release/v2"}) {
+		t.Fatalf("update should replace the binding, got %+v", after.Repositories)
+	}
+
+	// Update clears the binding (unbind path).
+	after.Repositories = nil
+	after.RepositoryID = ""
+	after.BaseBranch = ""
+	if err := store.UpdateIssueWatch(ctx, after); err != nil {
+		t.Fatalf("update clear: %v", err)
+	}
+	cleared, err := store.GetIssueWatch(ctx, w.ID)
+	if err != nil {
+		t.Fatalf("get after clear: %v", err)
+	}
+	if len(cleared.Repositories) != 0 || cleared.RepositoryID != "" || cleared.BaseBranch != "" {
+		t.Fatalf("expected binding cleared, got %+v (legacy repo=%q branch=%q)", cleared.Repositories, cleared.RepositoryID, cleared.BaseBranch)
+	}
+}
+
+// TestStore_IssueWatch_LegacyColumnsFallback pins the read-compat path: a row
+// whose repositories_json is empty but whose legacy columns carry a binding
+// (a row written by a pre-multi-repo binary) reads back as a one-entry
+// repository list. New writes always populate repositories_json; this covers
+// the defensive fallback for any row that missed the migration backfill.
+func TestStore_IssueWatch_LegacyColumnsFallback(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+
+	id := uuid.New().String()
+	now := time.Now().UTC()
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO linear_issue_watches
+		(id, workspace_id, workflow_id, workflow_step_id, repository_id, base_branch, filter_json, created_at, updated_at)
+		VALUES (?, 'ws-1', 'wf-1', 'step-1', 'repo-legacy', 'old-main', '{}', ?, ?)`,
+		id, now, now); err != nil {
+		t.Fatalf("seed legacy row: %v", err)
+	}
+	got, err := store.GetIssueWatch(ctx, id)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if len(got.Repositories) != 1 || got.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-legacy", BaseBranch: "old-main"}) {
+		t.Fatalf("legacy columns should fall back to a one-entry list, got %+v", got.Repositories)
+	}
+}
+
+// preMultiRepoIssueWatchSchema is the linear_issue_watches DDL from before the
+// repositories_json column was introduced (after the single-repository binding
+// columns landed). Used to exercise the repositories_json migration + backfill.
+const preMultiRepoIssueWatchSchema = `
+	CREATE TABLE linear_issue_watches (
+		id TEXT PRIMARY KEY,
+		workspace_id TEXT NOT NULL,
+		workflow_id TEXT NOT NULL,
+		workflow_step_id TEXT NOT NULL,
+		repository_id TEXT NOT NULL DEFAULT '',
+		base_branch TEXT NOT NULL DEFAULT '',
+		filter_json TEXT NOT NULL DEFAULT '{}',
+		agent_profile_id TEXT NOT NULL DEFAULT '',
+		executor_profile_id TEXT NOT NULL DEFAULT '',
+		prompt TEXT NOT NULL DEFAULT '',
+		enabled BOOLEAN NOT NULL DEFAULT 1,
+		poll_interval_seconds INTEGER NOT NULL DEFAULT 300,
+		max_inflight_tasks INTEGER DEFAULT 5,
+		sort_by TEXT NOT NULL DEFAULT '',
+		last_polled_at DATETIME,
+		last_error TEXT NOT NULL DEFAULT '',
+		last_error_at DATETIME,
+		created_at DATETIME NOT NULL,
+		updated_at DATETIME NOT NULL
+	);`
+
+func TestStore_IssueWatch_AddRepositoriesJSONColumn_Migration(t *testing.T) {
+	ctx := context.Background()
+	raw, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	raw.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = raw.Close() })
+
+	if _, err := raw.Exec(preMultiRepoIssueWatchSchema); err != nil {
+		t.Fatalf("legacy schema: %v", err)
+	}
+	now := time.Now().UTC()
+	boundID := uuid.New().String()
+	unboundID := uuid.New().String()
+	for _, row := range []struct {
+		id           string
+		repositoryID string
+		baseBranch   string
+	}{
+		{boundID, "repo-bound", "develop"},
+		{unboundID, "", ""},
+	} {
+		if _, err := raw.Exec(`INSERT INTO linear_issue_watches
+			(id, workspace_id, workflow_id, workflow_step_id, repository_id, base_branch, filter_json, created_at, updated_at)
+			VALUES (?, 'ws-1', 'wf-1', 'step-1', ?, ?, '{}', ?, ?)`,
+			row.id, row.repositoryID, row.baseBranch, now, now); err != nil {
+			t.Fatalf("seed legacy row: %v", err)
+		}
+	}
+
+	store, err := NewStore(raw, raw)
+	if err != nil {
+		t.Fatalf("NewStore on legacy table: %v", err)
+	}
+
+	bound, err := store.GetIssueWatch(ctx, boundID)
+	if err != nil {
+		t.Fatalf("get bound row: %v", err)
+	}
+	if len(bound.Repositories) != 1 || bound.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-bound", BaseBranch: "develop"}) {
+		t.Fatalf("bound row should be backfilled to a one-entry list, got %+v", bound.Repositories)
+	}
+
+	unbound, err := store.GetIssueWatch(ctx, unboundID)
+	if err != nil {
+		t.Fatalf("get unbound row: %v", err)
+	}
+	if len(unbound.Repositories) != 0 {
+		t.Fatalf("repo-less row should stay unbound, got %+v", unbound.Repositories)
+	}
+
+	// Idempotent: running initSchema again must not fail on duplicate columns.
+	if err := store.initSchema(); err != nil {
+		t.Fatalf("second initSchema (idempotency): %v", err)
 	}
 }
 

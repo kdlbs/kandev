@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import type { Locator } from "@playwright/test";
 import { LinearSettingsPage } from "../../pages/linear-settings-page";
 import { assertWatcherAgentProfileResetsToStepDefault } from "./watcher-profile-default-flow";
 import { assertWatcherDispatchOrderPersists } from "./watcher-dispatch-order-flow";
@@ -236,5 +237,146 @@ test.describe("Linear settings", () => {
     apiClient,
   }) => {
     await assertWatcherDispatchOrderPersists(testPage, apiClient);
+  });
+
+  test("watcher dialog selects and persists multiple repositories", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockLinearReset();
+    await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    // The fixture seeds one workspace repository ("E2E Repo"); add a second so
+    // the picker has two options. The path need not exist on disk — repository
+    // registration is DB-level, and the branch fetch for this repo returns
+    // nothing (its default branch is filled server-side on save).
+    const secondRepo = await apiClient.createRepository(
+      seedData.workspaceId,
+      `${seedData.repositoryPath}-multi`,
+      "main",
+      { name: "E2E Repo B" },
+    );
+    const firstRepoId = seedData.repositoryId;
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    await testPage.getByRole("button", { name: /new watcher/i }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    // Scopes a Radix Select trigger by its field label (same shape as the
+    // dispatch-order flow helper).
+    const comboboxByLabel = (root: Locator, label: string) =>
+      root.getByText(label, { exact: true }).locator("xpath=..").getByRole("combobox");
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    // Minimum fields to enable Save: workspace, non-empty filter (team),
+    // workflow, and workflow step. Prompt is pre-filled.
+    await pick("Workspace", "E2E Workspace");
+    await pick("Team", /ENG/);
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    // Add both repositories via the add control, and pin a branch on the first.
+    await dialog.getByTestId("add-repository-trigger").click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: "E2E Repo", exact: true })
+      .click();
+    await dialog.getByTestId("add-repository-trigger").click();
+    await testPage
+      .getByRole("listbox")
+      .getByRole("option", { name: "E2E Repo B", exact: true })
+      .click();
+    await dialog.getByTestId(`branch-trigger-${firstRepoId}`).click();
+    await testPage.getByRole("listbox").getByRole("option", { name: "main" }).click();
+
+    const createButton = dialog.getByRole("button", { name: "Create" });
+    await expect(createButton).toBeEnabled();
+    await createButton.click();
+    await expect(dialog).toBeHidden();
+
+    // The stored watch carries both bindings in the added order; the second
+    // repo's empty branch was resolved to its default ("main") at save.
+    const res = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    );
+    const { watches } = (await res.json()) as {
+      watches: Array<{
+        id: string;
+        repositories?: Array<{ repositoryId: string; baseBranch: string }>;
+      }>;
+    };
+    const saved = watches[watches.length - 1];
+    expect(saved.repositories).toEqual([
+      { repositoryId: firstRepoId, baseBranch: "main" },
+      { repositoryId: secondRepo.id, baseBranch: "main" },
+    ]);
+
+    // Reopen the saved watcher: both rows render with the saved branches.
+    await testPage.getByText("team:ENG").first().click();
+    const editDialog = testPage.getByRole("dialog");
+    await expect(editDialog.getByText("Edit Linear Watcher")).toBeVisible();
+    await expect(editDialog.getByText("E2E Repo", { exact: true })).toBeVisible();
+    await expect(editDialog.getByText("E2E Repo B", { exact: true })).toBeVisible();
+    await expect(editDialog.getByTestId(`branch-trigger-${firstRepoId}`)).toContainText("main");
+  });
+
+  test("watcher saved without touching the repository picker stays unbound", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockLinearReset();
+    await apiClient.mockLinearSetTeams([{ id: "team-1", key: "ENG", name: "Engineering" }]);
+    await apiClient.setLinearConfig({ secret: "lin_api_xxx" });
+    await apiClient.waitForIntegrationAuthHealthy("linear");
+
+    const settings = new LinearSettingsPage(testPage);
+    await settings.goto();
+
+    await testPage.getByRole("button", { name: /new watcher/i }).click();
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+
+    const comboboxByLabel = (root: Locator, label: string) =>
+      root.getByText(label, { exact: true }).locator("xpath=..").getByRole("combobox");
+    const pick = async (label: string, option: string | RegExp) => {
+      await comboboxByLabel(dialog, label).click();
+      await testPage.getByRole("listbox").getByRole("option", { name: option }).click();
+    };
+
+    await pick("Workspace", "E2E Workspace");
+    await pick("Team", /ENG/);
+    await pick("Workflow", "E2E Workflow");
+    await comboboxByLabel(dialog, "Workflow Step").click();
+    await testPage.getByRole("listbox").getByRole("option").first().click();
+
+    await dialog.getByRole("button", { name: "Create" }).click();
+    await expect(dialog).toBeHidden();
+
+    // The stored watch must carry no repository binding — the historical
+    // repo-less behaviour (unbound tasks are pinned at the source layer).
+    const res = await apiClient.rawRequest(
+      "GET",
+      `/api/v1/linear/watches/issue?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    );
+    const { watches } = (await res.json()) as {
+      watches: Array<{
+        id: string;
+        repositories?: Array<{ repositoryId: string; baseBranch: string }>;
+      }>;
+    };
+    const saved = watches[watches.length - 1];
+    expect(saved.repositories).toBeUndefined();
   });
 });

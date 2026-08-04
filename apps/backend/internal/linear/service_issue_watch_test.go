@@ -119,6 +119,120 @@ func TestService_CreateIssueWatch_RepositoryBinding(t *testing.T) {
 		if w.RepositoryID != "" || w.BaseBranch != "" {
 			t.Fatalf("unbound watch must stay empty, got repo=%q branch=%q", w.RepositoryID, w.BaseBranch)
 		}
+		if len(w.Repositories) != 0 {
+			t.Fatalf("unbound watch must have no repositories, got %+v", w.Repositories)
+		}
+	})
+}
+
+func TestService_CreateIssueWatch_MultipleRepositories(t *testing.T) {
+	ctx := context.Background()
+	baseReq := func() *CreateIssueWatchRequest {
+		return &CreateIssueWatchRequest{
+			WorkspaceID:    "ws-1",
+			WorkflowID:     "wf",
+			WorkflowStepID: "step",
+			Filter:         SearchFilter{TeamKey: "ENG"},
+		}
+	}
+
+	t.Run("plural list persisted with default branches", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.Repositories = []IssueWatchRepository{
+			{RepositoryID: "repo-a"},
+			{RepositoryID: "repo-b", BaseBranch: "develop"},
+		}
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if len(w.Repositories) != 2 {
+			t.Fatalf("expected 2 bindings, got %+v", w.Repositories)
+		}
+		if w.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-a", BaseBranch: "main"}) {
+			t.Errorf("repo-a default branch not filled: %+v", w.Repositories[0])
+		}
+		if w.Repositories[1] != (IssueWatchRepository{RepositoryID: "repo-b", BaseBranch: "develop"}) {
+			t.Errorf("repo-b explicit branch lost: %+v", w.Repositories[1])
+		}
+		// Legacy mirror points at the primary.
+		if w.RepositoryID != "repo-a" || w.BaseBranch != "main" {
+			t.Errorf("legacy mirror should be the primary, got repo=%q branch=%q", w.RepositoryID, w.BaseBranch)
+		}
+	})
+
+	t.Run("duplicates collapse to the first occurrence", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.Repositories = []IssueWatchRepository{
+			{RepositoryID: "repo-a", BaseBranch: "main"},
+			{RepositoryID: "repo-a", BaseBranch: "develop"},
+		}
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if len(w.Repositories) != 1 || w.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-a", BaseBranch: "main"}) {
+			t.Fatalf("duplicate repo must collapse keep-first, got %+v", w.Repositories)
+		}
+	})
+
+	t.Run("empty repositoryId entries are dropped", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.Repositories = []IssueWatchRepository{
+			{RepositoryID: "", BaseBranch: "main"},
+			{RepositoryID: "repo-a"},
+		}
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if len(w.Repositories) != 1 || w.Repositories[0].RepositoryID != "repo-a" {
+			t.Fatalf("empty-id entry should be dropped, got %+v", w.Repositories)
+		}
+	})
+
+	t.Run("invalid branch ref on any entry rejected", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.Repositories = []IssueWatchRepository{
+			{RepositoryID: "repo-a"},
+			{RepositoryID: "repo-b", BaseBranch: "bad ref with spaces"},
+		}
+		if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("expected ErrInvalidConfig for invalid branch ref, got %v", err)
+		}
+	})
+
+	t.Run("cross-workspace entry rejected", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-other", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.Repositories = []IssueWatchRepository{{RepositoryID: "repo-a"}}
+		if _, err := f.svc.CreateIssueWatch(ctx, req); !errors.Is(err, ErrInvalidConfig) {
+			t.Fatalf("expected ErrInvalidConfig for cross-workspace repo, got %v", err)
+		}
+	})
+
+	t.Run("plural wins over legacy singular", func(t *testing.T) {
+		f := newSvcFixture(t)
+		f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+		req := baseReq()
+		req.RepositoryID = "repo-legacy"
+		req.Repositories = []IssueWatchRepository{{RepositoryID: "repo-plural"}}
+		w, err := f.svc.CreateIssueWatch(ctx, req)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if len(w.Repositories) != 1 || w.Repositories[0].RepositoryID != "repo-plural" {
+			t.Fatalf("plural should win over singular, got %+v", w.Repositories)
+		}
 	})
 }
 
@@ -826,6 +940,81 @@ func TestService_UpdateIssueWatch_RebindAndDeletedRepo(t *testing.T) {
 	}
 	if edited.Prompt != "updated prompt" || edited.RepositoryID != "repo-2" || edited.BaseBranch != "develop" {
 		t.Fatalf("expected prompt updated + binding preserved, got prompt=%q repo=%q branch=%q", edited.Prompt, edited.RepositoryID, edited.BaseBranch)
+	}
+}
+
+func TestService_UpdateIssueWatch_MultipleRepositories(t *testing.T) {
+	ctx := context.Background()
+	f := newSvcFixture(t)
+	f.svc.SetRepositoryLookup(fakeRepoLookup{workspaceID: "ws-1", defaultBranch: "main", ok: true})
+
+	w, err := f.svc.CreateIssueWatch(ctx, &CreateIssueWatchRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf", WorkflowStepID: "step",
+		Filter:       SearchFilter{TeamKey: "ENG"},
+		Repositories: []IssueWatchRepository{{RepositoryID: "repo-1", BaseBranch: "main"}},
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// Omitted repositories → binding unchanged.
+	prompt := "new prompt"
+	edited, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Prompt: &prompt})
+	if err != nil {
+		t.Fatalf("update without repositories: %v", err)
+	}
+	if len(edited.Repositories) != 1 || edited.Repositories[0].RepositoryID != "repo-1" {
+		t.Fatalf("omitted repositories must leave the binding unchanged, got %+v", edited.Repositories)
+	}
+
+	// Replace with a two-entry list.
+	replaced, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{
+		Repositories: []IssueWatchRepository{
+			{RepositoryID: "repo-2", BaseBranch: "develop"},
+			{RepositoryID: "repo-3"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("replace: %v", err)
+	}
+	if len(replaced.Repositories) != 2 {
+		t.Fatalf("expected 2 bindings, got %+v", replaced.Repositories)
+	}
+	if replaced.Repositories[0] != (IssueWatchRepository{RepositoryID: "repo-2", BaseBranch: "develop"}) {
+		t.Errorf("first entry wrong: %+v", replaced.Repositories[0])
+	}
+	if replaced.Repositories[1] != (IssueWatchRepository{RepositoryID: "repo-3", BaseBranch: "main"}) {
+		t.Errorf("second entry default branch not filled: %+v", replaced.Repositories[1])
+	}
+	// Legacy mirror follows the new primary.
+	if replaced.RepositoryID != "repo-2" || replaced.BaseBranch != "develop" {
+		t.Errorf("legacy mirror should follow new primary, got repo=%q branch=%q", replaced.RepositoryID, replaced.BaseBranch)
+	}
+
+	// Re-sending the same list while the lookup fails must not block the edit
+	// (an unchanged binding is not re-validated).
+	f.svc.SetRepositoryLookup(fakeRepoLookup{ok: false})
+	same, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{
+		Repositories: []IssueWatchRepository{
+			{RepositoryID: "repo-2", BaseBranch: "develop"},
+			{RepositoryID: "repo-3", BaseBranch: "main"},
+		},
+		Prompt: &prompt,
+	})
+	if err != nil {
+		t.Fatalf("unchanged binding re-validation blocked the edit: %v", err)
+	}
+	if len(same.Repositories) != 2 {
+		t.Fatalf("binding should be preserved, got %+v", same.Repositories)
+	}
+
+	// Empty array clears the binding.
+	cleared, err := f.svc.UpdateIssueWatch(ctx, w.ID, &UpdateIssueWatchRequest{Repositories: []IssueWatchRepository{}})
+	if err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if len(cleared.Repositories) != 0 || cleared.RepositoryID != "" || cleared.BaseBranch != "" {
+		t.Fatalf("empty repositories must clear the binding, got %+v (legacy repo=%q)", cleared.Repositories, cleared.RepositoryID)
 	}
 }
 
