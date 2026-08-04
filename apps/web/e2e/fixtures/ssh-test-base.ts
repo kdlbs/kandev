@@ -38,7 +38,7 @@ export type SSHSeedData = {
  * without Docker can still run the chromium project.
  */
 export const sshTest = backendFixture.extend<
-  { testPage: Page },
+  { testPage: Page; _sshRuntimeReset: void },
   { apiClient: ApiClient; seedData: SSHSeedData }
 >({
   apiClient: [
@@ -120,6 +120,18 @@ export const sshTest = backendFixture.extend<
     await use(page);
     await context.close();
   },
+
+  _sshRuntimeReset: [
+    async ({ apiClient, seedData }, use) => {
+      await resetSSHRuntime(apiClient, seedData);
+      try {
+        await use();
+      } finally {
+        await resetSSHRuntime(apiClient, seedData);
+      }
+    },
+    { auto: true },
+  ],
 });
 
 async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
@@ -143,16 +155,6 @@ async function resetSSHRuntime(apiClient: ApiClient, seedData: SSHSeedData) {
     )
     .toBe(true);
 }
-
-// Run for API-only tests as well as browser tests. Playwright fixtures are
-// lazy, so reset inside `testPage` did not isolate sessions-endpoint specs.
-sshTest.beforeEach(async ({ apiClient, seedData }) => {
-  await resetSSHRuntime(apiClient, seedData);
-});
-
-sshTest.afterEach(async ({ apiClient, seedData }) => {
-  await resetSSHRuntime(apiClient, seedData);
-});
 
 async function seedSSHWorkspace(
   apiClient: ApiClient,
