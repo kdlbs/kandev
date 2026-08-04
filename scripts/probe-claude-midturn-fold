@@ -22,9 +22,12 @@
 #                          Corroboration only: the frame is marked @internal and
 #                          may be gated or absent on older CLIs.
 #
-# Observation 3 is also the capability signal Kandev would negotiate on
-# (`msg_lifecycle_v1` on the init frame) instead of today's agent-name allowlist
-# in adapter_prompt.go:supportsPromptHandoff.
+# Observation 3 is raw CLI observation only. It is NOT Kandev's admission gate:
+# Kandev negotiates steering over ACP, on the `initialize` advertisement
+# `agentCapabilities._meta.claudeCode.promptQueueing` (read in
+# acp/prompt_queueing.go). `msg_lifecycle_v1` on the stream-json init frame is
+# not advertised over ACP at all, so it can corroborate the fold here without
+# ever being something Kandev could gate on.
 #
 # Usage:
 #   scripts/probe-claude-midturn-fold [options]
@@ -184,6 +187,22 @@ class Recorder:
                     fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+class StreamEOF:
+    """One reader thread reached EOF.
+
+    Carries whether it was the protocol (JSON) stream. A bare sentinel would be
+    indistinguishable between stdout and stderr, and the CLI routinely closes
+    stderr first — breaking the main loop there would end the probe while stdout
+    can still deliver the very frames the verdict is read from.
+    """
+
+    __slots__ = ("direction", "is_protocol")
+
+    def __init__(self, direction, is_protocol):
+        self.direction = direction
+        self.is_protocol = is_protocol
+
+
 def reader(stream, direction, rec, events, is_json):
     # readline(), not `for line in stream`: iteration fills an 8KB read-ahead
     # buffer, which arrives as one burst and flattens the timing this probe is
@@ -205,7 +224,7 @@ def reader(stream, direction, rec, events, is_json):
             continue
         entry = rec.add(direction, frame)
         events.put((entry["t_ms"], frame))
-    events.put(None)
+    events.put(StreamEOF(direction, is_json))
 
 
 def tool_use_names(frame):
@@ -249,10 +268,14 @@ def main():
         start_new_session=True,
     )
     events = queue.Queue()
-    threading.Thread(target=reader, args=(proc.stdout, "out", rec, events, True),
-                     daemon=True).start()
-    threading.Thread(target=reader, args=(proc.stderr, "err", rec, events, False),
-                     daemon=True).start()
+    readers = [
+        threading.Thread(target=reader, args=(proc.stdout, "out", rec, events, True),
+                         daemon=True),
+        threading.Thread(target=reader, args=(proc.stderr, "err", rec, events, False),
+                         daemon=True),
+    ]
+    for t in readers:
+        t.start()
 
     def send(frame, label):
         rec.add("in", frame)
@@ -312,8 +335,11 @@ def main():
                 rec.note("linger_expired")
                 break
             continue
-        if item is None:
-            break
+        if isinstance(item, StreamEOF):
+            rec.note("stream_eof", stream=item.direction)
+            if item.is_protocol:
+                break
+            continue
         t_ms, frame = item
         ftype = frame.get("type")
 
@@ -364,6 +390,12 @@ def main():
         rec.note("kill_after_stdin_close")
         _kill_process_group(proc)
         proc.wait(timeout=10)
+
+    # Drain the readers before the log is written: frames that arrived between
+    # the loop breaking and the process exiting are still being appended, and a
+    # probe that silently drops its last frames is worse than no probe.
+    for t in readers:
+        t.join(timeout=5)
 
     first_result = result_times[0] if result_times else None
     started = [t for t, s in b_lifecycle if s == "started"]

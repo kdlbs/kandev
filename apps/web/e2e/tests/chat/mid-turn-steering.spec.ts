@@ -130,10 +130,15 @@ async function waitForActiveSessionSupportsSteering(page: Page, expected: boolea
               };
             }
           ).__KANDEV_E2E_STORE__;
-          if (!store) return null;
+          // Report undefined — never false — until the session and its
+          // supports_steering field actually exist. Collapsing "not loaded yet"
+          // into false would let the flag-off assertion pass before the
+          // capability arrives, or when a regression drops the field entirely.
+          if (!store) return undefined;
           const state = store.getState();
-          const sid = state.tasks.activeSessionId ?? "";
-          return state.taskSessions.items[sid]?.supports_steering ?? false;
+          const sid = state.tasks.activeSessionId;
+          if (!sid) return undefined;
+          return state.taskSessions.items[sid]?.supports_steering;
         }),
       { timeout: 15_000 },
     )

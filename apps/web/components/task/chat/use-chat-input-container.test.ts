@@ -128,10 +128,10 @@ describe("useChatInputContainer", () => {
     });
 
     // The steer label must win: a send here is delivered into the running turn,
-    // and the generic "Continue working…" prompt would mask that.
-    expect(result.current.inputPlaceholder).not.toBe(callerPlaceholder);
-    expect(result.current.inputPlaceholder).not.toBe("Queue more instructions...");
-    expect(result.current.inputPlaceholder.length).toBeGreaterThan(0);
+    // and the generic "Continue working…" prompt would mask that. Assert the
+    // resolved chat:composerSteerPlaceholder itself — asserting only that it
+    // differs from the caller's would also pass on any other generic label.
+    expect(result.current.inputPlaceholder).toBe("Send now — delivered to the running turn");
   });
 
   it("keeps the caller placeholder when the session cannot steer", () => {

@@ -145,6 +145,22 @@ class Recorder:
                     fh.write(json.dumps(e, ensure_ascii=False) + "\n")
 
 
+class StreamEOF:
+    """One reader thread reached EOF.
+
+    Carries whether it was the protocol (JSON) stream. A bare sentinel would be
+    indistinguishable between stdout and stderr, and the bridge routinely closes
+    stderr first — breaking the main loop there would end the probe while stdout
+    can still deliver the very frames the verdict is read from.
+    """
+
+    __slots__ = ("direction", "is_protocol")
+
+    def __init__(self, direction, is_protocol):
+        self.direction = direction
+        self.is_protocol = is_protocol
+
+
 def reader(stream, direction, rec, events, is_json):
     # readline(), not iteration: iteration fills a read-ahead buffer and
     # destroys the arrival timing this probe measures.
@@ -165,7 +181,7 @@ def reader(stream, direction, rec, events, is_json):
             continue
         entry = rec.add(direction, frame=frame)
         events.put((entry["t_ms"], frame))
-    events.put(None)
+    events.put(StreamEOF(direction, is_json))
 
 
 def main():
@@ -196,10 +212,14 @@ def main():
         start_new_session=True,
     )
     events = queue.Queue()
-    threading.Thread(target=reader, args=(proc.stdout, "received", rec, events, True),
-                     daemon=True).start()
-    threading.Thread(target=reader, args=(proc.stderr, "stderr", rec, events, False),
-                     daemon=True).start()
+    readers = [
+        threading.Thread(target=reader, args=(proc.stdout, "received", rec, events, True),
+                         daemon=True),
+        threading.Thread(target=reader, args=(proc.stderr, "stderr", rec, events, False),
+                         daemon=True),
+    ]
+    for t in readers:
+        t.start()
 
     write_lock = threading.Lock()
 
@@ -284,8 +304,11 @@ def main():
                 rec.note("linger_expired")
                 break
             continue
-        if item is None:
-            break
+        if isinstance(item, StreamEOF):
+            rec.note("stream_eof", stream=item.direction)
+            if item.is_protocol:
+                break
+            continue
         t_ms, frame = item
 
         # --- agent -> client requests we must answer -----------------------
@@ -418,6 +441,12 @@ def main():
         rec.note("kill_after_stdin_close")
         _kill_process_group(proc)
         proc.wait(timeout=10)
+
+    # Drain the readers before the log is written: frames that arrived between
+    # the loop breaking and the process exiting are still being appended, and a
+    # probe that silently drops its last frames is worse than no probe.
+    for t in readers:
+        t.join(timeout=5)
 
     ra, rb = responses.get(ID_PROMPT_A), responses.get(ID_PROMPT_B)
     # Assistant text streams as chunks ("ST" + "EERED"), so concatenate with no
