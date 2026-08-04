@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { t } from "@/lib/i18n";
+import { afterAll, describe, expect, it } from "vitest";
+import { activateLocale, i18n, t } from "@/lib/i18n";
 import { getExecutorLabel } from "@/lib/executor-icons";
 import {
   EXECUTOR_TYPE_MAP,
@@ -32,6 +32,7 @@ import { getExecutorDescription } from "./executor-description";
  * PR — see the guard comment in eslint.i18n.options.mjs.
  */
 const SPRITES_DEV = "Sprites.dev";
+const SSH = "SSH";
 
 const HUB_CARD_COPY: Array<{ type: string; label: string; description: string }> = [
   { type: "local", label: "Local", description: "Run agents directly in the repository folder." },
@@ -52,7 +53,7 @@ const HUB_CARD_COPY: Array<{ type: string; label: string; description: string }>
   },
   {
     type: "ssh",
-    label: "SSH",
+    label: SSH,
     description: "Connect to a remote host over SSH and run agentctl there.",
   },
 ];
@@ -66,7 +67,7 @@ const HUB_CARD_KEYS: Record<string, { labelKey?: string; brand?: string; descrip
     },
     local_docker: { brand: "Docker", descriptionKey: "executors:hubDescriptionDocker" },
     sprites: { brand: SPRITES_DEV, descriptionKey: "executors:hubDescriptionSprites" },
-    ssh: { brand: "SSH", descriptionKey: "executors:hubDescriptionSsh" },
+    ssh: { brand: SSH, descriptionKey: "executors:hubDescriptionSsh" },
   };
 
 describe("executors hub card copy", () => {
@@ -106,7 +107,7 @@ describe("create-page executor type registry", () => {
     },
     {
       type: "ssh",
-      label: "SSH",
+      label: SSH,
       description: "Connects to a remote host over SSH and runs agentctl there.",
     },
   ];
@@ -155,7 +156,7 @@ describe("getExecutorDescription", () => {
 describe("getExecutorLabel", () => {
   it("returns brand and protocol names verbatim rather than from the catalog", () => {
     expect(getExecutorLabel("sprites")).toBe(SPRITES_DEV);
-    expect(getExecutorLabel("ssh")).toBe("SSH");
+    expect(getExecutorLabel("ssh")).toBe(SSH);
   });
 
   it("renders the translated labels unchanged", () => {
@@ -167,6 +168,24 @@ describe("getExecutorLabel", () => {
 
   it("echoes an unmapped wire value", () => {
     expect(getExecutorLabel("does-not-exist")).toBe("does-not-exist");
+  });
+
+  // The label used to be a module-scope constant. It resolves from the catalog
+  // now, so this pins that it resolves at CALL time rather than at import — the
+  // property every consumer's re-render depends on.
+  it("follows a locale switch", async () => {
+    const before = getExecutorLabel("local");
+    await activateLocale("pseudo");
+    expect(getExecutorLabel("local")).not.toBe(before);
+    expect(getExecutorLabel("local")).toBe(t("executors:typeLocal"));
+    // Brand names are not catalog values, so they are unaffected.
+    expect(getExecutorLabel("ssh")).toBe(SSH);
+    await activateLocale("en");
+    expect(getExecutorLabel("local")).toBe(before);
+  });
+
+  afterAll(async () => {
+    if (i18n.language !== "en") await activateLocale("en");
   });
 });
 

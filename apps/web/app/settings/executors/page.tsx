@@ -98,6 +98,9 @@ function ProfileCard({
   profile: ProfileWithExecutor;
   onDelete: (id: string) => void;
 }) {
+  // Subscribes so the `getExecutorLabel` badge below re-renders on a locale
+  // switch; the helper resolves at call time but does not itself notify React.
+  useTranslation();
   const router = useRouter();
   return (
     <Card

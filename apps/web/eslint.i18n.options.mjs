@@ -1309,6 +1309,16 @@ export const i18nGuardFiles = [
   //   - `PluginErrorBoundary`'s `context` prop, now in `jsx-attributes.exclude`
   //     above — it is a console.error identifier that never reaches the DOM.
   //
+  // `getExecutorLabel` returns catalog text now, so a caller that does not
+  // subscribe to i18n renders the previous locale until something else makes it
+  // re-render. Every consumer this PR owns subscribes, and
+  // `use-filter-value-options.ts` (the task sidebar's executor filter) gained
+  // `i18n.language` in its memo deps for the same reason. One consumer is left:
+  // `lib/sidebar/apply-view.ts` builds a group label from it inside the sidebar
+  // view pipeline, which this PR does not own — its labels resolve correctly on
+  // load and lag a runtime locale switch until the view recomputes. It belongs
+  // to whoever migrates `lib/sidebar`.
+  //
   // One deliberate English change, the only one in this PR: the SSH
   // running-sessions confirm read "This executor has 3 running session(s)."
   // The `(s)` is the inline-plural shape docs/i18n.md rejects — the plural rule
