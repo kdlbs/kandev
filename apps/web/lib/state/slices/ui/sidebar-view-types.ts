@@ -1,5 +1,4 @@
 export type FilterDimension =
-  | "archived"
   | "state"
   | "workflow"
   | "workflowStep"

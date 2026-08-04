@@ -160,6 +160,23 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Update deps")).toHaveCount(0);
   });
 
+  test("does not offer archived as a filter dimension", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, ["Mobile filter options"]);
+    await sheet.getByTestId("sidebar-filter-gear").click();
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(popover).toBeVisible();
+    await popover.getByTestId("filter-add-button").click();
+    await popover.getByTestId("filter-dimension-select").click();
+
+    await expect(testPage.getByRole("option", { name: "Archived", exact: true })).toHaveCount(0);
+    await expect(testPage.getByRole("option", { name: "Title", exact: true })).toBeVisible();
+    await testPage.keyboard.press("Escape");
+  });
+
   test("switching saved views swaps the filtered list in the sheet", async ({
     testPage,
     apiClient,

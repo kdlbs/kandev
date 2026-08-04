@@ -169,6 +169,20 @@ test.describe("Sidebar filter — view ordering", () => {
 });
 
 test.describe("Sidebar filter — filtering", () => {
+  test("does not offer archived as a filter dimension", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { filters } = await openWithSeed(testPage, apiClient, seedData, ["Filter options task"]);
+    await filters.addFilterRow();
+    await filters.clauseRow(0).getByTestId("filter-dimension-select").click();
+
+    await expect(testPage.getByRole("option", { name: "Archived", exact: true })).toHaveCount(0);
+    await expect(testPage.getByRole("option", { name: "Title", exact: true })).toBeVisible();
+    await testPage.keyboard.press("Escape");
+  });
+
   test("adding a title filter narrows the list live", async ({ testPage, apiClient, seedData }) => {
     const { session, filters } = await openWithSeed(testPage, apiClient, seedData, [
       "Fix auth bug",

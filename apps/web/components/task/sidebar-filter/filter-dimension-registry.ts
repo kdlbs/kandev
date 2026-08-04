@@ -37,14 +37,6 @@ export const DIMENSION_METAS: DimensionMeta[] = [
     defaultValue: true,
   },
   {
-    dimension: "archived",
-    label: "Archived",
-    valueKind: "boolean",
-    ops: ["is", "is_not"],
-    defaultOp: "is",
-    defaultValue: true,
-  },
-  {
     dimension: "hasDiff",
     label: "Has diff",
     valueKind: "boolean",

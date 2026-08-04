@@ -32,7 +32,6 @@ function createDefaultSidebarState(): UISliceState["sidebarViews"] {
 }
 
 export const KNOWN_DIMENSIONS = new Set<string>([
-  "archived",
   "state",
   "workflow",
   "workflowStep",

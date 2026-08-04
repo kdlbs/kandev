@@ -83,14 +83,6 @@ describe("applyFilters — per-dimension", () => {
     expect(out.map((t) => t.id)).toEqual(["b"]);
   });
 
-  it("filters by archived boolean", () => {
-    const tasks = [task({ id: "a", isArchived: true }), task({ id: "b" })];
-    const only = applyFilters(tasks, [C({ dimension: "archived", op: "is", value: true })]);
-    expect(only.map((t) => t.id)).toEqual(["a"]);
-    const not = applyFilters(tasks, [C({ dimension: "archived", op: "is", value: false })]);
-    expect(not.map((t) => t.id)).toEqual(["b"]);
-  });
-
   it("filters by state bucket with in / not_in", () => {
     const tasks = [
       task({ id: "a", state: "REVIEW" }),
