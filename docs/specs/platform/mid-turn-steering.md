@@ -160,18 +160,27 @@ These are narrow, accepted windows inherent to opportunistic steering over an
 asynchronous agent boundary. All are gated behind the default-off toggle.
 
 - **Acknowledgement is not delivery.** agentctl acknowledges a steer, then runs
-  the concurrent `session/prompt` on a goroutine. The handoff is armed
-  synchronously before that acknowledgement so a predecessor settling in the gap
-  is still suppressed; but if the concurrent prompt itself then fails on an agent
-  that advertised prompt queueing yet rejects the concurrent prompt (abnormal),
-  the message can be stranded with success already reported. No client-side
-  fallback can fire once the request has been accepted.
-- **The fold is decided agent-side.** The lifecycle lock closes the backend-side
-  selection/dispatch race, but the acknowledgement proves acceptance, not that
-  the agent folded. If the turn ends agent-side between generation selection and
-  the fold, the steer runs as a fresh turn tagged with the reused generation and
-  that turn's completion bookkeeping (on_turn_complete, usage) is discarded as a
-  duplicate; the message is still delivered.
+  the concurrent `session/prompt` on a goroutine. Once the request has been
+  accepted no client-side fallback can fire, so if the concurrent prompt then
+  fails on an agent that advertised prompt queueing yet rejects it (abnormal),
+  the message can be stranded with success already reported.
+- **The fold is decided agent-side, and the predecessor may settle first.** The
+  lifecycle lock closes the backend-side selection/dispatch race, but the
+  acknowledgement proves acceptance, not a fold: the predecessor turn is
+  suppressed only once the successor actually acquires (transfers) the prompt
+  gate, which happens when the async steer runs — not when it is accepted. If the
+  predecessor settles agent-side before that transfer (it naturally ends, or the
+  agent runs the steer as a fresh turn instead of folding), the steer's turn is
+  tagged with the reused generation and its completion bookkeeping
+  (on_turn_complete, usage) is discarded as a duplicate. The operator's message
+  is still delivered; only that turn's second completion is lost. This window is
+  inherent to opportunistic delivery over an async boundary and is not closable
+  from the Kandev side.
+- **Steer history ordering.** A dispatched steer's user message is appended to
+  the agent's resume history after the lifecycle lock is released (so a slow
+  history store never extends the lock). A completion can settle in that narrow
+  window, so on resume the steer message may order after the turn it folded into.
+  The durable DB transcript is unaffected; this is a resume-fidelity residual.
 - **Session replacement during a fall-through wait.** A steer that finds no
   handoff-eligible turn (e.g. a synthetic wakeup holds the gate) falls through to
   ordinary gate acquisition. If the ACP session is replaced (`session/new` /

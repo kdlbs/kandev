@@ -200,60 +200,6 @@ func TestSteerUsageCountedOnceAcrossHandoff(t *testing.T) {
 	}
 }
 
-// TestBeginSteerHandoffArmsSuppressionBeforePrompt covers the synchronous arm the
-// agentctl handler performs before it launches the async steer: arming the
-// handoff up front (while the predecessor turn is still in flight) must suppress
-// the predecessor's early settlement and hand the turn to the successor, exactly
-// as the inline arm does — and be idempotent with it. This closes the window
-// where the predecessor could settle between the steer's acknowledgement and the
-// async PromptSteer reaching beginSteerHandoff itself.
-func TestBeginSteerHandoffArmsSuppressionBeforePrompt(t *testing.T) {
-	a, fake, _ := setupHandoffFakeAgent(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	if err := a.Initialize(ctx); err != nil {
-		t.Fatalf("initialize: %v", err)
-	}
-	if _, err := a.NewSession(ctx, nil); err != nil {
-		t.Fatalf("new session: %v", err)
-	}
-	if !a.SupportsSteering() {
-		t.Fatal("advertised agent does not report steering support")
-	}
-
-	firstDone := make(chan error, 1)
-	go func() { firstDone <- a.Prompt(ctx, "predecessor", nil, 61) }()
-	awaitPromptCall(t, fake, "predecessor prompt")
-
-	// The handler arms the handoff synchronously, before the async steer runs.
-	a.BeginSteerHandoff()
-	// Idempotent: a second arm (the inline one inside PromptSteer) is harmless.
-	a.BeginSteerHandoff()
-
-	steerDone := make(chan error, 1)
-	go func() { steerDone <- a.PromptSteer(ctx, "steer", nil, 62) }()
-	awaitPromptCall(t, fake, "steer")
-	if err := awaitPromptErr(t, firstDone, "predecessor prompt"); err != nil {
-		t.Fatalf("predecessor errored after pre-armed handoff: %v", err)
-	}
-
-	fake.releasePrompts()
-	if err := <-steerDone; err != nil {
-		t.Fatalf("steer prompt: %v", err)
-	}
-
-	complete := waitForEventType(t, a, streams.EventTypeComplete)
-	if complete.PromptGeneration != 62 {
-		t.Fatalf("completion generation = %d, want the steer's 62", complete.PromptGeneration)
-	}
-	for _, event := range drainEvents(a) {
-		if event.Type == streams.EventTypeComplete && event.PromptGeneration == 61 {
-			t.Fatal("predecessor emitted a completion despite the pre-armed handoff")
-		}
-	}
-}
-
 // TestSteerPreservesPredecessorBackgroundWork proves the boundary does not sweep
 // work that was live when the turn was handed off. This is required, not
 // cosmetic: a backgrounded workload has been observed outliving both prompts and

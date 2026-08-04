@@ -346,13 +346,4 @@ type SteerablePrompter interface {
 		attachments []v1.MessageAttachment,
 		promptGeneration uint64,
 	) error
-	// BeginSteerHandoff arms the mid-turn handoff synchronously, so a caller can
-	// guarantee the predecessor's early settlement is suppressed before it
-	// launches the (asynchronous) PromptSteer. Without this, the prompt handler
-	// acknowledges the steer and only then runs PromptSteer on a goroutine — if
-	// the predecessor turn settles in that window the handoff is armed too late
-	// and its completion can be misattributed to the reused generation. No-op when
-	// steering was not negotiated or no handoff-eligible turn is in flight, and
-	// idempotent with the arm inside PromptSteer.
-	BeginSteerHandoff()
 }

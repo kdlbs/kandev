@@ -548,14 +548,6 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	// the user to approve a previous tool call while processing the new prompt.
 	s.procMgr.CancelPendingPermissions()
 
-	// Arm a steer's mid-turn handoff synchronously, before acknowledging the
-	// request and launching the async prompt below. If the predecessor turn
-	// settled in the window between the ack and the goroutine reaching
-	// beginSteerHandoff, the handoff would be armed too late and the
-	// predecessor's early completion could be attributed to the reused
-	// generation. Idempotent with the arm inside PromptSteer.
-	armSteerHandoff(adapter, req)
-
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
 	// Use context.Background() so the prompt is NOT tied to the WebSocket connection
@@ -774,18 +766,6 @@ func (s *Server) handleWSResetSession(ctx context.Context, msg *ws.Message) *ws.
 // SteerablePrompter, or a connected agent that never advertised the capability,
 // falls back to the ordinary prompt — the message still reaches the agent, just
 // at the next turn boundary, which is exactly today's behavior.
-// armSteerHandoff synchronously arms a steer's mid-turn handoff before the async
-// prompt is launched. Defined at package scope (not inline in handleWSPrompt)
-// because the handler shadows the `adapter` package with a local variable.
-func armSteerHandoff(adpt adapter.AgentAdapter, req PromptRequest) {
-	if !req.Steer {
-		return
-	}
-	if steerable, ok := adpt.(adapter.SteerablePrompter); ok && steerable.SupportsSteering() {
-		steerable.BeginSteerHandoff()
-	}
-}
-
 func promptOrSteer(
 	ctx context.Context,
 	adpt adapter.AgentAdapter,

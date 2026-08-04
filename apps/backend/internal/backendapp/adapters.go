@@ -438,6 +438,16 @@ func (a *lifecycleAdapter) PromptAgentWithDispatchCallback(ctx context.Context, 
 	}, nil
 }
 
+// Compile-time guard for the steer capability. The executor selects the steer
+// path by asserting the agent manager to its unexported
+// steerAgentWithDispatchCallback interface (internal/orchestrator/executor); that
+// assertion fails silently at runtime if this method's signature drifts,
+// disabling every production steer. Pin the exact shape here so drift is a build
+// error, not a runtime regression.
+var _ interface {
+	SteerAgentWithDispatchCallback(context.Context, string, string, []v1.MessageAttachment, bool, func()) (*executor.PromptResult, error)
+} = (*lifecycleAdapter)(nil)
+
 // SteerAgentWithDispatchCallback forwards a mid-turn steer to the lifecycle
 // manager. Without it the executor's steer path type-assertion fails and every
 // eligible steer returns ErrPromptDispatchCallbackUnsupported, so the production
