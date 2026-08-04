@@ -47,6 +47,13 @@ The fixed-width LSP popover currently renders server-controlled project-progress
 - `pnpm run typecheck` and focused ESLint both passed; `git diff --check` passed.
 - Managed E2E runs tore down their isolated backends and repositories. No temporary production code, fixture mode, or tracked build artifact remains.
 
+## PR Review Fixup
+
+- Codex review on `adae0deb663b99f0b06b913f67943b2637f2b126` found that a bridge close during asynchronous initialization could leave the status at `starting`. Commit `6779f2cfaa9f4d1f3f6231667d4e5299156f38ee` now reports the close as an error or mapped unavailable state and adds the pending-initialize regression.
+- The follow-up Codex review found that definition navigation accepted only LSP `Location` results. Commit `e0058e8440a225c9809a9ac8b350dec41ca0bc8c` normalizes `LocationLink` results with `targetUri` and `targetSelectionRange`; provider tests cover array, scalar, and mixed response shapes.
+- Review-fixup verification passed: all 8 LSP unit files (80 tests), web typecheck, focused ESLint with zero warnings, and `git diff --check`.
+- After the remediation push, PR #1863 was open, ready, and mergeable on exact head `e0058e8440a225c9809a9ac8b350dec41ca0bc8c`, with 0 failed and 15 pending checks, 0 unresolved or hidden review threads, and 0 actionable issue comments. The LocationLink thread was replied to and resolved.
+
 ## Implementation Waves And Parallel Candidates
 
 - [x] [task-01-contain-progress-text](task-01-contain-progress-text.md) — Wave 1, completed
