@@ -111,6 +111,12 @@ export const noLiteralStringOptions = {
       "to",
       "htmlFor",
       "data-.*",
+      // `PluginErrorBoundary`'s console-log identifier (`slot "task-sidebar"`,
+      // `route "/plugins/hello"`). It is written to console.error in
+      // componentDidCatch and never reaches the DOM, so it is a developer
+      // diagnostic rather than copy. The only literal `context=` values in the
+      // tree are that boundary's four call sites.
+      "context",
       // Identifiers and prefixes the caller composes into ids/testids.
       "id",
       "k",
@@ -1200,4 +1206,133 @@ export const i18nGuardFiles = [
   "app/settings/automations/page.tsx",
   "app/settings/workspace/[[]id[]]/automations/**/*.tsx",
   "hooks/domains/settings/use-automation-runs.ts",
+  // Settings → Plugins, Settings → Account, and the plural
+  // `app/settings/executors/` tree (the executor list, the typed create
+  // routes, and the SSH connection pages). Copy lives in two new namespaces,
+  // `plugins` and `account`, plus additions to `executors`.
+  //
+  // `components/plugins/**` is reached from OUTSIDE Settings — the app
+  // sidebar, the mobile menu sheet, the chat top bar, the chat input, the task
+  // sidebar and the kanban top bar all render `PluginSlot`, and
+  // `PluginModalHost` mounts at the app root. It is listed here because this
+  // migration owns the Plugins feature end to end, not because those routes
+  // are migrated; only the two strings those files own (`PluginRouteFallback`
+  // and the mobile nav heading) went through `t()`. Everything else they
+  // render — a slot component, a modal title, a nav item's label — is
+  // plugin-authored and is third-party data, not our copy.
+  //
+  // Nine entries hold no JSX, or none that carries copy, so `mode: "jsx-only"`
+  // never inspects them and the string count reported them as ZERO while they
+  // owned copy that reaches the user. Each records that it was read by eye,
+  // and only the pseudo-locale can prove it stays that way:
+  //   - `app/settings/executors/new/[type]/executor-types.ts` — reported 0 and
+  //     carried ELEVEN strings, the six type labels and their descriptions.
+  //   - `lib/executor-icons.ts` and `components/settings/executor-description.ts`
+  //     — plain functions returning copy, the shape one step out from a config
+  //     table and just as invisible.
+  //   - `components/settings/plugins/use-plugin-actions.ts` (eight toasts),
+  //     `use-plugin-config-form.ts` (five toasts plus the required-fields
+  //     reason), `lib/plugins/sync-summary.ts` (the sync toast), and the three
+  //     `hooks/domains/plugins/*.ts` error fallbacks. All import the
+  //     module-level `t` rather than the hook, so each resolves when its
+  //     callback fires and stays out of the dependency array.
+  //   - `app/settings/executors/new/[type]/ssh-config.ts` carries no copy at
+  //     all (snake_case config mapping); it is listed to pin that.
+  //
+  // This PR also closes the residual #2218 recorded against it:
+  // `validateMcpPolicy` in `profile-edit/mcp-policy-card.tsx` returned English
+  // ("Invalid JSON", "MCP policy must be a JSON object") because its only
+  // callers were the un-migrated plural tree. It now returns catalog keys and
+  // the card's prop is `mcpPolicyErrorKey`, matching the local validator in
+  // `app/settings/executor/[id]/page.tsx`.
+  //
+  // `src/settings-routes.tsx` is listed for the first time. docs/i18n.md's
+  // "Copy that belongs to no directory" rule says the LAST area to migrate
+  // adds it, because allowlisting it earlier claims a completeness nobody has:
+  // the two Account routes were the final inline English entries in
+  // `SETTINGS_ROUTES`, so every entry in that table now resolves from a
+  // catalog. Read the entry as a claim about that FILE, not about all of
+  // Settings — `app/settings/automations/page.tsx`,
+  // `app/settings/integrations/page.tsx` and `components/settings/agent-card.tsx`
+  // still hold English and belong to their own migrations. They render no
+  // route-table copy, which is why they do not block this entry.
+  //
+  // THREE surfaces describe the same six executor types and had already
+  // drifted from one another: the hub cards use the imperative mood ("Run
+  // agents directly…"), while the create and edit headers use the third person
+  // ("Runs agents directly…") — and the edit header's SSH sentence differs
+  // from the create header's again. Sentences that are byte-identical share a
+  // key (the create page reuses `executors:description*`, which
+  // `/settings/executor/:id` already owned); the ones that differ keep their
+  // own. Folding them together would have rewritten shipping English on two of
+  // the three with every gate green.
+  // `components/settings/executor-copy.test.ts` pins all three tables
+  // byte-for-byte, and `account/account-route-copy.test.ts` does the same for
+  // the two route headers. De-duplicating the tables is a behaviour change and
+  // belongs in its own PR.
+  //
+  // Deliberately left in English, none of it copy:
+  //   - The executor type keys `local` / `worktree` / `local_docker` /
+  //     `remote_docker` / `sprites` / `ssh`. They are the persisted enum, the
+  //     create route's path segment, and a `===` comparison in four places.
+  //     The `exec-*` executorIds are backend row ids. Only the labels beside
+  //     them are copy.
+  //   - The brand and protocol names `Docker`, `Sprites.dev` and `SSH` when
+  //     they ARE the whole label. They read the same in every locale (the
+  //     guard's own `words.exclude` lists all three), and keeping them out of
+  //     the catalog stops the pseudo-locale transliterating a name the user
+  //     must match against their SSH config or Sprites dashboard.
+  //   - Every SSH fingerprint and known-hosts value. `ssh-fingerprint-trust-block`
+  //     is a security surface: the user compares those strings
+  //     character-for-character against what their own host reports, so both
+  //     the observed and the pinned fingerprint are interpolated as values.
+  //   - The SSH example values `prod`, `dev.example.com`, `22`, `ubuntu`,
+  //     `~/.ssh/id_ed25519` and `bastion.example.com`, and the
+  //     `ssh-agent (SSH_AUTH_SOCK)` option — a program name plus the
+  //     environment variable it reads. `My VPS` beside them IS copy and does
+  //     go through `t()`. `~/.ssh/config`, `$PATH`, `.tar.gz` and `index.json`
+  //     are interpolated into their sentences for the same reason.
+  //   - The throw in `ssh-connection-card`'s `handleSave`. It is unreachable
+  //     while `canSave` gates the button and it signals the settings save
+  //     coordinator, not the user — the same shape docs/i18n.md records for
+  //     the migrated GitHub and Jira settings.
+  //   - Plugin ids, versions, manifest keys (`config_schema`), permission
+  //     scopes (`events:*`, `read:*`, `write:*`), webhook keys, marketplace
+  //     source URLs, and the raw manifest JSON dump. Those are the contract.
+  //     A plugin's display name, description, categories, icon, config-field
+  //     labels and modal titles come from its manifest or an untrusted
+  //     index.json, so they are third-party data — interpolated as values,
+  //     never written into a message.
+  //   - Account data: emails, usernames, user agents, IP addresses, and every
+  //     API token VALUE, which never passes through `t()` at all. Token names
+  //     are user data; only the column headers and role labels are copy.
+  //   - `PluginErrorBoundary`'s `context` prop, now in `jsx-attributes.exclude`
+  //     above — it is a console.error identifier that never reaches the DOM.
+  //
+  // One deliberate English change, the only one in this PR: the SSH
+  // running-sessions confirm read "This executor has 3 running session(s)."
+  // The `(s)` is the inline-plural shape docs/i18n.md rejects — the plural rule
+  // cannot be expressed at the call site in a language with three or six forms
+  // — so it is now `_one`/`_other` and reads "1 running session" /
+  // "3 running sessions".
+  //
+  // Four dates moved off `toLocaleString()` onto `lib/i18n/formats`'
+  // `formatDateTime`, and the marketplace star count off `toLocaleString()`
+  // onto `formatNumber`, so they follow the active locale rather than the
+  // browser's — the same call `storage-quarantine.ts` made.
+  "app/settings/executors/**/*.{ts,tsx}",
+  "components/settings/account/**/*.{ts,tsx}",
+  "components/settings/executor-description.ts",
+  "components/settings/plugins/**/*.{ts,tsx}",
+  "components/settings/ssh-agent-readiness-card.tsx",
+  "components/settings/ssh-connection-card.tsx",
+  "components/settings/ssh-connection-form.tsx",
+  "components/settings/ssh-fingerprint-trust-block.tsx",
+  "components/settings/ssh-sessions-card.tsx",
+  "components/settings/ssh-settings.tsx",
+  "components/plugins/**/*.{ts,tsx}",
+  "hooks/domains/plugins/*.ts",
+  "lib/executor-icons.ts",
+  "lib/plugins/sync-summary.ts",
+  "src/settings-routes.tsx",
 ];

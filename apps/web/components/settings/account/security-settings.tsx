@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
@@ -15,8 +16,10 @@ import {
   revokeSession,
   type AuthSession,
 } from "@/lib/api/domains/auth-api";
+import { formatDateTime } from "@/lib/i18n/formats";
 
 function ChangePasswordCard() {
+  const { t } = useTranslation();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +37,7 @@ function ChangePasswordCard() {
       setNext("");
       setSuccess(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not change password.");
+      setError(err instanceof ApiError ? err.message : t("account:couldNotChangePassword"));
     } finally {
       setSubmitting(false);
     }
@@ -44,14 +47,14 @@ function ChangePasswordCard() {
     <Card data-testid="account-security-password-card">
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <IconKey className="h-4 w-4" /> Password
+          <IconKey className="h-4 w-4" /> {t("account:password")}
         </CardTitle>
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-3 max-w-sm" onSubmit={(e) => void onSubmit(e)}>
           <div className="flex flex-col gap-1">
             <label htmlFor="account-current-password" className="text-xs text-muted-foreground">
-              Current password
+              {t("account:currentPassword")}
             </label>
             <Input
               id="account-current-password"
@@ -63,7 +66,7 @@ function ChangePasswordCard() {
           </div>
           <div className="flex flex-col gap-1">
             <label htmlFor="account-new-password" className="text-xs text-muted-foreground">
-              New password
+              {t("account:newPassword")}
             </label>
             <Input
               id="account-new-password"
@@ -81,7 +84,7 @@ function ChangePasswordCard() {
           )}
           {success && (
             <p className="text-xs text-muted-foreground" data-testid="account-password-success">
-              Password updated.
+              {t("account:passwordUpdated")}
             </p>
           )}
           <Button
@@ -90,7 +93,7 @@ function ChangePasswordCard() {
             disabled={submitting}
             data-testid="account-password-submit"
           >
-            {submitting ? "Saving..." : "Change password"}
+            {submitting ? t("account:saving") : t("account:changePassword")}
           </Button>
         </form>
       </CardContent>
@@ -99,6 +102,7 @@ function ChangePasswordCard() {
 }
 
 function useSessionsList() {
+  const { t } = useTranslation();
   const [sessions, setSessions] = useState<AuthSession[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,9 +114,9 @@ function useSessionsList() {
       setSessions(res.sessions);
       setLoaded(true);
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Failed to load sessions.");
+      setError(err instanceof ApiError ? err.message : t("account:failedToLoadSessions"));
     }
-  }, []);
+  }, [t]);
 
   useEffect(() => {
     void reload();
@@ -122,6 +126,7 @@ function useSessionsList() {
 }
 
 function SessionsCard() {
+  const { t } = useTranslation();
   const { sessions, loaded, error, reload } = useSessionsList();
 
   const onRevoke = async (id: string) => {
@@ -133,7 +138,7 @@ function SessionsCard() {
     <Card data-testid="account-sessions-card">
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
-          <IconDevices className="h-4 w-4" /> Active sessions
+          <IconDevices className="h-4 w-4" /> {t("account:activeSessions")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -144,17 +149,17 @@ function SessionsCard() {
         )}
         {!loaded && !error && (
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Spinner className="size-4" /> Loading sessions...
+            <Spinner className="size-4" /> {t("account:loadingSessions")}
           </div>
         )}
         {loaded && sessions.length > 0 && (
           <Table data-testid="account-sessions-table">
             <TableHeader>
               <TableRow>
-                <TableHead>Device</TableHead>
-                <TableHead>IP</TableHead>
-                <TableHead>Last seen</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
+                <TableHead>{t("account:device")}</TableHead>
+                <TableHead>{t("account:ipAddress")}</TableHead>
+                <TableHead>{t("account:lastSeen")}</TableHead>
+                <TableHead className="text-right">{t("account:actions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -164,14 +169,12 @@ function SessionsCard() {
                     {session.user_agent}
                     {session.current && (
                       <Badge variant="default" className="ml-2 text-[10px]">
-                        This device
+                        {t("account:thisDevice")}
                       </Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-xs">{session.ip}</TableCell>
-                  <TableCell className="text-xs">
-                    {new Date(session.last_seen_at).toLocaleString()}
-                  </TableCell>
+                  <TableCell className="text-xs">{formatDateTime(session.last_seen_at)}</TableCell>
                   <TableCell className="text-right">
                     {!session.current && (
                       <Button
@@ -181,7 +184,7 @@ function SessionsCard() {
                         onClick={() => void onRevoke(session.id)}
                         data-testid="account-sessions-revoke"
                       >
-                        Sign out
+                        {t("account:signOut")}
                       </Button>
                     )}
                   </TableCell>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Switch } from "@kandev/ui/switch";
@@ -22,6 +23,7 @@ import { usePluginActions } from "./use-plugin-actions";
  * flag by the page-level default export.
  */
 export function PluginsSettings() {
+  const { t } = useTranslation();
   const list = usePlugins();
   const actions = usePluginActions();
   const autoUpdate = useAutoUpdateSettings();
@@ -43,8 +45,8 @@ export function PluginsSettings() {
 
   return (
     <SettingsPageTemplate
-      title="Plugins"
-      description="Browse the marketplace, then install, enable, disable, and uninstall kandev plugins."
+      title={t("common:plugins")}
+      description={t("plugins:settingsDescription")}
       isDirty={false}
       saveStatus="idle"
       onSave={() => undefined}
@@ -57,10 +59,10 @@ export function PluginsSettings() {
             data-testid="plugins-tab-installed"
             className="cursor-pointer"
           >
-            Installed
+            {t("plugins:tabInstalled")}
           </TabsTrigger>
           <TabsTrigger value="browse" data-testid="plugins-tab-browse" className="cursor-pointer">
-            Browse
+            {t("plugins:tabBrowse")}
           </TabsTrigger>
         </TabsList>
 
@@ -116,12 +118,13 @@ function InstalledTab({
   updatingId,
   onUpdate,
 }: InstalledTabProps) {
+  const { t } = useTranslation();
   return (
     <>
       <GlobalAutoUpdateToggle settings={autoUpdate} />
 
       <div className="flex items-center justify-between gap-2">
-        <div className="text-sm font-medium text-foreground">Installed plugins</div>
+        <div className="text-sm font-medium text-foreground">{t("plugins:installedPlugins")}</div>
         <div className="flex items-center gap-2">
           <Button
             data-testid="plugins-sync-button"
@@ -131,14 +134,14 @@ function InstalledTab({
             className="cursor-pointer"
           >
             <IconRefresh className={`h-4 w-4 ${actions.syncBusy ? "animate-spin" : ""}`} />
-            Sync
+            {t("plugins:sync")}
           </Button>
           <Button
             data-testid="install-plugin-trigger"
             onClick={actions.openInstall}
             className="cursor-pointer"
           >
-            Install plugin
+            {t("plugins:installPlugin")}
           </Button>
         </div>
       </div>
@@ -178,6 +181,7 @@ function GlobalAutoUpdateToggle({
 }: {
   settings: ReturnType<typeof useAutoUpdateSettings>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-border/70 bg-background p-4">
       <div className="min-w-0 space-y-1">
@@ -185,12 +189,9 @@ function GlobalAutoUpdateToggle({
           htmlFor="plugins-auto-update-default"
           className="text-sm font-medium text-foreground cursor-pointer"
         >
-          Automatically update plugins
+          {t("plugins:autoUpdateTitle")}
         </label>
-        <p className="text-xs text-muted-foreground">
-          Check the marketplace periodically and install newer versions of active plugins. Applies
-          to every plugin unless overridden per plugin below.
-        </p>
+        <p className="text-xs text-muted-foreground">{t("plugins:autoUpdateDescription")}</p>
       </div>
       <Switch
         id="plugins-auto-update-default"
@@ -221,6 +222,7 @@ function PluginList({
   updatingId,
   onUpdate,
 }: PluginListProps) {
+  const { t } = useTranslation();
   const { items, loaded, loading, error } = list;
 
   if (error) {
@@ -234,7 +236,7 @@ function PluginList({
   if (!loaded && loading) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-        Loading plugins...
+        {t("plugins:loadingPlugins")}
       </div>
     );
   }
@@ -242,7 +244,7 @@ function PluginList({
   if (loaded && items.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-border/70 p-6 text-sm text-muted-foreground">
-        No plugins yet. Install one from the Browse tab, or upload a package.
+        {t("plugins:noPluginsYet")}
       </div>
     );
   }

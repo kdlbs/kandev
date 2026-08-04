@@ -22,9 +22,12 @@ describe("executor icons", () => {
   });
 
   it("returns human-readable labels for known executor types", () => {
+    expect(getExecutorLabel("local")).toBe("Local");
+    expect(getExecutorLabel("worktree")).toBe("Worktree");
     expect(getExecutorLabel("local_docker")).toBe("Local Docker");
     expect(getExecutorLabel("remote_docker")).toBe("Remote Docker");
     expect(getExecutorLabel("sprites")).toBe("Sprites.dev");
+    expect(getExecutorLabel("ssh")).toBe("SSH");
     expect(getExecutorLabel("does-not-exist")).toBe("does-not-exist");
   });
 });
