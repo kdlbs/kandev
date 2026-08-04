@@ -102,11 +102,47 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  /**
+   * Wait for the session chat panel to be visible.
+   *
+   * When multiple session tabs are open, multiple session-chat panels exist in
+   * the DOM but only the active one is visible. Use :visible to avoid matching
+   * a hidden background panel (which would cause the wait to time out).
+   *
+   * Under CI shard load the freshly-navigated task page can be slow to hydrate:
+   * the SSR boot payload + React mount + WS connect sequence races, and a single
+   * hard `waitFor` occasionally exceeds its budget before the chat panel mounts.
+   * Reloading re-drives SSR hydration and reliably recovers, so instead of one
+   * fixed wait we poll with a bounded reload-and-retry loop (same recovery shape
+   * as `waitForChatIdle`). The fast path stays instant when the chat is already
+   * visible.
+   */
   async waitForLoad(timeout = 15_000) {
-    // When multiple session tabs are open, multiple session-chat panels exist in
-    // the DOM but only the active one is visible. Use :visible to avoid matching
-    // a hidden background panel (which would cause the wait to time out).
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    const chat = this.activeChat();
+    // Fast path: already foregrounded (common case, no reload cost).
+    if (await chat.isVisible()) return;
+
+    const attemptTimeout = Math.min(timeout, Math.max(5_000, Math.floor(timeout / 2)));
+    const start = Date.now();
+    let lastReloadAt = start;
+
+    while (Date.now() - start < timeout) {
+      const remaining = timeout - (Date.now() - start);
+      const now = Date.now();
+      // Re-drive SSR hydration once per attemptTimeout slice while budget remains
+      // for the reloaded page to settle.
+      if (now - lastReloadAt >= attemptTimeout && remaining > attemptTimeout) {
+        lastReloadAt = now;
+        await this.page.reload();
+      }
+      await chat
+        .waitFor({ state: "visible", timeout: Math.min(attemptTimeout, remaining) })
+        .catch(() => undefined);
+      if (await chat.isVisible()) return;
+    }
+
+    // Final bounded check: still throws on a genuinely stuck page.
+    await chat.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
   /**
