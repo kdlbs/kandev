@@ -754,6 +754,15 @@ func isTimeoutError(err error) bool {
 // from ensureSessionRunning, before executor.PromptWithDispatchCallback ever
 // runs, so retrying here cannot double-send a prompt the agent already
 // accepted.
+//
+// ResumeTaskSession and waitForSessionReady failures return origErr: neither
+// step ever reaches PromptTask, so the original pre-dispatch error is still
+// the only meaningful signal. Once the retry's own PromptTask call runs,
+// though, that call IS a real dispatch attempt — its error is authoritative
+// and takes over from origErr, so the caller's isAgentReportedError check
+// still fires correctly (e.g. the retry failing with a wrapped
+// lifecycle.ErrAgentReported must suppress createPromptErrorMessage, not get
+// masked by the unrelated original timeout).
 func (h *MessageHandlers) handlePromptWithResume(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -787,7 +796,7 @@ func (h *MessageHandlers) handlePromptWithResume(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return origErr
+		return err
 	}
 	return nil
 }
