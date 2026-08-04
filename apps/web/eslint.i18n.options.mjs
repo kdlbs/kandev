@@ -694,7 +694,13 @@ export const i18nGuardFiles = [
   // union, and the `configure_session` rule `operation`s. Workflow and step
   // NAMES are user data throughout and are always interpolated as values,
   // never built into a message by concatenation.
-  "app/settings/workspace/[id]/workflows/**/*.{ts,tsx}",
+  // `[[]id[]]`, not `[id]`: glob brackets are a character class, so the
+  // unescaped form matches nothing and the entry silently guards no files.
+  // This one and the two under Workspaces were escaped by #2247, which hit the
+  // same trap on its own dynamic route. `pnpm lint` is unchanged by the repair,
+  // so these directories were always clean — just unguarded. See docs/i18n.md
+  // ("An entry can be born dead").
+  "app/settings/workspace/[[]id[]]/workflows/**/*.{ts,tsx}",
   "app/settings/workspace/use-workflow-creation.ts",
   "app/settings/workspace/workspace-workflows-client.tsx",
   "app/settings/workspace/workspace-workflows-dialogs.tsx",
@@ -933,8 +939,8 @@ export const i18nGuardFiles = [
   // workspace's own name, so there is no translatable type-to-confirm token
   // here to break; the name travels into the sentence as an interpolated value.
   "app/settings/workspace/page.tsx",
-  "app/settings/workspace/[id]/page.tsx",
-  "app/settings/workspace/[id]/repositories/page.tsx",
+  "app/settings/workspace/[[]id[]]/page.tsx",
+  "app/settings/workspace/[[]id[]]/repositories/page.tsx",
   "app/settings/workspace/workspace-edit-client.tsx",
   "app/settings/workspace/workspace-not-found-card.tsx",
   "app/settings/workspace/workspace-repositories-client.tsx",
