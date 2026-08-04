@@ -1,13 +1,16 @@
 "use client";
 
-import { useContext } from "react";
-import { QuickTerminalContext } from "@/components/quick-terminal/quick-terminal-provider";
+import { useCallback } from "react";
+import { useAppStore } from "@/components/state-provider";
+import { captureQuickChatLauncherFocus } from "@/components/quick-chat/quick-chat-focus";
 
-/** Opens the shared ephemeral host-shell dialog. */
-export function useQuickTerminalLauncher() {
-  const openQuickTerminal = useContext(QuickTerminalContext);
-  if (!openQuickTerminal) {
-    throw new Error("useQuickTerminalLauncher must be used within QuickTerminalProvider");
-  }
-  return openQuickTerminal;
+/** Opens or re-selects a workspace's terminal in the shared Quick Chat surface. */
+export function useQuickTerminalLauncher(workspaceId?: string | null) {
+  const reuseOrCreateQuickTerminal = useAppStore((state) => state.reuseOrCreateQuickTerminal);
+
+  return useCallback(() => {
+    if (!workspaceId) return;
+    captureQuickChatLauncherFocus();
+    reuseOrCreateQuickTerminal(workspaceId);
+  }, [reuseOrCreateQuickTerminal, workspaceId]);
 }

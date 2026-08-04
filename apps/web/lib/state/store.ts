@@ -344,6 +344,11 @@ export type AppState = KanbanSlice & {
   invalidateSystemHealth: () => void;
   openQuickChat: UIA["openQuickChat"];
   addQuickChatSession: UIA["addQuickChatSession"];
+  reuseOrCreateQuickTerminal: UIA["reuseOrCreateQuickTerminal"];
+  createQuickTerminal: UIA["createQuickTerminal"];
+  updateQuickTerminal: UIA["updateQuickTerminal"];
+  activateQuickTerminal: UIA["activateQuickTerminal"];
+  removeQuickTerminal: UIA["removeQuickTerminal"];
   syncQuickChatSessions: UIA["syncQuickChatSessions"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
@@ -534,7 +539,8 @@ export type AppState = KanbanSlice & {
 // only have one piece of it (e.g. update notification settings from the
 // settings boot payload) must be able to pass a partial `system` object
 // without fabricating placeholder values for the rest.
-export type HydrationState = Omit<Partial<AppState>, "system"> & {
+export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
+  quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
 };
 

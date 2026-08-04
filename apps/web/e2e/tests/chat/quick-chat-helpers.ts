@@ -28,7 +28,8 @@ export async function openQuickChatSetup(page: Page, navigateHome = true): Promi
   // If a stale session tab is showing, click "+" to start a fresh setup form.
   const setup = dialog.getByTestId("quick-chat-setup");
   if (!(await setup.isVisible({ timeout: 1_000 }).catch(() => false))) {
-    await dialog.getByLabel("Start new chat").click();
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await page.getByTestId("quick-chat-new-agent").click();
   }
   await expect(setup).toBeVisible({ timeout: 5_000 });
   return dialog;

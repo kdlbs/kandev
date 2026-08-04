@@ -7,6 +7,8 @@ import { defaultState, mergeInitialState } from "@/lib/state/default-state";
 import type { AppState } from "@/lib/state/store";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 
+const TERMINAL_TAB_ID = "terminal-1";
+
 function makeDraft(): AppState {
   // hydrateUI only touches UI-slice fields; an empty object cast satisfies
   // the rest without dragging the full AppState shape into this test.
@@ -125,7 +127,9 @@ describe("hydrateUI — typed quick chat sessions", () => {
 
     expect(result.quickChat.sessions.map((s) => s.name)).toEqual(["Renamed A", "Original B"]);
   });
+});
 
+describe("hydrateUI — quick chat lifecycle", () => {
   it("clears stale quick chat sessions when the backend returns none", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
@@ -134,6 +138,10 @@ describe("hydrateUI — typed quick chat sessions", () => {
         sessions: [
           { sessionId: "stale-session", workspaceId: "ws-1", name: "Stale", kind: "chat" },
         ],
+        terminalTabs: [],
+        activeKind: "conversation",
+        activeTerminalTabId: null,
+        lastTerminalTabIdByWorkspace: {},
       };
       hydrateUI(draft, {
         quickChat: {
@@ -147,6 +155,41 @@ describe("hydrateUI — typed quick chat sessions", () => {
     expect(result.quickChat.sessions).toEqual([]);
     expect(result.quickChat.isOpen).toBe(false);
     expect(result.quickChat.activeSessionId).toBeNull();
+  });
+
+  it("preserves browser-local terminal tabs when server conversations resync", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat = {
+        isOpen: true,
+        activeSessionId: "chat-1",
+        sessions: [{ sessionId: "chat-1", workspaceId: "ws-1", kind: "chat" }],
+        terminalTabs: [
+          {
+            tabId: TERMINAL_TAB_ID,
+            workspaceId: "ws-1",
+            sessionId: "pty-1",
+            sequence: 1,
+            status: "running",
+          },
+        ],
+        activeKind: "terminal",
+        activeTerminalTabId: TERMINAL_TAB_ID,
+        lastTerminalTabIdByWorkspace: { "ws-1": TERMINAL_TAB_ID },
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.sessions).toEqual([]);
+    expect(result.quickChat.terminalTabs).toHaveLength(1);
+    expect(result.quickChat.activeKind).toBe("terminal");
+    expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
+    expect(result.quickChat.isOpen).toBe(true);
   });
 });
 

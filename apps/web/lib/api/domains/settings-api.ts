@@ -327,6 +327,11 @@ export type AgentLoginSession = {
   exit_code?: number;
 };
 
+export type HostShellStartOptions = ApiRequestOptions & {
+  /** Stable browser-local identity used to isolate Quick Chat terminal tabs. */
+  clientId?: string;
+};
+
 export async function startAgentLogin(
   agentName: string,
   size: { cols: number; rows: number },
@@ -377,16 +382,21 @@ export function agentLoginStreamUrl(sessionID: string): string {
  */
 export async function startHostShell(
   size: { cols: number; rows: number },
-  options?: ApiRequestOptions,
+  options?: HostShellStartOptions,
 ): Promise<AgentLoginSession> {
+  const { clientId, ...requestOptions } = options ?? {};
   return fetchJson<AgentLoginSession>("/api/v1/host-shell/start", {
-    ...options,
+    ...requestOptions,
     init: {
       method: "POST",
-      body: JSON.stringify(size),
-      ...(options?.init ?? {}),
+      body: JSON.stringify({ ...size, ...(clientId ? { client_id: clientId } : {}) }),
+      ...(requestOptions.init ?? {}),
     },
   });
+}
+
+export async function getAgentLoginStatus(sessionID: string): Promise<AgentLoginSession> {
+  return fetchJson<AgentLoginSession>(`/api/v1/agent-login/sessions/${sessionID}/status`);
 }
 
 export async function createCustomTUIAgent(

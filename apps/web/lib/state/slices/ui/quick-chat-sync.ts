@@ -104,10 +104,38 @@ export function removeQuickChatSessionsForTask(
  * local tab close does: fall back to another tab in the same workspace, and
  * close the modal only when nothing is left to show.
  */
+function preserveTerminalSelection(
+  state: QuickChatState,
+  sessions: QuickChatSession[],
+): QuickChatState | null {
+  if (state.activeKind !== "terminal") return null;
+  const active = state.terminalTabs.find((tab) => tab.tabId === state.activeTerminalTabId);
+  if (active) return { ...state, sessions };
+
+  const previousWorkspaceId = state.terminalTabs.find(
+    (tab) => tab.tabId === state.activeTerminalTabId,
+  )?.workspaceId;
+  const terminal = state.terminalTabs.find(
+    (tab) => !previousWorkspaceId || tab.workspaceId === previousWorkspaceId,
+  );
+  if (!terminal) return null;
+  return {
+    ...state,
+    sessions,
+    activeTerminalTabId: terminal.tabId,
+    lastTerminalTabIdByWorkspace: {
+      ...state.lastTerminalTabIdByWorkspace,
+      [terminal.workspaceId]: terminal.tabId,
+    },
+  };
+}
+
 function withValidActiveSession(
   state: QuickChatState,
   sessions: QuickChatSession[],
 ): QuickChatState {
+  const terminalSelection = preserveTerminalSelection(state, sessions);
+  if (terminalSelection) return terminalSelection;
   const active = state.activeSessionId;
   // No tab was ever selected: leave it unset rather than silently promoting one
   // on a background resync. Same invariant `hydrateUI` guards on.
@@ -115,15 +143,28 @@ function withValidActiveSession(
   if (sessions.some((session) => session.sessionId === active)) {
     return { ...state, sessions };
   }
-  const previousWorkspaceId = state.sessions.find(
-    (session) => session.sessionId === active,
-  )?.workspaceId;
+  const previousWorkspaceId =
+    state.sessions.find((session) => session.sessionId === active)?.workspaceId ??
+    state.terminalTabs.find((tab) => tab.tabId === state.activeTerminalTabId)?.workspaceId;
   const fallback =
     sessions.find((session) => session.workspaceId === previousWorkspaceId) ?? sessions[0];
+  const terminalFallback = state.terminalTabs.find(
+    (tab) => tab.workspaceId === previousWorkspaceId,
+  );
+  if (!fallback && terminalFallback) {
+    return {
+      ...state,
+      sessions,
+      activeKind: "terminal",
+      activeTerminalTabId: terminalFallback.tabId,
+      isOpen: state.isOpen,
+    };
+  }
   return {
     ...state,
     sessions,
     activeSessionId: fallback?.sessionId ?? null,
+    activeKind: "conversation",
     isOpen: fallback ? state.isOpen : false,
   };
 }

@@ -102,6 +102,51 @@ func TestStart_IdempotentPerAgent(t *testing.T) {
 	}
 }
 
+func TestStartWithKey_SeparatesUniquenessFromPublicAgentID(t *testing.T) {
+	mgr := newTestManager(t, nil)
+
+	first, err := mgr.StartWithKey("_host_shell:tab-a", "_host_shell", []string{"sh", "-c", "sleep 30"}, 80, 24)
+	if err != nil {
+		t.Fatalf("first start: %v", err)
+	}
+	second, err := mgr.StartWithKey("_host_shell:tab-b", "_host_shell", []string{"sh", "-c", "sleep 30"}, 80, 24)
+	if err != nil {
+		t.Fatalf("second start: %v", err)
+	}
+	t.Cleanup(func() {
+		first.stop()
+		second.stop()
+	})
+
+	if first.ID == second.ID {
+		t.Fatalf("distinct manager keys reused session %q", first.ID)
+	}
+	if first.AgentID != "_host_shell" || second.AgentID != "_host_shell" {
+		t.Fatalf("public agent ids = %q and %q, want _host_shell", first.AgentID, second.AgentID)
+	}
+
+	repeated, err := mgr.StartWithKey("_host_shell:tab-a", "_host_shell", []string{"sh", "-c", "sleep 30"}, 80, 24)
+	if !errors.Is(err, ErrSessionAlreadyRunning) {
+		t.Fatalf("repeated start err = %v, want ErrSessionAlreadyRunning", err)
+	}
+	if repeated.ID != first.ID {
+		t.Fatalf("repeated start id = %q, want %q", repeated.ID, first.ID)
+	}
+
+	first.stop()
+	deadline := time.After(3 * time.Second)
+	for mgr.GetByID(first.ID) != nil {
+		select {
+		case <-deadline:
+			t.Fatal("first session was not removed from manager")
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	if sibling := mgr.GetByID(second.ID); sibling == nil || !sibling.Status().Running {
+		t.Fatal("cleaning up one internal key removed or stopped its sibling")
+	}
+}
+
 func TestStart_EmptyCommand(t *testing.T) {
 	mgr := newTestManager(t, nil)
 	_, err := mgr.Start("test-agent", nil, 80, 24)

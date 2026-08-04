@@ -3,10 +3,10 @@
 // browser-based or token-prompt auth flows without shelling into the
 // container.
 //
-// Sessions are keyed by agent ID — at most one login PTY per agent runs at a
-// time, since concurrent logins for the same agent would race on the same
-// HOME dotfile. The session terminates when the command exits, on idle
-// timeout, or on explicit Stop.
+// Sessions are keyed by an internal uniqueness key — at most one login PTY per
+// key runs at a time. Normal agent logins use the agent ID as that key, while
+// callers that own separate logical sessions (such as host-shell tabs) can
+// provide a bounded key without changing the public AgentID.
 package loginpty
 
 import (
@@ -47,7 +47,7 @@ var (
 // Manager owns active login sessions and dispatches lifecycle callbacks.
 type Manager struct {
 	mu       sync.Mutex
-	sessions map[string]*Session // key: agentID
+	sessions map[string]*Session // key: internal uniqueness key
 	byID     map[string]*Session // key: sessionID
 	log      *logger.Logger
 
@@ -67,15 +67,21 @@ func NewManager(log *logger.Logger, onExit func(agentID string, exitCode int, ex
 	}
 }
 
-// Start spawns a PTY-backed process for the agent. Returns the session
-// snapshot. Fails with ErrSessionAlreadyRunning if a session for this agent
-// is already active.
+// Start spawns a PTY-backed process for the agent. It preserves the legacy
+// one-session-per-agent behavior by using agentID as the internal key.
 func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Session, error) {
+	return m.StartWithKey(agentID, agentID, cmd, cols, rows)
+}
+
+// StartWithKey spawns a PTY-backed process using managerKey for uniqueness
+// while retaining agentID as the stable public identity and exit-callback
+// value. Fails with ErrSessionAlreadyRunning if managerKey is already active.
+func (m *Manager) StartWithKey(managerKey, agentID string, cmd []string, cols, rows uint16) (*Session, error) {
 	if len(cmd) == 0 {
 		return nil, errors.New("empty command")
 	}
 	m.mu.Lock()
-	if existing, ok := m.sessions[agentID]; ok {
+	if existing, ok := m.sessions[managerKey]; ok {
 		m.mu.Unlock()
 		_ = existing.Status() // touch
 		return existing, ErrSessionAlreadyRunning
@@ -91,6 +97,7 @@ func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Sessi
 	sess := &Session{
 		ID:          uuid.NewString(),
 		AgentID:     agentID,
+		managerKey:  managerKey,
 		Cmd:         append([]string(nil), cmd...),
 		subscribers: map[chan<- []byte]struct{}{},
 		log:         m.log.WithFields(zap.String("agent", agentID)),
@@ -102,7 +109,7 @@ func (m *Manager) Start(agentID string, cmd []string, cols, rows uint16) (*Sessi
 		return nil, err
 	}
 
-	m.sessions[agentID] = sess
+	m.sessions[managerKey] = sess
 	m.byID[sess.ID] = sess
 	m.mu.Unlock()
 
@@ -204,7 +211,9 @@ loop:
 	}
 
 	m.mu.Lock()
-	delete(m.sessions, sess.AgentID)
+	if current, ok := m.sessions[sess.managerKey]; ok && current == sess {
+		delete(m.sessions, sess.managerKey)
+	}
 	delete(m.byID, sess.ID)
 	m.mu.Unlock()
 
@@ -260,6 +269,7 @@ type Session struct {
 	AgentID string
 	Cmd     []string
 
+	managerKey string
 	mu         sync.Mutex
 	cmd        *exec.Cmd
 	pty        ptyHandle

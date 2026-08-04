@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	gorillaws "github.com/gorilla/websocket"
 	"go.uber.org/zap"
 
@@ -113,8 +114,23 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	var req startRequest
 	_ = c.ShouldBindJSON(&req)
 
+	managerKey := hostShellAgentID
+	if len(req.ClientID) > 0 {
+		var clientID string
+		if err := json.Unmarshal(req.ClientID, &clientID); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id must be a UUID"})
+			return
+		}
+		parsedClientID, err := uuid.Parse(clientID)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "client_id must be a UUID"})
+			return
+		}
+		managerKey += ":" + parsedClientID.String()
+	}
+
 	shell := detectShell()
-	sess, err := h.mgr.Start(hostShellAgentID, []string{shell}, req.Cols, req.Rows)
+	sess, err := h.mgr.StartWithKey(managerKey, hostShellAgentID, []string{shell}, req.Cols, req.Rows)
 	if err != nil && err != ErrSessionAlreadyRunning {
 		h.logger.Warn("host shell start failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -139,8 +155,9 @@ func detectShell() string {
 }
 
 type startRequest struct {
-	Cols uint16 `json:"cols"`
-	Rows uint16 `json:"rows"`
+	Cols     uint16          `json:"cols"`
+	Rows     uint16          `json:"rows"`
+	ClientID json.RawMessage `json:"client_id"`
 }
 
 func (h *Handlers) httpStart(c *gin.Context) {

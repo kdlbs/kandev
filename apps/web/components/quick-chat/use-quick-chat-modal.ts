@@ -2,13 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
+import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
+import { stopAgentLogin } from "@/lib/api/domains/settings-api";
+import { ApiError } from "@/lib/api/client";
+import { type PtyTerminalState } from "@/components/settings/pty-terminal-view";
+import { cancelPtyTerminalStart } from "@/components/settings/pty-terminal-lifecycle";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
-import { useTranslation } from "react-i18next";
 
 const noop = () => {};
 
@@ -23,9 +27,16 @@ function useQuickChatStore(workspaceId: string) {
       isOpen: s.quickChat.isOpen,
       sessions: s.quickChat.sessions,
       activeSessionId: s.quickChat.activeSessionId,
+      activeKind: s.quickChat.activeKind,
+      activeTerminalTabId: s.quickChat.activeTerminalTabId,
+      terminalTabs: s.quickChat.terminalTabs,
       closeQuickChat: s.closeQuickChat,
       closeQuickChatSession: s.closeQuickChatSession,
       setActiveQuickChatSession: s.setActiveQuickChatSession,
+      createQuickTerminal: s.createQuickTerminal,
+      updateQuickTerminal: s.updateQuickTerminal,
+      activateQuickTerminal: s.activateQuickTerminal,
+      removeQuickTerminal: s.removeQuickTerminal,
       renameQuickChatSession: s.renameQuickChatSession,
       openQuickChat: s.openQuickChat,
       agentProfiles: s.agentProfiles.items ?? [],
@@ -36,6 +47,7 @@ function useQuickChatStore(workspaceId: string) {
     () => ({
       ...store,
       sessions: store.sessions.filter((session) => session.workspaceId === workspaceId),
+      terminalTabs: store.terminalTabs.filter((tab) => tab.workspaceId === workspaceId),
     }),
     [store, workspaceId],
   );
@@ -59,13 +71,29 @@ function resolveTaskId(store: QuickChatStore, sessionId: string): string | undef
 
 function useWorkspaceQuickChat(store: QuickChatStore) {
   const sessions = store.sessions;
-  const activeSession = sessions.find((session) => session.sessionId === store.activeSessionId);
+  const terminalTabs = store.terminalTabs;
+  const activeSession =
+    store.activeKind === "conversation"
+      ? sessions.find((session) => session.sessionId === store.activeSessionId)
+      : undefined;
+  const activeTerminalTab =
+    store.activeKind === "terminal"
+      ? terminalTabs.find((tab) => tab.tabId === store.activeTerminalTabId)
+      : undefined;
   useEffect(() => {
-    if (store.isOpen && store.activeSessionId !== null && !activeSession) {
+    if (
+      store.isOpen &&
+      store.activeKind === "conversation" &&
+      store.activeSessionId &&
+      !activeSession
+    ) {
       store.closeQuickChat();
     }
-  }, [activeSession, store.isOpen, store.activeSessionId, store.closeQuickChat]);
-  return { sessions, activeSession };
+    if (store.isOpen && store.activeKind === "terminal" && !activeTerminalTab) {
+      store.closeQuickChat();
+    }
+  }, [activeSession, activeTerminalTab, store]);
+  return { sessions, terminalTabs, activeSession, activeTerminalTab };
 }
 
 /** POSTs to start a quick-chat session and returns the response. */
@@ -193,23 +221,67 @@ function useQuickChatSessionClose(store: QuickChatStore, resetPendingStarts: () 
   return { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose };
 }
 
-export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
-  const { t } = useTranslation();
+function useQuickTerminalClose(store: QuickChatStore, resetPendingStarts: () => void) {
   const { toast } = useToast();
-  const store = useQuickChatStore(workspaceId);
-  const { sessions, activeSession } = useWorkspaceQuickChat(store);
-  const [setupKey, setSetupKey] = useState(0);
-  const {
-    pendingAgentId,
-    reset,
-    handleSelectAgent: doSelectAgent,
-  } = useAgentSelection(workspaceId, store);
-  const resetPendingStarts = useCallback(() => {
-    reset();
-    onSupersedeConfigStart();
-  }, [onSupersedeConfigStart, reset]);
+  const { t } = useTranslation();
+
+  const handleCloseTerminal = useCallback(
+    async (tabId: string) => {
+      resetPendingStarts();
+      cancelPtyTerminalStart(tabId);
+      const tab = store.terminalTabs.find((item) => item.tabId === tabId);
+      if (!tab) return;
+      if (!tab.sessionId) {
+        store.removeQuickTerminal(tabId);
+        return;
+      }
+
+      try {
+        await stopAgentLogin(tab.sessionId);
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) {
+          store.removeQuickTerminal(tabId);
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        store.updateQuickTerminal(tabId, { status: "error", error: message });
+        toast({
+          title: t("sidebar:quickChatTerminals"),
+          description: t("sidebar:quickChatTerminalError", { error: message }),
+          variant: "error",
+        });
+        return;
+      }
+      store.removeQuickTerminal(tabId);
+    },
+    [resetPendingStarts, store, t, toast],
+  );
+
+  return handleCloseTerminal;
+}
+
+type QuickChatTabActionsOptions = {
+  workspaceId: string;
+  sessions: QuickChatStore["sessions"];
+  activeSession: QuickChatStore["sessions"][number] | undefined;
+  store: QuickChatStore;
+  resetPendingStarts: () => void;
+  setSetupKey: React.Dispatch<React.SetStateAction<number>>;
+};
+
+function useQuickChatTabActions({
+  workspaceId,
+  sessions,
+  activeSession,
+  store,
+  resetPendingStarts,
+  setSetupKey,
+}: QuickChatTabActionsOptions) {
+  const { toast } = useToast();
+  const { t } = useTranslation();
   const { sessionToClose, setSessionToClose, handleCloseTab, handleConfirmClose } =
     useQuickChatSessionClose(store, resetPendingStarts);
+  const handleCloseTerminal = useQuickTerminalClose(store, resetPendingStarts);
 
   const handleOpenChange = useCallback(
     (open: boolean) => {
@@ -223,14 +295,36 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
     [resetPendingStarts, sessions, store],
   );
 
-  // Any picker-bypassing user action while a pick is pending should supersede
-  // the in-flight start, so the resolved request cleans up its orphan task
-  // instead of yanking the user back to that session.
   const handleNewChat = useCallback(() => {
     resetPendingStarts();
     setSetupKey((key) => key + 1);
     store.openQuickChat("", workspaceId, undefined, "chat");
+  }, [resetPendingStarts, setSetupKey, store, workspaceId]);
+
+  const handleNewTerminal = useCallback(() => {
+    resetPendingStarts();
+    store.createQuickTerminal(workspaceId);
   }, [resetPendingStarts, store, workspaceId]);
+
+  const handleActivateTerminal = useCallback(
+    (tabId: string) => {
+      resetPendingStarts();
+      store.activateQuickTerminal(tabId, workspaceId);
+    },
+    [resetPendingStarts, store, workspaceId],
+  );
+
+  const handleTerminalStateChange = useCallback(
+    (tabId: string, state: PtyTerminalState) => {
+      store.updateQuickTerminal(tabId, {
+        sessionId: state.sessionId,
+        status: state.status,
+        exitCode: state.exitCode,
+        error: state.error,
+      });
+    },
+    [store],
+  );
 
   const handleSetupKindChange = useCallback(
     (kind: QuickChatSessionKind) => {
@@ -241,13 +335,7 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
       setSetupKey((key) => key + 1);
       store.openQuickChat("", workspaceId, undefined, kind);
     },
-    [activeSession, resetPendingStarts, store, workspaceId],
-  );
-
-  const handleSelectAgent = useCallback(
-    (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
-      doSelectAgent(agentId, repositories),
-    [doSelectAgent],
+    [activeSession, resetPendingStarts, setSetupKey, store, workspaceId],
   );
 
   const setActiveQuickChatSession = useCallback(
@@ -261,8 +349,6 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
   const handleRename = useCallback(
     (sessionId: string, name: string) => {
       if (!sessionId) return;
-      // Show the new label immediately, then save it to the backing task so
-      // the user's other devices pick it up over the task.updated event.
       store.renameQuickChatSession(sessionId, name);
       persistQuickChatRename(sessionId, resolveTaskId(store, sessionId), name).catch(() => {
         toast({
@@ -276,24 +362,65 @@ export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = 
   );
 
   return {
+    sessionToClose,
+    setSessionToClose,
+    handleOpenChange,
+    handleNewChat,
+    handleNewTerminal,
+    handleActivateTerminal,
+    handleTerminalStateChange,
+    handleSetupKindChange,
+    setActiveQuickChatSession,
+    handleCloseTab,
+    handleCloseTerminal,
+    handleConfirmClose,
+    handleRename,
+  };
+}
+
+export function useQuickChatModal(workspaceId: string, onSupersedeConfigStart = noop) {
+  const store = useQuickChatStore(workspaceId);
+  const { sessions, terminalTabs, activeSession, activeTerminalTab } = useWorkspaceQuickChat(store);
+  const [setupKey, setSetupKey] = useState(0);
+  const {
+    pendingAgentId,
+    reset,
+    handleSelectAgent: doSelectAgent,
+  } = useAgentSelection(workspaceId, store);
+  const resetPendingStarts = useCallback(() => {
+    reset();
+    onSupersedeConfigStart();
+  }, [onSupersedeConfigStart, reset]);
+  const tabActions = useQuickChatTabActions({
+    workspaceId,
+    sessions,
+    activeSession,
+    store,
+    resetPendingStarts,
+    setSetupKey,
+  });
+
+  const handleSelectAgent = useCallback(
+    (agentId: string, repositories: QuickChatRepositoryInput[] = []) =>
+      doSelectAgent(agentId, repositories),
+    [doSelectAgent],
+  );
+
+  return {
     isOpen: store.isOpen,
     sessions,
+    terminalTabs,
+    activeKind: store.activeKind,
+    activeTerminalTabId: activeTerminalTab?.tabId ?? null,
+    activeTerminalTab,
     activeSessionId: activeSession?.sessionId ?? null,
     activeSession,
-    sessionToClose,
+    ...tabActions,
     setupKey,
     activeSessionNeedsAgent: Boolean(
       activeSession && isQuickChatSetupSessionId(activeSession.sessionId),
     ),
     pendingAgentId,
-    setActiveQuickChatSession,
-    setSessionToClose,
-    handleOpenChange,
-    handleNewChat,
-    handleSetupKindChange,
     handleSelectAgent,
-    handleCloseTab,
-    handleConfirmClose,
-    handleRename,
   };
 }

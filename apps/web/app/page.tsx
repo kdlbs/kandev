@@ -169,6 +169,10 @@ async function loadWorkspaceState({
         isOpen: false,
         sessions: quickChatSessions,
         activeSessionId: null,
+        terminalTabs: [],
+        activeKind: "conversation" as const,
+        activeTerminalTabId: null,
+        lastTerminalTabIdByWorkspace: {},
       },
     },
   };

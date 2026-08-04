@@ -1,11 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
+import type { QuickTerminalTab } from "@/lib/state/slices/ui/types";
 
 // Mocks must be declared before importing the hook so vi.mock hoists correctly.
 const mockToast = vi.fn();
 const mockStartQuickChat = vi.fn();
 const mockDeleteTask = vi.fn();
 const mockUpdateTask = vi.fn();
+const mockStopAgentLogin = vi.fn();
 let mockAppState: ReturnType<typeof makeAppState>;
 
 vi.mock("@/components/state-provider", () => ({
@@ -26,10 +28,16 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));
 
+vi.mock("@/lib/api/domains/settings-api", () => ({
+  stopAgentLogin: (...args: unknown[]) => mockStopAgentLogin(...args),
+}));
+
 import { useAgentSelection, useQuickChatModal } from "./use-quick-chat-modal";
 import { getQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 
 const WORKSPACE_ID = "ws-1";
+const TERMINAL_ONE_ID = "terminal-1";
+const SESSION_ONE_ID = "session-1";
 const CHAT_SETUP_ID = getQuickChatSetupSessionId(WORKSPACE_ID, "chat");
 
 type MockStore = Parameters<typeof useAgentSelection>[1];
@@ -45,10 +53,17 @@ function makeAppState() {
         taskId?: string;
       }>,
       activeSessionId: "",
+      activeKind: "conversation" as const,
+      activeTerminalTabId: null,
+      terminalTabs: [] as QuickTerminalTab[],
     },
     closeQuickChat: vi.fn(),
     closeQuickChatSession: vi.fn(),
     setActiveQuickChatSession: vi.fn(),
+    createQuickTerminal: vi.fn(),
+    updateQuickTerminal: vi.fn(),
+    activateQuickTerminal: vi.fn(),
+    removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
     agentProfiles: { items: [] },
@@ -60,10 +75,17 @@ function makeStore(overrides: Partial<MockStore> = {}): MockStore {
   return {
     isOpen: true,
     sessions: [],
+    terminalTabs: [],
     activeSessionId: "",
+    activeKind: "conversation",
+    activeTerminalTabId: null,
     closeQuickChat: vi.fn(),
     closeQuickChatSession: vi.fn(),
     setActiveQuickChatSession: vi.fn(),
+    createQuickTerminal: vi.fn(),
+    updateQuickTerminal: vi.fn(),
+    activateQuickTerminal: vi.fn(),
+    removeQuickTerminal: vi.fn(),
     renameQuickChatSession: vi.fn(),
     openQuickChat: vi.fn(),
     agentProfiles: [
@@ -81,16 +103,73 @@ function flushPromises() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockStopAgentLogin.mockReset();
   mockAppState = makeAppState();
+});
+
+describe("useQuickChatModal — terminal close lifecycle", () => {
+  const terminal = (tabId: string, sessionId: string): QuickTerminalTab => ({
+    tabId,
+    workspaceId: WORKSPACE_ID,
+    sessionId,
+    sequence: Number(tabId.slice(-1)),
+    status: "running",
+  });
+
+  it("removes a terminal when the stop endpoint says it is already gone", async () => {
+    mockAppState.quickChat.terminalTabs = [terminal(TERMINAL_ONE_ID, SESSION_ONE_ID)];
+    mockStopAgentLogin.mockRejectedValue(
+      new (await import("@/lib/api/client")).ApiError("gone", 404, null),
+    );
+
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    await act(async () => result.current.handleCloseTerminal(TERMINAL_ONE_ID));
+
+    expect(mockStopAgentLogin).toHaveBeenCalledWith(SESSION_ONE_ID);
+    expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID);
+  });
+
+  it("keeps a terminal and records an error when stopping fails", async () => {
+    mockAppState.quickChat.terminalTabs = [terminal(TERMINAL_ONE_ID, SESSION_ONE_ID)];
+    mockStopAgentLogin.mockRejectedValue(new Error("stop failed"));
+
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    await act(async () => result.current.handleCloseTerminal(TERMINAL_ONE_ID));
+
+    expect(mockAppState.removeQuickTerminal).not.toHaveBeenCalled();
+    expect(mockAppState.updateQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID, {
+      status: "error",
+      error: "stop failed",
+    });
+    expect(mockToast).toHaveBeenCalled();
+  });
+
+  it("stops only the explicitly closed sibling terminal", async () => {
+    mockAppState.quickChat.terminalTabs = [
+      terminal(TERMINAL_ONE_ID, SESSION_ONE_ID),
+      terminal("terminal-2", "session-2"),
+    ];
+
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    await act(async () => result.current.handleCloseTerminal(TERMINAL_ONE_ID));
+
+    expect(mockStopAgentLogin).toHaveBeenCalledTimes(1);
+    expect(mockStopAgentLogin).toHaveBeenCalledWith(SESSION_ONE_ID);
+    expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID);
+    expect(mockAppState.removeQuickTerminal).not.toHaveBeenCalledWith("terminal-2");
+  });
 });
 
 describe("useQuickChatModal — setup lifecycle", () => {
   it("removes a blank placeholder when dismissed from an active session", () => {
     mockAppState.quickChat.sessions = [
       { sessionId: CHAT_SETUP_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
-      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: SESSION_ONE_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
     ];
-    mockAppState.quickChat.activeSessionId = "session-1";
+    mockAppState.quickChat.activeSessionId = SESSION_ONE_ID;
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
     act(() => result.current.handleOpenChange(false));
@@ -125,15 +204,18 @@ describe("useQuickChatModal — setup lifecycle", () => {
   it("supersedes an in-flight config start when the user changes tabs", () => {
     const resetConfigStart = vi.fn();
     mockAppState.quickChat.sessions = [
-      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: SESSION_ONE_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
     ];
-    mockAppState.quickChat.activeSessionId = "session-1";
+    mockAppState.quickChat.activeSessionId = SESSION_ONE_ID;
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID, resetConfigStart));
 
-    act(() => result.current.setActiveQuickChatSession("session-1"));
+    act(() => result.current.setActiveQuickChatSession(SESSION_ONE_ID));
 
     expect(resetConfigStart).toHaveBeenCalledTimes(1);
-    expect(mockAppState.setActiveQuickChatSession).toHaveBeenCalledWith("session-1", WORKSPACE_ID);
+    expect(mockAppState.setActiveQuickChatSession).toHaveBeenCalledWith(
+      SESSION_ONE_ID,
+      WORKSPACE_ID,
+    );
   });
 });
 
@@ -385,16 +467,16 @@ describe("useQuickChatModal — renaming", () => {
   it("saves the new name to the backing task so other devices pick it up", async () => {
     mockUpdateTask.mockResolvedValue(undefined);
     mockAppState.quickChat.sessions = [
-      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
+      { sessionId: SESSION_ONE_ID, workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
     ];
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
     await act(async () => {
-      result.current.handleRename("session-1", "Renamed");
+      result.current.handleRename(SESSION_ONE_ID, "Renamed");
       await flushPromises();
     });
 
-    expect(mockAppState.renameQuickChatSession).toHaveBeenCalledWith("session-1", "Renamed");
+    expect(mockAppState.renameQuickChatSession).toHaveBeenCalledWith(SESSION_ONE_ID, "Renamed");
     expect(mockUpdateTask).toHaveBeenCalledWith("task-1", { title: "Renamed" });
     expect(mockToast).not.toHaveBeenCalled();
   });
@@ -406,13 +488,13 @@ describe("useQuickChatModal — renaming", () => {
   it("falls back to taskSessions for a tab that carries no taskId", async () => {
     mockUpdateTask.mockResolvedValue(undefined);
     mockAppState.quickChat.sessions = [
-      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat" },
+      { sessionId: SESSION_ONE_ID, workspaceId: WORKSPACE_ID, kind: "chat" },
     ];
-    mockAppState.taskSessions.items = { "session-1": { task_id: "task-legacy" } };
+    mockAppState.taskSessions.items = { [SESSION_ONE_ID]: { task_id: "task-legacy" } };
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
     await act(async () => {
-      result.current.handleRename("session-1", "Renamed");
+      result.current.handleRename(SESSION_ONE_ID, "Renamed");
       await flushPromises();
     });
 
@@ -422,17 +504,17 @@ describe("useQuickChatModal — renaming", () => {
   it("warns that the rename did not sync when the request fails", async () => {
     mockUpdateTask.mockRejectedValue(new Error("offline"));
     mockAppState.quickChat.sessions = [
-      { sessionId: "session-1", workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
+      { sessionId: SESSION_ONE_ID, workspaceId: WORKSPACE_ID, kind: "chat", taskId: "task-1" },
     ];
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
     await act(async () => {
-      result.current.handleRename("session-1", "Renamed");
+      result.current.handleRename(SESSION_ONE_ID, "Renamed");
       await flushPromises();
     });
 
     // The label still changed locally — only the sync failed.
-    expect(mockAppState.renameQuickChatSession).toHaveBeenCalledWith("session-1", "Renamed");
+    expect(mockAppState.renameQuickChatSession).toHaveBeenCalledWith(SESSION_ONE_ID, "Renamed");
     expect(mockToast).toHaveBeenCalledWith(expect.objectContaining({ variant: "error" }));
   });
 });

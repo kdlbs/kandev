@@ -25,6 +25,11 @@ import {
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
 } from "./quick-chat-sync";
+import {
+  activateConversationDraft,
+  activateWorkspaceFallback,
+  buildQuickTerminalActions,
+} from "./quick-terminal-actions";
 
 /** Default sidebar view state: the single built-in "All tasks" view, active, no draft. */
 function createDefaultSidebarState(): UISliceState["sidebarViews"] {
@@ -107,7 +112,15 @@ export const defaultUIState: UISliceState = {
   reviewPRSelection: { selectedKeyByTaskId: {} },
   documentPanel: { activeDocumentBySessionId: {} },
   systemHealth: { issues: [], checks: [], healthy: true, loaded: false, loading: false },
-  quickChat: { isOpen: false, sessions: [], activeSessionId: null },
+  quickChat: {
+    isOpen: false,
+    sessions: [],
+    activeSessionId: null,
+    terminalTabs: [],
+    activeKind: "conversation",
+    activeTerminalTabId: null,
+    lastTerminalTabIdByWorkspace: {},
+  },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
   updateAvailableNotification: null,
@@ -333,6 +346,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
         if (existingConfigSession) {
           draft.quickChat.isOpen = true;
           draft.quickChat.activeSessionId = existingConfigSession.sessionId;
+          draft.quickChat.activeKind = "conversation";
           return;
         }
         const setupSessionId = getQuickChatSetupSessionId(workspaceId, kind);
@@ -341,6 +355,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
         }
         draft.quickChat.isOpen = true;
         draft.quickChat.activeSessionId = setupSessionId;
+        draft.quickChat.activeKind = "conversation";
         return;
       }
       const existing = draft.quickChat.sessions.find((session) => session.sessionId === sessionId);
@@ -353,6 +368,7 @@ function buildOpenQuickChatAction(set: ImmerSet) {
       }
       draft.quickChat.isOpen = true;
       draft.quickChat.activeSessionId = sessionId;
+      draft.quickChat.activeKind = "conversation";
     });
 }
 
@@ -382,7 +398,10 @@ function buildQuickChatActions(set: ImmerSet) {
         } else {
           draft.quickChat.sessions.push({ sessionId, workspaceId, agentProfileId, kind, taskId });
         }
-        if (shouldActivate) draft.quickChat.activeSessionId = sessionId;
+        if (shouldActivate) {
+          draft.quickChat.activeSessionId = sessionId;
+          draft.quickChat.activeKind = "conversation";
+        }
       }),
     openQuickChat: buildOpenQuickChatAction(set),
     closeQuickChat: () =>
@@ -401,14 +420,22 @@ function buildQuickChatActions(set: ImmerSet) {
         const nextSession = draft.quickChat.sessions.find(
           (session) => session.workspaceId === closingSession?.workspaceId,
         );
-        draft.quickChat.activeSessionId = nextSession?.sessionId ?? null;
-        if (!nextSession) draft.quickChat.isOpen = false;
+        if (nextSession) {
+          activateConversationDraft(
+            draft.quickChat,
+            nextSession.sessionId,
+            nextSession.workspaceId,
+          );
+        } else {
+          activateWorkspaceFallback(draft.quickChat, closingSession?.workspaceId);
+        }
       }),
     setActiveQuickChatSession: (sessionId: string, workspaceId: string) =>
       set((draft) => {
         const session = draft.quickChat.sessions.find((item) => item.sessionId === sessionId);
         if (!session || session.workspaceId !== workspaceId) return;
         draft.quickChat.activeSessionId = sessionId;
+        draft.quickChat.activeKind = "conversation";
       }),
     // Optimistic only. Persisting the name is `persistQuickChatRename`'s job,
     // so the backing task title stays the shared source of truth.
@@ -457,6 +484,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildSystemHealthActions(set),
   ...buildDismissedAgentErrors(set),
   ...buildNotificationActions(set),
+  ...buildQuickTerminalActions(set),
   ...buildQuickChatActions(set),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {

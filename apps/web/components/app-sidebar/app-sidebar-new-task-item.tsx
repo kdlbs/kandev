@@ -113,7 +113,7 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
   const setActiveSession = useAppStore((s) => s.setActiveSession);
   const inOffice = useInOffice();
   const handleOpenQuickChat = useQuickChatLauncher(workspaceId);
-  const handleOpenQuickTerminal = useQuickTerminalLauncher();
+  const handleOpenQuickTerminal = useQuickTerminalLauncher(workspaceId);
   const [open, setOpen] = useState(false);
   useNewTaskCreationRequest(workspaceId, setOpen);
 

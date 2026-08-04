@@ -81,7 +81,8 @@ test.describe("Quick Chat cross-device sync", () => {
 
     // Device A starts a second chat while B is already open and idle. B must
     // learn about it from the task event alone — no reload, no navigation.
-    await dialogA.getByLabel("Start new chat").click();
+    await dialogA.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
     await startQuickChatFromSetup(dialogA, testPage);
     await expect(dialogA.getByTestId("quick-chat-tab")).toHaveCount(2);
 
@@ -122,7 +123,8 @@ test.describe("Quick Chat cross-device sync", () => {
 
     await testPage.setViewportSize(DESKTOP_VIEWPORT);
     const dialogA = await openQuickChatWithAgent(testPage);
-    await dialogA.getByLabel("Start new chat").click();
+    await dialogA.getByTestId("quick-chat-add-menu-trigger").click();
+    await testPage.getByTestId("quick-chat-new-agent").click();
     await startQuickChatFromSetup(dialogA, testPage);
     await expect(dialogA.getByTestId("quick-chat-tab")).toHaveCount(2);
 

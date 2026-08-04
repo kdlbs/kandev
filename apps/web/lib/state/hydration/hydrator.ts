@@ -231,21 +231,13 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
   if (state.quickChat) {
     // Merge quick chat sessions, preserving isOpen from client
     if (state.quickChat.sessions) {
+      const previousSessions = draft.quickChat.sessions;
+      const previousActiveSessionId = draft.quickChat.activeSessionId;
       // Local renames live in localStorage and override the SSR-provided name
       // (which derives from the backend task title). Apply on every hydration
       // so a renamed chat keeps its local name across reloads and tab switches.
       draft.quickChat.sessions = applyStoredQuickChatNames(state.quickChat.sessions);
-      // Validate activeSessionId exists in sessions after merge
-      if (
-        draft.quickChat.activeSessionId &&
-        !draft.quickChat.sessions.some((s) => s.sessionId === draft.quickChat.activeSessionId)
-      ) {
-        draft.quickChat.activeSessionId = draft.quickChat.sessions[0]?.sessionId ?? null;
-      }
-      // Close quick chat if no sessions remain
-      if (draft.quickChat.sessions.length === 0) {
-        draft.quickChat.isOpen = false;
-      }
+      restoreQuickChatSelection(draft, previousSessions, previousActiveSessionId);
     }
   }
   if (state.connection) {
@@ -254,6 +246,55 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
       Object.assign(draft.connection, rest);
     }
   }
+}
+
+function restoreQuickChatSelection(
+  draft: Draft<AppState>,
+  previousSessions: AppState["quickChat"]["sessions"],
+  previousActiveSessionId: string | null,
+): void {
+  draft.quickChat.terminalTabs ??= [];
+  draft.quickChat.activeKind ??= "conversation";
+  draft.quickChat.activeTerminalTabId ??= null;
+  draft.quickChat.lastTerminalTabIdByWorkspace ??= {};
+  if (draft.quickChat.activeKind === "terminal") {
+    if (
+      draft.quickChat.activeTerminalTabId &&
+      draft.quickChat.terminalTabs.some((tab) => tab.tabId === draft.quickChat.activeTerminalTabId)
+    ) {
+      return;
+    }
+    draft.quickChat.activeKind = "conversation";
+  }
+  if (
+    draft.quickChat.activeSessionId &&
+    draft.quickChat.sessions.some(
+      (session) => session.sessionId === draft.quickChat.activeSessionId,
+    )
+  ) {
+    return;
+  }
+  const previousWorkspaceId = previousSessions.find(
+    (session) => session.sessionId === previousActiveSessionId,
+  )?.workspaceId;
+  const fallbackSession =
+    draft.quickChat.sessions.find((session) => session.workspaceId === previousWorkspaceId) ??
+    draft.quickChat.sessions[0];
+  if (fallbackSession) {
+    draft.quickChat.activeSessionId = fallbackSession.sessionId;
+    draft.quickChat.activeKind = "conversation";
+    return;
+  }
+  const fallbackTerminal = draft.quickChat.terminalTabs.find(
+    (tab) => tab.workspaceId === previousWorkspaceId,
+  );
+  if (fallbackTerminal) {
+    draft.quickChat.activeKind = "terminal";
+    draft.quickChat.activeTerminalTabId = fallbackTerminal.tabId;
+    return;
+  }
+  draft.quickChat.activeSessionId = null;
+  if (draft.quickChat.terminalTabs.length === 0) draft.quickChat.isOpen = false;
 }
 
 /**

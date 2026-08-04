@@ -5,7 +5,7 @@ import {
   upsertQuickChatSession,
 } from "./quick-chat-sync";
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
-import type { QuickChatSession, QuickChatState } from "./types";
+import type { QuickChatSession, QuickChatState, QuickTerminalTab } from "./types";
 
 const mockStoredNames = vi.hoisted(() => ({ value: {} as Record<string, string> }));
 
@@ -28,7 +28,16 @@ function chat(sessionId: string, overrides: Partial<QuickChatSession> = {}): Qui
 }
 
 function state(sessions: QuickChatSession[], overrides: Partial<QuickChatState> = {}) {
-  return { isOpen: true, sessions, activeSessionId: null, ...overrides };
+  return {
+    isOpen: true,
+    sessions,
+    activeSessionId: null,
+    terminalTabs: [],
+    activeKind: "conversation" as const,
+    activeTerminalTabId: null,
+    lastTerminalTabIdByWorkspace: {},
+    ...overrides,
+  };
 }
 
 beforeEach(() => {
@@ -125,7 +134,9 @@ describe("reconcileQuickChatSessions", () => {
     expect(after.activeSessionId).toBeNull();
     expect(after.isOpen).toBe(false);
   });
+});
 
+describe("reconcileQuickChatSessions — selection preservation", () => {
   it("leaves a never-selected active tab unset instead of promoting one", () => {
     // A background resync must not decide which tab is "current" for a user who
     // has not opened quick chat at all.
@@ -145,6 +156,49 @@ describe("reconcileQuickChatSessions", () => {
     const after = reconcileQuickChatSessions(before, WS, []);
 
     expect(after.activeSessionId).toBe("foreign");
+    expect(after.isOpen).toBe(true);
+  });
+
+  it("preserves local terminal tabs and active terminal selection during resync", () => {
+    const terminal: QuickTerminalTab = {
+      tabId: "terminal-a",
+      workspaceId: WS,
+      sessionId: "pty-a",
+      sequence: 1,
+      status: "running",
+    };
+    const before = state([], {
+      activeKind: "terminal",
+      activeTerminalTabId: terminal.tabId,
+      terminalTabs: [terminal],
+      lastTerminalTabIdByWorkspace: { [WS]: terminal.tabId },
+    });
+
+    const after = reconcileQuickChatSessions(before, WS, []);
+
+    expect(after.terminalTabs).toEqual([terminal]);
+    expect(after.activeKind).toBe("terminal");
+    expect(after.activeTerminalTabId).toBe(terminal.tabId);
+    expect(after.isOpen).toBe(true);
+  });
+
+  it("falls back to a local terminal when the active conversation disappears", () => {
+    const terminal: QuickTerminalTab = {
+      tabId: "terminal-a",
+      workspaceId: WS,
+      sessionId: "pty-a",
+      sequence: 1,
+      status: "running",
+    };
+    const before = state([chat("a")], {
+      activeSessionId: "a",
+      terminalTabs: [terminal],
+    });
+
+    const after = reconcileQuickChatSessions(before, WS, []);
+
+    expect(after.activeKind).toBe("terminal");
+    expect(after.activeTerminalTabId).toBe(terminal.tabId);
     expect(after.isOpen).toBe(true);
   });
 });

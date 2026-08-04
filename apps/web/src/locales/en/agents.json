@@ -179,6 +179,7 @@
   "selectAModelShort": "Select a model",
   "sessionEnded": "Session ended.",
   "sessionEndedWithCode": "Session ended (exit {{code}}).",
+  "sessionUnavailable": "Session is no longer available.",
   "setupProfile": "Setup Profile",
   "signInToAgent": "Sign in: {{name}}",
   "startMode": "Start mode",

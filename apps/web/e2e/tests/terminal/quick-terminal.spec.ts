@@ -1,22 +1,46 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertLocatorWithinViewportX } from "../../helpers/layout-assertions";
 
-const QUICK_TERMINAL_TITLE = "Quick terminal";
+const QUICK_CHAT_TITLE = "Quick Chat";
 
 async function readQuickTerminalBuffer(page: Page): Promise<string> {
   return page.evaluate(() => {
-    const container = document.querySelector('[data-testid="host-shell-terminal"]') as
+    const container = document.querySelector('[data-testid="quick-terminal-terminal"]') as
       | (HTMLDivElement & { __xtermReadBuffer?: () => string })
       | null;
     return container?.__xtermReadBuffer?.() ?? "";
   });
 }
 
-test.describe("quick terminal", () => {
-  test("opens from the desktop sidebar and uses the larger floating surface", async ({
+async function waitForTerminalReady(page: Page) {
+  await expect
+    .poll(() => readQuickTerminalBuffer(page), {
+      timeout: 15_000,
+      message: "Waiting for Quick Chat terminal shell prompt",
+    })
+    .not.toBe("");
+}
+
+async function sendMarker(page: Page, marker: string) {
+  await page.getByTestId("quick-terminal-terminal").click();
+  await page.keyboard.type(`echo ${marker}`);
+  await page.keyboard.press("Enter");
+  await expect
+    .poll(() => readQuickTerminalBuffer(page), {
+      timeout: 10_000,
+      message: `Waiting for terminal marker ${marker}`,
+    })
+    .toContain(marker);
+}
+
+function terminalTab(dialog: Locator, sequence: number) {
+  return dialog.locator(`[data-testid="quick-terminal-tab"][data-terminal-sequence="${sequence}"]`);
+}
+
+test.describe("quick terminal tabs", () => {
+  test("creates, detaches, reuses, switches, and closes independent terminals", async ({
     testPage,
-    prCapture,
   }) => {
     await testPage.goto("/");
 
@@ -31,58 +55,67 @@ test.describe("quick terminal", () => {
     ).toBe("sidebar-quick-chat-shortcut");
 
     await terminalButton.click();
-    const dialog = testPage.getByRole("dialog", { name: QUICK_TERMINAL_TITLE });
+    const dialog = testPage.getByRole("dialog", { name: QUICK_CHAT_TITLE });
     await expect(dialog).toBeVisible();
-    const terminal = testPage.getByTestId("host-shell-terminal");
-    await expect(terminal).toBeVisible();
-    await expect
-      .poll(() => readQuickTerminalBuffer(testPage), {
-        timeout: 15_000,
-        message: "Waiting for Quick Terminal shell prompt",
-      })
-      .not.toBe("");
-    await terminal.click();
-    await testPage.keyboard.type("echo QUICK_TERMINAL_READY");
-    await testPage.keyboard.press("Enter");
-    await expect
-      .poll(() => readQuickTerminalBuffer(testPage), {
-        timeout: 10_000,
-        message: "Waiting for Quick Terminal command output",
-      })
-      .toContain("QUICK_TERMINAL_READY");
+    await expect(dialog.getByTestId("quick-terminal-tab-panel")).toBeVisible();
+    await expect(dialog.getByTestId("quick-terminal-terminal")).toBeVisible();
+    await expect(dialog.getByTestId("host-shell-done")).toHaveCount(0);
+    await waitForTerminalReady(testPage);
+    await sendMarker(testPage, "QUICK_TERMINAL_ONE");
+    await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+
+    // Dismissing the shared surface detaches the terminal but does not stop it.
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await expect(terminalButton).toBeFocused();
+    await expect(testPage.getByRole("tooltip", { name: "Quick terminal" })).toHaveCount(0);
+
+    await terminalButton.click();
+    await expect(dialog).toBeVisible();
+    await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+    await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+
+    // The grouped menu's New Terminal action always creates a second PTY.
+    await dialog.getByTestId("quick-chat-add-menu-trigger").click();
+    await expect(testPage.getByText("Agents", { exact: true })).toBeVisible();
+    await expect(testPage.getByText("Terminals", { exact: true })).toBeVisible();
+    await testPage.getByTestId("quick-chat-new-terminal").click();
+    await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(2);
+    await waitForTerminalReady(testPage);
+    await sendMarker(testPage, "QUICK_TERMINAL_TWO");
+
+    const firstTab = terminalTab(dialog, 1);
+    const secondTab = terminalTab(dialog, 2);
+    await firstTab.getByRole("button", { name: "Terminal 1", exact: true }).click();
+    await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+    await secondTab.getByRole("button", { name: "Terminal 2", exact: true }).click();
+    await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_TWO");
+
+    // Closing one tab stops/removes only that tab and falls back to its sibling.
+    await secondTab.getByRole("button", { name: "Close Terminal 2" }).click();
+    await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+    await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+
+    // The chat launcher switches content kind without discarding the terminal.
+    await testPage.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await quickChatButton.click();
+    await expect(dialog.getByTestId("quick-chat-setup")).toBeVisible({ timeout: 10_000 });
+    await expect(firstTab).toBeVisible();
+    await firstTab.getByRole("button", { name: "Terminal 1", exact: true }).click();
+    await expect(dialog.getByTestId("quick-terminal-tab-panel")).toBeVisible();
 
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.width).toBeGreaterThan(820);
     expect(dialogBox!.height).toBeGreaterThan(420);
-    await assertLocatorWithinViewportX(dialog, "desktop quick terminal dialog");
-    await prCapture.screenshot("desktop-floating-terminal", {
-      caption: "Desktop Quick Terminal floating surface",
-    });
+    await assertLocatorWithinViewportX(dialog, "desktop shared Quick Chat dialog");
 
-    await testPage.getByTestId("host-shell-done").click();
+    await testPage.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
-    await expect(terminalButton).toBeFocused();
-    await expect(testPage.getByRole("tooltip", { name: QUICK_TERMINAL_TITLE })).toHaveCount(0);
-
-    if (process.env.CAPTURE_PR_ASSETS) {
-      await testPage.setViewportSize({ width: 700, height: 800 });
-      await testPage.goto("/");
-      const tabletTerminalButton = testPage.getByTestId("tablet-quick-terminal-button");
-      await expect(tabletTerminalButton).toBeVisible();
-      await tabletTerminalButton.click();
-      const tabletDialog = testPage.getByRole("dialog", { name: QUICK_TERMINAL_TITLE });
-      await expect(tabletDialog).toBeVisible();
-      await expect(testPage.getByTestId("host-shell-terminal")).toBeVisible();
-      await prCapture.screenshot("tablet-floating-terminal", {
-        caption: "Tablet Quick Terminal floating surface",
-      });
-      await testPage.getByTestId("host-shell-done").click();
-      await expect(tabletDialog).toBeHidden();
-    }
   });
 
-  test("keeps the tablet action order and hit targets", async ({ testPage }) => {
+  test("keeps tablet launcher order and 44px hit targets", async ({ testPage }) => {
     await testPage.setViewportSize({ width: 700, height: 800 });
     await testPage.goto("/");
 
@@ -97,23 +130,23 @@ test.describe("quick terminal", () => {
     ).toBe("tablet-quick-chat-button");
 
     for (const button of [terminalButton, quickChatButton]) {
-      const buttonBox = await button.boundingBox();
-      expect(buttonBox).not.toBeNull();
-      expect(buttonBox!.width).toBeGreaterThanOrEqual(44);
-      expect(buttonBox!.height).toBeGreaterThanOrEqual(44);
+      const box = await button.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
+      expect(box!.height).toBeGreaterThanOrEqual(44);
     }
 
     await terminalButton.click();
-    const dialog = testPage.getByRole("dialog", { name: QUICK_TERMINAL_TITLE });
+    const dialog = testPage.getByRole("dialog", { name: QUICK_CHAT_TITLE });
     await expect(dialog).toBeVisible();
-    await expect(testPage.getByTestId("host-shell-terminal")).toBeVisible();
-
+    await expect(dialog.getByTestId("quick-terminal-terminal")).toBeVisible();
     const dialogBox = await dialog.boundingBox();
     expect(dialogBox).not.toBeNull();
     expect(dialogBox!.width).toBeGreaterThan(500);
     expect(dialogBox!.height).toBeGreaterThan(420);
-    await assertLocatorWithinViewportX(dialog, "tablet quick terminal dialog");
-    await testPage.getByTestId("host-shell-done").click();
+    await assertLocatorWithinViewportX(dialog, "tablet shared Quick Chat dialog");
+
+    await testPage.keyboard.press("Escape");
     await expect(dialog).toBeHidden();
     await expect(terminalButton).toBeFocused();
   });
