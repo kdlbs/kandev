@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-No backend or task-host changes are required. Both WebSocket proxy hops already forward JSON-RPC bodies unchanged.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery and npm/Go auto-install resolve commands and results through the process manager's task environment.
 
 ## Frontend
 
@@ -34,7 +34,8 @@ No backend or task-host changes are required. Both WebSocket proxy hops already 
 
 - **Work progress transitions:** `apps/web/lib/lsp/lsp-progress.test.ts` covers token validation, clamping, omitted-field preservation, independent concurrent tokens, unknown/malformed payloads, completion, and reset.
 - **Protocol integration:** `apps/web/lib/lsp/lsp-client-manager.test.ts` proves initialize capability/token advertisement, pre-initialize progress, server-created numeric tokens, subscriber updates, and stale-generation isolation.
-- **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and elapsed-time formatting without adding shallow React markup tests.
+- **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
+- **Task-host environment:** focused Go tests cover PATH-based command discovery, GOBIN result lookup, pre-install registry discovery, and process-manager environment exposure.
 
 ## E2E Tests
 
@@ -72,6 +73,7 @@ No backend or task-host changes are required. Both WebSocket proxy hops already 
 cd apps && pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts
 cd apps/web && pnpm run typecheck
 cd apps/web && pnpm exec eslint lib/lsp hooks/use-lsp.ts components/editors
+make -C apps/backend test
 cd apps/web && pnpm e2e:run tests/lsp/lsp-file-intelligence.spec.ts
 cd apps/web && pnpm e2e:run --no-build -- --project=mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts
 cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --no-build -- --project=containers tests/docker/lsp-file-intelligence.spec.ts tests/ssh/lsp-unsupported-executor.spec.ts

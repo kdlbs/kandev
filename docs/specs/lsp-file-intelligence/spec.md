@@ -42,6 +42,7 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Server-reported project titles and messages remain fully readable and wrap within the LSP status surface, including URL-, path-, and identifier-like text without ordinary break points. The desktop popover and coarse-pointer tablet drawer do not clip, truncate, or horizontally overflow this text.
 - Kotlin supports auto-start but not auto-install. `kotlin-lsp` must already be available on the task host's `PATH`.
 - Language servers run through the task's `agentctl`, with the task workspace as their working directory. This keeps project files, dependencies, and server execution in the same environment.
+- Binary discovery and npm/Go auto-install resolve commands and installation results with that same task environment, including task-provided `PATH`, `GOBIN`, `GOPATH`, and `HOME` values.
 - V1 task-host support is limited to Local PC and local Docker executors. Remote Docker, SSH, and Sprites report an unsupported-executor state.
 - Each active browser WebSocket owns one language-server process. The browser shares a connection for the same session and language inside one window and closes it after its idle timeout; separate browser windows may own separate processes.
 - The backend caps active LSP WebSocket connections at 8 by default. `KANDEV_LSP_MAX_CONNECTIONS` overrides the cap.
@@ -118,7 +119,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 
 - Connection readiness remains the existing lifecycle (`connecting`, `installing`, `starting`, `ready`, `stopping`, `unavailable`, or `error`).
 - The task-host `ready` handshake means the executable has launched and the JSON-RPC bridge can begin; it does not mean the language server has completed LSP initialization.
-- Initialization is locally observable from the initialize request until its response. The UI shows elapsed time even when the server sends no progress payload.
+- Initialization is locally observable from the initialize request until its response. The UI shows locale-aware elapsed time even when the server sends no progress payload.
 - The 60-second long-running presentation is derived only from elapsed wall time. It does not change connection state, cancel the request, restart the server, or assert that the server is indexing.
 - Work-done progress is runtime-only activity attached to a live connection. Multiple active tokens are a flat list because LSP defines no parent/child relationship.
 - The oldest active work item is the primary summary; additional active items are shown as a count. Percentages from unrelated work items are never averaged.
@@ -139,6 +140,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Unsupported executor:** the file toolbar reports that the task host is unsupported and no process starts.
 - **Missing Kotlin server:** the UI tells the user to install `kotlin-lsp` on the task host; it does not offer or retry auto-install.
 - **Missing auto-installable server:** the UI reports the missing binary or shows install progress when auto-install is enabled.
+- **Task-only toolchain:** binary lookup, installer execution, and installed-binary discovery use the task runtime environment instead of the agentctl host environment.
 - **Capacity exceeded:** the UI reports that too many language servers are active.
 - **Server crash:** the connection closes, Monaco providers and markers are cleaned up, and the user can retry.
 - **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
@@ -155,6 +157,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** Kotlin auto-start is enabled and `kotlin-lsp` is on a Local PC task host's `PATH`, **WHEN** a `.kt` or `.kts` file opens, **THEN** the toolbar reaches ready and Monaco registers Kotlin providers.
 - **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4001` and the UI shows manual setup guidance without attempting installation.
 - **GIVEN** a local Docker task, **WHEN** an LSP starts, **THEN** the binary is resolved and executed inside the container rather than on the main backend host.
+- **GIVEN** Go and `GOBIN` are available only through the task runtime environment, **WHEN** Kandev discovers or installs `gopls`, **THEN** lookup, `go install`, and result discovery all use those task values.
 - **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no process starts.
 - **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP, **THEN** the new connection closes with `4005`.
 - **GIVEN** two task/session connections have active providers, placeholder models, or diagnostics, **WHEN** one connection stops or crashes, **THEN** cleanup removes only that connection's state and leaves the other connection fully functional.
@@ -163,6 +166,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** session workspace metadata hydrates after the LSP connection, **WHEN** the client opens or navigates to a document, **THEN** it uses the canonical workspace URI and repository subpaths from the task-host ready handshake, including after that LSP connection stops.
 - **GIVEN** a definition or reference target is nested beneath unloaded folders, **WHEN** Monaco navigates to that file, **THEN** the Files tree loads and expands every ancestor and marks the target as active.
 - **GIVEN** the task host has launched a language-server process, **WHEN** the LSP `initialize` response is still pending, **THEN** the current editor's status surface distinguishes the launched process from protocol readiness and shows increasing elapsed time with no ETA.
+- **GIVEN** a non-English or pseudo locale is active, **WHEN** initialization or server work shows elapsed time, **THEN** its hour, minute, and second units and their composition come from that locale's catalog.
 - **GIVEN** Kotlin LSP has not answered `initialize` for 60 seconds, **WHEN** the user opens its status, **THEN** the UI says initialization is taking longer than usual, identifies Gradle project import as a possible cause, keeps Stop available, and does not restart or time out the server automatically.
 - **GIVEN** Kotlin LSP reports initialize work with a title, message, and percentage, **WHEN** `begin` and `report` notifications arrive, **THEN** the current editor shows the latest server text, the clamped percentage, and elapsed time while its connection continues initializing or remains ready.
 - **GIVEN** a server reports an indeterminate work item, **WHEN** it omits percentage, **THEN** the UI shows activity and elapsed time without fabricating percentage or time remaining.
