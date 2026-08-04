@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -188,5 +189,150 @@ func TestClaudeFetchUsage_ExpiredKeychainTokenPointsAtCLI(t *testing.T) {
 	}
 	if creds.ClaudeAiOauth.AccessToken != "live-token" {
 		t.Errorf("file was rewritten: accessToken = %q", creds.ClaudeAiOauth.AccessToken)
+	}
+}
+
+// stubKeychainCommand swaps the exec seam — one level below stubKeychain — so
+// the reader itself can be exercised without invoking `security`.
+func stubKeychainCommand(
+	t *testing.T,
+	fn func(ctx context.Context, service string) ([]byte, error),
+) *int {
+	t.Helper()
+	calls := 0
+	prev := keychainCommand
+	keychainCommand = func(ctx context.Context, service string) ([]byte, error) {
+		calls++
+		return fn(ctx, service)
+	}
+	t.Cleanup(func() { keychainCommand = prev })
+	return &calls
+}
+
+func stubKeychainGOOS(t *testing.T, goos string) {
+	t.Helper()
+	prev := keychainGOOS
+	keychainGOOS = goos
+	t.Cleanup(func() { keychainGOOS = prev })
+}
+
+func TestKeychainLookup_SkipsExecWhenItCannotApply(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		goos    string
+		service string
+	}{
+		{"non-darwin", "linux", ClaudeDefaultKeychainService},
+		{"no service name", "darwin", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubKeychainGOOS(t, tc.goos)
+			calls := stubKeychainCommand(t, func(context.Context, string) ([]byte, error) {
+				return []byte(`{"claudeAiOauth":{"accessToken":"kc"}}`), nil
+			})
+
+			if got := readKeychainCredentialsFromSecurity(tc.service); got != nil {
+				t.Fatalf("expected nil, got %q", got)
+			}
+			if *calls != 0 {
+				t.Fatalf("expected no exec, got %d call(s)", *calls)
+			}
+		})
+	}
+}
+
+func TestKeychainLookup_FallsBackToNil(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		out  []byte
+		err  error
+	}{
+		// What `security` exits with when the item is absent or access is denied.
+		{"lookup error", nil, errors.New("exit status 44")},
+		{"timeout", nil, context.DeadlineExceeded},
+		{"blank output", []byte("  \n\t "), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubKeychainGOOS(t, "darwin")
+			stubKeychainCommand(t, func(context.Context, string) ([]byte, error) {
+				return tc.out, tc.err
+			})
+
+			if got := readKeychainCredentialsFromSecurity(ClaudeDefaultKeychainService); got != nil {
+				t.Fatalf("expected nil, got %q", got)
+			}
+		})
+	}
+}
+
+func TestKeychainLookup_TrimsAndReturnsPayload(t *testing.T) {
+	stubKeychainGOOS(t, "darwin")
+	var sawService string
+	stubKeychainCommand(t, func(_ context.Context, service string) ([]byte, error) {
+		sawService = service
+		return []byte("{\"claudeAiOauth\":{\"accessToken\":\"kc\"}}\n"), nil
+	})
+
+	got := readKeychainCredentialsFromSecurity(ClaudeDefaultKeychainService)
+	if want := `{"claudeAiOauth":{"accessToken":"kc"}}`; string(got) != want {
+		t.Fatalf("payload = %q, want %q", got, want)
+	}
+	if sawService != ClaudeDefaultKeychainService {
+		t.Fatalf("service = %q", sawService)
+	}
+}
+
+// The bound is what keeps a headless host from wedging behind an authorization
+// dialog nobody can answer.
+func TestKeychainLookup_BoundsTheCommand(t *testing.T) {
+	stubKeychainGOOS(t, "darwin")
+	var deadline time.Time
+	var hadDeadline bool
+	stubKeychainCommand(t, func(ctx context.Context, _ string) ([]byte, error) {
+		deadline, hadDeadline = ctx.Deadline()
+		return nil, ctx.Err()
+	})
+
+	readKeychainCredentialsFromSecurity(ClaudeDefaultKeychainService)
+
+	if !hadDeadline {
+		t.Fatal("keychain lookup ran with no deadline")
+	}
+	if remaining := time.Until(deadline); remaining > claudeKeychainLookupTimeout {
+		t.Fatalf("deadline %v exceeds the %v bound", remaining, claudeKeychainLookupTimeout)
+	}
+}
+
+func TestKeychainLookup_OptOut(t *testing.T) {
+	for _, tc := range []struct {
+		value    string
+		wantExec bool
+	}{
+		// Anything but an explicit false disables, including a value that does
+		// not parse: someone who wrote "=yes" means to turn it off, and ignoring
+		// them would do the exact thing they were preventing.
+		{"1", false}, {"true", false}, {"TRUE", false}, {"yes", false}, {"anything", false},
+		// An explicit false must not disable, or setting "=0" to keep the
+		// feature on would silently switch it off.
+		{"", true}, {"0", true}, {"false", true}, {"FALSE", true},
+	} {
+		t.Run("value="+tc.value, func(t *testing.T) {
+			stubKeychainGOOS(t, "darwin")
+			t.Setenv(disableKeychainEnv, tc.value)
+			calls := stubKeychainCommand(t, func(context.Context, string) ([]byte, error) {
+				return []byte(`{"claudeAiOauth":{"accessToken":"kc"}}`), nil
+			})
+
+			got := readKeychainCredentialsFromSecurity(ClaudeDefaultKeychainService)
+			if tc.wantExec && got == nil {
+				t.Fatal("expected the keychain to be consulted")
+			}
+			if !tc.wantExec && got != nil {
+				t.Fatalf("expected nil when opted out, got %q", got)
+			}
+			if want := map[bool]int{true: 1, false: 0}[tc.wantExec]; *calls != want {
+				t.Fatalf("exec calls = %d, want %d", *calls, want)
+			}
+		})
 	}
 }
