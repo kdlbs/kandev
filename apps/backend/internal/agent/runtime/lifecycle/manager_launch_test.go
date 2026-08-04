@@ -1146,12 +1146,42 @@ func TestLaunch_PublishesPrepareCompletedAfterRuntimeProgress(t *testing.T) {
 		t.Fatalf("Launch returned error: %v", err)
 	}
 
+	if backend.lastRequest == nil {
+		t.Fatal("runtime did not receive a create request")
+	}
+	require.Equal(t, "/tmp/ws", backend.lastRequest.WorkspacePath,
+		"runtime must receive the workspace path returned by environment preparation")
+
 	completed := prepareCompletedPayloads(eventBus)
 	require.NotEmpty(t, completed)
 	final := completed[len(completed)-1]
 	require.True(t, final.Success)
 	requirePrepareStep(t, final.Steps, "Validate Docker")
 	requirePrepareStep(t, final.Steps, "Waiting for Docker container")
+}
+
+func TestLaunch_UsesPreparedWorkspacePathForWorktree(t *testing.T) {
+	profileResolver := &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-worktree",
+		AgentName: "auggie",
+	}}
+	mgr, backend := newEnvironmentExecutionTestManagerWithProfileResolver(t, nil, profileResolver)
+	mgr.preparerRegistry = NewPreparerRegistry(mgr.logger)
+	mgr.preparerRegistry.Register(models.ExecutorTypeWorktree, &progressPreparer{})
+
+	_, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         "task-worktree-path",
+		SessionID:      "session-worktree-path",
+		AgentProfileID: "profile-worktree",
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryPath: "/tmp/repo",
+		UseWorktree:    true,
+		BaseBranch:     "main",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, backend.lastRequest)
+	require.Equal(t, "/tmp/ws", backend.lastRequest.WorkspacePath,
+		"worktree runtime must receive the path returned by preparation")
 }
 
 func TestLaunch_PublishesPrepareCompletionOnLegacyRouteEnvError(t *testing.T) {

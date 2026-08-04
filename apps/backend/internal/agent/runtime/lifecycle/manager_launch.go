@@ -1168,6 +1168,11 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 		if err := m.launchApplyPrepareResult(&reqWithWorktree, prepResult, &workspacePath, &mainRepoGitDir, &worktreeID, &worktreeBranch); err != nil {
 			return nil, err
 		}
+		// The preparer owns the final workspace location for worktree-backed
+		// launches. Keep the executor request in sync with the local launch
+		// state; otherwise standalone receives the repository path (or an empty
+		// path) that was present before preparation completed.
+		reqWithWorktree.WorkspacePath = workspacePath
 	}
 
 	// 6b. Deploy per-profile skills + custom prompt (ADR 0005 Wave A).
