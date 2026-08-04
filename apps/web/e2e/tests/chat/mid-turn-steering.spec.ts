@@ -82,9 +82,19 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
 
       // A steered send is delivered, not queued: it appears as a user message
       // and must NOT produce a client-side queue chip.
-      await expect(session.activeChat().getByText("steer: change course now")).toBeVisible({
-        timeout: 15_000,
-      });
+      //
+      // Scoped to the user bubble rather than a bare getByText: the steered text
+      // also reaches the agent, so a plain text match resolves to two elements
+      // (the user message and the mock's echo of the prompt) and trips strict
+      // mode. Which one renders first is a race, so the bare match failed only
+      // sometimes — it must assert the *user message* specifically anyway, since
+      // that is what distinguishes delivery from queuing.
+      await expect(
+        session
+          .activeChat()
+          .getByTestId("user-message-bubble")
+          .filter({ hasText: "steer: change course now" }),
+      ).toBeVisible({ timeout: 15_000 });
       await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
     });
   });
