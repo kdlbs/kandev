@@ -11,6 +11,7 @@ EMBEDDED_WEB_DIR := $(BACKEND_DIR)/internal/webapp/embedded/generated
 
 # Tools
 PNPM := pnpm
+GOFLAGS ?= -v
 MAKE := make
 
 # Cross-platform commands
@@ -46,10 +47,12 @@ MAGENTA := \033[35m
 
 VERBOSE ?= 0
 NODE ?= $(shell command -v node $(NULL_REDIR) || echo node)
-SERVICE_LAUNCHER := $(CURDIR)/dist/kandev/bin/kandev
-SERVICE_BUNDLE_DIR := $(CURDIR)/dist/kandev
+RUNTIME_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
+RUNTIME_VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
+SERVICE_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
+SERVICE_LAUNCHER = $(SERVICE_BUNDLE_DIR)/bin/kandev
 SERVICE_VERSION := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo dev)
-SERVICE_ENV := KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
+SERVICE_ENV = KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
 SERVICE_PORT_FLAG := $(if $(PORT),--port $(PORT),)
 SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)
 SERVICE_NO_BOOT_START_FLAG := $(if $(filter 1 true yes,$(NO_BOOT_START)),--no-boot-start,)
@@ -111,6 +114,7 @@ help:
 	@echo "  build            Build backend and web app"
 	@echo "  build-backend    Build backend binary"
 	@echo "  build-web        Build web app for production"
+	@echo "  runtime-bundle   Build the package-manager runtime bundle (deps must exist)"
 	@echo "  desktop-runtime  Build/copy runtime resources for the macOS desktop app"
 	@echo "  desktop-build    Build the macOS Tauri app bundle/DMG"
 	@echo "  desktop-open     Build and open the macOS app"
@@ -310,22 +314,30 @@ start-windows-debug:
 # Service
 #
 
-.PHONY: service-bundle
-service-bundle: install build
-	$(call phase,Packaging Service Bundle)
-	@test -n "$(SERVICE_BUNDLE_DIR)" || { echo "SERVICE_BUNDLE_DIR is empty; aborting."; exit 1; }
-	@test "$(SERVICE_BUNDLE_DIR)" != "/" || { echo "SERVICE_BUNDLE_DIR must not be /; aborting."; exit 1; }
-	@$(MAKE) -C $(BACKEND_DIR) build-agentctl-remote
-	@$(RMDIR) "$(SERVICE_BUNDLE_DIR)/bin"
-	@mkdir -p "$(SERVICE_BUNDLE_DIR)/bin"
+.PHONY: runtime-bundle
+runtime-bundle:
+	$(call phase,Packaging Runtime Bundle)
+	@test -n "$(RUNTIME_BUNDLE_DIR)" || { echo "RUNTIME_BUNDLE_DIR is empty; aborting."; exit 1; }
+	@test "$(RUNTIME_BUNDLE_DIR)" != "/" || { echo "RUNTIME_BUNDLE_DIR must not be /; aborting."; exit 1; }
+	@$(MAKE) -s build-web
+	@$(MAKE) -s sync-embedded-web
+	@$(MAKE) -C $(BACKEND_DIR) build-runtime VERSION="$(RUNTIME_VERSION)" GOFLAGS="$(GOFLAGS)"
+	@$(RMDIR) "$(RUNTIME_BUNDLE_DIR)/bin"
+	@mkdir -p "$(RUNTIME_BUNDLE_DIR)/bin"
 	@cp "$(BACKEND_DIR)/bin/kandev" "$(BACKEND_DIR)/bin/agentctl" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-amd64" \
 		"$(BACKEND_DIR)/bin/agentctl-linux-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-arm64" \
 		"$(BACKEND_DIR)/bin/agentctl-darwin-amd64" \
-		"$(SERVICE_BUNDLE_DIR)/bin/"
-	@scripts/release/package-bundle.sh
-	$(call success,Service bundle packaged at $(SERVICE_BUNDLE_DIR))
+		"$(RUNTIME_BUNDLE_DIR)/bin/"
+	@scripts/release/package-bundle.sh --bundle-dir "$(RUNTIME_BUNDLE_DIR)"
+	$(call success,Runtime bundle packaged at $(RUNTIME_BUNDLE_DIR))
+
+.PHONY: service-bundle
+service-bundle: install
+	@$(MAKE) -s runtime-bundle \
+		RUNTIME_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" \
+		RUNTIME_VERSION="$(SERVICE_VERSION)"
 
 .PHONY: service-cli-check
 service-cli-check:
@@ -502,6 +514,7 @@ test-scripts:
 	@python3 scripts/lint-harness-files.test.py
 	@python3 scripts/lint-architecture.test.py
 	@bash scripts/release-desktop.test.sh
+	@bash scripts/release/runtime-bundle.test.sh
 	@node --test apps/desktop/e2e/desktop-launch-smoke.test.mjs
 	@python3 .github/scripts/release-workflow-contract_test.py
 	@node --test scripts/release/nightly-version.test.mjs scripts/release/nightly-release.test.mjs scripts/release/npm-view-version.test.mjs scripts/release/publish-npm.test.mjs

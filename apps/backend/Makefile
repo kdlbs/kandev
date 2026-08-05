@@ -133,7 +133,7 @@ LDFLAGS += -X main.Version=$(VERSION) -X main.Commit=$(COMMIT) -X main.BuildTime
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
+.PHONY: all build build-runtime build-all build-agentctl build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
 
 ## Default target
 all: build
@@ -169,10 +169,13 @@ build-acpdbg:
 	-@$(MKDIR) $(BUILD_DIR)
 	$(GO) build $(GOFLAGS) -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/acpdbg$(EXE) ./cmd/acpdbg
 
-## Build the unified kandev binary. Always includes remote agentctl helpers
-## because SSH/Docker/Sprites executors upload or bind-mount platform-specific
-## sidecars into remote environments.
-build: build-agentctl build-agentctl-remote build-mock-agent build-acpdbg build-winjob
+## Build the complete development binary set.
+build: build-runtime build-mock-agent build-acpdbg build-winjob
+
+## Build only the binaries shipped in a runtime bundle. Always includes remote
+## agentctl helpers because SSH/Docker/Sprites executors upload or bind-mount
+## platform-specific sidecars into remote environments.
+build-runtime: build-agentctl build-agentctl-remote
 	@echo "Building $(BINARY_NAME)..."
 	-@$(MKDIR) $(BUILD_DIR)
 	$(CGO_PREFIX) $(GO) build $(GOFLAGS) -tags fts5 -ldflags "$(LDFLAGS)" -o $(BUILD_DIR)/$(BINARY_NAME)$(EXE) ./cmd/kandev
