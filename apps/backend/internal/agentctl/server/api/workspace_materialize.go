@@ -391,8 +391,23 @@ func matchingRemoteContributionCheckout(ctx context.Context, destination string,
 	if err := materializeRemoteContributionRef(ctx, destination, binding); err != nil {
 		return false, err
 	}
+	remoteName := binding.ContributionRemoteName()
+	currentBranch, err := materializeGitOutput(ctx, "-C", destination, "branch", "--show-current")
+	if err != nil || strings.TrimSpace(currentBranch) == "" {
+		return false, errMaterializeCollision
+	}
+	upstream, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}")
+	if err != nil || strings.TrimSpace(upstream) != remoteName+"/"+binding.HeadBranch {
+		return false, errMaterializeCollision
+	}
 	head, err := materializeGitOutput(ctx, "-C", destination, "rev-parse", "--verify", "HEAD^{commit}")
-	if err != nil || !strings.EqualFold(strings.TrimSpace(head), binding.HeadSHA) {
+	if err != nil {
+		return false, errMaterializeCollision
+	}
+	if strings.EqualFold(strings.TrimSpace(head), binding.HeadSHA) {
+		return true, nil
+	}
+	if _, err := materializeGitOutput(ctx, "-C", destination, "merge-base", "--is-ancestor", binding.HeadSHA, "HEAD"); err != nil {
 		return false, errMaterializeCollision
 	}
 	return true, nil

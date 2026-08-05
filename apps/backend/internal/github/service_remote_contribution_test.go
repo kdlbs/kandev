@@ -29,6 +29,7 @@ func TestBuildGitHubRemoteContributionUsesValidatedForkIdentity(t *testing.T) {
 		HeadRepoOwner:       "contributor",
 		HeadRepoName:        "widget-fork",
 		HeadRepoID:          42,
+		HeadRepoNodeID:      "R_kgDOFork123",
 		BaseRepoID:          99,
 		BaseRepoOwner:       "acme",
 		BaseRepoName:        "widget",
@@ -46,6 +47,9 @@ func TestBuildGitHubRemoteContributionUsesValidatedForkIdentity(t *testing.T) {
 	}
 	if got := resolution.Binding.SourceRepository.Path; got != "contributor/widget-fork" {
 		t.Fatalf("source path = %q, want contributor/widget-fork", got)
+	}
+	if got := resolution.Binding.SourceRepository.ProviderID; got != "R_kgDOFork123" {
+		t.Fatalf("source provider ID = %q, want GitHub node ID", got)
 	}
 	if resolution.TargetDefaultBranch != "main" || resolution.TargetProviderID != "99" {
 		t.Fatalf("target identity = (%q, %q), want (main, 99)", resolution.TargetDefaultBranch, resolution.TargetProviderID)

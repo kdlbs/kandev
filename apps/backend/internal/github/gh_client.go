@@ -203,7 +203,7 @@ type ghPR struct {
 	ReviewRequests      []ghRequestedReviewer `json:"reviewRequests"`
 	MaintainerCanModify bool                  `json:"maintainerCanModify"`
 	HeadRepository      ghRepository          `json:"headRepository"`
-	BaseRepository      ghRepository          `json:"baseRepository"`
+	HeadRepositoryOwner ghRepositoryOwner     `json:"headRepositoryOwner"`
 	Author              struct {
 		Login string `json:"login"`
 	} `json:"author"`
@@ -211,15 +211,16 @@ type ghPR struct {
 
 type ghRepository struct {
 	DefaultBranch string `json:"defaultBranch"`
-	ID            int64  `json:"id"`
+	ID            string `json:"id"`
 	Name          string `json:"name"`
 	NameWithOwner string `json:"nameWithOwner"`
 	URL           string `json:"url"`
 	CloneURL      string `json:"cloneUrl"`
 	HTTPSURL      string `json:"httpsUrl"`
-	Owner         struct {
-		Login string `json:"login"`
-	} `json:"owner"`
+}
+
+type ghRepositoryOwner struct {
+	Login string `json:"login"`
 }
 
 type ghIssue struct {
@@ -246,7 +247,7 @@ type ghIssue struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,baseRepository")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner")
 	if err != nil {
 		if isNotFoundErr(err) {
 			return nil, &GitHubAPIError{
@@ -1233,8 +1234,8 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		MergedAt:            parseTimePtr(raw.MergedAt),
 		ClosedAt:            parseTimePtr(raw.ClosedAt),
 	}
-	pr.HeadRepoID = raw.HeadRepository.ID
-	pr.HeadRepoOwner = raw.HeadRepository.Owner.Login
+	pr.HeadRepoNodeID = raw.HeadRepository.ID
+	pr.HeadRepoOwner = raw.HeadRepositoryOwner.Login
 	pr.HeadRepoName = raw.HeadRepository.Name
 	if parts := strings.SplitN(raw.HeadRepository.NameWithOwner, "/", 2); len(parts) == 2 {
 		if pr.HeadRepoOwner == "" {
@@ -1248,18 +1249,12 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 	if pr.HeadRepoCloneURL == "" {
 		pr.HeadRepoCloneURL = raw.HeadRepository.HTTPSURL
 	}
-	pr.BaseRepoID = raw.BaseRepository.ID
-	pr.BaseRepoOwner = raw.BaseRepository.Owner.Login
-	pr.BaseRepoName = raw.BaseRepository.Name
-	if parts := strings.SplitN(raw.BaseRepository.NameWithOwner, "/", 2); len(parts) == 2 {
-		if pr.BaseRepoOwner == "" {
-			pr.BaseRepoOwner = parts[0]
-		}
-		if pr.BaseRepoName == "" {
-			pr.BaseRepoName = parts[1]
-		}
-	}
-	pr.BaseDefaultBranch = raw.BaseRepository.DefaultBranch
+	// gh pr view does not expose baseRepository. The --repo arguments are the
+	// trusted target identity, while the PR response supplies the immutable
+	// base ref. Keep these separate from the source repository identity above.
+	pr.BaseRepoOwner = owner
+	pr.BaseRepoName = repo
+	pr.BaseDefaultBranch = raw.BaseRefName
 	return pr
 }
 

@@ -260,6 +260,7 @@ type PR struct {
 	RepoOwner           string              `json:"repo_owner"`
 	RepoName            string              `json:"repo_name"`
 	HeadRepoID          int64               `json:"head_repo_id,omitempty"`
+	HeadRepoNodeID      string              `json:"head_repo_node_id,omitempty"`
 	HeadRepoOwner       string              `json:"head_repo_owner,omitempty"`
 	HeadRepoName        string              `json:"head_repo_name,omitempty"`
 	HeadRepoCloneURL    string              `json:"head_repo_clone_url,omitempty"`

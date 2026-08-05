@@ -125,8 +125,14 @@ func validateGitLabContributionMR(projectPath string, iid int, mr *MR) error {
 }
 
 func gitLabContributionSource(projectPath string, mr *MR) (string, bool, error) {
+	if mr == nil {
+		return "", false, errors.New("GitLab merge request response is empty")
+	}
 	sourcePath := mr.SourceProjectPath
 	if sourcePath == "" {
+		if mr.SourceProjectID > 0 && mr.TargetProjectID > 0 && mr.SourceProjectID != mr.TargetProjectID {
+			return "", false, errors.New("GitLab merge request source project identity is missing")
+		}
 		sourcePath = projectPath
 	}
 	if !validGitLabProjectPath(sourcePath) || !validGitLabProjectPath(projectPath) {

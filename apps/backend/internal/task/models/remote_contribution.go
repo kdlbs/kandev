@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/kandev/kandev/internal/common/securityutil"
@@ -181,10 +182,8 @@ func validateRemoteContributionRepository(repository RemoteContributionRepositor
 	if host == "" || path == "" {
 		return errors.New("host and path are required")
 	}
-	if strings.ContainsAny(host, "/:@?#") || strings.ContainsAny(path, "\\:@?#") ||
-		!remoteContributionRepositoryPathPattern.MatchString(path) ||
-		strings.Contains(path, "..") || strings.HasSuffix(path, "/") || strings.Contains(path, "//") {
-		return errors.New("repository identity is invalid")
+	if err := validateRemoteContributionRepositoryIdentity(host, path); err != nil {
+		return err
 	}
 	parsed, err := parseCredentialFreeURL(repository.RemoteURL)
 	if err != nil {
@@ -196,6 +195,38 @@ func validateRemoteContributionRepository(repository RemoteContributionRepositor
 	remotePath := strings.Trim(strings.TrimSuffix(parsed.Path, ".git"), "/")
 	if !strings.EqualFold(remotePath, path) {
 		return errors.New("remote_url path does not match repository path")
+	}
+	return nil
+}
+
+func validateRemoteContributionRepositoryIdentity(host, path string) error {
+	if strings.ContainsAny(host, "/@?#") || !validRemoteContributionPath(path) {
+		return errors.New("repository identity is invalid")
+	}
+	return validateRemoteContributionAuthority(host)
+}
+
+func validateRemoteContributionAuthority(host string) error {
+	authority, err := url.Parse("https://" + host)
+	if err != nil || authority.Host != host || authority.Hostname() == "" {
+		return errors.New("repository identity is invalid")
+	}
+	if authority.User != nil || authority.Path != "" || authority.RawQuery != "" || authority.Fragment != "" {
+		return errors.New("repository identity is invalid")
+	}
+	if err := validateRemoteContributionPort(authority.Port()); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateRemoteContributionPort(port string) error {
+	if port == "" {
+		return nil
+	}
+	portNumber, err := strconv.Atoi(port)
+	if err != nil || portNumber < 1 || portNumber > 65535 {
+		return errors.New("repository identity is invalid")
 	}
 	return nil
 }

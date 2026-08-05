@@ -145,6 +145,42 @@ func TestGHSearchParsingPreservesImmutableIdentity(t *testing.T) {
 	}
 }
 
+func TestGHClient_GetPRParsesSupportedCLIRepositoryShape(t *testing.T) {
+	binDir := t.TempDir()
+	logPath := filepath.Join(t.TempDir(), "gh-args.log")
+	ghPath := filepath.Join(binDir, "gh")
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$GH_ARGS_LOG"
+printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.com/acme/widget/pull/7","state":"OPEN","body":"","headRefName":"feature/remote","headRefOid":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","baseRefName":"main","author":{"login":"alice"},"isDraft":false,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","additions":1,"deletions":0,"createdAt":"2025-01-01T00:00:00Z","updatedAt":"2025-01-02T00:00:00Z","mergedAt":"","closedAt":"","reviewRequests":[],"maintainerCanModify":true,"headRepository":{"id":"R_kgDOFork123","name":"widget-fork","nameWithOwner":"contributor/widget-fork","url":"https://github.com/contributor/widget-fork","cloneUrl":"https://github.com/contributor/widget-fork.git"},"headRepositoryOwner":{"login":"contributor"}}'
+`
+	if err := os.WriteFile(ghPath, []byte(script), 0o755); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("GH_ARGS_LOG", logPath)
+
+	pr, err := NewGHClient().GetPR(context.Background(), "acme", "widget", 7)
+	if err != nil {
+		t.Fatalf("GetPR() error = %v", err)
+	}
+	if pr.HeadRepoNodeID != "R_kgDOFork123" || pr.HeadRepoOwner != "contributor" || pr.HeadRepoName != "widget-fork" {
+		t.Fatalf("source repository = (%q, %q, %q), want CLI node ID and owner shape", pr.HeadRepoNodeID, pr.HeadRepoOwner, pr.HeadRepoName)
+	}
+	if pr.BaseRepoOwner != "acme" || pr.BaseRepoName != "widget" || pr.BaseDefaultBranch != "main" {
+		t.Fatalf("target repository = (%q, %q, %q), want acme/widget/main", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseDefaultBranch)
+	}
+	args, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read gh args: %v", err)
+	}
+	if !strings.Contains(string(args), "headRepositoryOwner") {
+		t.Fatalf("GetPR() did not request headRepositoryOwner: %s", args)
+	}
+	if strings.Contains(string(args), "baseRepository") {
+		t.Fatalf("GetPR() requested unsupported baseRepository field: %s", args)
+	}
+}
+
 func TestGHClient_ListCheckRuns_PaginatesCheckRuns(t *testing.T) {
 	binDir := t.TempDir()
 	logPath := filepath.Join(t.TempDir(), "gh-args.log")

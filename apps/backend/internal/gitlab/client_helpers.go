@@ -123,6 +123,10 @@ type rawPipeline struct {
 func convertRawMR(raw *rawMR) *MR {
 	state := normalizeMRState(raw.State)
 	namespace, projectPath := splitFullReference(raw.References.Full)
+	targetProjectID := raw.TargetProjectID
+	if targetProjectID == 0 {
+		targetProjectID = raw.ProjectID
+	}
 	mr := &MR{
 		ID:                 raw.ID,
 		IID:                raw.IID,
@@ -138,7 +142,7 @@ func convertRawMR(raw *rawMR) *MR {
 		ProjectNamespace:   namespace,
 		ProjectPath:        projectPath,
 		SourceProjectID:    raw.SourceProjectID,
-		TargetProjectID:    raw.TargetProjectID,
+		TargetProjectID:    targetProjectID,
 		AllowCollaboration: raw.AllowCollaboration,
 		Body:               raw.Description,
 		Draft:              raw.Draft || raw.WorkInProgress,
@@ -155,13 +159,14 @@ func convertRawMR(raw *rawMR) *MR {
 	if raw.SourceProject.PathWithNamespace != "" {
 		mr.SourceProjectPath = raw.SourceProject.PathWithNamespace
 	}
-	if mr.SourceProjectPath == "" {
+	// A fork MR can contain only source_project_id and target_project_id. Do
+	// not turn that response into a same-project MR by copying the target path;
+	// PATClient hydrates the source project by ID before this conversion.
+	if mr.SourceProjectPath == "" && (raw.SourceProjectID == 0 ||
+		(targetProjectID > 0 && raw.SourceProjectID == targetProjectID)) {
 		mr.SourceProjectPath = projectPath
 	}
 	mr.SourceProjectRemoteURL = raw.SourceProject.HTTPURLToRepo
-	if mr.TargetProjectID == 0 {
-		mr.TargetProjectID = raw.ProjectID
-	}
 	if raw.TargetProject.PathWithNamespace != "" {
 		mr.TargetProjectPath = raw.TargetProject.PathWithNamespace
 	}

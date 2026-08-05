@@ -89,6 +89,72 @@ func TestRemoteContributionRejectsUnsafeOrCredentialBearingValues(t *testing.T) 
 	}
 }
 
+func TestRemoteContributionAcceptsGitLabPortAndIPv6Authorities(t *testing.T) {
+	cases := []struct {
+		name string
+		host string
+		url  string
+	}{
+		{
+			name: "custom port",
+			host: "gitlab.example.test:8443",
+			url:  "https://gitlab.example.test:8443/group/widget",
+		},
+		{
+			name: "bracketed IPv6 with port",
+			host: "[::1]:8443",
+			url:  "https://[::1]:8443/group/widget",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			binding := RemoteContribution{
+				Version:      RemoteContributionVersion,
+				Provider:     RemoteContributionProviderGitLab,
+				Kind:         RemoteContributionKindMergeRequest,
+				CanonicalURL: tc.url + "/-/merge_requests/7",
+				Number:       7,
+				State:        RemoteContributionStateOpen,
+				BaseBranch:   "main",
+				HeadBranch:   "feature/fix",
+				HeadSHA:      "0123456789abcdef0123456789abcdef01234567",
+				SourceRepository: RemoteContributionRepository{
+					Host:      tc.host,
+					Path:      "group/widget",
+					RemoteURL: tc.url + ".git",
+				},
+				CollaborationAllowed: true,
+			}
+			if err := binding.Validate(); err != nil {
+				t.Fatalf("Validate() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRemoteContributionRejectsInvalidGitLabPortAuthority(t *testing.T) {
+	binding := RemoteContribution{
+		Version:      RemoteContributionVersion,
+		Provider:     RemoteContributionProviderGitLab,
+		Kind:         RemoteContributionKindMergeRequest,
+		CanonicalURL: "https://gitlab.example.test:99999/group/widget/-/merge_requests/7",
+		Number:       7,
+		State:        RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/fix",
+		HeadSHA:      "0123456789abcdef0123456789abcdef01234567",
+		SourceRepository: RemoteContributionRepository{
+			Host:      "gitlab.example.test:99999",
+			Path:      "group/widget",
+			RemoteURL: "https://gitlab.example.test:99999/group/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	if err := binding.Validate(); err == nil {
+		t.Fatal("Validate() accepted an out-of-range port")
+	}
+}
+
 func TestLoadRemoteContributionRejectsMalformedJSON(t *testing.T) {
 	metadata := map[string]interface{}{RemoteContributionMetadataKey: json.RawMessage(`{"version":1}`)}
 	if _, ok, err := LoadRemoteContribution(metadata); err == nil || ok {

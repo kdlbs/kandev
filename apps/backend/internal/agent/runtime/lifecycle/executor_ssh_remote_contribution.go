@@ -115,12 +115,18 @@ func appendSSHGitConfig(env map[string]string, count int, key, value string) int
 
 func sshRemoteContributionScript(taskDir, targetURL string, binding *models.RemoteContribution) string {
 	remoteName, remoteBranch, remoteRef, refspec, suffix := sshRemoteContributionScriptValues(binding)
-	return fmt.Sprintf(strings.Join([]string{
+	lines := append(sshRemoteContributionSetupLines(), sshRemoteContributionCheckoutLines()...)
+	return fmt.Sprintf(strings.Join(lines, "\n"), shellQuote(taskDir), shellQuote(targetURL), shellQuote(remoteName), shellQuote(binding.SourceRepository.RemoteURL), shellQuote(binding.BaseBranch), shellQuote(remoteBranch), shellQuote(remoteRef), shellQuote(refspec), shellQuote(binding.HeadSHA), suffix, suffix)
+}
+
+func sshRemoteContributionSetupLines() []string {
+	return []string{
 		"set -eu",
 		"workspace=%s",
 		"target_url=%s",
 		"contribution_remote=%s",
 		"contribution_url=%s",
+		"base_branch=%s",
 		"contribution_branch=%s",
 		"contribution_ref=%s",
 		"contribution_refspec=%s",
@@ -142,7 +148,7 @@ func sshRemoteContributionScript(taskDir, targetURL string, binding *models.Remo
 		"mkdir -p \"$(dirname \"$exclude_file\")\"",
 		"touch \"$exclude_file\"",
 		"grep -Fqx '/.kandev/' \"$exclude_file\" || printf '%%s\\n' '/.kandev/' >>\"$exclude_file\"",
-		"if ! git -C \"$workspace\" fetch --no-tags origin \"+refs/heads/%s:refs/remotes/origin/%s\" >/dev/null 2>&1; then",
+		"if ! git -C \"$workspace\" fetch --no-tags origin \"+refs/heads/$base_branch:refs/remotes/origin/$base_branch\" >/dev/null 2>&1; then",
 		"  echo 'kandev: target base branch is unavailable' >&2",
 		"  exit 1",
 		"fi",
@@ -170,10 +176,18 @@ func sshRemoteContributionScript(taskDir, targetURL string, binding *models.Remo
 		"  echo 'kandev: contribution source head changed' >&2",
 		"  exit 1",
 		"fi",
+	}
+}
+
+func sshRemoteContributionCheckoutLines() []string {
+	return []string{
+		"current_branch=$(git -C \"$workspace\" branch --show-current 2>/dev/null || true)",
+		"current_upstream=$(git -C \"$workspace\" rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)",
 		"checkout_branch=\"$contribution_branch\"",
-		"if git -C \"$workspace\" show-ref --verify --quiet \"refs/heads/$checkout_branch\"; then",
-		"  existing_head=$(git -C \"$workspace\" rev-parse --verify \"refs/heads/$checkout_branch\")",
-		"  if [ \"$existing_head\" != \"$expected_head\" ]; then",
+		"if [ -n \"$current_branch\" ] && [ \"$current_upstream\" = \"$contribution_remote/$contribution_branch\" ] && git -C \"$workspace\" merge-base --is-ancestor \"$expected_head\" HEAD >/dev/null 2>&1; then",
+		"  checkout_branch=\"$current_branch\"",
+		"elif git -C \"$workspace\" show-ref --verify --quiet \"refs/heads/$checkout_branch\"; then",
+		"  if ! git -C \"$workspace\" merge-base --is-ancestor \"$expected_head\" \"refs/heads/$checkout_branch\" >/dev/null 2>&1; then",
 		"    checkout_branch=\"$contribution_branch-kandev-%s\"",
 		"    suffix_number=0",
 		"    while git -C \"$workspace\" show-ref --verify --quiet \"refs/heads/$checkout_branch\"; do",
@@ -182,7 +196,6 @@ func sshRemoteContributionScript(taskDir, targetURL string, binding *models.Remo
 		"    done",
 		"  fi",
 		"fi",
-		"current_branch=$(git -C \"$workspace\" branch --show-current 2>/dev/null || true)",
 		"if [ \"$current_branch\" != \"$checkout_branch\" ]; then",
 		"  if git -C \"$workspace\" show-ref --verify --quiet \"refs/heads/$checkout_branch\"; then",
 		"    git -C \"$workspace\" checkout \"$checkout_branch\" >/dev/null 2>&1",
@@ -191,7 +204,7 @@ func sshRemoteContributionScript(taskDir, targetURL string, binding *models.Remo
 		"  fi",
 		"fi",
 		"git -C \"$workspace\" branch --set-upstream-to=\"$contribution_remote/$contribution_branch\" \"$checkout_branch\" >/dev/null 2>&1",
-	}, "\n"), shellQuote(taskDir), shellQuote(targetURL), shellQuote(remoteName), shellQuote(binding.SourceRepository.RemoteURL), shellQuote(remoteBranch), shellQuote(remoteRef), shellQuote(refspec), shellQuote(binding.HeadSHA), shellQuote(binding.BaseBranch), shellQuote(binding.BaseBranch), suffix, suffix)
+	}
 }
 
 func sshRemoteContributionScriptValues(binding *models.RemoteContribution) (string, string, string, string, string) {

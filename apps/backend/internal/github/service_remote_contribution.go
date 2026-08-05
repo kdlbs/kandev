@@ -78,7 +78,7 @@ func buildGitHubRemoteContribution(rawURL, owner, repo string, number int, pr *P
 		Host:       "github.com",
 		Path:       sourceOwner + "/" + sourceName,
 		RemoteURL:  fmt.Sprintf("https://github.com/%s/%s.git", sourceOwner, sourceName),
-		ProviderID: positiveID(pr.HeadRepoID),
+		ProviderID: githubHeadProviderID(pr),
 	}
 	binding := taskmodels.RemoteContribution{
 		Version:              taskmodels.RemoteContributionVersion,
@@ -148,4 +148,14 @@ func positiveID(id int64) string {
 		return ""
 	}
 	return strconv.FormatInt(id, 10)
+}
+
+func githubHeadProviderID(pr *PR) string {
+	if pr == nil {
+		return ""
+	}
+	if nodeID := strings.TrimSpace(pr.HeadRepoNodeID); nodeID != "" {
+		return nodeID
+	}
+	return positiveID(pr.HeadRepoID)
 }
