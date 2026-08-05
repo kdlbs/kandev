@@ -30,6 +30,11 @@ destination, to collide.
   the raw item ID separately only for compatibility selectors.
 - Keep availability-gated and static consumers distinct. Static consumers must
   not mount integration polling merely to render ungated links.
+- Keep deep settings discovery in a dedicated settings catalog rather than
+  expanding `APP_DESTINATIONS`. The Settings tree and command palette resolve
+  that catalog, while stable target IDs connect entries to rendered controls.
+  Plugin-authored control discovery remains out of scope until the plugin
+  contract supplies explicit labels, aliases, routes, and target metadata.
 
 The following concerns remain explicit follow-up decisions rather than fields or
 validation added before a concrete requirement exists:
@@ -52,6 +57,8 @@ validation added before a concrete requirement exists:
 - Plugin destination React keys are globally stable across owners without
   changing existing plugin test IDs.
 - New navigation consumers must choose the gated or static hook deliberately.
+- Deep-settings consumers share one independently testable catalog without
+  turning top-level navigation entries into a settings schema.
 - Future ordering, path ownership, and typed-route work has a discoverable
   decision boundary instead of relying on comments in one implementation file.
 

@@ -10,6 +10,7 @@ import {
   IconTerminal2,
 } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { GENERAL_DISCOVERY_DEFINITIONS } from "@/lib/settings-discovery/catalog/general";
 
 export type GeneralNavItem = {
   href: string;
@@ -18,56 +19,63 @@ export type GeneralNavItem = {
   icon: TablerIcon;
 };
 
-export const GENERAL_NAV_ITEMS: GeneralNavItem[] = [
+const GENERAL_NAV_PRESENTATION: Array<
+  Pick<GeneralNavItem, "descriptionKey" | "icon"> & { id: string }
+> = [
   {
-    href: "/settings/general/appearance",
-    labelKey: "settings:appearance",
+    id: "general-appearance",
     descriptionKey: "settings:themeMetricsAndChangesPanelPreferences",
     icon: IconPalette,
   },
   {
-    href: "/settings/general/layouts",
-    labelKey: "settings:layouts",
+    id: "general-layouts",
     descriptionKey: "settings:taskWorkbenchLayoutProfilesAndDefaults",
     icon: IconLayoutDashboard,
   },
   {
-    href: "/settings/general/terminal",
-    labelKey: "settings:terminal",
+    id: "general-terminal",
     descriptionKey: "settings:shellTerminalFontsAndLinkBehavior",
     icon: IconTerminal2,
   },
   {
-    href: "/settings/general/notifications",
-    labelKey: "settings:notifications",
+    id: "general-notifications",
     descriptionKey: "settings:providersAndNotificationEvents",
     icon: IconBell,
   },
   {
-    href: "/settings/general/editors",
-    labelKey: "settings:editors",
+    id: "general-editors",
     descriptionKey: "settings:editorIntegrationsAndDefaults",
     icon: IconCode,
   },
   {
-    href: "/settings/general/keyboard-shortcuts",
-    labelKey: "settings:keyboardShortcuts",
+    id: "general-keyboard-shortcuts",
     descriptionKey: "settings:chatInputAndCommandShortcuts",
     icon: IconCommand,
   },
   {
-    href: "/settings/general/task-actions",
-    labelKey: "settings:taskActions",
+    id: "general-task-actions",
     descriptionKey: "settings:mcpTaskDefaultsAndArchiveSafeguards",
     icon: IconArchive,
   },
   {
-    href: "/settings/general/message-queue",
-    labelKey: "system:messageQueueTitle",
+    id: "general-message-queue",
     descriptionKey: "system:messageQueueDescription",
     icon: IconMessage,
   },
 ];
+
+const generalPages = new Map(GENERAL_DISCOVERY_DEFINITIONS.map((item) => [item.id, item]));
+
+export const GENERAL_NAV_ITEMS: GeneralNavItem[] = GENERAL_NAV_PRESENTATION.map((item) => {
+  const page = generalPages.get(item.id);
+  if (!page?.labelKey) throw new Error(`Missing General discovery page: ${item.id}`);
+  return {
+    href: page.href,
+    labelKey: page.labelKey,
+    descriptionKey: item.descriptionKey,
+    icon: item.icon,
+  };
+});
 
 /** A nav item with its copy already translated, ready to render. */
 export type ResolvedGeneralNavItem = {

@@ -59,6 +59,7 @@ import {
 } from "@/components/settings/profile-edit/executor-profile-baselines";
 import type { Executor, ExecutorProfile, ExecutorType, ProfileEnvVar } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
+import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 const SPRITES_TOKEN_KEY = "SPRITES_API_TOKEN";
@@ -409,15 +410,10 @@ type ProfileEditSectionsProps = {
   secrets: ReturnType<typeof useSecrets>["items"];
 };
 
-function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
+function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
   const gitIdentityBaseline = getGitIdentityBaseline(profile, form.localGitIdentity);
   return (
     <>
-      <ProfileDetailsCard
-        name={form.name}
-        baselineName={profile.name}
-        onNameChange={form.setName}
-      />
       {executor.type === "ssh" && (
         <SSHAgentReadinessCard
           executorId={executor.id}
@@ -470,6 +466,25 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
           secrets={secrets}
         />
       )}
+    </>
+  );
+}
+
+function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSectionsProps) {
+  return (
+    <>
+      <ProfileDetailsCard
+        name={form.name}
+        baselineName={profile.name}
+        onNameChange={form.setName}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "profile-details")}
+      />
+      <ExecutorSpecificSections
+        executor={executor}
+        profile={profile}
+        form={form}
+        secrets={secrets}
+      />
       <EnvVarsCard
         rows={form.envVarRows}
         baselineRows={envVarsToRows(profile.env_vars)}
@@ -477,6 +492,7 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
         onAdd={form.addEnvVar}
         onUpdate={form.updateEnvVar}
         onRemove={form.removeEnvVar}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "environment-variables")}
       />
       <ScriptCard
         title="Prepare Script"
@@ -487,6 +503,7 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
         height="300px"
         placeholders={form.placeholders}
         executorType={executor.type}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "prepare-script")}
       />
       {form.isRemote && (
         <ScriptCard
@@ -505,6 +522,7 @@ function ProfileEditSections({ executor, profile, form, secrets }: ProfileEditSe
         baselinePolicy={profile.mcp_policy ?? ""}
         mcpPolicyError={form.mcpPolicyError}
         onPolicyChange={form.setMcpPolicy}
+        discoveryTargetId={executorProfileDiscoveryTarget(profile.id, "mcp-policy")}
       />
     </>
   );

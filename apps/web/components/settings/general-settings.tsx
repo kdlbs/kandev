@@ -37,6 +37,7 @@ import type { StoredShortcutOverrides } from "@/lib/keyboard/shortcut-overrides"
 import { buildPluginShortcutEntries } from "@/lib/keyboard/plugin-shortcuts";
 import { usePlugins } from "@/hooks/domains/plugins/use-plugins";
 import { StartupPageSettingsCard } from "@/components/settings/startup-page-settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 function ThemeSettingsCard({
   theme,
@@ -49,7 +50,11 @@ function ThemeSettingsCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="theme-settings-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.colorTheme}
+      data-testid="theme-settings-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:colorTheme")}</CardTitle>
       </CardHeader>
@@ -82,7 +87,11 @@ function ChatSubmitKeyCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="chat-submit-key-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.submitShortcut}
+      data-testid="chat-submit-key-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:submitShortcut")}</CardTitle>
       </CardHeader>
@@ -120,7 +129,11 @@ function ChangesPanelLayoutCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="changes-panel-layout-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.changesPanelLayout}
+      data-testid="changes-panel-layout-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:changesPanelLayout")}</CardTitle>
       </CardHeader>

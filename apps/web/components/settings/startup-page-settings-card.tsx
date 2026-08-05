@@ -6,6 +6,7 @@ import { Label } from "@kandev/ui/label";
 import { RadioGroup, RadioGroupItem } from "@kandev/ui/radio-group";
 import type { StartupPage } from "@/lib/types/http";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 /**
  * Holds catalog KEYS, not copy. A module-scope table is evaluated once at import,
@@ -37,7 +38,11 @@ export function StartupPageSettingsCard({
 }) {
   const { t } = useTranslation();
   return (
-    <SettingsCard isDirty={isDirty} data-testid="startup-page-settings-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.startupPage}
+      data-testid="startup-page-settings-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:openKandevTo")}</CardTitle>
         <CardDescription>{t("settings:thisAppliesWhenKandevStarts")}</CardDescription>

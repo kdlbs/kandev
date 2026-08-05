@@ -88,6 +88,7 @@ vi.mock("./workspace-content-search", () => ({
 
 import {
   CommandPanelView,
+  MODE_COMMANDS,
   MODE_SEARCH_CONTENT,
   type CommandPanelViewProps,
 } from "./command-panel-footer";
@@ -256,6 +257,89 @@ describe("CommandPanelView task content search mode", () => {
     expect(screen.queryByText("Switch mode")).toBeNull();
     expect(fireEvent.keyDown(input, { key: "Tab" })).toBe(true);
     expect(onScopeChange).not.toHaveBeenCalled();
+  });
+});
+
+describe("CommandPanelView search-only commands", () => {
+  const FONT_SIZE_LABEL = "Terminal Font Size";
+  const goToSettings = {
+    id: "nav-settings",
+    label: "Go to Settings",
+    group: "Navigation",
+    action: vi.fn(),
+  };
+  const fontSize = {
+    id: "setting:terminal-font-size",
+    label: FONT_SIZE_LABEL,
+    group: "Settings",
+    context: "Settings › General › Terminal",
+    searchOnly: true,
+    action: vi.fn(),
+  };
+
+  it("keeps granular settings hidden before typing", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "",
+          commands: [goToSettings, fontSize],
+          grouped: [
+            ["Navigation", [goToSettings]],
+            ["Settings", [fontSize]],
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Go to Settings")).toBeTruthy();
+    expect(screen.queryByText(FONT_SIZE_LABEL)).toBeNull();
+  });
+
+  it("shows a matching granular setting with owning context after typing", () => {
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "font size",
+          commands: [goToSettings, fontSize],
+          grouped: [],
+        })}
+      />,
+    );
+
+    expect(screen.getByText(FONT_SIZE_LABEL)).toBeTruthy();
+    expect(screen.getByText("Settings › General › Terminal")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Commands" })).toBeNull();
+  });
+
+  it("separates regular and granular matches into Commands and Settings", () => {
+    const fontSizeGuide = {
+      id: "help:terminal-font-size",
+      label: "Terminal Font Size Guide",
+      group: "Help",
+      action: vi.fn(),
+    };
+    render(
+      <CommandPanelView
+        {...viewProps({
+          mode: MODE_COMMANDS,
+          search: "terminal font size",
+          commands: [fontSizeGuide, fontSize],
+          grouped: [],
+        })}
+      />,
+    );
+
+    expect(
+      screen.getByText("Terminal Font Size Guide").closest("section")?.querySelector("h2")
+        ?.textContent,
+    ).toBe("Commands");
+    expect(
+      screen.getByText(FONT_SIZE_LABEL, { exact: true }).closest("section")?.querySelector("h2")
+        ?.textContent,
+    ).toBe("Settings");
   });
 });
 

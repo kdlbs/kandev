@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Input } from "@kandev/ui/input";
 import { Spinner } from "@kandev/ui/spinner";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
@@ -15,6 +15,8 @@ import {
   revokeSession,
   type AuthSession,
 } from "@/lib/api/domains/auth-api";
+import { SettingsCard } from "@/components/settings/settings-card";
+import { ACCOUNT_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/account";
 
 function ChangePasswordCard() {
   const [current, setCurrent] = useState("");
@@ -41,7 +43,10 @@ function ChangePasswordCard() {
   };
 
   return (
-    <Card data-testid="account-security-password-card">
+    <SettingsCard
+      discoveryTargetId={ACCOUNT_SETTINGS_TARGETS.password}
+      data-testid="account-security-password-card"
+    >
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <IconKey className="h-4 w-4" /> Password
@@ -94,7 +99,7 @@ function ChangePasswordCard() {
           </Button>
         </form>
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -130,7 +135,10 @@ function SessionsCard() {
   };
 
   return (
-    <Card data-testid="account-sessions-card">
+    <SettingsCard
+      discoveryTargetId={ACCOUNT_SETTINGS_TARGETS.sessions}
+      data-testid="account-sessions-card"
+    >
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <IconDevices className="h-4 w-4" /> Active sessions
@@ -191,7 +199,7 @@ function SessionsCard() {
           </Table>
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

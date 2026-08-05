@@ -47,6 +47,7 @@ type McpPolicyCardProps = {
   baselinePolicy?: string;
   mcpPolicyError: string | null;
   onPolicyChange: (value: string) => void;
+  discoveryTargetId?: string;
 };
 
 export function McpPolicyCard({
@@ -54,6 +55,7 @@ export function McpPolicyCard({
   baselinePolicy,
   mcpPolicyError,
   onPolicyChange,
+  discoveryTargetId,
 }: McpPolicyCardProps) {
   const { t } = useTranslation();
   const isDirty = baselinePolicy !== undefined && mcpPolicy !== baselinePolicy;
@@ -64,7 +66,7 @@ export function McpPolicyCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty}>
+    <SettingsCard isDirty={isDirty} discoveryTargetId={discoveryTargetId}>
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {t("executors:mcpPolicy")}

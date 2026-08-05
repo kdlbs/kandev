@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTranslation } from "react-i18next";
 
@@ -47,7 +48,11 @@ export function UnreadDividerSettings() {
   });
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="unread-divider-settings-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.unreadMessages}
+      data-testid="unread-divider-settings-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:unreadMessages")}</CardTitle>
       </CardHeader>
