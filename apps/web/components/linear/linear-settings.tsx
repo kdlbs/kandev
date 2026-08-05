@@ -32,6 +32,7 @@ import type { LinearConfig, LinearTeam, TestLinearConnectionResult } from "@/lib
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { LinearIssueWatchersSection } from "./linear-issue-watchers-section";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 type FormState = {
   defaultTeamKey: string;
@@ -439,6 +440,7 @@ export function LinearConnectionSection({ workspaceId }: { workspaceId: string }
 
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.linear}
       icon={<IconHexagon className="h-5 w-5" />}
       title={t("linear:linearIntegration")}
       description={t("linear:linearIntegrationDescription")}

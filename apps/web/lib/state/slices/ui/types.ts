@@ -1,6 +1,5 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
-import type { StateSnapshot } from "react-virtuoso";
 import type {
   FilterClause,
   GroupKey,
@@ -73,9 +72,6 @@ export type TranscriptAutoScrollState = {
   /** Last known scrollTop for the native renderer, captured continuously so
    *  a disabled session's position survives a dockview panel remount. */
   scrollTopBySessionId: Record<string, number>;
-  /** Last captured Virtuoso state snapshot (scroll offset + measured item
-   *  sizes) for the virtuoso renderer, captured on disable/unmount. */
-  virtuosoStateBySessionId: Record<string, StateSnapshot>;
 };
 
 export type ReviewPRSelectionState = {
@@ -237,7 +233,6 @@ export type UISliceActions = {
   setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
-  setTranscriptVirtuosoState: (sessionId: string, state: StateSnapshot) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;

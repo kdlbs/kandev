@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { IconCheck, IconX, IconClock } from "@tabler/icons-react";
 import type { CheckRun } from "@/lib/types/github";
 import { CollapsibleSection, AddToContextButton, formatDuration, formatElapsed } from "./pr-shared";
+import { useTranslation } from "react-i18next";
 
 function CheckStatusIcon({ check }: { check: CheckRun }) {
   const value = check.conclusion || check.status;
@@ -49,6 +50,11 @@ function buildCheckMessage(check: CheckRun): string {
   return parts.join("\n\n");
 }
 
+/**
+ * Agent-facing content, not UI copy: queued into the chat by `onAddAsContext`
+ * and sent to the agent verbatim, so it stays English — same call as the
+ * integration prompt templates.
+ */
 function buildAllFailedMessage(checks: CheckRun[]): string {
   const failed = checks.filter(isFailedCheck);
   const parts = [`### ${failed.length} CI Check${failed.length !== 1 ? "s" : ""} Failed`, ""];
@@ -62,14 +68,17 @@ function buildAllFailedMessage(checks: CheckRun[]): string {
   return parts.join("\n");
 }
 
-function formatSectionSummary(checks: CheckRun[]): string {
+function formatSectionSummary(
+  checks: CheckRun[],
+  t: (key: string, values?: Record<string, unknown>) => string,
+): string {
   const failed = checks.filter(isFailedCheck).length;
   const passed = checks.filter((c) => c.conclusion === "success").length;
   const pending = checks.length - failed - passed;
   const parts: string[] = [];
-  if (failed > 0) parts.push(`${failed} failed`);
-  if (passed > 0) parts.push(`${passed} passed`);
-  if (pending > 0) parts.push(`${pending} pending`);
+  if (failed > 0) parts.push(t("github:checksFailedCount", { count: failed }));
+  if (passed > 0) parts.push(t("github:checksPassedCount", { count: passed }));
+  if (pending > 0) parts.push(t("github:checksPendingCount", { count: pending }));
   return parts.join(", ");
 }
 
@@ -80,6 +89,7 @@ export function ChecksSection({
   checks: CheckRun[];
   onAddAsContext: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const hasRunning = useMemo(() => checks.some((c) => c.started_at && !c.completed_at), [checks]);
 
   const [, setTick] = useState(0);
@@ -89,18 +99,20 @@ export function ChecksSection({
     return () => clearInterval(id);
   }, [hasRunning]);
 
-  const summary = checks.length > 0 ? ` \u2014 ${formatSectionSummary(checks)}` : "";
+  const summary = checks.length > 0 ? ` \u2014 ${formatSectionSummary(checks, t)}` : "";
   const hasFailed = checks.some(isFailedCheck);
 
   return (
     <CollapsibleSection
-      title={`CI Checks${summary}`}
+      title={t("github:ciChecks", { summary })}
       count={checks.length}
       defaultOpen
       onAddAll={hasFailed ? () => onAddAsContext(buildAllFailedMessage(checks)) : undefined}
-      addAllLabel="Add all failed checks to chat context"
+      addAllLabel={t("github:addAllFailedChecksToChat")}
     >
-      {checks.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No checks</p>}
+      {checks.length === 0 && (
+        <p className="text-xs text-muted-foreground px-2 py-2">{t("github:noChecks")}</p>
+      )}
       {checks.map((check) => {
         const label = conclusionLabel(check);
         const duration = checkDurationText(check);

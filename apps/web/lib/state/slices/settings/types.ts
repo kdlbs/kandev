@@ -10,6 +10,7 @@ import type {
   NotificationProvider,
   SavedLayout,
   ToolStatus,
+  LspStatusLocation,
   MCPTaskAgentProfileDefault,
   StartupPage,
 } from "@/lib/types/http";
@@ -23,6 +24,7 @@ import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type { SleepInhibitionResponse } from "@/lib/types/system";
 
 export type ExecutorsState = {
   items: Executor[];
@@ -166,6 +168,14 @@ export type SettingsDataState = {
   agentsLoaded: boolean;
 };
 
+/** Install-wide sleep-inhibition settings and runtime status. */
+export type SleepInhibitionStoreState = {
+  response: SleepInhibitionResponse | null;
+  loaded: boolean;
+  loading: boolean;
+  error: boolean;
+};
+
 export type UserSettingsState = {
   workspaceId: string | null;
   kanbanViewMode: string | null;
@@ -194,6 +204,7 @@ export type UserSettingsState = {
   lspAutoStartLanguages: string[];
   lspAutoInstallLanguages: string[];
   lspServerConfigs: Record<string, Record<string, unknown>>;
+  lspStatusLocation: LspStatusLocation;
   savedLayouts: SavedLayout[];
   sidebarViews: SidebarView[];
   sidebarActiveViewId: string | null;
@@ -264,6 +275,7 @@ export type SettingsSliceState = {
   sprites: SpritesState;
   notificationProviders: NotificationProvidersState;
   settingsData: SettingsDataState;
+  sleepInhibition: SleepInhibitionStoreState;
   userSettings: UserSettingsState;
 };
 
@@ -302,6 +314,9 @@ export type SettingsSliceActions = {
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
+  setSleepInhibition: (response: SleepInhibitionResponse) => void;
+  setSleepInhibitionLoading: (loading: boolean) => void;
+  setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   bumpAgentProfilesVersion: () => void;
 };

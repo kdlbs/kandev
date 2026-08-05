@@ -77,6 +77,7 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
   if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
+  if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
   if (state.userSettings && !draft.userSettings.loaded) {
     deepMerge(draft.userSettings, state.userSettings);
     bridgeSidebarViewsFromUserSettings(draft, state.userSettings);

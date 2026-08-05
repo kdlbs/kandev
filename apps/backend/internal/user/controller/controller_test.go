@@ -72,6 +72,28 @@ func TestUpdateUserSettingsMapsMCPTaskAgentProfileDefault(t *testing.T) {
 	}
 }
 
+func TestUpdateUserSettingsMapsLspStatusLocation(t *testing.T) {
+	log, err := logger.NewFromZap(zap.NewNop())
+	if err != nil {
+		t.Fatalf("logger.NewFromZap: %v", err)
+	}
+	repo := &settingsRepository{settings: &models.UserSettings{
+		LspStatusLocation: models.LspStatusLocationToolbar,
+	}}
+	controller := NewController(service.NewService(repo, nil, log))
+	want := models.LspStatusLocationStatusBar
+
+	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
+		LspStatusLocation: &want,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUserSettings: %v", err)
+	}
+	if response.Settings.LspStatusLocation != want {
+		t.Fatalf("LspStatusLocation = %q, want %q", response.Settings.LspStatusLocation, want)
+	}
+}
+
 func TestUpdateUserSettingsMapsStartupPage(t *testing.T) {
 	log, err := logger.NewFromZap(zap.NewNop())
 	if err != nil {

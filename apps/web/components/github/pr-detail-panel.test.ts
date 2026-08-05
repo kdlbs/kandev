@@ -514,16 +514,27 @@ describe("PRDetailContent persistent request expiry", () => {
 
   it("clears the expiry timer when feedback confirms the request", async () => {
     vi.useFakeTimers();
-    feedbackMocks.value = makeFeedback({ reviews: [dismissedReview()] });
     reviewMocks.requestReviewers.mockResolvedValue({ requested: true });
-    const view = renderPRDetail();
-    await act(async () => fireEvent.click(screen.getByTestId(RE_REQUEST_BUTTON)));
+    let reviewRequest: ReturnType<typeof usePRScopedReviewRequest> | undefined;
+    const onReady = (value: ReturnType<typeof usePRScopedReviewRequest>) => {
+      reviewRequest = value;
+    };
+    const view = render(
+      createElement(ReviewRequestHarness, {
+        onReady,
+        reviews: [dismissedReview()],
+      }),
+    );
+
+    await act(async () => reviewRequest?.reRequest("octocat"));
     expect(vi.getTimerCount()).toBe(1);
 
-    feedbackMocks.value = makeFeedback({
-      pr: { requested_reviewers: [{ login: "octocat", type: "user" }] },
-    });
-    view.rerender(prDetailTree());
+    view.rerender(
+      createElement(ReviewRequestHarness, {
+        onReady,
+        requestedReviewers: [{ login: "octocat", type: "user" }],
+      }),
+    );
     await act(async () => undefined);
 
     expect(vi.getTimerCount()).toBe(0);

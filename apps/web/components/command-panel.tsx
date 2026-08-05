@@ -577,7 +577,7 @@ export function CommandPanel() {
     onScopeChange,
     goBack,
   } = useCommandPanelHandlers(state, setOpen, commands, kanbanSteps, repositories);
-  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath);
+  const handleContentSelect = useContentSearchResultOpener(setOpen, worktreePath, activeSessionId);
 
   return (
     <CommandPanelView

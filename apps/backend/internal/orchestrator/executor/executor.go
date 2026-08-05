@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"time"
@@ -343,6 +344,7 @@ type LaunchAgentRequest struct {
 	ExecutorConfig       map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID  string            // Previous execution ID for runtime reconnect
 	McpMode              string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders         []string          // Normalized provider capabilities attached to the task
 	IsEphemeral          bool              // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath        string            // Optional host folder for repo-less tasks (overrides scratch fallback)
 
@@ -645,6 +647,12 @@ type ExecutorTypeCapabilities interface {
 	ShouldApplyPreferredShell(executorType string) bool
 }
 
+// AttachmentReader is the narrow attachment-store seam used to stream a
+// claimed descriptor into a passthrough workspace.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
+}
+
 // GitLabCredentialResolver returns the configured origin and credential for
 // exactly one workspace. Implementations must not fall back across workspaces.
 type GitLabCredentialResolver interface {
@@ -654,6 +662,7 @@ type GitLabCredentialResolver interface {
 // Executor manages agent execution for tasks
 type Executor struct {
 	agentManager      AgentManagerClient
+	attachmentReader  AttachmentReader
 	repo              executorStore
 	secretStore       secrets.SecretStore
 	shellPrefs        ShellPreferenceProvider
@@ -837,6 +846,12 @@ func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logge
 		retryLimit:   3,
 		retryDelay:   5 * time.Second,
 	}
+}
+
+// SetAttachmentReader wires the backend attachment store used to stream
+// claimed descriptors into passthrough workspaces.
+func (e *Executor) SetAttachmentReader(reader AttachmentReader) {
+	e.attachmentReader = reader
 }
 
 // SetOnTaskStateChange sets a callback for task state changes.

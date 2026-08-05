@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # check-make-shells — assert that apps/backend/Makefile's run/dev/start-debug
-# targets expand to the correct per-shell command line, without running them.
+# and deadcode targets expand to the correct per-shell command line, without
+# running them.
 #
 # The Makefile dispatches on two independent axes:
 #   * EXE suffix   — keyed on $(OS): any Windows build (native cmd/PowerShell
@@ -28,7 +29,7 @@ status=0
 
 # expect <label> <OS> <MSYSTEM> <target> <expected recipe tail>
 expect() {
-	local label=$1 os=$2 msys=$3 target=$4 want=$5 got
+	local label=$1 os=$2 msys=$3 target=$4 want=$5 marker=${6:-__backend} got
 	# The OS=/MSYSTEM= overrides only steer which branch the Makefile picks;
 	# $(shell ...) still runs under this harness's POSIX shell, and it expands
 	# even under `make -n`. So neutralise the build-stamp probes rather than let
@@ -38,7 +39,7 @@ expect() {
 	# a /dev/null argument to `nul` on its way to native make. None of this
 	# affects the run/dev/start-debug recipes under assertion.
 	got=$(make -C "$backend_dir" OS="$os" MSYSTEM="$msys" NULL_REDIR= BUILD_TIME=simulated -n "$target" 2>/dev/null \
-		| grep -F __backend \
+		| grep -F "$marker" \
 		| sed 's/^[[:space:]]*//; s/[[:space:]]*$//; s/[[:space:]]\{1,\}/ /g' \
 		|| true)
 	if [ "$got" = "$want" ]; then
@@ -64,6 +65,18 @@ expect windows-native Windows_NT '' start-debug 'set KANDEV_DEBUG_PPROF_ENABLED=
 expect git-bash Windows_NT MINGW64 run         './bin/kandev.exe __backend'
 expect git-bash Windows_NT MINGW64 dev         'KANDEV_DEBUG_PPROF_ENABLED=true exec ./bin/kandev.exe __backend'
 expect git-bash Windows_NT MINGW64 start-debug 'KANDEV_DEBUG_PPROF_ENABLED=true KANDEV_LOG_LEVEL=debug exec ./bin/kandev.exe __backend'
+
+# deadcode — the analyzer is invoked through the same shell-specific env-prefix
+# mechanism, but its command has no __backend marker, so match its module path.
+expect unix '' '' deadcode \
+	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
+	'golang.org/x/tools/cmd/deadcode'
+expect windows-native Windows_NT '' deadcode \
+	'set GOTOOLCHAIN=go1.26.0& go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
+	'golang.org/x/tools/cmd/deadcode'
+expect git-bash Windows_NT MINGW64 deadcode \
+	'GOTOOLCHAIN=go1.26.0 go run golang.org/x/tools/cmd/deadcode@v0.48.0 -tags fts5 ./...' \
+	'golang.org/x/tools/cmd/deadcode'
 
 # Static guard: no literal /dev/null inside $(shell ...).
 #
@@ -96,6 +109,6 @@ else
 fi
 
 if [ "$status" -eq 0 ]; then
-	echo "All Makefile shell-dispatch checks passed (3 shells x 3 targets, plus static guard)."
+	echo "All Makefile shell-dispatch checks passed (3 shells x 4 targets, plus static guard)."
 fi
 exit "$status"

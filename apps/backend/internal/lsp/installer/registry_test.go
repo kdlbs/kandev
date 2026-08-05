@@ -1,14 +1,31 @@
 package installer
 
 import (
+	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 )
+
+type registryCommandRunner struct {
+	environment map[string]string
+}
+
+func (r *registryCommandRunner) CombinedOutput(
+	_ context.Context,
+	_ tools.CommandSpec,
+) ([]byte, error) {
+	return nil, nil
+}
+
+func (r *registryCommandRunner) CommandEnvironment() (map[string]string, error) {
+	return r.environment, nil
+}
 
 func testLogger() *logger.Logger {
 	log, _ := logger.NewLogger(logger.LoggingConfig{
@@ -21,7 +38,7 @@ func testLogger() *logger.Logger {
 
 func TestSupportedLanguages(t *testing.T) {
 	langs := SupportedLanguages()
-	expected := []string{"typescript", "go", "rust", "python"}
+	expected := []string{"typescript", "go", "rust", "python", "kotlin"}
 	for _, lang := range expected {
 		if _, ok := langs[lang]; !ok {
 			t.Errorf("expected %q in SupportedLanguages()", lang)
@@ -41,6 +58,7 @@ func TestIsSupported(t *testing.T) {
 		{"go", true},
 		{"rust", true},
 		{"python", true},
+		{"kotlin", true},
 		{"java", false},
 		{"", false},
 		{"ruby", false},
@@ -62,6 +80,7 @@ func TestLspCommand(t *testing.T) {
 		{"go", "gopls", []string{"serve"}},
 		{"rust", "rust-analyzer", nil},
 		{"python", "pyright-langserver", []string{"--stdio"}},
+		{"kotlin", "kotlin-lsp", []string{"--stdio"}},
 		{"unknown", "", nil},
 	}
 	for _, tc := range tests {
@@ -78,6 +97,44 @@ func TestLspCommand(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestCanAutoInstall(t *testing.T) {
+	for _, language := range []string{"typescript", "go", "python"} {
+		if !CanAutoInstall(language) {
+			t.Errorf("CanAutoInstall(%q) = false, want true", language)
+		}
+	}
+	for _, goos := range []string{darwinOS, linuxOS} {
+		if !canAutoInstallOnPlatform("rust", goos) {
+			t.Errorf("canAutoInstallOnPlatform(rust, %q) = false, want true", goos)
+		}
+	}
+	if canAutoInstallOnPlatform("rust", windowsOS) {
+		t.Error("canAutoInstallOnPlatform(rust, windows) = true, want false")
+	}
+	wantRust := runtime.GOOS == darwinOS || runtime.GOOS == linuxOS
+	if got := CanAutoInstall("rust"); got != wantRust {
+		t.Errorf("CanAutoInstall(rust) = %v, want %v on %s", got, wantRust, runtime.GOOS)
+	}
+	for _, language := range []string{"kotlin", "java", ""} {
+		if CanAutoInstall(language) {
+			t.Errorf("CanAutoInstall(%q) = true, want false", language)
+		}
+	}
+}
+
+func TestAutoInstallPreferenceLanguagesAreTaskHostIndependent(t *testing.T) {
+	want := []string{"go", "python", "rust", "typescript"}
+	if got := AutoInstallPreferenceLanguages(); !slices.Equal(got, want) {
+		t.Fatalf("AutoInstallPreferenceLanguages() = %v, want %v", got, want)
+	}
+	if !SupportsAutoInstall("rust") {
+		t.Fatal("Rust must remain configurable when a Windows backend can launch a Linux task host")
+	}
+	if SupportsAutoInstall("kotlin") {
+		t.Fatal("Kotlin must remain manual-install-only")
 	}
 }
 
@@ -108,8 +165,11 @@ func TestBinaryName(t *testing.T) {
 func TestStrategyFor(t *testing.T) {
 	r := NewRegistry("", testLogger())
 
-	// Supported languages should return a strategy
-	for _, lang := range []string{"typescript", "go", "rust", "python"} {
+	installable := []string{"typescript", "go", "python"}
+	if CanAutoInstall("rust") {
+		installable = append(installable, "rust")
+	}
+	for _, lang := range installable {
 		s, err := r.StrategyFor(lang)
 		if err != nil {
 			t.Errorf("StrategyFor(%q) returned error: %v", lang, err)
@@ -121,6 +181,11 @@ func TestStrategyFor(t *testing.T) {
 		}
 		if s.Name() == "" {
 			t.Errorf("StrategyFor(%q).Name() is empty", lang)
+		}
+	}
+	if !CanAutoInstall("rust") {
+		if _, err := r.StrategyFor("rust"); err == nil {
+			t.Error("StrategyFor(rust) should reject auto-install on this platform")
 		}
 	}
 
@@ -146,8 +211,13 @@ func TestBinaryPath_InPATH(t *testing.T) {
 
 func TestBinaryPath_InBinDir(t *testing.T) {
 	// Create a temp bin directory with a fake binary
+	t.Setenv("PATH", t.TempDir())
 	tmpDir := t.TempDir()
-	fakeBinary := filepath.Join(tmpDir, "node_modules", ".bin", "typescript-language-server")
+	binaryName := "typescript-language-server"
+	if runtime.GOOS == windowsOS {
+		binaryName += ".cmd"
+	}
+	fakeBinary := filepath.Join(tmpDir, "node_modules", ".bin", binaryName)
 	if err := os.MkdirAll(filepath.Dir(fakeBinary), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -162,20 +232,21 @@ func TestBinaryPath_InBinDir(t *testing.T) {
 
 	p, err := r.BinaryPath("typescript")
 	if err != nil {
-		// Only fail if it's not in PATH either
-		if _, lookErr := exec.LookPath("typescript-language-server"); lookErr != nil {
-			t.Errorf("BinaryPath(\"typescript\") error = %v (expected to find in binDir)", err)
-		}
-		return
+		t.Fatalf("BinaryPath(typescript) error = %v", err)
 	}
-	if p == "" {
-		t.Error("BinaryPath(\"typescript\") returned empty path")
+	if p != fakeBinary {
+		t.Errorf("BinaryPath(typescript) = %q, want %q", p, fakeBinary)
 	}
 }
 
 func TestBinaryPath_DirectBinary(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
 	tmpDir := t.TempDir()
-	fakeBinary := filepath.Join(tmpDir, "rust-analyzer")
+	binaryName := "rust-analyzer"
+	if runtime.GOOS == windowsOS {
+		binaryName += ".exe"
+	}
+	fakeBinary := filepath.Join(tmpDir, binaryName)
 	if err := os.WriteFile(fakeBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -187,13 +258,10 @@ func TestBinaryPath_DirectBinary(t *testing.T) {
 
 	p, err := r.BinaryPath("rust")
 	if err != nil {
-		if _, lookErr := exec.LookPath("rust-analyzer"); lookErr != nil {
-			t.Errorf("BinaryPath(\"rust\") error = %v (expected to find direct binary)", err)
-		}
-		return
+		t.Fatalf("BinaryPath(rust) error = %v", err)
 	}
-	if p == "" {
-		t.Error("BinaryPath(\"rust\") returned empty path")
+	if p != fakeBinary {
+		t.Errorf("BinaryPath(rust) = %q, want %q", p, fakeBinary)
 	}
 }
 
@@ -224,10 +292,50 @@ func TestBinaryPath_UnsupportedLanguage(t *testing.T) {
 	}
 }
 
+func TestNewRegistryFailsClosedWithoutTrustedHome(t *testing.T) {
+	workDir := t.TempDir()
+	t.Chdir(workDir)
+	t.Setenv("HOME", "")
+	t.Setenv("PATH", "")
+	projectBinary := filepath.Join(workDir, DefaultBinDir, "kotlin-lsp")
+	if err := os.MkdirAll(filepath.Dir(projectBinary), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(projectBinary, []byte("project-controlled"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewRegistry("", testLogger())
+	if r.binDir != "" {
+		t.Fatalf("binDir = %q, want disabled cache", r.binDir)
+	}
+	if path, err := r.BinaryPath("kotlin"); err == nil {
+		t.Fatalf("BinaryPath(kotlin) = %q from relative project cache, want not found", path)
+	}
+}
+
+func TestNewRegistryUsesTaskEnvironmentHome(t *testing.T) {
+	processHome := t.TempDir()
+	taskHome := t.TempDir()
+	t.Setenv("HOME", processHome)
+
+	r := NewRegistry("", testLogger(), WithCommandRunner(&registryCommandRunner{
+		environment: map[string]string{"HOME": taskHome},
+	}))
+	want := filepath.Join(taskHome, DefaultBinDir)
+	if r.binDir != want {
+		t.Fatalf("binDir = %q, want task-environment cache %q", r.binDir, want)
+	}
+}
+
 func TestFindGoBinary(t *testing.T) {
 	// Test with GOBIN set to a temp directory containing a fake binary
 	tmpDir := t.TempDir()
-	fakeBinary := filepath.Join(tmpDir, "gopls")
+	binaryName := "gopls"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	fakeBinary := filepath.Join(tmpDir, binaryName)
 	if err := os.WriteFile(fakeBinary, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -241,6 +349,30 @@ func TestFindGoBinary(t *testing.T) {
 	}
 	if p != fakeBinary {
 		t.Errorf("tools.FindGoBinary(\"gopls\") = %q, want %q", p, fakeBinary)
+	}
+}
+
+func TestBinaryPathUsesTaskEnvironment(t *testing.T) {
+	t.Setenv("PATH", t.TempDir())
+	taskBin := t.TempDir()
+	binaryName := "gopls"
+	if runtime.GOOS == "windows" {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(taskBin, binaryName)
+	if err := os.WriteFile(binaryPath, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	registry := NewRegistry("", testLogger(), WithCommandRunner(&registryCommandRunner{
+		environment: map[string]string{"PATH": taskBin},
+	}))
+
+	path, err := registry.BinaryPath("go")
+	if err != nil {
+		t.Fatalf("BinaryPath(go) error = %v", err)
+	}
+	if path != binaryPath {
+		t.Fatalf("BinaryPath(go) = %q, want task-environment path %q", path, binaryPath)
 	}
 }
 

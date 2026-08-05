@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
 import { getJiraTicket, transitionJiraTicket } from "@/lib/api/domains/jira-api";
 import type { JiraStatusCategory, JiraTicket } from "@/lib/types/jira";
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
+import { useTranslation } from "react-i18next";
 
 // Matches PROJECT-123 anywhere in the string. Jira keys start with letters and
 // include an uppercase prefix, followed by a dash and one or more digits.
@@ -40,7 +41,8 @@ export function formatRelative(iso: string | undefined): string {
 }
 
 export function PersonCell({ name, avatar }: { name?: string; avatar?: string }) {
-  if (!name) return <span className="text-muted-foreground">Unassigned</span>;
+  const { t } = useTranslation();
+  if (!name) return <span className="text-muted-foreground">{t("jira:unassigned")}</span>;
   return (
     <>
       <Avatar size="sm" className="size-5">
@@ -160,13 +162,14 @@ type JiraErrorMessageProps = {
 };
 
 export function JiraErrorMessage({ error, compact }: JiraErrorMessageProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Jira"
       reconnectHref="/settings/integrations/jira"
       isAuthError={isJiraAuthError}
-      authErrorBody="Your Jira session expired or needs step-up authentication. Reconnect to view this ticket."
+      authErrorBody={t("jira:yourJiraSessionExpiredOrNeeds")}
       compact={compact}
     />
   );

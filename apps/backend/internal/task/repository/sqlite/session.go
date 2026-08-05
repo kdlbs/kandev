@@ -1938,6 +1938,22 @@ func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Con
 	return err
 }
 
+// UpdateTaskSessionWorktreeBranchByWorktree updates exactly one worktree row.
+// This is the repository-scoped variant needed when a task attaches multiple
+// branches from the same repository.
+func (r *Repository) UpdateTaskSessionWorktreeBranchByWorktree(ctx context.Context, sessionID, worktreeID, branch string) error {
+	now := time.Now().UTC()
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_worktrees
+		SET worktree_branch = ?, updated_at = ?
+		WHERE session_id = ?
+		  AND worktree_id = ?
+		  AND deleted_at IS NULL
+		  AND status = 'active'
+	`), branch, now, sessionID, worktreeID)
+	return err
+}
+
 func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskSessionWorktree, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT

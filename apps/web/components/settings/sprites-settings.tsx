@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle, CardDescription } from "@kandev/ui/card";
 import { Separator } from "@kandev/ui/separator";
 import {
   IconTrash,
@@ -23,6 +23,10 @@ import {
 } from "@/lib/api/domains/sprites-api";
 import type { SpritesInstance, SpritesTestResult, SpritesTestStep } from "@/lib/types/http-sprites";
 import { Trans, useTranslation } from "react-i18next";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
+import { SettingsCard } from "./settings-card";
+
+const SPRITES_TOKEN_ENV_VAR = "SPRITES_API_TOKEN";
 
 export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   const { t } = useTranslation();
@@ -50,7 +54,7 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
   }, [secretId, t]);
 
   return (
-    <Card>
+    <SettingsCard discoveryTargetId={GENERAL_SETTINGS_TARGETS.spritesConnection}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -79,9 +83,13 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
             </p>
           ) : (
             <p>
-              <Trans i18nKey="settings:configureSpritesApiToken">
-                Configure a <code className="text-xs">SPRITES_API_TOKEN</code> environment variable
-                in the executor profile, referencing a secret with your Sprites.dev API token.
+              <Trans
+                i18nKey="settings:configureSpritesApiToken"
+                values={{ envVar: SPRITES_TOKEN_ENV_VAR }}
+              >
+                Configure a <code className="text-xs">{SPRITES_TOKEN_ENV_VAR}</code> environment
+                variable in the executor profile, referencing a secret with your Sprites.dev API
+                token.
               </Trans>
             </p>
           )}
@@ -104,7 +112,7 @@ export function SpritesConnectionCard({ secretId }: { secretId?: string }) {
         </div>
         {testResult && <TestResultDisplay result={testResult} />}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 
@@ -194,7 +202,7 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
   }, [secretId, instances, removeSpritesInstance]);
 
   return (
-    <Card>
+    <SettingsCard discoveryTargetId={GENERAL_SETTINGS_TARGETS.spritesInstances}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <div>
@@ -229,7 +237,7 @@ export function SpritesInstancesCard({ secretId }: { secretId?: string }) {
           onDestroy={handleDestroy}
         />
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

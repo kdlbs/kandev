@@ -60,6 +60,9 @@ vi.mock("@/lib/keyboard/shortcut-overrides", () => ({ getShortcut: () => undefin
 vi.mock("@/lib/routing/client-router", () => ({
   useRouter: () => ({ push: mocks.push }),
 }));
+vi.mock("@/components/settings-discovery-commands", () => ({
+  SettingsDiscoveryCommands: () => null,
+}));
 
 function navigationCommand(): CommandItem {
   const command = mocks.commands.find((item) => item.id === "nav-stats");

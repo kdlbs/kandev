@@ -26,6 +26,7 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
+import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 
 export type { HandoffPreset } from "./handoff-types";
 
@@ -35,6 +36,7 @@ type NewSessionDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   taskId: string;
+  workspaceId?: string | null;
   groupId?: string;
   handoff?: HandoffPreset;
 };
@@ -45,6 +47,17 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 }
 
 function useNewSessionDialogState(taskId: string) {
+  const resolvedWorkspaceId = useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId: null,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
   const taskTitle = useAppStore((state) => {
     const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
     return task?.title ?? "Task";
@@ -85,6 +98,7 @@ function useNewSessionDialogState(taskId: string) {
     : (agentProfiles[0]?.id ?? "");
 
   return {
+    resolvedWorkspaceId,
     taskTitle,
     agentProfiles,
     currentSession,
@@ -318,6 +332,7 @@ function SessionFormHeader({
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
+  workspaceId,
   defaultProfileId,
   initialProfileId,
   executorId,
@@ -331,6 +346,7 @@ function NewSessionForm({
   onClose,
 }: {
   taskId: string;
+  workspaceId?: string | null;
   defaultProfileId: string;
   initialProfileId?: string;
   executorId: string;
@@ -352,6 +368,7 @@ function NewSessionForm({
     handoffInitial?.selectedProfileId ?? initialProfileId ?? defaultProfileId,
   );
   const [hasPrompt, setHasPrompt] = useState(false);
+  const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<TaskFormInputsHandle | null>(null);
   const busySignal = Number(isCreating) + Number(isSummarizing);
@@ -392,11 +409,9 @@ function NewSessionForm({
     activateSession: activateNewSession,
     setIsCreating,
   });
-  const isSubmitDisabled = shouldDisableSubmit(
-    isBusyState,
-    hasPrompt,
-    profileSelection.hasProfiles,
-  );
+  const isSubmitDisabled =
+    shouldDisableSubmit(isBusyState, hasPrompt, profileSelection.hasProfiles) ||
+    hasPendingAttachmentUploads;
 
   return (
     <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
@@ -421,14 +436,17 @@ function NewSessionForm({
       />
       <TaskFormInputs
         isSessionMode
+        workspaceId={workspaceId}
         autoFocus
         initialDescription=""
         onDescriptionChange={setHasPrompt}
+        onPendingAttachmentUploadsChange={setHasPendingAttachmentUploads}
         onKeyDown={(event) => {
           if (
             event.key === "Enter" &&
             (event.metaKey || event.ctrlKey) &&
             !isBusyState &&
+            !hasPendingAttachmentUploads &&
             hasPrompt &&
             profileSelection.hasProfiles
           ) {
@@ -442,7 +460,7 @@ function NewSessionForm({
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onVoiceAutoSend={() => {
-          if (isBusyState || !profileSelection.hasProfiles) return;
+          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) return;
           void handleSubmit(VOICE_SUBMIT_EVENT);
         }}
       />
@@ -511,11 +529,13 @@ export function NewSessionDialog({
   open,
   onOpenChange,
   taskId,
+  workspaceId,
   groupId,
   handoff,
 }: NewSessionDialogProps) {
   const {
     taskTitle,
+    resolvedWorkspaceId,
     agentProfiles,
     currentSession,
     worktreeBranch,
@@ -549,6 +569,7 @@ export function NewSessionDialog({
         <NewSessionForm
           key={formKey}
           taskId={taskId}
+          workspaceId={workspaceId ?? resolvedWorkspaceId}
           defaultProfileId={sessionProfileId}
           initialProfileId={effectiveDefaultProfileId}
           executorId={currentSession?.executor_id ?? ""}

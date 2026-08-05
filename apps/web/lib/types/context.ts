@@ -12,6 +12,7 @@ type ContextItemBase = {
   label: string;
   pinned?: boolean;
   onRemove?: () => void;
+  onRetry?: () => void;
   onUnpin?: () => void;
 };
 

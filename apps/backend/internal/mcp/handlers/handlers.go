@@ -155,6 +155,12 @@ type TaskStopper interface {
 	StopTaskForCoordinator(ctx context.Context, taskID string) (orchestrator.CoordinatorTaskStopResult, error)
 }
 
+// TaskTitleBranchRenamer performs the best-effort branch side effect after an
+// owner session accepts a prompt-first task title.
+type TaskTitleBranchRenamer interface {
+	RenameGeneratedBranchesForTaskTitle(ctx context.Context, taskID, sessionID, title string) (orchestrator.TitleBranchRenameResult, error)
+}
+
 // MessageQueuer queues a prompt message for delivery to a session on its next turn.
 // TakeQueued is exposed so move_task can roll back the hand-off prompt when the
 // underlying MoveTask call fails — without it, a queued "you were moved..."
@@ -193,6 +199,7 @@ type Handlers struct {
 	walkthroughService   *service.WalkthroughService
 	sessionLauncher      SessionLauncher
 	taskStopper          TaskStopper
+	titleBranchRenamer   TaskTitleBranchRenamer
 	stopTaskGetter       func(context.Context, string) (*models.Task, error)
 	messageQueue         MessageQueuer
 	promptResolver       PromptReferenceResolver
@@ -222,6 +229,8 @@ type Handlers struct {
 	taskPRAutomation       TaskPRAutomationService
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
+	// Optional task-bound GitLab MR automation controls.
+	taskMRAutomation       TaskMRAutomationService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -279,6 +288,12 @@ func (h *Handlers) SetTaskStopper(stopper TaskStopper) {
 	h.taskStopper = stopper
 }
 
+// SetTaskTitleBranchRenamer wires the best-effort branch rename performed
+// after an accepted agent-generated title.
+func (h *Handlers) SetTaskTitleBranchRenamer(renamer TaskTitleBranchRenamer) {
+	h.titleBranchRenamer = renamer
+}
+
 // SetUserSettingsProvider wires portable user preferences into MCP task creation.
 func (h *Handlers) SetUserSettingsProvider(provider UserSettingsProvider) {
 	h.userSettingsProvider = provider
@@ -298,6 +313,8 @@ func (h *Handlers) SetConfigDeps(
 
 // RegisterHandlers registers all MCP handlers with the dispatcher.
 func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
+	before := d.HandlerCount()
+
 	// Task-mode handlers (always registered)
 	d.RegisterFunc(ws.ActionMCPListWorkspaces, h.handleListWorkspaces)
 	d.RegisterFunc(ws.ActionMCPListWorkflows, h.handleListWorkflows)
@@ -309,6 +326,8 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
 	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
 	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
 	d.RegisterFunc(ws.ActionMCPAddWorkspaceSources, h.handleAddWorkspaceSources)
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
@@ -331,13 +350,10 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 	d.RegisterFunc(ws.ActionTaskWalkthroughGet, h.handleGetWalkthrough)
 	d.RegisterFunc(ws.ActionTaskWalkthroughDelete, h.handleDeleteWalkthrough)
 	d.RegisterFunc(ws.ActionMCPClarificationTimeout, h.handleClarificationTimeout)
-	count := 26
 	if h.diagnosticBundles != nil && h.diagnosticMaterializer != nil {
 		d.RegisterFunc(ws.ActionMCPGetDiagnosticBundle, h.handleGetDiagnosticBundle)
-		count++
 	}
-	count += h.registerReviewHandlers(d)
-	count += 2 // task PR automation get/update
+	h.registerReviewHandlers(d)
 
 	// Config-mode handlers (registered when config deps are set)
 	if h.workflowSvc != nil {
@@ -349,7 +365,6 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPUpdateWorkflowStep, h.handleUpdateWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPDeleteWorkflowStep, h.handleDeleteWorkflowStep)
 		d.RegisterFunc(ws.ActionMCPReorderWorkflowStep, h.handleReorderWorkflowSteps)
-		count += 8
 	}
 	if h.agentSettingsCtrl != nil {
 		d.RegisterFunc(ws.ActionMCPListAgents, h.handleListAgents)
@@ -358,43 +373,38 @@ func (h *Handlers) RegisterHandlers(d *ws.Dispatcher) {
 		d.RegisterFunc(ws.ActionMCPCreateAgentProfile, h.handleCreateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPUpdateAgentProfile, h.handleUpdateAgentProfile)
 		d.RegisterFunc(ws.ActionMCPDeleteAgentProfile, h.handleDeleteAgentProfile)
-		count += 6
 	}
 	// Executor discovery/profile listing is always available (read-only, used in task mode for create_task)
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListExecutors, h.handleListExecutors)
 		d.RegisterFunc(ws.ActionMCPListExecutorProfiles, h.handleListExecutorProfiles)
-		count += 2
 	}
 	if h.mcpConfigSvc != nil {
 		d.RegisterFunc(ws.ActionMCPGetMcpConfig, h.handleGetMcpConfig)
 		d.RegisterFunc(ws.ActionMCPUpdateMcpConfig, h.handleUpdateMcpConfig)
-		count += 2
 	}
 	if h.handoffSvc != nil {
 		d.RegisterFunc(ws.ActionMCPListRelatedTasks, h.handleListRelatedTasks)
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-		count += 4
 	}
 	if h.taskSvc != nil {
 		d.RegisterFunc(ws.ActionMCPMoveTask, h.handleMoveTask)
 		d.RegisterFunc(ws.ActionMCPDeleteTask, h.handleDeleteTask)
 		d.RegisterFunc(ws.ActionMCPArchiveTask, h.handleArchiveTask)
 		d.RegisterFunc(ws.ActionMCPUpdateTaskState, h.handleUpdateTaskState)
-		count += 4
 
 		// Executor mutation handlers (config-mode only)
 		if h.workflowSvc != nil {
 			d.RegisterFunc(ws.ActionMCPCreateExecutorProfile, h.handleCreateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPUpdateExecutorProfile, h.handleUpdateExecutorProfile)
 			d.RegisterFunc(ws.ActionMCPDeleteExecutorProfile, h.handleDeleteExecutorProfile)
-			count += 3
 		}
 	}
 
-	h.logger.Info("registered MCP handlers", zap.Int("count", count))
+	after := d.HandlerCount()
+	h.logger.Info("registered MCP handlers", zap.Int("count", after-before))
 }
 
 // handleListWorkspaces lists all workspaces.
@@ -1361,6 +1371,20 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 	}
 	if !accepted {
 		result["reason"] = reason
+		return ws.NewResponse(msg.ID, msg.Action, result)
+	}
+	if h.titleBranchRenamer != nil {
+		branchResult, branchErr := h.titleBranchRenamer.RenameGeneratedBranchesForTaskTitle(ctx, req.TaskID, req.SessionID, task.Title)
+		if branchErr != nil {
+			h.logger.Warn("failed to rename generated task branches", zap.String("task_id", req.TaskID), zap.Error(branchErr))
+			branchResult = orchestrator.TitleBranchRenameResult{
+				Status: orchestrator.TitleBranchStatusFailed,
+				Failed: []orchestrator.TitleBranchFailure{{Message: branchErr.Error()}},
+			}
+		}
+		result["branch_rename"] = branchResult
+	} else {
+		result["branch_rename"] = orchestrator.TitleBranchRenameResult{Status: orchestrator.TitleBranchStatusNotApplicable}
 	}
 	return ws.NewResponse(msg.ID, msg.Action, result)
 }

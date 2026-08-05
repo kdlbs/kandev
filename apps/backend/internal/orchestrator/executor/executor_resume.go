@@ -898,6 +898,7 @@ func (e *Executor) buildResumeRequestAtCredentialBoundary(
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
 	}
+	req.McpProviders = deriveMCPProviders(allRepos)
 	repositoryID, err := e.applyResumeRepoConfig(ctx, task, session, req, existingEnv, allRepos)
 	if err != nil {
 		return nil, "", execConfig, nil, nil, err
@@ -1285,7 +1286,7 @@ func resolveResumeTaskDirName(existingEnv *models.TaskEnvironment, task *v1.Task
 	if existingEnv != nil && existingEnv.TaskDirName != "" {
 		return existingEnv.TaskDirName
 	}
-	return worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+	return worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
 }
 
 // persistResumeState updates the session row for a resume launch. For an agent

@@ -583,6 +583,28 @@ echo "$AGENTCTL_PID"
 
 const sshAgentctlLogTailLines = 25
 
+func buildSSHCreateInstanceRequest(req *ExecutorCreateRequest, workspacePath string) agentctl.CreateInstanceRequest {
+	return agentctl.CreateInstanceRequest{
+		ID:            req.InstanceID,
+		WorkspacePath: workspacePath,
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
+		Protocol:      req.Protocol,
+		AgentType:     sshAgentTypeFromReq(req),
+		AutoApprovePermissions: autoApprovePermissionsOverride(
+			req.AutoApprovePermissions,
+			req.AutoApprovePermissionsOverride,
+		),
+		McpServers:          req.McpServers,
+		McpMode:             req.McpMode,
+		McpProviders:        req.McpProviders,
+		RequiresProcessKill: requiresProcessKillFromReq(req),
+		StripEnv:            stripEnvFromReq(req),
+		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		Env:                 sshRemoteAgentEnv(req),
+	}
+}
+
 // createRemoteAgentInstance creates a per-session agent instance on the
 // remote agentctl control server by POSTing to /api/v1/instances over a
 // direct-tcpip channel through the existing SSH client — no second port
@@ -598,24 +620,7 @@ func createRemoteAgentInstance(
 	authToken string,
 	log *logger.Logger,
 ) (int, error) {
-	body, err := json.Marshal(agentctl.CreateInstanceRequest{
-		ID:            req.InstanceID,
-		WorkspacePath: workspacePath,
-		SessionID:     req.SessionID,
-		TaskID:        req.TaskID,
-		Protocol:      req.Protocol,
-		AgentType:     sshAgentTypeFromReq(req),
-		AutoApprovePermissions: autoApprovePermissionsOverride(
-			req.AutoApprovePermissions,
-			req.AutoApprovePermissionsOverride,
-		),
-		McpServers:          req.McpServers,
-		McpMode:             req.McpMode,
-		RequiresProcessKill: requiresProcessKillFromReq(req),
-		StripEnv:            stripEnvFromReq(req),
-		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
-		Env:                 sshRemoteAgentEnv(req),
-	})
+	body, err := json.Marshal(buildSSHCreateInstanceRequest(req, workspacePath))
 	if err != nil {
 		return 0, fmt.Errorf("ssh: marshal create-instance: %w", err)
 	}

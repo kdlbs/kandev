@@ -2,8 +2,10 @@
 
 import type { TaskMR } from "@/lib/types/gitlab";
 import { TaskRowIndicator } from "@/components/github/my-github/task-row-indicator";
+import { useTranslation } from "react-i18next";
 
 export function MRRowTaskIndicator({ tasks }: { tasks: TaskMR[] | undefined }) {
+  const { t } = useTranslation();
   return (
     <TaskRowIndicator
       tasks={tasks?.map((association) => ({
@@ -12,7 +14,7 @@ export function MRRowTaskIndicator({ tasks }: { tasks: TaskMR[] | undefined }) {
         fallbackTitle: association.mr_title,
       }))}
       testIdPrefix="gitlab-mr-row-task-indicator"
-      emptyLabel="No task created yet"
+      emptyLabel={t("gitlab:noTaskCreatedYet")}
     />
   );
 }

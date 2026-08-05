@@ -68,6 +68,8 @@ function makeFs(): DialogFormState {
     setHasTitle: () => {},
     hasDescription: false,
     setHasDescription: () => {},
+    hasPendingAttachmentUploads: false,
+    setHasPendingAttachmentUploads: () => {},
     draftDescription: "",
     openCycle: 0,
     currentDefaults: { name: "", description: "" },

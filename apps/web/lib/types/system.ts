@@ -202,6 +202,28 @@ export interface MessageQueueSettingsResponse {
   effective: MessageQueueEffectiveSettings;
 }
 
+export type SleepInhibitionPlatform = "darwin" | "windows" | "linux" | "other";
+export type SleepInhibitionIssue =
+  | "unsupported_platform"
+  | "system_service_unavailable"
+  | "request_failed";
+
+export interface SleepInhibitionSettings {
+  enabled: boolean;
+}
+
+export interface SleepInhibitionStatus {
+  platform: SleepInhibitionPlatform;
+  supported: boolean;
+  active: boolean;
+  issue?: SleepInhibitionIssue;
+}
+
+export interface SleepInhibitionResponse {
+  settings: SleepInhibitionSettings;
+  status: SleepInhibitionStatus;
+}
+
 export interface SystemMetricSample {
   id: SystemMetricId | string;
   label: string;

@@ -665,6 +665,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpServers:                     mcpServers,
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
+		McpProviders:                   reqWithWorktree.McpProviders,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
@@ -980,6 +981,14 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, acquireErr
 		}
 		defer activityLease.Release()
+		if len(req.McpProviders) > 0 {
+			if execution.agentctl == nil {
+				return nil, fmt.Errorf("execution %q has no agentctl client for MCP provider promotion", execution.ID)
+			}
+			if err := execution.agentctl.SetMcpProviders(sharedCtx, req.McpProviders); err != nil {
+				return nil, fmt.Errorf("set MCP providers during workspace execution promotion: %w", err)
+			}
+		}
 		// Re-check after acquiring the slot — a peer Launch may have already
 		// promoted while we were waiting.
 		if execution.AgentCommand != "" {
@@ -1074,11 +1083,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
-	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders); err != nil {
+	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
-		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
 			return nil, err
 		}
 	}
@@ -1529,6 +1539,30 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 	return execution.agentctl.SetMcpMode(ctx, mode)
+}
+
+// SetMcpProvidersForSession replaces the task-mode MCP provider capabilities
+// on the live execution attached to sessionID. The execution store is the
+// source of truth for active agentctl instances; an absent execution is a
+// successful no-op because the next launch or resume derives providers from
+// the persisted task repositories.
+func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID string, providers []string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	execution, exists := m.GetExecutionBySessionID(sessionID)
+	if !exists || execution == nil {
+		m.logger.Debug("MCP provider refresh skipped: no execution for session",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	if err := execution.agentctl.SetMcpProviders(ctx, providers); err != nil {
+		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name

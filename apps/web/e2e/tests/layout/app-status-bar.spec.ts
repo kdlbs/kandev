@@ -78,22 +78,25 @@ test.describe("App status bar", () => {
     await expectStatusBarAfterSidebar(testPage);
   });
 
-  test("fills available width when responsive layout hides sidebar", async ({ testPage }) => {
+  test("hands the status surface to the drawer once the sidebar is hidden", async ({
+    testPage,
+  }) => {
+    // The sidebar is `hidden md:block` and `useResponsiveBreakpoint` switches to
+    // mobile composition at the same 768px boundary, so no width renders the
+    // inline bar without the sidebar beside it. Below the boundary the drawer
+    // trigger *is* the status surface, and it has to stay reachable across the
+    // whole band — 700px is the width where a 640px trigger class used to hide it.
     await testPage.setViewportSize({ width: 700, height: 900 });
-    await testPage.goto("/");
+    await testPage.goto("/stats");
 
-    const bar = testPage.getByTestId("app-status-bar");
-    await expect(bar).toBeVisible();
     await expect(testPage.getByTestId("app-sidebar")).toBeHidden();
+    await expect(testPage.getByTestId("app-status-bar")).toHaveCount(0);
 
-    const [barBox, viewport] = await Promise.all([
-      bar.boundingBox(),
-      testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
-    ]);
-    if (!barBox) throw new Error("app status bar has no bounding box");
+    const trigger = testPage.getByTestId("app-status-drawer-trigger");
+    await expect(trigger).toBeVisible();
 
-    expect(Math.abs(barBox.x)).toBeLessThanOrEqual(PIXEL_TOLERANCE);
-    expect(Math.abs(barBox.width - viewport.width)).toBeLessThanOrEqual(PIXEL_TOLERANCE);
+    await trigger.click();
+    await expect(testPage.getByTestId("app-status-drawer")).toBeVisible();
   });
 
   test("persists a modifier-mouse move across the spacer", async ({ testPage }) => {

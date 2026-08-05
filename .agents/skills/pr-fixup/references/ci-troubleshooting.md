@@ -167,10 +167,11 @@ go test -race ./path/to/package -run '^TestName$' -count=20
 go test -race ./path/to/package -count=3
 ```
 
-If a failed-job rerun reports a different, unrelated package or test, validate
-that second failure the same way and allow one additional failed-job rerun
-instead of changing unrelated PR code. Stop and fix code when the same failure
-reproduces locally or repeats in CI.
+If a failed-job rerun reports a different package or test, validate that failure
+with the same rigor even when it is outside the PR diff. Do not dismiss or rerun
+past a valid race, leak, or product defect because it appears unrelated; fix it
+and exercise the affected package without retry masking. Only an evidenced
+external dependency or infrastructure fault is exempt from code remediation.
 
 ## E2E Failures
 
@@ -191,14 +192,12 @@ scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- te
 scripts/run-quiet e2e -- bash -c 'cd apps && pnpm --filter @kandev/web e2e -- tests/path/to/failing.spec.ts -g "exact failing test title"'
 ```
 
-If the failed E2E spec is unrelated to the PR diff, the exact failing test
-passes locally via `pnpm e2e:run`, and there are no unresolved review threads
-or other failed checks, rerun the failed GitHub job once and poll until terminal:
-
-```bash
-gh run rerun <run-id> --failed
-scripts/pr-state --summary <PR>
-```
+An isolated pass does not invalidate a CI failure, and a spec outside the PR
+diff remains part of fixup scope. Re-run it with retries disabled under CI
+resource limits and preserve the failed shard's ordering. If that exposes a
+race, stale state, or interaction leak, fix it and stress the smallest
+reproducing sequence before running the full affected shard. Never use a
+failed-job rerun as a substitute for explaining and fixing a valid test failure.
 
 When a UI copy rename is intentional, search E2E specs for old visible text
 before debugging deeper. Prefer updating assertions to the new label while

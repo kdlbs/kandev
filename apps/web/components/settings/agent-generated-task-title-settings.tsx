@@ -8,6 +8,7 @@ import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 
 export function AgentGeneratedTaskTitleSettings() {
@@ -43,7 +44,11 @@ export function AgentGeneratedTaskTitleSettings() {
   });
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="agent-generated-task-title-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.agentGeneratedTitles}
+      data-testid="agent-generated-task-title-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:agentGeneratedTaskTitles")}</CardTitle>
         <CardDescription>{t("settings:agentGeneratedTaskTitlesDescription")}</CardDescription>

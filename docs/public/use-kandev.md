@@ -85,6 +85,18 @@ The first-run dialog scans supported agent CLIs, lets you inspect detected profi
 
 </details>
 
+## Find a setting
+
+Open **Settings** and use **Search settings** at the top of its navigation tree. Search results are
+grouped by area; selecting a specific control opens its owning page, scrolls it into view, focuses
+it, and briefly highlights it without changing the saved value. The same search is available in
+the Settings menu on phones.
+
+From anywhere, press `Cmd/Ctrl+K` and begin typing a setting name or familiar alias. Individual
+settings appear only after typing, while **Go to Settings** remains in the command menu at rest.
+Discovery searches setting names and curated aliases, never saved values, secrets, paths, or other
+configuration content.
+
 ## Add a local repository
 
 1. Open **Settings > Workspaces > Default Workspace > Repositories**. If you created or renamed the workspace, choose that workspace instead.

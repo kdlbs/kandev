@@ -18,12 +18,12 @@ describe("resolveInitialLocale", () => {
 
   it("prefers the boot payload locale", () => {
     document.cookie = `${LOCALE_COOKIE}=en; path=/`;
-    expect(resolveInitialLocale(payloadWithLocale("pseudo"))).toBe("pseudo");
+    expect(resolveInitialLocale(payloadWithLocale("zh-cn"))).toBe("zh-cn");
   });
 
   it("falls back to the cookie when the payload has no locale", () => {
-    document.cookie = `${LOCALE_COOKIE}=pseudo; path=/`;
-    expect(resolveInitialLocale(payloadWithLocale())).toBe("pseudo");
+    document.cookie = `${LOCALE_COOKIE}=zh-cn; path=/`;
+    expect(resolveInitialLocale(payloadWithLocale())).toBe("zh-cn");
   });
 
   it("defaults to en when neither payload nor cookie is present", () => {

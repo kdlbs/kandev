@@ -355,9 +355,10 @@ export function useMessageHandler({
       if (hasPendingClarification || inputMode === "queue") {
         const queueAttachments = payload.attachments?.map((att) => ({
           type: att.type,
-          data: att.data,
+          ...(att.attachment_id ? { attachment_id: att.attachment_id } : { data: att.data ?? "" }),
           mime_type: att.mime_type,
           name: att.name,
+          size_bytes: att.size_bytes,
           delivery_mode: att.delivery_mode,
         }));
         await queue({

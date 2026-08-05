@@ -7,6 +7,7 @@ import { Switch } from "@kandev/ui/switch";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTranslation } from "react-i18next";
 
@@ -42,7 +43,11 @@ export function ArchiveConfirmationSettings() {
   });
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="archive-confirmation-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.archiveConfirmation}
+      data-testid="archive-confirmation-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:archiveConfirmation")}</CardTitle>
       </CardHeader>

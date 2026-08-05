@@ -10,6 +10,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { MCPTaskAgentProfileDefault } from "@/lib/types/http";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { Trans, useTranslation } from "react-i18next";
 
@@ -124,7 +125,11 @@ export function MCPTaskAgentProfileDefaultSettings() {
   });
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="mcp-task-profile-default-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.agentTaskProfile}
+      data-testid="mcp-task-profile-default-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">
           <h3>{t("settings:profileForTasksCreatedByAgents")}</h3>

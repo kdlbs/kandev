@@ -32,6 +32,7 @@ import { GitLabWatchSettings } from "./watch-settings";
 import { GitLabActionPresetsSection } from "./action-presets-section";
 import { Trans, useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 const DEFAULT_HOST = "https://gitlab.com";
 // The bare hostname as it reads mid-sentence. Interpolated rather than written
@@ -429,6 +430,7 @@ function GitLabConnectionCard(props: ConnectionCardProps) {
   } = props;
   return (
     <SettingsSection
+      discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.gitlab}
       title="GitLab"
       description={t("gitlab:connectAGitlabAccountSoKandev")}
       icon={<IconBrandGitlab className="h-4 w-4" />}

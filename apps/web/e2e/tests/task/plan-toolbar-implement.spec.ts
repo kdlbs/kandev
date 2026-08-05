@@ -28,6 +28,7 @@ async function seedTaskWithPlan(
   await session.waitForLoad();
   await expect.poll(() => apiClient.getTaskPlan(task.id), { timeout: 30_000 }).not.toBeNull();
   await session.waitForChatIdle({ timeout: 45_000 });
+  await session.composerReady();
   await openPlanPanel(session);
   return { taskId: task.id, sessionId: task.session_id!, session };
 }
@@ -39,8 +40,6 @@ async function openPlanPanel(session: SessionPage) {
 }
 
 test.describe("Plan toolbar implement", () => {
-  test.describe.configure({ retries: 1 });
-
   test("saves unsaved plan text, starts implementation, and stays disabled after refresh", async ({
     testPage,
     apiClient,
@@ -56,6 +55,7 @@ test.describe("Plan toolbar implement", () => {
 
     const toolbarButton = testPage.getByTestId("plan-toolbar-implement-button");
     await expect(toolbarButton).toBeVisible({ timeout: 10_000 });
+    await expect(toolbarButton).toBeEnabled();
 
     const toolbarSpacing = await testPage
       .getByTestId("plan-toolbar-implement-control")

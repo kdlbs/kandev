@@ -23,6 +23,8 @@ import type {
   Issue as MockGitLabIssue,
   MR as MockGitLabMR,
   TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
 } from "../../lib/types/gitlab";
 import type {
   SSHAgentReadinessResponse,
@@ -865,6 +867,10 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     saved_layouts?: unknown[];
+    lsp_auto_start_languages?: string[];
+    lsp_auto_install_languages?: string[];
+    lsp_server_configs?: Record<string, Record<string, unknown>>;
+    lsp_status_location?: "toolbar" | "status_bar";
     kanban_view_mode?: string;
     tasks_list_show_details?: boolean;
     tasks_list_sort?: string;
@@ -1644,6 +1650,21 @@ export class ApiClient {
     );
   }
 
+  async getTaskMRAutomationOptions(taskId: string): Promise<TaskMRAutomationOptions> {
+    return this.request("GET", `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`);
+  }
+
+  async updateTaskMRAutomationOptions(
+    taskId: string,
+    patch: TaskMRAutomationPatch,
+  ): Promise<TaskMRAutomationOptions> {
+    return this.request(
+      "PATCH",
+      `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+      patch,
+    );
+  }
+
   async linkTaskGitLabMR(
     workspaceId: string,
     data: { task_id: string; repository_id?: string; mr_url: string },
@@ -1782,7 +1803,7 @@ export class ApiClient {
   }
 
   async setPrimarySession(sessionId: string): Promise<void> {
-    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+    await this.wsRequest("session.set_primary", { session_id: sessionId });
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -1892,7 +1913,9 @@ export class ApiClient {
       executor_profile_id?: string;
       prompt: string;
       intent?: string;
+      session_id?: string;
       workflow_step_id?: string;
+      launch_workspace?: boolean;
       auto_start?: boolean;
     },
     timeoutMs = 30_000,

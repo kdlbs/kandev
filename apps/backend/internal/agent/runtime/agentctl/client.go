@@ -371,6 +371,45 @@ func (c *Client) SetMcpMode(ctx context.Context, mode string) error {
 	return nil
 }
 
+// SetMcpProviders replaces the provider capabilities advertised by task-mode
+// MCP tools on the agentctl instance.
+func (c *Client) SetMcpProviders(ctx context.Context, providers []string) error {
+	ctx, span := tracing.TraceHTTPRequest(ctx, "PUT", "/api/v1/mcp/providers", c.executionID)
+	defer span.End()
+
+	body, err := json.Marshal(struct {
+		Providers []string `json:"mcp_providers"`
+	}{Providers: providers})
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+"/api/v1/mcp/providers", bytes.NewReader(body))
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		tracing.TraceHTTPResponse(span, 0, err)
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		respBody, _ := readResponseBody(resp)
+		httpErr := fmt.Errorf("set MCP providers failed with status %d: %s", resp.StatusCode, string(respBody))
+		tracing.TraceHTTPResponse(span, resp.StatusCode, httpErr)
+		return httpErr
+	}
+
+	tracing.TraceHTTPResponse(span, resp.StatusCode, nil)
+	return nil
+}
+
 // Start starts the agent process and returns the full command that was executed.
 func (c *Client) Start(ctx context.Context) (string, error) {
 	ctx, span := tracing.TraceHTTPRequest(ctx, "POST", "/api/v1/start", c.executionID)

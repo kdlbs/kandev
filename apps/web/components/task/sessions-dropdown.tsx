@@ -27,6 +27,7 @@ import { getSessionStateIcon } from "@/lib/ui/state-icons";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useSessionPendingInput, type PendingInput } from "@/hooks/use-task-pending-input";
 import { buildAgentLabelsById, resolveAgentLabelFor, sortSessions } from "./session-sort";
+import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 
 type SessionStatus = "running" | "waiting_input" | "complete" | "failed" | "cancelled";
 
@@ -219,6 +220,17 @@ export const SessionsDropdown = memo(function SessionsDropdown({
     return task?.primarySessionId ?? null;
   });
   const primarySessionId = primarySessionIdProp ?? storePrimarySessionId;
+  const taskWorkspaceId = useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId: null,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
   const { sortedSessions, currentTime, loadSessions, resolveAgentLabel } =
     useSessionsDropdownState(taskId);
   const { handleSelectSession } = useSessionSelectionHandlers(taskId);
@@ -268,7 +280,7 @@ export const SessionsDropdown = memo(function SessionsDropdown({
         open={showNewSessionDialog}
         onOpenChange={setShowNewSessionDialog}
         mode="session"
-        workspaceId={null}
+        workspaceId={taskWorkspaceId}
         workflowId={null}
         defaultStepId={null}
         steps={[]}

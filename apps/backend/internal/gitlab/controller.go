@@ -28,6 +28,7 @@ func (c *Controller) RegisterHTTPRoutes(router *gin.Engine) {
 	api := router.Group("/api/v1/gitlab")
 	c.registerConfigRoutes(api)
 	c.RegisterTaskMRHTTPRoutes(api)
+	c.RegisterMRAutomationHTTPRoutes(api)
 	c.registerMemberSubscriptionRoutes(api)
 	api.GET("/status", c.httpGetStatus)
 

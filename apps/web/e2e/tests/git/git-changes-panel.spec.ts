@@ -520,12 +520,18 @@ test.describe("Git Changes Panel", () => {
     // Wait for both commits to appear. The commits-section header renders as
     // soon as the section mounts (no commits required), so asserting on the
     // text alone races the WS git-status push that carries the actual commit
-    // list. Gate on the row count first — that's the signal that the FE
-    // received both commits — and only then check text content.
+    // list. Gate on the two *named* commit rows we created — that's the signal
+    // that the FE received them. Don't assert an exact total count: the
+    // auto-started agent can land its own commit in the same worktree, so the
+    // list may legitimately hold a third row.
     await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
     await session.expandCommitsSection();
     const commitsList = testPage.getByTestId("commits-list");
-    await expect(commitsList.locator('[data-testid^="commit-row-"]')).toHaveCount(2, {
+    const commitRows = commitsList.locator('[data-testid^="commit-row-"]');
+    await expect(commitRows.filter({ hasText: "First commit" })).toHaveCount(1, {
+      timeout: 15_000,
+    });
+    await expect(commitRows.filter({ hasText: "Second commit" })).toHaveCount(1, {
       timeout: 15_000,
     });
     await expect(session.changes.getByText("First commit")).toBeVisible({ timeout: 5_000 });
@@ -1026,7 +1032,19 @@ test.describe("Git Changes Panel", () => {
     git.exec(`git reset --soft ${baseSha}`);
     git.commit("Squashed commit");
 
-    // Wait for the UI to update - old commits should disappear
+    // The squash happens on the filesystem while the Changes tab is already
+    // open, so the FE only reflects it once the backend's git-status watcher
+    // fires a WS push. Under CI shard load that push can lag past the wait
+    // budget. Reload to force a fresh git-status load — deterministic instead of
+    // racing the watcher (same approach as the persistent-commits test above).
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.clickTab("Changes");
+    await expect(session.changes).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("commits-section")).toBeVisible({ timeout: 15_000 });
+    await session.expandCommitsSection();
+
+    // Old commits should be gone after the squash.
     await expect(session.changes.getByText("First commit to squash")).not.toBeVisible({
       timeout: 15_000,
     });

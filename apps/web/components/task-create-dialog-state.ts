@@ -41,6 +41,7 @@ type FormResetters = {
   setTaskName: (v: string) => void;
   setHasTitle: (v: boolean) => void;
   setHasDescription: (v: boolean) => void;
+  setHasPendingAttachmentUploads: (v: boolean) => void;
   setRepositories: (v: TaskRepoRow[]) => void;
   setRemoteRepos: (v: TaskRemoteRepoRow[]) => void;
   setAgentProfileId: (v: string) => void;
@@ -170,6 +171,7 @@ function resetTaskForm(
   resetters.setTaskName(name);
   resetters.setHasTitle(name.trim().length > 0);
   resetters.setHasDescription(description.trim().length > 0);
+  resetters.setHasPendingAttachmentUploads(false);
   // Seed the unified repos list from initialValues. A repo + branch pre-fill
   // becomes a single row; nothing seeds an empty list (the auto-select
   // effect later picks the user's last-used repo or the first workspace one).
@@ -318,6 +320,7 @@ function useFormStateValues(workflowId: string | null) {
   const [taskName, setTaskName] = useState("");
   const [hasTitle, setHasTitle] = useState(false);
   const [hasDescription, setHasDescription] = useState(false);
+  const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [draftDescription, setDraftDescription] = useState("");
 
   const descriptionInputRef = useRef<TaskFormInputsHandle | null>(null);
@@ -340,6 +343,8 @@ function useFormStateValues(workflowId: string | null) {
     setHasTitle,
     hasDescription,
     setHasDescription,
+    hasPendingAttachmentUploads,
+    setHasPendingAttachmentUploads,
     draftDescription,
     setDraftDescription,
     descriptionInputRef,
@@ -416,6 +421,7 @@ export function useDialogFormState(
       setTaskName: form.setTaskName,
       setHasTitle: form.setHasTitle,
       setHasDescription: form.setHasDescription,
+      setHasPendingAttachmentUploads: form.setHasPendingAttachmentUploads,
       setRepositories: repos.setRepositories,
       setRemoteRepos: remoteRepos.setRemoteRepos,
       setAgentProfileId: form.setAgentProfileId,

@@ -1,4 +1,7 @@
+"use client";
+
 import type { ReactNode } from "react";
+import { useSettingsTargetRegistration } from "./settings-target-provider";
 
 type SettingsSectionProps = {
   icon?: ReactNode;
@@ -7,6 +10,7 @@ type SettingsSectionProps = {
   description?: string;
   action?: ReactNode;
   children: ReactNode;
+  discoveryTargetId?: string;
 };
 
 export function SettingsSection({
@@ -16,9 +20,11 @@ export function SettingsSection({
   description,
   action,
   children,
+  discoveryTargetId,
 }: SettingsSectionProps) {
+  const registerTarget = useSettingsTargetRegistration(discoveryTargetId);
   return (
-    <section className="space-y-4">
+    <section ref={registerTarget} className="space-y-4">
       {/* Stack the action row under the title on narrow screens instead of
           squeezing both onto one line; shrink-0 keeps the actions from being
           compressed by a long description when side by side. */}

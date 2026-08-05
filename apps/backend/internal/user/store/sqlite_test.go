@@ -410,6 +410,76 @@ func TestSQLiteRepositoryMCPTaskAgentProfileDefaultRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScanUserSettingsLspStatusLocationDefaultsAndLoads(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty settings use toolbar", raw: `{}`, want: models.LspStatusLocationToolbar},
+		{name: "unknown setting uses toolbar", raw: `{"lsp_status_location":"sidebar"}`, want: models.LspStatusLocationToolbar},
+		{name: "toolbar is preserved", raw: `{"lsp_status_location":"toolbar"}`, want: models.LspStatusLocationToolbar},
+		{name: "status bar is preserved", raw: `{"lsp_status_location":"status_bar"}`, want: models.LspStatusLocationStatusBar},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			settings, err := scanUserSettings(settingsScanner{raw: tt.raw}, DefaultUserID)
+			if err != nil {
+				t.Fatalf("scan settings: %v", err)
+			}
+			if settings.LspStatusLocation != tt.want {
+				t.Fatalf("LspStatusLocation = %q, want %q", settings.LspStatusLocation, tt.want)
+			}
+		})
+	}
+}
+
+func TestMarshalUserSettingsLspStatusLocation(t *testing.T) {
+	raw, err := marshalUserSettingsPayload(&models.UserSettings{
+		LspStatusLocation: models.LspStatusLocationStatusBar,
+	})
+	if err != nil {
+		t.Fatalf("marshal settings: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	if got := payload["lsp_status_location"]; got != models.LspStatusLocationStatusBar {
+		t.Fatalf("lsp_status_location = %#v, want status_bar", got)
+	}
+}
+
+func TestSQLiteRepositoryLspStatusLocationRoundTrip(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get defaults: %v", err)
+	}
+	settings.LspStatusLocation = models.LspStatusLocationStatusBar
+	upsertUserSettingsForTest(t, repo, ctx, settings)
+
+	got, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("get saved settings: %v", err)
+	}
+	if got.LspStatusLocation != models.LspStatusLocationStatusBar {
+		t.Fatalf("LspStatusLocation = %q, want status_bar", got.LspStatusLocation)
+	}
+}
+
 func TestScanUserSettingsSystemMetricsDisplayDefault(t *testing.T) {
 	settings, err := scanUserSettings(settingsScanner{raw: "{}"}, DefaultUserID)
 	if err != nil {

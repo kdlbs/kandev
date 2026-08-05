@@ -308,6 +308,51 @@ func removeLifecyclePromptFields(result map[string]interface{}) {
 	}
 }
 
+// mrAutomationToolError logs the underlying backend error (which may still
+// carry database/GitLab-client detail forwarded from the dispatcher) and
+// returns a stable, sanitized tool error to the MCP client.
+func (s *Server) mrAutomationToolError(logMsg string, err error) (*mcp.CallToolResult, error) {
+	s.logger.Error(logMsg, zap.Error(err))
+	return mcp.NewToolResultError("failed to process MR automation request"), nil
+}
+
+func (s *Server) getTaskMRAutomationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, _ mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(
+			ctx, ws.ActionMCPGetTaskMRAutomation, map[string]interface{}{"task_id": s.taskID}, &result,
+		); err != nil {
+			return s.mrAutomationToolError("get task MR automation failed", err)
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
+func (s *Server) updateTaskMRAutomationHandler() server.ToolHandlerFunc {
+	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		payload := map[string]interface{}{"task_id": s.taskID}
+		args := req.GetArguments()
+		if hasLifecyclePromptOverrideArgument(args) {
+			return mcp.NewToolResultError("lifecycle prompt overrides are not supported"), nil
+		}
+		for _, key := range []string{"prompt_on_review_requested", "prompt_on_merged", "prompt_on_closed"} {
+			if value, ok := args[key].(bool); ok {
+				payload[key] = value
+			}
+		}
+		if len(payload) == 1 {
+			return mcp.NewToolResultError("at least one MR automation option is required"), nil
+		}
+		var result map[string]interface{}
+		if err := s.backend.RequestPayload(ctx, ws.ActionMCPUpdateTaskMRAutomation, payload, &result); err != nil {
+			return s.mrAutomationToolError("update task MR automation failed", err)
+		}
+		data, _ := json.MarshalIndent(result, "", "  ")
+		return mcp.NewToolResultText(string(data)), nil
+	}
+}
+
 func (s *Server) messageTaskHandler() server.ToolHandlerFunc {
 	return func(ctx context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		taskID, err := req.RequireString("task_id")

@@ -236,6 +236,8 @@ function buildMockFs(initialDescription = ORIGINAL_PROMPT): DialogFormState {
     setHasTitle: () => undefined,
     hasDescription: true,
     setHasDescription: setHasDescriptionMock,
+    hasPendingAttachmentUploads: false,
+    setHasPendingAttachmentUploads: () => undefined,
     draftDescription: initialDescription,
     openCycle: 0,
     currentDefaults: { name: "Task title", description: initialDescription },

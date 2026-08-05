@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,27 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type passthroughAttachmentReader struct{}
+
+func (passthroughAttachmentReader) OpenClaimed(context.Context, string, string, string) (io.ReadCloser, string, string, int64, error) {
+	const body = "descriptor attachment body"
+	return io.NopCloser(strings.NewReader(body)), "passthrough-upload.txt", "text/plain", int64(len(body)), nil
+}
+
+var _ AttachmentReader = passthroughAttachmentReader{}
+
+type failingPassthroughAttachmentReader struct{}
+
+func (failingPassthroughAttachmentReader) OpenClaimed(_ context.Context, id, _ string, _ string) (io.ReadCloser, string, string, int64, error) {
+	if id == "attachment-1" {
+		const body = "first attachment body"
+		return io.NopCloser(strings.NewReader(body)), "first-upload.txt", "text/plain", int64(len(body)), nil
+	}
+	return io.NopCloser(strings.NewReader("short")), "second-upload.txt", "text/plain", int64(len("second attachment body")), nil
+}
+
+var _ AttachmentReader = failingPassthroughAttachmentReader{}
 
 // seedPassthroughSession installs a task + session into the mock repo and wires
 // the agent manager to claim a valid execution ID, so Executor.Prompt reaches
@@ -170,6 +192,72 @@ func TestExecutor_Prompt_PassthroughWithAttachmentsSavesFilesAndReferencesPaths(
 	}
 	if string(contents) != "passthrough attachment body" {
 		t.Fatalf("saved attachment contents = %q", string(contents))
+	}
+}
+
+func TestExecutor_Prompt_PassthroughWithClaimedAttachmentStreamsFileAndReferencesPath(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	workDir := t.TempDir()
+	repo.sessions["sess-1"].WorkspacePath = workDir
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetAttachmentReader(passthroughAttachmentReader{})
+
+	const body = "descriptor attachment body"
+	atts := []v1.MessageAttachment{{
+		AttachmentID: "attachment-1",
+		Type:         "resource",
+		MimeType:     "text/plain",
+		Name:         "passthrough-upload.txt",
+		SizeBytes:    int64(len(body)),
+		DeliveryMode: "path",
+	}}
+	result, err := exec.Prompt(context.Background(), "task-1", "sess-1", "read the attached file", atts, false)
+	if err != nil {
+		t.Fatalf("Prompt with a claimed attachment should succeed: %v", err)
+	}
+	if result == nil || result.StopReason != "passthrough_dispatched" {
+		t.Fatalf("expected passthrough_dispatched result, got %+v", result)
+	}
+
+	relPath := filepath.Join(".kandev", "attachments", "sess-1", "passthrough-upload.txt")
+	data := agentManager.writePassthroughStdinCalls[0].Data
+	if !strings.Contains(data, "read the attached file") || !strings.Contains(data, relPath) {
+		t.Fatalf("PTY write should reference the claimed attachment path, got %q", data)
+	}
+	contents, err := os.ReadFile(filepath.Join(workDir, relPath))
+	if err != nil {
+		t.Fatalf("expected streamed attachment file: %v", err)
+	}
+	if string(contents) != body {
+		t.Fatalf("streamed attachment contents = %q, want %q", contents, body)
+	}
+}
+
+func TestExecutor_Prompt_PassthroughWithClaimedAttachmentFailureRollsBackPreviousFiles(t *testing.T) {
+	repo := newMockRepository()
+	agentManager := &mockAgentManager{
+		isPassthroughSessionFunc: func(_ context.Context, _ string) bool { return true },
+	}
+	seedPassthroughSession(t, repo, agentManager, "task-1", "sess-1", "exec-1")
+	workDir := t.TempDir()
+	repo.sessions["sess-1"].WorkspacePath = workDir
+	exec := newTestExecutor(t, agentManager, repo)
+	exec.SetAttachmentReader(failingPassthroughAttachmentReader{})
+
+	atts := []v1.MessageAttachment{
+		{AttachmentID: "attachment-1", Type: "resource", DeliveryMode: "path"},
+		{AttachmentID: "attachment-2", Type: "resource", DeliveryMode: "path"},
+	}
+	if _, err := exec.Prompt(context.Background(), "task-1", "sess-1", "read both attached files", atts, false); err == nil {
+		t.Fatal("Prompt should fail when the second attachment size does not match")
+	}
+	firstPath := filepath.Join(workDir, ".kandev", "attachments", "sess-1", "first-upload.txt")
+	if _, err := os.Stat(firstPath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("first attachment should be removed after batch failure, stat error = %v", err)
 	}
 }
 

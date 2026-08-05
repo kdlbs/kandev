@@ -12,6 +12,7 @@
     "build": "pnpm -r run build",
     "build:web": "pnpm --filter @kandev/web build",
     "lint": "pnpm -r run lint",
+    "dead-code": "knip --include files,exports,dependencies --no-progress",
     "format": "prettier --write web cli packages --ignore-unknown",
     "format:check": "prettier --check web cli packages --ignore-unknown",
     "clean": "pnpm -r run clean && rm -rf node_modules"
@@ -20,6 +21,7 @@
     "@commitlint/cli": "^20.4.2",
     "@commitlint/config-conventional": "^20.4.2",
     "@types/node": "^20",
+    "knip": "6.31.0",
     "prettier": "^3.6.2",
     "typescript": "^5"
   },

@@ -1,12 +1,14 @@
 import { IconGitCommit } from "@tabler/icons-react";
 import type { GitLabMRCommit } from "@/lib/types/gitlab";
 import { CollapsibleSection, formatTimeAgo } from "@/components/github/pr-shared";
+import { useTranslation } from "react-i18next";
 
 export function MRCommitsSection({ commits }: { commits: GitLabMRCommit[] }) {
+  const { t } = useTranslation();
   return (
-    <CollapsibleSection title="Commits" count={commits.length} defaultOpen={false}>
+    <CollapsibleSection title={t("gitlab:commits")} count={commits.length} defaultOpen={false}>
       {commits.length === 0 && (
-        <p className="px-2 py-2 text-xs text-muted-foreground">No commits</p>
+        <p className="px-2 py-2 text-xs text-muted-foreground">{t("gitlab:noCommits")}</p>
       )}
       {commits.map((commit) => (
         <div

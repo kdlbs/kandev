@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"strings"
@@ -59,6 +60,14 @@ type ServiceConfig struct {
 	QueueSize                     int
 	QueueGroup                    string
 	ClaudeBackgroundPromptHandoff bool
+}
+
+// AttachmentReader is the narrow attachment-store seam needed when the
+// orchestrator delivers claimed descriptors to a passthrough agent.
+// Keeping this interface local avoids coupling the coordinator to lifecycle's
+// concrete package while preserving the same structural contract.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
 // DefaultServiceConfig returns default configuration
@@ -322,6 +331,11 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// titleBranchRuntime performs the lifecycle-owned Git branch rename after
+	// an agent resolves a prompt-first task title. It is optional for tests and
+	// installations that do not configure an agent runtime.
+	titleBranchRuntime titleBranchRuntime
+
 	// Workflow step getter for prompt building
 	workflowStepGetter WorkflowStepGetter
 
@@ -370,6 +384,14 @@ type Service struct {
 	// ciAutomationInFlight prevents PR feedback and task-PR update events from
 	// racing duplicate auto-fix prompts or merge calls for the same PR.
 	ciAutomationInFlight sync.Map
+
+	// GitLab MR lifecycle notification automation. Nil-safe: without it,
+	// gitlab.task_mr.updated events are observed but no lifecycle prompt is
+	// ever evaluated.
+	gitlabMRAutomation taskMRAgentAutomationService
+	// mrAutomationInFlight prevents overlapping poll ticks from running the
+	// lifecycle evaluation pass twice for the same (task, repository, iid).
+	mrAutomationInFlight sync.Map
 
 	// Office task-handoffs materializer (phase 6 wiring) — invoked from
 	// PrepareTaskSession to flip workspace groups to materialized once
@@ -810,6 +832,12 @@ func NewService(
 // If not set: Agent messages won't be saved to the database (events will still be published).
 func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
+}
+
+// SetAttachmentReader wires the backend attachment store into passthrough
+// prompt delivery so claimed descriptors can be streamed into the workspace.
+func (s *Service) SetAttachmentReader(reader AttachmentReader) {
+	s.executor.SetAttachmentReader(reader)
 }
 
 // SetOnPrimarySessionSet sets a callback on the executor for when the first session

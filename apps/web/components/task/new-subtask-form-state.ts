@@ -72,6 +72,8 @@ export function useSubtaskFormState(workspaceId: string | null): DialogFormState
   return useMemo<DialogFormState>(
     () => ({
       ...INERT_TITLE_DRAFT,
+      hasPendingAttachmentUploads: false,
+      setHasPendingAttachmentUploads: NOOP,
       currentDefaults: EMPTY_DEFAULTS,
       descriptionInputRef,
       // Repo chip row — what RepoChipsRow + useDialogHandlers actually drive.

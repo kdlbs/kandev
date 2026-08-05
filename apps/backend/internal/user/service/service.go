@@ -62,6 +62,7 @@ type UpdateUserSettingsRequest struct {
 	LspAutoStartLanguages           *[]string
 	LspAutoInstallLanguages         *[]string
 	LspServerConfigs                *map[string]map[string]interface{}
+	LspStatusLocation               *string
 	SavedLayouts                    *[]models.SavedLayout
 	SidebarViews                    *[]models.SidebarView
 	SidebarActiveViewID             *string
@@ -508,13 +509,25 @@ func applyLSPSettings(settings *models.UserSettings, req *UpdateUserSettingsRequ
 		settings.LspAutoStartLanguages = *req.LspAutoStartLanguages
 	}
 	if req.LspAutoInstallLanguages != nil {
-		if err := validateLSPLanguages(*req.LspAutoInstallLanguages); err != nil {
+		if err := validateLSPAutoInstallLanguages(*req.LspAutoInstallLanguages); err != nil {
 			return fmt.Errorf("lsp_auto_install_languages: %w", err)
 		}
 		settings.LspAutoInstallLanguages = *req.LspAutoInstallLanguages
 	}
 	if req.LspServerConfigs != nil {
 		settings.LspServerConfigs = *req.LspServerConfigs
+	}
+	if req.LspStatusLocation != nil {
+		switch *req.LspStatusLocation {
+		case models.LspStatusLocationToolbar, models.LspStatusLocationStatusBar:
+			settings.LspStatusLocation = *req.LspStatusLocation
+		default:
+			return fmt.Errorf(
+				"lsp_status_location must be %q or %q",
+				models.LspStatusLocationToolbar,
+				models.LspStatusLocationStatusBar,
+			)
+		}
 	}
 	return nil
 }
@@ -699,6 +712,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"lsp_auto_start_languages":            settings.LspAutoStartLanguages,
 		"lsp_auto_install_languages":          settings.LspAutoInstallLanguages,
 		"lsp_server_configs":                  settings.LspServerConfigs,
+		"lsp_status_location":                 models.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"saved_layouts":                       settings.SavedLayouts,
 		"sidebar_views":                       settings.SidebarViews,
 		"sidebar_active_view_id":              settings.SidebarActiveViewID,
@@ -758,6 +772,18 @@ func validateLSPLanguages(langs []string) error {
 	for _, lang := range langs {
 		if _, ok := supported[lang]; !ok {
 			return fmt.Errorf("unsupported language: %s", lang)
+		}
+	}
+	return nil
+}
+
+func validateLSPAutoInstallLanguages(langs []string) error {
+	if err := validateLSPLanguages(langs); err != nil {
+		return err
+	}
+	for _, lang := range langs {
+		if !installer.SupportsAutoInstall(lang) {
+			return fmt.Errorf("language %s does not support auto-install", lang)
 		}
 	}
 	return nil

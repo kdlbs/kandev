@@ -3,12 +3,21 @@
 import { useMemo, type ReactNode } from "react";
 import { StatusSurfaceMetrics } from "@/components/system-metrics/status-surface-metrics";
 import { useAppStore } from "@/components/state-provider";
+import { useLspStatusPlacement } from "@/hooks/use-lsp-status-placement";
+import { getMonacoLanguage } from "@/lib/editor/language-map";
+import { toLspLanguage } from "@/lib/lsp/lsp-client-manager";
+import type { EffectiveLspStatusPlacement } from "@/lib/lsp/lsp-status-placement";
 import { usePluginRegistry, type PluginSlotRegistration } from "@/lib/plugins/registry";
 import type { AppStatusBarSlotProps } from "@/lib/plugins/types";
+import { useDockviewStore } from "@/lib/state/dockview-store";
+import { buildRepoScopedItemId } from "@/lib/state/dockview-panel-actions";
+import { useEditorResolverStore, type EditorProvider } from "@/lib/state/editor-resolver-store";
 import { ConnectionStatusItem } from "./connection-status-item";
+import { LspStatusItem } from "./lsp-status-item";
 import { AppStatusBarPluginContribution } from "./app-status-bar-plugin-slots";
 import {
   APP_STATUS_CONNECTION_ID,
+  APP_STATUS_LSP_ID,
   APP_STATUS_METRICS_ID,
   type AppStatusItemDescriptor,
 } from "./app-status-bar-order";
@@ -34,8 +43,45 @@ export function useAppStatusItems(
 ): AppStatusItem[] {
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
+  const lspPlacement = useLspStatusPlacement();
+  const activeFilePath = useDockviewStore((state) => state.activeFilePath);
+  const activeFileRepo = useDockviewStore((state) => state.activeFileRepo);
+  const activePanelComponent = useDockviewStore((state) => state.activePanelComponent);
+  const activeFileBuffer = useDockviewStore((state) => {
+    if (!activeFilePath) return null;
+    return (
+      state.openFiles.get(buildRepoScopedItemId(activeFilePath, activeFileRepo ?? undefined)) ??
+      null
+    );
+  });
+  const codeEditorProvider = useEditorResolverStore((state) => state.providers["code-editor"]);
+  const hasMountedMonacoEditor =
+    activePanelComponent === "file-editor" &&
+    codeEditorProvider === "monaco" &&
+    activeFileBuffer !== null &&
+    // Restored tabs are seeded before their content is loaded. Require the
+    // server's explicit text classification so that placeholder buffers do
+    // not expose or auto-start LSP before the real editor can mount.
+    activeFileBuffer.isBinary === false;
   const metricsEnabled = useAppStore(
     (state) => state.userSettings.systemMetricsDisplay.showInTopbar,
+  );
+  const activeLsp = useMemo(
+    () =>
+      resolveActiveLspStatusItem({
+        placement: lspPlacement,
+        activeSessionId: context.activeSessionId,
+        activeFilePath,
+        editorProvider: codeEditorProvider,
+        hasMountedMonacoEditor,
+      }),
+    [
+      activeFilePath,
+      codeEditorProvider,
+      context.activeSessionId,
+      hasMountedMonacoEditor,
+      lspPlacement,
+    ],
   );
 
   return useMemo(() => {
@@ -45,10 +91,43 @@ export function useAppStatusItems(
     return [
       connectionItem(),
       ...left.map((registration) => pluginItem(registration, "left", context)),
+      ...(activeLsp ? [lspItem(activeLsp)] : []),
       ...(metricsEnabled ? [metricsItem()] : []),
       ...right.map((registration) => pluginItem(registration, "right", context)),
     ];
-  }, [connectionOnly, context, metricsEnabled, registry, registryVersion]);
+  }, [activeLsp, connectionOnly, context, metricsEnabled, registry, registryVersion]);
+}
+
+type ActiveLspStatusItem = {
+  sessionId: string;
+  monacoLanguage: string;
+};
+
+export function resolveActiveLspStatusItem({
+  placement,
+  activeSessionId,
+  activeFilePath,
+  editorProvider,
+  hasMountedMonacoEditor,
+}: {
+  placement: EffectiveLspStatusPlacement;
+  activeSessionId: string | null;
+  activeFilePath: string | null;
+  editorProvider: EditorProvider;
+  hasMountedMonacoEditor: boolean;
+}): ActiveLspStatusItem | null {
+  if (
+    placement !== "status_bar" ||
+    editorProvider !== "monaco" ||
+    !hasMountedMonacoEditor ||
+    !activeSessionId ||
+    !activeFilePath
+  ) {
+    return null;
+  }
+  const monacoLanguage = getMonacoLanguage(activeFilePath);
+  if (!toLspLanguage(monacoLanguage)) return null;
+  return { sessionId: activeSessionId, monacoLanguage };
 }
 
 function connectionItem(): AppStatusItem {
@@ -56,6 +135,14 @@ function connectionItem(): AppStatusItem {
     id: APP_STATUS_CONNECTION_ID,
     defaultSide: "left",
     render: ({ presentation }) => <ConnectionStatusItem presentation={presentation} />,
+  };
+}
+
+function lspItem(active: ActiveLspStatusItem): AppStatusItem {
+  return {
+    id: APP_STATUS_LSP_ID,
+    defaultSide: "right",
+    render: () => <LspStatusItem {...active} />,
   };
 }
 

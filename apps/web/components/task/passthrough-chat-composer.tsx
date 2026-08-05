@@ -2,7 +2,7 @@
 
 import { useCallback, type RefObject } from "react";
 import { useToast } from "@/components/toast-provider";
-import { useAppStoreApi } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useCommentsStore } from "@/lib/state/slices/comments/comments-store";
 import { formatReviewCommentsAsMarkdown } from "@/lib/state/slices/comments/format";
 import { buildSubmitMessage } from "./chat/chat-input-area";
@@ -22,6 +22,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { getTaskPlan } from "@/lib/api/domains/plan-api";
 import type { AppState } from "@/lib/state/store";
 import { generateUUID } from "@/lib/utils";
+import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 
 const PLAN_CONTEXT_PATH = "plan:context";
 
@@ -51,6 +52,17 @@ export function PassthroughComposerPanel({
     panelState.pendingPRFeedback.length > 0 ||
     panelState.walkthroughComments.length > 0 ||
     panelState.messageComments.length > 0;
+  const workspaceId = useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId: panelState.resolvedSessionId,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
   return (
     <div
       data-testid="passthrough-composer"
@@ -63,7 +75,7 @@ export function PassthroughComposerPanel({
         onSubmit={onSubmit}
         sessionId={panelState.resolvedSessionId}
         taskId={taskId}
-        workspaceId={null}
+        workspaceId={workspaceId}
         entityReferencesEnabled={false}
         taskTitle={panelState.task?.title}
         taskDescription={panelState.taskDescription ?? ""}

@@ -38,6 +38,8 @@ import type { LinearIssue } from "@/lib/types/linear";
 import { useTaskCreatePromptMention } from "@/hooks/use-task-create-prompt-mention";
 import { cn } from "@/lib/utils";
 import { clampTaskTitleInput } from "@/lib/task-title";
+import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
+import { ApiError } from "@/lib/api/client";
 
 const CURSOR_POINTER_CLASS = "cursor-pointer";
 
@@ -322,9 +324,11 @@ export const InlineTaskName = memo(function InlineTaskName({
 // Memoized description input to prevent re-rendering the entire dialog on every keystroke
 type TaskFormInputsProps = {
   isSessionMode: boolean;
+  workspaceId?: string | null;
   autoFocus?: boolean;
   initialDescription: string;
   onDescriptionChange: (hasContent: boolean) => void;
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void;
   onKeyDown: (e: React.KeyboardEvent) => void;
   descriptionValueRef: React.RefObject<TaskFormInputsHandle | null>;
   disabled?: boolean;
@@ -350,14 +354,73 @@ type TaskFormInputsProps = {
   onVoiceAutoSend?: () => void;
 };
 
-function useFileAttachments() {
+// eslint-disable-next-line max-lines-per-function
+function useFileAttachments(
+  workspaceId: string | null | undefined,
+  onPendingAttachmentUploadsChange?: (pending: boolean) => void,
+) {
   const [attachments, setAttachments] = useState<FileAttachment[]>([]);
   const attachmentsRef = useRef<FileAttachment[]>([]);
+
+  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
+    setAttachments((prev) => {
+      const next = prev.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...update } : attachment,
+      );
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const uploadPendingAttachment = useCallback(
+    async (attachment: FileAttachment) => {
+      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
+      updateAttachment(attachment.id, { uploadStatus: "uploading" });
+      try {
+        const uploaded = await uploadAttachment(attachment.file, {
+          workspaceId,
+          kind: attachment.isImage ? "image" : "resource",
+          deliveryMode: attachment.deliveryMode,
+        });
+        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
+          return;
+        }
+        updateAttachment(attachment.id, {
+          attachmentId: uploaded.attachment_id,
+          uploadStatus: "ready",
+          size: uploaded.size_bytes,
+        });
+      } catch (error) {
+        updateAttachment(attachment.id, {
+          uploadStatus: "failed",
+          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+        });
+      }
+    },
+    [updateAttachment, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    for (const attachment of attachmentsRef.current) {
+      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
+        void uploadPendingAttachment(attachment);
+      }
+    }
+  }, [uploadPendingAttachment, workspaceId]);
+
   const [isDragging, setIsDragging] = useState(false);
   const warnAttachmentCountLimit = useAttachmentCountFeedback();
   const rejectOversizedFile = useAttachmentFileFeedback();
   const warnAttachmentTotalSizeLimit = useAttachmentTotalSizeFeedback();
   const warnUnreadablePastedImage = useUnreadablePastedImageFeedback();
+
+  useEffect(() => {
+    onPendingAttachmentUploadsChange?.(
+      attachments.some((attachment) => attachment.file && !attachment.attachmentId),
+    );
+  }, [attachments, onPendingAttachmentUploadsChange, workspaceId]);
 
   const addFiles = useCallback(
     async (files: File[], issue?: ImagePasteIssue) => {
@@ -387,22 +450,41 @@ function useFileAttachments() {
       const next = [...attachmentsRef.current, ...accepted];
       attachmentsRef.current = next;
       setAttachments(next);
+      for (const attachment of accepted) void uploadPendingAttachment(attachment);
     },
     [
       rejectOversizedFile,
       warnAttachmentCountLimit,
       warnAttachmentTotalSizeLimit,
       warnUnreadablePastedImage,
+      uploadPendingAttachment,
     ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
+    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
     const next = attachmentsRef.current.filter((att) => att.id !== id);
     attachmentsRef.current = next;
     setAttachments(next);
+    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
 
-  return { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment };
+  const handleRetryAttachment = useCallback(
+    (id: string) => {
+      const attachment = attachmentsRef.current.find((item) => item.id === id);
+      if (attachment) void uploadPendingAttachment(attachment);
+    },
+    [uploadPendingAttachment],
+  );
+
+  return {
+    attachments,
+    isDragging,
+    setIsDragging,
+    addFiles,
+    handleRemoveAttachment,
+    handleRetryAttachment,
+  };
 }
 
 function useAttachmentHandlers(
@@ -470,6 +552,7 @@ function useAttachmentHandlers(
 function toContextItems(
   attachments: FileAttachment[],
   onRemove: (id: string) => void,
+  onRetry: (id: string) => void,
 ): ContextItem[] {
   return attachments.map((att) =>
     att.isImage
@@ -479,6 +562,7 @@ function toContextItems(
           label: `Image (${formatBytes(att.size)})`,
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: () => onRetry(att.id),
         } as ImageContextItem)
       : ({
           kind: "file-attachment" as const,
@@ -486,6 +570,7 @@ function toContextItems(
           label: att.fileName,
           attachment: att,
           onRemove: () => onRemove(att.id),
+          onRetry: () => onRetry(att.id),
         } as FileAttachmentContextItem),
   );
 }
@@ -680,7 +765,8 @@ function useTextareaHandlers(
 ) {
   const { handleChange: mentionHandleChange, handleKeyDown: mentionHandleKeyDown } = mention;
   const handleChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => mentionHandleChange(e.target.value),
+    (e: React.ChangeEvent<HTMLTextAreaElement>) =>
+      mentionHandleChange(e.target.value, e.target.selectionStart),
     [mentionHandleChange],
   );
   const handleKeyDown = useCallback(
@@ -737,10 +823,12 @@ function DraggingOverlay({ isDragging }: { isDragging: boolean }) {
 }
 
 export const TaskFormInputs = memo(function TaskFormInputs({
+  workspaceId,
   isSessionMode,
   autoFocus,
   initialDescription,
   onDescriptionChange,
+  onPendingAttachmentUploadsChange,
   onKeyDown,
   descriptionValueRef,
   disabled,
@@ -752,16 +840,22 @@ export const TaskFormInputs = memo(function TaskFormInputs({
   linearImport,
   onVoiceAutoSend,
 }: TaskFormInputsProps) {
-  const { attachments, isDragging, setIsDragging, addFiles, handleRemoveAttachment } =
-    useFileAttachments();
+  const {
+    attachments,
+    isDragging,
+    setIsDragging,
+    addFiles,
+    handleRemoveAttachment,
+    handleRetryAttachment,
+  } = useFileAttachments(workspaceId, onPendingAttachmentUploadsChange);
   const { handlePaste, handleDragOver, handleDragLeave, handleDrop } = useAttachmentHandlers(
     disabled,
     addFiles,
     setIsDragging,
   );
   const contextItems = useMemo(
-    () => toContextItems(attachments, handleRemoveAttachment),
-    [attachments, handleRemoveAttachment],
+    () => toContextItems(attachments, handleRemoveAttachment, handleRetryAttachment),
+    [attachments, handleRemoveAttachment, handleRetryAttachment],
   );
   const { description, textareaRef, setDescriptionValue, insertAtCursor } = useDescriptionInput(
     initialDescription,

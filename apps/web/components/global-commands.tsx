@@ -5,15 +5,7 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { useRouter } from "@/lib/routing/client-router";
 import { useTheme } from "@/components/theme/app-theme";
-import {
-  IconSun,
-  IconMoon,
-  IconRobot,
-  IconCpu,
-  IconFolder,
-  IconMessageCircle,
-  IconSparkles,
-} from "@tabler/icons-react";
+import { IconSun, IconMoon, IconMessageCircle, IconSparkles } from "@tabler/icons-react";
 import { useStaticDestinations } from "@/hooks/use-app-destinations";
 import { PALETTE_NAVIGATION_GROUP_KEY } from "@/lib/navigation/surface-policy";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
@@ -24,13 +16,13 @@ import { useAppStore } from "@/components/state-provider";
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import type { CommandItem } from "@/lib/commands/types";
+import { SettingsDiscoveryCommands } from "@/components/settings-discovery-commands";
 
 type PushFn = ReturnType<typeof useRouter>["push"];
 
 // Catalog keys, not copy — safe at module scope (no `t()` call here). The
 // palette groups by this resolved value, so every producer must use these.
 const GROUP_NAVIGATION = PALETTE_NAVIGATION_GROUP_KEY;
-const GROUP_SETTINGS = "common:commandGroupSettings";
 const GROUP_ACTIONS = "common:commandGroupActions";
 
 /**
@@ -112,43 +104,6 @@ function useNavigationCommands(push: PushFn, t: TFunction): CommandItem[] {
   return cacheRef.current.commands;
 }
 
-function buildSettingsCommands(push: PushFn, t: TFunction): CommandItem[] {
-  return [
-    {
-      id: "settings-agents",
-      label: t("common:commandAgentsSettings"),
-      group: t(GROUP_SETTINGS),
-      icon: <IconRobot className="size-3.5" />,
-      keywords: searchKeywords(t, "common:commandAgentsSettingsKeywords"),
-      action: () => push("/settings/agents"),
-    },
-    {
-      id: "settings-executors",
-      label: t("common:commandExecutorsSettings"),
-      group: t(GROUP_SETTINGS),
-      icon: <IconCpu className="size-3.5" />,
-      keywords: searchKeywords(t, "common:commandExecutorsSettingsKeywords"),
-      action: () => push("/settings/executors"),
-    },
-    {
-      id: "settings-workspace",
-      label: t("common:commandWorkspaceSettings"),
-      group: t(GROUP_SETTINGS),
-      icon: <IconFolder className="size-3.5" />,
-      keywords: searchKeywords(t, "common:commandWorkspaceSettingsKeywords"),
-      action: () => push("/settings/workspace"),
-    },
-    {
-      id: "settings-prompts",
-      label: t("common:commandPromptsSettings"),
-      group: t(GROUP_SETTINGS),
-      icon: <IconMessageCircle className="size-3.5" />,
-      keywords: searchKeywords(t, "common:commandPromptsSettingsKeywords"),
-      action: () => push("/settings/prompts"),
-    },
-  ];
-}
-
 function buildThemeCommand(
   resolvedTheme: string | undefined,
   setTheme: (theme: string) => void,
@@ -207,7 +162,6 @@ export function GlobalCommands() {
   const commands = useMemo<CommandItem[]>(
     () => [
       ...navigationCommands,
-      ...buildSettingsCommands(router.push, t),
       buildThemeCommand(resolvedTheme, setTheme, t),
       quickChatCommand,
       configChatCommand,
@@ -231,5 +185,5 @@ export function GlobalCommands() {
   useAppShortcuts();
   usePluginShortcuts();
 
-  return null;
+  return <SettingsDiscoveryCommands />;
 }

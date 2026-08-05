@@ -1286,6 +1286,7 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 		IsEphemeral:       task.IsEphemeral,
 		IsPassthrough:     session.IsPassthrough,
 		WorkspacePath:     session.WorkspacePath,
+		McpProviders:      deriveMCPProviders(allRepos),
 	}
 
 	execConfig := e.resolveExecutorConfig(ctx, executorID, task.WorkspaceID, metadata)
@@ -1477,7 +1478,7 @@ func (e *Executor) applyRepositoryConfig(req *LaunchAgentRequest, task *v1.Task,
 		}
 		// Task directory mode: place worktree inside per-task directory
 		if req.UseWorktree && repoInfo.Repository != nil && repoInfo.Repository.Name != "" {
-			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.SmallSuffix(3))
+			req.TaskDirName = worktree.SemanticWorktreeName(task.Title, worktree.TaskDirSuffix(task.ID))
 		}
 		if repoInfo.Repository != nil && repoInfo.Repository.SetupScript != "" {
 			if metadata == nil {

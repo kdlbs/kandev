@@ -19,29 +19,46 @@ import type {
   AzureDevOpsPullRequest,
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
+import { useTranslation } from "react-i18next";
 
 function EmptyResult({ loading, error }: { loading: boolean; error: string | null }) {
-  if (loading) return <div className="p-6 text-sm text-muted-foreground">Loading results...</div>;
+  const { t } = useTranslation();
+  if (loading)
+    return (
+      <div className="p-6 text-sm text-muted-foreground">{t("azuredevops:loadingResults")}</div>
+    );
   if (error)
     return (
       <div className="p-6 text-sm text-destructive" role="alert">
         {error}
       </div>
     );
-  return <div className="p-6 text-sm text-muted-foreground">No matching results.</div>;
+  return (
+    <div className="p-6 text-sm text-muted-foreground">{t("azuredevops:noMatchingResults")}</div>
+  );
 }
+
+// A discriminant, not copy: the aria-label is a whole sentence per kind, because
+// interpolating an English noun into a translated sentence is untranslatable.
+type TaskActionsItemKind = "workItem" | "pullRequest";
+
+const TASK_ACTIONS_LABEL_KEYS: Record<TaskActionsItemKind, string> = {
+  workItem: "azuredevops:taskActionsForWorkItem",
+  pullRequest: "azuredevops:taskActionsForPullRequest",
+};
 
 function TaskActionsMenu<T extends { id: number }>({
   item,
-  itemLabel,
+  itemKind,
   actions,
   onSelect,
 }: {
   item: T;
-  itemLabel: string;
+  itemKind: TaskActionsItemKind;
   actions: AzureDevOpsActionPreset[];
   onSelect: (item: T, action: AzureDevOpsActionPreset) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -50,9 +67,10 @@ function TaskActionsMenu<T extends { id: number }>({
           size="sm"
           variant="outline"
           className="cursor-pointer"
-          aria-label={`Task actions for ${itemLabel} ${item.id}`}
+          aria-label={t(TASK_ACTIONS_LABEL_KEYS[itemKind], { id: item.id })}
         >
-          <IconPlus className="h-4 w-4" /> Task <IconChevronDown className="h-3 w-3" />
+          <IconPlus className="h-4 w-4" /> {t("azuredevops:task")}{" "}
+          <IconChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
@@ -86,6 +104,7 @@ export function AzureDevOpsWorkItemResults({
   quickActions?: AzureDevOpsActionPreset[];
   onQuickAction?: (item: AzureDevOpsWorkItem, action: AzureDevOpsActionPreset) => void;
 }) {
+  const { t } = useTranslation();
   if (loading || error || items.length === 0)
     return <EmptyResult loading={loading} error={error} />;
   return (
@@ -112,7 +131,7 @@ export function AzureDevOpsWorkItemResults({
             </div>
             <div className="break-words text-sm font-medium">{item.title}</div>
             <div className="text-xs text-muted-foreground">
-              {item.assignedTo || "Unassigned"}
+              {item.assignedTo || t("azuredevops:unassigned")}
               {item.areaPath ? ` · ${item.areaPath}` : ""}
             </div>
           </div>
@@ -123,7 +142,7 @@ export function AzureDevOpsWorkItemResults({
                   href={item.webUrl}
                   target="_blank"
                   rel="noreferrer"
-                  aria-label={`Open work item ${item.id} in Azure DevOps`}
+                  aria-label={t("azuredevops:openWorkItemInAzureDevops", { id: item.id })}
                 >
                   <IconExternalLink className="h-4 w-4" />
                 </a>
@@ -132,7 +151,7 @@ export function AzureDevOpsWorkItemResults({
             {quickActions.length > 0 && onQuickAction ? (
               <TaskActionsMenu
                 item={item}
-                itemLabel="work item"
+                itemKind="workItem"
                 actions={quickActions}
                 onSelect={onQuickAction}
               />
@@ -145,7 +164,7 @@ export function AzureDevOpsWorkItemResults({
                 onClick={() => onStartTask(item)}
               >
                 <IconPlus className="h-4 w-4" />
-                Start task
+                {t("azuredevops:startTask")}
               </Button>
             )}
           </div>
@@ -176,6 +195,7 @@ export function AzureDevOpsPullRequestResults({
   quickActions?: AzureDevOpsActionPreset[];
   onQuickAction?: (pullRequest: AzureDevOpsPullRequest, action: AzureDevOpsActionPreset) => void;
 }) {
+  const { t } = useTranslation();
   if (loading || error || items.length === 0)
     return <EmptyResult loading={loading} error={error} />;
   return (
@@ -189,7 +209,7 @@ export function AzureDevOpsPullRequestResults({
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span className="font-mono">PR {pullRequest.id}</span>
               <Badge variant="outline">{pullRequest.status}</Badge>
-              {pullRequest.isDraft && <Badge variant="secondary">Draft</Badge>}
+              {pullRequest.isDraft && <Badge variant="secondary">{t("azuredevops:draft")}</Badge>}
               <span>{pullRequest.repositoryName}</span>
             </div>
             <div className="break-words text-sm font-medium">{pullRequest.title}</div>
@@ -206,12 +226,12 @@ export function AzureDevOpsPullRequestResults({
               onClick={() => onFeedback(pullRequest)}
             >
               <IconMessageCircle className="h-4 w-4" />
-              Feedback
+              {t("azuredevops:feedback")}
             </Button>
             {quickActions.length > 0 && onQuickAction ? (
               <TaskActionsMenu
                 item={pullRequest}
-                itemLabel="pull request"
+                itemKind="pullRequest"
                 actions={quickActions}
                 onSelect={onQuickAction}
               />
@@ -224,7 +244,7 @@ export function AzureDevOpsPullRequestResults({
                 onClick={() => onStartTask(pullRequest)}
               >
                 <IconPlus className="h-4 w-4" />
-                Start task
+                {t("azuredevops:startTask")}
               </Button>
             )}
             <Button asChild variant="ghost" size="icon-sm" className="cursor-pointer">
@@ -232,7 +252,7 @@ export function AzureDevOpsPullRequestResults({
                 href={pullRequest.webUrl}
                 target="_blank"
                 rel="noreferrer"
-                aria-label={`Open pull request ${pullRequest.id} in Azure DevOps`}
+                aria-label={t("azuredevops:openPullRequestInAzureDevops", { id: pullRequest.id })}
               >
                 <IconExternalLink className="h-4 w-4" />
               </a>

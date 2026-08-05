@@ -35,9 +35,12 @@ import type {
 } from "./chat-input-container";
 import type { TipTapInputHandle } from "./tiptap-input";
 import type { ImagePasteIssue } from "./clipboard-attachments";
+import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";
+import { ApiError } from "@/lib/api/client";
 
 type UseChatInputStateProps = {
   sessionId: string | null;
+  workspaceId?: string | null;
   isSending: boolean;
   contextItems: ContextItem[];
   pendingCommentsByFile?: Record<string, DiffComment[]>;
@@ -68,23 +71,17 @@ function collectComments(
 }
 
 function toMessageAttachments(attachments: FileAttachment[]): MessageAttachment[] {
-  return attachments.map((att) =>
-    att.isImage
-      ? {
-          type: "image" as const,
-          data: att.data,
-          mime_type: att.mimeType,
-          name: att.fileName,
-          ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
-        }
-      : {
-          type: "resource" as const,
-          data: att.data,
-          mime_type: att.mimeType,
-          name: att.fileName,
-          delivery_mode: "path" as const,
-        },
-  );
+  return attachments.map((att) => {
+    const attachment = {
+      type: att.isImage ? ("image" as const) : ("resource" as const),
+      mime_type: att.mimeType,
+      name: att.fileName,
+      size_bytes: att.size,
+      ...(att.attachmentId ? { attachment_id: att.attachmentId } : { data: att.data ?? "" }),
+      ...(att.deliveryMode === "path" && { delivery_mode: "path" as const }),
+    };
+    return attachment;
+  });
 }
 
 function clearDraft(sessionId: string | null) {
@@ -152,6 +149,7 @@ function handleSubmitResult(result: ChatSubmitResult, onSuccess: () => void) {
 
 type SubmitDraftArgs = {
   isSending: boolean;
+  workspaceId?: string | null;
   valueRef: MutableRefObject<string>;
   pendingCommentsRef: MutableRefObject<Record<string, DiffComment[]> | undefined>;
   attachmentsRef: MutableRefObject<FileAttachment[]>;
@@ -174,6 +172,12 @@ function submitDraft(args: SubmitDraftArgs) {
   const trimmed = args.valueRef.current.trim();
   const allComments = collectComments(args.pendingCommentsRef.current);
   const currentAttachments = args.attachmentsRef.current;
+  if (
+    args.workspaceId &&
+    currentAttachments.some((attachment) => attachment.file && !attachment.attachmentId)
+  ) {
+    return;
+  }
   const submittedAttachments = attachmentSnapshot(currentAttachments);
   const hasContent =
     trimmed || allComments.length > 0 || currentAttachments.length > 0 || args.hasContextComments;
@@ -201,7 +205,10 @@ function submitDraft(args: SubmitDraftArgs) {
   );
 }
 
-function useAttachments(sessionId: string | null) {
+// Attachment staging, retry, and draft persistence share one state machine so
+// desktop and mobile composers cannot drift.
+// eslint-disable-next-line max-lines-per-function
+function useAttachments(sessionId: string | null, workspaceId?: string | null) {
   const [attachments, setAttachments] = useState<FileAttachment[]>(() =>
     sessionId ? getChatDraftAttachments(sessionId).map(restoreAttachmentPreview) : [],
   );
@@ -237,6 +244,55 @@ function useAttachments(sessionId: string | null) {
     if (sessionId) setChatDraftAttachments(sessionId, attachments);
   }, [attachments, sessionId]);
 
+  const updateAttachment = useCallback((id: string, update: Partial<FileAttachment>) => {
+    setAttachments((prev) => {
+      const next = prev.map((attachment) =>
+        attachment.id === id ? { ...attachment, ...update } : attachment,
+      );
+      attachmentsRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const uploadPendingAttachment = useCallback(
+    async (attachment: FileAttachment) => {
+      if (!workspaceId || !attachment.file || attachment.attachmentId) return;
+      updateAttachment(attachment.id, { uploadStatus: "uploading", uploadError: undefined });
+      try {
+        const uploaded = await uploadAttachment(attachment.file, {
+          workspaceId,
+          kind: attachment.isImage ? "image" : "resource",
+          deliveryMode: attachment.deliveryMode,
+        });
+        if (!attachmentsRef.current.some((current) => current.id === attachment.id)) {
+          void deleteAttachment(uploaded.attachment_id).catch(() => undefined);
+          return;
+        }
+        updateAttachment(attachment.id, {
+          attachmentId: uploaded.attachment_id,
+          uploadStatus: "ready",
+          uploadError: undefined,
+          size: uploaded.size_bytes,
+        });
+      } catch (error) {
+        updateAttachment(attachment.id, {
+          uploadStatus: "failed",
+          uploadError: error instanceof ApiError ? error.message : "Upload failed",
+        });
+      }
+    },
+    [updateAttachment, workspaceId],
+  );
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    for (const attachment of attachmentsRef.current) {
+      if (attachment.file && !attachment.attachmentId && attachment.uploadStatus !== "uploading") {
+        void uploadPendingAttachment(attachment);
+      }
+    }
+  }, [uploadPendingAttachment, workspaceId]);
+
   const addFiles = useCallback(
     async (files: File[], issue?: ImagePasteIssue) => {
       if (issue === "unreadable-image") {
@@ -263,7 +319,16 @@ function useAttachments(sessionId: string | null) {
         if (attachment) {
           acceptedCount += 1;
           acceptedTotalSize += attachment.size;
-          setAttachments((prev) => [...prev, attachment]);
+          const staged = {
+            ...attachment,
+            uploadStatus: workspaceId ? ("pending" as const) : attachment.uploadStatus,
+          };
+          setAttachments((prev) => {
+            const next = [...prev, staged];
+            attachmentsRef.current = next;
+            return next;
+          });
+          void uploadPendingAttachment(staged);
         }
       }
     },
@@ -273,15 +338,19 @@ function useAttachments(sessionId: string | null) {
       warnAttachmentCountLimit,
       warnAttachmentTotalSizeLimit,
       warnUnreadablePastedImage,
+      uploadPendingAttachment,
+      workspaceId,
     ],
   );
 
   const handleRemoveAttachment = useCallback((id: string) => {
+    const removed = attachmentsRef.current.find((attachment) => attachment.id === id);
     setAttachments((prev) => {
       const next = prev.filter((att) => att.id !== id);
       attachmentsRef.current = next;
       return next;
     });
+    if (removed?.attachmentId) void deleteAttachment(removed.attachmentId).catch(() => undefined);
   }, []);
 
   const handleDeliveryModeChange = useCallback((id: string, deliveryMode: "prompt" | "path") => {
@@ -297,6 +366,14 @@ function useAttachments(sessionId: string | null) {
     [attachmentsRef],
   );
 
+  const handleRetryAttachment = useCallback(
+    (id: string) => {
+      const attachment = attachmentsRef.current.find((item) => item.id === id);
+      if (attachment) void uploadPendingAttachment(attachment);
+    },
+    [uploadPendingAttachment],
+  );
+
   return {
     attachments,
     attachmentsRef,
@@ -304,12 +381,15 @@ function useAttachments(sessionId: string | null) {
     addFiles,
     handleRemoveAttachment,
     handleDeliveryModeChange,
+    handleRetryAttachment,
     getAttachments,
   };
 }
 
+// eslint-disable-next-line max-lines-per-function
 export function useChatInputState({
   sessionId,
+  workspaceId,
   isSending,
   contextItems,
   pendingCommentsByFile,
@@ -332,8 +412,9 @@ export function useChatInputState({
     addFiles,
     handleRemoveAttachment,
     handleDeliveryModeChange,
+    handleRetryAttachment,
     getAttachments,
-  } = useAttachments(sessionId);
+  } = useAttachments(sessionId, workspaceId);
 
   // Reset text value from storage when session changes (runs before paint)
   useLayoutEffect(() => {
@@ -368,6 +449,7 @@ export function useChatInputState({
     (resetHeight: () => void) => {
       submitDraft({
         isSending,
+        workspaceId,
         valueRef,
         pendingCommentsRef,
         attachmentsRef,
@@ -386,7 +468,15 @@ export function useChatInputState({
         },
       });
     },
-    [onSubmit, isSending, sessionId, attachmentsRef, setAttachments, hasContextComments],
+    [
+      onSubmit,
+      isSending,
+      workspaceId,
+      sessionId,
+      attachmentsRef,
+      setAttachments,
+      hasContextComments,
+    ],
   );
 
   const allItems = useMemo((): ContextItem[] => {
@@ -400,6 +490,7 @@ export function useChatInputState({
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
               onDeliveryModeChange: (mode) => handleDeliveryModeChange(att.id, mode),
+              onRetry: () => handleRetryAttachment(att.id),
             } as ImageContextItem)
           : ({
               kind: "file-attachment" as const,
@@ -407,11 +498,22 @@ export function useChatInputState({
               label: att.fileName,
               attachment: att,
               onRemove: () => handleRemoveAttachment(att.id),
+              onRetry: () => handleRetryAttachment(att.id),
             } as FileAttachmentContextItem),
     );
     return [...contextItems, ...attachmentItems];
-  }, [contextItems, attachments, handleRemoveAttachment, handleDeliveryModeChange]);
+  }, [
+    contextItems,
+    attachments,
+    handleRemoveAttachment,
+    handleDeliveryModeChange,
+    handleRetryAttachment,
+  ]);
+
+  const hasPendingAttachmentUploads =
+    Boolean(workspaceId) &&
+    attachments.some((attachment) => attachment.file && !attachment.attachmentId);
 
   // prettier-ignore
-  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments };
+  return { value, attachments, inputRef, addFiles, handleChange, handleSubmit, allItems, getAttachments, hasPendingAttachmentUploads };
 }

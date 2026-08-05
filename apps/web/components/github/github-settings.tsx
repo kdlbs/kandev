@@ -26,6 +26,7 @@ import { ResetWatchDialog, useWatchResetController } from "@/components/watches/
 import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // CleanupNowButton runs a manual global sweep over the dedup tables. Useful
 // for users who upgraded with a pile of legacy merged-PR / closed-issue
@@ -260,6 +261,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
       <Separator />
       <GitHubCallbackNotice workspaceId={workspaceId} />
       <SettingsSection
+        discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.github}
         title={t("github:workspaceGithubAccess")}
         description={t("github:credentialUsedForRepositorySyncWatches")}
       >

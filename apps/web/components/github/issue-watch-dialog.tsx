@@ -75,6 +75,7 @@ type FormState = {
 };
 
 const DEFAULT_QUERY = "type:issue state:open";
+const ISSUE_LABEL_EXAMPLES = "bug, enhancement, priority:high";
 
 function makeDefaultForm(workspaceId: string): FormState {
   return {
@@ -236,7 +237,9 @@ function IssueFilterFields({
         <Input
           value={form.labels}
           onChange={(e) => setForm((prev) => ({ ...prev, labels: e.target.value }))}
-          placeholder={t("github:eGBugEnhancementPriorityHigh")}
+          placeholder={t("github:eGBugEnhancementPriorityHigh", {
+            examples: ISSUE_LABEL_EXAMPLES,
+          })}
         />
         <p className="text-xs text-muted-foreground">
           {t("github:onlyMatchIssuesWithTheseLabels")}

@@ -373,6 +373,8 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
+	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
 	ActionMCPAddWorkspaceSources        = "mcp.add_workspace_sources"
 	ActionMCPUpdateRepositoryBaseBranch = "mcp.update_repository_base_branch"
@@ -507,6 +509,8 @@ const (
 	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
 	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
 	ActionGitLabStats             = "gitlab.stats"
+
+	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
 
 	ActionGitLabMRMerge                = "gitlab.mr.merge"
 	ActionGitLabMRApprove              = "gitlab.mr.approve"

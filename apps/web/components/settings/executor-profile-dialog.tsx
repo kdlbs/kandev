@@ -16,6 +16,8 @@ import { createExecutorProfile } from "@/lib/api/domains/settings-api";
 import type { ExecutorProfile } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
+const PROFILE_NAME_EXAMPLE = "Production, Development";
+
 type ExecutorProfileDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -73,7 +75,9 @@ export function ExecutorProfileDialog({
               id="profile-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder={t("executors:eGProductionDevelopment")}
+              placeholder={t("executors:eGProductionDevelopment", {
+                example: PROFILE_NAME_EXAMPLE,
+              })}
               autoFocus
             />
           </div>

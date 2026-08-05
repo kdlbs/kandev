@@ -52,6 +52,7 @@ import { ProfileMcpConfigCard } from "@/app/settings/agents/[agentId]/profile-mc
 import { CommandPreviewCard } from "@/app/settings/agents/[agentId]/profiles/[profileId]/command-preview-card";
 import type { AgentProfileMcpConfig } from "@/lib/types/http";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
+import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 
 type ProfileEditorProps = {
   agent: Agent;
@@ -143,7 +144,10 @@ function ProfileSettingsCard({
   const savedPermissionValues = profilePermissionValues(savedProfile, permissionSettings);
 
   return (
-    <SettingsCard isDirty={isDirty}>
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "profile-settings")}
+    >
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <span>{t("agents:profileSettings")}</span>
@@ -270,12 +274,14 @@ function ProfileEditorBody({
         baselineFlags={savedProfile.cliFlags ?? []}
         onChange={(next) => updateDraft({ cliFlags: next })}
         permissionSettings={permissionSettings}
+        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "cli-flags")}
       />
 
       <ProfileEnvVarsSection
         envVars={draft.envVars}
         baselineEnvVars={savedProfile.envVars}
         onChange={updateDraft}
+        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "environment-variables")}
       />
 
       <CommandPreviewCard
@@ -287,6 +293,7 @@ function ProfileEditorBody({
         commandPrefix={draft.commandPrefix}
         envVars={draft.envVars}
         secrets={secrets}
+        discoveryTargetId={agentProfileDiscoveryTarget(draft.id, "command-preview")}
       />
 
       <ProfileMcpConfigCard

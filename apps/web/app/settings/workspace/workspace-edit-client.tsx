@@ -31,6 +31,8 @@ import { useToast } from "@/components/toast-provider";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { SettingsTarget } from "@/components/settings/settings-target";
+import { workspaceDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 
 type WorkspaceEditClientProps = {
   workspaceId: string;
@@ -77,6 +79,7 @@ type SelectFieldProps = {
   options: { id: string; name: string }[];
   emptyLabel: string;
   emptyValue: string;
+  discoveryTargetId: string;
 };
 
 function SelectField({
@@ -88,10 +91,11 @@ function SelectField({
   options,
   emptyLabel,
   emptyValue,
+  discoveryTargetId,
 }: SelectFieldProps) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-2">
+    <SettingsTarget targetId={discoveryTargetId} className="space-y-2">
       <Label>{label}</Label>
       <Select value={value || "none"} onValueChange={(v) => onChange(v === "none" ? "" : v)}>
         <SelectTrigger className="w-full" data-settings-dirty={isDirty}>
@@ -111,11 +115,12 @@ function SelectField({
           )}
         </SelectContent>
       </Select>
-    </div>
+    </SettingsTarget>
   );
 }
 
 type WorkspaceSettingsCardProps = {
+  workspaceId: string;
   workspaceNameDraft: string;
   nameIsDirty: boolean;
   onNameChange: (value: string) => void;
@@ -131,6 +136,7 @@ type WorkspaceSettingsCardProps = {
 };
 
 function WorkspaceSettingsCard({
+  workspaceId,
   workspaceNameDraft,
   nameIsDirty,
   onNameChange,
@@ -157,7 +163,10 @@ function WorkspaceSettingsCard({
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
-          <div className="space-y-2">
+          <SettingsTarget
+            targetId={workspaceDiscoveryTarget(workspaceId, "name")}
+            className="space-y-2"
+          >
             <Label htmlFor="workspace-name">{t("workspaces:name")}</Label>
             <Input
               id="workspace-name"
@@ -165,7 +174,7 @@ function WorkspaceSettingsCard({
               data-settings-dirty={nameIsDirty}
               onChange={(e) => onNameChange(e.target.value)}
             />
-          </div>
+          </SettingsTarget>
           <SelectField
             label={t("workspaces:defaultExecutor")}
             placeholder={t("workspaces:selectDefaultExecutor")}
@@ -175,6 +184,7 @@ function WorkspaceSettingsCard({
             options={executorsEmpty ? [] : executorOptions}
             emptyLabel={t("workspaces:noExecutorsAvailable")}
             emptyValue=""
+            discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-executor")}
           />
           <SelectField
             label={t("workspaces:defaultAgentProfile")}
@@ -185,6 +195,7 @@ function WorkspaceSettingsCard({
             options={profileOptions}
             emptyLabel={t("workspaces:noAgentProfilesAvailable")}
             emptyValue="empty-agent-profiles"
+            discoveryTargetId={workspaceDiscoveryTarget(workspaceId, "default-agent-profile")}
           />
         </div>
       </CardContent>
@@ -560,6 +571,7 @@ function WorkspaceEditForm({ workspace }: WorkspaceEditFormProps) {
       </div>
       <Separator />
       <WorkspaceSettingsCard
+        workspaceId={currentWorkspace.id}
         workspaceNameDraft={workspaceNameDraft}
         nameIsDirty={workspaceNameDraft.trim() !== savedState.name}
         onNameChange={setWorkspaceNameDraft}

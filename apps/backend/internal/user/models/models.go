@@ -8,6 +8,8 @@ import (
 const (
 	MCPTaskAgentProfileDefaultCurrentTask      = "current_task"
 	MCPTaskAgentProfileDefaultWorkspaceDefault = "workspace_default"
+	LspStatusLocationToolbar                   = "toolbar"
+	LspStatusLocationStatusBar                 = "status_bar"
 )
 
 func NormalizeMCPTaskAgentProfileDefault(value string) string {
@@ -15,6 +17,13 @@ func NormalizeMCPTaskAgentProfileDefault(value string) string {
 		return value
 	}
 	return MCPTaskAgentProfileDefaultCurrentTask
+}
+
+func NormalizeLspStatusLocation(value string) string {
+	if value == LspStatusLocationStatusBar {
+		return value
+	}
+	return LspStatusLocationToolbar
 }
 
 const (
@@ -83,6 +92,7 @@ type UserSettings struct {
 	LspAutoStartLanguages           []string                          `json:"lsp_auto_start_languages"`
 	LspAutoInstallLanguages         []string                          `json:"lsp_auto_install_languages"`
 	LspServerConfigs                map[string]map[string]interface{} `json:"lsp_server_configs"`
+	LspStatusLocation               string                            `json:"lsp_status_location"`
 	SavedLayouts                    []SavedLayout                     `json:"saved_layouts"`
 	SidebarViews                    []SidebarView                     `json:"sidebar_views"`
 	SidebarActiveViewID             string                            `json:"sidebar_active_view_id"`

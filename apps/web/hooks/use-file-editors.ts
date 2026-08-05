@@ -39,18 +39,19 @@ export function useOpenFileAtLine(
   onOpenFile: ((path: string) => void) | undefined,
   startLine: number | undefined,
   worktreePath: string | null | undefined,
+  sessionId?: string,
 ) {
   return useCallback(
     (path: string) => {
       if (startLine && startLine > 0) {
-        setPendingCursorPosition(path, startLine, 1);
+        setPendingCursorPosition(path, startLine, 1, undefined, sessionId);
         onOpenFile?.(path);
-        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1);
+        scrollEditorIfMounted(path, worktreePath ?? null, startLine, 1, { sessionId });
         return;
       }
       onOpenFile?.(path);
     },
-    [onOpenFile, startLine, worktreePath],
+    [onOpenFile, startLine, worktreePath, sessionId],
   );
 }
 

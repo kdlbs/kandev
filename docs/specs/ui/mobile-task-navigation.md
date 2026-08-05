@@ -14,7 +14,7 @@ Mobile users need the same task controls as desktop without relying on long pres
 
 - Task action controls are visible and touch-reachable on mobile.
 - Mobile task actions preserve desktop capabilities, including same-workflow **Move to**, cross-workflow **Send to workflow**, linking, pinning, renaming, coloring, archiving, and deleting when those actions are available on desktop.
-- Context and dropdown action menus below the app's 640px mobile breakpoint stay within the viewport, use bottom-sheet presentation, contain their own vertical overflow, respect the bottom safe area, and provide touch targets at least 44px high.
+- Context and dropdown action menus below 640px stay within the viewport, use bottom-sheet presentation, contain their own vertical overflow, respect the bottom safe area, and provide touch targets at least 44px high.
 - Mobile Kanban renders one focused workflow and one focused step at a time when the user has several workflows.
 - Workflow is a primary mobile Kanban navigation dimension, not a setting hidden in the secondary display menu. The current workflow and step are always visible together in the board navigation control, including when only one workflow exists.
 - Opening the board navigation control exposes available workflows and the focused workflow's steps in one bottom drawer. Choosing a workflow makes it the active workflow for the board, task creation, and multi-select actions through the existing saved workflow selection; previous/next step buttons and horizontal swipe remain equivalent transient step shortcuts.

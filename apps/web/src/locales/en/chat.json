@@ -3,6 +3,19 @@
   "collapseQueuedMessages": "Collapse queued messages",
   "clearAll": "Clear all",
   "clearAllQueuedMessages": "Clear all queued messages",
+  "attachmentUploadPending": "Uploading attachment…",
+  "attachmentUploadPendingSubmit": "Finish uploading attachments before sending.",
+  "attachmentUploadFailed": "Attachment upload failed",
+  "retryAttachmentUpload": "Retry attachment upload",
+  "attachmentPreviewAlt": "Preview",
+  "attachmentMessageAlt": "Attachment {{index}}",
+  "attachmentFallbackName": "Attachment",
+  "attachmentPreviewFullAlt": "Full size preview",
+  "attachmentDeliveryMode": "Attachment delivery mode",
+  "attachmentDeliveryPrompt": "Prompt",
+  "attachmentDeliveryFile": "File",
+  "attachmentDeliveryPromptDescription": "Send as prompt context for visual understanding. The agent will not get a file path.",
+  "attachmentDeliveryPathDescription": "Upload into the workspace so the agent can read or edit the file.",
   "editQueuedMessage": "Edit queued message",
   "expandMessage": "Expand message",
   "failedToClearQueuedMessages": "Failed to clear queued messages.",
@@ -35,6 +48,6 @@
   "providerQuotaReset": "Capacity resets {{resetAt}}.",
   "providerQuotaResetUnknown": "Try again when the provider makes capacity available.",
   "providerQuotaProviderFallback": "Provider",
-  "turnGroupToolCalls_one": "tool call",
-  "turnGroupToolCalls_other": "tool calls"
+  "turnGroupToolCalls_one": "{{count}} tool call",
+  "turnGroupToolCalls_other": "{{count}} tool calls"
 }

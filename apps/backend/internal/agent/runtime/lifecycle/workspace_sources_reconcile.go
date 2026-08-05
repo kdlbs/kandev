@@ -12,9 +12,13 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
+func ownedDirectoryLinkOwner(taskID, taskDirName string) worktree.OwnedDirectoryLinkOwner {
+	return worktree.OwnedDirectoryLinkOwner{TaskID: taskID, TaskDirName: taskDirName}
+}
+
 // reconcileWorkspaceSources recreates Kandev-owned links from durable source
 // specs before a host launch or workspace-only resume.
-func reconcileWorkspaceSources(_ context.Context, root string, folders []WorkspaceFolderSpec) error {
+func reconcileWorkspaceSources(_ context.Context, root string, folders []WorkspaceFolderSpec, owner worktree.OwnedDirectoryLinkOwner) error {
 	if len(folders) == 0 {
 		return nil
 	}
@@ -29,7 +33,7 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 		if err != nil || !info.IsDir() {
 			return fmt.Errorf("workspace folder %q target is missing: %s", folder.Name, folder.LocalPath)
 		}
-		if _, _, err := worktree.EnsureOwnedDirectoryLink(root, folder.Name, folder.LocalPath); err != nil {
+		if _, err := worktree.EnsureOwnedDirectoryLink(root, folder.Name, folder.LocalPath, owner); err != nil {
 			return fmt.Errorf("link workspace folder %q: %w", folder.Name, err)
 		}
 	}
@@ -45,7 +49,7 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 // by index, because a host-materialized multi-repo local task roots the
 // workspace at ~/.kandev/tasks/<taskDir> — there repositories[0] is a real
 // sibling and must keep its link.
-func reconcileWorkspaceRepositories(root string, repositories []WorkspaceRepositorySpec, log *logger.Logger) error {
+func reconcileWorkspaceRepositories(root string, repositories []WorkspaceRepositorySpec, log *logger.Logger, owner worktree.OwnedDirectoryLinkOwner) error {
 	if len(repositories) == 0 {
 		return nil
 	}
@@ -64,7 +68,7 @@ func reconcileWorkspaceRepositories(root string, repositories []WorkspaceReposit
 		if err != nil || !info.IsDir() {
 			return fmt.Errorf("workspace repository %q target is missing: %s", repository.RepoName, repository.RepositoryPath)
 		}
-		if _, _, err := worktree.EnsureOwnedDirectoryLink(root, repository.RepoName, repository.RepositoryPath); err != nil {
+		if _, err := worktree.EnsureOwnedDirectoryLink(root, repository.RepoName, repository.RepositoryPath, owner); err != nil {
 			return fmt.Errorf("link workspace repository %q: %w", repository.RepoName, err)
 		}
 	}

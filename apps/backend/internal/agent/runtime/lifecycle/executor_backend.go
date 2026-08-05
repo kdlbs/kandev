@@ -315,6 +315,7 @@ type ExecutorCreateRequest struct {
 	AgentConfig                    agents.Agent // Agent type info needed by runtimes
 	PreviousExecutionID            string       // Non-empty when reconnecting to a previous execution
 	McpMode                        string       // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders                   []string     // Normalized provider capabilities attached to the task
 	AuthToken                      string       // Previously handshaken agentctl token for reconnects
 	BootstrapNonce                 string       // Stored nonce for re-handshake after container restart
 

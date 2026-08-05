@@ -10,6 +10,7 @@ import { fetchSystemMetricsSettings, updateSystemMetricsSettings } from "@/lib/a
 import type { SystemMetricId, SystemMetricsGlobalSettings } from "@/lib/types/system";
 import { useSettingsSaveContributor } from "./settings-save-provider";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useTranslation } from "react-i18next";
 
 const METRIC_OPTIONS: Array<{ id: SystemMetricId; labelKey: string }> = [
@@ -90,7 +91,10 @@ export function SystemMetricsSettingsCard({
   };
 
   return (
-    <SettingsCard isDirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}>
+    <SettingsCard
+      isDirty={isDirty || Boolean(isShowInTopbarDirty) || Boolean(isSimplifiedDirty)}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.resourceMetrics}
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:resourceMetrics")}</CardTitle>
       </CardHeader>

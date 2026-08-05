@@ -53,6 +53,7 @@ import (
 	"github.com/kandev/kandev/internal/improvekandev"
 	"github.com/kandev/kandev/internal/jira"
 	"github.com/kandev/kandev/internal/linear"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	mcpserver "github.com/kandev/kandev/internal/mcp/server"
@@ -544,6 +545,7 @@ type routeParams struct {
 	httpPort                      int
 	features                      config.FeaturesConfig
 	voice                         config.VoiceConfig
+	homeDir                       string
 	interimSettingsInterlockToken string
 	log                           *logger.Logger
 }
@@ -771,9 +773,10 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 // client can activate the right catalog before first paint.
 func webRuntimeConfig(debug bool, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
-		APIPrefix:     "/api/v1",
-		WebSocketPath: "/ws",
-		Debug:         debug,
+		APIPrefix:                         "/api/v1",
+		WebSocketPath:                     "/ws",
+		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
+		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
 		// e2e harness serves a PRODUCTION bundle, so the frontend cannot infer
 		// this from its own build mode.
@@ -963,6 +966,11 @@ func resolveRepositoryIDForSessionSubpath(ctx context.Context, taskRepo *sqliter
 
 // registerTaskRoutes registers all task-related HTTP and WebSocket routes.
 func registerTaskRoutes(p routeParams, planService *taskservice.PlanService, handoffSvc *taskservice.HandoffService) {
+	if attachmentSvc := p.taskSvc.AttachmentService(); attachmentSvc != nil {
+		taskhandlers.RegisterAttachmentRoutes(p.router, attachmentSvc, p.log)
+	} else {
+		p.log.Warn("prompt attachment routes disabled: attachment service is unavailable")
+	}
 	taskhandlers.RegisterWorkspaceRoutes(p.router, p.gateway.Dispatcher, p.taskSvc, p.log)
 	if p.services != nil {
 		registerMentionRoutes(p.router, p.services.Mentions)
@@ -1479,6 +1487,7 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
+	mcpHandlers.SetTaskTitleBranchRenamer(p.orchestratorSvc)
 	mcpHandlers.SetUserSettingsProvider(p.services.User)
 	if p.systemSvc != nil && p.systemSvc.LogBundles != nil {
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
@@ -1489,6 +1498,9 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
+	}
+	if p.services.GitLab != nil {
+		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
 
 	// Reuse the cross-task handoff service constructed in registerRoutes —

@@ -112,104 +112,7 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
-	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
-	// fall back to RepositoryURL (legacy: this carries a local filesystem path
-	// for the workspace). Empty is also valid — lifecycle manager creates a
-	// scratch workspace.
-	workspacePath := req.WorkspacePath
-	if workspacePath == "" {
-		workspacePath = req.RepositoryURL
-	}
-	officeProfileID := req.OfficeAgentProfileID
-	if officeProfileID == "" {
-		officeProfileID = req.AgentProfileID
-	}
-	launchReq := &lifecycle.LaunchRequest{
-		TaskID:              req.TaskID,
-		WorkspaceID:         req.WorkspaceID,
-		SessionID:           req.SessionID,
-		TaskEnvironmentID:   req.TaskEnvironmentID,
-		TaskTitle:           req.TaskTitle,
-		AgentProfileID:      officeProfileID,
-		ExecutionProfileID:  req.AgentProfileID,
-		StartAgent:          req.StartAgent,
-		WorkspacePath:       workspacePath,
-		TaskDescription:     req.TaskDescription,
-		Attachments:         convertToLifecycleAttachments(req.Attachments),
-		Env:                 req.Env,
-		ACPSessionID:        req.ACPSessionID,
-		Metadata:            req.Metadata,
-		ModelOverride:       req.ModelOverride,
-		ExecutorType:        req.ExecutorType,
-		ExecutorConfig:      req.ExecutorConfig,
-		PreviousExecutionID: req.PreviousExecutionID,
-		McpMode:             req.McpMode,
-		IsEphemeral:         req.IsEphemeral,
-		IsPassthrough:       req.IsPassthrough,
-		SetupScript:         req.SetupScript,
-		CopyFiles:           req.CopyFiles,
-		// Worktree configuration for concurrent agent execution
-		UseWorktree:            req.UseWorktree,
-		WorktreeID:             req.WorktreeID,
-		RepositoryID:           req.RepositoryID,
-		RepositoryPath:         req.RepositoryPath,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		// Task directory mode
-		TaskDirName:        req.TaskDirName,
-		RepoName:           req.RepoName,
-		BranchSlug:         req.BranchSlug,
-		BranchIdentitySlug: req.BranchIdentitySlug,
-	}
-	for _, f := range req.WorkspaceFolders {
-		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
-	}
-
-	if req.RouteOverride != nil {
-		launchReq.RouteOverride = &lifecycle.RouteOverride{
-			ExecutionProfileID: req.RouteOverride.ExecutionProfileID,
-			ProviderID:         req.RouteOverride.ProviderID,
-			Model:              req.RouteOverride.Model,
-			Tier:               req.RouteOverride.Tier,
-			Mode:               req.RouteOverride.Mode,
-			Flags:              req.RouteOverride.Flags,
-			Env:                req.RouteOverride.Env,
-		}
-	}
-
-	// Multi-repo: forward the explicit repo list when the orchestrator built one.
-	if len(req.Repositories) > 0 {
-		specs := make([]lifecycle.RepoLaunchSpec, 0, len(req.Repositories))
-		for _, r := range req.Repositories {
-			specs = append(specs, lifecycle.RepoLaunchSpec{
-				RepositoryID:           r.RepositoryID,
-				RepositoryPath:         r.RepositoryPath,
-				RepositoryURL:          r.RepositoryURL,
-				RepoName:               r.RepoName,
-				BaseBranch:             r.BaseBranch,
-				DefaultBranch:          r.DefaultBranch,
-				CheckoutBranch:         r.CheckoutBranch,
-				PRNumber:               r.PRNumber,
-				WorktreeID:             r.WorktreeID,
-				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-				WorktreeBranchTicket:   r.WorktreeBranchTicket,
-				PullBeforeWorktree:     r.PullBeforeWorktree,
-				RepoSetupScript:        r.RepoSetupScript,
-				RepoCleanupScript:      r.RepoCleanupScript,
-				CopyFiles:              r.CopyFiles,
-				BranchSlug:             r.BranchSlug,
-				BranchIdentitySlug:     r.BranchIdentitySlug,
-			})
-		}
-		launchReq.Repositories = specs
-	}
+	launchReq := buildLifecycleLaunchRequest(req)
 
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
@@ -263,6 +166,120 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
+func buildLifecycleLaunchRequest(req *executor.LaunchAgentRequest) *lifecycle.LaunchRequest {
+	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
+	// fall back to RepositoryURL (legacy: this carries a local filesystem path
+	// for the workspace). Empty is also valid — lifecycle manager creates a
+	// scratch workspace.
+	workspacePath := req.WorkspacePath
+	if workspacePath == "" {
+		workspacePath = req.RepositoryURL
+	}
+	officeProfileID := req.OfficeAgentProfileID
+	if officeProfileID == "" {
+		officeProfileID = req.AgentProfileID
+	}
+	launchReq := &lifecycle.LaunchRequest{
+		TaskID:              req.TaskID,
+		WorkspaceID:         req.WorkspaceID,
+		SessionID:           req.SessionID,
+		TaskEnvironmentID:   req.TaskEnvironmentID,
+		TaskTitle:           req.TaskTitle,
+		AgentProfileID:      officeProfileID,
+		ExecutionProfileID:  req.AgentProfileID,
+		StartAgent:          req.StartAgent,
+		WorkspacePath:       workspacePath,
+		TaskDescription:     req.TaskDescription,
+		Attachments:         convertToLifecycleAttachments(req.Attachments),
+		Env:                 req.Env,
+		ACPSessionID:        req.ACPSessionID,
+		Metadata:            req.Metadata,
+		ModelOverride:       req.ModelOverride,
+		ExecutorType:        req.ExecutorType,
+		ExecutorConfig:      req.ExecutorConfig,
+		PreviousExecutionID: req.PreviousExecutionID,
+		McpMode:             req.McpMode,
+		McpProviders:        req.McpProviders,
+		IsEphemeral:         req.IsEphemeral,
+		IsPassthrough:       req.IsPassthrough,
+		SetupScript:         req.SetupScript,
+		CopyFiles:           req.CopyFiles,
+		// Worktree configuration for concurrent agent execution
+		UseWorktree:            req.UseWorktree,
+		WorktreeID:             req.WorktreeID,
+		RepositoryID:           req.RepositoryID,
+		RepositoryPath:         req.RepositoryPath,
+		BaseBranch:             req.BaseBranch,
+		DefaultBranch:          req.DefaultBranch,
+		CheckoutBranch:         req.CheckoutBranch,
+		PRNumber:               req.PRNumber,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   req.WorktreeBranchTicket,
+		PullBeforeWorktree:     req.PullBeforeWorktree,
+		// Task directory mode
+		TaskDirName:        req.TaskDirName,
+		RepoName:           req.RepoName,
+		BranchSlug:         req.BranchSlug,
+		BranchIdentitySlug: req.BranchIdentitySlug,
+	}
+	for _, f := range req.WorkspaceFolders {
+		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+	}
+
+	applyLifecycleRouteOverride(launchReq, req.RouteOverride)
+	launchReq.Repositories = convertToLifecycleRepoSpecs(req.Repositories)
+
+	return launchReq
+}
+
+func applyLifecycleRouteOverride(launchReq *lifecycle.LaunchRequest, route *executor.RouteOverride) {
+	if route == nil {
+		return
+	}
+	launchReq.RouteOverride = &lifecycle.RouteOverride{
+		ExecutionProfileID: route.ExecutionProfileID,
+		ProviderID:         route.ProviderID,
+		Model:              route.Model,
+		Tier:               route.Tier,
+		Mode:               route.Mode,
+		Flags:              route.Flags,
+		Env:                route.Env,
+	}
+}
+
+// convertToLifecycleRepoSpecs forwards the explicit repo list when the
+// orchestrator built one for a multi-repository launch.
+func convertToLifecycleRepoSpecs(repositories []executor.RepoSpec) []lifecycle.RepoLaunchSpec {
+	if len(repositories) == 0 {
+		return nil
+	}
+	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repositories))
+	for _, r := range repositories {
+		specs = append(specs, lifecycle.RepoLaunchSpec{
+			RepositoryID:           r.RepositoryID,
+			RepositoryPath:         r.RepositoryPath,
+			RepositoryURL:          r.RepositoryURL,
+			RepoName:               r.RepoName,
+			BaseBranch:             r.BaseBranch,
+			DefaultBranch:          r.DefaultBranch,
+			CheckoutBranch:         r.CheckoutBranch,
+			PRNumber:               r.PRNumber,
+			WorktreeID:             r.WorktreeID,
+			WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:   r.WorktreeBranchTicket,
+			PullBeforeWorktree:     r.PullBeforeWorktree,
+			RepoSetupScript:        r.RepoSetupScript,
+			RepoCleanupScript:      r.RepoCleanupScript,
+			CopyFiles:              r.CopyFiles,
+			BranchSlug:             r.BranchSlug,
+			BranchIdentitySlug:     r.BranchIdentitySlug,
+		})
+	}
+	return specs
+}
+
 // convertToLifecycleAttachments converts v1.MessageAttachment to lifecycle.MessageAttachment.
 func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecycle.MessageAttachment {
 	if len(attachments) == 0 {
@@ -271,10 +288,12 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 	result := make([]lifecycle.MessageAttachment, len(attachments))
 	for i, att := range attachments {
 		result[i] = lifecycle.MessageAttachment{
+			AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
 			Name:         att.Name,
+			SizeBytes:    att.SizeBytes,
 			DeliveryMode: att.DeliveryMode,
 		}
 	}

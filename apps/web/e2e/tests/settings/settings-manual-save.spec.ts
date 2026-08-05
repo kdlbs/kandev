@@ -4,6 +4,7 @@ import type { ApiClient } from "../../helpers/api-client";
 const APPEARANCE_PATH = "/settings/general/appearance";
 const TERMINAL_PATH = "/settings/general/terminal";
 const NOTIFICATIONS_PATH = "/settings/general/notifications";
+const TASK_ACTIONS_PATH = "/settings/general/task-actions";
 const CLARIFICATION_REQUESTED = "session.clarification_requested";
 const PROVIDER_NAME = "E2E semantic notifications";
 
@@ -25,6 +26,75 @@ async function seedNotificationProvider(
 }
 
 test.describe("Settings manual save", () => {
+  test("persists host sleep inhibition only when Save changes is pressed", async ({
+    testPage,
+    apiClient,
+    prCapture,
+  }) => {
+    const initialResponse = await apiClient.rawRequest("GET", "/api/v1/system/sleep-inhibition");
+    expect(initialResponse.ok).toBe(true);
+    const initial = (await initialResponse.json()) as {
+      settings: { enabled: boolean };
+    };
+    const next = !initial.settings.enabled;
+
+    try {
+      await testPage.goto(TASK_ACTIONS_PATH);
+      const card = testPage.getByTestId("sleep-inhibition-settings");
+      const toggle = card.getByRole("switch", { name: "Prevent idle system sleep" });
+      await expect(card).toBeVisible();
+      await expect(card).toContainText("Container, Kubernetes, remote-executor");
+      const info = card.getByRole("button", { name: "How host sleep prevention works" });
+      await info.hover();
+      const infoTooltip = testPage.getByRole("tooltip");
+      await expect(infoTooltip).toContainText("/usr/bin/caffeinate -i -w");
+      await expect(infoTooltip).toContainText("SetThreadExecutionState");
+      await expect(infoTooltip).toContainText("systemd-logind");
+      await testPage.waitForTimeout(500);
+      await prCapture.screenshot("sleep-inhibition-desktop-info", {
+        caption: "Desktop host sleep prevention details in the hover tooltip",
+      });
+      if (initial.settings.enabled) await expect(toggle).toBeChecked();
+      else await expect(toggle).not.toBeChecked();
+
+      await toggle.click();
+      await expect(card).toHaveAttribute("data-settings-dirty", "true");
+      const beforeSaveResponse = await apiClient.rawRequest(
+        "GET",
+        "/api/v1/system/sleep-inhibition",
+      );
+      expect(((await beforeSaveResponse.json()) as typeof initial).settings.enabled).toBe(
+        initial.settings.enabled,
+      );
+
+      const floatingSave = testPage.getByTestId("settings-floating-save");
+      await testPage.waitForTimeout(1_000);
+      await testPage
+        .locator("[data-sonner-toast], [data-testid='toast-message']")
+        .evaluateAll((toasts) => {
+          for (const toast of toasts) (toast as HTMLElement).style.display = "none";
+        });
+      await prCapture.screenshot("sleep-inhibition-desktop-draft", {
+        caption: "Task Actions sleep inhibition setting with Save changes pending",
+      });
+      await floatingSave.getByRole("button", { name: "Save changes" }).click();
+      await expect(floatingSave).not.toBeVisible({ timeout: 15_000 });
+
+      const savedResponse = await apiClient.rawRequest("GET", "/api/v1/system/sleep-inhibition");
+      expect(((await savedResponse.json()) as typeof initial).settings.enabled).toBe(next);
+      await testPage.reload();
+      const reloadedToggle = testPage
+        .getByTestId("sleep-inhibition-settings")
+        .getByRole("switch", { name: "Prevent idle system sleep" });
+      if (next) await expect(reloadedToggle).toBeChecked();
+      else await expect(reloadedToggle).not.toBeChecked();
+    } finally {
+      await apiClient.rawRequest("PATCH", "/api/v1/system/sleep-inhibition", {
+        enabled: initial.settings.enabled,
+      });
+    }
+  });
+
   test("keeps Appearance changes local and guards dirty navigation", async ({
     testPage,
     apiClient,

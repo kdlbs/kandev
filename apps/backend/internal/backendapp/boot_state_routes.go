@@ -469,6 +469,7 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"lspAutoStartLanguages":           stringSlice(settings.LspAutoStartLanguages),
 		"lspAutoInstallLanguages":         stringSlice(settings.LspAutoInstallLanguages),
 		"lspServerConfigs":                mapStringMap(settings.LspServerConfigs),
+		"lspStatusLocation":               usermodels.NormalizeLspStatusLocation(settings.LspStatusLocation),
 		"savedLayouts":                    settings.SavedLayouts,
 		"sidebarViews":                    mapSidebarViews(settings.SidebarViews),
 		"sidebarActiveViewId":             nullString(settings.SidebarActiveViewID),

@@ -110,5 +110,6 @@ export async function seedIdleSession(
   if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
   const session = await openTaskSession(testPage, task.id);
   await session.waitForChatIdle({ timeout: 30_000 });
+  await session.composerReady();
   return session;
 }

@@ -46,6 +46,7 @@ describe("PromptZone", () => {
           isDragging: false,
           fileInputRef: { current: null },
           handleRemoveAttachment: vi.fn(),
+          handleRetryAttachment: vi.fn(),
           handlePaste: vi.fn(),
           handleDragOver: vi.fn(),
           handleDragLeave: vi.fn(),

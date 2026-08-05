@@ -102,11 +102,47 @@ export class SessionPage {
     return this.page.locator("[data-testid='session-chat']:visible").first();
   }
 
+  /**
+   * Wait for the session chat panel to be visible.
+   *
+   * When multiple session tabs are open, multiple session-chat panels exist in
+   * the DOM but only the active one is visible. Use :visible to avoid matching
+   * a hidden background panel (which would cause the wait to time out).
+   *
+   * Under CI shard load the freshly-navigated task page can be slow to hydrate:
+   * the SSR boot payload + React mount + WS connect sequence races, and a single
+   * hard `waitFor` occasionally exceeds its budget before the chat panel mounts.
+   * Reloading re-drives SSR hydration and reliably recovers, so instead of one
+   * fixed wait we poll with a bounded reload-and-retry loop (same recovery shape
+   * as `waitForChatIdle`). The fast path stays instant when the chat is already
+   * visible.
+   */
   async waitForLoad(timeout = 15_000) {
-    // When multiple session tabs are open, multiple session-chat panels exist in
-    // the DOM but only the active one is visible. Use :visible to avoid matching
-    // a hidden background panel (which would cause the wait to time out).
-    await this.activeChat().waitFor({ state: "visible", timeout });
+    const chat = this.activeChat();
+    // Fast path: already foregrounded (common case, no reload cost).
+    if (await chat.isVisible()) return;
+
+    const attemptTimeout = Math.min(timeout, Math.max(5_000, Math.floor(timeout / 2)));
+    const start = Date.now();
+    let lastReloadAt = start;
+
+    while (Date.now() - start < timeout) {
+      const remaining = timeout - (Date.now() - start);
+      const now = Date.now();
+      // Re-drive SSR hydration once per attemptTimeout slice while budget remains
+      // for the reloaded page to settle.
+      if (now - lastReloadAt >= attemptTimeout && remaining > attemptTimeout) {
+        lastReloadAt = now;
+        await this.page.reload();
+      }
+      await chat
+        .waitFor({ state: "visible", timeout: Math.min(attemptTimeout, remaining) })
+        .catch(() => undefined);
+      if (await chat.isVisible()) return;
+    }
+
+    // Final bounded check: still throws on a genuinely stuck page.
+    await chat.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
   /**
@@ -148,17 +184,22 @@ export class SessionPage {
    * This is the same race the office agent-run-live spec rides out with
    * `expect.poll`-based re-seeding.
    */
-  async waitForChatIdle(opts: { timeout?: number; attemptTimeout?: number } = {}) {
+  async waitForChatIdle(
+    opts: { timeout?: number; attemptTimeout?: number; requireEditable?: boolean } = {},
+  ) {
     const softTotalTimeout = opts.timeout ?? 45_000;
     const attemptTimeout =
       opts.attemptTimeout ?? Math.min(15_000, Math.max(5_000, Math.floor(softTotalTimeout / 3)));
     const pollSlice = 1_500;
     const idle = this.anyIdleInput();
+    const editor = this.activeChat().locator(".tiptap.ProseMirror:visible").first();
+    const isReady = async () =>
+      (await idle.isVisible()) && (!opts.requireEditable || (await editor.isEditable()));
     const start = Date.now();
     let lastReloadAt = start;
 
     while (Date.now() - start < softTotalTimeout) {
-      if (await idle.isVisible()) return;
+      if (await isReady()) return;
 
       const resumeButton = this.recoveryResumeButton();
       if (await resumeButton.isVisible()) {
@@ -191,6 +232,10 @@ export class SessionPage {
 
     // Final bounded check: still throws on a genuinely stuck session, but gives
     // the last hydration attempt a full attemptTimeout slice to land.
+    if (opts.requireEditable) {
+      await expect.poll(isReady, { timeout: attemptTimeout }).toBe(true);
+      return;
+    }
     await idle.waitFor({ state: "visible", timeout: attemptTimeout });
   }
 
@@ -343,20 +388,20 @@ export class SessionPage {
 
   /** Chat input placeholder when agent is idle (default mode). */
   idleInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the task..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the task..."]');
   }
 
   /** Chat input placeholder when agent is idle in any current mode. */
   anyIdleInput(): Locator {
-    return this.page
+    return this.activeChat()
       .locator('[data-placeholder="Continue working on the task..."]')
-      .or(this.page.locator('[data-placeholder="Continue working on the plan..."]'))
-      .or(this.page.locator('[data-placeholder="Continue working on the file..."]'));
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the plan..."]'))
+      .or(this.activeChat().locator('[data-placeholder="Continue working on the file..."]'));
   }
 
   /** Chat input placeholder when agent is idle (plan mode). */
   planModeInput(): Locator {
-    return this.page.locator('[data-placeholder="Continue working on the plan..."]');
+    return this.activeChat().locator('[data-placeholder="Continue working on the plan..."]');
   }
 
   /**
@@ -965,8 +1010,7 @@ export class SessionPage {
    * TipTap maps "Mod" to Meta on macOS and Control on Linux/Windows.
    */
   async sendMessage(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
     const modifier = process.platform === "darwin" ? "Meta" : "Control";
@@ -978,11 +1022,70 @@ export class SessionPage {
    * don't submit on Ctrl/Cmd+Enter, so mobile specs use this instead.
    */
   async sendMessageViaButton(text: string) {
-    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable();
+    const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
-    await this.page.getByTestId("submit-message-button").click();
+    const isTouch = await this.page.evaluate(() => window.matchMedia("(pointer: coarse)").matches);
+    if (isTouch) {
+      await this.tapSubmitWhenReady();
+      return;
+    }
+    await this.clickSubmitWhenReady();
+  }
+
+  /** The composer's send/submit button (scoped to the active chat panel). */
+  submitButton(): Locator {
+    return this.activeChat().getByTestId("submit-message-button");
+  }
+
+  /**
+   * Tap the submit button only once it is actually enabled.
+   *
+   * The button renders a spinner and is `disabled` while the composer is in a
+   * transient not-ready state (`isSending`/`isStarting`/`isMoving`) — most
+   * commonly the brief STARTING lifecycle an auto-started session passes through
+   * right after it first goes idle. Acting on the button during that window is a
+   * no-op tap that silently drops the message, so we gate on `toBeEnabled`
+   * (waiting for the `disabled` attribute to clear — a condition, not a longer
+   * fixed delay) before tapping. Mirrors `clickSubmitWhenReady` for desktop.
+   */
+  async tapSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.tap();
+  }
+
+  /** Desktop analog of `tapSubmitWhenReady` (uses click instead of tap). */
+  async clickSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.click();
+  }
+
+  /**
+   * Resolve the active chat's ProseMirror composer and wait until it is
+   * actually editable before returning it.
+   *
+   * TipTap uses `immediatelyRender: false`, so `EditorContent` mounts the
+   * `.tiptap.ProseMirror` node only after the editor instance is created in a
+   * post-mount effect; until then the contenteditable host is absent or still
+   * `contenteditable="false"`. Callers reach here after `waitForLoad` /
+   * `waitForChatIdle` have already driven hydration, so the default
+   * `toBeEditable` wait is the correct condition to synchronize on.
+   */
+  async composerReady(): Promise<Locator> {
+    const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
+    try {
+      await expect(editor).toBeEditable();
+    } catch {
+      // `waitForChatIdle` intentionally treats the visible idle placeholder as
+      // sufficient for terminal workflow states, where the composer may stay
+      // disabled. Sending requires the stronger editable condition; re-drive
+      // that condition when startup hydration exposed a stale idle placeholder.
+      await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
+      await expect(editor).toBeEditable();
+    }
+    return editor;
   }
 
   /**

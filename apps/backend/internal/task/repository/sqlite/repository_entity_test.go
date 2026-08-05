@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -38,6 +39,42 @@ func seedWorkspace(t *testing.T, repo *Repository, id string) {
 }
 
 func strptr(value string) *string { return &value }
+
+func TestListTaskRepositoryProvidersJoinsTaskLinks(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	seedWorkspace(t, repo, "ws-provider-join")
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-provider-join", WorkspaceID: "ws-provider-join", Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, repository := range []*models.Repository{
+		{ID: "repo-provider-github", WorkspaceID: "ws-provider-join", Name: "github", Provider: "github"},
+		{ID: "repo-provider-gitlab", WorkspaceID: "ws-provider-join", Name: "gitlab", Provider: " GITLAB "},
+	} {
+		if err := repo.CreateRepository(ctx, repository); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-provider-join", WorkspaceID: "ws-provider-join", WorkflowID: "wf-provider-join", Title: "Task"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, taskRepository := range []*models.TaskRepository{
+		{ID: "task-repo-provider-gitlab", TaskID: "task-provider-join", RepositoryID: "repo-provider-gitlab", Position: 0},
+		{ID: "task-repo-provider-github", TaskID: "task-provider-join", RepositoryID: "repo-provider-github", Position: 1},
+	} {
+		if err := repo.CreateTaskRepository(ctx, taskRepository); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	providers, err := repo.ListTaskRepositoryProviders(ctx, "task-provider-join")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := providers, []string{" GITLAB ", "github"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("task repository providers = %q, want %q", got, want)
+	}
+}
 
 func TestCreateWorkflowRejectsDuplicateHiddenTemplatePerWorkspace(t *testing.T) {
 	repo := newRepoForEntityTests(t)

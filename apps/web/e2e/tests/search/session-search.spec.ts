@@ -167,25 +167,4 @@ test.describe("@search session chat panel search", () => {
     await close.click();
     await expect(panelSearchBar(testPage)).toHaveCount(0);
   });
-
-  // Virtuoso renderer coverage — session-search should work with the virtualized path.
-  test("C-virtuoso basic search works on the virtuoso renderer", async ({
-    testPage,
-    apiClient,
-    seedData,
-  }) => {
-    test.setTimeout(120_000);
-    const { session } = await seedTask(testPage, apiClient, seedData, "session-search-virtuoso", {
-      description: seedMessagesDescription(["virtuoso fox alpha", "virtuoso fox beta"]),
-      rendererOverride: "virtuoso",
-    });
-    await expect(session.chat.getByText("virtuoso", { exact: false }).first()).toBeVisible({
-      timeout: 30_000,
-    });
-
-    await openPanelSearch(testPage, "session");
-    await panelSearchInput(testPage).fill("virtuoso fox");
-    const hitsContainer = testPage.locator(HITS_LIST_SELECTOR);
-    await expect(hitsContainer.locator("button").first()).toBeVisible({ timeout: 10_000 });
-  });
 });

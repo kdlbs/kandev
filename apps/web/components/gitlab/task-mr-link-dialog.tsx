@@ -17,6 +17,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { createTaskMR } from "@/lib/api/domains/gitlab-api";
 import type { Repository } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 const NO_REPOSITORY = "__none__";
 
@@ -51,10 +52,11 @@ function RepositoryField({
   value: string;
   onChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   if (options.length <= 1) return null;
   return (
     <div className="space-y-2">
-      <Label htmlFor="gitlab-mr-repository">Task repository</Label>
+      <Label htmlFor="gitlab-mr-repository">{t("gitlab:taskRepository")}</Label>
       <Select value={value} onValueChange={onChange}>
         <SelectTrigger id="gitlab-mr-repository">
           <SelectValue />
@@ -84,10 +86,11 @@ function LinkDialogFields({
   repositoryID: string;
   onRepositoryChange: (value: string) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label htmlFor="gitlab-mr-url">Merge request URL</Label>
+        <Label htmlFor="gitlab-mr-url">{t("gitlab:mergeRequestUrl")}</Label>
         <Input
           id="gitlab-mr-url"
           value={mrURL}
@@ -116,6 +119,7 @@ export function TaskMRLinkDialog({
   taskRepositories: TaskRepositoryLink[];
   repositories: Repository[];
 }) {
+  const { t } = useTranslation();
   const options = useRepositoryOptions(repositories, taskRepositories);
   const defaultRepositoryID = options[0]?.id ?? NO_REPOSITORY;
   const [mrURL, setMRURL] = useState("");
@@ -152,9 +156,9 @@ export function TaskMRLinkDialog({
       onOpenChange(false);
     } catch (error) {
       toast({
-        title: "Failed to link merge request",
+        title: t("gitlab:failedToLinkMergeRequest"),
         description:
-          error instanceof Error ? error.message : "GitLab rejected the merge request link.",
+          error instanceof Error ? error.message : t("gitlab:gitlabRejectedTheMergeRequestLink"),
         variant: "error",
       });
     } finally {
@@ -166,10 +170,8 @@ export function TaskMRLinkDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Link GitLab merge request</DialogTitle>
-          <DialogDescription>
-            Paste a merge request URL from this workspace&apos;s configured GitLab host.
-          </DialogDescription>
+          <DialogTitle>{t("gitlab:linkGitlabMergeRequest")}</DialogTitle>
+          <DialogDescription>{t("gitlab:pasteAMergeRequestUrlFrom")}</DialogDescription>
         </DialogHeader>
         <LinkDialogFields
           mrURL={mrURL}
@@ -185,7 +187,7 @@ export function TaskMRLinkDialog({
             onClick={() => onOpenChange(false)}
             className="cursor-pointer"
           >
-            Cancel
+            {t("common:cancel")}
           </Button>
           <Button
             type="button"
@@ -193,7 +195,7 @@ export function TaskMRLinkDialog({
             disabled={!mrURL.trim() || submitting}
             className="cursor-pointer"
           >
-            {submitting ? "Linking…" : "Link merge request"}
+            {submitting ? t("gitlab:linking") : t("gitlab:linkMergeRequest")}
           </Button>
         </DialogFooter>
       </DialogContent>
