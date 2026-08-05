@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	gorillaws "github.com/gorilla/websocket"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentruntime"
@@ -301,7 +303,7 @@ func TestLSPRuntimeSupported(t *testing.T) {
 
 func TestResolveLSPExecutionRejectsUnsupportedRuntimeBeforeEnsure(t *testing.T) {
 	manager := &recordingLSPLifecycleManager{runtimeName: agentruntime.RuntimeSSH}
-	handler := &LSPHandler{lifecycleMgr: manager}
+	handler := &LSPHandler{lifecycleMgr: manager, capacity: newLSPCapacityLimiter(1)}
 
 	_, runtimeName, err := handler.resolveLSPExecution(context.Background(), "session-ssh")
 	if !errors.Is(err, errLSPUnsupportedExecutor) {
@@ -321,7 +323,7 @@ func TestResolveLSPExecutionEnsuresSupportedRuntime(t *testing.T) {
 		runtimeName: agentruntime.RuntimeDocker,
 		execution:   execution,
 	}
-	handler := &LSPHandler{lifecycleMgr: manager}
+	handler := &LSPHandler{lifecycleMgr: manager, capacity: newLSPCapacityLimiter(1)}
 
 	got, runtimeName, err := handler.resolveLSPExecution(context.Background(), "session-docker")
 	if err != nil {
@@ -336,6 +338,65 @@ func TestResolveLSPExecutionEnsuresSupportedRuntime(t *testing.T) {
 	if manager.ensureCalls != 1 {
 		t.Fatalf("GetOrEnsureExecution calls = %d, want 1", manager.ensureCalls)
 	}
+	handler.capacity.Release()
+}
+
+func TestHandleLSPConnectionChecksCapacityBeforeEnsuringExecution(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	manager := &recordingLSPLifecycleManager{runtimeName: agentruntime.RuntimeStandalone}
+	capacity := newLSPCapacityLimiter(1)
+	if !capacity.TryAcquire() {
+		t.Fatal("failed to fill test capacity")
+	}
+	defer capacity.Release()
+	handler := &LSPHandler{
+		lifecycleMgr: manager,
+		capacity:     capacity,
+		logger:       testLogger(),
+	}
+	router := gin.New()
+	router.GET("/lsp/:sessionId", handler.HandleLSPConnection)
+	server := httptest.NewServer(router)
+	defer server.Close()
+
+	conn, _, err := gorillaws.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(server.URL, "http")+"/lsp/cold-session?language=go",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("Dial() error = %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+	if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	_, _, readErr := conn.ReadMessage()
+	var closeErr *gorillaws.CloseError
+	if !errors.As(readErr, &closeErr) || closeErr.Code != lspCloseCapacityExceeded {
+		t.Fatalf("ReadMessage() error = %v, want close code %d", readErr, lspCloseCapacityExceeded)
+	}
+	if manager.ensureCalls != 0 {
+		t.Fatalf("GetOrEnsureExecution calls = %d, want 0", manager.ensureCalls)
+	}
+}
+
+func TestResolveLSPExecutionReleasesCapacityWhenEnsureFails(t *testing.T) {
+	ensureErr := errors.New("task start failed")
+	manager := &recordingLSPLifecycleManager{
+		runtimeName: agentruntime.RuntimeStandalone,
+		ensureErr:   ensureErr,
+	}
+	capacity := newLSPCapacityLimiter(1)
+	handler := &LSPHandler{lifecycleMgr: manager, capacity: capacity}
+
+	_, _, err := handler.resolveLSPExecution(context.Background(), "failed-session")
+	if !errors.Is(err, ensureErr) {
+		t.Fatalf("resolveLSPExecution() error = %v, want %v", err, ensureErr)
+	}
+	if !capacity.TryAcquire() {
+		t.Fatal("capacity slot was not released after ensure failure")
+	}
+	capacity.Release()
 }
 
 func TestShouldAutoInstallRejectsManualOnlyLanguage(t *testing.T) {

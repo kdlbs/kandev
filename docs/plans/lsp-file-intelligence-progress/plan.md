@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery, managed cache roots, and npm/Go auto-install resolve through the process manager's task environment, resolves Windows npm shims through PATHEXT and Go's default workspace through `USERPROFILE`, rejects Rust auto-install on task hosts without a packaged strategy through a distinct browser-visible close code, keeps that task-host decision out of the main backend's global settings policy, and checks the persisted executor runtime before any cold execution is created for LSP.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery, managed cache roots, and npm/Go auto-install resolve through the process manager's task environment, resolves Windows npm shims through PATHEXT and Go's default workspace through `USERPROFILE`, rejects Rust auto-install on task hosts without a packaged strategy through a distinct browser-visible close code, keeps that task-host decision out of the main backend's global settings policy, checks the persisted executor runtime before any cold execution is created for LSP, and acquires connection capacity before a supported task host can start or resume.
 
 ## Frontend
 
@@ -48,7 +48,7 @@ The progress protocol itself requires no backend payload transform because both 
 - **Provider ownership and semantic tokens:** focused Monaco/manager/provider tests prove TypeScript built-in suppression follows the owning session model, independent connections dispose separately, and valid empty semantic-token arrays complete without self-scheduled polling.
 - **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in and renders localized manual-install guidance rather than suggesting an unusable preference.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
-- **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, and read-only rejection of cold unsupported executors.
+- **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, read-only rejection of cold unsupported executors, and capacity rejection before supported execution startup.
 
 ## E2E Tests
 

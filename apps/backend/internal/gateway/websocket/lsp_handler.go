@@ -47,7 +47,10 @@ type lspLifecycleManager interface {
 	GetOrEnsureExecution(ctx context.Context, sessionID string) (*lifecycle.AgentExecution, error)
 }
 
-var errLSPUnsupportedExecutor = errors.New("unsupported LSP executor")
+var (
+	errLSPUnsupportedExecutor = errors.New("unsupported LSP executor")
+	errLSPCapacityExceeded    = errors.New("active LSP connection cap exceeded")
+)
 
 // LSPHandler handles browser-facing LSP WebSocket connections.
 // The backend owns session/runtime policy and proxies raw LSP traffic to the
@@ -99,6 +102,13 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 
 	execution, runtimeName, err := h.resolveLSPExecution(c.Request.Context(), sessionID)
 	if err != nil {
+		if errors.Is(err, errLSPCapacityExceeded) {
+			h.logger.Info("LSP: capacity exceeded",
+				zap.String("session_id", sessionID),
+				zap.String("language", language))
+			h.closeWithCode(c, lspCloseCapacityExceeded, errLSPCapacityExceeded.Error())
+			return
+		}
 		if errors.Is(err, errLSPUnsupportedExecutor) {
 			h.logger.Info("LSP: unsupported runtime",
 				zap.String("session_id", sessionID),
@@ -112,21 +122,13 @@ func (h *LSPHandler) HandleLSPConnection(c *gin.Context) {
 		h.closeWithCode(c, lspCloseSessionNotFound, "session not found")
 		return
 	}
+	defer h.capacity.Release()
 	agentctlClient := execution.GetAgentCtlClient()
 	if agentctlClient == nil {
 		h.logger.Warn("LSP: execution has no agentctl client", zap.String("session_id", sessionID))
 		h.closeWithCode(c, lspCloseSessionNotFound, "agentctl unavailable")
 		return
 	}
-	if !h.capacity.TryAcquire() {
-		h.logger.Info("LSP: capacity exceeded",
-			zap.String("session_id", sessionID),
-			zap.String("language", language))
-		h.closeWithCode(c, lspCloseCapacityExceeded, "active LSP connection cap exceeded")
-		return
-	}
-	defer h.capacity.Release()
-
 	browserConn, upgradeErr := lspUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if upgradeErr != nil {
 		h.logger.Error("LSP: failed to upgrade to WebSocket",
@@ -168,6 +170,15 @@ func (h *LSPHandler) resolveLSPExecution(
 	if !lspRuntimeSupported(runtimeName) {
 		return nil, runtimeName, errLSPUnsupportedExecutor
 	}
+	if !h.capacity.TryAcquire() {
+		return nil, runtimeName, errLSPCapacityExceeded
+	}
+	releaseCapacity := true
+	defer func() {
+		if releaseCapacity {
+			h.capacity.Release()
+		}
+	}()
 	execution, err := h.lifecycleMgr.GetOrEnsureExecution(ctx, sessionID)
 	if err != nil {
 		return nil, runtimeName, err
@@ -178,6 +189,7 @@ func (h *LSPHandler) resolveLSPExecution(
 	if !lspRuntimeSupported(execution.RuntimeName) {
 		return nil, execution.RuntimeName, errLSPUnsupportedExecutor
 	}
+	releaseCapacity = false
 	return execution, execution.RuntimeName, nil
 }
 
