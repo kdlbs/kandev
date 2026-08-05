@@ -17,7 +17,7 @@ import type {
   WorkflowSyncSetConfigRequest,
 } from "@/lib/types/workflow-sync";
 import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "@/lib/utils/github-repo-url";
-import { buildGitLabProjectRef, parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
+import { parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
 
 export type WorkflowSyncFormState = {
   provider: WorkflowSyncProvider;
@@ -55,20 +55,20 @@ function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
   };
 }
 
-function displayUrl(form: Pick<WorkflowSyncFormState, "provider" | "repo_owner" | "repo_name" | "project_path" | "branch" | "path">): string {
+// displayUrl redisplays only the repo identity (owner/repo, or GitLab
+// project_path) — never branch or directory. Branch and directory are their
+// own directly-editable fields (see BranchField/DirectoryField in the
+// dialog), specifically because a branch name can itself contain slashes
+// (e.g. "features/my-ticket"), which makes splitting a combined
+// project+branch+path string ambiguous by construction — no client-side
+// parse can always get it right. Baking branch/path back into this field
+// would let it silently disagree with the authoritative Branch/Directory
+// fields after a direct edit.
+function displayUrl(form: Pick<WorkflowSyncFormState, "provider" | "repo_owner" | "repo_name" | "project_path">): string {
   if (form.provider === "gitlab") {
-    return form.project_path
-      ? buildGitLabProjectRef({ projectPath: form.project_path, branch: form.branch, path: form.path })
-      : "";
+    return form.project_path;
   }
-  return form.repo_owner
-    ? buildGitHubRepoUrl({
-        owner: form.repo_owner,
-        repo: form.repo_name,
-        branch: form.branch,
-        path: form.path,
-      })
-    : "";
+  return form.repo_owner ? buildGitHubRepoUrl({ owner: form.repo_owner, repo: form.repo_name }) : "";
 }
 
 function parseRepoUrl(provider: WorkflowSyncProvider, value: string) {

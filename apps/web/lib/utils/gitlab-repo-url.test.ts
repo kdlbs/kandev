@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildGitLabProjectRef, parseGitLabProjectUrl } from "./gitlab-repo-url";
+import { parseGitLabProjectUrl } from "./gitlab-repo-url";
 
 const HOST = "https://gitlab.com";
 const PROJECT = "acme/project";
@@ -64,13 +64,27 @@ describe("parseGitLabProjectUrl", () => {
     });
   });
 
-  it("parses a bare host-less ref, as produced by buildGitLabProjectRef", () => {
+  it("parses a bare project-path ref with no scheme", () => {
     expect(parseGitLabProjectUrl(NESTED_PROJECT)).toEqual({ projectPath: NESTED_PROJECT });
     expect(parseGitLabProjectUrl(`${NESTED_PROJECT}/-/tree/main/${WORKFLOWS_DIR}`)).toEqual({
       projectPath: NESTED_PROJECT,
       branch: "main",
       path: WORKFLOWS_DIR,
     });
+  });
+
+  // A pasted HTTPS clone URL carries a .git suffix that must not leak into
+  // the stored project path — a project path with .git on the end 404s
+  // against GitLab, since no project is actually named that.
+  it("strips a .git suffix from an HTTPS clone URL", () => {
+    expect(parseGitLabProjectUrl(`${HOST}/${PROJECT}.git`)).toEqual({ projectPath: PROJECT });
+    expect(parseGitLabProjectUrl(`${HOST}/${NESTED_PROJECT}.git`)).toEqual({
+      projectPath: NESTED_PROJECT,
+    });
+  });
+
+  it("strips a .git suffix from a bare project-path ref", () => {
+    expect(parseGitLabProjectUrl(`${PROJECT}.git`)).toEqual({ projectPath: PROJECT });
   });
 
   it("strips a bare-pasted host when it looks like a domain", () => {
@@ -96,25 +110,5 @@ describe("parseGitLabProjectUrl", () => {
       branch: "main",
       path: "my flows",
     });
-  });
-});
-
-describe("buildGitLabProjectRef", () => {
-  it("renders a project path alone without a branch", () => {
-    expect(buildGitLabProjectRef({ projectPath: NESTED_PROJECT })).toBe(NESTED_PROJECT);
-  });
-
-  it("renders projectPath/branch/path back into a tree ref", () => {
-    const ref = buildGitLabProjectRef({
-      projectPath: NESTED_PROJECT,
-      branch: "main",
-      path: WORKFLOWS_DIR,
-    });
-    expect(ref).toBe(`${NESTED_PROJECT}/-/tree/main/${WORKFLOWS_DIR}`);
-  });
-
-  it("round-trips through parseGitLabProjectUrl", () => {
-    const parts = { projectPath: NESTED_PROJECT, branch: "dev", path: "my flows/sub" };
-    expect(parseGitLabProjectUrl(buildGitLabProjectRef(parts))).toEqual(parts);
   });
 });

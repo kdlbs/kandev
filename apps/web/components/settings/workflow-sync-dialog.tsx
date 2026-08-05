@@ -59,14 +59,17 @@ type RepoUrlFieldProps = {
   onChange: (value: string) => void;
 };
 
-// RepoUrlField is the primary input: a full repository link (optionally with
-// a branch + directory suffix) that resolves into the stored coordinates —
-// owner/repo/branch/directory for GitHub, project_path/branch/directory for
-// GitLab. GitLab sync has no host of its own (it always uses the workspace's
+// RepoUrlField captures the repository identity — owner/repo for GitHub,
+// project_path for GitLab. Pasting a full link (including a /tree/.../-/tree/
+// suffix) still convenience-fills Branch and Directory below, but those are
+// their own directly-editable fields: a branch name can itself contain
+// slashes (e.g. "features/my-ticket"), which makes splitting a combined
+// "project/branch/path" string ambiguous by construction — no client-side
+// parse can always place that boundary correctly. If a paste gets it wrong,
+// fix it directly in Branch/Directory rather than needing a different link.
+// GitLab sync has no host of its own (it always uses the workspace's
 // configured GitLab connection, including self-managed instances), so a
-// saved GitLab config redisplays as a bare "group/project" reference rather
-// than a full URL — pasting a full link still works to fill the fields. The
-// resolved target is echoed underneath so the structured fields stay visible.
+// saved GitLab config redisplays as a bare "group/project" reference.
 function RepoUrlField({ provider, url, invalid, resolved, onChange }: RepoUrlFieldProps) {
   const { t } = useTranslation();
   const providerLabel = provider === "gitlab" ? "GitLab" : "GitHub";
@@ -105,10 +108,44 @@ type FieldsProps = {
   update: <K extends keyof WorkflowSyncFormState>(key: K, value: WorkflowSyncFormState[K]) => void;
 };
 
+// BranchDirectoryFields exposes branch and directory as their own inputs
+// rather than only ever deriving them from a parsed link. A pasted link
+// still convenience-fills both, but a branch name with a slash in it (a
+// common convention — "features/TICKET-123") can't always be told apart
+// from the directory that follows it, so these fields are the way to
+// directly correct a wrong guess instead of needing a differently-shaped
+// link.
+function BranchDirectoryFields({ form, update }: FieldsProps) {
+  const { t } = useTranslation();
+  const directoryPlaceholder = ".kandev/workflows";
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <div className="space-y-1.5">
+        <Label htmlFor="workflow-sync-branch">{t("workflows:branchLabel")}</Label>
+        <Input
+          id="workflow-sync-branch"
+          data-testid="workflow-sync-branch-input"
+          placeholder="main"
+          value={form.branch}
+          onChange={(e) => update("branch", e.target.value)}
+        />
+      </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="workflow-sync-directory">{t("workflows:directoryLabel")}</Label>
+        <Input
+          id="workflow-sync-directory"
+          data-testid="workflow-sync-directory-input"
+          placeholder={directoryPlaceholder}
+          value={form.path}
+          onChange={(e) => update("path", e.target.value)}
+        />
+      </div>
+    </div>
+  );
+}
+
 // PollFields is a single compact row: the auto-sync switch and, when on, the
-// interval right beside it. The branch needs no field of its own — it comes
-// from the pasted link (or defaults to main) and is echoed in the resolved
-// summary under the link input.
+// interval right beside it.
 function PollFields({ form, update }: FieldsProps) {
   const { t } = useTranslation();
   return (
@@ -216,6 +253,7 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
             resolved={resolved}
             onChange={sync.setUrlInput}
           />
+          <BranchDirectoryFields form={sync.form} update={sync.update} />
           <PollFields form={sync.form} update={sync.update} />
           <p className="text-xs text-muted-foreground">
             {t("workflows:syncDirectoryHelp", {

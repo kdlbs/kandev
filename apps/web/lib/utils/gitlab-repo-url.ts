@@ -7,9 +7,7 @@ export type ParsedGitLabProjectUrl = {
 // GitLab has no fixed host (self-managed instances are common) and workflow
 // sync deliberately stores no host of its own — the workspace's configured
 // GitLab connection supplies it at sync time. So unlike GitHub's parser this
-// one cannot validate a hostname, and round-tripping a saved config means
-// re-parsing a host-less "project ref" (see buildGitLabProjectRef) rather
-// than a real URL.
+// one cannot validate a hostname.
 const SSH_URL_RE = /^git@([^:/\s]+):(.+?)(?:\.git)?\/?$/;
 
 // A bare (schemeless) first segment that looks like a domain (contains a
@@ -30,20 +28,39 @@ function splitPath(pathname: string): string[] | null {
   }
 }
 
+// stripGitSuffix removes a trailing ".git" from the final project-path
+// segment, matching a pasted HTTPS clone URL (https://gitlab.com/g/p.git) —
+// otherwise the ".git" becomes part of the stored project path and every
+// sync 404s against a project that doesn't exist.
+function stripGitSuffix(projectPath: string): string {
+  return projectPath.replace(/\.git$/, "");
+}
+
 // parseGitLabProjectUrl extracts a project path (and, for /-/tree/... or
 // /-/blob/... links, branch + directory) from a pasted GitLab link, an SSH
 // remote, or a bare "group/subgroup/project" ref. Returns null when the
 // input isn't a recognizable project reference.
+//
+// A branch name can itself contain slashes (e.g. "features/my-ticket"), so
+// splitting a combined "project/-/tree/branch/path" string can't always
+// place the boundary correctly — this parser assumes a single-segment
+// branch, same limitation as parseGitHubRepoUrl. Callers should expose
+// branch and directory as their own directly-editable fields rather than
+// relying on this parse alone to be authoritative.
 export function parseGitLabProjectUrl(input: string): ParsedGitLabProjectUrl | null {
   const raw = input.trim();
   if (!raw) return null;
 
   const ssh = raw.match(SSH_URL_RE);
   if (ssh) {
-    const projectPath = ssh[2].replace(/^\/+|\/+$/g, "");
+    const projectPath = stripGitSuffix(ssh[2].replace(/^\/+|\/+$/g, ""));
     return projectPath.includes("/") ? { projectPath } : null;
   }
 
+  return parseNonSshRef(raw);
+}
+
+function parseNonSshRef(raw: string): ParsedGitLabProjectUrl | null {
   let segments: string[] | null;
   if (raw.includes("://")) {
     let url: URL;
@@ -63,20 +80,14 @@ export function parseGitLabProjectUrl(input: string): ParsedGitLabProjectUrl | n
 
   const markerIndex = segments.indexOf("-");
   if (markerIndex === -1) {
-    return { projectPath: segments.join("/") };
+    return { projectPath: stripGitSuffix(segments.join("/")) };
   }
   const projectSegments = segments.slice(0, markerIndex);
   if (projectSegments.length < 2) return null;
-  return { projectPath: projectSegments.join("/"), ...parseBranchAndPath(segments.slice(markerIndex + 1)) };
-}
-
-// buildGitLabProjectRef renders a stored config back into the host-less ref
-// string parseGitLabProjectUrl accepts, so the settings form can redisplay a
-// saved GitLab config without fabricating a host it was never given.
-export function buildGitLabProjectRef(parts: ParsedGitLabProjectUrl): string {
-  if (!parts.branch) return parts.projectPath;
-  const path = parts.path ? `/${parts.path}` : "";
-  return `${parts.projectPath}/-/tree/${parts.branch}${path}`;
+  return {
+    projectPath: stripGitSuffix(projectSegments.join("/")),
+    ...parseBranchAndPath(segments.slice(markerIndex + 1)),
+  };
 }
 
 function parseBranchAndPath(segments: string[]): Pick<ParsedGitLabProjectUrl, "branch" | "path"> {

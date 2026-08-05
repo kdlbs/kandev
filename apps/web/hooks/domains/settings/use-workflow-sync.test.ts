@@ -145,3 +145,41 @@ describe("useWorkflowSync", () => {
     expect(result.current.config?.last_error).toBe("boom");
   });
 });
+
+// The link field must redisplay only the repo identity, never branch or
+// directory — otherwise it can silently disagree with the separate,
+// directly-editable Branch/Directory fields once a user corrects one of them
+// without retyping the whole link.
+describe("useWorkflowSync — link field redisplay", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("redisplays only the repo identity, not branch or directory", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({ repo_owner: "acme", repo_name: "flows", branch: "release/1.2", path: "custom/dir" }),
+    );
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.url).toBe("https://github.com/acme/flows");
+    expect(result.current.form.branch).toBe("release/1.2");
+    expect(result.current.form.path).toBe("custom/dir");
+  });
+
+  it("redisplays a GitLab config's project_path alone", async () => {
+    getWorkflowSyncConfigMock.mockResolvedValue(
+      makeConfig({
+        provider: "gitlab",
+        repo_owner: "",
+        repo_name: "",
+        project_path: "front-end/km-mobile-app",
+        branch: "features/kegmil-location-adoption",
+        path: ".kandev/workflows",
+      }),
+    );
+    const { result } = renderHook(() => useWorkflowSync("ws-1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.url).toBe("front-end/km-mobile-app");
+    expect(result.current.form.branch).toBe("features/kegmil-location-adoption");
+  });
+});
