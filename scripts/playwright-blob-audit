@@ -10,7 +10,7 @@ import sys
 import zipfile
 from collections import Counter
 from pathlib import Path, PurePosixPath
-from typing import Iterable, TextIO
+from typing import Iterable
 
 
 EXPECTED_STATUSES = {"passed", "skipped"}

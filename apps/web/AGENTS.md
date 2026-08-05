@@ -42,12 +42,7 @@ Go Boot Payload -> Hydrate Store -> Components Read Store -> Hooks Subscribe
 
 ### Browser capability boundaries
 
-- Use `generateUUID()` from `@/lib/utils` for client-only non-security IDs;
-  never call `crypto.randomUUID()` directly because remote plain-HTTP origins
-  can expose `crypto` without `randomUUID`. Use `copyToClipboard()` from
-  `@/lib/utils/copy-to-clipboard` for copy actions; never call
-  `navigator.clipboard.writeText()` directly. Keep fallbacks non-security and
-  add Vitest coverage for missing/rejected capabilities plus an `rg` audit.
+- Use `generateUUID()` for client-only non-security IDs, not `crypto.randomUUID()`; use `copyToClipboard()` for copy actions, not `navigator.clipboard.writeText()`. Keep fallbacks non-security; test missing or rejected capabilities with an `rg` audit.
 
 ## Store Structure (Domain Slices)
 
@@ -162,45 +157,24 @@ surface.
   with independent open state. Touch-pinned help must close on a second trigger
   tap, outside interaction, and Escape; verify desktop pointer and mobile-sized
   touch flows.
-- **Renaming a `data-testid`:** set the new id as `data-testid="<new>"` and keep
-  the old id as `data-legacy-testid="<old>"`, then migrate e2e specs to the new
-  id in the same PR. JSX rejects two `data-testid` attributes on one element,
-  and Playwright's `getByTestId` only matches one attribute name — the
-  `data-legacy-testid` alias lets existing specs keep selecting the element
-  while the migration is in flight.
-- **Dockview session panel activation:** session chat panels can become active
-  through tab pointer/keyboard events, global tab-cycling shortcuts,
-  reopen/menu actions, and Dockview close controls. When changing
-  `tasks.activeSessionId` or active-session sync, audit all of those paths. Use
-  store state in addition to Dockview `api.isActive`; the current session's chat
-  tab may be Dockview-inactive while Files/Changes is active. Same-session
-  clicks must not leave stale activation intent, and Dockview
-  `.dv-default-tab-action` close controls should be treated as close/delete
-  actions rather than session-switch intent.
-- **Conditional review-panel ownership:** `pr-detail` is visible only for active
-  tasks with linked PR/MR; default layouts provide a preferred group/tab but do
-  not make empty tabs persistent. Hydrated review loss removes canonical panels;
-  restoration/maximized layouts and offered/dismissed markers suppress insertion.
-  Existing panels sync provider/review identity without moving them.
-- **Dockview environment switching:** Reusable/default layouts may omit group IDs
-  after ephemeral-panel filtering. Restore views after reconciliation; correlate
-  ID-less groups by stable ID or position. Treat `chat`/`session:*` as semantic
-  only when `activeSessionId` is non-null; test ID-less and null-session defaults.
-- **GitHub PR status UI:** visual PR/CI status surfaces should use the shared
-  helpers in `apps/web/components/github/pr-task-icon.tsx`
-  (`hasPRChecksPassedForDisplay`, `hasPRChecksInProgressForDisplay`, and
-  `hasPRChecksPassedWithoutReviewWaitForDisplay`) instead of re-deriving status
-  from `checks_state`, `checks_total`, or `checks_passing` locally. Aggregate
-  check counts are a display-only fallback when `checks_state` is empty; they may
-  make chips or task icons render passed/in-progress, but must not enable merge
-  actions. Merge readiness must use `isPRReadyToMerge`, which requires GitHub's
-  explicit `checks_state === "success"` rollup. When changing PR status behavior,
-  update both `pr-task-icon.test.ts` and `pr-status-chip.test.tsx`.
-- **GitHub PR multi-association UI:** Keep the complete PR association list for
-  tabs and unlink controls, including terminal or merged siblings. Derive a
-  separate `openPRs` view only for aggregate status and automation. When this
-  behavior changes, cover desktop and mobile unlinking of a terminal sibling
-  and the two-to-one association collapse/focus path.
+- **Renaming a `data-testid`:** use `data-legacy-testid` for the old id while
+  migrating specs; JSX and Playwright only support one `data-testid` attribute.
+- **Dockview session activation:** audit pointer/keyboard tabs, shortcuts,
+  reopen/menu actions, and close controls; combine store state with
+  `api.isActive`, clear same-session intent, and treat default-tab close as
+  delete rather than session switching.
+- **Conditional review panels:** show `pr-detail` only for active tasks with a
+  linked PR/MR; default layouts only provide preferred placement. Hydrated review
+  loss removes canonical panels, while restoration/maximized and offered/dismissed
+  markers suppress insertion; existing panels sync identity without moving.
+- **Dockview environment switching:** reconcile ephemeral panels before restoring views;
+  correlate ID-less groups by stable ID or position. Treat `chat`/`session:*` as semantic only with a non-null `activeSessionId`.
+- **GitHub PR status UI:** use the shared `pr-task-icon.tsx` display helpers and
+  `isPRReadyToMerge`; aggregate counts are display-only and cannot enable merges.
+  Update `pr-task-icon.test.ts` and `pr-status-chip.test.tsx` with behavior changes.
+- **GitHub PR associations:** retain terminal/merged siblings for tabs/unlink;
+  derive `openPRs` only for aggregate status/automation and test desktop/mobile
+  terminal unlink plus two-to-one collapse/focus.
 - **Task repository labels:** user-facing task/card repo chips should display a
   stable repo slug or name (`owner/repo` when known, otherwise the repo name),
   not a local filesystem path. Local clone paths or folder paths belong in
