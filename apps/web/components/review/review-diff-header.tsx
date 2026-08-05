@@ -61,6 +61,7 @@ function ReviewDiffStats({ file, compact = false }: { file: ReviewFile; compact?
 }
 
 function StaleIndicator({ compact = false }: { compact?: boolean }) {
+  const { t } = useTranslation();
   return (
     <span
       className={cn(
@@ -69,7 +70,7 @@ function StaleIndicator({ compact = false }: { compact?: boolean }) {
       )}
     >
       <IconAlertTriangle className="size-3.5" />
-      changed
+      {t("review:staleChanged")}
     </span>
   );
 }

@@ -16,21 +16,12 @@ import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import type { ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
+import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];
   currentPage?: "kanban" | "tasks";
 };
-
-/** Returns a catalog key, not copy: `t()` must run at render, never here. */
-function getRepositoryPlaceholderKey(
-  repositoriesLoading: boolean,
-  repositoriesEmpty: boolean,
-): string {
-  if (repositoriesLoading) return "kanban:loadingRepositories";
-  if (repositoriesEmpty) return "kanban:noRepositories";
-  return "kanban:selectRepository";
-}
 
 function WorkflowSection({
   activeWorkflowId,

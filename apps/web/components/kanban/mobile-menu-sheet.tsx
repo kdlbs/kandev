@@ -23,6 +23,7 @@ import type { WorkflowsState } from "@/lib/state/slices";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
 import { useTranslation } from "react-i18next";
+import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import { MobileUtilityActions } from "./mobile-menu-utility-actions";
 import {
   mobileControlClass,
@@ -44,13 +45,6 @@ type MobileMenuSheetProps = {
   showHealthIndicator: boolean;
   onOpenHealthDialog: () => void;
 };
-
-/** Returns a catalog key, not copy: `t()` must run at render, never here. */
-function getRepositoryPlaceholderKey(loading: boolean, empty: boolean): string {
-  if (loading) return "kanban:loadingRepositories";
-  if (empty) return "kanban:noRepositories";
-  return "kanban:selectRepository";
-}
 
 type MobileDisplayOptionsProps = {
   activeWorkflowId: string | null;

@@ -1,4 +1,5 @@
 import { djb2Hash } from "@/lib/utils/hash";
+import { t } from "@/lib/i18n";
 import type { FileChangeStatus } from "@/lib/utils/file-change-status";
 
 export type ReviewFile = {
@@ -98,15 +99,15 @@ export function splitReviewFileKey(key: string): { repositoryName: string; path:
 export function diffSkipReasonLabel(reason?: string): string {
   switch (reason) {
     case "too_large":
-      return "File too large to diff (>10 MB)";
+      return t("review:diffSkipTooLarge");
     case "binary":
-      return "Binary file — not diffable";
+      return t("review:diffSkipBinary");
     case "truncated":
-      return "Diff truncated (>256 KB)";
+      return t("review:diffSkipTruncated");
     case "budget_exceeded":
-      return "Diff skipped — too many changed files";
+      return t("review:diffSkipBudgetExceeded");
     default:
-      return "Loading diff...";
+      return t("review:diffLoading");
   }
 }
 
@@ -134,17 +135,17 @@ export function reviewDiffUnavailableLabel(file: ReviewFile): string {
   if (file.diff_skip_reason) return diffSkipReasonLabel(file.diff_skip_reason);
   switch (file.status) {
     case "added":
-      return "Added file has no textual diff";
+      return t("review:noTextualDiffAdded");
     case "untracked":
-      return "Untracked file has no textual diff";
+      return t("review:noTextualDiffUntracked");
     case "deleted":
-      return "Deleted file has no textual diff";
+      return t("review:noTextualDiffDeleted");
     case "renamed":
       return file.old_path
-        ? `Moved from ${file.old_path}; no textual changes`
-        : "File moved; no textual changes";
+        ? t("review:noTextualDiffMovedFrom", { oldPath: file.old_path })
+        : t("review:noTextualDiffMoved");
     case "modified":
-      return "No textual diff available";
+      return t("review:noTextualDiffModified");
     default: {
       const exhaustiveStatus: never = file.status;
       return exhaustiveStatus;

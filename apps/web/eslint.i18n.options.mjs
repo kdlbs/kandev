@@ -1564,6 +1564,10 @@ export const i18nGuardFiles = [
   "components/review/review-run-button.tsx",
   "components/review/review-top-bar.tsx",
   "components/review/walkthrough-overlay.tsx",
+  // Plain-TS label helpers the review diff list renders — guard-blind, so they
+  // are listed to keep the entries above honest rather than because lint sees
+  // anything here.
+  "components/review/types.ts",
   // Kanban board: swimlanes, graph pipeline, and the mobile board shell.
   "components/kanban/graph2-task-pipeline.tsx",
   "components/kanban/kanban-header-mobile.tsx",
@@ -1589,4 +1593,6 @@ export const i18nGuardFiles = [
   "components/kanban-column.tsx",
   "components/kanban-display-dropdown.tsx",
   "components/kanban-with-preview.tsx",
+  // Shared by the desktop dropdown and the mobile sheet; returns catalog keys.
+  "lib/kanban/repository-placeholder.ts",
 ];
