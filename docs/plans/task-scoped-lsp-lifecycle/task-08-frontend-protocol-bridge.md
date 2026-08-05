@@ -1,0 +1,89 @@
+---
+id: "08-frontend-protocol-bridge"
+title: "Frontend task protocol bridge"
+status: pending
+wave: 4
+depends_on: ["07-lifecycle-reconciliation"]
+plan: "plan.md"
+spec: "../../specs/lsp-file-intelligence/spec.md"
+---
+
+# Task 08: Frontend Task Protocol Bridge
+
+## Acceptance
+
+- Frontend snapshots, live updates, and actions are keyed by task/language, reject stale revisions,
+  and never send session/runtime identity or origin in control requests.
+- A browser shares one downstream attachment per task/language across same-task session models,
+  consumes task-host capabilities, and never sends initialize/shutdown/exit or owns a process timer.
+- Monaco provider routing, diagnostics, navigation, document synchronization, configuration
+  behavior, TypeScript built-in suppression, and save-race guarantees remain intact; releasing all
+  browser editor leases can detach but cannot change task policy/generation.
+
+## TDD sequence
+
+1. Add failing API/store/hook tests for task-scoped shapes, all policies/phases/evidence, action
+   payloads, hydration/live-update races, lower-revision rejection, and legacy localStorage removal.
+2. Add failing manager harness cases for two sessions sharing one task/language attachment, attach
+   handshake/capabilities, no browser initialize/shutdown, reconnect, and final detach without Stop.
+3. Add failing provider/document tests for source-session URI mapping, same task-host URI across
+   session models, diagnostic replay, model-scoped suppression, ordered sync, and save races.
+4. Implement the domain slice/API/hook and refactor `LSPClientManager` to task ownership. Keep
+   session identity only at the Monaco model/navigation edge.
+5. Run focused tests, typecheck, and lint; remove obsolete idle/storage/placement dependencies only
+   after their replacement tests pass.
+
+## Verification
+
+```bash
+cd apps && pnpm install --frozen-lockfile
+cd apps && pnpm --filter @kandev/web test -- --run lib/api/domains/lsp-api.test.ts lib/state/slices/lsp hooks/domains/lsp lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts lib/lsp/lsp-providers.test.ts
+cd apps/web && pnpm run typecheck
+cd apps/web && pnpm exec eslint lib/api/domains/lsp-api.ts lib/state/slices/lsp hooks/domains/lsp lib/lsp hooks/use-lsp.ts
+```
+
+## Files likely touched
+
+- `apps/web/lib/types/http-lsp.ts`
+- `apps/web/lib/api/domains/lsp-api.ts`
+- `apps/web/lib/api/domains/lsp-api.test.ts`
+- `apps/web/lib/state/slices/lsp/lsp-slice.ts`
+- `apps/web/lib/state/slices/lsp/lsp-slice.test.ts`
+- `apps/web/lib/state/slices/lsp/types.ts`
+- `apps/web/lib/state/slices/index.ts`
+- `apps/web/lib/ws/handlers/lsp.ts`
+- `apps/web/lib/ws/handlers/lsp.test.ts`
+- `apps/web/hooks/domains/lsp/use-task-lsp.ts`
+- `apps/web/hooks/domains/lsp/use-task-lsp.test.tsx`
+- `apps/web/hooks/use-lsp.ts`
+- `apps/web/hooks/use-lsp.test.tsx`
+- `apps/web/lib/lsp/lsp-client-manager.ts`
+- `apps/web/lib/lsp/lsp-client-types.ts`
+- `apps/web/lib/lsp/lsp-client-storage.ts` (removed)
+- `apps/web/lib/lsp/lsp-client-*.test.ts`
+- `apps/web/lib/lsp/lsp-providers.ts`
+- `apps/web/lib/lsp/lsp-editor-models.ts`
+- `apps/web/hooks/use-lsp-file-opener.ts`
+
+## Dependencies
+
+Task 07 supplies stable task HTTP/events, revisions, lifecycle truth, and the attachment proxy.
+
+## Parallelism
+
+Sequential. Task 09 consumes these hooks, view data, and current-language attachment behavior.
+
+## Inputs
+
+- Spec: API surface; shared document/editor scenarios; browser persistence boundary.
+- Current manager/provider/file URI/model isolation tests and state-slice/WS handler conventions.
+- Frontend AGENTS rule: domain hooks/store own data access; components do not fetch directly.
+
+## Output contract
+
+Report task-key migration, removed session/localStorage/idle ownership, RED/GREEN test counts,
+typecheck/lint results, and any protocol feature limitation. Update task/plan status and actual files.
+
+## Results
+
+Pending.
