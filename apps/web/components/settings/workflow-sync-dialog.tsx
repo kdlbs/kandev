@@ -73,10 +73,15 @@ type RepoUrlFieldProps = {
 function RepoUrlField({ provider, url, invalid, resolved, onChange }: RepoUrlFieldProps) {
   const { t } = useTranslation();
   const providerLabel = provider === "gitlab" ? "GitLab" : "GitHub";
-  const placeholder =
-    provider === "gitlab"
-      ? "https://gitlab.com/group/project/-/tree/main/.kandev/workflows"
-      : "https://github.com/kdlbs/kandev/tree/main/.kandev/workflows";
+  // GitLab's placeholder is a bare path, not a URL: a full link (any host —
+  // gitlab.com or a self-managed instance) is accepted, but nothing here
+  // needs a host at all, since syncing always uses this workspace's own
+  // connected GitLab host regardless of what's typed in this field. Showing
+  // a "gitlab.com" example would wrongly suggest a self-managed host has to
+  // match it.
+  const placeholder = provider === "gitlab" ? "group/project" : "https://github.com/kdlbs/kandev";
+  const hint =
+    provider === "gitlab" ? t("workflows:pasteGitLabPathHint") : t("workflows:pasteRepositoryLinkHint", { provider: providerLabel });
   return (
     <div className="space-y-1.5">
       <Label htmlFor="workflow-sync-url">
@@ -96,7 +101,7 @@ function RepoUrlField({ provider, url, invalid, resolved, onChange }: RepoUrlFie
         </p>
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="workflow-sync-resolved">
-          {resolved || t("workflows:pasteRepositoryLinkHint", { provider: providerLabel })}
+          {resolved || hint}
         </p>
       )}
     </div>
