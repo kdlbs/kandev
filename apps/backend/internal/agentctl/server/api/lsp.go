@@ -43,8 +43,11 @@ const (
 	lspWorkspacePathJSONKey  = "workspacePath"
 	lspWorkspaceURIJSONKey   = "workspaceUri"
 	lspRepoSubpathsJSONKey   = "repoSubpaths"
+	lspStdinWriteTimeout     = 30 * time.Second
 	lspWebSocketWriteTimeout = 5 * time.Second
 )
+
+var errLSPStdinWriteTimeout = errors.New("LSP stdin write timed out")
 
 type lspServerProcess struct {
 	id     string
@@ -351,6 +354,7 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 	go func() {
 		defer close(done)
 		defer func() { _ = conn.Close() }()
+		defer func() { _ = server.stdin.Close() }()
 		reader := bufio.NewReader(server.stdout)
 		for {
 			msg, err := protocol.ReadMessage(reader)
@@ -381,12 +385,7 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 			break
 		}
 
-		header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg))
-		if _, err := server.stdin.Write([]byte(header)); err != nil {
-			s.logger.Debug("LSP stdin write error", zap.String("language", language), zap.Error(err))
-			break
-		}
-		if _, err := server.stdin.Write(msg); err != nil {
+		if err := writeLSPStdinFrame(server.stdin, msg); err != nil {
 			s.logger.Debug("LSP stdin write error", zap.String("language", language), zap.Error(err))
 			break
 		}
@@ -394,6 +393,32 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 
 	_ = conn.Close()
 	s.stopLSPServer(server)
+}
+
+func writeLSPStdinFrame(stdin io.WriteCloser, msg []byte) error {
+	header := fmt.Sprintf("Content-Length: %d\r\n\r\n", len(msg))
+	frame := make([]byte, 0, len(header)+len(msg))
+	frame = append(frame, header...)
+	frame = append(frame, msg...)
+	return writeLSPStdinWithTimeout(stdin, frame, lspStdinWriteTimeout)
+}
+
+func writeLSPStdinWithTimeout(stdin io.WriteCloser, data []byte, timeout time.Duration) error {
+	closeResult := make(chan error, 1)
+	timer := time.AfterFunc(timeout, func() {
+		closeResult <- stdin.Close()
+	})
+	written, writeErr := stdin.Write(data)
+	if !timer.Stop() {
+		return errors.Join(errLSPStdinWriteTimeout, writeErr, <-closeResult)
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	if written != len(data) {
+		return io.ErrShortWrite
+	}
+	return nil
 }
 
 func writeLSPMessage(conn *websocket.Conn, messageType int, data []byte) error {

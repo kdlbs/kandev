@@ -75,6 +75,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: LSP completion-list `isIncomplete` state reaches Monaco so continued typing can request refreshed results through trigger kind `3` instead of retaining stale partial suggestions.
 - Review hardening: completion, hover, definition, references, and signature help register only when advertised; TypeScript built-in suppression now follows the exact overlapping provider set, preserving built-in fallbacks for omitted capabilities and unwired rename, code-action, highlight, and inlay features.
 - Review hardening: every task-host LSP WebSocket frame now uses the same five-second write deadline, so an unread pre-bridge status or ready frame cannot pin the handler or leak its owned language-server process.
+- Review hardening: a terminating stdout forwarder closes language-server stdin to release active writes immediately, while a cross-platform 30-second cutoff closes a pipe whose server remains alive but stops reading; both paths converge on owned-process cleanup.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
@@ -106,4 +107,6 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `go test ./internal/agentctl/server/api -count=1` (categorical process-start failure included)
   - `go test ./internal/agentctl/server/api -run 'TestHandleLSPStream(BridgesFramesAndStopsOwnedProcess|StopsProcessWhenForwardingToWebSocketFails|PeerCloseReleasesBlockedForwarderWrite)' -count=1` (ready-frame deadline and bridge cleanup)
   - `go test ./internal/agentctl/server/api -count=1` (bounded task-host status and ready writes included)
+  - `go test ./internal/agentctl/server/api -run 'Test(RunLSPBridgeForwarderExitUnblocksStdinWrite|WriteLSPStdinWithTimeoutClosesBlockedWrite)' -count=1` (forwarder cleanup and virtual-time stdin cutoff)
+  - `go test -race ./internal/agentctl/server/api -run 'Test(RunLSPBridgeForwarderExitUnblocksStdinWrite|WriteLSPStdinWithTimeoutClosesBlockedWrite)' -count=1`
   - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -71,6 +72,35 @@ type discardLSPWriteCloser struct{}
 func (discardLSPWriteCloser) Write(data []byte) (int, error) { return len(data), nil }
 func (discardLSPWriteCloser) Close() error                   { return nil }
 
+type blockingLSPWriteCloser struct {
+	writeStarted  chan struct{}
+	writeReturned chan struct{}
+	closed        chan struct{}
+	writeOnce     sync.Once
+	returnOnce    sync.Once
+	closeOnce     sync.Once
+}
+
+func newBlockingLSPWriteCloser() *blockingLSPWriteCloser {
+	return &blockingLSPWriteCloser{
+		writeStarted:  make(chan struct{}),
+		writeReturned: make(chan struct{}),
+		closed:        make(chan struct{}),
+	}
+}
+
+func (w *blockingLSPWriteCloser) Write([]byte) (int, error) {
+	w.writeOnce.Do(func() { close(w.writeStarted) })
+	<-w.closed
+	w.returnOnce.Do(func() { close(w.writeReturned) })
+	return 0, io.ErrClosedPipe
+}
+
+func (w *blockingLSPWriteCloser) Close() error {
+	w.closeOnce.Do(func() { close(w.closed) })
+	return nil
+}
+
 func TestRunLSPBridgeClosesStdoutAfterForwarderReturns(t *testing.T) {
 	server := newTestServer(t)
 	stdout := newOrderedLSPReadCloser()
@@ -121,6 +151,81 @@ func TestRunLSPBridgeClosesStdoutAfterForwarderReturns(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("stdout was not closed after its forwarder returned")
 	}
+}
+
+func TestRunLSPBridgeForwarderExitUnblocksStdinWrite(t *testing.T) {
+	server := newTestServer(t)
+	stdin := newBlockingLSPWriteCloser()
+	stdout := newOrderedLSPReadCloser()
+	processDone := make(chan struct{})
+	close(processDone)
+	lspProcess := &lspServerProcess{
+		id: "already-stopped", stdin: stdin, stdout: stdout, done: processDone,
+	}
+	handlerDone := make(chan error, 1)
+	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		conn, err := server.upgrader.Upgrade(writer, request, nil)
+		if err == nil {
+			server.runLSPBridge(conn, "kotlin", lspProcess)
+		}
+		handlerDone <- err
+	}))
+	t.Cleanup(func() {
+		_ = stdin.Close()
+		stdout.release()
+		httpServer.Close()
+	})
+
+	conn, _, err := websocket.DefaultDialer.Dial("ws"+strings.TrimPrefix(httpServer.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial bridge: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	select {
+	case <-stdout.readStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stdout forwarder did not start")
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, []byte(`{}`)); err != nil {
+		t.Fatalf("write LSP payload: %v", err)
+	}
+	select {
+	case <-stdin.writeStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("stdin write did not block")
+	}
+
+	stdout.release()
+	select {
+	case err := <-handlerDone:
+		if err != nil {
+			t.Fatalf("bridge handler: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("stdout forwarder exit did not release the blocked stdin write")
+	}
+	select {
+	case <-stdin.writeReturned:
+	default:
+		t.Fatal("stdin write remained blocked after bridge cleanup")
+	}
+}
+
+func TestWriteLSPStdinWithTimeoutClosesBlockedWrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		stdin := newBlockingLSPWriteCloser()
+		t.Cleanup(func() { _ = stdin.Close() })
+
+		err := writeLSPStdinWithTimeout(stdin, []byte("blocked frame"), lspStdinWriteTimeout)
+		if !errors.Is(err, errLSPStdinWriteTimeout) {
+			t.Fatalf("write error = %v, want stdin timeout", err)
+		}
+		select {
+		case <-stdin.writeReturned:
+		default:
+			t.Fatal("timed-out stdin write remained blocked")
+		}
+	})
 }
 
 func TestRunLSPBridgeUsesCategoricalCloseWhenServerExits(t *testing.T) {
