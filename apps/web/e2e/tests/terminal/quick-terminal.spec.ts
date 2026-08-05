@@ -115,8 +115,8 @@ test.describe("quick terminal tabs", () => {
     await expect(dialog).toBeHidden();
   });
 
-  test("keeps tablet launcher order and 44px hit targets", async ({ testPage }) => {
-    await testPage.setViewportSize({ width: 700, height: 800 });
+  test("keeps tablet launcher order and 44px hit targets", async ({ tabletTestPage }) => {
+    const testPage = tabletTestPage;
     await testPage.goto("/");
 
     const terminalButton = testPage.getByTestId("tablet-quick-terminal-button");
