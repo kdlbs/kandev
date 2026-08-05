@@ -450,7 +450,7 @@
   "externalMcpIntro": "Use this if you want to manage Kandev from coding agents that run <2>outside</2> Kandev (e.g. Claude Code, Cursor, or Codex on your host), or from <4>passthrough agents</4> running inside Kandev.",
   "externalMcpIntroPassthrough": "Agents launched inside Kandev in their normal mode already have the Kandev MCP wired in automatically, no setup needed.",
   "externalMcpEndpoints": "Endpoints",
-  "externalMcpEndpointsDescription": "Available on the same host and port as Kandev. Use localhost for same-machine agents, or the reachable Kandev URL for LAN, VPN, and reverse-proxy clients.",
+  "externalMcpEndpointsDescription": "Available on the same host and port as Kandev. Use {{localhostHost}} for same-machine agents, or the reachable Kandev URL for LAN, VPN, and reverse-proxy clients.",
   "externalMcpStreamableHttp": "Streamable HTTP",
   "externalMcpStreamableHttpHint": "Recommended for Claude Code, Cursor, and Codex.",
   "externalMcpSse": "Server-Sent Events (SSE)",

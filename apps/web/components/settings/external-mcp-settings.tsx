@@ -68,7 +68,14 @@ export function ExternalMcpSettings() {
       <SettingsSection
         icon={<IconPlugConnected className="h-5 w-5" />}
         title={t("settings:externalMcpEndpoints")}
-        description={t("settings:externalMcpEndpointsDescription")}
+        // `localhost` is a hostname the user types, not copy. Interpolated so
+        // the pseudo-locale leaves it intact — baked into the message it renders
+        // as `ĺōćàĺĥōśţ`, a dead pointer to something the reader must reproduce
+        // verbatim. Same reasoning as `voiceUnavailableInsecure`, which already
+        // passes its scheme and host as values.
+        description={t("settings:externalMcpEndpointsDescription", {
+          localhostHost: "localhost",
+        })}
       >
         <Card>
           <CardHeader>
