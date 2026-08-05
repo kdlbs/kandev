@@ -15,6 +15,10 @@ vi.mock("@/components/github/pr-task-icon", () => ({
   PRTaskIcon: () => <span data-testid="pr-task-icon" />,
 }));
 
+vi.mock("@/components/gitlab/mr-task-icon", () => ({
+  MRTaskIcon: () => <span data-testid="mr-task-icon" />,
+}));
+
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { KanbanCardBody } from "./kanban-card-content";
 import type { Task } from "./kanban-card";
@@ -52,5 +56,20 @@ describe("KanbanCardBody — task-card-indicators slot", () => {
     render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
 
     expect(screen.getByTestId("plugin-indicator").textContent).toBe("task-1|ws-1|step-1");
+  });
+});
+
+describe("KanbanCardBody — linked PR/MR badges (AC30)", () => {
+  it("renders both the PR badge and the MR badge, PR first", () => {
+    const { container } = render(<KanbanCardBody task={TASK} repositoryChips={[]} />);
+    const title = screen.getByTestId("task-card-title");
+    const row = title.parentElement;
+    expect(row).not.toBeNull();
+    const prIcon = screen.getByTestId("pr-task-icon");
+    const mrIcon = screen.getByTestId("mr-task-icon");
+    expect(container.contains(prIcon)).toBe(true);
+    expect(container.contains(mrIcon)).toBe(true);
+    // AC30: PR badge before MR badge in document order.
+    expect(prIcon.compareDocumentPosition(mrIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
