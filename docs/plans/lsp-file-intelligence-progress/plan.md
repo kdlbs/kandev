@@ -35,6 +35,7 @@ The progress protocol itself requires no backend payload transform because both 
 
 - Extend `useLsp` and `useMonacoEditorLsp` to expose the current progress snapshot.
 - Replace the one-click toolbar toggle with a disclosure-first `LspStatusButton`.
+- Keep an explicit per-session/language Stop override in the browser runtime so global auto-start cannot reacquire a lease on later editor or configuration renders; explicit Start clears the override.
 - Add a shared progress body that separates connection readiness from project work, renders a determinate bar only for server percentages, uses tabular elapsed time, preserves concurrent-work counts, and avoids project-wide completion claims.
 - Use `useTouchDrawer`: fine pointers receive an anchored popover; coarse-pointer Monaco/tablet layouts receive an inset bottom drawer with one internal scroll owner and touch-sized controls. Phone CodeMirror viewing remains unchanged.
 - Gate each Editors auto-install checkbox with the task-host-independent preference list. Forward enabled preferences to agentctl so its actual platform decides whether installation can run, and render each language's install prerequisites and destination visibly from the same localized metadata source used by Settings.
@@ -50,6 +51,7 @@ The progress protocol itself requires no backend payload transform because both 
 - **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in, process launch failure closes with `4008`, and categorical statuses render localized guidance instead of backend transport prose.
 - **Initialization failure:** the manager regression proves a JSON-RPC initialize error object renders its `message` field and still cleans up the failed connection for Retry.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting; a rendered language-card regression proves auto-install prerequisites remain visible without tooltip interaction.
+- **Auto-start lifecycle:** hook coverage stops an auto-started lease, rerenders with changed configuration, and proves only explicit Start reacquires it; desktop E2E repeats the boundary across a matching editor reopen.
 - **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, read-only rejection of cold unsupported executors, and capacity rejection before supported execution startup.
 
 ## E2E Tests

@@ -5,6 +5,7 @@ import { EMPTY_LSP_PROGRESS, type LspProgressSnapshot } from "@/lib/lsp/lsp-prog
 
 const DISABLED: LspStatus = { state: "disabled" };
 const startRequestGenerations = new Map<string, number>();
+const manualStopOverrides = new Set<string>();
 
 function lspKey(sessionId: string | null, lspLanguage: string | null): string | null {
   return sessionId && lspLanguage ? `${sessionId}:${lspLanguage}` : null;
@@ -19,12 +20,14 @@ function subscribeToLspKey(key: string | null, callback: () => void): () => void
 
 function requestLspStart(sessionId: string, lspLanguage: string): void {
   const key = `${sessionId}:${lspLanguage}`;
+  manualStopOverrides.delete(key);
   startRequestGenerations.set(key, (startRequestGenerations.get(key) ?? 0) + 1);
   lspClientManager.saveEnabledState(sessionId, lspLanguage);
 }
 
 function requestLspStop(sessionId: string, lspLanguage: string): void {
   const key = `${sessionId}:${lspLanguage}`;
+  manualStopOverrides.add(key);
   lspClientManager.stop(sessionId, lspLanguage);
   startRequestGenerations.delete(key);
   lspClientManager.clearEnabledState(sessionId, lspLanguage);
@@ -82,6 +85,7 @@ export function useLsp(
   const lspLanguage = toLspLanguage(monacoLanguage);
   const shouldAutoStart = lspLanguage ? lspAutoStartLanguages.includes(lspLanguage) : false;
   const key = lspKey(sessionId, lspLanguage);
+  const hasManualStopOverride = key ? manualStopOverrides.has(key) : false;
   const isManuallyEnabled = useSyncExternalStore(
     (callback) => subscribeToLspKey(key, callback),
     () =>
@@ -95,13 +99,16 @@ export function useLsp(
   );
   const { status, progress, toggle } = useLspStatus(sessionId, lspLanguage);
 
-  // Each mounted matching editor owns one connection lease. Manual policy and
-  // auto-start only decide whether the editor should acquire that lease.
+  // Each mounted matching editor owns one connection lease. An explicit Stop
+  // suppresses global auto-start for this session/language until Start clears
+  // the override; later settings/configuration renders must not reacquire it.
   useEffect(() => {
-    if ((!shouldAutoStart && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
+    const autoStartEnabled = shouldAutoStart && !hasManualStopOverride;
+    if ((!autoStartEnabled && !isManuallyEnabled) || !sessionId || !lspLanguage) return;
     const disconnect = lspClientManager.connect(sessionId, lspLanguage, lspServerConfigs);
     return disconnect;
   }, [
+    hasManualStopOverride,
     isManuallyEnabled,
     shouldAutoStart,
     sessionId,

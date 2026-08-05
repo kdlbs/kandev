@@ -57,7 +57,10 @@ Record rendered behavior, accessibility and geometry decisions, files changed, e
 - GREEN: one snapshot now drives a fine-pointer popover or coarse-pointer drawer, with separate connection/project state, determinate-only percentages, tabular elapsed time, honest completion copy, and explicit lifecycle actions.
 - Review hardening: hour, minute, and second units plus multi-unit composition now come from the active locale catalog, with pseudo-locale coverage.
 - Review hardening: the boot runtime's task-host-independent preference list controls auto-install checkboxes, agentctl retains platform authority, and the LSP/settings catalogs now retain full Simplified Chinese parity.
+- Review hardening: an explicit Stop now records a runtime override for the session/language, preventing global auto-start from reacquiring the lease after a matching editor or configuration rerender; explicit Start clears it. Hook and desktop E2E coverage exercise both halves.
 - Verified:
   - focused LSP/editor Vitest suite (75 tests)
+  - `pnpm exec vitest run hooks/use-lsp.test.tsx` (6 passed, including auto-start Stop/configuration/explicit-Start policy)
+  - `pnpm e2e:run tests/lsp/lsp-file-intelligence.spec.ts -- --grep "auto-starts one shared server"` (1 production-build Chromium scenario passed)
   - `pnpm run typecheck`
   - full web ESLint with zero warnings

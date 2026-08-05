@@ -614,7 +614,7 @@ test.describe("LSP file intelligence", () => {
       .toBe(1);
   });
 
-  test("auto-starts one shared server for two files and forwards configuration", async ({
+  test("auto-starts one shared server, forwards configuration, and honors Stop", async ({
     testPage,
     apiClient,
     seedData,
@@ -761,6 +761,19 @@ test.describe("LSP file intelligence", () => {
       const activeStatus = testPage.locator('[data-testid="lsp-status-button"]:visible');
       await performLspAction(testPage, "stop");
       await expect(activeStatus).toHaveAttribute("data-lsp-state", "disabled");
+
+      await openDesktopFile(testPage, task.session, task.filePaths[1]);
+      await expect(activeStatus).toHaveAttribute("data-lsp-state", "disabled");
+      expect(readFakeLspEvents(backend).filter((event) => event.event === "started")).toHaveLength(
+        1,
+      );
+
+      await performLspAction(testPage, "start");
+      await expect(activeStatus).toHaveAttribute("data-lsp-state", "ready", { timeout: 15_000 });
+      await expect
+        .poll(() => readFakeLspEvents(backend).filter((event) => event.event === "started").length)
+        .toBe(2);
+      await performLspAction(testPage, "stop");
     } finally {
       await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
         lsp_auto_start_languages: initialAutoStart,

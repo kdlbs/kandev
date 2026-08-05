@@ -13,10 +13,17 @@ const mocks = vi.hoisted(() => {
   const changeListeners = new Set<(key: string) => void>();
   const connect = vi.fn(() => vi.fn());
   const state = { status: disabledStatus, progress: emptyProgress };
-  const userSettings = {
+  const userSettings: {
+    lspAutoStartLanguages: string[];
+    lspServerConfigs: Record<string, Record<string, unknown>>;
+  } = {
     lspAutoStartLanguages: [],
     lspServerConfigs: {},
   };
+  const stop = vi.fn((sessionId: string, language: string) => {
+    state.status = disabledStatus;
+    for (const listener of changeListeners) listener(`${sessionId}:${language}`);
+  });
 
   return {
     clearEnabledState: vi.fn((sessionId: string, language: string) => {
@@ -44,7 +51,7 @@ const mocks = vi.hoisted(() => {
     }),
     state,
     changeListeners,
-    stop: vi.fn(),
+    stop,
     userSettings,
   };
 });
@@ -85,6 +92,8 @@ beforeEach(() => {
   mocks.enabledKeys.clear();
   mocks.state.status = mocks.disabledStatus;
   mocks.state.progress = mocks.emptyProgress;
+  mocks.userSettings.lspAutoStartLanguages = [];
+  mocks.userSettings.lspServerConfigs = {};
 });
 
 afterEach(() => {
@@ -176,7 +185,33 @@ describe("useLsp manual policy leases", () => {
 
     await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
   });
+});
 
+describe("useLsp auto-start policy", () => {
+  it("keeps an auto-started server stopped until the user starts it again", async () => {
+    const autoStartSession = "auto-start-session";
+    mocks.userSettings.lspAutoStartLanguages = [LANGUAGE];
+    const hook = renderHook(() => useLsp(autoStartSession, LANGUAGE));
+
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledOnce());
+    act(() => {
+      mocks.state.status = { state: "ready" } as typeof mocks.disabledStatus;
+      for (const listener of mocks.changeListeners) listener(`${autoStartSession}:${LANGUAGE}`);
+    });
+    act(() => hook.result.current.toggle());
+
+    mocks.userSettings.lspServerConfigs = { [LANGUAGE]: { diagnostics: false } };
+    hook.rerender();
+    await waitFor(() => {
+      expect(mocks.connect).toHaveBeenCalledOnce();
+    });
+
+    act(() => hook.result.current.toggle());
+    await waitFor(() => expect(mocks.connect).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("useLsp progress subscription", () => {
   it("subscribes to the current connection progress snapshot", () => {
     const hook = renderHook(() => useLsp(SESSION_ID, LANGUAGE));
     const progress = {

@@ -20,7 +20,7 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
   - Kotlin via the official `kotlin-lsp`; Kotlin is marked experimental while its upstream server is alpha
 - Wired editor capabilities are diagnostics, completions, hover, go to definition, references, signature help, and semantic tokens.
 - Global editor settings select languages that auto-start, languages Kandev may auto-install, and per-language configuration returned through `workspace/configuration`. Saving changed configuration updates the existing server through `workspace/didChangeConfiguration` without waiting for an idle disconnect or process restart.
-- A user can manually start or stop the current file's server from the file toolbar. Manual state is remembered in browser local storage for that session and language.
+- A user can manually start or stop the current file's server from the effective status control. Manual enablement is remembered in browser local storage for that session and language. An explicit Stop suppresses global auto-start for that session and language in the current browser runtime until the user explicitly starts it again; it does not rewrite the global preference or affect another browser window.
 - The current editor's LSP status surface distinguishes process launch, protocol readiness, and server-reported project work:
   - after the task host reports `ready`, it says that the server process started and that Kandev is waiting for the LSP `initialize` response;
   - while initialization is pending, it shows locally measured elapsed time without treating that time as server-reported indexing progress;
@@ -176,6 +176,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 ## Scenarios
 
 - **GIVEN** Kotlin auto-start is enabled and `kotlin-lsp` is on a Local PC task host's `PATH`, **WHEN** a `.kt` or `.kts` file opens, **THEN** the toolbar reaches ready and Monaco registers Kotlin providers.
+- **GIVEN** a language server was acquired by global auto-start, **WHEN** the user explicitly stops it and a matching editor remounts or its configuration changes, **THEN** the server stays Off for that session and language until the user explicitly starts it again.
 - **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4007` and the UI shows Kotlin-specific manual setup guidance without attempting installation.
 - **GIVEN** an auto-installable server is missing and the task-host close reason contains backend prose, **WHEN** the browser handles `4001` in a non-English locale, **THEN** it renders the localized missing-server catalog message rather than the transport reason.
 - **GIVEN** a language supports configurable auto-install, **WHEN** the user opens Editors settings, **THEN** its installation command, prerequisites, or managed destination are visible in the language card without requiring pointer hover.
