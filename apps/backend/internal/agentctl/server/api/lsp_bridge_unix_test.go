@@ -245,6 +245,71 @@ func TestHandleLSPStreamBridgesFramesAndStopsOwnedProcess(t *testing.T) {
 	t.Fatalf("LSP process remains tracked after WebSocket close: %v", procMgr.ListProcesses("session-1"))
 }
 
+func TestHandleLSPStreamAutoInstallHandsFirstClientMessageToBridge(t *testing.T) {
+	binDir := t.TempDir()
+	serverPath := filepath.Join(binDir, "typescript-language-server")
+	if err := os.WriteFile(serverPath, []byte("#!/bin/sh\nexec /bin/cat\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-auto-install-handoff"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	releaseInstall := make(chan struct{})
+	close(releaseInstall)
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	server.lspInstaller = &fakeLSPInstallerRegistry{strategy: &controlledLSPInstallStrategy{
+		name:    serverPath,
+		started: make(chan struct{}),
+		release: releaseInstall,
+	}}
+	httpServer := httptest.NewServer(server.router)
+	t.Cleanup(httpServer.Close)
+
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(httpServer.URL, "http")+
+			"/api/v1/lsp/stream?language=typescript&autoInstall=true",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	for _, want := range []string{lspStatusInstalling, lspStatusInstalled, lspStatusReady} {
+		_, raw, err := conn.ReadMessage()
+		if err != nil {
+			t.Fatalf("read %s status: %v", want, err)
+		}
+		var status struct {
+			Status string `json:"status"`
+		}
+		if err := json.Unmarshal(raw, &status); err != nil {
+			t.Fatalf("decode %s status: %v", want, err)
+		}
+		if status.Status != want {
+			t.Fatalf("status = %q, want %q", status.Status, want)
+		}
+	}
+
+	payload := []byte(`{"jsonrpc":"2.0","id":1,"method":"initialize"}`)
+	if err := conn.WriteMessage(websocket.TextMessage, payload); err != nil {
+		t.Fatalf("write first LSP payload: %v", err)
+	}
+	_, echoed, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("read echoed first LSP payload: %v", err)
+	}
+	if string(echoed) != string(payload) {
+		t.Fatalf("echoed payload = %s, want %s", echoed, payload)
+	}
+}
+
 func TestHandleLSPStreamStopsProcessWhenForwardingToWebSocketFails(t *testing.T) {
 	binDir := t.TempDir()
 	serverPath := filepath.Join(binDir, "kotlin-lsp")

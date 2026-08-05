@@ -55,6 +55,7 @@ Users inspect and edit code inside Kandev task file tabs, but code navigation an
 - Each active browser WebSocket owns one language-server process. The browser shares a connection for the same session and language inside one window and closes it after its idle timeout; separate browser windows may own separate processes.
 - The backend caps active LSP WebSocket connections at 8 by default. `KANDEV_LSP_MAX_CONNECTIONS` overrides the cap.
 - Language-server processes and npm/Go auto-install commands are owned by the existing agentctl process manager. Instance teardown cancels and drains install work, then reaps full process trees on Unix and Windows before releasing resources.
+- During auto-install, one pending task-host WebSocket read cancels the connection-owned installer context if the browser stops or disconnects. After a successful install, that same read becomes the bridge's first inbound frame so readiness handoff does not race or lose an initialize request.
 - Kandev-managed npm and release binaries live under the task host's `~/.kandev/lsp-servers`; `gopls` is installed through the task host's Go toolchain. No managed server cache lives inside a checked-out project.
 - LSP JSON-RPC bodies are limited to 16 MiB across stdio and WebSocket transport; stdio headers are bounded separately. Oversized frames close the affected connection instead of allocating unbounded memory.
 - Every task-host LSP WebSocket write has a five-second deadline, including installing, installed, failure, ready, close, and bridged JSON-RPC frames. A stalled browser peer cannot retain the stream handler or its owned language-server process indefinitely.
@@ -173,6 +174,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Cross-file intelligence remains incomplete after ready:** the UI does not claim that the server is still indexing unless a work item is active; the status surface explains that project import, dependencies, or module resolution may require investigation.
 - **Task stop:** agentctl closes process admission and reaps the language-server process tree before releasing task resources.
 - **Instance teardown during auto-install:** agentctl cancels the install, removes an unpublished partial release download, drains the shared cache mutation, and reaps npm/Go descendants before releasing task resources.
+- **Browser disconnect during auto-install:** the task-host read watcher cancels and drains that connection's owned install instead of allowing npm, Go, or release downloads to continue without a consumer.
 - **Stalled browser peer:** bounded task-host WebSocket writes fail and enter the existing connection cleanup path, including stopping a language-server process that was started before its ready frame could be delivered.
 - **Stalled language-server stdin:** stdout-forwarder termination releases an active stdin write immediately; otherwise the write cutoff closes stdin and enters owned-process cleanup after 30 seconds.
 - **Unknown language:** no LSP control is shown.

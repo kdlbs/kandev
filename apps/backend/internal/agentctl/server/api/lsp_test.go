@@ -114,7 +114,7 @@ func TestRunLSPBridgeClosesStdoutAfterForwarderReturns(t *testing.T) {
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		conn, err := server.upgrader.Upgrade(writer, request, nil)
 		if err == nil {
-			server.runLSPBridge(conn, "kotlin", lspProcess)
+			server.runLSPBridge(conn, "kotlin", lspProcess, nil)
 		}
 		handlerDone <- err
 	}))
@@ -166,7 +166,7 @@ func TestRunLSPBridgeForwarderExitUnblocksStdinWrite(t *testing.T) {
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		conn, err := server.upgrader.Upgrade(writer, request, nil)
 		if err == nil {
-			server.runLSPBridge(conn, "kotlin", lspProcess)
+			server.runLSPBridge(conn, "kotlin", lspProcess, nil)
 		}
 		handlerDone <- err
 	}))
@@ -242,7 +242,7 @@ func TestRunLSPBridgeUsesCategoricalCloseWhenServerExits(t *testing.T) {
 	httpServer := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		conn, err := server.upgrader.Upgrade(writer, request, nil)
 		if err == nil {
-			server.runLSPBridge(conn, "kotlin", lspProcess)
+			server.runLSPBridge(conn, "kotlin", lspProcess, nil)
 		}
 		handlerDone <- err
 	}))
@@ -700,5 +700,47 @@ func TestLSPAutoInstallIsCanceledAndDrainedByInstanceTeardown(t *testing.T) {
 	closeErr, ok := err.(*websocket.CloseError)
 	if !ok || closeErr.Code != websocket.CloseGoingAway || closeErr.Text != "" {
 		t.Fatalf("teardown close error = %T %v, want close code %d with no reason", err, err, websocket.CloseGoingAway)
+	}
+}
+
+func TestLSPAutoInstallIsCanceledByClientDisconnect(t *testing.T) {
+	log := newTestLogger()
+	cfg := &config.InstanceConfig{WorkDir: t.TempDir(), SessionID: "session-client-disconnect"}
+	procMgr := process.NewManager(cfg, log)
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = procMgr.StopForTeardown(ctx)
+	})
+	strategy := &blockingLSPInstallStrategy{
+		started:  make(chan struct{}),
+		canceled: make(chan struct{}),
+	}
+	server := NewServer(cfg, procMgr, nil, nil, log)
+	server.lspInstaller = &fakeLSPInstallerRegistry{strategy: strategy}
+	httpServer := httptest.NewServer(server.router)
+	t.Cleanup(httpServer.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(httpServer.URL, "http") +
+		"/api/v1/lsp/stream?language=typescript&autoInstall=true"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	<-strategy.started
+	if _, status, err := conn.ReadMessage(); err != nil || !strings.Contains(string(status), lspStatusInstalling) {
+		t.Fatalf("installing status = %q, error = %v", status, err)
+	}
+	_ = conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""),
+		time.Now().Add(time.Second),
+	)
+	_ = conn.Close()
+
+	select {
+	case <-strategy.canceled:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("client disconnect did not cancel the active LSP auto-install")
 	}
 }

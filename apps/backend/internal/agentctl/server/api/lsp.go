@@ -58,6 +58,11 @@ type lspServerProcess struct {
 	forwarderDone <-chan struct{}
 }
 
+type lspClientRead struct {
+	message []byte
+	err     error
+}
+
 type lspInstallerRegistry interface {
 	BinaryPath(language string) (string, error)
 	StrategyFor(language string) (tools.Strategy, error)
@@ -162,7 +167,7 @@ func (s *Server) handleLSPStreamWS(c *gin.Context) {
 		return
 	}
 
-	s.handleLSPBridge(conn, language, binaryPath)
+	s.handleLSPBridge(conn, language, binaryPath, nil)
 }
 
 func lspAutoInstallRequested(c *gin.Context) bool {
@@ -181,10 +186,13 @@ func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Co
 		s.logger.Warn("failed to send LSP installing status", zap.String("language", language), zap.Error(err))
 	}
 
-	binaryPath, err := s.awaitOrInstallLSP(ctx, language)
+	installCtx, cancelInstall := context.WithCancel(ctx)
+	firstClientRead := readFirstLSPClientMessage(conn, cancelInstall)
+	binaryPath, err := s.awaitOrInstallLSP(installCtx, language)
+	cancelInstall()
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, process.ErrManagerStopping) {
-			s.logger.Debug("LSP auto-install canceled during task teardown", zap.String("language", language))
+			s.logger.Debug("LSP auto-install canceled", zap.String("language", language))
 			_ = writeLSPMessage(conn, websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseGoingAway, ""))
 			_ = conn.Close()
 			return
@@ -202,10 +210,25 @@ func (s *Server) handleLSPBinaryNotFound(ctx context.Context, conn *websocket.Co
 		s.logger.Warn("failed to send LSP installed status", zap.String("language", language), zap.Error(err))
 	}
 
-	s.handleLSPBridge(conn, language, binaryPath)
+	s.handleLSPBridge(conn, language, binaryPath, firstClientRead)
 }
 
-func (s *Server) handleLSPBridge(conn *websocket.Conn, language, binaryPath string) {
+func readFirstLSPClientMessage(conn *websocket.Conn, cancel context.CancelFunc) <-chan lspClientRead {
+	result := make(chan lspClientRead, 1)
+	go func() {
+		_, message, err := conn.ReadMessage()
+		cancel()
+		result <- lspClientRead{message: message, err: err}
+	}()
+	return result
+}
+
+func (s *Server) handleLSPBridge(
+	conn *websocket.Conn,
+	language string,
+	binaryPath string,
+	firstClientRead <-chan lspClientRead,
+) {
 	server, err := s.startLSPServer(language, binaryPath)
 	if err != nil {
 		s.logger.Error("LSP: failed to start language server", zap.String("language", language), zap.Error(err))
@@ -230,7 +253,7 @@ func (s *Server) handleLSPBridge(conn *websocket.Conn, language, binaryPath stri
 		return
 	}
 
-	s.runLSPBridge(conn, language, server)
+	s.runLSPBridge(conn, language, server, firstClientRead)
 }
 
 // workspaceFileURI converts the task host's native workspace path into the
@@ -347,7 +370,12 @@ func (s *Server) stopLSPServerWithContext(ctx context.Context, server *lspServer
 	}
 }
 
-func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lspServerProcess) {
+func (s *Server) runLSPBridge(
+	conn *websocket.Conn,
+	language string,
+	server *lspServerProcess,
+	firstClientRead <-chan lspClientRead,
+) {
 	done := make(chan struct{})
 	server.forwarderDone = done
 
@@ -377,7 +405,15 @@ func (s *Server) runLSPBridge(conn *websocket.Conn, language string, server *lsp
 	}()
 
 	for {
-		_, msg, err := conn.ReadMessage()
+		var msg []byte
+		var err error
+		if firstClientRead != nil {
+			result := <-firstClientRead
+			firstClientRead = nil
+			msg, err = result.message, result.err
+		} else {
+			_, msg, err = conn.ReadMessage()
+		}
 		if err != nil {
 			if !websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
 				s.logger.Debug("LSP WebSocket read error", zap.String("language", language), zap.Error(err))
