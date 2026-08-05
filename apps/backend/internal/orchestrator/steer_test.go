@@ -4,11 +4,29 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type blockingQueueRepository struct {
+	messagequeue.Repository
+	insertStarted chan struct{}
+	releaseInsert chan struct{}
+	insertOnce    sync.Once
+}
+
+func (r *blockingQueueRepository) Insert(ctx context.Context, msg *messagequeue.QueuedMessage, maxPerSession int) error {
+	r.insertOnce.Do(func() {
+		close(r.insertStarted)
+		<-r.releaseInsert
+	})
+	return r.Repository.Insert(ctx, msg, maxPerSession)
+}
 
 // TestSteerEligible_GatedByFlagCapabilityAndState covers every condition the
 // steer gate depends on. The matrix is the observable contract behind the
@@ -140,6 +158,68 @@ func TestSteerTask_OrderRuleQueuesBehindPending(t *testing.T) {
 	}
 	if _, inFlight := svc.steerInFlight.Load(sessionID); inFlight {
 		t.Fatal("declined steer left an in-flight slot claimed")
+	}
+}
+
+// TestSteerTask_DoesNotOvertakeQueueWriter pins the cross-entry-point ordering
+// boundary: an ordinary queue writer that starts first must complete before a
+// steer can decide that the queue is empty and dispatch.
+func TestSteerTask_DoesNotOvertakeQueueWriter(t *testing.T) {
+	ctx := context.Background()
+	const taskID = "task-order-race"
+	const sessionID = "session-order-race"
+
+	svc, agentMgr := steerDispatchService(t, taskID, sessionID)
+	queueRepo := &blockingQueueRepository{
+		Repository:    messagequeue.NewMemoryRepository(),
+		insertStarted: make(chan struct{}),
+		releaseInsert: make(chan struct{}),
+	}
+	svc.messageQueue = messagequeue.NewService(queueRepo, 10, testLogger())
+
+	ordinaryDone := make(chan error, 1)
+	go func() {
+		_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, "ordinary first", "", "user", false, nil)
+		ordinaryDone <- err
+	}()
+	<-queueRepo.insertStarted
+
+	steerDone := make(chan struct {
+		result *PromptResult
+		err    error
+	}, 1)
+	go func() {
+		result, err := svc.SteerTask(ctx, taskID, sessionID, "steer second", "", false, nil)
+		steerDone <- struct {
+			result *PromptResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	select {
+	case result := <-steerDone:
+		close(queueRepo.releaseInsert)
+		t.Fatalf("steer completed before the earlier queue write: result=%+v err=%v", result.result, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(queueRepo.releaseInsert)
+	if err := <-ordinaryDone; err != nil {
+		t.Fatalf("ordinary queue write: %v", err)
+	}
+	result := <-steerDone
+	if result.err != nil {
+		t.Fatalf("steer: %v", result.err)
+	}
+	if result.result == nil || result.result.StopReason != steerQueuedStopReason {
+		t.Fatalf("steer result = %+v, want queued behind ordinary message", result.result)
+	}
+	if got := len(agentMgr.getCapturedSteerCalls()); got != 0 {
+		t.Fatalf("steer dispatch count = %d, want 0", got)
+	}
+	status := svc.messageQueue.GetStatus(ctx, sessionID)
+	if status == nil || status.Count != 2 || status.Entries[0].Content != "ordinary first" || status.Entries[1].Content != "steer second" {
+		t.Fatalf("queue after race = %+v, want ordinary first then steer second", status)
 	}
 }
 

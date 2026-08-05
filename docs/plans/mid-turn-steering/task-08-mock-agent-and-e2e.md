@@ -1,7 +1,7 @@
 ---
 id: "08-mock-agent-and-e2e"
 title: "Replay steering in the mock agent and cover it end to end"
-status: done
+status: in_progress
 wave: 5
 depends_on: ["04-adapter-steer-admission", "05-orchestrator-steer-admission", "07-composer-steer-affordance"]
 plan: "plan.md"
@@ -39,12 +39,19 @@ spec: "../../specs/platform/mid-turn-steering.md"
 
 ## Validation Results
 
-Re-run on 2026-08-04 against the branch merged with `main`.
+Re-run on 2026-08-05 against the branch merged with `main`.
 
-- `cd apps/backend && go test -race ./cmd/mock-agent/...`: passed.
+- `cd apps/backend && go test -race ./internal/orchestrator/messagequeue`: passed.
+- `cd apps/backend && go test -race -run 'TestSteerTask_DoesNotOvertakeQueueWriter|TestSessionKeyedEntryPointsGuardBeforeDependencies' ./internal/orchestrator`: passed.
+- `cd apps/backend && go test -race -run 'TestInitializePromptQueueingCanBeDisabled' ./cmd/mock-agent`: passed.
+- `cd apps/web && pnpm run typecheck`: passed.
 - `cd apps/web && pnpm e2e`: **not run locally** — the full Playwright suite is
-  CI-owned for this branch. CI on head `33a4dc3` passed all 14 E2E shards plus
-  the 6 container shards, which covers `e2e/tests/chat/mid-turn-steering.spec.ts`
-  (delivers-mid-turn with the flag on, queues-when-off with it off).
-- The mock agent advertises `_meta.claudeCode.promptQueueing` so the e2e session
-  negotiates steer-eligibility over the same path a real bridge uses.
+  CI-owned for this branch. The mid-turn spec now covers delivery, disabled
+  toggle, missing agent capability, and order behind an existing queue entry.
+- The mock agent advertises `_meta.claudeCode.promptQueueing` by default and can
+  suppress it with `KANDEV_MOCK_AGENT_PROMPT_QUEUEING=false`, so the capability
+  gate is exercised through the same negotiation path as a real bridge.
+
+The folded/deferred replay modes described by the first acceptance item are
+still not implemented. Keep this task in progress until the mock can drive both
+outcomes and the corresponding transcript assertions exist.

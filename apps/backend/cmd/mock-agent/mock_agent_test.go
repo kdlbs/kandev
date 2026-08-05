@@ -74,6 +74,21 @@ func TestMockAgentCancelStopsPrompt(t *testing.T) {
 	}
 }
 
+func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
+	t.Setenv("KANDEV_MOCK_AGENT_PROMPT_QUEUEING", "false")
+
+	agent := &mockAgent{}
+	response, err := agent.Initialize(context.Background(), acp.InitializeRequest{})
+	if err != nil {
+		t.Fatalf("initialize: %v", err)
+	}
+	if response.AgentCapabilities.Meta != nil {
+		if _, advertised := response.AgentCapabilities.Meta["claudeCode"]; advertised {
+			t.Fatal("prompt queueing capability advertised while disabled")
+		}
+	}
+}
+
 func TestParseModelFromArgs(t *testing.T) {
 	tests := []struct {
 		name string

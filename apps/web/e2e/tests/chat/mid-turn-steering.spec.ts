@@ -20,7 +20,7 @@ async function seedRunningGeneratingSession(
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-): Promise<SessionPage> {
+): Promise<{ session: SessionPage; taskId: string; sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -41,7 +41,8 @@ async function seedRunningGeneratingSession(
   await session.sendMessage("/sleep 20");
   await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
   await waitForActiveSessionForegroundActivity(testPage, "generating");
-  return session;
+  if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+  return { session, taskId: task.id, sessionId: task.session_id };
 }
 
 test.describe.serial("Claude mid-turn steering experiment", () => {
@@ -65,7 +66,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const session = await seedRunningGeneratingSession(
+      const { session } = await seedRunningGeneratingSession(
         testPage,
         apiClient,
         seedData,
@@ -95,7 +96,75 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
           .getByTestId("user-message-bubble")
           .filter({ hasText: "steer: change course now" }),
       ).toBeVisible({ timeout: 15_000 });
+      await expect(testPage.getByText("steer: change course now", { exact: false })).toHaveCount(
+        2,
+        { timeout: 15_000 },
+      );
       await expect(testPage.getByTestId("queue-chip")).not.toBeVisible();
+    });
+
+    test("keeps a steer behind a message that was already queued", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+        testPage,
+        apiClient,
+        seedData,
+        "Mid-turn steering queue order",
+      );
+
+      await waitForActiveSessionSupportsSteering(testPage, true);
+      await apiClient.queueMessage(taskId, sessionId, "already queued");
+
+      const chat = session.activeChat();
+      await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+
+      const editor = chat.locator(".tiptap.ProseMirror:visible");
+      await typeWhileBusy(testPage, editor, "steer after queued");
+      await testPage.getByTestId("submit-message-button").click();
+
+      await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
+      await chat.getByTestId("queue-chip").click();
+      const entries = chat.getByTestId("queued-ghost-list").getByTestId("queue-entry-text");
+      await expect(entries).toHaveCount(2, { timeout: 10_000 });
+      await expect(entries.nth(0)).toHaveText("already queued");
+      await expect(entries.nth(1)).toHaveText("steer after queued");
+    });
+  });
+
+  test.describe("capability not advertised", () => {
+    test.beforeAll(async ({ backend }) => {
+      await backend.restart({
+        KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING: "true",
+        KANDEV_MOCK_AGENT_PROMPT_QUEUEING: "false",
+      });
+    });
+
+    test.afterAll(async ({ backend }) => {
+      await backend.restart();
+    });
+
+    test("queues input when the agent does not advertise prompt queueing", async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      const { session } = await seedRunningGeneratingSession(
+        testPage,
+        apiClient,
+        seedData,
+        "Mid-turn steering capability absent",
+      );
+
+      await waitForActiveSessionSupportsSteering(testPage, false);
+      const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
+      await typeWhileBusy(testPage, editor, "capability absent follow-up");
+      await testPage.getByTestId("submit-message-button").click();
+      await expect(testPage.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });
     });
   });
 
@@ -106,7 +175,7 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       seedData,
     }) => {
       test.setTimeout(120_000);
-      const session = await seedRunningGeneratingSession(
+      const { session } = await seedRunningGeneratingSession(
         testPage,
         apiClient,
         seedData,

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
@@ -65,16 +64,6 @@ func (s *Service) steerEligibleForSession(ctx context.Context, sessionID string)
 	return s.SteerEligible(sessionID, session.State)
 }
 
-// steerAdmitLock returns the per-session mutex that serializes a steer's
-// admission decision. The queue-empty check, the single-in-flight claim, and the
-// enqueue-on-decline must happen as one critical section: without it a message
-// could enter the queue between the check and the claim and the steer would jump
-// it, and two concurrent steers could both pass the check.
-func (s *Service) steerAdmitLock(sessionID string) *sync.Mutex {
-	actual, _ := s.steerAdmitLocks.LoadOrStore(sessionID, &sync.Mutex{})
-	return actual.(*sync.Mutex)
-}
-
 // SteerTask delivers a prompt into a still-generating turn. It enforces the two
 // ordering invariants from the spec — steer only with an empty queue, and at
 // most one in-flight steer per session — then dispatches without taking the
@@ -92,6 +81,9 @@ func (s *Service) SteerTask(
 	planMode bool,
 	attachments []v1.MessageAttachment,
 ) (*PromptResult, error) {
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return nil, err
+	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || session == nil {
 		return nil, ErrSteerNotEligible
@@ -100,51 +92,51 @@ func (s *Service) SteerTask(
 		return nil, ErrSteerNotEligible
 	}
 
-	// Serialize the admission decision for this session so the ordering and
-	// single-in-flight invariants cannot race. The lock guards only the
-	// check-claim-or-enqueue critical section below; it is released before the
-	// (blocking) dispatch so a later send for the same session can make its own
-	// admission decision promptly.
-	admit := s.steerAdmitLock(sessionID)
-	admit.Lock()
-
-	// Order rule: never jump ahead of an already-queued message, and never run
-	// two steers at once. Either way, enqueue behind whatever is pending so the
-	// message is delivered in order on the next turn boundary.
-	queueNonEmpty := false
-	if status := s.messageQueue.GetStatus(ctx, sessionID); status != nil && status.Count > 0 {
-		queueNonEmpty = true
+	var (
+		admittedForDispatch bool
+		queueNonEmpty       bool
+		steerOutstanding    bool
+		admittedResult      *PromptResult
+	)
+	if err := s.messageQueue.WithSessionAdmission(ctx, sessionID, func(admittedCtx context.Context) error {
+		// Order rule: never jump ahead of an already-queued message, and never run
+		// two steers at once. Either way, enqueue behind whatever is pending so the
+		// message is delivered in order on the next turn boundary.
+		if status := s.messageQueue.GetStatus(admittedCtx, sessionID); status != nil && status.Count > 0 {
+			queueNonEmpty = true
+		}
+		_, steerOutstanding = s.steerInFlight.LoadOrStore(sessionID, struct{}{})
+		if queueNonEmpty || steerOutstanding {
+			// LoadOrStore may have installed our marker when the queue was the reason
+			// we decline; only delete it if no genuine prior steer owns it.
+			if !steerOutstanding {
+				s.steerInFlight.Delete(sessionID)
+			}
+			_, qErr := s.messageQueue.QueueMessageWithMetadata(
+				admittedCtx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser,
+				planMode, toQueuedAttachments(attachments), nil,
+			)
+			if qErr != nil {
+				return fmt.Errorf("queue steer behind pending work: %w", qErr)
+			}
+			admittedResult = &PromptResult{StopReason: steerQueuedStopReason}
+			return nil
+		}
+		admittedForDispatch = true
+		return nil
+	}); err != nil {
+		return nil, err
 	}
-	_, steerOutstanding := s.steerInFlight.LoadOrStore(sessionID, struct{}{})
-	if queueNonEmpty || steerOutstanding {
-		// LoadOrStore may have installed our marker when the queue was the reason
-		// we decline; only delete it if no genuine prior steer owns it.
-		if !steerOutstanding {
-			s.steerInFlight.Delete(sessionID)
-		}
-		// Hold the admission lock across the queue write. Releasing it first would
-		// open a window where the outstanding steer completes (clearing its
-		// in-flight slot) and a later send observes an empty queue with no
-		// in-flight claim, then dispatches ahead of this not-yet-persisted steer —
-		// breaking submission order.
-		_, qErr := s.messageQueue.QueueMessageWithMetadata(
-			ctx, sessionID, taskID, prompt, model, messagequeue.QueuedByUser,
-			planMode, toQueuedAttachments(attachments), nil,
-		)
-		admit.Unlock()
-		if qErr != nil {
-			return nil, fmt.Errorf("queue steer behind pending work: %w", qErr)
-		}
+	if !admittedForDispatch {
 		s.logger.Info("steer enqueued behind pending work",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Bool("queue_non_empty", queueNonEmpty),
 			zap.Bool("steer_outstanding", steerOutstanding))
-		return &PromptResult{StopReason: steerQueuedStopReason}, nil
+		return admittedResult, nil
 	}
-	// We now own the single in-flight slot. Release the admission lock before the
-	// blocking dispatch; clear the slot when the dispatch completes.
-	admit.Unlock()
+	// We now own the single in-flight slot. The queue admission lock is released
+	// before the blocking dispatch; clear the slot when the dispatch completes.
 	defer s.steerInFlight.Delete(sessionID)
 
 	effectivePrompt := s.effectivePromptForSession(sessionID, prompt, planMode, session)
