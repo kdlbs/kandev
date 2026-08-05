@@ -72,15 +72,9 @@ lib/api/domains/                    # API clients
 - `tasks.activeTaskId`, `tasks.activeSessionId`, `workspaces.activeId`
 - `repositories.byWorkspace`, `repositoryBranches.byRepository`
 
-Quick Chat owns two kinds of browser-visible tabs. Server-backed conversation
-tabs remain in `quickChat.sessions`; browser-local terminal descriptors live in
-`quickChat.terminalTabs` with `activeKind`, `activeTerminalTabId`, and
-`lastTerminalTabIdByWorkspace` tracking terminal selection. Terminal actions in
-`lib/state/slices/ui/quick-terminal-actions.ts` create/reuse, activate, update,
-and remove PTYs, including same-workspace fallback. Terminal descriptors are
-never sent through Quick Chat conversation rename/delete/sync APIs; explicit
-terminal removal owns stopping the PTY, while server conversation reconciliation
-must preserve the local terminal descriptors and per-workspace selection.
+Quick Chat stores server conversations in `quickChat.sessions` and browser-local terminals in
+`quickChat.terminalTabs`; `activeKind` and terminal IDs track selection. `quick-terminal-actions.ts`
+owns lifecycle/fallback; terminal descriptors never enter conversation APIs or get lost in reconciliation.
 
 **Hydration:** Go injects `window.__KANDEV_BOOT_PAYLOAD__` into the SPA shell before React mounts. `lib/state/hydration/merge-strategies.ts` has `deepMerge()`, `mergeSessionMap()`, `mergeLoadingState()` to avoid overwriting live client state. Pass `activeSessionId` to protect active sessions.
 
@@ -295,16 +289,12 @@ plugin leaks a stale registration.
   `/api/plugins/{id}/user-state/...` (`docs/decisions/2026-08-01-per-user-plugin-storage.md`).
   `subscribe` (`lib/plugins/user-state-sync.ts`) wraps `registerWsHandler` with own-plugin filtering
   and own-tab echo suppression via a per-tab `writerId`.
-- **`host.ui.RichTextEditor`/`RichTextReadOnly`** (`components/editors/tiptap/rich-text-editor.tsx`):
-  narrow Plan-panel-tiptap wrappers — don't widen their props beyond
-  `{ taskId, value, onChange, placeholder, className, testId }` / `{ value, className, testId }`
-  without updating `PLUGIN-API.md`.
+- **`host.ui.RichTextEditor`/`RichTextReadOnly`** (`components/editors/tiptap/rich-text-editor.tsx`): narrow Plan-panel-tiptap wrappers; update `PLUGIN-API.md` before widening props beyond `{ taskId, value, onChange, placeholder, className, testId }` / `{ value, className, testId }`.
 
 ## Testing notes
 
 - jsdom drops `secure` cookies over `http`, so `document.cookie` reads back empty. To assert a cookie write in a Vitest unit test, intercept the setter with `Object.defineProperty(document, "cookie", { set: ... })` and restore it after.
-- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, render under
-  `TooltipProvider` and assert the keyboard-focus path with `fireEvent.focus`. Cover pointer hover in
-  Playwright with `locator.hover()` and assert the portaled `role="tooltip"`; don't drop a hover
-  regression just because `mouseenter`/`pointerMove` failed in jsdom.
+- jsdom synthetic mouse events do not reliably open Radix Tooltip. In component tests, use
+  `TooltipProvider` and assert keyboard focus; cover pointer hover in Playwright with `locator.hover()`
+  and a visible `role="tooltip"`, keeping regressions that jsdom cannot exercise.
 - In Playwright tests, avoid strict locators that assume only one `terminal-panel` or `.xterm` exists. Mobile and dockview layouts can mount multiple terminal instances; scope to the active panel or use `.first()` / `.last()` deliberately with a comment or helper. Shared E2E helpers that inspect mounted React/DOM internals must also be scoped to the active panel/container, not global selectors, because hidden or stale mounted panels can coexist in dock/mobile layouts.
