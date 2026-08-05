@@ -211,7 +211,10 @@ function useDialogState(open: boolean, workspaceId?: string): DialogState {
         if (seq === searchSeq.current) setLoading(false);
       }
     },
-    [workspaceId, instanceId, filter],
+    // `t` is a dependency now that the precondition messages are translated:
+    // i18next hands out a new `t` per language, so omitting it would leave this
+    // closure reporting the previous locale's message after a switch.
+    [workspaceId, instanceId, filter, t],
   );
 
   return {
