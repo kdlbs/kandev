@@ -365,7 +365,7 @@ function useScopedFileSummary({
  * empty scope resolves to the primary single-repo display name, or "All
  * repos" when the workspace has multiple repos and the dialog is fanning out.
  */
-function pickRepoLabel(
+export function pickRepoLabel(
   scopedRepo: string,
   isMultiRepo: boolean,
   resolveDisplayName: (name: string) => string | undefined,
