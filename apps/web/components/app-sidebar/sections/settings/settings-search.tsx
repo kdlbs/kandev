@@ -29,9 +29,17 @@ type SettingsSearchProps = {
   layout?: "inline" | "floating";
 };
 
-/** Clears the status bar and the home-indicator inset when floating. */
-const FLOATING_OFFSET =
-  "bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--app-status-bar-height))]";
+/**
+ * Where the floating field sits.
+ *
+ * Bottom clears the status bar and the home-indicator inset. The right inset
+ * clears the config-chat button, which is `right-6 w-12` — 4.5rem of occupied
+ * edge — plus a gap, so the field ends before it instead of running underneath.
+ * The left inset mirrors that button's own, so the field and the button read as
+ * one centred row rather than two things that happen to overlap.
+ */
+const FLOATING_POSITION =
+  "bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--app-status-bar-height))] left-6 right-20";
 
 type ResultGroup = {
   id: string;
@@ -63,7 +71,7 @@ export function SettingsSearch({
       <div
         className={
           floating
-            ? `fixed inset-x-0 z-30 mx-auto w-[min(92vw,26rem)] rounded-xl border border-border bg-background p-1 shadow-lg shadow-black/20 ${FLOATING_OFFSET}`
+            ? `fixed z-30 rounded-xl border border-border bg-background p-1 shadow-lg shadow-black/20 ${FLOATING_POSITION}`
             : "sticky top-0 z-10 bg-background pb-2 md:bg-sidebar md:pb-1.5"
         }
         data-testid="settings-search"

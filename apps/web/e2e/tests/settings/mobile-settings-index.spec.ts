@@ -44,11 +44,14 @@ test.describe("Settings index on a phone", () => {
       await testPage.evaluate(() => ({ w: innerWidth, h: innerHeight })),
     ];
     expect(box).not.toBeNull();
-    // Bottom half of the viewport, and horizontally centred.
     expect(box!.y).toBeGreaterThan(viewport.h / 2);
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.h);
-    const centreOffset = Math.abs(box!.x + box!.width / 2 - viewport.w / 2);
-    expect(centreOffset).toBeLessThanOrEqual(2);
+
+    // And clear of the config-chat button, which shares that corner.
+    const chat = testPage.getByRole("button", { name: "Configuration Chat" });
+    const chatBox = await chat.boundingBox();
+    expect(chatBox).not.toBeNull();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(chatBox!.x);
 
     // Still filters the list it floats over.
     await search.getByRole("searchbox", { name: "Search settings" }).fill("terminal font size");
