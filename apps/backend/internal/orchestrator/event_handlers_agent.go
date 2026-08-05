@@ -358,6 +358,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 	// execution in this handler preserves the legacy ready-event completion
 	// boundary while still using the normal lifecycle delivery pipeline.
 	var deferredLifecycleDispatch *messagequeue.QueuedMessage
+	var deferredLifecycleReservation *queuedDispatchReservation
 	defer func() {
 		if deferredLifecycleDispatch == nil {
 			return
@@ -365,7 +366,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		if hook := s.afterReadyLifecycleReservation; hook != nil {
 			hook()
 		}
-		s.executeQueuedMessage(data.SessionID, deferredLifecycleDispatch)
+		s.executeQueuedMessageWithReservation(data.SessionID, deferredLifecycleDispatch, deferredLifecycleReservation)
 	}()
 
 	if s.isSessionResetInProgress(data.SessionID) {
@@ -556,7 +557,7 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			// still owns the same guard used by all drains. Deferring this mark
 			// until after guard release lets a competing manual drain reserve the
 			// same durable row and begin a duplicate delivery attempt.
-			s.markQueuedDispatchInFlight(data.SessionID, queuedMsg.ID)
+			deferredLifecycleReservation = s.markQueuedDispatchInFlightWithSource(data.SessionID, queuedMsg.ID, queuedMsg)
 			deferredLifecycleDispatch = queuedMsg
 			return
 		}
@@ -619,21 +620,26 @@ func (s *Service) recordQueuedUserMessage(ctx context.Context, queuedMsg *messag
 }
 
 func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messagequeue.QueuedMessage) {
+	s.executeQueuedMessageWithReservation(callerSessionID, queuedMsg, nil)
+}
+
+func (s *Service) executeQueuedMessageWithReservation(
+	callerSessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+	reservation *queuedDispatchReservation,
+) {
 	promptCtx := context.Background() // Use a fresh context for async execution
 	reservedSessionID := queuedMsg.SessionID
 	defer s.clearQueuedDispatchInFlightIfCurrent(reservedSessionID, queuedMsg.ID)
 	lifecyclePrompt := isLifecycleAutomationOrigin(queuedMsg.Metadata["origin"])
 
-	// Safety net: guarantee the in-flight marker (set by
-	// dispatchTakenQueuedMessage before spawning this goroutine — see the
-	// Service.dispatchingQueued field doc comment) is cleared on every exit
-	// path, including the early reset-in-progress return below, PROVIDED
-	// this goroutine still owns it (compare-and-delete keyed on this
-	// entry's own ID) — the primary claim-and-clear happens deterministically
-	// inside promptTask's guarded claim step, right before setSessionRunning
-	// further down; this defer only catches paths that return before
-	// reaching it, or a losing claim that must not touch a newer dispatch's
-	// marker.
+	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
+		promptCtx, callerSessionID, queuedMsg, reservation,
+	)
+	if handoffDone {
+		return
+	}
+
 	if s.isSessionResetInProgress(queuedMsg.SessionID) {
 		s.logger.Warn("queued message execution deferred due to context reset in progress",
 			zap.String("session_id", callerSessionID),
@@ -694,27 +700,43 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		s.processOnTurnStartViaEngine(promptCtx, queuedMsg.TaskID, session)
 	}
 
-	// Call the internal promptTask directly (not the public PromptTask
-	// wrapper), passing this entry's own ID as the claim token — see
-	// promptTask's doc comment and the Service.dispatchingQueued field doc
-	// comment for the guarded claim-then-mark-RUNNING step this enables,
-	// and for why a bare, unguarded check-then-clear would not be enough.
-	var afterClaim func() error
-	if lifecyclePrompt {
-		afterClaim = func() error {
-			if !s.lifecycleQueuedDispatchIsCurrent(promptCtx, queuedMsg) {
-				return errLifecyclePromptReservationSuperseded
-			}
-			return s.recordQueuedUserMessage(promptCtx, queuedMsg, attachments)
-		}
-	}
-	claimEntryID := ""
-	if s.isQueuedDispatchInFlight(queuedMsg.SessionID) {
-		claimEntryID = queuedMsg.ID
-	}
+	// Call promptTask with this entry's ID as a second ownership check. The
+	// worker already claimed the handoff before visible side effects; promptTask
+	// revalidates that ownership while it marks the session RUNNING.
+	afterClaim := s.queuedLifecycleAfterClaim(promptCtx, queuedMsg, attachments, lifecyclePrompt)
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
 		claimEntryID, lifecyclePrompt, afterClaim)
+	s.finishQueuedMessageExecution(
+		promptCtx, callerSessionID, reservedSessionID, queuedMsg,
+		lifecyclePrompt, userMessageRecorded, err,
+	)
+}
+
+func (s *Service) queuedLifecycleAfterClaim(
+	ctx context.Context,
+	queuedMsg *messagequeue.QueuedMessage,
+	attachments []v1.MessageAttachment,
+	lifecyclePrompt bool,
+) func() error {
+	if !lifecyclePrompt {
+		return nil
+	}
+	return func() error {
+		if !s.lifecycleQueuedDispatchIsCurrent(ctx, queuedMsg) {
+			return errLifecyclePromptReservationSuperseded
+		}
+		return s.recordQueuedUserMessage(ctx, queuedMsg, attachments)
+	}
+}
+
+func (s *Service) finishQueuedMessageExecution(
+	ctx context.Context,
+	callerSessionID, reservedSessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+	lifecyclePrompt, userMessageRecorded bool,
+	err error,
+) {
 	if errors.Is(err, errLifecyclePromptReservationSuperseded) {
 		s.logger.Info("discarding stale lifecycle dispatch after final claim",
 			zap.String("session_id", callerSessionID),
@@ -723,16 +745,16 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 		return
 	}
 	if errors.Is(err, errLifecyclePromptInactive) {
-		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
+		s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
 		return
 	}
 	var reselected *lifecyclePromptReselectedError
 	if errors.As(err, &reselected) {
 		queuedMsg.SessionID = reselected.sessionID
 		if s.requeueLifecycleMessage(
-			promptCtx, queuedMsg, queuedMsg.QueuedBy, messageCoalesceKey(queuedMsg),
+			ctx, queuedMsg, queuedMsg.QueuedBy, messageCoalesceKey(queuedMsg),
 		) {
-			s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
+			s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
 		}
 		return
 	}
@@ -747,50 +769,112 @@ func (s *Service) executeQueuedMessage(callerSessionID string, queuedMsg *messag
 			zap.String("session_id", callerSessionID),
 			zap.String("task_id", queuedMsg.TaskID),
 			zap.String("queue_id", queuedMsg.ID))
-		s.requeueMessage(promptCtx, queuedMsg, "superseded-by-newer-dispatch")
+		s.requeueMessage(ctx, queuedMsg, "superseded-by-newer-dispatch")
 		return
 	}
 	if err != nil {
-		s.logger.Error("failed to execute queued message",
-			zap.String("session_id", callerSessionID),
-			zap.String("task_id", queuedMsg.TaskID),
-			zap.String("queue_id", queuedMsg.ID),
-			zap.Error(err))
-
-		manualRecovery := isManualRecoveryPromptError(err)
-		if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
-			errors.Is(err, errLifecyclePromptMessagePersistence) ||
-			isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
-			errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
-			if userMessageRecorded {
-				markQueuedUserMessageRecorded(queuedMsg)
-			}
-			s.logger.Warn("queued message execution failed; requeueing",
-				zap.String("session_id", callerSessionID),
-				zap.String("task_id", queuedMsg.TaskID),
-				zap.String("queue_id", queuedMsg.ID),
-				zap.Bool("manual_recovery", manualRecovery))
-			if manualRecovery {
-				s.restoreQueuedMessage(promptCtx, queuedMsg)
-			} else {
-				s.requeueMessage(promptCtx, queuedMsg, "workflow-auto-start-retry")
-			}
-			return
-		}
-
-		// TODO: Implement dead letter queue for failed queued messages
-		// Currently, failed messages are lost. Consider:
-		// 1. Retry mechanism with exponential backoff
-		// 2. Persist failed messages to database for manual intervention
-		// 3. Notification to user about failed queue execution
-		s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
-			zap.String("session_id", callerSessionID),
-			zap.String("queue_id", queuedMsg.ID),
-			zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+		s.handleQueuedMessageExecutionError(
+			ctx, callerSessionID, queuedMsg, lifecyclePrompt, userMessageRecorded, err,
+		)
 		return
 	}
 	if lifecyclePrompt {
-		s.acknowledgeLifecycleQueueEntry(promptCtx, reservedSessionID, queuedMsg)
+		s.acknowledgeLifecycleQueueEntry(ctx, reservedSessionID, queuedMsg)
+	}
+}
+
+func (s *Service) handleQueuedMessageExecutionError(
+	ctx context.Context,
+	callerSessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+	lifecyclePrompt, userMessageRecorded bool,
+	err error,
+) {
+	s.logger.Error("failed to execute queued message",
+		zap.String("session_id", callerSessionID),
+		zap.String("task_id", queuedMsg.TaskID),
+		zap.String("queue_id", queuedMsg.ID),
+		zap.Error(err))
+
+	manualRecovery := isManualRecoveryPromptError(err)
+	if lifecyclePrompt || errors.Is(err, errLifecyclePromptClaim) ||
+		errors.Is(err, errLifecyclePromptMessagePersistence) ||
+		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
+		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) {
+		if userMessageRecorded {
+			markQueuedUserMessageRecorded(queuedMsg)
+		}
+		s.logger.Warn("queued message execution failed; requeueing",
+			zap.String("session_id", callerSessionID),
+			zap.String("task_id", queuedMsg.TaskID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Bool("manual_recovery", manualRecovery))
+		if manualRecovery {
+			s.restoreQueuedMessage(ctx, queuedMsg)
+		} else {
+			s.requeueMessage(ctx, queuedMsg, "workflow-auto-start-retry")
+		}
+		return
+	}
+
+	// TODO: Implement dead letter queue for failed queued messages
+	// Currently, failed messages are lost. Consider:
+	// 1. Retry mechanism with exponential backoff
+	// 2. Persist failed messages to database for manual recovery
+	// 3. Notification to user about failed queue execution
+	s.logger.Warn("queued message execution failed - message is lost (no retry/dead letter queue)",
+		zap.String("session_id", callerSessionID),
+		zap.String("queue_id", queuedMsg.ID),
+		zap.String("content_preview", queuedMsg.Content[:min(50, len(queuedMsg.Content))]))
+}
+
+// claimQueuedMessageHandoff resolves direct/test reservations and claims the
+// worker's ownership before executeQueuedMessage performs visible side effects.
+// The bool return is true when the caller must stop because another dispatch
+// already won or the reservation could not be claimed.
+func (s *Service) claimQueuedMessageHandoff(
+	ctx context.Context,
+	callerSessionID string,
+	queuedMsg *messagequeue.QueuedMessage,
+	reservation *queuedDispatchReservation,
+) (string, bool) {
+	reservedSessionID := queuedMsg.SessionID
+	if reservation == nil {
+		pending := s.pendingQueuedDispatch(reservedSessionID)
+		accepted := s.acceptedQueuedDispatchForSession(reservedSessionID)
+		switch {
+		case pending != nil && pending.entryID == queuedMsg.ID:
+			reservation = pending
+		case accepted != nil && accepted.entryID == queuedMsg.ID:
+			reservation = accepted
+		case pending != nil || accepted != nil:
+			s.requeueMessage(ctx, queuedMsg, "superseded-by-newer-dispatch")
+			return "", true
+		}
+	}
+	if reservation == nil {
+		return "", false
+	}
+
+	tracked, claimErr := s.claimQueuedDispatchForExecution(reservedSessionID, queuedMsg.ID, reservation)
+	switch {
+	case errors.Is(claimErr, errQueuedDispatchSupersededBySendNow):
+		// Send Now restored and claimed this exact source; the stale FIFO worker
+		// must not requeue it or create any visible side effects.
+		return "", true
+	case errors.Is(claimErr, errQueuedDispatchSuperseded):
+		s.requeueMessage(ctx, queuedMsg, "superseded-by-newer-dispatch")
+		return "", true
+	case claimErr != nil:
+		s.logger.Warn("failed to claim queued dispatch ownership",
+			zap.String("session_id", callerSessionID),
+			zap.String("queue_id", queuedMsg.ID),
+			zap.Error(claimErr))
+		return "", true
+	case tracked:
+		return queuedMsg.ID, false
+	default:
+		return "", false
 	}
 }
 

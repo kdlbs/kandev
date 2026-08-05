@@ -3,11 +3,14 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 func TestSelectSendNowEntriesUsesExactEntryOrSnapshot(t *testing.T) {
@@ -128,6 +131,9 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 		t.Fatalf("claim replacement sources: %v", err)
 	}
 
+	// Production dispatch registers the handoff before starting the worker;
+	// preserve that ownership precondition for this direct worker test.
+	svc.markQueuedDispatchInFlight("session-1", claimed.Dispatch.ID)
 	svc.executeSendNowClaim(claimed)
 	if len(messageCreator.userMessages) != 1 {
 		t.Fatalf("replacement retry created %d user messages, want 1", len(messageCreator.userMessages))
@@ -141,4 +147,137 @@ func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
 			t.Fatalf("restored source %q lost user_message_recorded marker: %#v", entry.ID, entry.Metadata)
 		}
 	}
+}
+
+func TestSendQueuedNowSupersedesPendingFIFOHandoff(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		promptDone:             make(chan struct{}),
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+
+	reservationMetadata := map[string]interface{}{
+		messagequeue.MetadataLifecycleDurable: true,
+	}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "session-1", "task-1", "first queued", "", messagequeue.QueuedByWorkflow, false, nil, reservationMetadata,
+	); err != nil {
+		t.Fatalf("queue first message: %v", err)
+	}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, "session-1", "task-1", "second queued", "", messagequeue.QueuedByUser, false, nil, nil,
+	); err != nil {
+		t.Fatalf("queue second message: %v", err)
+	}
+
+	reserved, ok := svc.messageQueue.ReserveQueued(ctx, "session-1")
+	if !ok || reserved == nil || reserved.Content != "first queued" {
+		t.Fatalf("reserve FIFO head: message=%#v ok=%v", reserved, ok)
+	}
+	reservation := svc.markQueuedDispatchInFlightWithSource("session-1", reserved.ID, reserved)
+
+	sent, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeAll, "")
+	if err != nil {
+		t.Fatalf("send now: %v", err)
+	}
+	if sent != 2 {
+		t.Fatalf("send now sent_count = %d, want 2", sent)
+	}
+	// The real FIFO worker may already be runnable when Send Now wins. Run its
+	// stale handoff synchronously here as well: it must observe the superseded
+	// phase and neither requeue the durable source nor create side effects.
+	svc.executeQueuedMessageWithReservation("session-1", reserved, reservation)
+
+	select {
+	case <-agentMgr.promptDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for aggregate replacement prompt")
+	}
+	if len(agentMgr.capturedPrompts) != 1 {
+		t.Fatalf("replacement prompt count = %d, want 1", len(agentMgr.capturedPrompts))
+	}
+	if got := agentMgr.capturedPrompts[0]; got != "first queued\n\nsecond queued" {
+		t.Fatalf("replacement prompt = %q, want FIFO aggregate", got)
+	}
+	if !strings.Contains(agentMgr.capturedPrompts[0], "first queued") ||
+		!strings.Contains(agentMgr.capturedPrompts[0], "second queued") {
+		t.Fatalf("replacement prompt lost a queued body: %q", agentMgr.capturedPrompts[0])
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "session-1").Count; got != 0 {
+		t.Fatalf("queue count after aggregate dispatch = %d, want 0", got)
+	}
+	if got := len(svc.messageCreator.(*mockMessageCreator).userMessages); got != 1 {
+		t.Fatalf("visible replacement message count = %d, want 1", got)
+	}
+}
+
+func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	promptEntered := make(chan struct{})
+	allowPrompt := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+		promptAgentFunc: func(context.Context, string, string, []v1.MessageAttachment, bool) (*executor.PromptResult, error) {
+			close(promptEntered)
+			<-allowPrompt
+			return &executor.PromptResult{}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.messageCreator = &mockMessageCreator{}
+
+	for _, content := range []string{"first queued", "second queued"} {
+		if _, err := svc.messageQueue.QueueMessageWithMetadata(
+			ctx, "session-1", "task-1", content, "", messagequeue.QueuedByUser, false, nil, nil,
+		); err != nil {
+			t.Fatalf("queue %q: %v", content, err)
+		}
+	}
+	if !svc.drainQueuedMessageForPromptableSession(ctx, "session-1") {
+		t.Fatal("normal FIFO drain did not start")
+	}
+	<-promptEntered
+
+	if _, err := svc.SendQueuedNow(ctx, "session-1", QueueSendNowScopeAll, ""); !errors.Is(err, ErrSendNowConflict) {
+		t.Fatalf("send now error = %v, want %v", err, ErrSendNowConflict)
+	}
+	if got := agentMgr.cancelAgentCalls.Load(); got != 0 {
+		t.Fatalf("send now cancelled accepted FIFO turn %d times, want 0", got)
+	}
+	status := svc.messageQueue.GetStatus(ctx, "session-1")
+	if status.Count != 1 || status.Entries[0].Content != "second queued" {
+		t.Fatalf("remaining queue = %#v, want second queued only", status.Entries)
+	}
+
+	close(allowPrompt)
 }

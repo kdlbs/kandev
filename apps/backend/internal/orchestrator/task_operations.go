@@ -3096,13 +3096,12 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 }
 
 // promptTask is PromptTask's implementation, taking an additional
-// claimEntryID parameter used only by executeQueuedMessage's internal
-// call. When non-empty, this acquires sessionID's cancelInFlight guard
-// around a "confirm I still own this dispatch, then mark the session
-// RUNNING" step, immediately before startTurnForSession and the
-// (potentially long-blocking) executor.Prompt call below it — see
-// isCurrentQueuedDispatch and the Service.dispatchingQueued field doc
-// comment for the race this closes.
+// claimEntryID parameter used only by queued dispatches. When non-empty, this
+// acquires sessionID's cancelInFlight guard around a second ownership check
+// and the "mark the session RUNNING" step immediately before startTurnForSession
+// and the (potentially long-blocking) executor.Prompt call below it. The worker
+// claims the handoff before visible side effects; this check keeps the final
+// session transition tied to that same ownership record.
 //
 // A bare (unguarded) "check the token, then separately call
 // setSessionRunning" would still let two settling dispatches for the same
@@ -3118,10 +3117,10 @@ func (s *Service) PromptTask(ctx context.Context, taskID, sessionID string, prom
 // bounded-hold-time contract in this file.
 //
 // Every return path *before* this step (invalid session, not promptable,
-// ensureSessionRunning failure, a model switch) never claims anything —
-// those are covered by executeQueuedMessage's own deferred cleanup
-// instead (clearQueuedDispatchInFlightIfCurrent), which is safe since
-// none of them block on an agent turn.
+// ensureSessionRunning failure, a model switch) is covered by
+// executeQueuedMessage's own deferred cleanup instead
+// (clearQueuedDispatchInFlightIfCurrent), which is safe since none of them
+// block on an agent turn.
 func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prompt string, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool, claimEntryID string, lifecyclePrompt bool, afterClaim func() error) (*PromptResult, error) {
 	s.logPromptTaskCall(taskID, sessionID, prompt, model, planMode, attachments, dispatchOnly)
 	if err := s.validatePromptTaskStart(sessionID); err != nil {
@@ -3573,10 +3572,9 @@ func (e *lifecyclePromptReselectedError) Error() string {
 // this turn" decision atomic with coordinator stop; the potentially blocking
 // executor.Prompt call remains outside the guard.
 //
-// When claimEntryID is set (a queued dispatch claiming its reserved token —
-// see the Service.dispatchingQueued field doc comment), the claim happens
-// under the same per-session cancelInFlightGuard every other cancel/take-
-// and-dispatch decision in this file serializes through. Re-verifying
+// When claimEntryID is set, the final claim happens under the same per-session
+// cancelInFlightGuard every other cancel/take-and-dispatch decision in this
+// file serializes through. Re-verifying
 // ownership *and* promptability inside this same critical section,
 // immediately before writing RUNNING, closes a gap that checking the token
 // alone would leave open: nothing would otherwise stop this call from
@@ -3625,15 +3623,11 @@ func (s *Service) claimSessionRunningForPrompt(
 			State:     freshSession.State,
 		}
 	}
-	// Clear the token now, inside the same lock, rather than deferring to
-	// executeQueuedMessage's cleanup after this entire (potentially
-	// long-blocking) call returns: from this point session.State is the
-	// authoritative "busy" signal for this dispatch, so holding the marker
-	// any longer would only risk the natural agent.ready firing when *this*
-	// turn completes seeing it still set and skipping the *next* queued
-	// entry — see the Service.dispatchingQueued field doc comment.
+	// Remove only the pre-acceptance marker here. The accepted ownership record
+	// remains until the turn settles, so Send Now cannot cancel or duplicate
+	// this successor while the executor call is still in progress.
 	if claimEntryID != "" {
-		s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+		s.releaseQueuedDispatchPendingIfCurrent(sessionID, claimEntryID)
 	}
 	return freshSession, nil
 }
@@ -3679,7 +3673,7 @@ func (s *Service) claimLifecycleSessionRunning(
 		s.restoreLifecycleClaim(ctx, taskID, sessionID, claim.PreviousState)
 		return nil, "", errLifecyclePromptInactive
 	}
-	s.clearQueuedDispatchInFlightIfCurrent(sessionID, claimEntryID)
+	s.releaseQueuedDispatchPendingIfCurrent(sessionID, claimEntryID)
 	return freshSession, claim.PreviousState, nil
 }
 

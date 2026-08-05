@@ -42,6 +42,12 @@ follow-up, without completing or advancing the task's workflow step.
   session uses the existing backend-owned cancellation progress, cancels only
   the turn observed when the action began, and starts the replacement turn
   after cancellation settles.
+- If ordinary FIFO delivery has reserved a queued entry but has not yet
+  accepted its prompt, Send Now wins that same-session handoff. The reserved
+  source is restored before the requested selection is claimed, so an
+  all-scope replacement can include it in one aggregate prompt. Once FIFO has
+  accepted its prompt, Send Now fails closed with `send_now_conflict`; it does
+  not duplicate or cancel that successor turn.
 - Send Now is a replacement/steering cancellation. It does not create the
   ordinary **Turn cancelled** message, move the task to review, evaluate
   `cancel_triggers_turn_complete`, or run the cancelled turn's
@@ -125,11 +131,20 @@ visible entry IDs before beginning cancellation. All validation and aggregation
 limits are checked before the cancellation signal is sent.
 
 The cancel-and-dispatch decision uses the shared per-session cancellation and
-queue-take serialization point. After a successful cancellation, the backend
-atomically claims exactly the selected ID or the complete bulk snapshot. New
-messages accepted after the snapshot remain queued. A missing or newly
-ineligible bulk member fails the whole claim; the backend never sends a partial
-bulk result or substitutes the FIFO head for a missing selected entry.
+queue-take serialization point. An ordinary FIFO handoff has an explicit
+pre-acceptance phase: Send Now may supersede that reservation while the worker
+has not claimed prompt ownership, but the worker must claim ownership before
+creating a visible user message, running turn-start workflow effects, or
+accepting the agent prompt. After that claim, the handoff is terminal for Send
+Now and the existing conflict response applies.
+
+When Send Now supersedes a pre-acceptance FIFO reservation, the backend
+restores that exact source (including clearing a durable lifecycle
+reservation), then atomically claims exactly the selected ID or the complete
+bulk snapshot. New messages accepted after the snapshot remain queued. A
+missing or newly ineligible bulk member fails the whole claim; the backend
+never sends a partial bulk result or substitutes the FIFO head for a missing
+selected entry.
 
 Ordinary entries are removed when claimed, matching normal queue delivery.
 Durable lifecycle entries remain reserved until the combined prompt is
@@ -153,6 +168,11 @@ releases every durable reservation before publishing queue status.
 - **Selection changes during cancellation:** the active turn may already be
   cancelled, but no replacement is dispatched from a partial or different
   selection. The UI refetches and asks the user to retry.
+- **FIFO handoff race:** if normal FIFO delivery reserved the head but has not
+  accepted its prompt, Send Now restores/reclaims that reservation and
+  dispatches the requested exact selection. If FIFO already accepted the
+  prompt, Send Now returns `send_now_conflict`; it leaves that successor and
+  the remaining queue authoritative rather than creating a duplicate turn.
 - **Prompt admission fails after claim:** the backend restores the original
   entries and their FIFO positions before publishing status. Existing ordinary
   queue delivery retains its current process-crash window after a destructive
@@ -196,6 +216,15 @@ releases every durable reservation before publishing queue status.
 - **GIVEN** the session is already promptable with queued work, **WHEN** the user
   clicks either Send Now action, **THEN** the requested selection starts without
   issuing a cancellation.
+- **GIVEN** a promptable session has two queued messages and normal FIFO
+  delivery has reserved the first one but has not accepted its prompt, **WHEN**
+  the user clicks header Send Now, **THEN** the FIFO reservation is restored,
+  both messages are claimed in FIFO order, and exactly one replacement prompt
+  contains both bodies.
+- **GIVEN** normal FIFO delivery has already accepted its successor prompt,
+  **WHEN** the user clicks Send Now, **THEN** the action fails closed without a
+  duplicate user message, duplicate prompt, or cancellation of that successor,
+  and the authoritative remaining queue is preserved.
 - **GIVEN** the workflow step enables `cancel_triggers_turn_complete`, **WHEN**
   the user sends a queued message now, **THEN** the task stays on the same step
   and only the replacement turn's ordinary lifecycle hooks may change it.
@@ -213,7 +242,8 @@ releases every durable reservation before publishing queue status.
 - Choosing a different model or plan mode for the bulk turn.
 - Sending an arbitrary user-selected subset other than one entry or all visible
   pending entries.
-- Changing normal FIFO auto-drain, **Run next**, **Remove**, **Clear all**, edit,
-  or merge semantics.
+- Changing normal FIFO auto-drain selection or **Run next**, **Remove**, **Clear
+  all**, edit, or merge semantics. FIFO participates in Send Now handoff
+  arbitration only until its prompt is accepted.
 - Making ordinary queued-message dispatch crash-durable after its existing
   destructive claim boundary.

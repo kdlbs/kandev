@@ -354,6 +354,12 @@ test.describe("Task session queue", () => {
     await expect(transcript).toContainText("bulk first", { timeout: 20_000 });
     await expect(transcript).toContainText("bulk second");
     await expect(transcript).toContainText("bulk third");
+    const aggregateUserBubble = transcript
+      .getByTestId("user-message-bubble")
+      .filter({ hasText: "bulk first" });
+    await expect(aggregateUserBubble).toHaveCount(1);
+    await expect(aggregateUserBubble).toContainText("bulk second");
+    await expect(aggregateUserBubble).toContainText("bulk third");
     const transcriptText = await transcript.innerText();
     expect(transcriptText.indexOf("bulk first")).toBeLessThan(
       transcriptText.indexOf("bulk second"),

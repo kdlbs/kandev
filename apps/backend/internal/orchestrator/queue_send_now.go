@@ -67,8 +67,29 @@ func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID s
 		release()
 	}()
 
-	if s.currentCancellation(sessionID) != nil || s.isQueuedDispatchInFlight(sessionID) {
+	if s.currentCancellation(sessionID) != nil || s.isQueuedDispatchAccepted(sessionID) {
 		return 0, ErrSendNowConflict
+	}
+	if s.isQueuedDispatchInFlight(sessionID) {
+		reserved, err := s.supersedeQueuedDispatchForSendNow(sessionID)
+		if err != nil {
+			return 0, err
+		}
+		if reserved == nil {
+			return 0, ErrSendNowConflict
+		}
+		restore := &messagequeue.SendNowClaim{
+			Sources: []messagequeue.QueuedMessage{*reserved},
+		}
+		if err := s.messageQueue.RestoreSendNowClaim(ctx, restore); err != nil {
+			s.logger.Warn("failed to restore FIFO reservation for send now",
+				zap.String("session_id", sessionID),
+				zap.String("queue_id", reserved.ID),
+				zap.Error(err),
+			)
+			s.publishQueueStatusEvent(ctx, sessionID)
+			return 0, ErrSendNowQueueChanged
+		}
 	}
 	if err := s.verifySendNowTurn(ctx, sessionID, turnBefore); err != nil {
 		return 0, err
@@ -244,6 +265,15 @@ func (s *Service) executeSendNowClaim(claim *messagequeue.SendNowClaim) {
 		s.publishQueueStatusEvent(ctx, sessionID)
 	}
 	if s.isSessionResetInProgress(sessionID) {
+		restore()
+		return
+	}
+	tracked, claimErr := s.claimQueuedDispatchForExecution(sessionID, claim.Dispatch.ID, nil)
+	if !tracked || claimErr != nil {
+		if claimErr != nil {
+			s.logger.Warn("send-now dispatch lost prompt ownership; restoring queue claim",
+				zap.String("session_id", sessionID), zap.Error(claimErr))
+		}
 		restore()
 		return
 	}

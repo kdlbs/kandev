@@ -502,34 +502,14 @@ type Service struct {
 	// Active turns map: sessionID -> turnID
 	activeTurns sync.Map
 
-	// dispatchingQueued tracks, per session, the entry ID of whichever
-	// queued message was most recently taken and handed off to the async
-	// executeQueuedMessage goroutine, but hasn't yet reached promptTask's
-	// own setSessionRunning call — the only point at which session.State
-	// itself starts correctly reporting "busy" for that dispatch. Without
-	// this, a second take-and-dispatch decision for the same session (a
-	// workflow drain, a manual drain, or another parent interrupt) could
-	// acquire the cancelInFlight guard in that gap, see the still-idle
-	// session.State, and dispatch a second, unrelated queued entry before
-	// the first dispatch's turn has even started.
-	//
-	// Stores the entry ID (string), not a bool: a newer dispatch for the
-	// same session (e.g. a second parent interrupt cancelling and
-	// re-taking) always supersedes an older one that's still settling —
-	// markQueuedDispatchInFlight unconditionally overwrites. Each
-	// goroutine must reconfirm it still owns *its own* entry ID
-	// (isCurrentQueuedDispatch) immediately before calling
-	// setSessionRunning, and may only clear the marker via a
-	// compare-and-delete keyed on that same entry ID
-	// (clearQueuedDispatchInFlightIfCurrent) — otherwise a superseded
-	// goroutine finishing late could delete a newer dispatch's marker out
-	// from under it, or proceed to prompt after it no longer owns the
-	// session. Non-cancelling take-and-dispatch paths
-	// (drainQueuedMessageForPromptableSessionLocked, takeIfPromptableLocked)
-	// instead use isQueuedDispatchInFlight, which only asks "is *anything*
-	// still settling" — they have no cancel to supersede it with, so any
-	// in-flight dispatch at all is reason enough to defer.
-	dispatchingQueued sync.Map
+	// dispatchingQueued tracks the pre-acceptance reservation for the exact
+	// queued message handed to an async worker. acceptedQueuedDispatch keeps
+	// the same ownership visible after the worker claims RUNNING until its turn
+	// settles, so Send Now cannot cancel or duplicate a successor that FIFO has
+	// already accepted. The two maps are managed by queued_dispatch.go and are
+	// arbitrated through cancelInFlight.
+	dispatchingQueued      sync.Map
+	acceptedQueuedDispatch sync.Map
 
 	// afterReadyLifecycleReservation is a deterministic test seam for the
 	// narrow interval after handleAgentReady releases its per-session guard
@@ -1272,6 +1252,7 @@ func (s *Service) startTurnForSessionWithOwnership(ctx context.Context, sessionI
 // query the DB for any open turn and close it. Loops to mop up multiple
 // zombies (e.g. left over from before this fix) with a small sanity bound.
 func (s *Service) completeTurnForSession(ctx context.Context, sessionID string) {
+	s.clearAcceptedQueuedDispatch(sessionID)
 	s.completeTurnForTaskSession(ctx, "", sessionID)
 }
 
@@ -1486,74 +1467,6 @@ func (s *Service) peekActiveTurnID(ctx context.Context, sessionID string) (strin
 		return "", nil
 	}
 	return turn.ID, nil
-}
-
-// markQueuedDispatchInFlight records that entryID — a specific queued
-// message — has been taken and handed off to the async
-// executeQueuedMessage goroutine for sessionID. Unconditionally
-// overwrites any previous entry for the session: a newer dispatch always
-// supersedes an older one that's still settling. See the
-// Service.dispatchingQueued field doc comment for why this exists:
-// session.State alone doesn't reflect "busy" until that goroutine's own
-// promptTask call reaches setSessionRunning, several DB round-trips
-// later — and for why the token must be the specific entry ID, not a bare
-// bool.
-func (s *Service) markQueuedDispatchInFlight(sessionID, entryID string) {
-	if sessionID == "" {
-		return
-	}
-	s.dispatchingQueued.Store(sessionID, entryID)
-}
-
-// clearQueuedDispatchInFlightIfCurrent removes sessionID's in-flight
-// marker only if it still names entryID — a compare-and-delete so a
-// goroutine whose own dispatch has since been superseded by a newer one
-// (a different entryID overwrote the marker) can never clear the
-// *newer* dispatch's marker out from under it. Called by
-// executeQueuedMessage via defer so the marker is cleared on every exit
-// path (success, transient requeue, superseded, or lost/dropped message)
-// — but only when this goroutine is still the current owner.
-func (s *Service) clearQueuedDispatchInFlightIfCurrent(sessionID, entryID string) {
-	if sessionID == "" {
-		return
-	}
-	s.dispatchingQueued.CompareAndDelete(sessionID, entryID)
-}
-
-// isCurrentQueuedDispatch reports whether entryID is still the most
-// recently handed-off in-flight dispatch for sessionID — i.e. no *other*
-// dispatch has superseded it since markQueuedDispatchInFlight was called
-// for it. A goroutine that owns entryID must confirm this immediately
-// before calling setSessionRunning (see promptTask's claimDispatch
-// parameter); if it no longer owns the token, a different dispatch has
-// already taken over the session and this one must not proceed.
-func (s *Service) isCurrentQueuedDispatch(sessionID, entryID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	v, ok := s.dispatchingQueued.Load(sessionID)
-	if !ok {
-		return false
-	}
-	current, _ := v.(string)
-	return current == entryID
-}
-
-// isQueuedDispatchInFlight reports whether *any* queued message is
-// currently in the handoff window for sessionID, regardless of which one
-// — see markQueuedDispatchInFlight. Checked by
-// drainQueuedMessageForPromptableSessionLocked and takeIfPromptableLocked
-// before either takes and directly dispatches another entry on the same
-// session without a cancel to supersede whatever is already settling; a
-// genuine cancel (cancelAndTakeForPeerMessage) is exempt — see its own
-// doc comment for why it may proceed regardless and simply overwrite the
-// token via markQueuedDispatchInFlight.
-func (s *Service) isQueuedDispatchInFlight(sessionID string) bool {
-	if sessionID == "" {
-		return false
-	}
-	_, ok := s.dispatchingQueued.Load(sessionID)
-	return ok
 }
 
 func (s *Service) setSessionResetInProgress(sessionID string, inProgress bool) {
