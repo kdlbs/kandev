@@ -102,15 +102,54 @@ function AppSidebarNavigation({ collapsed, inOffice, settingsMode }: AppSidebarN
  * Desktop-only (`hidden md:block`) — mobile surfaces carry their own nav (mobile
  * headers and menu sheets), so the global rail never overlays mobile content.
  */
+/**
+ * The transient settings takeover, kept aligned with route ownership. It is
+ * intentionally not persisted, so a direct reload on `/settings/...` has to
+ * enter it from the current pathname.
+ *
+ * Keyed on actual pathname changes, and only forced when *entering* the settings
+ * surface: moving within it must not reopen a takeover the user closed. Leaving
+ * it closes the takeover unless the user's own toggle was the thing that
+ * navigated (`togglePathnameRef`), because history updates before React renders
+ * the new pathname.
+ */
+function useSettingsTakeover(pathname: string | null) {
+  const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
+  const setSettingsMode = useAppStore((s) => s.setAppSidebarSettingsMode);
+  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
+  const togglePathnameRef = useRef<string | null>(null);
+  const prevPathnameRef = useRef<string | null>(null);
+
+  const toggle = useCallback(() => {
+    togglePathnameRef.current = window.location.pathname;
+    toggleSettingsMode();
+  }, [toggleSettingsMode]);
+
+  useEffect(() => {
+    if (!pathname || prevPathnameRef.current === pathname) return;
+    const cameFromSettings = isSettingsRoute(prevPathnameRef.current);
+    prevPathnameRef.current = pathname;
+    if (isSettingsRoute(pathname)) {
+      togglePathnameRef.current = null;
+      // `/settings` handing off to the last page visited (see `SettingsIndex`)
+      // is a settings-to-settings navigation, and so is every tree click.
+      if (!settingsMode && !cameFromSettings) setSettingsMode(true);
+      return;
+    }
+    if (settingsMode && togglePathnameRef.current !== pathname) {
+      setSettingsMode(false);
+    }
+  }, [pathname, settingsMode, setSettingsMode]);
+
+  return { settingsMode, toggleSettingsMode: toggle };
+}
+
 export function AppSidebar() {
   const collapsed = useAppStore((s) => s.appSidebar.collapsed);
-  const settingsMode = useAppStore((s) => s.appSidebar.settingsMode);
   const sectionExpanded = useAppStore((s) => s.appSidebar.sectionExpanded);
   const storedWidth = useAppStore((s) => s.appSidebar.width);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
   const toggleCollapsed = useAppStore((s) => s.toggleAppSidebar);
-  const toggleSettingsMode = useAppStore((s) => s.toggleAppSidebarSettingsMode);
-  const setSettingsMode = useAppStore((s) => s.setAppSidebarSettingsMode);
   const setWidth = useAppStore((s) => s.setAppSidebarWidth);
   const pathname = usePathname();
   const inOffice = useInOffice();
@@ -151,32 +190,8 @@ export function AppSidebar() {
 
   const expandedWidth = Math.max(APP_SIDEBAR_EXPANDED_WIDTH, storedWidth);
   const targetWidth = collapsed ? APP_SIDEBAR_COLLAPSED_WIDTH : expandedWidth;
-  const settingsModeTogglePathnameRef = useRef<string | null>(null);
-
-  const handleToggleSettingsMode = useCallback(() => {
-    // History updates before React renders the new pathname; remember which
-    // route the user actually clicked on so delayed route sync cannot undo it.
-    settingsModeTogglePathnameRef.current = window.location.pathname;
-    toggleSettingsMode();
-  }, [toggleSettingsMode]);
-
-  // Keep the transient settings takeover aligned with route ownership. It is
-  // intentionally not persisted, so direct reloads on `/settings/...` need to
-  // enter it from the current pathname. Key on actual pathname changes so a
-  // user can still close the takeover while staying on a settings page.
-  const prevPathnameRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!pathname || prevPathnameRef.current === pathname) return;
-    prevPathnameRef.current = pathname;
-    if (isSettingsRoute(pathname)) {
-      settingsModeTogglePathnameRef.current = null;
-      if (!settingsMode) setSettingsMode(true);
-      return;
-    }
-    if (settingsMode && settingsModeTogglePathnameRef.current !== pathname) {
-      setSettingsMode(false);
-    }
-  }, [pathname, settingsMode, setSettingsMode]);
+  const { settingsMode, toggleSettingsMode: handleToggleSettingsMode } =
+    useSettingsTakeover(pathname);
 
   useEffect(() => {
     if (!pathname) return;
