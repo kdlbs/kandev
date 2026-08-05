@@ -120,6 +120,17 @@ type rawPipeline struct {
 	FinishedAt *time.Time `json:"finished_at"`
 }
 
+// rawPipelineJob is the JSON shape of a single entry from
+// GET /projects/:id/pipelines/:id/jobs.
+type rawPipelineJob struct {
+	ID           int64  `json:"id"`
+	Name         string `json:"name"`
+	Stage        string `json:"stage"`
+	Status       string `json:"status"`
+	AllowFailure bool   `json:"allow_failure"`
+	WebURL       string `json:"web_url"`
+}
+
 func convertRawMR(raw *rawMR) *MR {
 	state := normalizeMRState(raw.State)
 	namespace, projectPath := splitFullReference(raw.References.Full)
@@ -301,6 +312,17 @@ func convertRawPipeline(raw *rawPipeline) Pipeline {
 		WebURL:     raw.WebURL,
 		StartedAt:  raw.StartedAt,
 		FinishedAt: raw.FinishedAt,
+	}
+}
+
+func convertRawPipelineJob(raw *rawPipelineJob) PipelineJob {
+	return PipelineJob{
+		ID:           raw.ID,
+		Name:         raw.Name,
+		Stage:        raw.Stage,
+		Status:       raw.Status,
+		AllowFailure: raw.AllowFailure,
+		WebURL:       raw.WebURL,
 	}
 }
 

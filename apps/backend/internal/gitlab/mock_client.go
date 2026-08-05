@@ -32,6 +32,10 @@ type MockClient struct {
 	// pipelines for that project). Keying by mockMRKey here would
 	// make iteration order matter when multiple MRs share a project.
 	pipelines map[string][]Pipeline
+	// pipelineJobs is keyed by pipeline ID (unique across projects in the
+	// mock's fixture data), mirroring the real API's per-pipeline jobs
+	// endpoint.
+	pipelineJobs map[int64][]PipelineJob
 	// approvals tracks who has approved each MR. requiredApprovals tracks
 	// the project-level required-count GitLab returns alongside the
 	// approved_by list. Both are seeded separately because the GitLab
@@ -82,6 +86,7 @@ func (c *MockClient) resetLocked() {
 	c.files = make(map[mockMRKey][]MRFile)
 	c.commits = make(map[mockMRKey][]MRCommitInfo)
 	c.pipelines = make(map[string][]Pipeline)
+	c.pipelineJobs = make(map[int64][]PipelineJob)
 	c.approvals = make(map[mockMRKey][]MRApproval)
 	c.requiredApprovals = make(map[mockMRKey]int)
 	c.issues = make(map[mockIssueKey]*Issue)
@@ -168,6 +173,15 @@ func (c *MockClient) SeedPipelines(projectPath string, pipelines []Pipeline) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.pipelines[projectPath] = pipelines
+}
+
+// SeedPipelineJobs registers the jobs returned for a given pipeline ID,
+// mirroring the real API's per-pipeline jobs endpoint. Seed pipelines with
+// SeedPipelines first so the pipeline ID referenced here exists.
+func (c *MockClient) SeedPipelineJobs(pipelineID int64, jobs []PipelineJob) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.pipelineJobs[pipelineID] = jobs
 }
 
 // SeedApprovals registers the approval state for (projectPath, iid):
@@ -310,6 +324,12 @@ func (c *MockClient) ListPipelines(_ context.Context, projectPath, _ string) ([]
 	return []Pipeline{}, nil
 }
 
+func (c *MockClient) ListPipelineJobs(_ context.Context, _ string, pipelineID int64) ([]PipelineJob, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]PipelineJob(nil), c.pipelineJobs[pipelineID]...), nil
+}
+
 func (c *MockClient) GetMRFeedback(ctx context.Context, projectPath string, iid int) (*MRFeedback, error) {
 	mr, err := c.GetMR(ctx, projectPath, iid)
 	if err != nil {
@@ -343,6 +363,17 @@ func (c *MockClient) GetMRStatus(ctx context.Context, projectPath string, iid in
 	var pipelines []Pipeline
 	if mr.HeadSHA != "" || mr.HeadBranch != "" {
 		pipelines, _ = c.ListPipelines(ctx, projectPath, mr.HeadBranch)
+	}
+	if len(pipelines) > 0 {
+		// Only overwrite the seeded pipeline's job counts when jobs were
+		// explicitly seeded via SeedPipelineJobs — tests that seed
+		// JobsTotal/JobsPassing directly on the Pipeline (the pre-jobs-API
+		// convention) must keep working unchanged.
+		if jobs, _ := c.ListPipelineJobs(ctx, projectPath, pipelines[0].ID); len(jobs) > 0 {
+			total, passing, _ := summarizePipelineJobs(jobs)
+			pipelines[0].JobsTotal = total
+			pipelines[0].JobsPassing = passing
+		}
 	}
 	approvals, _ := c.ListMRApprovals(ctx, projectPath, iid)
 	c.mu.Lock()
