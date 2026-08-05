@@ -18,6 +18,13 @@ func CommandContext(ctx context.Context, targetPath string, _ *os.File) (*exec.C
 	return command, nil
 }
 
+// CommitCommandContext creates a Git commit command for targetPath.
+func CommitCommandContext(ctx context.Context, targetPath string, _ *os.File, args ...string) (*exec.Cmd, error) {
+	command := subproc.NewGitCommand(ctx, args...)
+	command.Dir = targetPath
+	return command, nil
+}
+
 func runInheritedDirectory(string) int {
 	fmt.Fprintln(os.Stderr, "git init helper is unsupported on this platform")
 	return 2

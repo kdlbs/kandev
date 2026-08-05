@@ -1,4 +1,4 @@
-// Package gitinit runs Git initialization inside an inherited directory descriptor.
+// Package gitinit runs Git commands inside an inherited directory descriptor.
 package gitinit
 
 import (
@@ -16,11 +16,11 @@ func runHelper(args []string) (int, bool) {
 	if len(args) == 0 || args[0] != helperArgument {
 		return 0, false
 	}
-	if len(args) != 2 {
-		fmt.Fprintln(os.Stderr, "git init helper requires the Git executable path")
+	if len(args) < 3 {
+		fmt.Fprintln(os.Stderr, "git init helper requires Git arguments")
 		return 2, true
 	}
-	return runInheritedDirectory(args[1]), true
+	return runInheritedDirectory(args[1], args[2:]), true
 }
 
 func withHelperEnvironment(environment []string) []string {
