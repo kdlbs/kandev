@@ -328,10 +328,10 @@ export function RepositoryStatsGrid({
             </div>
 
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground font-mono">
-              <span>{repo.total_tasks} tasks</span>
-              <span>{repo.session_count} sessions</span>
-              <span>{repo.turn_count} turns</span>
-              <span>{repo.message_count} msgs</span>
+              <span>{t("stats:repoTasksCount", { count: repo.total_tasks })}</span>
+              <span>{t("stats:repoSessionsCount", { count: repo.session_count })}</span>
+              <span>{t("stats:repoTurnsCount", { count: repo.turn_count })}</span>
+              <span>{t("stats:repoMessagesCount", { count: repo.message_count })}</span>
             </div>
 
             <div className="mt-3">
@@ -486,7 +486,8 @@ export function RepoLeaders({ repositoryStats }: { repositoryStats: RepositorySt
 }
 
 function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationListProps) {
-  const filtered = [...tasks].filter((t) => t.active_duration_ms > 0);
+  const { t } = useTranslation();
+  const filtered = [...tasks].filter((task) => task.active_duration_ms > 0);
   filtered.sort((a, b) =>
     sortDirection === "desc"
       ? b.active_duration_ms - a.active_duration_ms
@@ -504,13 +505,16 @@ function TaskDurationList({ tasks, sortDirection, emptyLabel }: TaskDurationList
               {task.task_title}
             </div>
             <div className="text-xs text-muted-foreground">
-              {task.turn_count} turns {"\u00B7"} {task.message_count} messages
+              {t("stats:turnsMessagesMiddot", {
+                turns: task.turn_count,
+                messages: task.message_count,
+              })}
             </div>
           </div>
           <div className="text-sm font-medium tabular-nums text-right">
             <div>{formatDuration(task.active_duration_ms)}</div>
             <div className="text-[11px] text-muted-foreground">
-              span {formatDuration(task.elapsed_span_ms)}
+              {t("stats:durationSpan", { duration: formatDuration(task.elapsed_span_ms) })}
             </div>
           </div>
         </div>

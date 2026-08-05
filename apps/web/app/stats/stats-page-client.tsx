@@ -66,6 +66,12 @@ interface StatsPageClientProps {
   initialError?: string | null;
 }
 
+const RANGE_LABEL_KEYS: Record<RangeKey, string> = {
+  week: "stats:rangeLastWeek",
+  month: "stats:rangeLastMonth",
+  all: "stats:rangeAllTime",
+};
+
 function StatsEmptyState({ message }: { message: string }) {
   const { t } = useTranslation();
   return (
@@ -120,7 +126,7 @@ function StatsHeader({
                 value={key}
                 className="cursor-pointer h-7 px-2 text-xs data-[state=on]:bg-muted data-[state=on]:text-foreground"
               >
-                {getRangeLabel(key)}
+                {t(RANGE_LABEL_KEYS[key])}
               </ToggleGroupItem>
             ))}
           </ToggleGroup>
@@ -392,7 +398,11 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
 
   const rawRange = searchParams?.get("range") ?? activeRange;
   const range: RangeKey = isRangeKey(rawRange) ? rawRange : DEFAULT_RANGE;
+  // English label for the copyable stats summary (`buildStatsSummary`, in
+  // stats-utils.ts — out of this migration's scope). The on-screen label is
+  // `rangeLabelDisplay` below.
   const rangeLabel = getRangeLabel(range);
+  const rangeLabelDisplay = t(RANGE_LABEL_KEYS[range]);
 
   const sections = useStatsSections(workspaceId, range);
   const fetchError = firstError(sections);
@@ -447,7 +457,7 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
         onRangeChange={handleRangeChange}
         onCopy={handleCopyStats}
       />
-      <StatsContent sections={sections} rangeLabel={rangeLabel} workspaceId={workspaceId} />
+      <StatsContent sections={sections} rangeLabel={rangeLabelDisplay} workspaceId={workspaceId} />
     </div>
   );
 }

@@ -1529,6 +1529,7 @@ export const i18nGuardFiles = [
   "app/stats/stats-charts.tsx",
   // Tasks list view.
   "app/tasks/tasks-list-view.tsx",
+  "app/tasks/tasks-list-controls.tsx",
   "app/tasks/tasks-pagination.tsx",
   "app/tasks/rich-task-list-row.tsx",
   "app/tasks/[[]id[]]/kanban-task-shell.tsx",

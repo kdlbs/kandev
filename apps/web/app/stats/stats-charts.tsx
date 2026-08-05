@@ -7,11 +7,11 @@ import type { DailyActivityDTO, AgentUsageDTO, CompletedTaskActivityDTO } from "
 import { useTranslation } from "react-i18next";
 
 function formatMonthLabel(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+  return date.toLocaleDateString(undefined, { month: "short", year: "2-digit" });
 }
 
 function formatWeekLabel(date: Date): string {
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function getHeatmapColor(intensity: number): string {
@@ -24,7 +24,7 @@ function getHeatmapColor(intensity: number): string {
 
 function formatDate(dateStr: string): string {
   const date = new Date(dateStr);
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxActivity: number }) {
@@ -108,7 +108,7 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
       const date = new Date(`${firstDay}T00:00:00`);
       const month = date.getMonth();
       if (month !== lastMonth) {
-        monthMarkers.push({ index, label: date.toLocaleDateString("en-US", { month: "short" }) });
+        monthMarkers.push({ index, label: date.toLocaleDateString(undefined, { month: "short" }) });
         lastMonth = month;
       }
     });
@@ -203,6 +203,12 @@ export function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) 
 }
 
 type CompletionBucket = "day" | "week" | "month";
+
+const BUCKET_LABEL_KEYS: Record<CompletionBucket, string> = {
+  day: "stats:bucketDay",
+  week: "stats:bucketWeek",
+  month: "stats:bucketMonth",
+};
 
 function BucketBarChart({
   series,
@@ -314,7 +320,7 @@ export function CompletedTasksChart({
             className="h-7 px-2 font-mono text-[11px] cursor-pointer"
             onClick={() => setBucket(b)}
           >
-            {b.charAt(0).toUpperCase() + b.slice(1)}
+            {t(BUCKET_LABEL_KEYS[b])}
           </Button>
         ))}
       </div>

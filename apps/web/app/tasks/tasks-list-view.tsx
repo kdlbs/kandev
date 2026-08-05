@@ -3,9 +3,6 @@
 import { useMemo, useState } from "react";
 import type { PaginationState } from "@tanstack/react-table";
 import { Button } from "@kandev/ui/button";
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Label } from "@kandev/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { IconArchive, IconArchiveOff, IconLoader, IconTrash } from "@tabler/icons-react";
 import { TaskArchiveConfirmDialog } from "@/components/task/task-archive-confirm-dialog";
@@ -17,9 +14,8 @@ import { formatRelativeTime } from "@/lib/utils";
 import { TasksPagination } from "./tasks-pagination";
 import { TaskListRowPrimaryContent } from "./rich-task-list-row";
 import { PullToRefresh } from "@/components/mobile/pull-to-refresh";
+import { TasksListControls } from "./tasks-list-controls";
 import {
-  TASKS_LIST_GROUP_OPTIONS,
-  TASKS_LIST_SORT_OPTIONS,
   TASK_STATE_ORDER,
   type TasksListGroup,
   type TasksListSort,
@@ -108,82 +104,6 @@ export function TasksListView({
     </main>
   );
   return onRefresh ? <PullToRefresh onRefresh={onRefresh}>{content}</PullToRefresh> : content;
-}
-
-function TasksListControls({
-  showArchived,
-  onShowArchivedChange,
-  tasksListSort,
-  onTasksListSortChange,
-  tasksListGroup,
-  onTasksListGroupChange,
-}: {
-  showArchived: boolean;
-  onShowArchivedChange: (show: boolean) => void;
-  tasksListSort: TasksListSort;
-  onTasksListSortChange: (sort: TasksListSort) => void;
-  tasksListGroup: TasksListGroup;
-  onTasksListGroupChange: (group: TasksListGroup) => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
-      <ListOptionSelect
-        label={t("tasks:sort")}
-        value={tasksListSort}
-        options={TASKS_LIST_SORT_OPTIONS}
-        onChange={(value) => onTasksListSortChange(value as TasksListSort)}
-        testId="tasks-list-sort"
-      />
-      <ListOptionSelect
-        label={t("tasks:group")}
-        value={tasksListGroup}
-        options={TASKS_LIST_GROUP_OPTIONS}
-        onChange={(value) => onTasksListGroupChange(value as TasksListGroup)}
-        testId="tasks-list-group"
-      />
-      <Label className="flex h-11 items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none lg:h-9">
-        <Checkbox
-          checked={showArchived}
-          onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
-          className="cursor-pointer"
-        />
-        {t("tasks:showArchived")}
-      </Label>
-    </div>
-  );
-}
-
-function ListOptionSelect<T extends string>({
-  label,
-  value,
-  options,
-  onChange,
-  testId,
-}: {
-  label: string;
-  value: T;
-  options: ReadonlyArray<{ readonly value: T; readonly label: string }>;
-  onChange: (value: T) => void;
-  testId: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <Select value={value} onValueChange={(next) => onChange(next as T)}>
-        <SelectTrigger data-testid={testId} className="h-10 w-[150px] cursor-pointer lg:h-9">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {options.map((option) => (
-            <SelectItem key={option.value} value={option.value} className="cursor-pointer">
-              {option.label}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 }
 
 type TaskTreeNode = {

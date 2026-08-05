@@ -85,7 +85,7 @@ export function KanbanTaskShell({
         <p className="mt-4 text-sm text-muted-foreground">
           {showOfficeLink
             ? t("tasks:simpleViewForKanbanTasksShows")
-            : t("tasks:simpleViewShowsTheChatThat")}
+            : t("tasks:simpleViewShowsTheChatThat", { simpleQuery: "?simple=false" })}
         </p>
       </div>
     </div>
