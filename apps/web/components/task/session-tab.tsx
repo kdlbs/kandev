@@ -16,7 +16,6 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { renameSession } from "@/lib/api/domains/session-api";
 import {
-  type RemoveSessionOptions,
   useSessionActions,
   isSessionDeletable as isDeletable,
 } from "@/hooks/domains/session/use-session-actions";
@@ -34,6 +33,7 @@ import { resolveSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
 import { SessionTabCloseAction } from "./session-tab-close-action";
+import { useSessionTabDelete } from "./use-session-tab-delete";
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -310,45 +310,6 @@ function useSessionTabDialogState(sessionId: string | undefined) {
     handoffPreset,
     setHandoffPreset,
     handleHandoffProfile,
-  };
-}
-
-function useSessionTabDelete(
-  setConfirmDelete: (open: boolean) => void,
-  handleDelete: (options?: RemoveSessionOptions) => Promise<boolean>,
-) {
-  const [deleteOrigin, setDeleteOrigin] = useState<"tab" | "menu" | null>(null);
-  const [isDeletingFromTab, setIsDeletingFromTab] = useState(false);
-  const handleCloseTab = useCallback(() => {
-    setDeleteOrigin("tab");
-    setConfirmDelete(true);
-  }, [setConfirmDelete]);
-  const handleDeleteDialogOpenChange = useCallback(
-    (open: boolean) => {
-      setConfirmDelete(open);
-      if (!open) setDeleteOrigin(null);
-    },
-    [setConfirmDelete],
-  );
-  const handleConfirmDelete = useCallback(async () => {
-    const isTabDelete = deleteOrigin === "tab";
-    if (isTabDelete) setIsDeletingFromTab(true);
-
-    const deleted = await handleDelete({ feedback: isTabDelete ? "inline" : "toast" });
-
-    if (!deleted && isTabDelete) setIsDeletingFromTab(false);
-    setDeleteOrigin(null);
-  }, [deleteOrigin, handleDelete]);
-  const handleMenuDelete = useCallback(() => {
-    setDeleteOrigin("menu");
-    setConfirmDelete(true);
-  }, [setConfirmDelete]);
-  return {
-    handleCloseTab,
-    handleDeleteDialogOpenChange,
-    handleConfirmDelete,
-    handleMenuDelete,
-    isDeletingFromTab,
   };
 }
 
