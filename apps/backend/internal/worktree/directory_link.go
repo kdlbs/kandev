@@ -79,6 +79,39 @@ func RestoreOwnedDirectoryLink(root, name, target string) error {
 	return restoreOwnedDirectoryLinkLocked(root, name, link, target)
 }
 
+// RemoveOwnedDirectoryLink removes root/name only while it is still the
+// directory link inspected under the per-link lock. A missing entry is already
+// rolled back and is therefore treated as success.
+func RemoveOwnedDirectoryLink(root, name string) error {
+	if !isOwnedDirectoryLinkPath(root, name) {
+		return fmt.Errorf("invalid owned link path")
+	}
+	link, err := ownedDirectoryLinkPath(root, name)
+	if err != nil {
+		return err
+	}
+	release, err := acquireWorktreeTargetPath(context.Background(), link)
+	if err != nil {
+		return fmt.Errorf("acquire owned link lock: %w", err)
+	}
+	defer release()
+
+	info, err := os.Lstat(link)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect owned link entry: %w", err)
+	}
+	if !isPlatformDirectoryLink(info, link) {
+		return fmt.Errorf("owned link entry is not a directory link: %s", name)
+	}
+	if err := removeInspectedDirectoryLink(link, info); err != nil {
+		return fmt.Errorf("remove owned link: %w", err)
+	}
+	return nil
+}
+
 func isOwnedDirectoryLinkPath(root, name string) bool {
 	return root != "" && filepath.IsAbs(root) && name != "" && filepath.Base(name) == name && name != "." && name != ".."
 }

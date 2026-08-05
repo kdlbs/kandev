@@ -277,6 +277,38 @@ func TestEnsureOwnedDirectoryLinkRejectsTraversalBeforeRepoint(t *testing.T) {
 	}
 }
 
+func TestRemoveOwnedDirectoryLinkRemovesDirectoryLink(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	target := t.TempDir()
+	seedOwnedDirectoryLink(t, root, "notes", target)
+
+	if err := RemoveOwnedDirectoryLink(root, "notes"); err != nil {
+		t.Fatalf("RemoveOwnedDirectoryLink: %v", err)
+	}
+	if _, err := os.Lstat(filepath.Join(root, "notes")); !os.IsNotExist(err) {
+		t.Fatalf("removed directory link still exists: %v", err)
+	}
+}
+
+func TestRemoveOwnedDirectoryLinkPreservesNonLinkEntry(t *testing.T) {
+	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
+	path := filepath.Join(root, "notes")
+	const contents = "user content"
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RemoveOwnedDirectoryLink(root, "notes"); err == nil {
+		t.Fatal("RemoveOwnedDirectoryLink removed a non-link entry")
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != contents {
+		t.Fatalf("non-link entry = %q, %v; want it preserved", got, err)
+	}
+}
+
 func TestEnsureOwnedDirectoryLinkKeepsOriginalLinkWhenReplacementTargetIsInvalid(t *testing.T) {
 	root := filepath.Join(canonicalTempDir(t), "tasks", "task-1")
 	current := t.TempDir()

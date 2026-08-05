@@ -11,17 +11,19 @@ parallelism: sequential
 
 # Task 01: Task-unique task-root directory name
 
-Make the `~/.kandev/tasks/<taskDir>` root name derive from the task ID so two distinct tasks — even
-with identical titles — never resolve to the same task root, and so the resume fallback recomputes the
-same name the initial launch would have produced.
+Make the `~/.kandev/tasks/<taskDir>` root name derive from the task ID so distinct tasks — even with
+identical titles — normally resolve to different task roots, while the ownership marker rejects any
+residual collision, and so the resume fallback recomputes the same name the initial launch would have
+produced.
 
 ## Acceptance
 
 - A new pure helper in `apps/backend/internal/worktree/config.go` produces a short, filesystem-safe,
-  lowercase suffix from a task ID that is stable across repeated calls for the same ID and differs for
-  different IDs.
+  lowercase, collision-resistant suffix from a task ID that is stable across repeated calls for the
+  same ID and normally differs for different IDs.
 - The two task-root call sites build the task directory name from the task ID rather than
-  `SmallSuffix(3)`, so two tasks with the same title produce different task-root names.
+  `SmallSuffix(3)`, so two tasks with the same title normally produce different task-root names and a
+  residual collision is blocked by the ownership marker.
 - `SmallSuffix` and its existing branch-slug callers are unchanged; `SemanticWorktreeName`'s signature
   is unchanged.
 
@@ -64,13 +66,15 @@ conversation. Reconcile **Files likely touched** with the actual diff before mar
 ## Results
 
 - Added `TaskDirSuffix(taskID string) string` to `apps/backend/internal/worktree/config.go`: a
-  deterministic 8-char lowercase suffix over `branchSuffixAlphabet`, derived from `sha256(taskID)`.
-  Empty ID returns empty. `SmallSuffix` and `SemanticWorktreeName`'s signature are unchanged.
+  deterministic, collision-resistant 8-char lowercase suffix over `branchSuffixAlphabet`, derived
+  from `sha256(taskID)`. Empty ID returns empty. `SmallSuffix` and `SemanticWorktreeName`'s signature
+  are unchanged.
 - Updated both task-root call sites to pass `worktree.TaskDirSuffix(task.ID)` instead of
   `worktree.SmallSuffix(3)`: `executor_execute.go:1465` and `resolveResumeTaskDirName`
   (`executor_resume.go:1288`).
-- Added `TestTaskDirSuffix` (stable, lowercase-alphanumeric, task-unique, empty-ID) and
-  `TestSemanticWorktreeNameTaskUnique` (same title + different task IDs → different roots) to
+- Added `TestTaskDirSuffix` (stable, lowercase-alphanumeric, representative different IDs, empty-ID)
+  and `TestSemanticWorktreeNameTaskUnique` (same title + different task IDs → different roots for the
+  covered IDs) to
   `config_test.go`. Both failed red before the helper existed (build error: `undefined: TaskDirSuffix`)
   and pass after.
 - Commands:

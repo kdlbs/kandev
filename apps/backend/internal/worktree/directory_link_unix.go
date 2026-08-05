@@ -44,3 +44,13 @@ func requirePlatformDirectoryLink(path string) error {
 	}
 	return nil
 }
+
+func removeInspectedDirectoryLink(link string, inspected os.FileInfo) error {
+	if err := revalidateInspectedDirectoryLink(link, inspected); err != nil {
+		return err
+	}
+	if err := os.Remove(link); err != nil {
+		return fmt.Errorf("remove owned link: %w", err)
+	}
+	return nil
+}

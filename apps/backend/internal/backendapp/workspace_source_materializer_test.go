@@ -479,6 +479,22 @@ func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *te
 	}
 }
 
+func TestRollbackOwnedDirectoryLinkPreservesReplacementFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "notes")
+	const contents = "user replacement"
+	if err := os.WriteFile(path, []byte(contents), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	err := rollbackOwnedDirectoryLink(ownedDirectoryLinkUndo{Path: path})
+	if err == nil {
+		t.Fatal("rollbackOwnedDirectoryLink removed a replacement file")
+	}
+	if got, readErr := os.ReadFile(path); readErr != nil || string(got) != contents {
+		t.Fatalf("replacement file = %q, %v; want it preserved", got, readErr)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)

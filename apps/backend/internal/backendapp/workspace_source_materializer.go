@@ -266,7 +266,7 @@ func rollbackOwnedDirectoryLinks(undo []ownedDirectoryLinkUndo) error {
 
 func rollbackOwnedDirectoryLink(undo ownedDirectoryLinkUndo) error {
 	if undo.PriorTarget == "" {
-		if err := os.Remove(undo.Path); err != nil && !os.IsNotExist(err) {
+		if err := worktree.RemoveOwnedDirectoryLink(filepath.Dir(undo.Path), filepath.Base(undo.Path)); err != nil {
 			return fmt.Errorf("remove materialized link %q: %w", undo.Path, err)
 		}
 		return nil

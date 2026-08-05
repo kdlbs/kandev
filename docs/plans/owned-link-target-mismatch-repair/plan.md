@@ -19,9 +19,10 @@ first launch **and every subsequent resume** fail identically (observed on task 
 
 This fix has two parts, in dependency order:
 
-1. **Uniqueness (root cause):** derive the task-root suffix deterministically from the task ID so two
-   distinct tasks never resolve to the same task root, and the persisted name is reproducible across
-   launch/resume without relying on a stored random value.
+1. **Collision resistance (root cause):** derive the task-root suffix deterministically from the task
+   ID so distinct tasks normally resolve to different task roots, while the ownership marker guards
+   the residual collision case; the persisted name remains reproducible across launch/resume without
+   relying on a stored random value.
 2. **Self-heal (defense in depth):** inside a Kandev-owned task root, `EnsureOwnedDirectoryLink`
    repoints an existing Kandev-owned *directory-link* entry on target mismatch instead of failing
    closed forever. A non-link entry still fails closed. This is scoped to the owned task root and does
@@ -58,7 +59,7 @@ This fix has two parts, in dependency order:
     the identical name the initial launch would have used (no drift when the env row was never stamped).
 - Do not change `SemanticWorktreeName`'s signature; only what the callers pass as `suffix`.
 - Persisted `task_dir_name` reuse on resume is unchanged; the deterministic suffix simply makes the
-  fallback reproducible and cross-task-unique.
+  fallback reproducible and collision-resistant across tasks.
 
 ### Area 2 — Owned-link self-heal on mismatch (Task 02)
 
@@ -77,11 +78,11 @@ This fix has two parts, in dependency order:
 
 ## Tests
 
-- **Deterministic suffix is stable and task-unique** — `apps/backend/internal/worktree/config_test.go`:
+- **Deterministic suffix is stable and collision-resistant** — `apps/backend/internal/worktree/config_test.go`:
   table test that `TaskDirSuffix(id)` is non-empty, uses only the safe alphabet, is identical across
-  repeated calls for the same ID, and differs for two different IDs. (Task 01)
-- **Same-title tasks get different roots** — `config_test.go`: two different task IDs with an identical
-  title produce different `SemanticWorktreeName(...)` results. (Task 01)
+  repeated calls for the same ID, and differs for the covered different IDs. (Task 01)
+- **Same-title tasks normally get different roots** — `config_test.go`: two different task IDs with an
+  identical title produce different `SemanticWorktreeName(...)` results for the covered IDs. (Task 01)
 - **Regression: self-heal repoints an owned link on mismatch** — `directory_link_test.go`: seed an
   owned link to target A, call `EnsureOwnedDirectoryLink(root, name, B)`, assert no error,
   `created=true`, and that the entry now resolves to B. This test must **fail before** the Task 02

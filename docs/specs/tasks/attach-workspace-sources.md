@@ -293,9 +293,10 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 - **GIVEN** an agent calls `add_workspace_sources_kandev` for its current idle task, **WHEN** all
   inputs materialize, **THEN** the UI receives the same task and session updates as the human flow.
 - **GIVEN** two distinct tasks whose titles sanitize to the same task-root slug, **WHEN** each task
-  materializes a Kandev-owned task root, **THEN** the two tasks resolve to different task-root
-  directory names and neither task's launch or resume fails with an owned-link target mismatch caused
-  by the other task's entries.
+  materializes a Kandev-owned task root, **THEN** their collision-resistant suffixes normally produce
+  different task-root directory names; if a residual suffix collision occurs, the ownership marker
+  rejects cross-task repointing with a marker-conflict error rather than redirecting the other task's
+  entries.
 - **GIVEN** a local task whose persisted task root already contains a Kandev-owned directory-link
   entry for a repository that points at a different directory than the current durable spec target,
   **WHEN** the task launches or resumes, **THEN** reconciliation repoints the owned entry to the
