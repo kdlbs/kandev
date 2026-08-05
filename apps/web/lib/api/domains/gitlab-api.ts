@@ -13,6 +13,8 @@ import type {
   GitLabConfig,
   SetGitLabConfigRequest,
   TestGitLabConnectionResult,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
 } from "@/lib/types/gitlab";
 import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
@@ -126,6 +128,29 @@ export async function syncTaskMR(
   return fetchJson<TaskMR>(`/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mrs/sync`, {
     init: { method: "POST", body: JSON.stringify(body) },
   });
+}
+
+/** Get a task's MR automation (lifecycle notification) options. */
+export async function getTaskMRAutomation(taskId: string, options?: ApiRequestOptions) {
+  return fetchJson<TaskMRAutomationOptions>(
+    `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+    options,
+  );
+}
+
+/** Update a task's MR automation (lifecycle notification) options. */
+export async function updateTaskMRAutomation(
+  taskId: string,
+  patch: TaskMRAutomationPatch,
+  options?: ApiRequestOptions,
+) {
+  return fetchJson<TaskMRAutomationOptions>(
+    `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+    {
+      ...options,
+      init: { ...(options?.init ?? {}), method: "PATCH", body: JSON.stringify(patch) },
+    },
+  );
 }
 
 export async function createTaskMR(

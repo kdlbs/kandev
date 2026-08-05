@@ -471,7 +471,7 @@ export function PrepareProgress({ sessionId }: PrepareProgressProps) {
 
   // Track status/expand transitions over the panel's lifetime — the
   // remote-executor bug suspects the panel staying expanded (tall) while the
-  // env is still "preparing" combined with a Virtuoso initial-scroll race.
+  // env is still "preparing" combined with an initial-scroll race.
   const prevSnapshotRef = useRef<PrepareSnapshot | null>(null);
   useEffect(() => {
     if (!isDebug()) return;

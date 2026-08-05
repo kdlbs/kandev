@@ -306,6 +306,32 @@ function renderAgentMessageWithSession(
   );
 }
 
+describe("ChatMessage context file badges", () => {
+  it("renders a folder icon for directory context metadata", () => {
+    const Wrapper = wrapper();
+
+    render(
+      <Wrapper>
+        <ChatMessage
+          comment={userMessage({
+            metadata: {
+              context_files: [
+                { path: "src", name: "src", is_directory: true },
+                { path: "src/app.ts", name: "app.ts" },
+              ],
+            },
+          })}
+          label="Message"
+          className=""
+        />
+      </Wrapper>,
+    );
+
+    expect(screen.getByTestId("message-context-directory-icon")).not.toBeNull();
+    expect(screen.getByTestId("message-context-file-icon")).not.toBeNull();
+  });
+});
+
 describe("ChatMessage sender badge", () => {
   it("renders the sender badge when sender_task_id is present in metadata", () => {
     const { container } = renderWithSender([{ id: SENDER_TASK_ID, title: SENDER_TITLE }], {
@@ -584,6 +610,27 @@ describe("ChatMessage image attachments", () => {
     expect(preview.className).toContain("w-[min(92vw,1100px)]");
     expect(preview.className).toContain("max-h-[calc(100dvh-5rem)]");
     expect(preview.getAttribute("src")).toBe(`data:image/png;base64,${PNG_BASE64}`);
+  });
+
+  it("renders staged image descriptors through the authenticated content URL", () => {
+    renderWithSender([], {
+      attachments: [
+        {
+          type: "image",
+          attachment_id: "attachment-staged-1",
+          mime_type: "image/png",
+          name: "diagram.png",
+          size_bytes: 1024,
+        },
+      ],
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: OPEN_ATTACHMENT_1_LABEL }));
+
+    const preview = screen.getByAltText(FULL_SIZE_ATTACHMENT_1_ALT);
+    expect(preview.getAttribute("src")).toContain(
+      "/api/v1/attachments/attachment-staged-1/content",
+    );
   });
 });
 

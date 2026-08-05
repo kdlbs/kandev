@@ -35,6 +35,7 @@ export function GitHubPushConfig({ config, onUpdate }: GitHubPushConfigProps) {
           value={branches}
           onChange={(e) => setBranches(e.target.value)}
           onBlur={handleBlur}
+          // eslint-disable-next-line i18next/no-literal-string -- example branch globs, see above
           placeholder="main, release/*"
         />
         <p className="text-xs text-muted-foreground">{t("automations:pushTriggerHelp")}</p>

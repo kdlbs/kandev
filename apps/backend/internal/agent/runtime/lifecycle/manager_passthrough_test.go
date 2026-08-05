@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // mockPassthroughProfileResolver is a mock for testing passthrough verification
@@ -108,6 +109,32 @@ func newPassthroughMCPTestManager(t *testing.T, agentName string) (*Manager, *Ag
 func newClaudePassthroughMCPTestManager(t *testing.T) (*Manager, *AgentExecution, *AgentProfileInfo) {
 	t.Helper()
 	return newPassthroughMCPTestManager(t, "claude-acp")
+}
+
+func TestHandlePassthroughTurnCompleteIgnoresStaleProcess(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:                   "exec-1",
+		SessionID:            "session-1",
+		PassthroughProcessID: "new-process",
+		Status:               v1.AgentStatusRunning,
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	// Stopping a PTY can race an already-queued idle timer callback. The old
+	// process must not mark the replacement execution ready, or the replacement
+	// process's real completion event will be suppressed as a duplicate.
+	mgr.handlePassthroughTurnComplete(execution.SessionID, "old-process")
+	if execution.Status != v1.AgentStatusRunning {
+		t.Fatalf("stale process changed execution status to %q", execution.Status)
+	}
+
+	mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("active process did not mark execution ready, got %q", execution.Status)
+	}
 }
 
 func TestBuildPassthroughCommand(t *testing.T) {

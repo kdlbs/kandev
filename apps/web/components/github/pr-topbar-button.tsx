@@ -39,6 +39,7 @@ import { PR_CI_DESKTOP_POPOVER_SCROLL_CLASS, PRCIPopover } from "@/components/gi
 import { MultiPRCIPopover } from "@/components/github/multi-pr-ci-popover";
 import { useAppStore } from "@/components/state-provider";
 import type { TaskPR } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 const POPOVER_OPEN_DELAY_MS = 150;
 const POPOVER_CLOSE_DELAY_MS = 150;
@@ -232,6 +233,7 @@ function PRMultiButton({
   onRemovePR: (associationId: string) => Promise<void>;
   triggerRef?: TriggerRef;
 }) {
+  const { t } = useTranslation();
   // Click still drives the dropdown (the explicit "jump to this PR's panel"
   // affordance, and the only interaction on touch). Hover adds the aggregate
   // CI popover with a tab per PR — desktop only, suppressed on touch where
@@ -276,7 +278,9 @@ function PRMultiButton({
         onBlur={onTriggerLeave}
       >
         <IconGitPullRequest className={`h-4 w-4 ${aggColor}`} />
-        <span className="text-xs font-medium">{prs.length} PRs</span>
+        <span className="text-xs font-medium">
+          {prs.length} {t("github:prs")}
+        </span>
         <IconChevronDown className="h-3 w-3 text-muted-foreground" />
       </Button>
     </DropdownMenuTrigger>
@@ -293,7 +297,9 @@ function PRMultiButton({
         <TooltipTrigger asChild>
           {usesTouchDrawer ? triggerButton : <PopoverAnchor asChild>{triggerButton}</PopoverAnchor>}
         </TooltipTrigger>
-        <TooltipContent>{prs.length} pull requests linked to this task — open one</TooltipContent>
+        <TooltipContent>
+          {t("github:pullRequestsLinkedToTask", { count: prs.length })}
+        </TooltipContent>
       </Tooltip>
       <MultiPRMenuContent prs={prs} />
     </DropdownMenu>
@@ -331,10 +337,11 @@ function PRMultiButton({
 }
 
 function MultiPRMenuContent({ prs }: { prs: TaskPR[] }) {
+  const { t } = useTranslation();
   const addPRPanel = useDockviewStore((s) => s.addPRPanel);
   return (
     <DropdownMenuContent align="end" className="w-72">
-      <DropdownMenuLabel className="text-xs">Pull requests</DropdownMenuLabel>
+      <DropdownMenuLabel className="text-xs">{t("github:pullRequests")}</DropdownMenuLabel>
       <DropdownMenuSeparator />
       {prs.map((pr) => (
         <DropdownMenuItem

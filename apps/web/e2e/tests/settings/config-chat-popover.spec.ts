@@ -2,12 +2,7 @@ import { type Locator, type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { expectElementsNotToIntersect } from "../../helpers/layout-assertions";
 
-async function openConfigChatFromSettings(page: Page): Promise<Locator> {
-  const pageErrors: string[] = [];
-  page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.goto("/settings/agents");
-  await page.waitForLoadState("networkidle");
-  expect(pageErrors, "settings page should render without client errors").toEqual([]);
+async function openConfigChatPopover(page: Page): Promise<Locator> {
   const fab = page.getByRole("button", { name: "Configuration Chat" });
   await expect(fab).toBeVisible({ timeout: 10_000 });
   await fab.click();
@@ -15,6 +10,15 @@ async function openConfigChatFromSettings(page: Page): Promise<Locator> {
   await expect(popover).toBeVisible({ timeout: 10_000 });
   await expect(page.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
   return popover;
+}
+
+async function openConfigChatFromSettings(page: Page): Promise<Locator> {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.goto("/settings/agents");
+  await page.waitForLoadState("networkidle");
+  expect(pageErrors, "settings page should render without client errors").toEqual([]);
+  return openConfigChatPopover(page);
 }
 
 async function startConfigChat(dialog: Locator, prompt: string) {
@@ -76,7 +80,7 @@ test.describe("Configuration Chat", () => {
     }
   });
 
-  test("starts floating, expands the same session, restores, continues, and deletes", async ({
+  test("starts floating, expands the same session, restores, and continues", async ({
     testPage,
   }) => {
     await testPage.setViewportSize({ width: 900, height: 520 });
@@ -116,9 +120,7 @@ test.describe("Configuration Chat", () => {
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
-    await expect(testPage.getByRole("dialog", { name: "Quick Chat" })).not.toBeVisible();
-    await testPage.getByRole("button", { name: "Configuration Chat" }).click();
-    const restored = testPage.getByTestId("config-chat-popover");
+    const restored = await openConfigChatPopover(testPage);
     await expect(restored.getByTestId("chat-input-editor")).toBeVisible({ timeout: 10_000 });
     await expect(
       restored.getByText("simple mock response for e2e testing", { exact: false }),
@@ -128,9 +130,18 @@ test.describe("Configuration Chat", () => {
     await expect(restored.getByText("continued config response", { exact: true })).toBeVisible({
       timeout: 30_000,
     });
+  });
 
-    await restored.getByRole("button", { name: "Open in Quick Chat" }).click();
+  test("deletes an expanded configuration chat and returns to setup", async ({ testPage }) => {
+    const popover = await openConfigChatFromSettings(testPage);
+    await startConfigChat(popover, "/e2e:simple-message");
+    await expect(
+      popover.getByText("simple mock response for e2e testing", { exact: false }),
+    ).toBeVisible({ timeout: 30_000 });
+
+    await popover.getByRole("button", { name: "Open in Quick Chat" }).click();
     const restoredDialog = testPage.getByRole("dialog", { name: "Quick Chat" });
+    await expect(restoredDialog).toBeVisible({ timeout: 10_000 });
     await restoredDialog
       .getByTestId("quick-chat-tab")
       .getByRole("button", { name: /^Close / })
@@ -146,10 +157,8 @@ test.describe("Configuration Chat", () => {
 
     await testPage.reload();
     await testPage.waitForLoadState("networkidle");
-    await testPage.getByRole("button", { name: "Configuration Chat" }).click();
-    await expect(
-      testPage.getByTestId("config-chat-popover").getByTestId("config-chat-setup"),
-    ).toBeVisible({ timeout: 10_000 });
+    const freshPopover = await openConfigChatPopover(testPage);
+    await expect(freshPopover.getByTestId("config-chat-setup")).toBeVisible({ timeout: 10_000 });
   });
 
   test("opens the same typed setup from the command palette", async ({ testPage }) => {

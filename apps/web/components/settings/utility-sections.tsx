@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { IconPencil, IconPlus, IconTrash } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardAction, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import {
   Select,
@@ -25,6 +25,7 @@ import {
 import { InferenceAgentStatusNote } from "@/components/settings/inference-agent-status";
 import type { UtilityAgent, InferenceAgent } from "@/lib/api/domains/utility-api";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { isUtilityAgentDirty } from "@/components/settings/utility-dirty";
 
 const USE_DEFAULT = "__USE_DEFAULT__";
@@ -97,7 +98,11 @@ export function DefaultModelSection({
   }));
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="utility-default-model-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityDefaultModel}
+      data-testid="utility-default-model-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">
           <h3>{t("settings:utilityDefaultModelTitle")}</h3>
@@ -299,6 +304,7 @@ export function PerActionOverridesSection({
           savedBuiltins.find((saved) => saved.id === agent.id),
         ),
       )}
+      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityActions}
       data-testid="utility-actions-card"
     >
       <CardHeader>
@@ -337,7 +343,10 @@ type CustomAgentsSectionProps = {
 export function CustomAgentsSection({ agents, onAdd, onEdit, onDelete }: CustomAgentsSectionProps) {
   const { t } = useTranslation();
   return (
-    <Card data-testid="utility-custom-agents-card">
+    <SettingsCard
+      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.utilityCustomAgents}
+      data-testid="utility-custom-agents-card"
+    >
       <CardHeader>
         <CardTitle className="text-base">
           <h3>{t("settings:utilityCustomAgentsTitle")}</h3>
@@ -366,7 +375,7 @@ export function CustomAgentsSection({ agents, onAdd, onEdit, onDelete }: CustomA
           </div>
         )}
       </CardContent>
-    </Card>
+    </SettingsCard>
   );
 }
 

@@ -49,7 +49,13 @@ test.describe("WebSocket connectivity warning", () => {
     await expect(warning).toHaveCount(0);
   });
 
-  test("keeps a connection-only warning reachable on tablet widths", async ({ testPage }) => {
+  // 700px is mobile composition since the hook's boundary moved to 768px, so
+  // this covers the drawer fallback below the sidebar boundary. The
+  // `isTablet && connectionOnly` clause above it needs a coarse pointer between
+  // 768px and 1024px, which no Playwright project emulates yet.
+  test("keeps a connection-only warning reachable below the sidebar boundary", async ({
+    testPage,
+  }) => {
     await testPage.setViewportSize({ width: 700, height: 900 });
     await testPage.goto("/stats");
     await setAppStatusBarEnabled(testPage, false);

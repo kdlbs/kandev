@@ -39,6 +39,7 @@ Product-wide capabilities that are not tied to a single feature area.
 | Spec | Status |
 |---|---|
 | [background-work-liveness](platform/background-work-liveness.md) | shipped |
+| [task-sleep-inhibition](platform/task-sleep-inhibition.md) | building |
 | [i18n](platform/i18n.md) | building |
 | [plugins](plugins/spec.md) | draft |
 | [plugins — authoring experience](plugins/authoring-experience.md) | draft |
@@ -63,6 +64,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [run-scheduling](tasks/run-scheduling.md) | building |
 | [without-repositories](tasks/without-repositories.md) | draft |
 | [attach-workspace-sources](tasks/attach-workspace-sources.md) | building |
+| [remote-contribution-tasks](tasks/remote-contribution-tasks.md) | approved |
 | [subtask-checklist](tasks/subtask-checklist.md) | shipped |
 | [subtask-detachment](tasks/subtask-detachment.md) | shipped |
 | [subtask-completion-trigger](tasks/subtask-completion-trigger.md) | draft |
@@ -81,6 +83,7 @@ Kandev's task model: documents, execution stages, labels, blocker escalation, su
 | [runtime-state-publication-order](tasks/runtime-state-publication-order.md) | shipped |
 | [agent-generated-titles](tasks/agent-generated-titles.md) | approved |
 | [task-create-executor-default](tasks/task-create-executor-default.md) | approved |
+| [prompt-attachments](tasks/prompt-attachments.md) | draft |
 | [sidebar-task-edit](tasks/sidebar-task-edit.md) | approved |
 | [explicit-completion-signal](workflow/explicit-completion-signal/spec.md) | shipped |
 | [cancelled-turn-completion](workflow/cancelled-turn-completion/spec.md) | building |
@@ -93,6 +96,7 @@ Roles, governance gates, and granular permissions that apply across human users 
 | Spec | Status |
 |---|---|
 | [runtime-updates](agents/runtime-updates.md) | approved |
+| [profile-disable](agents/profile-disable.md) | draft |
 | [roles](agents/roles.md) | shipped |
 | [governance](agents/governance.md) | shipped |
 | [granular-permissions](agents/granular-permissions.md) | draft |
@@ -107,6 +111,7 @@ Per-workspace credentials and triage triggers for external services.
 | [slack](integrations/slack.md) | shipped |
 | [external-mcp](integrations/external-mcp.md) | draft |
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
+| [provider-aware-review-automation](integrations/provider-aware-review-automation.md) | approved |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
@@ -151,6 +156,7 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [message-queue-management](ui/message-queue-management.md) | shipped |
 | [message-queue-merge](ui/message-queue-merge.md) | shipped |
 | [settings-manual-save](ui/settings-manual-save.md) | shipped |
+| [settings-discovery](ui/settings-discovery.md) | shipped |
 | [executor-settings-card-spacing](ui/executor-settings-card-spacing.md) | shipped |
 | [quick-chat-elevation](ui/quick-chat-elevation.md) | building |
 | [transcript-navigation-settings](ui/transcript-navigation-settings.md) | shipped |
@@ -165,7 +171,9 @@ Subscription quota tracking and per-agent cheap-model profile routing.
 | [agent-message-comments](ui/agent-message-comments.md) | shipped |
 | [external-vcs-file-links](ui/external-vcs-file-links.md) | shipped |
 | [task-listing-display-preferences](ui/task-listing-display-preferences.md) | shipped |
+| [sidebar-archived-filter](ui/sidebar-archived-filter.md) | draft |
 | [task-workspace-content-search](ui/task-workspace-content-search.md) | shipped |
+| [file-tree-chat-context](ui/file-tree-chat-context.md) | shipped |
 | [task-review-shortcut](ui/task-review-shortcut.md) | approved |
 | [embedded-vscode-executor-availability](ui/embedded-vscode-executor-availability.md) | approved |
 | [embedded-vscode-windows-availability](ui/embedded-vscode-windows-availability.md) | archived; superseded by embedded-vscode-executor-availability |
@@ -201,6 +209,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [homebrew-core](homebrew-core/spec.md) | draft |
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
+| [lsp-file-intelligence](lsp-file-intelligence/spec.md) | building |
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |

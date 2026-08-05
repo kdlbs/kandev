@@ -24,6 +24,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -52,6 +53,47 @@ func TestErrSessionWorkspaceNotReady_UnrelatedError(t *testing.T) {
 
 	if errors.Is(unrelated, ErrSessionWorkspaceNotReady) {
 		t.Errorf("expected errors.Is to be false for unrelated error")
+	}
+}
+
+func TestResolveSessionRuntimeDoesNotCreateUnsupportedExecution(t *testing.T) {
+	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-ssh": {
+			SessionID:    "session-ssh",
+			ExecutorType: string(models.ExecutorTypeSSH),
+		},
+	}}
+	mgr, backend := newEnvironmentExecutionTestManager(t, provider)
+
+	runtimeName, err := mgr.ResolveSessionRuntime(context.Background(), "session-ssh")
+	if err != nil {
+		t.Fatalf("ResolveSessionRuntime() error = %v", err)
+	}
+	if runtimeName != agentruntime.RuntimeSSH {
+		t.Fatalf("ResolveSessionRuntime() = %q, want %q", runtimeName, agentruntime.RuntimeSSH)
+	}
+	if got := backend.createCount.Load(); got != 0 {
+		t.Fatalf("CreateInstance calls = %d, want 0", got)
+	}
+	if _, exists := mgr.GetExecutionBySessionID("session-ssh"); exists {
+		t.Fatal("ResolveSessionRuntime() must not create an in-memory execution")
+	}
+}
+
+func TestResolveSessionRuntimeChecksSessionAccessBeforeLookup(t *testing.T) {
+	denied := errors.New("session access denied")
+	provider := &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
+		"session-ssh": {SessionID: "session-ssh", ExecutorType: string(models.ExecutorTypeSSH)},
+	}}
+	mgr, _ := newEnvironmentExecutionTestManager(t, provider)
+	mgr.SetSessionAccessChecker(func(context.Context, string) error { return denied })
+
+	_, err := mgr.ResolveSessionRuntime(context.Background(), "session-ssh")
+	if !errors.Is(err, denied) {
+		t.Fatalf("ResolveSessionRuntime() error = %v, want access error", err)
+	}
+	if provider.sessionCalls != 0 {
+		t.Fatalf("workspace provider calls = %d, want 0 before authorization", provider.sessionCalls)
 	}
 }
 

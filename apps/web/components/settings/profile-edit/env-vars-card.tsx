@@ -297,6 +297,7 @@ type EnvVarsFieldProps = {
   onAdd: (row: EnvVarRow) => void;
   onUpdate: (index: number, field: keyof EnvVarRow, val: string) => void;
   onRemove: (index: number) => void;
+  discoveryTargetId?: string;
 };
 
 function EnvVarsFieldBody({
@@ -358,7 +359,11 @@ export function EnvVarsCard(props: EnvVarsFieldProps) {
     props.baselineRows !== undefined &&
     JSON.stringify(rowsToEnvVars(props.rows)) !== JSON.stringify(rowsToEnvVars(props.baselineRows));
   return (
-    <SettingsCard isDirty={isDirty} data-testid="env-vars-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={props.discoveryTargetId}
+      data-testid="env-vars-card"
+    >
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>

@@ -11,6 +11,7 @@ import {
 import type { Icon } from "@tabler/icons-react";
 import type { GitHubPR, GitHubPRStatus } from "@/lib/types/github";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 type StatusChipProps = {
   Icon: Icon;
@@ -38,14 +39,17 @@ function StatusChip({ Icon, label, tone, title }: StatusChipProps) {
 }
 
 function ChecksChip({ status }: { status: GitHubPRStatus }) {
+  const { t } = useTranslation();
   const { checks_state: state, checks_total: total, checks_passing: passing } = status;
   if (!state) return null;
   const label = total > 0 ? `${passing}/${total}` : "";
   if (state === "success")
-    return <StatusChip Icon={IconCheck} label={label || "Checks passed"} tone="success" />;
+    return <StatusChip Icon={IconCheck} label={label || t("github:checksPassed")} tone="success" />;
   if (state === "failure")
-    return <StatusChip Icon={IconX} label={label || "Checks failed"} tone="failure" />;
-  return <StatusChip Icon={IconClockHour4} label={label || "Checks running"} tone="pending" />;
+    return <StatusChip Icon={IconX} label={label || t("github:checksFailed")} tone="failure" />;
+  return (
+    <StatusChip Icon={IconClockHour4} label={label || t("github:checksRunning")} tone="pending" />
+  );
 }
 
 function ReviewChip({
@@ -55,16 +59,20 @@ function ReviewChip({
   state: GitHubPRStatus["review_state"];
   pending: number;
 }) {
-  if (state === "approved") return <StatusChip Icon={IconCheck} label="Approved" tone="success" />;
+  const { t } = useTranslation();
+  if (state === "approved")
+    return <StatusChip Icon={IconCheck} label={t("github:approved")} tone="success" />;
   if (state === "changes_requested")
-    return <StatusChip Icon={IconAlertTriangle} label="Changes requested" tone="failure" />;
+    return (
+      <StatusChip Icon={IconAlertTriangle} label={t("github:changesRequested")} tone="failure" />
+    );
   if (pending > 0)
     return (
       <StatusChip
         Icon={IconClockHour4}
-        label={`${pending} pending`}
+        label={t("github:pending", { pending })}
         tone="pending"
-        title={`${pending} pending review(s)`}
+        title={t("github:pendingReviewS", { pending })}
       />
     );
   return null;
@@ -77,15 +85,17 @@ function MergeableChip({
   state: GitHubPRStatus["mergeable_state"];
   prState: GitHubPR["state"];
 }) {
-  if (prState === "merged") return <StatusChip Icon={IconGitMerge} label="Merged" tone="success" />;
+  const { t } = useTranslation();
+  if (prState === "merged")
+    return <StatusChip Icon={IconGitMerge} label={t("github:merged")} tone="success" />;
   if (state === "draft")
-    return <StatusChip Icon={IconGitPullRequestDraft} label="Draft" tone="neutral" />;
+    return <StatusChip Icon={IconGitPullRequestDraft} label={t("github:draft")} tone="neutral" />;
   if (state === "dirty")
-    return <StatusChip Icon={IconAlertTriangle} label="Conflicts" tone="failure" />;
+    return <StatusChip Icon={IconAlertTriangle} label={t("github:conflicts")} tone="failure" />;
   if (state === "blocked")
-    return <StatusChip Icon={IconAlertTriangle} label="Blocked" tone="pending" />;
+    return <StatusChip Icon={IconAlertTriangle} label={t("github:blocked")} tone="pending" />;
   if (state === "behind")
-    return <StatusChip Icon={IconAlertTriangle} label="Behind base" tone="pending" />;
+    return <StatusChip Icon={IconAlertTriangle} label={t("github:behindBase")} tone="pending" />;
   return null;
 }
 

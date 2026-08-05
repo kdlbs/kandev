@@ -43,10 +43,14 @@ test.describe("Mobile slash command composer", () => {
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     const session = await openTaskChat(testPage, task.id);
-    await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
-    // Multiple TipTap instances can be mounted in mobile layouts; scope to the first visible one.
-    const editor = testPage.locator(".tiptap.ProseMirror:visible").first();
+    // Resolve the active editor through the same startup-aware gate used by
+    // send helpers; the visible idle placeholder can briefly precede TipTap's
+    // editable host while the mobile session finishes starting.
+    const editor = await session.composerReady();
+    // composerReady may reload to reconcile stale startup state. Seed the
+    // client-side command list only after that recovery so it is not discarded.
+    await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");
@@ -62,7 +66,11 @@ test.describe("Mobile slash command composer", () => {
 
     await editor.pressSequentially("1s");
     await expect(editor).toHaveText(/slow\s+1s/, { timeout: 5_000 });
-    await testPage.getByTestId("submit-message-button").tap();
+    // The submit button shows a spinner and is `disabled` while the auto-started
+    // session finishes its brief STARTING transition. Tapping it then is a no-op
+    // that drops the message, so wait for it to be enabled before tapping.
+    await expect(session.submitButton()).toBeEnabled();
+    await session.submitButton().tap();
     await expect(chatList.getByText("/slow 1s", { exact: false })).toBeVisible({
       timeout: 10_000,
     });

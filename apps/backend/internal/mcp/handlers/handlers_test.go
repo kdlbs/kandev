@@ -186,6 +186,133 @@ func (p *mcpUserSettingsProvider) GetUserSettings(context.Context) (*usermodels.
 	return p.settings, p.err
 }
 
+type recordingRemoteContributionService struct {
+	resolution   *models.RemoteContributionResolution
+	associateErr error
+	associateURL string
+	taskID       string
+	repositoryID string
+}
+
+func (s *recordingRemoteContributionService) Resolve(_ context.Context, _, _, rawURL string) (*models.RemoteContributionResolution, bool, error) {
+	s.associateURL = rawURL
+	return s.resolution, true, nil
+}
+
+func (s *recordingRemoteContributionService) Associate(_ context.Context, _, _, taskID, repositoryID string, _ *models.RemoteContributionResolution) error {
+	s.taskID = taskID
+	s.repositoryID = repositoryID
+	return s.associateErr
+}
+
+func testRemoteContributionResolution() *models.RemoteContributionResolution {
+	return &models.RemoteContributionResolution{
+		Binding: models.RemoteContribution{
+			Version:      models.RemoteContributionVersion,
+			Provider:     models.RemoteContributionProviderGitHub,
+			Kind:         models.RemoteContributionKindPullRequest,
+			CanonicalURL: "https://github.com/acme/widget/pull/7",
+			Number:       7,
+			State:        models.RemoteContributionStateOpen,
+			BaseBranch:   "main",
+			HeadBranch:   "feature/remote",
+			HeadSHA:      strings.Repeat("a", 40),
+			SourceRepository: models.RemoteContributionRepository{
+				Host: "github.com", Path: "contributor/widget", ProviderID: "R_kgDOFork123", RemoteURL: "https://github.com/contributor/widget.git",
+			},
+			CollaborationAllowed: true,
+		},
+		TargetProvider:      models.RemoteContributionProviderGitHub,
+		TargetHost:          "https://github.com",
+		TargetPath:          "acme/widget",
+		TargetProviderID:    "99",
+		TargetRemoteURL:     "https://github.com/acme/widget.git",
+		TargetDefaultBranch: "main",
+	}
+}
+
+func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{resolution: testRemoteContributionResolution()}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Remote contribution",
+		"description":      "Work on the existing contribution",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	if resp.Type == ws.MessageTypeError {
+		t.Fatalf("create task returned error: %s", string(resp.Payload))
+	}
+	if remote.associateURL != "https://github.com/acme/widget/pull/7" || remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("remote association = URL %q, task %q, repository %q", remote.associateURL, remote.taskID, remote.repositoryID)
+	}
+	task, err := svc.GetTask(ctx, remote.taskID)
+	require.NoError(t, err)
+	require.NotNil(t, task)
+	taskRepos, err := repo.ListTaskRepositories(ctx, task.ID)
+	require.NoError(t, err)
+	require.Len(t, taskRepos, 1)
+	binding, found, err := models.LoadRemoteContribution(taskRepos[0].Metadata)
+	require.NoError(t, err)
+	if !found || binding.SourceRepository.Path != "contributor/widget" {
+		t.Fatalf("persisted remote contribution = (%+v, found=%v)", binding, found)
+	}
+}
+
+func TestHandleCreateTask_RollsBackWhenRemoteContributionAssociationFails(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	workspaces, err := svc.ListWorkspaces(ctx)
+	require.NoError(t, err)
+	workflows, err := svc.ListWorkflows(ctx, workspaces[0].ID, false)
+	require.NoError(t, err)
+	remote := &recordingRemoteContributionService{
+		resolution:   testRemoteContributionResolution(),
+		associateErr: errors.New("association failed"),
+	}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetRemoteContributionService(remote)
+
+	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+		"workspace_id":     workspaces[0].ID,
+		"workflow_id":      workflows[0].ID,
+		"title":            "Rollback contribution",
+		"description":      "This association will fail",
+		"agent_profile_id": "profile-remote",
+		"start_agent":      false,
+		"repositories": []map[string]interface{}{{
+			"github_url":  "https://github.com/acme/widget/pull/7",
+			"base_branch": "main",
+		}},
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeInternalError)
+	if remote.taskID == "" || remote.repositoryID == "" {
+		t.Fatalf("association was not attempted: task %q repository %q", remote.taskID, remote.repositoryID)
+	}
+	tasks, err := svc.ListTasks(ctx, workflows[0].ID)
+	require.NoError(t, err)
+	if len(tasks) != 0 {
+		t.Fatalf("tasks after association rollback = %d, want 0", len(tasks))
+	}
+}
+
 // TestClassifyAddBranchError_UnresolvedBaseBranchIsValidation pins the
 // classifier's handling of the new "cannot resolve base_branch" sentinel
 // emitted by AddBranchToTask when neither base_branch nor a probed

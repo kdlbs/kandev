@@ -10,7 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import type { Components } from "react-markdown";
-import { IconWand, IconMessageDots, IconFile } from "@tabler/icons-react";
+import { IconWand, IconMessageDots, IconFile, IconFolder } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { Message } from "@/lib/types/http";
 import { MessageActions } from "@/components/task/chat/messages/message-actions";
@@ -36,6 +37,8 @@ import { AgentMessageContent } from "./agent-message-content";
 import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
 import { entityReferencesFromMetadata } from "@/lib/entity-references/message-references";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
+import { formatBytes } from "@/lib/utils/format-bytes";
 
 type ChatMessageProps = {
   comment: Message;
@@ -155,7 +158,7 @@ type UserMessageMetadata = WorkflowMessageMetadata & {
   plan_mode?: boolean;
   has_review_comments?: boolean;
   has_hidden_prompts?: boolean;
-  context_files?: Array<{ path: string; name: string }>;
+  context_files?: Array<{ path: string; name: string; is_directory?: boolean }>;
   sender_task_id?: string;
   sender_task_title?: string;
   sender_session_id?: string;
@@ -361,7 +364,7 @@ function UserContextBadges({
 }: {
   hasPlanMode: boolean;
   hasReviewComments: boolean;
-  contextFiles: Array<{ path: string; name: string }>;
+  contextFiles: Array<{ path: string; name: string; is_directory?: boolean }>;
   senderTask: SenderTaskInfo | null;
   workflowMessage: WorkflowStepMessageInfo | null;
 }) {
@@ -390,16 +393,30 @@ function UserContextBadges({
       {contextFiles.map((f) => (
         <span
           key={f.path}
+          data-testid="message-context-file"
+          data-path={f.path}
           className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-0.5 text-[10px] text-muted-foreground"
         >
-          <IconFile size={10} /> {f.name}
+          {f.is_directory ? (
+            <IconFolder data-testid="message-context-directory-icon" size={10} />
+          ) : (
+            <IconFile data-testid="message-context-file-icon" size={10} />
+          )}{" "}
+          {f.name}
         </span>
       ))}
     </div>
   );
 }
 
-type UserMessageAttachment = { type: string; data: string; mime_type: string; name?: string };
+type UserMessageAttachment = {
+  type: string;
+  data?: string;
+  attachment_id?: string;
+  mime_type: string;
+  name?: string;
+  size_bytes?: number;
+};
 
 /** Renders image previews and file chips attached to a user message. */
 function UserMessageAttachments({
@@ -411,16 +428,37 @@ function UserMessageAttachments({
   fileAttachments: UserMessageAttachment[];
   hasContent: boolean;
 }) {
+  const { t } = useTranslation("chat");
+  const sourceFor = (attachment: UserMessageAttachment) => {
+    if (attachment.attachment_id) {
+      return attachmentContentUrl(attachment.attachment_id);
+    }
+    if (attachment.data) {
+      return `data:${attachment.mime_type};base64,${attachment.data}`;
+    }
+    return null;
+  };
   return (
     <div className={cn("flex flex-wrap gap-2", hasContent && "mb-2")}>
-      {imageAttachments.map((att, index) => (
-        <ImagePreviewDialog
-          key={index}
-          src={`data:${att.mime_type};base64,${att.data}`}
-          alt={`Attachment ${index + 1}`}
-          thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
-        />
-      ))}
+      {imageAttachments.map((att, index) => {
+        const src = sourceFor(att);
+        if (!src) {
+          return (
+            <span key={`image-${index}`} className="inline-flex items-center gap-1.5 text-xs">
+              <IconFile size={12} />
+              {att.name || t("chat:attachmentFallbackName")}
+            </span>
+          );
+        }
+        return (
+          <ImagePreviewDialog
+            key={index}
+            src={src}
+            alt={t("chat:attachmentMessageAlt", { index: index + 1 })}
+            thumbnailClassName="max-h-48 max-w-full rounded-lg object-contain transition-opacity hover:opacity-90"
+          />
+        );
+      })}
       {fileAttachments.map((att, index) => (
         <span
           key={`file-${index}`}
@@ -428,7 +466,10 @@ function UserMessageAttachments({
           className="inline-flex self-start items-center gap-1.5 rounded-full bg-muted/40 px-2.5 py-1 text-xs text-muted-foreground"
         >
           <IconFile size={12} />
-          {att.name || "Attachment"}
+          <span>{att.name || t("chat:attachmentFallbackName")}</span>
+          {typeof att.size_bytes === "number" && (
+            <span className="text-[10px]">({formatBytes(att.size_bytes)})</span>
+          )}
         </span>
       ))}
     </div>

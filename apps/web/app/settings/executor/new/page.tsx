@@ -17,6 +17,7 @@ import { useTranslation } from "react-i18next";
 
 const EXECUTOR_TYPES = ["local_docker", "remote_docker"] as const;
 type ExecutorType = (typeof EXECUTOR_TYPES)[number];
+const REMOTE_DOCKER_SCHEMES = "tcp://, ssh://";
 
 export default function ExecutorCreatePage() {
   const { t } = useTranslation();
@@ -78,6 +79,9 @@ function RemoteDockerFields({
           type="password"
           value={gitToken}
           onChange={(event) => onGitTokenChange(event.target.value)}
+          // GitHub's own personal-access-token prefix. An identifier the user
+          // matches against the token they paste, not copy.
+          // eslint-disable-next-line i18next/no-literal-string -- PAT prefix
           placeholder="ghp_..."
         />
         <p className="text-xs text-muted-foreground">
@@ -163,13 +167,22 @@ function ExecutorFormCard({
             onChange={(event) => onDockerHostChange(event.target.value)}
             placeholder={
               isRemoteDocker
-                ? "tcp://remote:2376 or ssh://user@host"
-                : "unix:///var/run/docker.sock"
+                ? // Two sample host URLs joined by a connector. The URLs are values
+                  // Docker parses, so they interpolate; the "or" between them is
+                  // copy and goes through the catalog.
+                  t("executors:dockerHostRemotePlaceholder", {
+                    tcp: "tcp://remote:2376",
+                    ssh: "ssh://user@host",
+                  })
+                : // The default Docker socket path. A filesystem path the daemon
+                  // owns, not copy.
+                  // eslint-disable-next-line i18next/no-literal-string -- Docker socket path
+                  "unix:///var/run/docker.sock"
             }
           />
           <p className="text-xs text-muted-foreground">
             {isRemoteDocker
-              ? t("executors:theRemoteDockerHostUrlTcp")
+              ? t("executors:theRemoteDockerHostUrlTcp", { schemes: REMOTE_DOCKER_SCHEMES })
               : t("executors:repositoriesWillBeMountedAsVolumes")}
           </p>
         </div>

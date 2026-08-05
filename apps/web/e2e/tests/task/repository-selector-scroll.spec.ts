@@ -21,6 +21,26 @@ async function expectWheelScrollsListInsideDialog(testPage: Page) {
     .poll(() => list.evaluate((el) => Boolean(el.closest('[data-testid="create-task-dialog"]'))))
     .toBe(true);
 
+  await expect
+    .poll(
+      () =>
+        list.evaluate((el) => ({
+          clientHeight: el.clientHeight,
+          scrollHeight: el.scrollHeight,
+        })),
+      { timeout: 5_000 },
+    )
+    .toEqual(
+      expect.objectContaining({
+        clientHeight: expect.any(Number),
+        scrollHeight: expect.any(Number),
+      }),
+    );
+
+  await expect
+    .poll(() => list.evaluate((el) => el.scrollHeight > el.clientHeight), { timeout: 5_000 })
+    .toBe(true);
+
   const { clientHeight, scrollHeight } = await list.evaluate((el) => ({
     clientHeight: el.clientHeight,
     scrollHeight: el.scrollHeight,

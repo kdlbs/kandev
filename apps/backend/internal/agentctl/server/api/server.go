@@ -18,6 +18,8 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/server/utility"
 	"github.com/kandev/kandev/internal/common/httpmw"
 	"github.com/kandev/kandev/internal/common/logger"
+	lspinstaller "github.com/kandev/kandev/internal/lsp/installer"
+	mcpproviders "github.com/kandev/kandev/internal/mcp/providers"
 	"github.com/kandev/kandev/internal/mcp/server"
 	"github.com/kandev/kandev/internal/system/metrics"
 	"go.uber.org/zap"
@@ -33,6 +35,7 @@ type Server struct {
 	router           *gin.Engine
 	portProxies      *portProxyCache
 	metricsCollector *metrics.Collector
+	lspInstaller     lspInstallerRegistry
 
 	upgrader websocket.Upgrader
 }
@@ -52,6 +55,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 		router:           gin.New(),
 		portProxies:      newPortProxyCache(),
 		metricsCollector: metrics.NewCollector(),
+		lspInstaller:     lspinstaller.NewRegistry("", log, lspinstaller.WithCommandRunner(procMgr)),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(r *http.Request) bool {
 				return true // Allow all origins for container-local communication
@@ -101,6 +105,7 @@ func (s *Server) setupRoutes() {
 		// Agent stream: bidirectional WebSocket for agent events, MCP, and agent operations
 		// (initialize, session/new, session/load, prompt, cancel, stderr, permissions/respond)
 		api.GET("/agent/stream", s.handleAgentStreamWS)
+		api.GET("/lsp/stream", s.handleLSPStreamWS)
 
 		// Unified workspace stream (git status, files, shell)
 		api.GET("/workspace/stream", s.handleWorkspaceStreamWS)
@@ -138,6 +143,7 @@ func (s *Server) setupRoutes() {
 		// Docker, Sprites — to seed the workspace with gitignored config
 		// after the in-container clone).
 		api.POST("/workspace/copy-files", s.handleWorkspaceCopyFiles)
+		api.POST("/attachments/materialize", s.handleMaterializeAttachment)
 		api.POST("/workspace/diagnostics/:id", s.handleWorkspaceDiagnostics)
 		api.POST("/workspace/materialize-repository", s.handleWorkspaceMaterializeRepository)
 		api.POST("/workspace/materialize-repository/remove", s.handleWorkspaceRemoveMaterializedRepository)
@@ -177,6 +183,7 @@ func (s *Server) setupRoutes() {
 		// Git operations
 		api.POST("/git/pull", s.handleGitPull)
 		api.POST("/git/push", s.handleGitPush)
+		api.POST("/git/push-preflight", s.handleGitPushPreflight)
 		api.POST("/git/rebase", s.handleGitRebase)
 		api.POST("/git/merge", s.handleGitMerge)
 		api.POST("/git/abort", s.handleGitAbort)
@@ -203,6 +210,7 @@ func (s *Server) setupRoutes() {
 	if s.mcpServer != nil {
 		s.mcpServer.RegisterRoutes(s.router)
 		api.PUT("/mcp/mode", s.handleSetMcpMode)
+		api.PUT("/mcp/providers", s.handleSetMcpProviders)
 	}
 
 	// pprof + memory stats (enabled via KANDEV_DEBUG_PPROF_ENABLED=true)
@@ -318,6 +326,21 @@ func (s *Server) handleSetMcpMode(c *gin.Context) {
 	}
 	s.mcpServer.SetMode(req.Mode)
 	c.JSON(http.StatusOK, gin.H{"mode": req.Mode})
+}
+
+// handleSetMcpProviders replaces the provider capabilities advertised by the
+// task-mode MCP server. Unknown providers are ignored by the MCP boundary.
+func (s *Server) handleSetMcpProviders(c *gin.Context) {
+	var req struct {
+		Providers []string `json:"mcp_providers"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	providers := mcpproviders.Normalize(req.Providers)
+	s.mcpServer.SetProviders(providers)
+	c.JSON(http.StatusOK, gin.H{"mcp_providers": providers})
 }
 
 // Status response

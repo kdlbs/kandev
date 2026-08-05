@@ -170,6 +170,111 @@ func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
 	}
 }
 
+func TestBundleDirForLauncherPathAcceptsBinLayout(t *testing.T) {
+	dir := filepath.Join("opt", "kandev")
+	got, ok := bundleDirForLauncherPath(filepath.Join(dir, "bin", executableName("kandev")))
+	if !ok {
+		t.Fatal("expected the <bundle>/bin/kandev layout to be accepted")
+	}
+	if got != dir {
+		t.Fatalf("bundle dir = %q, want %q", got, dir)
+	}
+}
+
+func TestBundleDirForLauncherPathRejectsLauncherOutsideBin(t *testing.T) {
+	for _, exe := range []string{
+		filepath.Join("opt", "kandev", executableName("kandev")),
+		filepath.Join("usr", "local", "sbin", executableName("kandev")),
+		executableName("kandev"),
+		// validateRuntimeBundle joins a lowercase "bin" onto whatever this
+		// returns, so any other casing must be refused here rather than
+		// derived and rejected later with a misleading error.
+		filepath.Join("opt", "kandev", "BIN", executableName("kandev")),
+	} {
+		if got, ok := bundleDirForLauncherPath(exe); ok {
+			t.Fatalf("exe %q was accepted as bundle %q", exe, got)
+		}
+	}
+}
+
+func TestResolveRuntimeBundlePrefersEnvOverExecutable(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", executableName("kandev")))
+	writeFile(t, filepath.Join(dir, "bin", executableName("agentctl")))
+	writeRemoteAgentctlHelpers(t, dir)
+	t.Setenv("KANDEV_BUNDLE_DIR", dir)
+
+	bundle, err := resolveRuntimeBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Source != "env" {
+		t.Fatalf("Source = %q, want %q", bundle.Source, "env")
+	}
+	if bundle.Dir != dir {
+		t.Fatalf("Dir = %q, want %q", bundle.Dir, dir)
+	}
+}
+
+func TestResolveRuntimeBundleFallsBackToExecutable(t *testing.T) {
+	dir := t.TempDir()
+	launcher := filepath.Join(dir, "bin", executableName("kandev"))
+	writeFile(t, launcher)
+	writeFile(t, filepath.Join(dir, "bin", executableName("agentctl")))
+	writeRemoteAgentctlHelpers(t, dir)
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
+
+	original := executablePath
+	t.Cleanup(func() { executablePath = original })
+	executablePath = func() (string, error) { return launcher, nil }
+
+	bundle, err := resolveRuntimeBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Source != "executable" {
+		t.Fatalf("Source = %q, want %q", bundle.Source, "executable")
+	}
+	// The lookup resolves symlinks, so compare against a resolved path. On
+	// Windows t.TempDir can sit under an 8.3 short name (JOOMAN~1) that
+	// EvalSymlinks expands, and on macOS /var is a symlink to /private/var.
+	wantDir := resolvedPath(t, dir)
+	if bundle.Dir != wantDir {
+		t.Fatalf("Dir = %q, want %q", bundle.Dir, wantDir)
+	}
+	wantLauncher := filepath.Join(wantDir, "bin", executableName("kandev"))
+	if bundle.Launcher != wantLauncher {
+		t.Fatalf("Launcher = %q, want %q", bundle.Launcher, wantLauncher)
+	}
+}
+
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
+}
+
+func TestResolveRuntimeBundleReportsBothLookupsInError(t *testing.T) {
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
+
+	// The test binary does not live in a <bundle>/bin directory, so the
+	// executable-relative lookup finds nothing and the error must say so rather
+	// than blaming the environment variable alone.
+	_, err := resolveRuntimeBundle()
+	if err == nil {
+		t.Fatal("expected an error when neither lookup resolves")
+	}
+	if !strings.Contains(err.Error(), "KANDEV_BUNDLE_DIR") {
+		t.Fatalf("error does not mention the env var: %v", err)
+	}
+	if !strings.Contains(err.Error(), "next to the launcher") {
+		t.Fatalf("error does not mention the executable-relative lookup: %v", err)
+	}
+}
+
 func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
 	t.Helper()
 	for _, helper := range requiredAgentctlRemoteHelpers {

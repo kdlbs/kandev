@@ -11,7 +11,6 @@ import {
   IconLink,
   IconLoader,
   IconLogicBuffer,
-  IconPencil,
   IconTicket,
   IconTrash,
   IconUnlink,
@@ -39,6 +38,8 @@ import {
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
 import { cn } from "@/lib/utils";
+import type { PluginTaskMenuContext } from "@/lib/plugins/types";
+import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 
 type ItemEntry = {
   kind: "item";
@@ -96,7 +97,21 @@ type BuildKanbanCardMenuEntriesArgs = {
   onLinkSentryIssue?: () => void;
   onMoveToStep?: (stepId: string) => void;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
+  /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
+  pluginMenuContext?: PluginTaskMenuContext;
 };
+
+const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
+  workspaceId: "",
+  taskId: "",
+  taskTitle: "",
+  workflowStepId: null,
+  presentation: "desktop",
+};
+
+function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
+  return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
+}
 
 function StepBadges({ step, isCurrent }: { step: TaskMoveStep; isCurrent: boolean }) {
   const hasAutoStart = stepHasAutoStart(step);
@@ -367,19 +382,17 @@ export function buildKanbanCardMenuEntries({
   onLinkSentryIssue,
   onMoveToStep,
   onSendToWorkflow,
+  pluginMenuContext,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
   const entries: KanbanCardMenuEntry[] = [
-    {
-      kind: "item",
-      key: "edit",
-      icon: <IconPencil className="mr-2 h-4 w-4" />,
-      label: "Edit",
-      disabled: isProcessing || !onEdit,
-      onSelect: onEdit,
-    },
+    buildEditMenuEntry({
+      onEdit,
+      disabled: isProcessing,
+      context: resolvePluginMenuContext(pluginMenuContext),
+    }),
   ];
 
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({

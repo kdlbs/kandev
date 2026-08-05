@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -170,6 +171,35 @@ func TestManager_ProcessEnvironmentMergesIndexedGitConfig(t *testing.T) {
 	}
 }
 
+func TestManager_PipedProcessInheritsAgentEnvironment(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{
+		AgentEnv: []string{
+			"KANDEV_GITHUB_CREDENTIAL_BROKER_URL=http://127.0.0.1:9876",
+			"PATH=/tmp/kandev-shim:/usr/bin",
+		},
+	}, newTestLogger(t))
+	req, err := mgr.buildPipedProcessRequest(PipedStartRequest{
+		SessionID: "session-1",
+		Command:   "kotlin-language-server",
+		Env: map[string]string{
+			"COMMAND_ONLY": "yes",
+			"PATH":         "/request/path",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildPipedProcessRequest() error = %v", err)
+	}
+	if got := req.Env["KANDEV_GITHUB_CREDENTIAL_BROKER_URL"]; got != "http://127.0.0.1:9876" {
+		t.Fatalf("piped process broker env = %q, want managed broker URL", got)
+	}
+	if got := req.Env["PATH"]; got != "/request/path" {
+		t.Fatalf("piped process PATH = %q, want explicit request value", got)
+	}
+	if got := req.Env["COMMAND_ONLY"]; got != "yes" {
+		t.Fatalf("piped process explicit env = %q, want yes", got)
+	}
+}
+
 func TestManager_StartAutoShellDoesNotDeadlockOnEnvironmentSnapshot(t *testing.T) {
 	mgr := NewManager(&config.InstanceConfig{
 		AgentArgs:    []string{"echo"},
@@ -216,6 +246,9 @@ func TestManager_BeginStopWaitsForInFlightAdmission(t *testing.T) {
 	if _, err := mgr.StartProcess(context.Background(), StartProcessRequest{}); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartProcess() error = %v, want manager-stopping error", err)
 	}
+	if _, err := mgr.StartPipedProcess(PipedStartRequest{}); !errors.Is(err, ErrManagerStopping) {
+		t.Fatalf("StartPipedProcess() error = %v, want manager-stopping error", err)
+	}
 	if err := mgr.StartShell(); !errors.Is(err, ErrManagerStopping) {
 		t.Fatalf("StartShell() error = %v, want manager-stopping error", err)
 	}
@@ -224,6 +257,47 @@ func TestManager_BeginStopWaitsForInFlightAdmission(t *testing.T) {
 	}
 	if _, err := mgr.ShellManager().Start("terminal", shell.DefaultConfig(t.TempDir())); err == nil {
 		t.Fatal("terminal shell Start() succeeded after BeginStop()")
+	}
+}
+
+func TestManager_StopForTeardownCancelsAndDrainsOwnedOperation(t *testing.T) {
+	mgr := NewManager(&config.InstanceConfig{WorkDir: t.TempDir()}, newTestLogger(t))
+	allowRelease := make(chan struct{})
+	var allowReleaseOnce sync.Once
+	signalRelease := func() {
+		allowReleaseOnce.Do(func() { close(allowRelease) })
+	}
+	operationCtx, release, err := mgr.BeginOwnedOperation(context.Background())
+	if err != nil {
+		t.Fatalf("BeginOwnedOperation() error = %v", err)
+	}
+	t.Cleanup(func() {
+		signalRelease()
+		release()
+	})
+
+	canceled := make(chan struct{})
+	go func() {
+		<-operationCtx.Done()
+		close(canceled)
+		<-allowRelease
+		release()
+	}()
+
+	stopDone := make(chan error, 1)
+	go func() { stopDone <- mgr.StopForTeardown(context.Background()) }()
+	<-canceled
+	select {
+	case err := <-stopDone:
+		t.Fatalf("StopForTeardown() returned before the owned operation released: %v", err)
+	default:
+	}
+	signalRelease()
+	if err := <-stopDone; err != nil {
+		t.Fatalf("StopForTeardown() error = %v", err)
+	}
+	if _, _, err := mgr.BeginOwnedOperation(context.Background()); !errors.Is(err, ErrManagerStopping) {
+		t.Fatalf("BeginOwnedOperation() after teardown error = %v, want %v", err, ErrManagerStopping)
 	}
 }
 

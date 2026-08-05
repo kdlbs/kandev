@@ -7,11 +7,8 @@
 // re-arms and older messages stop loading. The explicit button does not depend
 // on scroll/intersection state, so it always makes progress.
 //
-// Covers the native renderer (the production default — `STRATEGY = "native"`).
-// The virtuoso renderer shares the same MessageListStatus button, but its
-// windowed rendering keeps off-screen items out of the DOM, so asserting the
-// oldest message is *visible* there is a virtualization concern, not a
-// pagination one — out of scope for this regression.
+// Covers the native transcript renderer, including its explicit load-more
+// path and visible oldest-message assertion.
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";

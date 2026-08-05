@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -386,7 +387,7 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 	}
 	attachMgr := agentctlshared.NewAttachmentManager(workDir, e.logger.Zap())
 	attachMgr.SetSessionID(session.ID)
-	saved, err := attachMgr.SaveAttachments(attachments)
+	saved, err := e.savePassthroughAttachments(ctx, session, attachMgr, attachments)
 	if err != nil {
 		return "", fmt.Errorf("save passthrough attachments: %w", err)
 	}
@@ -404,6 +405,77 @@ func (e *Executor) buildPassthroughPromptWithAttachments(ctx context.Context, se
 		return attachmentPrompt, nil
 	}
 	return prompt + "\n\n" + attachmentPrompt, nil
+}
+
+func (e *Executor) savePassthroughAttachments(
+	ctx context.Context,
+	session *models.TaskSession,
+	attachMgr *agentctlshared.AttachmentManager,
+	attachments []v1.MessageAttachment,
+) ([]agentctlshared.SavedAttachment, error) {
+	var saved []agentctlshared.SavedAttachment
+	rollback := func() {
+		for _, attachment := range saved {
+			if attachment.AbsPath == "" {
+				continue
+			}
+			if err := os.Remove(attachment.AbsPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				e.logger.Debug("failed to roll back passthrough attachment",
+					zap.String("path", attachment.AbsPath), zap.Error(err))
+			}
+		}
+	}
+	for _, attachment := range attachments {
+		if attachment.AttachmentID != "" && attachment.Data == "" {
+			streamed, err := e.savePassthroughAttachment(ctx, session, attachMgr, attachment)
+			if streamed.AbsPath != "" {
+				saved = append(saved, streamed)
+			}
+			if err != nil {
+				rollback()
+				return nil, err
+			}
+			continue
+		}
+
+		inline, inlineErr := attachMgr.SaveAttachments([]v1.MessageAttachment{attachment})
+		saved = append(saved, inline...)
+		if inlineErr != nil {
+			rollback()
+			return nil, inlineErr
+		}
+	}
+	return saved, nil
+}
+
+func (e *Executor) savePassthroughAttachment(
+	ctx context.Context,
+	session *models.TaskSession,
+	attachMgr *agentctlshared.AttachmentManager,
+	attachment v1.MessageAttachment,
+) (agentctlshared.SavedAttachment, error) {
+	if e.attachmentReader == nil {
+		return agentctlshared.SavedAttachment{}, fmt.Errorf("attachment reader is unavailable for %q", attachment.AttachmentID)
+	}
+	reader, name, mimeType, sizeBytes, err := e.attachmentReader.OpenClaimed(
+		ctx, attachment.AttachmentID, session.TaskID, session.ID,
+	)
+	if err != nil {
+		return agentctlshared.SavedAttachment{}, fmt.Errorf("open attachment %q: %w", attachment.AttachmentID, err)
+	}
+	materialized := attachment
+	materialized.Name = name
+	materialized.MimeType = mimeType
+	materialized.SizeBytes = sizeBytes
+	streamed, saveErr := attachMgr.SaveAttachmentStream(materialized, reader)
+	closeErr := reader.Close()
+	if saveErr != nil {
+		return streamed, fmt.Errorf("write attachment %q: %w", attachment.AttachmentID, saveErr)
+	}
+	if closeErr != nil {
+		return streamed, fmt.Errorf("close attachment %q: %w", attachment.AttachmentID, closeErr)
+	}
+	return streamed, nil
 }
 
 func (e *Executor) passthroughAttachmentWorkspace(ctx context.Context, session *models.TaskSession) string {

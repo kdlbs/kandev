@@ -6,6 +6,7 @@ import { IconMessagePlus, IconChevronDown, IconChevronRight } from "@tabler/icon
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
+import { useTranslation } from "react-i18next";
 
 export function formatTimeAgo(dateStr: string): string {
   const date = new Date(dateStr);
@@ -92,6 +93,7 @@ export function CollapsibleSection({
   addAllLabel?: string;
   children: React.ReactNode;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(defaultOpen ?? true);
 
   return (
@@ -120,10 +122,10 @@ export function CollapsibleSection({
                 onClick={onAddAll}
               >
                 <IconMessagePlus className="h-3 w-3" />
-                Add all
+                {t("github:addAll")}
               </Button>
             </TooltipTrigger>
-            <TooltipContent>{addAllLabel ?? "Add all to chat context"}</TooltipContent>
+            <TooltipContent>{addAllLabel ?? t("github:addAllToChatContext")}</TooltipContent>
           </Tooltip>
         )}
       </div>
@@ -140,6 +142,7 @@ export function AddToContextButton({
   onClick: () => void;
   tooltip?: string;
 }) {
+  const { t } = useTranslation();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -155,7 +158,7 @@ export function AddToContextButton({
           <IconMessagePlus className="h-3 w-3" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{tooltip ?? "Add to chat context"}</TooltipContent>
+      <TooltipContent>{tooltip ?? t("github:addToChatContext")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -189,6 +192,7 @@ export function getTimeAgoColor(dateStr: string): string {
 }
 
 export function ExpandableBody({ body, className }: { body: string; className?: string }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -204,7 +208,7 @@ export function ExpandableBody({ body, className }: { body: string; className?: 
         }}
         className="text-[10px] text-blue-600 dark:text-blue-400 hover:underline mt-0.5 cursor-pointer"
       >
-        {expanded ? "Show less" : "Show more"}
+        {expanded ? t("github:showLess") : t("github:showMore")}
       </button>
     </div>
   );

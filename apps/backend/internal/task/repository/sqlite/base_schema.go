@@ -20,6 +20,7 @@ func (r *Repository) initSchema() error {
 		r.initWalkthroughsSchema,
 		r.initDocumentsSchema,
 		r.initSessionSchema,
+		r.initAttachmentsSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initGitSchema,
 		r.initReviewSchema,
@@ -551,6 +552,42 @@ func (r *Repository) initDocumentsSchema() error {
 		ON task_document_revisions(task_id, document_key, revision_number DESC);
 	`); err != nil {
 		return fmt.Errorf("init documents schema: %w", err)
+	}
+	return nil
+}
+
+// initAttachmentsSchema creates the descriptor registry for file-backed prompt
+// attachments. The storage key is intentionally opaque and never exposed in
+// API responses; bytes are owned by the attachment service.
+func (r *Repository) initAttachmentsSchema() error {
+	_, err := r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS task_message_attachments (
+		id TEXT PRIMARY KEY,
+		owner_id TEXT NOT NULL DEFAULT '',
+		workspace_id TEXT NOT NULL,
+		task_id TEXT NOT NULL DEFAULT '',
+		session_id TEXT NOT NULL DEFAULT '',
+		message_id TEXT NOT NULL DEFAULT '',
+		queue_id TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		mime_type TEXT NOT NULL DEFAULT 'application/octet-stream',
+		kind TEXT NOT NULL DEFAULT 'resource',
+		delivery_mode TEXT NOT NULL DEFAULT 'prompt',
+		size_bytes INTEGER NOT NULL,
+		storage_key TEXT NOT NULL UNIQUE,
+		state TEXT NOT NULL DEFAULT 'staged',
+		expires_at TIMESTAMP NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_owner_state
+		ON task_message_attachments(owner_id, state, expires_at);
+	CREATE INDEX IF NOT EXISTS idx_task_message_attachments_scope
+		ON task_message_attachments(workspace_id, task_id, session_id, state);
+	`)
+	if err != nil {
+		return fmt.Errorf("init attachments schema: %w", err)
 	}
 	return nil
 }

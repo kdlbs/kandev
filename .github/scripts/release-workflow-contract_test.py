@@ -158,6 +158,41 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn("inputs.channel == 'stable'", block)
             self.assertNotIn("github.event_name == 'schedule'", block)
 
+    def test_stable_jobs_continue_past_skipped_nightly_branch_only_after_successful_needs(
+        self,
+    ) -> None:
+        direct_dependencies = {
+            "build-desktop": ("prepare", "build-bundles"),
+            "docker-amd64": ("prepare", "build-bundles"),
+            "docker-arm64": ("prepare", "build-bundles"),
+            "docker-manifest": ("prepare", "docker-amd64", "docker-arm64"),
+            "docker-universal-amd64": ("prepare", "docker-manifest"),
+            "docker-universal-arm64": ("prepare", "docker-manifest"),
+            "docker-universal-manifest": (
+                "prepare",
+                "docker-universal-amd64",
+                "docker-universal-arm64",
+            ),
+            "publish-release": (
+                "prepare",
+                "build-bundles",
+                "build-desktop",
+                "docker-universal-manifest",
+            ),
+            "publish-npm": ("prepare", "publish-release"),
+            "update-homebrew-tap": ("prepare", "publish-release"),
+        }
+
+        for name, dependencies in direct_dependencies.items():
+            with self.subTest(job=name):
+                condition = job_condition(name)
+                self.assertIn("!cancelled()", condition)
+                for dependency in dependencies:
+                    self.assertIn(
+                        f"needs.{dependency}.result == 'success'",
+                        condition,
+                    )
+
     def test_nightly_publish_uses_exact_sha_local_assets_and_release_serialization(self) -> None:
         stable = job_block("publish-npm")
         nightly = job_block("publish-npm-nightly")

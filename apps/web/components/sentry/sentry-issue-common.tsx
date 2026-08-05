@@ -4,6 +4,7 @@ import { formatDistanceToNow } from "date-fns";
 import { Badge } from "@kandev/ui/badge";
 import type { SentryIssue, SentryLevel, SentryStatus } from "@/lib/types/sentry";
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
+import { useTranslation } from "react-i18next";
 
 // Sentry short IDs look like "PROJ-123" — alphanumeric uppercase project slug
 // followed by a numeric counter. Underscores and hyphens are allowed in the
@@ -86,11 +87,20 @@ export function SentryIssueRow({ issue }: { issue: SentryIssue }) {
 }
 
 function SentryIssueMeta({ issue, lastSeen }: { issue: SentryIssue; lastSeen: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3 text-xs text-muted-foreground">
-      {issue.count != null && issue.count !== "" && <span>events {issue.count}</span>}
-      {typeof issue.userCount === "number" && <span>users {issue.userCount}</span>}
-      {lastSeen && <span title={issue.lastSeen}>Last seen {lastSeen}</span>}
+      {issue.count != null && issue.count !== "" && (
+        <span>{t("sentry:eventsCount", { count: issue.count })}</span>
+      )}
+      {typeof issue.userCount === "number" && (
+        <span>{t("sentry:usersCount", { count: issue.userCount })}</span>
+      )}
+      {lastSeen && (
+        <span title={issue.lastSeen}>
+          {t("sentry:lastSeen")} {lastSeen}
+        </span>
+      )}
     </div>
   );
 }
@@ -109,13 +119,14 @@ type SentryErrorMessageProps = {
 };
 
 export function SentryErrorMessage({ error, compact }: SentryErrorMessageProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Sentry"
       reconnectHref="/settings/integrations/sentry"
       isAuthError={isSentryAuthError}
-      authErrorBody="Your Sentry auth token is invalid or has been revoked. Reconnect to view this issue."
+      authErrorBody={t("sentry:yourSentryAuthTokenIsInvalid")}
       compact={compact}
     />
   );

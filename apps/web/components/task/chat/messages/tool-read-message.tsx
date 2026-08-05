@@ -82,13 +82,15 @@ function parseReadMetadata(comment: Message) {
 function ReadFileLink({
   file,
   worktreePath,
+  sessionId,
   onOpenFile,
 }: {
   file: ReadFileRef;
   worktreePath?: string;
+  sessionId?: string;
   onOpenFile?: (path: string) => void;
 }) {
-  const handleOpenFile = useOpenFileAtLine(onOpenFile, file.startLine, worktreePath);
+  const handleOpenFile = useOpenFileAtLine(onOpenFile, file.startLine, worktreePath, sessionId);
   const lineRange = formatLineRange(file.startLine, file.lineCount);
   return (
     <span className="inline-flex items-baseline min-w-0">
@@ -109,6 +111,7 @@ function ReadFileLink({
 export const ToolReadMessage = memo(function ToolReadMessage({
   comment,
   worktreePath,
+  sessionId,
   onOpenFile,
 }: ToolReadMessageProps) {
   const { status, readOutput, filePath, offset, limit, hasOutput, isSuccess } =
@@ -147,7 +150,12 @@ export const ToolReadMessage = memo(function ToolReadMessage({
             <span className="inline-flex flex-wrap items-baseline gap-x-1 min-w-0">
               {resolvedFiles.map((file, idx) => (
                 <span key={`${file.path}-${idx}`} className="inline-flex items-baseline min-w-0">
-                  <ReadFileLink file={file} worktreePath={worktreePath} onOpenFile={onOpenFile} />
+                  <ReadFileLink
+                    file={file}
+                    worktreePath={worktreePath}
+                    sessionId={sessionId}
+                    onOpenFile={onOpenFile}
+                  />
                   {idx < resolvedFiles.length - 1 && (
                     <span className="text-muted-foreground/50">,</span>
                   )}

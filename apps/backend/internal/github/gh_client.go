@@ -183,27 +183,44 @@ type ghRequestedReviewer struct {
 
 // ghPR is the JSON shape returned by gh pr list/view.
 type ghPR struct {
-	Number           int                   `json:"number"`
-	Title            string                `json:"title"`
-	URL              string                `json:"url"`
-	State            string                `json:"state"`
-	Body             string                `json:"body"`
-	HeadRefName      string                `json:"headRefName"`
-	HeadRefOid       string                `json:"headRefOid"`
-	BaseRefName      string                `json:"baseRefName"`
-	IsDraft          bool                  `json:"isDraft"`
-	Mergeable        string                `json:"mergeable"`
-	MergeStateStatus string                `json:"mergeStateStatus"`
-	Additions        int                   `json:"additions"`
-	Deletions        int                   `json:"deletions"`
-	CreatedAt        time.Time             `json:"createdAt"`
-	UpdatedAt        time.Time             `json:"updatedAt"`
-	MergedAt         string                `json:"mergedAt"`
-	ClosedAt         string                `json:"closedAt"`
-	ReviewRequests   []ghRequestedReviewer `json:"reviewRequests"`
-	Author           struct {
+	Number              int                   `json:"number"`
+	Title               string                `json:"title"`
+	URL                 string                `json:"url"`
+	State               string                `json:"state"`
+	Body                string                `json:"body"`
+	HeadRefName         string                `json:"headRefName"`
+	HeadRefOid          string                `json:"headRefOid"`
+	BaseRefName         string                `json:"baseRefName"`
+	IsDraft             bool                  `json:"isDraft"`
+	Mergeable           string                `json:"mergeable"`
+	MergeStateStatus    string                `json:"mergeStateStatus"`
+	Additions           int                   `json:"additions"`
+	Deletions           int                   `json:"deletions"`
+	CreatedAt           time.Time             `json:"createdAt"`
+	UpdatedAt           time.Time             `json:"updatedAt"`
+	MergedAt            string                `json:"mergedAt"`
+	ClosedAt            string                `json:"closedAt"`
+	ReviewRequests      []ghRequestedReviewer `json:"reviewRequests"`
+	MaintainerCanModify bool                  `json:"maintainerCanModify"`
+	HeadRepository      ghRepository          `json:"headRepository"`
+	HeadRepositoryOwner ghRepositoryOwner     `json:"headRepositoryOwner"`
+	Author              struct {
 		Login string `json:"login"`
 	} `json:"author"`
+}
+
+type ghRepository struct {
+	DefaultBranch string `json:"defaultBranch"`
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	NameWithOwner string `json:"nameWithOwner"`
+	URL           string `json:"url"`
+	CloneURL      string `json:"cloneUrl"`
+	HTTPSURL      string `json:"httpsUrl"`
+}
+
+type ghRepositoryOwner struct {
+	Login string `json:"login"`
 }
 
 type ghIssue struct {
@@ -230,7 +247,7 @@ type ghIssue struct {
 func (c *GHClient) GetPR(ctx context.Context, owner, repo string, number int) (*PR, error) {
 	out, err := c.run(ctx, "pr", "view", fmt.Sprintf("%d", number),
 		"--repo", fmt.Sprintf("%s/%s", owner, repo),
-		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests")
+		"--json", "number,title,url,state,body,headRefName,headRefOid,baseRefName,author,isDraft,mergeable,mergeStateStatus,additions,deletions,createdAt,updatedAt,mergedAt,closedAt,reviewRequests,maintainerCanModify,headRepository,headRepositoryOwner")
 	if err != nil {
 		if isNotFoundErr(err) {
 			return nil, &GitHubAPIError{
@@ -765,6 +782,23 @@ func (c *GHClient) ListPRCommits(ctx context.Context, owner, repo string, number
 	return parsePRCommitsJSON(out)
 }
 
+func (c *GHClient) GetPRCommitDetail(ctx context.Context, owner, repo, sha string) (PRCommitDetail, error) {
+	if err := validateGitHubCommitSHA(sha); err != nil {
+		return PRCommitDetail{}, err
+	}
+	out, err := c.run(ctx, "api",
+		fmt.Sprintf("repos/%s/%s/commits/%s?per_page=100", owner, repo, sha),
+		"--paginate", "--slurp")
+	if err != nil {
+		return PRCommitDetail{}, fmt.Errorf("get PR commit detail: %w", err)
+	}
+	detail, err := parsePRCommitDetailJSON(out)
+	if err != nil {
+		return PRCommitDetail{}, err
+	}
+	return detail, nil
+}
+
 func (c *GHClient) SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error {
 	args := []string{"api",
 		fmt.Sprintf("repos/%s/%s/pulls/%d/reviews", owner, repo, number),
@@ -1193,29 +1227,51 @@ func convertGHPR(raw *ghPR, owner, repo string) *PR {
 		state = prStateMerged
 	}
 	pr := &PR{
-		Number:             raw.Number,
-		Title:              raw.Title,
-		URL:                raw.URL,
-		HTMLURL:            raw.URL,
-		State:              state,
-		Body:               raw.Body,
-		HeadBranch:         raw.HeadRefName,
-		HeadSHA:            raw.HeadRefOid,
-		BaseBranch:         raw.BaseRefName,
-		AuthorLogin:        raw.Author.Login,
-		RepoOwner:          owner,
-		RepoName:           repo,
-		Draft:              raw.IsDraft,
-		Mergeable:          raw.Mergeable == "MERGEABLE",
-		MergeableState:     strings.ToLower(raw.MergeStateStatus),
-		Additions:          raw.Additions,
-		Deletions:          raw.Deletions,
-		RequestedReviewers: convertGHRequestedReviewers(raw.ReviewRequests),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
-		MergedAt:           parseTimePtr(raw.MergedAt),
-		ClosedAt:           parseTimePtr(raw.ClosedAt),
+		Number:              raw.Number,
+		Title:               raw.Title,
+		URL:                 raw.URL,
+		HTMLURL:             raw.URL,
+		State:               state,
+		Body:                raw.Body,
+		HeadBranch:          raw.HeadRefName,
+		HeadSHA:             raw.HeadRefOid,
+		BaseBranch:          raw.BaseRefName,
+		AuthorLogin:         raw.Author.Login,
+		RepoOwner:           owner,
+		RepoName:            repo,
+		MaintainerCanModify: raw.MaintainerCanModify,
+		Draft:               raw.IsDraft,
+		Mergeable:           raw.Mergeable == "MERGEABLE",
+		MergeableState:      strings.ToLower(raw.MergeStateStatus),
+		Additions:           raw.Additions,
+		Deletions:           raw.Deletions,
+		RequestedReviewers:  convertGHRequestedReviewers(raw.ReviewRequests),
+		CreatedAt:           raw.CreatedAt,
+		UpdatedAt:           raw.UpdatedAt,
+		MergedAt:            parseTimePtr(raw.MergedAt),
+		ClosedAt:            parseTimePtr(raw.ClosedAt),
 	}
+	pr.HeadRepoNodeID = raw.HeadRepository.ID
+	pr.HeadRepoOwner = raw.HeadRepositoryOwner.Login
+	pr.HeadRepoName = raw.HeadRepository.Name
+	if parts := strings.SplitN(raw.HeadRepository.NameWithOwner, "/", 2); len(parts) == 2 {
+		if pr.HeadRepoOwner == "" {
+			pr.HeadRepoOwner = parts[0]
+		}
+		if pr.HeadRepoName == "" {
+			pr.HeadRepoName = parts[1]
+		}
+	}
+	pr.HeadRepoCloneURL = raw.HeadRepository.CloneURL
+	if pr.HeadRepoCloneURL == "" {
+		pr.HeadRepoCloneURL = raw.HeadRepository.HTTPSURL
+	}
+	// gh pr view does not expose baseRepository. The --repo arguments are the
+	// trusted target identity, while the PR response supplies the immutable
+	// base ref. Keep these separate from the source repository identity above.
+	pr.BaseRepoOwner = owner
+	pr.BaseRepoName = repo
+	pr.BaseDefaultBranch = raw.BaseRefName
 	return pr
 }
 

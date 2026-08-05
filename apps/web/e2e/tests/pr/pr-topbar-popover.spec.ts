@@ -10,17 +10,14 @@ const PR_NUMBER = 42;
 const PR_URL = `https://github.com/${OWNER}/${REPO}/pull/${PR_NUMBER}`;
 
 type SeedResult = {
-  workflowId: string;
-  inboxStepId: string;
-  workingStepId: string;
   doneStepId: string;
   taskId: string;
 };
 
 /**
- * Stand up a workspace + workflow + task that reaches the Done column
- * immediately (auto-start + on_turn_complete moves it). Returns the IDs the
- * spec needs to seed PR data + open the task.
+ * Stand up a workspace + workflow + completed task. These tests exercise the
+ * PR popover, so seed the session directly instead of launching an agent and
+ * making unrelated executor timing part of the fixture.
  */
 async function seedTask(
   apiClient: ApiClient,
@@ -30,17 +27,8 @@ async function seedTask(
   title: string,
 ): Promise<SeedResult> {
   const workflow = await apiClient.createWorkflow(workspaceId, `${title} Workflow`);
-  const inbox = await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
-  const working = await apiClient.createWorkflowStep(workflow.id, "Working", 1);
-  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 2);
-
-  await apiClient.updateWorkflowStep(working.id, {
-    prompt: 'e2e:message("done")\n{{task_prompt}}',
-    events: {
-      on_enter: [{ type: "auto_start_agent" }],
-      on_turn_complete: [{ type: "move_to_step", config: { step_id: done.id } }],
-    },
-  });
+  await apiClient.createWorkflowStep(workflow.id, "Inbox", 0);
+  const done = await apiClient.createWorkflowStep(workflow.id, "Done", 1);
 
   await apiClient.saveUserSettings({
     workspace_id: workspaceId,
@@ -53,15 +41,20 @@ async function seedTask(
 
   const task = await apiClient.createTask(workspaceId, title, {
     workflow_id: workflow.id,
-    workflow_step_id: inbox.id,
+    workflow_step_id: done.id,
     agent_profile_id: agentProfileId,
     repository_ids: [repositoryId],
   });
+  const now = new Date().toISOString();
+  await apiClient.seedTaskSession(task.id, {
+    state: "COMPLETED",
+    agentProfileId,
+    repositoryId,
+    startedAt: now,
+    completedAt: now,
+  });
 
   return {
-    workflowId: workflow.id,
-    inboxStepId: inbox.id,
-    workingStepId: working.id,
     doneStepId: done.id,
     taskId: task.id,
   };
@@ -124,14 +117,12 @@ async function expectScrollablePopoverWithinViewport(testPage: Page, locator: Lo
 
 async function openTaskAndWait(
   testPage: import("@playwright/test").Page,
-  apiClient: ApiClient,
   seed: SeedResult,
   title: string,
 ): Promise<SessionPage> {
   const kanban = new KanbanPage(testPage);
   await kanban.goto();
-  await apiClient.moveTask(seed.taskId, seed.workflowId, seed.workingStepId);
-  await expect(kanban.taskCardInColumn(title, seed.doneStepId)).toBeVisible({ timeout: 45_000 });
+  await expect(kanban.taskCardInColumn(title, seed.doneStepId)).toBeVisible({ timeout: 15_000 });
   await kanban.taskCardInColumn(title, seed.doneStepId).click();
   await expect(testPage).toHaveURL(/\/[st]\//, { timeout: 15_000 });
   const session = new SessionPage(testPage);
@@ -163,7 +154,7 @@ test.describe("PR top-bar CI popover", () => {
       review_count: 1,
       pending_review_count: 0,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prCheckGroupCount("passed")).toHaveText("22");
@@ -191,7 +182,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 22,
       checks_passing: 22,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prCheckGroup("passed")).toBeVisible();
@@ -234,7 +225,7 @@ test.describe("PR top-bar CI popover", () => {
         { name: "E2E / e", status: "completed", conclusion: "success", html_url: "" },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prWorkflowRow("Lint")).toBeVisible({ timeout: 10_000 });
@@ -268,7 +259,7 @@ test.describe("PR top-bar CI popover", () => {
       pr_number: PR_NUMBER,
       checks: manyRunningChecks(30),
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
 
     await expect(session.prStatusChip()).toBeVisible();
     await session.hoverPRTopbar();
@@ -299,7 +290,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prReviewRow()).toBeVisible();
@@ -331,7 +322,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     await expect(session.prReviewRow()).toBeVisible();
@@ -357,7 +348,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
 
     await session.hoverPRTopbar();
     // Move the cursor far away from the popover; close timer fires and the
@@ -399,7 +390,7 @@ test.describe("PR top-bar CI popover", () => {
         },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
 
     // Wait for the async CI content so the popover is at its final size/position
@@ -456,7 +447,7 @@ test.describe("PR top-bar CI popover", () => {
         },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await expect(session.prStatusChip()).toBeVisible();
     await session.hoverPRChip();
 
@@ -512,7 +503,7 @@ test.describe("PR top-bar CI popover", () => {
         },
       ],
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     // Move into the popover so it stays open while we read the row.
     await session.prTopbarPopover().hover();
@@ -537,7 +528,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 1,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await expect(session.prPopoverPRLink()).toHaveAttribute("href", PR_URL);
     await expect(session.prTopbarPopover().getByLabel("View all checks on GitHub")).toHaveCount(0);
@@ -558,7 +549,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 0,
       checks_passing: 0,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await expect(session.prChecksEmpty()).toBeVisible();
     await expect(session.prChecksEmpty()).toContainText("No checks have started");
@@ -580,7 +571,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 2,
       checks_passing: 1,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await expect(session.prPopoverReconnectLink()).toBeVisible();
     await expect(session.prPopoverReconnectLink()).toHaveAttribute("href", /settings/);
@@ -605,7 +596,7 @@ test.describe("PR top-bar CI popover", () => {
       checks_total: 27,
       checks_passing: 22,
     });
-    const session = await openTaskAndWait(testPage, apiClient, seed, title);
+    const session = await openTaskAndWait(testPage, seed, title);
     await session.hoverPRTopbar();
     await session.prTopbarPopover().hover();
     await expect(session.prCheckGroupCount("passed")).toHaveText("22");

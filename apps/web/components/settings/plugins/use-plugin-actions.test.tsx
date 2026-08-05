@@ -77,7 +77,10 @@ describe("usePluginActions — install/update", () => {
     });
 
     await waitFor(() => expect(loadPlugins).toHaveBeenCalledTimes(1));
-    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id, { evictCache: true });
+    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id, {
+      evictCache: true,
+      transition: "reload",
+    });
 
     const unloadOrder = unloadPlugin.mock.invocationCallOrder[0];
     const loadOrder = loadPlugins.mock.invocationCallOrder[0];
@@ -98,8 +101,11 @@ describe("usePluginActions — enable", () => {
     await waitFor(() => expect(loadPlugins).toHaveBeenCalledTimes(1));
     // Enable must unload without evicting the cache — eviction is reserved
     // for install/update, where the bundle content actually changed.
-    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id);
-    expect(unloadPlugin).not.toHaveBeenCalledWith(plugin.id, { evictCache: true });
+    expect(unloadPlugin).toHaveBeenCalledWith(plugin.id, { transition: "reload" });
+    expect(unloadPlugin).not.toHaveBeenCalledWith(plugin.id, {
+      evictCache: true,
+      transition: "reload",
+    });
 
     const unloadOrder = unloadPlugin.mock.invocationCallOrder[0];
     const loadOrder = loadPlugins.mock.invocationCallOrder[0];

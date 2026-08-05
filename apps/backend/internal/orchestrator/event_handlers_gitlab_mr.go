@@ -10,13 +10,6 @@ import (
 	"github.com/kandev/kandev/internal/gitlab"
 )
 
-// gitlabMRStateOpen mirrors the gitlab package's own normalized "open" state
-// value (GitLab's API returns "opened"; the client normalizes it to "open"
-// before it ever reaches a TaskMR row). Kept as a local constant rather than
-// exported from the gitlab package, matching how event_handlers_github.go's
-// githubPRStateOpen mirrors the github package's vocabulary.
-const gitlabMRStateOpen = "open"
-
 // detectPushAndAssociateMR is the GitLab twin of detectPushAndAssociatePR: on
 // push to a session branch, it looks up the open merge request whose source
 // branch matches and links it to the task, scoped by repository_id. Mirrors

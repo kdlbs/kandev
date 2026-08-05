@@ -15,6 +15,7 @@ type ScriptCardProps = {
   height?: string;
   placeholders: ScriptPlaceholder[];
   executorType: string;
+  discoveryTargetId?: string;
 };
 
 export function ScriptCard({
@@ -26,6 +27,7 @@ export function ScriptCard({
   height = "300px",
   placeholders,
   executorType,
+  discoveryTargetId,
 }: ScriptCardProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [editorHeight, setEditorHeight] = useState(height);
@@ -46,7 +48,7 @@ export function ScriptCard({
   const isDirty = baselineValue !== undefined && value !== baselineValue;
 
   return (
-    <SettingsCard isDirty={isDirty}>
+    <SettingsCard isDirty={isDirty} discoveryTargetId={discoveryTargetId}>
       <CardHeader>
         <CardTitle>{title}</CardTitle>
         <CardDescription>{description}</CardDescription>

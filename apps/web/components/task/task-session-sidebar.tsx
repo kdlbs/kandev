@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { usePathname, useRouter } from "@/lib/routing/client-router";
-import { linkToTask } from "@/lib/links";
+import { linkToTask, replaceTaskUrl } from "@/lib/links";
 import type { Repository, TaskSessionState } from "@/lib/types/http";
 import { PluginSlot } from "@/components/plugins/plugin-slot";
 import { TaskSwitcher, type TaskSwitcherItem } from "./task-switcher";
@@ -37,6 +38,16 @@ type TaskSessionSidebarProps = {
   hideFilterBar?: boolean;
 };
 
+function findSidebarTask(state: ReturnType<StoreApi["getState"]>, taskId: string) {
+  const activeTask = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+  if (activeTask) return activeTask;
+  for (const tasks of Object.values(state.sidebarArchivedTasks?.itemsByWorkspaceId ?? {})) {
+    const archivedTask = tasks.find((task) => task.id === taskId);
+    if (archivedTask) return archivedTask;
+  }
+  return undefined;
+}
+
 function useSidebarData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -57,6 +68,8 @@ function useSidebarData(workspaceId: string | null) {
     stepsByWorkflowId,
     workflows,
     isLoading: isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
   } = useWorkspaceSidebarTasks(workspaceId);
 
   const tasksWithRepositories = useMemo(() => {
@@ -101,6 +114,8 @@ function useSidebarData(workspaceId: string | null) {
     allSteps,
     stepsByWorkflowId,
     isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
     tasksWithRepositories,
     workflows,
   };
@@ -177,7 +192,7 @@ function useArchiveActions(store: StoreApi) {
   const handleArchiveTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findSidebarTask(state, taskId);
       setArchivingTask({
         id: taskId,
         title: task?.title ?? "this task",
@@ -231,7 +246,7 @@ function useDeleteActions(
   const handleDeleteTask = useCallback(
     (taskId: string) => {
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findSidebarTask(state, taskId);
       setDeletingTask({
         id: taskId,
         title: task?.title ?? "this task",
@@ -305,7 +320,12 @@ export function useSidebarActions(store: StoreApi) {
         return;
       }
       const state = store.getState();
-      const task = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots, state.kanban.tasks);
+      const task = findSidebarTask(state, taskId);
+      if (task?.isArchived) {
+        setActiveTask(taskId);
+        replaceTaskUrl(taskId);
+        return;
+      }
       selectTaskWithLayout({
         taskId,
         task: task ?? undefined,
@@ -377,6 +397,7 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   hideFilterBar,
 }: TaskSessionSidebarProps) {
   const store = useAppStoreApi();
+  const { t } = useTranslation();
   useRepositories(workspaceId);
   const pathname = usePathname();
 
@@ -386,6 +407,8 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     stepsByWorkflowId,
     workflows,
     isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
     tasksWithRepositories,
   } = useSidebarData(workspaceId);
 
@@ -445,6 +468,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     handleReorderGroup,
     handleReorderSubtasks,
     isLoadingWorkflow,
+    archivedError,
+    retryArchivedTasks,
+    archivedLoadErrorLabel: t("sidebar:archivedLoadFailed"),
+    archivedRetryLabel: t("sidebar:retry"),
     totalTaskCount: displayTasks.length,
     selection,
   });

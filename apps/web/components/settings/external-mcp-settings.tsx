@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
 import { Separator } from "@kandev/ui/separator";
 import { SettingsSection } from "@/components/settings/settings-section";
+import { STANDALONE_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/standalone";
 import { getBackendConfig } from "@/lib/config";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
 import {
@@ -66,9 +67,17 @@ export function ExternalMcpSettings() {
       <Separator />
 
       <SettingsSection
+        discoveryTargetId={STANDALONE_SETTINGS_TARGETS.externalMcpEndpoints}
         icon={<IconPlugConnected className="h-5 w-5" />}
         title={t("settings:externalMcpEndpoints")}
-        description={t("settings:externalMcpEndpointsDescription")}
+        // `localhost` is a hostname the user types, not copy. Interpolated so
+        // the pseudo-locale leaves it intact — baked into the message it renders
+        // as `ĺōćàĺĥōśţ`, a dead pointer to something the reader must reproduce
+        // verbatim. Same reasoning as `voiceUnavailableInsecure`, which already
+        // passes its scheme and host as values.
+        description={t("settings:externalMcpEndpointsDescription", {
+          localhostHost: "localhost",
+        })}
       >
         <Card>
           <CardHeader>
@@ -232,6 +241,7 @@ function SnippetsSection({
 
   return (
     <SettingsSection
+      discoveryTargetId={STANDALONE_SETTINGS_TARGETS.externalMcpSnippets}
       icon={<IconCode className="h-5 w-5" />}
       title={t("settings:externalMcpSnippets")}
       description={t("settings:externalMcpSnippetsDescription")}

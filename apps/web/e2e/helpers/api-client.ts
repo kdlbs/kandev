@@ -10,7 +10,11 @@ import type {
 } from "../../lib/types/http";
 import type { Agent, AgentProfile } from "../../lib/types/http-agents";
 import { normalizeAgentProfile } from "../../lib/api/domains/agent-profile-normalize";
-import type { TaskCIAutomationOptions, TaskCIAutomationPatch } from "../../lib/types/github";
+import type {
+  PRCommitDetail,
+  TaskCIAutomationOptions,
+  TaskCIAutomationPatch,
+} from "../../lib/types/github";
 import type { VoiceModeSettings } from "../../lib/types/http-voice";
 import type { TaskStatusSummary } from "../../lib/types/task-status-summary";
 import type {
@@ -23,6 +27,8 @@ import type {
   Issue as MockGitLabIssue,
   MR as MockGitLabMR,
   TaskMR,
+  TaskMRAutomationOptions,
+  TaskMRAutomationPatch,
 } from "../../lib/types/gitlab";
 import type {
   SSHAgentReadinessResponse,
@@ -574,6 +580,7 @@ export class ApiClient {
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;
+      enabled?: boolean;
       cli_flags?: Array<{ description: string; flag: string; enabled: boolean }>;
       command_prefix?: string;
       env_vars?: Array<{ key: string; value?: string; secret_id?: string }>;
@@ -849,6 +856,7 @@ export class ApiClient {
     unread_divider?: boolean;
     agent_generated_task_titles?: boolean;
     mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
+    sidebar_active_view_id?: string;
     show_anchored_prompt_bar?: boolean;
     show_scroll_to_last_prompt?: boolean;
     show_scroll_to_start?: boolean;
@@ -865,6 +873,10 @@ export class ApiClient {
     default_utility_model?: string;
     sidebar_views?: unknown[];
     saved_layouts?: unknown[];
+    lsp_auto_start_languages?: string[];
+    lsp_auto_install_languages?: string[];
+    lsp_server_configs?: Record<string, Record<string, unknown>>;
+    lsp_status_location?: "toolbar" | "status_bar";
     kanban_view_mode?: string;
     tasks_list_show_details?: boolean;
     tasks_list_sort?: string;
@@ -1313,6 +1325,7 @@ export class ApiClient {
       message: string;
       author_login: string;
       author_date: string;
+      stats_available?: boolean;
     }>,
   ): Promise<void> {
     await this.request("POST", "/api/v1/github/mock/commits", {
@@ -1325,6 +1338,28 @@ export class ApiClient {
 
     // PR commit fixtures predate workspace-scoped GitHub authentication and
     // expect the shared mock client to be available for provider lookups.
+    const workspaceId = await this.activeWorkspaceId();
+    if (!workspaceId) return;
+    await this.mockGitHubSetWorkspaceConnection(workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+  }
+
+  async mockGitHubAddPRCommitDetail(
+    owner: string,
+    repo: string,
+    sha: string,
+    detail: Omit<PRCommitDetail, "sha"> & { sha?: string },
+  ): Promise<void> {
+    await this.request("POST", "/api/v1/github/mock/commit-details", {
+      owner,
+      repo,
+      sha,
+      detail: { ...detail, sha: detail.sha ?? sha },
+    });
+    await this.seedMockGitHubRepositoryAccess([{ repo_owner: owner, repo_name: repo }]);
+
     const workspaceId = await this.activeWorkspaceId();
     if (!workspaceId) return;
     await this.mockGitHubSetWorkspaceConnection(workspaceId, {
@@ -1644,6 +1679,21 @@ export class ApiClient {
     );
   }
 
+  async getTaskMRAutomationOptions(taskId: string): Promise<TaskMRAutomationOptions> {
+    return this.request("GET", `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`);
+  }
+
+  async updateTaskMRAutomationOptions(
+    taskId: string,
+    patch: TaskMRAutomationPatch,
+  ): Promise<TaskMRAutomationOptions> {
+    return this.request(
+      "PATCH",
+      `/api/v1/gitlab/tasks/${encodeURIComponent(taskId)}/mr-automation`,
+      patch,
+    );
+  }
+
   async linkTaskGitLabMR(
     workspaceId: string,
     data: { task_id: string; repository_id?: string; mr_url: string },
@@ -1782,7 +1832,7 @@ export class ApiClient {
   }
 
   async setPrimarySession(sessionId: string): Promise<void> {
-    await this.request("POST", `/api/v1/task-sessions/${sessionId}/set-primary`);
+    await this.wsRequest("session.set_primary", { session_id: sessionId });
   }
 
   async deleteSession(sessionId: string): Promise<void> {
@@ -1892,7 +1942,9 @@ export class ApiClient {
       executor_profile_id?: string;
       prompt: string;
       intent?: string;
+      session_id?: string;
       workflow_step_id?: string;
+      launch_workspace?: boolean;
       auto_start?: boolean;
     },
     timeoutMs = 30_000,

@@ -5,7 +5,10 @@ import {
   useWorkflowAgentProfileEffect,
   useWorkflowStepsEffect,
 } from "./task-create-dialog-effects";
-import { decideAgentProfileAutopick } from "./task-create-dialog-autopick";
+import {
+  decideAgentProfileAutopick,
+  type AgentProfileAutopickInput,
+} from "./task-create-dialog-autopick";
 import type { DialogFormState, StoreSelections } from "@/components/task-create-dialog-types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { Workspace } from "@/lib/types/http";
@@ -363,63 +366,87 @@ function makeSel(overrides: Partial<StoreSelections> = {}): StoreSelections {
   };
 }
 
+function decideAutopick(
+  agentProfiles: AgentProfileOption[],
+  compatibleAgentProfiles: AgentProfileOption[],
+  overrides: Partial<AgentProfileAutopickInput> = {},
+) {
+  return decideAgentProfileAutopick({
+    open: true,
+    agentProfileId: "",
+    workflowAgentProfileId: "",
+    workflowHasAgent: false,
+    agentProfiles,
+    compatibleAgentProfiles,
+    authLoaded: true,
+    executorProfileId: "",
+    hasExecutors: false,
+    lastAgentProfileId: null,
+    userSettingsLoaded: true,
+    defaultAgentProfileId: null,
+    ...overrides,
+  });
+}
+
 describe("decideAgentProfileAutopick — user settings deferral", () => {
   it("defers agent auto-pick until user settings have loaded or settled", () => {
     const cursor = makeProfile("cursor");
-    const deferred = decideAgentProfileAutopick({
-      open: true,
-      agentProfileId: "",
-      workflowAgentProfileId: "",
-      workflowHasAgent: false,
-      agentProfiles: [cursor],
-      compatibleAgentProfiles: [cursor],
-      authLoaded: true,
-      executorProfileId: "",
-      hasExecutors: false,
-      lastAgentProfileId: null,
-      userSettingsLoaded: false,
-      defaultAgentProfileId: null,
+    expect(decideAutopick([cursor], [cursor], { userSettingsLoaded: false })).toEqual({
+      kind: "defer",
+      reason: "user-settings-not-loaded",
     });
-
-    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
-
-    const picked = decideAgentProfileAutopick({
-      open: true,
-      agentProfileId: "",
-      workflowAgentProfileId: "",
-      workflowHasAgent: false,
-      agentProfiles: [cursor],
-      compatibleAgentProfiles: [cursor],
-      authLoaded: true,
-      executorProfileId: "",
-      hasExecutors: false,
-      lastAgentProfileId: null,
-      userSettingsLoaded: true,
-      defaultAgentProfileId: null,
+    expect(decideAutopick([cursor], [cursor])).toEqual({
+      kind: "pick",
+      source: "first",
+      id: cursor.id,
     });
-
-    expect(picked).toEqual({ kind: "pick", source: "first", id: cursor.id });
   });
 
   it("defers auto-pick while user settings load", () => {
     const cursor = makeProfile("cursor");
+    expect(
+      decideAutopick([cursor], [cursor], {
+        userSettingsLoaded: false,
+        lastAgentProfileId: cursor.id,
+      }),
+    ).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+  });
 
-    const deferred = decideAgentProfileAutopick({
-      open: true,
-      agentProfileId: "",
-      workflowAgentProfileId: "",
-      workflowHasAgent: false,
-      agentProfiles: [cursor],
-      compatibleAgentProfiles: [cursor],
-      authLoaded: true,
-      executorProfileId: "",
-      hasExecutors: false,
-      lastAgentProfileId: cursor.id,
-      userSettingsLoaded: false,
-      defaultAgentProfileId: null,
+  it("never picks a disabled profile (last-used, workspace default, or first)", () => {
+    // The compat list is already filtered by useExecutorProfileCompat, so
+    // the disabled profile is absent — the decision must not resurrect it
+    // via the last-used or workspace-default candidates.
+    const enabled = makeProfile("enabled");
+    const disabled = { ...makeProfile("disabled"), enabled: false };
+    const agentProfiles = [disabled, enabled];
+    const compatibleAgentProfiles = [enabled];
+
+    expect(
+      decideAutopick(agentProfiles, compatibleAgentProfiles, { lastAgentProfileId: disabled.id }),
+    ).toEqual({
+      kind: "pick",
+      source: "first",
+      id: enabled.id,
     });
+    expect(
+      decideAutopick(agentProfiles, compatibleAgentProfiles, {
+        defaultAgentProfileId: disabled.id,
+      }),
+    ).toEqual({
+      kind: "pick",
+      source: "first",
+      id: enabled.id,
+    });
+    expect(decideAutopick(agentProfiles, compatibleAgentProfiles)).toEqual({
+      kind: "pick",
+      source: "first",
+      id: enabled.id,
+    });
+  });
 
-    expect(deferred).toEqual({ kind: "defer", reason: "user-settings-not-loaded" });
+  it("treats all-disabled as no compatible profiles", () => {
+    const disabled = { ...makeProfile("disabled"), enabled: false };
+    expect(decideAutopick([disabled], [])).toEqual({ kind: "skip", reason: "no-compatible" });
   });
 });
 

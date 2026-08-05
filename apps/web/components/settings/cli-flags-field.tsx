@@ -413,6 +413,7 @@ type CustomCLIFlagsCardProps = {
   baselineFlags?: CLIFlag[];
   onChange: (next: CLIFlag[]) => void;
   permissionSettings?: Record<string, PermissionSetting>;
+  discoveryTargetId?: string;
 };
 
 /**
@@ -426,6 +427,7 @@ export function CustomCLIFlagsCard({
   baselineFlags,
   onChange,
   permissionSettings,
+  discoveryTargetId,
 }: CustomCLIFlagsCardProps) {
   const { t } = useTranslation();
   const curatedFlagTexts = useMemo(
@@ -450,7 +452,11 @@ export function CustomCLIFlagsCard({
   const onAdd = (next: CLIFlag) => onChange([...flags, next]);
 
   return (
-    <SettingsCard isDirty={isDirty} data-testid="custom-cli-flags-card">
+    <SettingsCard
+      isDirty={isDirty}
+      discoveryTargetId={discoveryTargetId}
+      data-testid="custom-cli-flags-card"
+    >
       <CardHeader>
         <div className="flex items-center justify-between gap-3">
           <div>

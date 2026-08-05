@@ -54,6 +54,20 @@ type fakeRuntime struct {
 	blockProceed chan struct{}
 }
 
+type fakeUserStateCleanup struct {
+	deleteErr error
+	delete    func(context.Context, string) error
+	calls     int
+}
+
+func (f *fakeUserStateCleanup) DeleteAllForPlugin(ctx context.Context, pluginID string) error {
+	f.calls++
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	return f.delete(ctx, pluginID)
+}
+
 func newFakeRuntime() *fakeRuntime {
 	return &fakeRuntime{
 		running:       map[string]bool{},
@@ -403,6 +417,98 @@ func TestServiceUninstallDeletesPluginState(t *testing.T) {
 	}
 	if len(entries) != 0 {
 		t.Fatalf("plugin_state entries after Uninstall() = %d, want 0 (state should be deleted)", len(entries))
+	}
+}
+
+// TestServiceUninstallDeletesPluginUserStateForEveryUser pins AC20: the
+// per-user counterpart of TestServiceUninstallDeletesPluginState — uninstall
+// must purge plugin_user_state rows for every user who wrote one, not just
+// whichever user happened to trigger the uninstall.
+func TestServiceUninstallDeletesPluginUserStateForEveryUser(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	svc.SetUserState(newTestUserStateStore(t))
+	installTestPlugin(t, svc, "kandev-plugin-notes")
+
+	ctx := context.Background()
+	if _, err := svc.UserState().Set(ctx, "kandev-plugin-notes", "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
+		t.Fatalf("seed user_1: %v", err)
+	}
+	if _, err := svc.UserState().Set(ctx, "kandev-plugin-notes", "user_2", "task", "task_1", "note", json.RawMessage(`"b"`), nil); err != nil {
+		t.Fatalf("seed user_2: %v", err)
+	}
+
+	if err := svc.Uninstall(context.Background(), "kandev-plugin-notes"); err != nil {
+		t.Fatalf("Uninstall() unexpected error: %v", err)
+	}
+
+	for _, userID := range []string{"user_1", "user_2"} {
+		entries, err := svc.UserState().List(ctx, "kandev-plugin-notes", userID, "task", "task_1")
+		if err != nil {
+			t.Fatalf("List(%s) after Uninstall(): %v", userID, err)
+		}
+		if len(entries) != 0 {
+			t.Fatalf("plugin_user_state entries for %s after Uninstall() = %d, want 0", userID, len(entries))
+		}
+	}
+}
+
+func TestServiceUninstallFailsClosedWhenUserStateCleanupFails(t *testing.T) {
+	svc, fsStore, rt := newTestService(t)
+	svc.SetUserState(newTestUserStateStore(t))
+	rec := installTestPlugin(t, svc, "kandev-plugin-notes")
+	ctx := context.Background()
+	if _, err := svc.UserState().Set(ctx, rec.ID, "user_1", "task", "task_1", "note", json.RawMessage(`"a"`), nil); err != nil {
+		t.Fatalf("seed user state: %v", err)
+	}
+
+	cleanupErr := errors.New("user state database unavailable")
+	cleanup := &fakeUserStateCleanup{
+		deleteErr: cleanupErr,
+		delete:    svc.UserState().DeleteAllForPlugin,
+	}
+	svc.setUserStateCleanupStore(cleanup)
+	deliverer := &fakeDeliverer{}
+	svc.SetDeliverer(deliverer)
+
+	err := svc.Uninstall(ctx, rec.ID)
+	if err == nil || !strings.Contains(err.Error(), cleanupErr.Error()) {
+		t.Fatalf("Uninstall() error = %v, want user-state cleanup failure", err)
+	}
+	if cleanup.calls != 1 {
+		t.Fatalf("DeleteAllForPlugin calls after failed uninstall = %d, want 1", cleanup.calls)
+	}
+	if !rt.stopped(rec.ID) {
+		t.Fatal("Uninstall() did not stop the runtime before cleanup failure")
+	}
+	if _, err := svc.Get(rec.ID); err != nil {
+		t.Fatalf("Get() after failed uninstall: %v, want installed record", err)
+	}
+	if _, err := fsStore.Get(rec.ID); err != nil {
+		t.Fatalf("store.Get() after failed uninstall: %v, want installed record", err)
+	}
+	if _, err := os.Stat(rec.InstallPath); err != nil {
+		t.Fatalf("installed package after failed uninstall: %v", err)
+	}
+	if deliverer.refreshCount != 1 {
+		t.Fatalf("deliverer refreshes after failed uninstall = %d, want stopped-state reconciliation only", deliverer.refreshCount)
+	}
+
+	cleanup.deleteErr = nil
+	if err := svc.Uninstall(ctx, rec.ID); err != nil {
+		t.Fatalf("retry Uninstall() error: %v", err)
+	}
+	if cleanup.calls != 2 {
+		t.Fatalf("DeleteAllForPlugin calls after retry = %d, want 2", cleanup.calls)
+	}
+	if _, err := svc.Get(rec.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("Get() after successful retry = %v, want store.ErrNotFound", err)
+	}
+	entries, err := svc.UserState().List(ctx, rec.ID, "user_1", "task", "task_1")
+	if err != nil {
+		t.Fatalf("List() after successful retry: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("user state rows after successful retry = %d, want 0", len(entries))
 	}
 }
 

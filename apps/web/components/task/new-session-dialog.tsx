@@ -18,6 +18,7 @@ import { useRemoteAuthSpecs } from "@/hooks/domains/settings/use-remote-auth-spe
 import { useTaskExecutorProfile } from "@/hooks/domains/session/use-task-executor-profile";
 import { isAgentConfiguredOnExecutor } from "@/lib/agent-executor-compat";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { ExecutorProfile } from "@/lib/types/http";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { buildHandoffInitialState, type HandoffPreset } from "./handoff-types";
@@ -26,6 +27,7 @@ import { useUtilityAgentGenerator } from "@/hooks/use-utility-agent-generator";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { EnvironmentBadges, ContextSelect } from "./session-dialog-shared";
 import { useSessionContextChange, useSessionLaunchSubmit } from "./new-session-form-actions";
+import { resolveComposerWorkspaceId } from "./chat/composer-workspace";
 
 export type { HandoffPreset } from "./handoff-types";
 
@@ -35,6 +37,7 @@ type NewSessionDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   taskId: string;
+  workspaceId?: string | null;
   groupId?: string;
   handoff?: HandoffPreset;
 };
@@ -45,6 +48,17 @@ function agentProfileDisplayLabel(profile: AgentProfileOption): string {
 }
 
 function useNewSessionDialogState(taskId: string) {
+  const resolvedWorkspaceId = useAppStore((state) =>
+    resolveComposerWorkspaceId({
+      sessionId: null,
+      taskId,
+      quickChatSessions: state.quickChat.sessions,
+      activeWorkflowId: state.kanban.workflowId,
+      activeTasks: state.kanban.tasks,
+      snapshots: Object.values(state.kanbanMulti.snapshots),
+      workflows: state.workflows.items,
+    }),
+  );
   const taskTitle = useAppStore((state) => {
     const task = state.kanban.tasks.find((t: { id: string }) => t.id === taskId);
     return task?.title ?? "Task";
@@ -79,12 +93,17 @@ function useNewSessionDialogState(taskId: string) {
   });
 
   const sessionProfileId = currentSession?.agent_profile_id ?? "";
-  const profileIsValid = agentProfiles.some((p: { id: string }) => p.id === sessionProfileId);
+  // The default for a NEW session must be selectable: a current session
+  // that uses a now-disabled profile still runs (no effect on existing
+  // sessions), but the dialog falls back to the first enabled profile.
+  const selectableProfiles = agentProfiles.filter(isSelectableAgentProfile);
+  const profileIsValid = selectableProfiles.some((p: { id: string }) => p.id === sessionProfileId);
   const effectiveDefaultProfileId: string = profileIsValid
     ? sessionProfileId
-    : (agentProfiles[0]?.id ?? "");
+    : (selectableProfiles[0]?.id ?? "");
 
   return {
+    resolvedWorkspaceId,
     taskTitle,
     agentProfiles,
     currentSession,
@@ -145,10 +164,9 @@ function useCompatibleAgentProfiles(
 ): AgentProfileOption[] {
   const { specs: authSpecs, loaded: authLoaded } = useRemoteAuthSpecs();
   return useMemo(() => {
-    if (!executorProfile || !authLoaded) return agentProfiles;
-    return agentProfiles.filter((ap) =>
-      isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs),
-    );
+    const selectable = agentProfiles.filter(isSelectableAgentProfile);
+    if (!executorProfile || !authLoaded) return selectable;
+    return selectable.filter((ap) => isAgentConfiguredOnExecutor(ap, executorProfile, authSpecs));
   }, [agentProfiles, executorProfile, authSpecs, authLoaded]);
 }
 
@@ -215,16 +233,18 @@ function shouldDisableSubmit(isBusy: boolean, hasPrompt: boolean, hasProfiles: b
 }
 
 function useEnforceCompatibleProfile(
-  hasExecutorProfile: boolean,
   compatible: AgentProfileOption[],
   selectedId: string,
   setSelected: (id: string) => void,
 ) {
   useEffect(() => {
-    if (!hasExecutorProfile) return;
     if (compatible.some((p) => p.id === selectedId)) return;
-    if (compatible.length > 0) setSelected(compatible[0].id);
-  }, [hasExecutorProfile, compatible, selectedId, setSelected]);
+    if (compatible.length > 0) {
+      setSelected(compatible[0].id);
+    } else if (selectedId) {
+      setSelected("");
+    }
+  }, [compatible, selectedId, setSelected]);
 }
 
 function useSessionProfileSelection({
@@ -241,12 +261,7 @@ function useSessionProfileSelection({
   setSelectedProfileId: (value: string) => void;
 }) {
   const compatibleAgentProfiles = useCompatibleAgentProfiles(agentProfiles, executorProfile);
-  useEnforceCompatibleProfile(
-    Boolean(executorProfile),
-    compatibleAgentProfiles,
-    selectedProfileId,
-    setSelectedProfileId,
-  );
+  useEnforceCompatibleProfile(compatibleAgentProfiles, selectedProfileId, setSelectedProfileId);
   const profileOptions = useAgentProfileOptions(compatibleAgentProfiles);
   const hasProfiles = profileOptions.length > 0;
   const noCompatibleProfiles = isMissingCompatibleProfile(
@@ -318,6 +333,7 @@ function SessionFormHeader({
 // eslint-disable-next-line max-lines-per-function
 function NewSessionForm({
   taskId,
+  workspaceId,
   defaultProfileId,
   initialProfileId,
   executorId,
@@ -331,6 +347,7 @@ function NewSessionForm({
   onClose,
 }: {
   taskId: string;
+  workspaceId?: string | null;
   defaultProfileId: string;
   initialProfileId?: string;
   executorId: string;
@@ -352,6 +369,7 @@ function NewSessionForm({
     handoffInitial?.selectedProfileId ?? initialProfileId ?? defaultProfileId,
   );
   const [hasPrompt, setHasPrompt] = useState(false);
+  const [hasPendingAttachmentUploads, setHasPendingAttachmentUploads] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const promptRef = useRef<TaskFormInputsHandle | null>(null);
   const busySignal = Number(isCreating) + Number(isSummarizing);
@@ -392,11 +410,9 @@ function NewSessionForm({
     activateSession: activateNewSession,
     setIsCreating,
   });
-  const isSubmitDisabled = shouldDisableSubmit(
-    isBusyState,
-    hasPrompt,
-    profileSelection.hasProfiles,
-  );
+  const isSubmitDisabled =
+    shouldDisableSubmit(isBusyState, hasPrompt, profileSelection.hasProfiles) ||
+    hasPendingAttachmentUploads;
 
   return (
     <form onSubmit={handleSubmit} className="min-w-0 space-y-4">
@@ -421,14 +437,17 @@ function NewSessionForm({
       />
       <TaskFormInputs
         isSessionMode
+        workspaceId={workspaceId}
         autoFocus
         initialDescription=""
         onDescriptionChange={setHasPrompt}
+        onPendingAttachmentUploadsChange={setHasPendingAttachmentUploads}
         onKeyDown={(event) => {
           if (
             event.key === "Enter" &&
             (event.metaKey || event.ctrlKey) &&
             !isBusyState &&
+            !hasPendingAttachmentUploads &&
             hasPrompt &&
             profileSelection.hasProfiles
           ) {
@@ -442,7 +461,7 @@ function NewSessionForm({
         isEnhancingPrompt={isEnhancingPrompt}
         isUtilityConfigured={isUtilityConfigured}
         onVoiceAutoSend={() => {
-          if (isBusyState || !profileSelection.hasProfiles) return;
+          if (isBusyState || hasPendingAttachmentUploads || !profileSelection.hasProfiles) return;
           void handleSubmit(VOICE_SUBMIT_EVENT);
         }}
       />
@@ -511,11 +530,13 @@ export function NewSessionDialog({
   open,
   onOpenChange,
   taskId,
+  workspaceId,
   groupId,
   handoff,
 }: NewSessionDialogProps) {
   const {
     taskTitle,
+    resolvedWorkspaceId,
     agentProfiles,
     currentSession,
     worktreeBranch,
@@ -549,6 +570,7 @@ export function NewSessionDialog({
         <NewSessionForm
           key={formKey}
           taskId={taskId}
+          workspaceId={workspaceId ?? resolvedWorkspaceId}
           defaultProfileId={sessionProfileId}
           initialProfileId={effectiveDefaultProfileId}
           executorId={currentSession?.executor_id ?? ""}

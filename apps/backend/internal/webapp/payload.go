@@ -33,9 +33,10 @@ type ActivePluginPayload struct {
 
 // RuntimeConfig contains browser-facing runtime endpoints for the SPA.
 type RuntimeConfig struct {
-	APIPrefix     string `json:"apiPrefix"`
-	WebSocketPath string `json:"webSocketPath"`
-	Debug         bool   `json:"debug,omitempty"`
+	APIPrefix                         string   `json:"apiPrefix"`
+	WebSocketPath                     string   `json:"webSocketPath"`
+	LSPAutoInstallPreferenceLanguages []string `json:"lspAutoInstallPreferenceLanguages,omitempty"`
+	Debug                             bool     `json:"debug,omitempty"`
 	// NonProduction marks a dev or e2e build. Distinct from Debug (which the SPA
 	// uses for verbose logging): this gates QA-only UI such as the pseudo-locale
 	// option, which the e2e harness needs even though it serves a PRODUCTION

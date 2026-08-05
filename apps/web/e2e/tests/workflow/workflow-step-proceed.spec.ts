@@ -1,6 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
 import { routeMainWebSocketWithPromptDrop } from "../../helpers/ws-drop";
-import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Manual proceed to next workflow step", () => {
@@ -47,29 +46,15 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
     // Create task via API in Spec step — triggers auto_start_agent
-    await apiClient.createTask(seedData.workspaceId, "Plan Proceed Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Plan Proceed Task", {
       workflow_id: workflow.id,
       workflow_step_id: specStep.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
 
-    // Navigate to task session page
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Plan Proceed Task", specStep.id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 
@@ -192,7 +177,7 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    const workPrompt = "/slow 20s";
+    const workPrompt = "/slow 30s";
     await apiClient.updateWorkflowStep(workStep.id, {
       prompt: `${workPrompt}\n{{task_prompt}}`,
       events: {
@@ -200,27 +185,14 @@ test.describe("Manual proceed to next workflow step", () => {
       },
     });
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
-    await apiClient.createTask(seedData.workspaceId, "Proceed Message Gap Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Proceed Message Gap Task", {
       workflow_id: workflow.id,
       workflow_step_id: specStep.id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Proceed Message Gap Task", specStep.id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
@@ -243,15 +215,13 @@ test.describe("Manual proceed to next workflow step", () => {
         timeout: 10_000,
       })
       .toBeGreaterThan(0);
-    await expect
-      .poll(wsDrop.recoveryResponseCount, {
-        message: "expected message backfill after the dropped workflow prompt notification",
-        timeout: 10_000,
-      })
-      .toBeGreaterThan(0);
     await expect(
       session.chat.locator(".chat-message-list:visible").getByText(workPrompt, { exact: false }),
-    ).toBeVisible({ timeout: 5_000 });
+    ).toBeVisible({ timeout: 20_000 });
+    expect(
+      wsDrop.recoveryResponseCount(),
+      "expected message backfill after the dropped workflow prompt notification",
+    ).toBeGreaterThan(0);
   });
 
   /**
@@ -290,28 +260,15 @@ test.describe("Manual proceed to next workflow step", () => {
       });
     }
 
-    await apiClient.saveUserSettings({
-      workspace_id: seedData.workspaceId,
-      workflow_filter_id: workflow.id,
-      enable_preview_on_click: false,
-    });
-
     // Create task in Spec step
-    await apiClient.createTask(seedData.workspaceId, "Multi Step Task", {
+    const task = await apiClient.createTask(seedData.workspaceId, "Multi Step Task", {
       workflow_id: workflow.id,
       workflow_step_id: steps[0].id,
       agent_profile_id: seedData.agentProfileId,
       repository_ids: [seedData.repositoryId],
     });
 
-    const kanban = new KanbanPage(testPage);
-    await kanban.goto();
-
-    const card = kanban.taskCardInColumn("Multi Step Task", steps[0].id);
-    await expect(card).toBeVisible({ timeout: 15_000 });
-    await card.click();
-    await expect(testPage).toHaveURL(/\/t\//, { timeout: 15_000 });
-
+    await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
 

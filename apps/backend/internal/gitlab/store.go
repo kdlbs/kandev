@@ -213,6 +213,9 @@ func (s *Store) createTables() error {
 	if _, err := s.db.Exec(createTablesSQL); err != nil {
 		return err
 	}
+	if err := s.createMRAutomationTables(); err != nil {
+		return err
+	}
 	if err := s.migrateConfigRevision(); err != nil {
 		return err
 	}
@@ -564,8 +567,41 @@ func (s *Store) ListTaskMRsByWorkspaceID(ctx context.Context, workspaceID string
 	return out, nil
 }
 
-// DeleteTaskMR removes a single task↔MR row.
+// DeleteTaskMR removes a single task↔MR row, cascading to that MR's
+// lifecycle checkpoint (gitlab_task_mr_state). Without this, re-linking the
+// same MR later would inherit the old checkpoint and could suppress its next
+// lifecycle prompt — gitlab_task_mrs has no FK relationship to
+// gitlab_task_mr_state (it's keyed by (task_id, repository_id, project_path,
+// mr_iid), not by gitlab_task_mrs.id) for the database to cascade this
+// automatically.
 func (s *Store) DeleteTaskMR(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_task_mrs WHERE id = ?`, id)
-	return err
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var mr struct {
+		TaskID       string `db:"task_id"`
+		RepositoryID string `db:"repository_id"`
+		ProjectPath  string `db:"project_path"`
+		MRIID        int    `db:"mr_iid"`
+	}
+	err = tx.GetContext(ctx, &mr,
+		`SELECT task_id, repository_id, project_path, mr_iid FROM gitlab_task_mrs WHERE id = ?`, id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM gitlab_task_mr_state WHERE task_id = ? AND repository_id = ? AND project_path = ? AND mr_iid = ?`,
+		mr.TaskID, mr.RepositoryID, mr.ProjectPath, mr.MRIID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM gitlab_task_mrs WHERE id = ?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

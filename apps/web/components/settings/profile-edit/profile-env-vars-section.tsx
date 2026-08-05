@@ -27,6 +27,7 @@ type ProfileEnvVarsEditorProps = {
   baselineEnvVars?: ProfileEnvVar[];
   secrets: { id: string; name: string }[];
   onChange: (envVars: ProfileEnvVar[]) => void;
+  discoveryTargetId?: string;
 };
 
 export function ProfileEnvVarsEditor({
@@ -34,6 +35,7 @@ export function ProfileEnvVarsEditor({
   baselineEnvVars,
   secrets,
   onChange,
+  discoveryTargetId,
 }: ProfileEnvVarsEditorProps) {
   // `synced` is what we've acknowledged from the parent (either via the prop
   // or our own last emission). When the prop diverges from it we re-seed
@@ -88,6 +90,7 @@ export function ProfileEnvVarsEditor({
       onAdd={handleAdd}
       onUpdate={handleUpdate}
       onRemove={handleRemove}
+      discoveryTargetId={discoveryTargetId}
     />
   );
 }
@@ -96,12 +99,14 @@ type ProfileEnvVarsSectionProps = {
   envVars?: ProfileEnvVar[];
   baselineEnvVars?: ProfileEnvVar[];
   onChange: (patch: Partial<AgentProfile>) => void;
+  discoveryTargetId?: string;
 };
 
 export function ProfileEnvVarsSection({
   envVars,
   baselineEnvVars,
   onChange,
+  discoveryTargetId,
 }: ProfileEnvVarsSectionProps) {
   const { items: secrets } = useSecrets();
   const handleChange = useCallback(
@@ -115,6 +120,7 @@ export function ProfileEnvVarsSection({
       baselineEnvVars={baselineEnvVars}
       secrets={secrets}
       onChange={handleChange}
+      discoveryTargetId={discoveryTargetId}
     />
   );
 }

@@ -8,6 +8,7 @@ import type { FileAttachment } from "./chat/file-attachment";
 const mockLaunchSession = vi.fn();
 const mockBuildStartRequest = vi.fn();
 const mockToMessageAttachments = vi.fn();
+const mockHasPendingAttachmentUploads = vi.fn();
 
 vi.mock("@/lib/services/session-launch-service", () => ({
   launchSession: (...args: Parameters<typeof mockLaunchSession>) => mockLaunchSession(...args),
@@ -19,6 +20,8 @@ vi.mock("@/lib/services/session-launch-helpers", () => ({
 }));
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({
+  hasPendingAttachmentUploads: (...args: Parameters<typeof mockHasPendingAttachmentUploads>) =>
+    mockHasPendingAttachmentUploads(...args),
   toMessageAttachments: (...args: Parameters<typeof mockToMessageAttachments>) =>
     mockToMessageAttachments(...args),
 }));
@@ -233,6 +236,7 @@ describe("useSessionContextChange", () => {
 describe("useSessionLaunchSubmit", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockHasPendingAttachmentUploads.mockReturnValue(false);
     mockBuildStartRequest.mockReturnValue({
       request: {
         task_id: TASK_ID,
@@ -375,6 +379,42 @@ describe("useSessionLaunchSubmit", () => {
       await result.current(event);
     });
 
+    expect(mockBuildStartRequest).not.toHaveBeenCalled();
+    expect(mockLaunchSession).not.toHaveBeenCalled();
+    expect(mockSetIsCreating).not.toHaveBeenCalled();
+    expect(mockOnClose).not.toHaveBeenCalled();
+  });
+
+  it("does not launch while an attachment upload is pending", async () => {
+    mockHasPendingAttachmentUploads.mockReturnValue(true);
+    const promptRef = createPromptRef("hello", [ATTACHMENT]);
+    const mockSetActiveSession = vi.fn();
+    const mockActivateSession = vi.fn();
+    const mockSetIsCreating = vi.fn();
+    const mockOnClose = vi.fn();
+
+    const { result } = renderHook(() =>
+      useSessionLaunchSubmit({
+        promptRef,
+        taskId: TASK_ID,
+        selectedProfileId: PROFILE_ID,
+        executorId: EXECUTOR_ID,
+        contextValue: "blank",
+        initialPrompt: null,
+        agentProfiles: [AGENT_PROFILE_A],
+        onClose: mockOnClose,
+        toast: mockToast,
+        setActiveSession: mockSetActiveSession,
+        activateSession: mockActivateSession,
+        setIsCreating: mockSetIsCreating,
+      }),
+    );
+
+    await act(async () => {
+      await result.current({ preventDefault: vi.fn() } as unknown as FormEvent);
+    });
+
+    expect(mockHasPendingAttachmentUploads).toHaveBeenCalledWith([ATTACHMENT]);
     expect(mockBuildStartRequest).not.toHaveBeenCalled();
     expect(mockLaunchSession).not.toHaveBeenCalled();
     expect(mockSetIsCreating).not.toHaveBeenCalled();

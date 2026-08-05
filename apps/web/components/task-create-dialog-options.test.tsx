@@ -1,6 +1,19 @@
 import { describe, it, expect } from "vitest";
+import { renderHook } from "@testing-library/react";
 import type { Executor } from "@/lib/types/http";
-import { computeExecutorHint } from "./task-create-dialog-options";
+import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
+import { computeExecutorHint, useAgentProfileOptions } from "./task-create-dialog-options";
+
+function profileOption(id: string, enabled?: boolean): AgentProfileOption {
+  return {
+    id,
+    label: `Agent • ${id}`,
+    agent_id: "a1",
+    agent_name: "agent",
+    cli_passthrough: false,
+    enabled,
+  };
+}
 
 function exec(id: string, type: Executor["type"]): Executor {
   return { id, type, name: id } as Executor;
@@ -46,5 +59,24 @@ describe("computeExecutorHint", () => {
   it("returns null for an unrecognised executor type", () => {
     const odd = [exec("x", "remote" as Executor["type"])];
     expect(computeExecutorHint(odd, "x", 1)).toBeNull();
+  });
+});
+
+describe("useAgentProfileOptions", () => {
+  it("omits disabled profiles from the selectable options", () => {
+    const { result } = renderHook(() =>
+      useAgentProfileOptions([
+        profileOption("p-enabled"),
+        profileOption("p-disabled", false),
+        profileOption("p-legacy"),
+      ]),
+    );
+    const ids = result.current.map((o) => o.value);
+    expect(ids).toEqual(["p-enabled", "p-legacy"]);
+  });
+
+  it("keeps profiles whose enabled flag is absent (legacy options)", () => {
+    const { result } = renderHook(() => useAgentProfileOptions([profileOption("p-legacy")]));
+    expect(result.current.map((o) => o.value)).toEqual(["p-legacy"]);
   });
 });

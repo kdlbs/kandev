@@ -188,7 +188,35 @@ Office sessions, and every later session on the task—even if the owner fails b
 rename wins if it happens first; a late owner call returns `title_not_pending`, while a non-owner call
 returns `title_not_owner`, without changing the title.
 
+When the owner accepts a generated title, Kandev also updates the names of the task's Kandev-managed
+branches from that final title and refreshes the session's branch snapshots. This is evaluated per
+repository: a repository opened from an existing checkout branch (including a GitHub PR) is preserved,
+as is every Local/Local PC checkout. A branch manually selected before the title call is preserved.
+If one managed repository cannot be renamed or its snapshot cannot be persisted, the title remains
+accepted and the response reports the successful, preserved, and failed branch outcomes separately.
+
 Task identity is injected for operations that require it. Workspace, parent/subtask, executor, and task-state rules still apply.
+
+### Provider-scoped review automation tools
+
+Task-mode review automation tools follow the providers attached to the task's
+repositories. Kandev computes their union when the session launches or
+resumes:
+
+| Attached providers | Discoverable tools |
+| ------------------ | ------------------ |
+| GitHub only        | `get_task_pr_automation_kandev`, `update_task_pr_automation_kandev` |
+| GitLab only        | `get_task_mr_automation_kandev`, `update_task_mr_automation_kandev` |
+| GitHub and GitLab   | Both provider-specific pairs |
+| None or unsupported | Neither pair |
+
+Adding a repository source successfully to an idle task can update the live
+session's task MCP tool list after materialization. If live refresh is
+temporarily unavailable, the source attachment remains committed and the next
+launch or resume reconciles the tool list. Tool discovery only describes the
+available surface; backend authorization and task/provider validation remain
+authoritative for every call. The existing automation request and response
+payloads are unchanged.
 
 `spawn_session_kandev` creates a named sibling session on the current task by default and can target another task in the same workspace. `message_task_kandev` can address a task's primary session or an explicit session ID: a running agent receives queued input, an idle/created session can be started, and a failed or cancelled session rejects the message.
 
@@ -205,6 +233,8 @@ After an accepted stop, Kandev attempts to move an unarchived, non-Office task f
 The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sources": [...] }`. It returns `400` for invalid input, `404` for a missing task/source outside the workspace, `409` for duplicates or an active task, and `422` when materialization or executor capability fails. Successful adoption publishes `task.updated` and `session.workspace_sources.updated`; clients should refresh their Files and repository state from those updates.
 
 `step_complete_kandev` is registered and discoverable in every task-mode session. Kandev includes its completion instruction, and acts on its signal, only on Kanban steps whose auto-advance action explicitly requires that signal. A user message arriving before transition can cancel that automatic move.
+
+When `create_task_kandev.repositories[].repository_url` is a canonical GitHub pull request URL or a GitLab merge request URL on the configured host, Kandev resolves the contribution before creating the task. The contribution must still be open, have a valid source branch and head commit, and permit the target project to contribute; Kandev keeps the target repository as `origin`, fetches the exact source commit, and routes commits to the contributor's existing source branch. The existing pull request or merge request is associated with the task and reused for later changes, so Kandev does not open a duplicate. Provider-authored title, description, comments, and diff content are not copied into trusted task context. Configure the task's Git credentials as described in [task Git credentials](integrations.md#choose-task-git-credentials); Kandev runs a write preflight before starting the agent.
 
 The task server runs inside agentctl's local runtime boundary. Its MCP routes do not use a separate bearer token. Do not expose agentctl ports; rely on the executor's process/network isolation and Kandev's session scoping.
 
@@ -308,7 +338,7 @@ External MCP exposes 32 tools in these groups:
 
 The settings page's static **Available tools** preview currently counts 29 and omits `list_repositories_kandev`, `import_workflow_kandev`, and `get_task_conversation_kandev`. Treat the client's live `tools/list` response from the endpoint—not that preview—as authoritative.
 
-In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, GitHub URL, or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
+In external mode, `create_task_kandev` has no current task and does not accept the `parent_id: "self"` shorthand. Its registered top-level contract asks for a repository ID, repository URL (including a supported GitHub pull request or GitLab merge request URL), or local path; workspace and workflow resolve automatically only when unambiguous. The current handler can nevertheless accept an omitted repository and create repo-less work, which is a contract/implementation mismatch rather than a supported equivalent of the regular UI's **None** option. Supply an explicit repository locator for portable clients. A resolvable agent profile is required even with `start_agent: false`; otherwise `start_agent` defaults to true. To create a subtask, pass the full ID of an existing parent.
 
 `create_task_kandev` accepts task titles up to 60 characters. Use a concise, few-word title and put the implementation context in `description`; longer titles are rejected as validation errors.
 

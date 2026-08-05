@@ -1374,6 +1374,93 @@ func TestLaunch_PromotesWorkspaceOnlyExecution(t *testing.T) {
 	require.True(t, got.isResumedSession, "isResumedSession must be set when PreviousExecutionID is non-empty")
 }
 
+func TestLaunch_PromotesWorkspaceOnlyExecutionAppliesMCPProviders(t *testing.T) {
+	var gotProviders []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/mcp/providers" {
+			t.Errorf("request = %s %s, want PUT /api/v1/mcp/providers", r.Method, r.URL.Path)
+		}
+		var payload struct {
+			Providers []string `json:"mcp_providers"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode MCP provider payload: %v", err)
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		gotProviders = payload.Providers
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(parsed.Port())
+	require.NoError(t, err)
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentName: "auggie",
+	}}
+	existing := &AgentExecution{
+		ID:        "exec-workspace-provider",
+		SessionID: "session-provider",
+		TaskID:    "task-provider",
+		agentctl:  agentctl.NewClient(parsed.Hostname(), port, mgr.logger),
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	wantProviders := []string{"github", "gitlab"}
+	got, err := mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:         existing.TaskID,
+		SessionID:      existing.SessionID,
+		AgentProfileID: existing.AgentProfileID,
+		IsPassthrough:  true,
+		McpProviders:   wantProviders,
+	})
+	require.NoError(t, err)
+	require.Same(t, existing, got)
+	require.Equal(t, wantProviders, gotProviders,
+		"promotion must apply provider capabilities to the existing agentctl instance")
+}
+
+func TestLaunch_PromotesWorkspaceOnlyExecutionFailsWhenMCPProviderApplyFails(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut && r.URL.Path == "/api/v1/mcp/providers" {
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	require.NoError(t, err)
+	port, err := strconv.Atoi(parsed.Port())
+	require.NoError(t, err)
+
+	mgr := newTestManager(t)
+	mgr.profileResolver = &countingProfileResolver{info: &AgentProfileInfo{
+		ProfileID: "profile-1",
+		AgentName: "auggie",
+	}}
+	existing := &AgentExecution{
+		ID:        "exec-workspace-provider-failure",
+		SessionID: "session-provider-failure",
+		TaskID:    "task-provider-failure",
+		agentctl:  agentctl.NewClient(parsed.Hostname(), port, mgr.logger),
+	}
+	require.NoError(t, mgr.executionStore.Add(existing))
+
+	_, err = mgr.Launch(context.Background(), &LaunchRequest{
+		TaskID:        existing.TaskID,
+		SessionID:     existing.SessionID,
+		IsPassthrough: true,
+		McpProviders:  []string{"github"},
+	})
+	require.Error(t, err, "promotion must fail when the live provider endpoint rejects the update")
+	require.Empty(t, existing.AgentCommand, "failed provider application must not promote the execution")
+}
+
 // TestLaunch_RejectsWhenAgentAlreadyRunning verifies the original "already has
 // an agent running" guard still fires when the existing execution is a real
 // agent-equipped one (AgentCommand populated), preventing duplicate launches.
@@ -1941,6 +2028,9 @@ func TestEnsureLaunchSessionStillActiveRereadsAfterCleanupAdmission(t *testing.T
 	err := mgr.ensureLaunchSessionStillActive(context.Background(), "session-terminalization-race")
 	if err == nil || !strings.Contains(err.Error(), "CANCELLED") {
 		t.Fatalf("ensureLaunchSessionStillActive error = %v, want terminal-session validation", err)
+	}
+	if !errors.Is(err, ErrSessionTerminal) {
+		t.Fatalf("ensureLaunchSessionStillActive error = %v, want wrapped ErrSessionTerminal", err)
 	}
 	if got := reader.reads.Load(); got != 2 {
 		t.Fatalf("session reads = %d, want 2", got)

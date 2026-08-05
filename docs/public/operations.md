@@ -27,6 +27,35 @@ Kandev does not currently provide a user-login boundary for the web application,
 
 See [Desktop app](desktop-app.md), [CLI](cli.md), [Run as a service](run-as-a-service.md), [Docker](docker.md), and [Kubernetes](k8s.md) for mode-specific prerequisites and commands.
 
+## Prevent host sleep during active tasks
+
+Administrators can open **Settings > General > Task Actions** and enable
+**Prevent host sleep while tasks run**. The install-wide setting is off by
+default and is saved with the Kandev database. It applies only to the machine
+running the backend; it does not change executor or node power policy.
+
+When enabled, Kandev holds one host sleep-prevention request while any task
+session is `STARTING` or `RUNNING`. It releases the request when the last such
+session reaches `WAITING_FOR_INPUT`, `IDLE`, or a terminal state, when an
+administrator disables the setting, and during backend shutdown. Missed session
+events are repaired by periodic reconciliation against the session repository.
+
+The request prevents idle system sleep but does not keep the display awake or
+override an explicit user sleep action, lid-close behavior, shutdown, low-power
+emergency, or another administrator/platform policy. It is supported through
+macOS `caffeinate`, Windows execution state, and Linux `systemd-logind` over the
+system D-Bus. A missing or denied Linux system bus, an unavailable service, or
+another native failure is shown in the setting status and never blocks task
+execution.
+
+Do not enable this setting by default for Docker, Kubernetes, remote-executor,
+or always-on deployments. A backend inside a container or pod cannot inhibit
+sleep on the physical node, and an SSH or other remote executor runs on a
+different host. Those deployments should use their normal host power and
+availability policy instead. Enabling the preference is safe when moving the
+database between hosts: Kandev reacquires a native request only after startup
+if the new backend can provide it and a working task still exists.
+
 ## Health and readiness
 
 Use the top-level readiness endpoint for supervisors and probes:
@@ -320,7 +349,7 @@ rate-limited, or registry-failing installations continue to show that channel's 
 
 Nightlies are best-effort daily snapshots. A new version appears only when `main` contains commits
 after the latest Stable release and that exact commit has not already been published. Nightlies do
-not move npm `latest` and do not create Homebrew, Desktop, GHCR, Git tag, or GitHub Release
+not move npm `latest` and do not create Homebrew, Scoop, Desktop, GHCR, Git tag, or GitHub Release
 artifacts.
 
 Configure update alerts in **Settings > General > Notifications > Notification Events**. Select **Kandev update available** for each notification provider that should receive it: Local delivers the in-app update indication and can use an already-granted browser or native desktop notification; System and Apprise use their configured provider transports. Notification routing is independent of the Stable/Nightly release selector. New Local and System providers include this event by default; existing Local and System providers receive it once on upgrade, while existing Apprise providers remain unchanged. Disabling the event for a provider stops that provider's delivery without disabling release checks. Each provider receives a release version at most once; a later version is a new occurrence. Returning from Nightly to a Stable version is an explicit action and does not produce a normal upgrade notification.
@@ -341,7 +370,7 @@ Before any update, finish or stop active sessions, create and export a database 
   `brew upgrade kandev`, reinstall the service with the same flags, and restart.
 - System service: Stable only. Upgrade with the required privileges, reinstall with the same
   service flags, and restart; the UI never applies it.
-- Unmanaged CLI: run `brew upgrade kandev` or `npm install -g kandev@latest`, then restart the process.
+- Unmanaged CLI: run `brew upgrade kandev`, `scoop update kandev`, or `npm install -g kandev@latest`, then restart the process.
 - Transient npx: start the desired release with `npx -y kandev@latest`; this does not update a persistent package.
 - Docker/Kubernetes: replace the image and recreate the workload. Do not treat an in-container package install as a durable update.
 

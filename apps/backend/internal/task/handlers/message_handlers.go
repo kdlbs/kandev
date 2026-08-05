@@ -52,6 +52,10 @@ type MessageHandlers struct {
 	referenceValidator  entityrefs.SubmissionValidator
 	messageIDMu         sync.Mutex
 	messageIDGates      map[string]*messageIDGate
+	// waitForSessionReadyFn backs waitForSessionReady; defaults to
+	// service.WaitForSessionReady but is overridable in tests to avoid its
+	// real polling delay.
+	waitForSessionReadyFn func(ctx context.Context, sessionID string) error
 }
 
 type messageIDGate struct {
@@ -67,9 +71,10 @@ func NewMessageHandlers(
 	validators ...entityrefs.SubmissionValidator,
 ) *MessageHandlers {
 	handlers := &MessageHandlers{
-		service:      svc,
-		orchestrator: orchestrator,
-		logger:       log.WithFields(zap.String("component", "task-message-handlers")),
+		service:               svc,
+		orchestrator:          orchestrator,
+		logger:                log.WithFields(zap.String("component", "task-message-handlers")),
+		waitForSessionReadyFn: svc.WaitForSessionReady,
 	}
 	if len(validators) > 0 {
 		handlers.referenceValidator = validators[0]
@@ -429,6 +434,9 @@ func (h *MessageHandlers) wsAddMessage(ctx context.Context, msg *ws.Message) (*w
 		}
 	}
 	req.Content = storedContent
+	if err := h.service.ClaimMessageAttachments(ctx, req.TaskID, req.TaskSessionID, req.Attachments); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
 
 	createRequest := &service.CreateMessageRequest{
 		TaskSessionID: req.TaskSessionID,
@@ -728,8 +736,36 @@ func isTimeoutError(err error) bool {
 	return strings.Contains(strings.ToLower(err.Error()), "timeout")
 }
 
-// handlePromptWithResume attempts to resume a session and retry a prompt when the
-// initial prompt fails with ErrExecutionNotFound.
+// handlePromptWithResume attempts to resume a session and retry a prompt once
+// when the initial prompt fails with a recoverable, pre-dispatch error:
+//
+//   - executor.ErrExecutionNotFound: no live execution is tracked for the
+//     session (e.g. after a lazy backend restart).
+//   - orchestrator.ErrAgentNotReadyForPrompt: ensureSessionRunning's post-resume
+//     readiness wait (agentPromptReadyTimeout, 30s) expired — the exact error
+//     class behind "agent not ready after resume: ... context deadline
+//     exceeded". ensureSessionRunning already reaps a stuck execution on this
+//     error internally, and a fresh resume typically completes in a few
+//     seconds (ACP re-initialize + session/load), well inside a second
+//     attempt's own budget. Without this retry, a merely-slow-to-recover
+//     resume surfaced "Request timed out. The agent may be processing a
+//     complex task. Please try again." to the user on the very first hiccup,
+//     even though the backend's own self-healing would have succeeded
+//     silently one attempt later.
+//
+// Both error classes are guaranteed pre-dispatch: promptTask returns them
+// from ensureSessionRunning, before executor.PromptWithDispatchCallback ever
+// runs, so retrying here cannot double-send a prompt the agent already
+// accepted.
+//
+// ResumeTaskSession and waitForSessionReady failures return origErr: neither
+// step ever reaches PromptTask, so the original pre-dispatch error is still
+// the only meaningful signal. Once the retry's own PromptTask call runs,
+// though, that call IS a real dispatch attempt — its error is authoritative
+// and takes over from origErr, so the caller's isAgentReportedError check
+// still fires correctly (e.g. the retry failing with a wrapped
+// lifecycle.ErrAgentReported must suppress createPromptErrorMessage, not get
+// masked by the unrelated original timeout).
 func (h *MessageHandlers) handlePromptWithResume(
 	ctx context.Context,
 	taskID, sessionID, content, model string,
@@ -737,7 +773,8 @@ func (h *MessageHandlers) handlePromptWithResume(
 	attachments []v1.MessageAttachment,
 	origErr error,
 ) error {
-	if !errors.Is(origErr, executor.ErrExecutionNotFound) {
+	if !errors.Is(origErr, executor.ErrExecutionNotFound) &&
+		!errors.Is(origErr, orchestrator.ErrAgentNotReadyForPrompt) {
 		return origErr
 	}
 	if resumeErr := h.orchestrator.ResumeTaskSession(ctx, taskID, sessionID); resumeErr != nil {
@@ -755,10 +792,16 @@ func (h *MessageHandlers) handlePromptWithResume(
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(waitErr))
-		return waitErr
+		return origErr
 	}
-	_, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false)
-	return err
+	if _, err := h.orchestrator.PromptTask(ctx, taskID, sessionID, content, model, planMode, attachments, false); err != nil {
+		h.logger.Warn("retry prompt failed after resume",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(err))
+		return err
+	}
+	return nil
 }
 
 // createPromptErrorMessage creates an agent error message visible to the user when
@@ -795,10 +838,12 @@ func (h *MessageHandlers) createPromptErrorMessage(ctx context.Context, taskID, 
 	}
 }
 
-// waitForSessionReady delegates to the shared service.WaitForSessionReady helper.
-// Kept as a thin wrapper so existing tests on this method continue to pass.
+// waitForSessionReady delegates to waitForSessionReadyFn (by default
+// service.WaitForSessionReady). Kept as a thin wrapper so existing tests on
+// this method continue to pass; the indirection lets tests stub out the
+// real polling delay via waitForSessionReadyFn.
 func (h *MessageHandlers) waitForSessionReady(ctx context.Context, sessionID string) error {
-	return h.service.WaitForSessionReady(ctx, sessionID)
+	return h.waitForSessionReadyFn(ctx, sessionID)
 }
 
 type wsListMessagesRequest struct {

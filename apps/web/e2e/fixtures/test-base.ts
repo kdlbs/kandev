@@ -8,6 +8,15 @@ import { PrAssetCapture } from "../helpers/pr-asset-capture";
 import { makeGitEnv } from "../helpers/git-helper";
 import type { WorkflowStep } from "../../lib/types/http";
 
+const DEFAULT_SIDEBAR_VIEW = {
+  id: "view-all-tasks",
+  name: "All tasks",
+  filters: [],
+  sort: { key: "state", direction: "asc" },
+  group: "repository",
+  collapsed_groups: [],
+};
+
 export type SeedData = {
   workspaceId: string;
   workflowId: string;
@@ -26,6 +35,7 @@ export type SeedData = {
 export const test = backendFixture.extend<
   {
     testPage: Page;
+    tabletTestPage: Page;
     prCapture: PrAssetCapture;
     /**
      * Auto fixture that resets integration mock state and any persisted
@@ -184,8 +194,12 @@ export const test = backendFixture.extend<
       confirm_task_archive: true,
       agent_generated_task_titles: false,
       mcp_task_agent_profile_default: "current_task",
-      sidebar_views: [],
+      sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+      sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
       saved_layouts: [],
+      lsp_auto_start_languages: [],
+      lsp_auto_install_languages: [],
+      lsp_server_configs: {},
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",
@@ -220,6 +234,22 @@ export const test = backendFixture.extend<
     await context.close();
   },
 
+  tabletTestPage: async ({ browser, backend, testPage }, use) => {
+    // Depend on testPage so its per-test backend and settings reset runs before
+    // this specialized context is created.
+    void testPage;
+    const context = await browser.newContext({
+      baseURL: backend.frontendUrl,
+      viewport: { width: 900, height: 900 },
+      hasTouch: true,
+      isMobile: false,
+    });
+    const page = await context.newPage();
+    await setupPage(page, backend);
+    await use(page);
+    await context.close();
+  },
+
   // PR asset capture — gated behind CAPTURE_PR_ASSETS env var.
   // When enabled, provides screenshot/recording helpers for PR descriptions.
   // Destructure in tests that need it: { testPage, prCapture }
@@ -246,6 +276,15 @@ export const test = backendFixture.extend<
       await apiClient.rawRequest("DELETE", `/api/v1/jira/config`).catch(() => undefined);
       await apiClient.rawRequest("DELETE", `/api/v1/linear/config`).catch(() => undefined);
       await Promise.all([
+        // Provider-focused specs reuse and mutate the worker-scoped seed row.
+        // Restore its local-only identity before the next test; otherwise a
+        // removed mock remote plus stale provider metadata breaks workspace prep.
+        apiClient.updateRepository(seedData.repositoryId, {
+          provider: "",
+          provider_host: "",
+          provider_owner: "",
+          provider_name: "",
+        }),
         apiClient.mockJiraReset().catch(() => undefined),
         apiClient.mockLinearReset().catch(() => undefined),
         apiClient.mockSentryReset().catch(() => undefined),
@@ -291,8 +330,12 @@ test.beforeEach(async ({ apiClient, seedData }) => {
     confirm_task_archive: true,
     agent_generated_task_titles: false,
     mcp_task_agent_profile_default: "current_task",
-    sidebar_views: [],
+    sidebar_views: [DEFAULT_SIDEBAR_VIEW],
+    sidebar_active_view_id: DEFAULT_SIDEBAR_VIEW.id,
     saved_layouts: [],
+    lsp_auto_start_languages: [],
+    lsp_auto_install_languages: [],
+    lsp_server_configs: {},
     kanban_view_mode: "",
     startup_page: "task_overview",
     show_anchored_prompt_bar: false,

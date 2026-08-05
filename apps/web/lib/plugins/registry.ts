@@ -16,6 +16,8 @@ import type {
   PluginRegistry,
   PluginRouteOptions,
   SlotComponent,
+  TaskMenuActionRegistration,
+  TaskPanelRegistration,
   WsHandler,
 } from "./types";
 import type { ComponentType } from "react";
@@ -43,6 +45,16 @@ export interface PluginRouteRegistration extends RouteRegistration {
   pluginId: string;
 }
 
+/**
+ * Nav item plus the owning pluginId — what `getNavRegistrations()` returns.
+ * Navigation needs the owner because `NavItem.id` is plugin-local: two plugins
+ * may register the same id, and the navigation manifest builds its React keys
+ * from it (`lib/navigation/plugin-destinations.ts`).
+ */
+export interface PluginNavRegistration extends NavItem {
+  pluginId: string;
+}
+
 interface SlotRegistration {
   registrationId: string;
   orderingId: string;
@@ -63,6 +75,25 @@ interface WsHandlerRegistration {
   handler: WsHandler;
 }
 
+/** Task panel registration plus the owning pluginId — what `getTaskPanels()` returns. */
+export interface PluginTaskPanelRegistration extends TaskPanelRegistration {
+  pluginId: string;
+}
+
+/** Task menu action registration plus the owning pluginId. */
+export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistration {
+  pluginId: string;
+}
+
+/** Host-owned lifecycle states used to reconcile registrations with UI state. */
+export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
+
+/** A generation-fenced lifecycle snapshot; never exposed through PluginRegistry. */
+export interface PluginLifecycleSnapshot {
+  status: PluginLifecycleStatus;
+  generation: number;
+}
+
 function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
   return list.filter((entry) => entry.pluginId !== pluginId);
 }
@@ -74,9 +105,13 @@ class PluginRegistryStore {
   private slotComponents: Owned<SlotRegistration>[] = [];
   private wsHandlers: Owned<WsHandlerRegistration>[] = [];
   private keybindingHandlers: Owned<PluginKeybindingHandler>[] = [];
+  private taskPanels: Owned<TaskPanelRegistration>[] = [];
+  private taskMenuActions: Owned<TaskMenuActionRegistration>[] = [];
   private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
+  /** Host-owned lifecycle state; plugin-facing registries only expose registrations. */
+  private pluginLifecycles = new Map<string, PluginLifecycleSnapshot>();
   /**
    * Keybinding ids declared in each plugin's `ui.keybindings` manifest,
    * synced by the shortcut dispatcher (`hooks/use-plugin-shortcuts.ts`) from
@@ -96,6 +131,27 @@ class PluginRegistryStore {
   };
 
   getVersion = (): number => this.version;
+
+  getPluginLifecycle(pluginId: string): PluginLifecycleSnapshot | undefined {
+    const snapshot = this.pluginLifecycles.get(pluginId);
+    return snapshot ? { ...snapshot } : undefined;
+  }
+
+  markPluginLoading(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "loading", generation);
+  }
+
+  markPluginReady(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "ready", generation);
+  }
+
+  markPluginFailed(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "failed", generation);
+  }
+
+  markPluginRemoved(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "removed", generation);
+  }
 
   registerRoute(
     pluginId: string,
@@ -138,6 +194,27 @@ class PluginRegistryStore {
     this.notify();
   }
 
+  /**
+   * Removes exactly one previously registered WS handler (matched by
+   * reference equality), without touching any of the plugin's other
+   * registrations. Used by `host.storage.subscribe`'s returned unsubscribe
+   * function so an individual subscription can end without the plugin being
+   * disabled/uninstalled (which already bulk-revokes via unregisterPlugin).
+   * A no-op if the handler is already gone (e.g. the plugin was unregistered
+   * first).
+   */
+  unregisterWsHandler(pluginId: string, action: string, handler: WsHandler): void {
+    const index = this.wsHandlers.findIndex(
+      (entry) =>
+        entry.pluginId === pluginId &&
+        entry.value.action === action &&
+        entry.value.handler === handler,
+    );
+    if (index === -1) return;
+    this.wsHandlers.splice(index, 1);
+    this.notify();
+  }
+
   registerKeybinding(pluginId: string, id: string, handler: (event: KeyboardEvent) => void): void {
     const declared = this.declaredKeybindingIds.get(pluginId);
     if (declared && !declared.has(id)) {
@@ -146,6 +223,16 @@ class PluginRegistryStore {
       );
     }
     this.keybindingHandlers.push({ pluginId, value: { id, handler } });
+    this.notify();
+  }
+
+  registerTaskPanel(pluginId: string, registration: TaskPanelRegistration): void {
+    this.taskPanels.push({ pluginId, value: registration });
+    this.notify();
+  }
+
+  registerTaskMenuAction(pluginId: string, registration: TaskMenuActionRegistration): void {
+    this.taskMenuActions.push({ pluginId, value: registration });
     this.notify();
   }
 
@@ -167,6 +254,8 @@ class PluginRegistryStore {
     this.slotComponents = removeByPlugin(this.slotComponents, pluginId);
     this.wsHandlers = removeByPlugin(this.wsHandlers, pluginId);
     this.keybindingHandlers = removeByPlugin(this.keybindingHandlers, pluginId);
+    this.taskPanels = removeByPlugin(this.taskPanels, pluginId);
+    this.taskMenuActions = removeByPlugin(this.taskMenuActions, pluginId);
     this.pluginNames.delete(pluginId);
     this.declaredKeybindingIds.delete(pluginId);
     if (this.totalCount() !== before) this.notify();
@@ -185,8 +274,18 @@ class PluginRegistryStore {
     return this.settingsRoutes.map((entry) => entry.value);
   }
 
+  /**
+   * Nav items without their owner. Use `getNavRegistrations()` for anything that
+   * needs a globally unique identity; this stays for callers that only read the
+   * item's own fields (e.g. deriving a page title from a path).
+   */
   getNavItems(): NavItem[] {
     return this.navItems.map((entry) => entry.value);
+  }
+
+  /** Nav items plus the pluginId that registered each one, in registration order. */
+  getNavRegistrations(): PluginNavRegistration[] {
+    return this.navItems.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
   }
 
   getSlotComponents(slot: string): SlotComponent[] {
@@ -240,6 +339,28 @@ class PluginRegistryStore {
     )?.value.handler;
   }
 
+  /** Every registered task panel, in registration order. */
+  getTaskPanels(): PluginTaskPanelRegistration[] {
+    return this.taskPanels.map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
+  /** The registration for a specific `pluginId`/panel `id`, if still registered. */
+  getTaskPanel(pluginId: string, id: string): PluginTaskPanelRegistration | undefined {
+    const entry = this.taskPanels.find(
+      (candidate) => candidate.pluginId === pluginId && candidate.value.id === id,
+    );
+    return entry ? { ...entry.value, pluginId: entry.pluginId } : undefined;
+  }
+
+  /** Every registered task menu action, optionally filtered to one group. */
+  getTaskMenuActions(
+    group?: TaskMenuActionRegistration["group"],
+  ): PluginTaskMenuActionRegistration[] {
+    return this.taskMenuActions
+      .filter((entry) => !group || entry.value.group === group)
+      .map((entry) => ({ ...entry.value, pluginId: entry.pluginId }));
+  }
+
   /** Registry view scoped to one plugin — matches the frozen `PluginRegistry` contract. */
   forPlugin(pluginId: string, pluginName?: string): PluginRegistry {
     if (pluginName) this.pluginNames.set(pluginId, pluginName);
@@ -252,6 +373,8 @@ class PluginRegistryStore {
       registerComponent: (slot, Component) => this.registerComponent(pluginId, slot, Component),
       registerWsHandler: (action, handler) => this.registerWsHandler(pluginId, action, handler),
       registerKeybinding: (id, handler) => this.registerKeybinding(pluginId, id, handler),
+      registerTaskPanel: (registration) => this.registerTaskPanel(pluginId, registration),
+      registerTaskMenuAction: (registration) => this.registerTaskMenuAction(pluginId, registration),
     };
   }
 
@@ -262,13 +385,32 @@ class PluginRegistryStore {
       this.navItems.length +
       this.slotComponents.length +
       this.wsHandlers.length +
-      this.keybindingHandlers.length
+      this.keybindingHandlers.length +
+      this.taskPanels.length +
+      this.taskMenuActions.length
     );
   }
 
   private notify(): void {
     this.version += 1;
     this.listeners.forEach((listener) => listener());
+  }
+
+  private setPluginLifecycle(
+    pluginId: string,
+    status: PluginLifecycleStatus,
+    generation: number,
+  ): void {
+    const current = this.pluginLifecycles.get(pluginId);
+    if (
+      current &&
+      (generation < current.generation ||
+        (generation === current.generation && current.status === status))
+    ) {
+      return;
+    }
+    this.pluginLifecycles.set(pluginId, { status, generation });
+    this.notify();
   }
 }
 

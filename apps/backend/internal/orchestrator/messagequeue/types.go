@@ -45,6 +45,10 @@ const MetadataCoalesceKey = "coalesce_key"
 // queued message.
 const MetadataEntityReferences = "entity_references"
 
+// MetadataContextFiles carries path/name references and optional directory
+// identity for queued user messages.
+const MetadataContextFiles = "context_files"
+
 // MetadataLifecycleDurable marks lifecycle entries that remain in persistent
 // queue storage until the executor accepts their prompt.
 const MetadataLifecycleDurable = "lifecycle_durable_until_accepted"
@@ -170,8 +174,10 @@ func clearReservedMetadata(metadata map[string]interface{}) map[string]interface
 type MessageAttachment struct {
 	Type         string `json:"type"`
 	Data         string `json:"data"`
+	AttachmentID string `json:"attachment_id,omitempty"`
 	MimeType     string `json:"mime_type"`
 	Name         string `json:"name,omitempty"`
+	SizeBytes    int64  `json:"size_bytes,omitempty"`
 	DeliveryMode string `json:"delivery_mode,omitempty"`
 }
 

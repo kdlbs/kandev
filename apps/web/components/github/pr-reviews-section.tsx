@@ -3,6 +3,7 @@ import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import type { PRReview, RequestedReviewer } from "@/lib/types/github";
 import { CollapsibleSection, FeedbackItemRow } from "./pr-shared";
+import { useTranslation } from "react-i18next";
 
 function ReviewStateIcon({ state }: { state: string }) {
   if (state === "APPROVED") return <IconCheck className="h-3.5 w-3.5 text-green-500 shrink-0" />;
@@ -141,6 +142,7 @@ function SubmittedReviewRow({
   isRequesting: boolean;
   onReRequest?: (reviewer: string) => void;
 }) {
+  const { t } = useTranslation();
   const hasActionable = review.state === "CHANGES_REQUESTED" || !!review.body;
   return (
     <div data-testid={`pr-submitted-review-${normalizeLogin(review.author)}`}>
@@ -159,11 +161,11 @@ function SubmittedReviewRow({
                 variant="outline"
                 className="h-8 min-h-11 w-full max-w-full sm:w-auto sm:min-h-0 shrink-0 cursor-pointer px-2 text-[10px] [@media(pointer:coarse)]:min-h-11"
                 data-testid={`pr-rerequest-review-${normalizeLogin(review.author)}`}
-                aria-label={`Re-request review from ${review.author}`}
+                aria-label={t("github:reRequestReviewFrom", { author: review.author })}
                 onClick={() => onReRequest(review.author)}
                 disabled={isRequesting}
               >
-                {isRequesting ? "Requesting..." : "Re-request review"}
+                {isRequesting ? t("github:requesting") : t("github:reRequestReview")}
               </Button>
             </div>
           ) : undefined
@@ -177,6 +179,7 @@ function SubmittedReviewRow({
 }
 
 function PendingReviewRow({ reviewer }: { reviewer: RequestedReviewer }) {
+  const { t } = useTranslation();
   return (
     <div
       className="px-2.5 py-1.5 rounded-md border border-border bg-muted/30"
@@ -185,7 +188,9 @@ function PendingReviewRow({ reviewer }: { reviewer: RequestedReviewer }) {
       <div className="flex items-center gap-2">
         <IconClock className="h-3.5 w-3.5 text-yellow-500 shrink-0" />
         <span className="text-xs font-medium">{formatPendingReviewer(reviewer)}</span>
-        <span className="text-[10px] text-muted-foreground truncate">Pending review</span>
+        <span className="text-[10px] text-muted-foreground truncate">
+          {t("github:pendingReview")}
+        </span>
       </div>
     </div>
   );
@@ -212,6 +217,7 @@ export function ReviewsSection({
   requestingReviewers?: string[];
   onReRequest?: (reviewer: string) => void;
 }) {
+  const { t } = useTranslation();
   const { reviews: reconciledReviews, pendingReviewers } = reconcileReviews(
     reviews,
     requestedReviewers,
@@ -227,14 +233,14 @@ export function ReviewsSection({
 
   const subtitle = reviewState ? (
     <div className="text-[10px] text-muted-foreground px-2 pb-1">
-      Overall: <ReviewStateBadge state={reviewState} />
+      {t("github:overallLabel")} <ReviewStateBadge state={reviewState} />
       {pendingText && <span className="text-yellow-600 dark:text-yellow-400">{pendingText}</span>}
     </div>
   ) : null;
 
   return (
     <CollapsibleSection
-      title={`Reviews${summary}`}
+      title={t("github:reviews", { summary })}
       count={totalCount}
       defaultOpen
       subtitle={subtitle}
@@ -243,10 +249,10 @@ export function ReviewsSection({
           ? () => onAddAsContext(buildAllReviewsMessage(reconciledReviews, prUrl))
           : undefined
       }
-      addAllLabel="Add all reviews to chat context"
+      addAllLabel={t("github:addAllReviewsToChatContext")}
     >
       {reconciledReviews.length === 0 && pendingCount === 0 && (
-        <p className="text-xs text-muted-foreground px-2 py-2">No reviews yet</p>
+        <p className="text-xs text-muted-foreground px-2 py-2">{t("github:noReviewsYet")}</p>
       )}
       {reconciledReviews.map((review) => (
         <SubmittedReviewRow

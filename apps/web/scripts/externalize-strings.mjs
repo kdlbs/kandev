@@ -128,11 +128,20 @@ const NAMESPACE_RULES = [
   [/^(app|components)\/jira\//, "jira"],
   [/^(app|components)\/linear\//, "linear"],
   [/^components\/sentry\//, "sentry"],
-  [/^(app|components)\/azure-devops\//, "azureDevops"],
+  // `azuredevops`, not `azureDevops`: the shipped catalog is
+  // `src/locales/en/azuredevops.json` and every existing reference is
+  // `t("azuredevops:…")`. The camelCase form wrote a SECOND catalog file
+  // beside the real one — verified by running this on
+  // `azure-devops-work-item-detail.tsx`, which produced `azureDevops.json`
+  // alongside `azuredevops.json`. Nothing would have failed: the new keys
+  // resolve from the new namespace, so `i18n:check` stays green while the
+  // directory's copy is split across two files.
+  [/^(app|components)\/azure-devops\//, "azuredevops"],
   [/^components\/automations\//, "automations"],
   [/^components\/plugins\//, "plugins"],
   [/^components\/(integrations|vcs)\//, "integrations"],
   [/^app\/stats\//, "stats"],
+  [/^app\/tasks\//, "tasks"],
   [/^app\/auth\//, "auth"],
 ];
 

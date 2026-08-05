@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { useTranslation } from "react-i18next";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 const AUTO_SHELL = "auto";
 const CUSTOM_SHELL = "custom";
@@ -124,7 +125,7 @@ export function ShellSettingsCard({
       title={t("common:shell")}
       description={t("settings:pickTheDefaultShellForTask")}
     >
-      <SettingsCard isDirty={isDirty}>
+      <SettingsCard isDirty={isDirty} discoveryTargetId={GENERAL_SETTINGS_TARGETS.preferredShell}>
         <CardHeader>
           <CardTitle className="text-base">{t("settings:preferredShell")}</CardTitle>
         </CardHeader>

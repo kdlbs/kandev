@@ -1,5 +1,5 @@
 import { test as base } from "@playwright/test";
-import { type ChildProcess, spawn } from "node:child_process";
+import { type ChildProcess, execFile, spawn } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -150,20 +150,51 @@ async function waitForPortFree(port: number, timeoutMs = 10_000): Promise<void> 
   // port is still held and waitForHealth will surface the error.
 }
 
+type WindowsTreeKiller = (pid: number, done: (error?: Error) => void) => void;
+type ProcessAliveProbe = (pid: number) => boolean;
+
+const taskkillProcessTree: WindowsTreeKiller = (pid, done) => {
+  execFile("taskkill", ["/PID", String(pid), "/T", "/F"], (error) => done(error ?? undefined));
+};
+
+const isProcessAlive: ProcessAliveProbe = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 /**
- * Kills an entire process group. Used for the backend process which is spawned
- * with `detached: true` so it becomes a process group leader. Sending signals
- * to the negative PID targets all processes in that group (backend + agentctl).
- * The 7s grace period gives agentctl time to cascade cleanup to agent process groups.
+ * Kills the backend and every child process it owns. POSIX uses the detached
+ * process group; Windows needs taskkill because negative-PID signals are not
+ * supported there.
  */
-function killProcessGroup(proc: ChildProcess): Promise<void> {
-  return new Promise<void>((resolve) => {
+export function killProcessGroup(
+  proc: ChildProcess,
+  platform: NodeJS.Platform = process.platform,
+  killWindowsTree: WindowsTreeKiller = taskkillProcessTree,
+  processIsAlive: ProcessAliveProbe = isProcessAlive,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
     if (!proc.pid) {
       resolve();
       return;
     }
 
     const pid = proc.pid;
+
+    if (platform === "win32") {
+      killWindowsTree(pid, (error) => {
+        if (error && processIsAlive(pid)) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
+      return;
+    }
 
     try {
       process.kill(-pid, "SIGTERM");

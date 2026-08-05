@@ -37,28 +37,28 @@ const defaultImporter: BundleImporter = (url) => import(/* @vite-ignore */ url);
 const DEFAULT_INITIALIZE_TIMEOUT_MS = 10_000;
 
 /**
- * Races `promise` against a `timeoutMs` timer. Resolves with `promise`'s
- * value (or rejects with its error) if it settles first; otherwise calls
- * `onTimeout` and resolves with `undefined` once the timer fires — a timeout
- * is deliberately not a rejection, so the caller's loop can continue to the
- * next plugin instead of routing a hang through the same error-handling path
- * as a thrown/rejected `initialize()`. The original promise is not
- * cancelled; if it eventually settles nothing observes it.
+ * Races `promise` against a `timeoutMs` timer. Resolves with the settled value
+ * (or rejects with its error) if it settles first; otherwise calls `onTimeout`
+ * and resolves with `timedOut: true` — a timeout is deliberately not a
+ * rejection, so the caller's loop can continue to the next plugin instead of
+ * routing a hang through the same error-handling path as a thrown/rejected
+ * `initialize()`. The original promise is not cancelled; if it eventually
+ * settles nothing observes it.
  */
 function raceTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number,
   onTimeout: () => void,
-): Promise<T | void> {
+): Promise<{ value?: T; timedOut: boolean }> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       onTimeout();
-      resolve();
+      resolve({ timedOut: true });
     }, timeoutMs);
     promise.then(
       (value) => {
         clearTimeout(timer);
-        resolve(value);
+        resolve({ value, timedOut: false });
       },
       (error: unknown) => {
         clearTimeout(timer);
@@ -165,18 +165,28 @@ async function loadPlugin(
   // Claim a generation before the (awaited) import so entry order — not
   // import-resolve order — decides which load owns the registry.
   const generation = claimLoadGeneration(plugin.id);
+  pluginRegistry.markPluginLoading(plugin.id, generation);
+  let generationOpen = true;
+  const isActiveGeneration = () => generationOpen && isCurrentLoad(plugin.id, generation);
   try {
     injectStyles(plugin.id, plugin.styleUrls, apiBaseUrl);
     const registered = await resolveRegistration(plugin, importer, apiBaseUrl);
     if (!registered) {
       console.error(`[plugins] "${plugin.id}" bundle did not call registerKandevPlugin`);
+      generationOpen = false;
+      if (isCurrentLoad(plugin.id, generation)) {
+        pluginRegistry.markPluginFailed(plugin.id, generation);
+      }
       return;
     }
     // A newer load for this plugin started while we awaited the import — it now
     // owns the registry. Bail before mutating anything so this stale load can't
     // revoke the successor's registrations or initialize an older bundle over
     // them (the boot-vs-update race Codex flagged).
-    if (!isCurrentLoad(plugin.id, generation)) return;
+    if (!isCurrentLoad(plugin.id, generation)) {
+      generationOpen = false;
+      return;
+    }
     const host = hostFactory(plugin.id);
     // Idempotent (re)load. The nav/route/slot registry is append-only, so
     // running a plugin's initialize() a second time while its previous
@@ -197,14 +207,30 @@ async function loadPlugin(
     // registers post-await can't append onto the successor.
     const registry = generationFencedRegistry(
       pluginRegistry.forPlugin(plugin.id, plugin.name),
-      () => isCurrentLoad(plugin.id, generation),
+      isActiveGeneration,
     );
-    await raceTimeout(Promise.resolve(registered.initialize(registry, host)), initTimeoutMs, () => {
-      console.warn(
-        `[plugins] "${plugin.id}" initialize() timed out after ${initTimeoutMs}ms; continuing without it`,
-      );
-    });
+    const result = await raceTimeout(
+      Promise.resolve(registered.initialize(registry, host)),
+      initTimeoutMs,
+      () => {
+        console.warn(
+          `[plugins] "${plugin.id}" initialize() timed out after ${initTimeoutMs}ms; continuing without it`,
+        );
+      },
+    );
+    generationOpen = false;
+    if (isCurrentLoad(plugin.id, generation)) {
+      if (result.timedOut) {
+        pluginRegistry.markPluginFailed(plugin.id, generation);
+      } else {
+        pluginRegistry.markPluginReady(plugin.id, generation);
+      }
+    }
   } catch (error) {
+    generationOpen = false;
+    if (isCurrentLoad(plugin.id, generation)) {
+      pluginRegistry.markPluginFailed(plugin.id, generation);
+    }
     console.error(`[plugins] failed to load plugin "${plugin.id}"`, error);
   }
 }
@@ -266,8 +292,17 @@ function removeStyles(pluginId: string): void {
  * `loadPlugin` re-imports it. This is opt-in — unconditional eviction here
  * would break the plain disable/re-enable cycle's cached-registration reuse.
  */
-export function unloadPlugin(id: string, options?: { evictCache?: boolean }): void {
+export function unloadPlugin(
+  id: string,
+  options?: { evictCache?: boolean; transition?: "reload" | "removed" },
+): void {
   const plugin = registeredPlugins.get(id);
+  const generation = claimLoadGeneration(id);
+  if (options?.transition === "reload") {
+    pluginRegistry.markPluginLoading(id, generation);
+  } else {
+    pluginRegistry.markPluginRemoved(id, generation);
+  }
   try {
     plugin?.destroy?.();
   } catch (error) {
@@ -275,7 +310,6 @@ export function unloadPlugin(id: string, options?: { evictCache?: boolean }): vo
   } finally {
     // Supersede any in-flight load so a plugin whose initialize() is still
     // awaiting can't re-register after we've disabled/uninstalled it.
-    claimLoadGeneration(id);
     pluginRegistry.unregisterPlugin(id);
     pluginModalManager.closeAllForPlugin(id);
     removeStyles(id);

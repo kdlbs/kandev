@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,6 +55,7 @@ type AgentExecution struct {
 	ErrorMessage         string
 	ProviderError        *streams.ProviderError
 	Metadata             map[string]interface{}
+	metadataMu           sync.RWMutex
 	// runtimeEnv is the effective environment used to create the task's
 	// runtime instance. It is kept in memory only so authorized task-scoped
 	// terminals and passthrough processes can inherit the same credentials and
@@ -568,7 +570,8 @@ type RepoLaunchSpec struct {
 	BaseBranch             string
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string
-	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	PRNumber               int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeID             string // Existing worktree ID to reuse (skip creation if set)
 	WorktreeBranchPrefix   string
 	WorktreeBranchTemplate string
@@ -666,6 +669,7 @@ type LaunchRequest struct {
 	ExecutorConfig      map[string]string // Executor config (docker_host, git_token, etc.)
 	PreviousExecutionID string            // Previous execution ID for runtime reconnect
 	McpMode             string            // MCP tool mode: "task" (default), "config", or "office"
+	McpProviders        []string          // Normalized provider capabilities attached to the task
 
 	// Environment preparation
 	SetupScript string // Setup script to run before agent starts
@@ -686,6 +690,7 @@ type LaunchRequest struct {
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
+	RemoteContribution     *models.RemoteContribution
 	WorktreeBranchPrefix   string // Branch prefix for worktree branches
 	WorktreeBranchTemplate string // Branch name template for worktree branches
 	WorktreeBranchTicket   string // External ticket value for branch templates
@@ -743,11 +748,20 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 
 // MessageAttachment represents an image or file attachment for agent prompts.
 type MessageAttachment struct {
+	AttachmentID string // file-backed descriptor ID; Data is empty for staged files
 	Type         string // "image", "audio", or "resource"
 	Data         string // base64-encoded data
 	MimeType     string // MIME type
 	Name         string // optional filename for resource attachments
+	SizeBytes    int64  // raw byte size for file-backed descriptors
 	DeliveryMode string // "prompt" (native/default) or "path"
+}
+
+// AttachmentReader opens an authorized, claimed backend attachment for
+// streaming into the active agent execution. Implementations must enforce the
+// task/session ownership checks before returning any bytes.
+type AttachmentReader interface {
+	OpenClaimed(ctx context.Context, id, taskID, sessionID string) (io.ReadCloser, string, string, int64, error)
 }
 
 // CredentialsManager interface for credential retrieval

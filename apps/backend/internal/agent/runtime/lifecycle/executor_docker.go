@@ -162,6 +162,9 @@ func (r *DockerExecutor) HealthCheck(_ context.Context) error {
 }
 
 func (r *DockerExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateRequest) (instance *ExecutorInstance, err error) {
+	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, err
+	}
 	dockerClient, containerMgr, err := r.ensureClient()
 	if err != nil {
 		return nil, fmt.Errorf("docker unavailable: %w", err)
@@ -256,10 +259,12 @@ func (r *DockerExecutor) buildContainerLaunchConfig(req *ExecutorCreateRequest) 
 		AutoApprovePermissions:         req.AutoApprovePermissions,
 		AutoApprovePermissionsOverride: req.AutoApprovePermissionsOverride,
 		McpServers:                     req.McpServers,
+		McpProviders:                   req.McpProviders,
 		PrepareScript:                  r.resolvePrepareScript(req),
 		ImageTagOverride:               getMetadataString(req.Metadata, MetadataKeyImageTagOverride),
 		LocalClonePath:                 localCloneMountPath(req.Metadata),
 		BaseBranches:                   getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions:            req.RemoteContributions,
 	}
 }
 
@@ -548,6 +553,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		),
 		AutoStart:           false,
 		McpServers:          req.McpServers,
+		McpProviders:        req.McpProviders,
 		SessionID:           req.SessionID,
 		TaskID:              req.TaskID,
 		DisableAskQuestion:  disableAskQuestion,
@@ -557,6 +563,7 @@ func buildReconnectCreateInstanceRequest(req *ExecutorCreateRequest, instanceID 
 		RequiresProcessKill: requiresProcessKill,
 		StripEnv:            stripEnv,
 		BaseBranches:        getMetadataStringMap(req.Metadata, MetadataKeyBaseBranches),
+		RemoteContributions: req.RemoteContributions,
 	}
 }
 
@@ -772,6 +779,9 @@ func (r *DockerExecutor) resolvePrepareScript(req *ExecutorCreateRequest) string
 		return ""
 	}
 	script += KandevBranchCheckoutPostlude()
+	if binding, ok := req.RemoteContributions[""]; ok {
+		script += scriptengine.RemoteContributionSetupScript(&binding)
+	}
 
 	resolver := scriptengine.NewResolver().
 		WithProvider(scriptengine.WorkspaceProvider(dockerWorkspacePath)).

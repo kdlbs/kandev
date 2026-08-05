@@ -48,6 +48,10 @@ const placeholderComponents = {
   plan: PlaceholderPanel,
   browser: PlaceholderPanel,
   vscode: PlaceholderPanel,
+  // A saved preset can reference a plugin panel (Approach A1) — placeholder
+  // so Settings > Layouts renders a generic box instead of throwing on an
+  // unknown tabComponent (AC8), regardless of which plugin registered it.
+  "plugin-panel": PlaceholderPanel,
 };
 
 const placeholderTabs = {
@@ -55,6 +59,7 @@ const placeholderTabs = {
   changesTab: EditorTab,
   planTab: EditorTab,
   terminalTab: EditorTab,
+  pluginPanelTab: EditorTab,
 };
 
 function activePanelId(panel: { id: string } | undefined, api: DockviewApi) {

@@ -812,18 +812,39 @@ jobs:
           cd dist
           tar -czf "kandev-${{ matrix.platform }}.tar.gz" kandev
           shasum -a 256 "kandev-${{ matrix.platform }}.tar.gz" > "kandev-${{ matrix.platform }}.tar.gz.sha256"
+          # Windows package managers cannot consume the tarball: winget's
+          # InstallerType enum accepts zip as its only archive format, and
+          # Chocolatey's unzip helper needs two 7-Zip passes for a .tar.gz.
+          # The zip is published alongside the tarball, not instead of it —
+          # Homebrew and the npm runtime packages still read the tarball.
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            zip -qr "kandev-${{ matrix.platform }}.zip" kandev
+            shasum -a 256 "kandev-${{ matrix.platform }}.zip" > "kandev-${{ matrix.platform }}.zip.sha256"
+          fi
 
       - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5
         with:
           name: bundle-${{ matrix.platform }}
+          # The zip entries match nothing on the four non-Windows platforms.
+          # if-no-files-found is left at its default so a missing tarball is
+          # still an error.
           path: |
             dist/kandev-${{ matrix.platform }}.tar.gz
             dist/kandev-${{ matrix.platform }}.tar.gz.sha256
+            dist/kandev-${{ matrix.platform }}.zip
+            dist/kandev-${{ matrix.platform }}.zip.sha256
 
   build-desktop:
     name: Build desktop app (${{ matrix.platform }})
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     strategy:
       matrix:
         include:
@@ -1369,7 +1390,15 @@ jobs:
   docker-amd64:
     name: Build & push container image (amd64)
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1440,7 +1469,15 @@ jobs:
   docker-arm64:
     name: Build & push container image (arm64)
     needs: [prepare, build-bundles]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success'
+      }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1499,7 +1536,16 @@ jobs:
   docker-manifest:
     name: Assemble multi-arch base manifest
     needs: [prepare, docker-amd64, docker-arm64]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-amd64.result == 'success' &&
+        needs.docker-arm64.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1553,7 +1599,15 @@ jobs:
   docker-universal-amd64:
     name: Build & push universal image (amd64)
     needs: [prepare, docker-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1605,7 +1659,15 @@ jobs:
   docker-universal-arm64:
     name: Build & push universal image (arm64)
     needs: [prepare, docker-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-manifest.result == 'success'
+      }}
     runs-on: ubuntu-24.04-arm
     permissions:
       contents: read
@@ -1656,7 +1718,16 @@ jobs:
     # docker-universal-manifest is included in publish-release's `needs` so
     # its size gate (and any per-arch build failure) blocks the release.
     needs: [prepare, docker-universal-amd64, docker-universal-arm64]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.docker-universal-amd64.result == 'success' &&
+        needs.docker-universal-arm64.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1713,7 +1784,17 @@ jobs:
   publish-release:
     name: Publish GitHub release
     needs: [prepare, build-bundles, build-desktop, docker-universal-manifest]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.build-bundles.result == 'success' &&
+        needs.build-desktop.result == 'success' &&
+        needs.docker-universal-manifest.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # softprops/action-gh-release creates the release
@@ -1816,6 +1897,17 @@ jobs:
               exit 1
             fi
           done
+          # The Windows zip is the only archive winget and Chocolatey can read.
+          # Losing it would break those channels while every other check here
+          # still passed, so it is verified explicitly.
+          for artifact in \
+            dist/release-assets/kandev-windows-x64.zip \
+            dist/release-assets/kandev-windows-x64.zip.sha256; do
+            if [ ! -f "$artifact" ]; then
+              echo "Missing required Windows artifact: $artifact" >&2
+              exit 1
+            fi
+          done
           bash "$DESKTOP_ASSET_VERIFIER" dist/release-assets
           ls -lh dist/release-assets
 
@@ -1856,6 +1948,8 @@ jobs:
             dist/release-assets/kandev-macos-*.tar.gz.sha256
             dist/release-assets/kandev-windows-*.tar.gz
             dist/release-assets/kandev-windows-*.tar.gz.sha256
+            dist/release-assets/kandev-windows-*.zip
+            dist/release-assets/kandev-windows-*.zip.sha256
             dist/release-assets/kandev-desktop-*
             dist/release-assets/latest.json
           preserve_order: true
@@ -1863,7 +1957,15 @@ jobs:
   publish-npm:
     name: Publish npm packages
     needs: [prepare, publish-release]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write    # Required for OIDC trusted publishing
@@ -1953,7 +2055,15 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: [prepare, publish-release]
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.channel == 'stable' && !inputs.dry_run && !inputs.desktop_validation_only }}
+    if: >-
+      ${{ !cancelled() &&
+        github.event_name == 'workflow_dispatch' &&
+        inputs.channel == 'stable' &&
+        !inputs.dry_run &&
+        !inputs.desktop_validation_only &&
+        needs.prepare.result == 'success' &&
+        needs.publish-release.result == 'success'
+      }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6

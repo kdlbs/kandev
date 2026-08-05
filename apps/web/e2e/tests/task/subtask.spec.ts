@@ -1,6 +1,7 @@
 import { execSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
+import type { Locator } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
@@ -26,6 +27,17 @@ type SessionInfo = {
   executor_profile_id: string;
   state: string;
 };
+
+async function selectRepositoryFromChip(repoChip: Locator, option: Locator, name: string) {
+  await expect(async () => {
+    if (!(await option.isVisible())) {
+      await repoChip.click();
+    }
+    await expect(option).toBeVisible({ timeout: 3_000 });
+    await option.click({ timeout: 3_000 });
+    await expect(repoChip).toContainText(name, { timeout: 3_000 });
+  }).toPass({ timeout: 15_000 });
+}
 
 test.describe("Subtask basics", () => {
   test("subtask badge visible on kanban card", async ({ testPage, apiClient, seedData }) => {
@@ -320,12 +332,15 @@ test.describe("MCP subtask creation", () => {
     //    the combobox option role.
     const repoChip = testPage.getByTestId("repo-chip-trigger").first();
     await expect(repoChip).toBeVisible({ timeout: 5_000 });
-    await repoChip.click();
     // The combobox option label includes a truncated-path badge alongside the
-    // repo name, so match by name substring rather than exact.
-    await testPage.getByRole("option", { name: new RegExp(otherRepoName) }).click();
-    // After selection, the chip should now show repo B's name.
-    await expect(repoChip).toContainText(otherRepoName);
+    // repo name, so match by name substring rather than exact. Retry opening
+    // and selecting as one transaction because WS-driven dialog re-renders can
+    // detach the option between those two actions.
+    await selectRepositoryFromChip(
+      repoChip,
+      testPage.getByRole("option", { name: new RegExp(otherRepoName) }),
+      otherRepoName,
+    );
 
     // 5. Submit. Use a unique title so the listTasks poll can find this row.
     const subtaskTitle = `UI Override Subtask ${Date.now()}`;

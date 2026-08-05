@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { IconChartBar } from "@tabler/icons-react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +42,20 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/hooks/domains/features/use-feature", () => ({
   useFeature: (name: string) => (name === "office" ? officeEnabled : appStatusBarEnabled),
+}));
+
+// The footer renders its insight buttons from the navigation manifest; the
+// manifest itself is covered in `lib/navigation/core-destinations.test.ts`.
+vi.mock("@/hooks/use-app-destinations", () => ({
+  useStaticDestinations: () => [
+    {
+      id: "stats",
+      label: "Stats",
+      icon: IconChartBar,
+      section: "insights",
+      href: "/stats",
+    },
+  ],
 }));
 
 vi.mock("@/hooks/use-release-notes", () => ({

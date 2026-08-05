@@ -152,4 +152,25 @@ test.describe("Review dialog sidebar resize", () => {
       .toBeGreaterThanOrEqual(339);
     expectWidthNear(await getSidebarWidth(sidebar), 340);
   });
+
+  test("hides desktop sidebar chrome across the mobile band", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await seedReviewTask(testPage, apiClient, seedData);
+    await testPage.setViewportSize({ width: 700, height: 900 });
+    await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
+    await testPage.getByRole("button", { name: /Changes$/ }).click();
+    const changesPanel = testPage.getByTestId("mobile-changes-panel");
+    await expect(changesPanel).toBeVisible();
+    await changesPanel.getByRole("button", { name: "Review", exact: true }).click();
+
+    const dialog = testPage.getByRole("dialog", { name: "Review Changes" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("review-dialog-sidebar")).toBeHidden();
+    await expect(dialog.getByTestId("review-dialog-sidebar-resize")).toBeHidden();
+    await expect(dialog.getByTestId("review-file-actions").first()).toHaveCount(0);
+    await expect.poll(async () => Math.round((await dialog.boundingBox())?.width ?? 0)).toBe(700);
+  });
 });

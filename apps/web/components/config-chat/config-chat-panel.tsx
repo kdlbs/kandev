@@ -24,7 +24,15 @@ function useConfigChatPanelStore() {
   );
 }
 
-function PanelHeader({ onExpand, onClose }: { onExpand: () => void; onClose: () => void }) {
+function PanelHeader({
+  expandDisabled,
+  onExpand,
+  onClose,
+}: {
+  expandDisabled: boolean;
+  onExpand: () => void;
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
   return (
     <header className="flex h-12 shrink-0 items-center justify-between border-b bg-muted/30 pl-3">
@@ -35,15 +43,18 @@ function PanelHeader({ onExpand, onClose }: { onExpand: () => void; onClose: () 
       <div className="flex items-center">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button
-              size="icon"
-              variant="ghost"
-              className="h-11 w-11 cursor-pointer rounded-none"
-              onClick={onExpand}
-              aria-label={t("configChat:openInQuickChat")}
-            >
-              <IconArrowsMaximize className="h-4 w-4" />
-            </Button>
+            <span tabIndex={expandDisabled ? 0 : -1} className="inline-flex">
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-11 w-11 cursor-pointer rounded-none"
+                onClick={onExpand}
+                aria-label={t("configChat:openInQuickChat")}
+                disabled={expandDisabled}
+              >
+                <IconArrowsMaximize className="h-4 w-4" />
+              </Button>
+            </span>
           </TooltipTrigger>
           <TooltipContent>{t("configChat:openInQuickChat")}</TooltipContent>
         </Tooltip>
@@ -172,6 +183,7 @@ export const ConfigChatPanel = memo(function ConfigChatPanel({
         <ConfigChatFloatingActionsHost setHost={setFloatingActionsHost} />
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[inherit]">
           <PanelHeader
+            expandDisabled={panel.isStarting}
             onExpand={panel.handleExpand}
             onClose={() => panel.handleOpenChange(false)}
           />

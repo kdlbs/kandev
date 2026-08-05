@@ -410,7 +410,54 @@ describe("TaskSwitcher — edit menu", () => {
     fireEvent.contextMenu(screen.getByText(editableTask.title));
     expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
+});
 
+describe("TaskSwitcher — archived rows action menu", () => {
+  it("keeps archived rows navigation-only apart from delete", () => {
+    const archivedTask = item("Archived task", undefined, {
+      isArchived: true,
+      workflowId: TEST_WORKFLOW_ID,
+      workflowStepId: "step-1",
+    });
+    render(
+      <Providers>
+        <TaskSwitcher
+          grouped={{
+            groups: [{ key: "__all__", label: "All", tasks: [archivedTask] }],
+            subTasksByParentId: new Map(),
+          }}
+          activeTaskId={null}
+          selectedTaskId={null}
+          onSelectTask={vi.fn()}
+          onEditTask={vi.fn()}
+          onRenameTask={vi.fn()}
+          onArchiveTask={vi.fn()}
+          onCreateSubtask={vi.fn()}
+          onDeleteTask={vi.fn()}
+          onDetachTask={vi.fn()}
+          onLinkIssue={vi.fn()}
+          onMoveToStep={vi.fn()}
+          onTogglePin={vi.fn()}
+        />
+      </Providers>,
+    );
+
+    fireEvent.contextMenu(screen.getByText(archivedTask.title));
+    expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Rename" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Archive" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Pin" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Create Subtask" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Detach from parent" })).toBeNull();
+    expect(screen.queryByText("Link")).toBeNull();
+    expect(screen.queryByText("Duplicate")).toBeNull();
+    expect(screen.queryByText("Color")).toBeNull();
+    expect(screen.queryByText("Send to workflow")).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+  });
+});
+
+describe("TaskSwitcher — edit menu prerequisites", () => {
   it("omits edit when a task lacks workflow metadata", () => {
     const task = item("No workflow task");
     render(

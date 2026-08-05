@@ -30,6 +30,13 @@ function makeHostFactory(pluginId: string): PluginHostApi {
     theme: "light",
     navigate: () => {},
     openModal: () => ({ close: () => {} }),
+    storage: {
+      get: async () => undefined,
+      set: async () => ({ updatedAt: "" }),
+      delete: async () => {},
+      list: async () => [],
+      subscribe: () => () => {},
+    },
   };
 }
 

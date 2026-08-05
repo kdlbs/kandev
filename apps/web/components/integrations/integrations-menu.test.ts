@@ -2,8 +2,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { createElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  getAvailableIntegrationLinks,
-  getGitHubIntegrationStatus,
   IntegrationsMenu,
   IntegrationsTopbarLinks,
   MobileIntegrationsSection,
@@ -42,10 +40,14 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (
     selector: (state: {
       workspaces: { activeId: string | null; items: Array<{ id: string }> };
+      // The navigation manifest resolves hrefs against the active mode, so
+      // `useInOffice` (and through it `useFeature`) now runs in this tree.
+      features: Record<string, boolean>;
     }) => unknown,
   ) =>
     selector({
       workspaces: { activeId: activeWorkspaceRef.id, items: activeWorkspaceRef.items },
+      features: { office: false },
     }),
 }));
 
@@ -87,62 +89,10 @@ afterEach(() => {
   activeWorkspaceRef.items = [];
 });
 
-describe("getGitHubIntegrationStatus", () => {
-  it("shows checking while GitHub status is loading and not configured", () => {
-    expect(getGitHubIntegrationStatus(status({}), true)).toEqual({
-      ready: false,
-      label: "Checking",
-    });
-  });
-
-  it("treats a configured token as ready even before live auth is green", () => {
-    expect(getGitHubIntegrationStatus(status({ token_configured: true }), false)).toEqual({
-      ready: true,
-      label: "Configured",
-    });
-  });
-
-  it("uses the GitHub page for authenticated status", () => {
-    expect(getGitHubIntegrationStatus(status({ authenticated: true }), false)).toEqual({
-      ready: true,
-      label: "Connected",
-    });
-  });
-
-  it("shows setup only when no auth or token is configured", () => {
-    expect(getGitHubIntegrationStatus(status({}), false)).toEqual({
-      ready: false,
-      label: "Setup",
-    });
-  });
-});
-
-describe("getAvailableIntegrationLinks", () => {
-  it("returns only configured integration destinations", () => {
-    expect(
-      getAvailableIntegrationLinks({
-        githubReady: true,
-        gitlabReady: false,
-        jiraAvailable: false,
-        linearAvailable: true,
-      }),
-    ).toEqual([
-      { id: "github", label: "GitHub", href: "/github" },
-      { id: "linear", label: "Linear", href: "/linear" },
-    ]);
-  });
-
-  it("returns no setup destinations when integrations are unavailable", () => {
-    expect(
-      getAvailableIntegrationLinks({
-        githubReady: false,
-        gitlabReady: false,
-        jiraAvailable: false,
-        linearAvailable: false,
-      }),
-    ).toEqual([]);
-  });
-});
+// `getGitHubIntegrationStatus` now lives in `hooks/use-nav-availability` with the
+// rest of the manifest's availability gating, and the link table moved into
+// `lib/navigation/`. Their unit coverage moved with them — see
+// `hooks/use-nav-availability.test.ts` and `lib/navigation/*.test.ts`.
 
 describe("IntegrationsMenu", () => {
   it("opens configured integration links on hover", async () => {

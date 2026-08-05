@@ -26,6 +26,7 @@ import { ResetWatchDialog, useWatchResetController } from "@/components/watches/
 import { cleanupMergedReviewTasks, cleanupClosedIssueTasks } from "@/lib/api/domains/github-api";
 import type { ReviewWatch, IssueWatch } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
+import { INTEGRATION_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/integrations";
 
 // CleanupNowButton runs a manual global sweep over the dedup tables. Useful
 // for users who upgraded with a pile of legacy merged-PR / closed-issue
@@ -260,6 +261,7 @@ export function GitHubConnectionSection({ workspaceId }: { workspaceId: string }
       <Separator />
       <GitHubCallbackNotice workspaceId={workspaceId} />
       <SettingsSection
+        discoveryTargetId={INTEGRATION_SETTINGS_TARGETS.github}
         title={t("github:workspaceGithubAccess")}
         description={t("github:credentialUsedForRepositorySyncWatches")}
       >
@@ -394,6 +396,9 @@ function ReviewWatchSection({ workspaceId }: { workspaceId: string }) {
         }}
         onUpdate={async (id, req) => {
           const watch = watches.find((item) => item.id === id);
+          // Unreachable-invariant guard: the dialog only ever calls onUpdate for
+          // a row it was opened from. A developer diagnostic, not user copy.
+          // eslint-disable-next-line i18next/no-literal-string -- invariant message
           if (!watch) throw new Error("review watch not found");
           await update(id, watch.workspace_id, req);
           toast({ description: t("github:reviewWatchUpdated"), variant: "success" });
@@ -497,6 +502,8 @@ function IssueWatchSection({ workspaceId }: { workspaceId: string }) {
         }}
         onUpdate={async (id, req) => {
           const watch = issueActions.watches.find((item) => item.id === id);
+          // Unreachable-invariant guard, as above. Developer diagnostic.
+          // eslint-disable-next-line i18next/no-literal-string -- invariant message
           if (!watch) throw new Error("issue watch not found");
           await issueActions.update(id, watch.workspace_id, req);
           toast({ description: t("github:issueWatchUpdated"), variant: "success" });

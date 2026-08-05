@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useState } from "react";
+import { useTranslation } from "react-i18next";
+// Aliased so components can keep the conventional `t` from useTranslation();
+// this one is for the module-scope helpers and callbacks below, which have no
+// hook in scope and must resolve when they run, not at import.
+import { t as translate } from "@/lib/i18n";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
@@ -107,13 +112,11 @@ function initialState(initial?: Partial<SSHExecutorConfig>): SSHConnectionState 
   };
 }
 
+// A window.confirm argument is invisible to the guard; the module-level `t`
+// resolves it when the user clicks Save.
 function confirmRunningSessions(count?: number): boolean {
   if (!count) return true;
-  return window.confirm(
-    `This executor has ${count} running session(s). ` +
-      "They will keep running on the current host. Only new sessions started " +
-      "after save will use the updated config. Continue?",
-  );
+  return window.confirm(translate("executors:sshConfirmRunningSessions", { count }));
 }
 
 type CoordinatedSSHSaveOptions = {
@@ -139,7 +142,7 @@ function useCoordinatedSSHSave({
     revision,
     isDirty: Boolean(id) && revision !== JSON.stringify(baseline),
     canSave,
-    invalidReason: canSave ? undefined : "Test the connection and trust its fingerprint to save.",
+    invalidReason: canSave ? undefined : translate("executors:sshTestAndTrustToSave"),
     save,
     discard,
   });
@@ -215,7 +218,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
         testing: false,
       }));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to reach backend";
+      const msg = e instanceof Error ? e.message : translate("executors:sshFailedToReachBackend");
       setState((prev) => ({ ...prev, error: msg, testing: false }));
     }
   }, [form]);
@@ -223,6 +226,8 @@ function useSSHConnection(props: SSHConnectionCardProps) {
   const canSave = !!result?.success && !!result.fingerprint && trust && !resultStale && !saving;
 
   const handleSave = useCallback(async () => {
+    // Unreachable while `canSave` gates the Save button; this signals the save
+    // coordinator rather than the user, so it is control flow, not copy.
     if (!canSave || !result?.fingerprint) throw new Error("Test and trust this host before saving");
     if (!confirmRunningSessions(props.runningSessionCount)) throw new SettingsSaveCancelledError();
     const submitted = form;
@@ -232,7 +237,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
       setBaseline(submitted);
       setState((prev) => ({ ...prev, saving: false }));
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Failed to save executor";
+      const msg = e instanceof Error ? e.message : translate("executors:sshFailedToSaveExecutor");
       setState((prev) => ({ ...prev, saving: false, error: msg }));
       throw e;
     }
@@ -267,6 +272,7 @@ function useSSHConnection(props: SSHConnectionCardProps) {
 }
 
 export function SSHConnectionCard(props: SSHConnectionCardProps) {
+  const { t } = useTranslation();
   const c = useSSHConnection(props);
   return (
     <SettingsCard isDirty={c.isDirty} data-testid="ssh-connection-card">
@@ -275,11 +281,9 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
           <div>
             <CardTitle className="flex items-center gap-2">
               <IconTerminal2 className="h-5 w-5" />
-              Connection
+              {t("executors:connection")}
             </CardTitle>
-            <CardDescription>
-              Run an agent on Linux amd64 or macOS hosts you can reach over SSH.
-            </CardDescription>
+            <CardDescription>{t("executors:sshConnectionDescription")}</CardDescription>
           </div>
           <ConnectionBadge fingerprint={c.form.host_fingerprint} />
         </div>
@@ -316,6 +320,7 @@ export function SSHConnectionCard(props: SSHConnectionCardProps) {
 }
 
 function PinnedFingerprintRow({ fingerprint }: { fingerprint: string }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="ssh-fingerprint-pinned"
@@ -323,7 +328,8 @@ function PinnedFingerprintRow({ fingerprint }: { fingerprint: string }) {
     >
       <IconShieldLock className="h-4 w-4 shrink-0" />
       <span className="text-muted-foreground">
-        Pinned fingerprint:{" "}
+        {t("executors:sshPinnedFingerprint")}{" "}
+        {/* Never translated — the user compares it against their own host. */}
         <code data-testid="ssh-fingerprint-pinned-value" className="font-mono">
           {fingerprint}
         </code>
@@ -349,6 +355,7 @@ function SSHConnectionActions({
   onSave: () => void;
   showSave: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3">
       <Button
@@ -364,7 +371,7 @@ function SSHConnectionActions({
         ) : (
           <IconTestPipe className="mr-1.5 h-4 w-4" />
         )}
-        Test connection
+        {t("executors:sshTestConnection")}
       </Button>
       {showSave && (
         <Button
@@ -375,7 +382,7 @@ function SSHConnectionActions({
           className="cursor-pointer"
         >
           {saving ? <IconLoader2 className="mr-1.5 h-4 w-4 animate-spin" /> : null}
-          Save
+          {t("executors:save")}
         </Button>
       )}
     </div>
@@ -383,10 +390,11 @@ function SSHConnectionActions({
 }
 
 function ConnectionBadge({ fingerprint }: { fingerprint?: string }) {
+  const { t } = useTranslation();
   if (!fingerprint) {
     return (
       <Badge data-testid="ssh-connection-badge" data-status="unverified" variant="secondary">
-        Unverified
+        {t("executors:sshUnverified")}
       </Badge>
     );
   }
@@ -397,7 +405,7 @@ function ConnectionBadge({ fingerprint }: { fingerprint?: string }) {
       variant="default"
       className="bg-green-600"
     >
-      Trusted
+      {t("executors:sshTrusted")}
     </Badge>
   );
 }
@@ -444,6 +452,7 @@ function TestResultDisplay({
 }
 
 function TestResultHeader({ success, totalMs }: { success: boolean; totalMs: number }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid={success ? "ssh-test-result-success" : "ssh-test-result-failure"}
@@ -454,7 +463,7 @@ function TestResultHeader({ success, totalMs }: { success: boolean; totalMs: num
       ) : (
         <IconX className="h-4 w-4 text-red-600" />
       )}
-      {success ? "Connection test passed" : "Connection test failed"}
+      {success ? t("executors:sshConnectionTestPassed") : t("executors:sshConnectionTestFailed")}
       <span className="text-muted-foreground font-normal">({totalMs}ms)</span>
     </div>
   );

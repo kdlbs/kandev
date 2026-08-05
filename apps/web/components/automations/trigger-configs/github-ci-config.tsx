@@ -68,6 +68,7 @@ export function GitHubCIConfig({ config, onUpdate }: GitHubCIConfigProps) {
           value={checkNames}
           onChange={(e) => setCheckNames(e.target.value)}
           onBlur={handleCheckNamesBlur}
+          // eslint-disable-next-line i18next/no-literal-string -- example check names, see above
           placeholder="build, test, lint"
         />
       </div>

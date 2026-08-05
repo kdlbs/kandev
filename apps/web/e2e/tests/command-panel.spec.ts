@@ -13,11 +13,11 @@ const HOME_COMMAND_ALIASES: CommandAliasExpectation[] = [
   { query: "statistics", label: "Go to Stats" },
   { query: "issues", label: "Go to GitHub Dashboard" },
   { query: "pull request", label: "Go to GitHub Dashboard" },
-  { query: "agent profiles", label: "Agents Settings" },
-  { query: "claude", label: "Agents Settings" },
-  { query: "execution environment", label: "Executors Settings" },
-  { query: "custom prompts", label: "Prompts Settings" },
-  { query: "prompt templates", label: "Prompts Settings" },
+  { query: "agent profiles", label: "Agents" },
+  { query: "claude", label: "Agents" },
+  { query: "execution environment", label: "Executors" },
+  { query: "custom prompts", label: "Prompts" },
+  { query: "prompt templates", label: "Prompts" },
   { query: "color theme", label: "Switch to Dark Mode" },
   { query: "new quick chat", label: "Quick Chat" },
   { query: "configure kandev", label: "Configuration Chat" },
@@ -111,6 +111,33 @@ test.describe("Command Panel", () => {
 
     await dialog.getByRole("combobox").fill("Environments Settings");
     await expect(commandOption(testPage, "Environments Settings")).toHaveCount(0);
+  });
+
+  test("settings discovery stays quiet until typing and lands on an exact control", async ({
+    testPage,
+  }) => {
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await expect(commandOption(testPage, "Terminal Font Size")).toHaveCount(0);
+
+    const input = dialog.getByRole("combobox");
+    await input.fill("terminal font size");
+    await expect(dialog.locator("[cmdk-group-heading]")).toHaveText(["Settings"]);
+    const option = commandOption(testPage, "Terminal Font Size");
+    await expect(option).toBeVisible();
+    await expect(option.getByText("Settings › General › Terminal", { exact: true })).toBeVisible();
+    await expect(option).toHaveAttribute("data-selected", "true");
+    await input.press("Enter");
+
+    await expect(dialog).not.toBeVisible();
+    await expect(testPage).toHaveURL(/\/settings\/general\/terminal#setting-terminal-font-size$/);
+    const target = testPage.locator('[data-settings-target="setting-terminal-font-size"]');
+    await expect(target).toHaveAttribute("data-settings-target-highlight", "true");
+    await expect(testPage.getByTestId("terminal-font-size-input")).toBeFocused();
   });
 
   test("common aliases find worktree session commands", async ({

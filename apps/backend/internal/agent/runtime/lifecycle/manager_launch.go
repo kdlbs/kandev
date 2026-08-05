@@ -176,6 +176,47 @@ func buildLaunchMetadata(req *LaunchRequest, mainRepoGitDir, worktreeID, worktre
 	return metadata
 }
 
+// collectRemoteContributions projects the validated per-repository bindings
+// into the workspace-subpath keys understood by agentctl. The first repository
+// owns the workspace root; sibling destinations use the same deterministic key
+// as base-branch and workspace materialization projection.
+func collectRemoteContributions(req *LaunchRequest) (map[string]models.RemoteContribution, error) {
+	if req == nil {
+		return nil, nil
+	}
+	specs := req.RepoSpecs()
+	if len(specs) == 0 {
+		if req.RemoteContribution == nil {
+			return nil, nil
+		}
+		if err := req.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution: %w", err)
+		}
+		return map[string]models.RemoteContribution{"": *req.RemoteContribution}, nil
+	}
+	bindings := make(map[string]models.RemoteContribution)
+	for index, spec := range specs {
+		if spec.RemoteContribution == nil {
+			continue
+		}
+		if err := spec.RemoteContribution.Validate(); err != nil {
+			return nil, fmt.Errorf("validate remote contribution for repository %q: %w", spec.RepoName, err)
+		}
+		key := ""
+		if index > 0 {
+			key = baseBranchMetadataKey(spec)
+		}
+		if existing, ok := bindings[key]; ok && existing.CanonicalURL != spec.RemoteContribution.CanonicalURL {
+			return nil, fmt.Errorf("multiple remote contributions target workspace repository %q", key)
+		}
+		bindings[key] = *spec.RemoteContribution
+	}
+	if len(bindings) == 0 {
+		return nil, nil
+	}
+	return bindings, nil
+}
+
 // collectBaseBranches builds the per-repo {RepositoryName → base_branch}
 // map that agentctl reads to scope diff stats. Single-repo legacy launches
 // are recorded under the empty key "" so single-repo trackers (which have
@@ -641,6 +682,13 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	}
 
 	metadata := buildLaunchMetadata(reqWithWorktree, mainRepoGitDir, worktreeID, worktreeBranch)
+	remoteContributions, err := collectRemoteContributions(reqWithWorktree)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if len(remoteContributions) > 0 {
+		metadata[MetadataKeyRemoteContributions] = remoteContributions
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -665,9 +713,11 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpServers:                     mcpServers,
 		PreviousExecutionID:            reqWithWorktree.PreviousExecutionID,
 		McpMode:                        reqWithWorktree.McpMode,
+		McpProviders:                   reqWithWorktree.McpProviders,
 		AuthToken:                      m.revealRuntimeSecret(ctx, metadata, MetadataKeyAuthTokenSecret),
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
 		OnProgress:                     onProgress,
+		RemoteContributions:            remoteContributions,
 	}
 
 	if err := resumeRemoteInstancePreflight(ctx, rt, execReq); err != nil {
@@ -782,6 +832,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 		DefaultBranch:          req.DefaultBranch,
 		CheckoutBranch:         req.CheckoutBranch,
 		PRNumber:               req.PRNumber,
+		RemoteContribution:     req.RemoteContribution,
 		WorktreeBranch:         getMetadataString(req.Metadata, MetadataKeyWorktreeBranch),
 		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
 		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
@@ -811,6 +862,7 @@ func buildEnvPrepareRequest(req *LaunchRequest, workspacePath string, execName e
 				DefaultBranch:          r.DefaultBranch,
 				CheckoutBranch:         r.CheckoutBranch,
 				PRNumber:               r.PRNumber,
+				RemoteContribution:     r.RemoteContribution,
 				WorktreeID:             r.WorktreeID,
 				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
 				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
@@ -980,6 +1032,14 @@ func (m *Manager) promoteWorkspaceExecution(ctx context.Context, execution *Agen
 			return nil, acquireErr
 		}
 		defer activityLease.Release()
+		if len(req.McpProviders) > 0 {
+			if execution.agentctl == nil {
+				return nil, fmt.Errorf("execution %q has no agentctl client for MCP provider promotion", execution.ID)
+			}
+			if err := execution.agentctl.SetMcpProviders(sharedCtx, req.McpProviders); err != nil {
+				return nil, fmt.Errorf("set MCP providers during workspace execution promotion: %w", err)
+			}
+		}
 		// Re-check after acquiring the slot — a peer Launch may have already
 		// promoted while we were waiting.
 		if execution.AgentCommand != "" {
@@ -1074,11 +1134,12 @@ func (m *Manager) launchInternal(ctx context.Context, req *LaunchRequest) (*Agen
 
 	// 4. Resolve workspace path (non-worktree executors use this directly)
 	workspacePath, mainRepoGitDir, worktreeID, worktreeBranch := m.launchResolveWorkspacePath(ctx, req)
-	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders); err != nil {
+	owner := ownedDirectoryLinkOwner(req.TaskID, req.TaskDirName)
+	if err := reconcileWorkspaceSources(ctx, workspacePath, req.WorkspaceFolders, owner); err != nil {
 		return nil, err
 	}
 	if req.ExecutorType == string(models.ExecutorTypeLocal) || req.ExecutorType == legacyExecutorTypeLocalPC {
-		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger); err != nil {
+		if err := reconcileWorkspaceRepositories(workspacePath, workspaceRepositorySpecsFromLaunch(req), m.logger, owner); err != nil {
 			return nil, err
 		}
 	}
@@ -1326,7 +1387,7 @@ func (m *Manager) ensureLaunchSessionStillActive(ctx context.Context, sessionID 
 	case models.TaskSessionStateCancelled,
 		models.TaskSessionStateCompleted,
 		models.TaskSessionStateFailed:
-		return fmt.Errorf("verify session before registering execution: session %q is %s", sessionID, session.State)
+		return fmt.Errorf("verify session before registering execution: session %q is %s: %w", sessionID, session.State, ErrSessionTerminal)
 	default:
 		return nil
 	}
@@ -1529,6 +1590,30 @@ func (m *Manager) SetMcpMode(ctx context.Context, executionID string, mode strin
 		return fmt.Errorf("execution %q has no agentctl client", executionID)
 	}
 	return execution.agentctl.SetMcpMode(ctx, mode)
+}
+
+// SetMcpProvidersForSession replaces the task-mode MCP provider capabilities
+// on the live execution attached to sessionID. The execution store is the
+// source of truth for active agentctl instances; an absent execution is a
+// successful no-op because the next launch or resume derives providers from
+// the persisted task repositories.
+func (m *Manager) SetMcpProvidersForSession(ctx context.Context, sessionID string, providers []string) error {
+	if sessionID == "" {
+		return fmt.Errorf("session_id is required")
+	}
+	execution, exists := m.GetExecutionBySessionID(sessionID)
+	if !exists || execution == nil {
+		m.logger.Debug("MCP provider refresh skipped: no execution for session",
+			zap.String("session_id", sessionID))
+		return nil
+	}
+	if execution.agentctl == nil {
+		return fmt.Errorf("execution %q has no agentctl client", execution.ID)
+	}
+	if err := execution.agentctl.SetMcpProviders(ctx, providers); err != nil {
+		return fmt.Errorf("set MCP providers for session %s: %w", sessionID, err)
+	}
+	return nil
 }
 
 // resolveApprovalPolicyAndDisplayName resolves the approval policy and agent display name

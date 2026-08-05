@@ -304,6 +304,8 @@ function FrequencyDetail({
   onCustomDraftChange: (value: string) => void;
   onCustomBlur: () => void;
 }) {
+  const { t } = useTranslation();
+
   if (frequency === "custom") {
     return (
       <Input
@@ -321,7 +323,7 @@ function FrequencyDetail({
   if (frequency === "hourly") {
     return (
       <>
-        <span className="text-muted-foreground">at minute</span>
+        <span className="text-muted-foreground">{t("automations:atMinute")}</span>
         <Input
           type="number"
           min={0}
@@ -426,7 +428,7 @@ function NextRun({
             className="cursor-pointer underline underline-offset-2 hover:text-foreground"
             data-testid="schedule-adopt-timezone"
           >
-            interpreted as UTC, set a timezone
+            {t("automations:interpretedAsUtcSetTimezone")}
           </button>
         </>
       )}

@@ -1,5 +1,7 @@
 {
   "account": "Àććōũńţ",
+  "archivedLoadFailed": "Àŕćĥĩvēď ţàśķś ćōũĺď ńōţ ƀē ĺōàďēď",
+  "retry": "Ŕēţŕý",
   "activeWorkspaceBadge": "Àćţĩvē",
   "activity": "Àćţĩvĩţŷ",
   "addAgent": "Àďď àĝēńţ",
@@ -44,6 +46,7 @@
   "newViewUnavailable": "Ńēŵ vĩēŵ ũńàvàĩĺàƀĺē. {{reason}}",
   "noAgentsYet": "Ńō àĝēńţś ŷēţ",
   "noProjectsYet": "Ńō ƥŕōĵēćţś ŷēţ",
+  "noTasksYet": "Ńō ţàśķś ŷēţ.",
   "noWorkspaces": "Ńō ŵōŕķśƥàćēś",
   "office": "Ōƒƒĩćē",
   "offline": "Ōƒƒĺĩńē",

@@ -1,6 +1,5 @@
 import type { ConnectionIssueSeverity, ConnectionStatus } from "@/lib/types/connection";
 import type { HealthCheckSummary, HealthIssue, SystemHealthResponse } from "@/lib/types/health";
-import type { StateSnapshot } from "react-virtuoso";
 import type {
   FilterClause,
   GroupKey,
@@ -44,7 +43,16 @@ export type MobileKanbanState = {
   isSearchOpen: boolean;
 };
 
-export type MobileSessionPanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+/** Core, host-defined mobile panels. Kept as a named union (rather than
+ *  inlined into MobileSessionPanel) so existing `=== "chat"`-style narrowing
+ *  still works unchanged after MobileSessionPanel grew a plugin variant. */
+export type MobileSessionCorePanel = "chat" | "plan" | "changes" | "files" | "terminal" | "review";
+
+/** A plugin task panel id on mobile, `plugin:<pluginId>:<panelKey>` — see
+ *  lib/state/layout-manager/plugin-panels.ts's pluginPanelId. */
+export type MobileSessionPluginPanel = `plugin:${string}:${string}`;
+
+export type MobileSessionPanel = MobileSessionCorePanel | MobileSessionPluginPanel;
 
 export type MobileSessionState = {
   activePanelBySessionId: Record<string, MobileSessionPanel>;
@@ -64,9 +72,6 @@ export type TranscriptAutoScrollState = {
   /** Last known scrollTop for the native renderer, captured continuously so
    *  a disabled session's position survives a dockview panel remount. */
   scrollTopBySessionId: Record<string, number>;
-  /** Last captured Virtuoso state snapshot (scroll offset + measured item
-   *  sizes) for the virtuoso renderer, captured on disable/unmount. */
-  virtuosoStateBySessionId: Record<string, StateSnapshot>;
 };
 
 export type ReviewPRSelectionState = {
@@ -228,7 +233,6 @@ export type UISliceActions = {
   setCancelTurnPending: (sessionId: string, pending: boolean) => void;
   setTranscriptAutoScrollEnabled: (sessionId: string, enabled: boolean) => void;
   setTranscriptScrollTop: (sessionId: string, scrollTop: number) => void;
-  setTranscriptVirtuosoState: (sessionId: string, state: StateSnapshot) => void;
   setReviewPRSelection: (taskId: string, selectedKey: string) => void;
   setActiveDocument: (sessionId: string, doc: ActiveDocument | null) => void;
   setSystemHealth: (response: SystemHealthResponse) => void;

@@ -6,6 +6,7 @@ const MAIN_WORKSPACE_ID = "ws-1";
 const ARCHIVE_WORKSPACE_ID = "ws-10";
 const MAIN_WORKSPACE_NAME = "Main Workspace";
 const ARCHIVE_WORKSPACE_NAME = "Archive Workspace";
+const VOICE_MODE_LABEL = "Voice Mode";
 
 const state = {
   workspaces: {
@@ -234,7 +235,7 @@ describe("SettingsTree standalone leaves", () => {
   it("keeps Voice Mode in the settings tree as a standalone active leaf", () => {
     render(<SettingsTree pathname="/settings" />);
 
-    expect(screen.getByRole("link", { name: "Voice Mode" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL }).getAttribute("href")).toBe(
       "/settings/voice-mode",
     );
 
@@ -242,7 +243,7 @@ describe("SettingsTree standalone leaves", () => {
 
     render(<SettingsTree pathname="/settings/voice-mode" />);
 
-    expect(screen.getByRole("link", { name: "Voice Mode" }).className).toContain(
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL }).className).toContain(
       "before:bg-primary",
     );
     expect(screen.queryByRole("link", { name: "Appearance" })).toBeNull();
@@ -257,6 +258,49 @@ describe("SettingsTree standalone leaves", () => {
         .slice(-2)
         .map((link) => link.textContent),
     ).toEqual(["Plugins", "System"]);
+  });
+});
+
+describe("SettingsTree search", () => {
+  afterEach(cleanup);
+
+  it("preserves the normal tree until a query filters it to grouped hits", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+
+    fireEvent.change(search, { target: { value: "font size" } });
+
+    const result = screen.getByRole("link", { name: /Terminal Font Size/ });
+    expect(result.getAttribute("href")).toBe(
+      "/settings/general/terminal#setting-terminal-font-size",
+    );
+    expect(result.textContent).toContain("General");
+    expect(result.textContent).toContain("Terminal");
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
+  });
+
+  it("clears a query with Escape and restores the normal tree", () => {
+    render(<SettingsTree pathname="/settings" />);
+    const search = screen.getByRole("searchbox", { name: "Search settings" });
+
+    fireEvent.change(search, { target: { value: "font size" } });
+    fireEvent.keyDown(search, { key: "Escape" });
+
+    expect((search as HTMLInputElement).value).toBe("");
+    expect(screen.getByRole("link", { name: VOICE_MODE_LABEL })).toBeTruthy();
+  });
+
+  it("announces an empty result without rendering the normal tree", () => {
+    render(<SettingsTree pathname="/settings" />);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search settings" }), {
+      target: { value: "definitely missing" },
+    });
+
+    expect(screen.getByText("No matching settings")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: VOICE_MODE_LABEL })).toBeNull();
   });
 });
 

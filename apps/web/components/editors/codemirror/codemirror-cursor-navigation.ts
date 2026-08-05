@@ -27,8 +27,9 @@ export function revealPendingCodeMirrorCursor(
   view: EditorView,
   path: string,
   repo?: string,
+  sessionId?: string,
 ): boolean {
-  const pending = consumePendingCursorPosition(path, repo);
+  const pending = consumePendingCursorPosition(path, repo, sessionId);
   if (!pending) return false;
   return revealCodeMirrorCursor(view, pending.line, pending.column);
 }

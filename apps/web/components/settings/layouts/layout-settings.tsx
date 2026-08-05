@@ -28,6 +28,8 @@ import { LayoutEditor } from "./layout-editor";
 import { LayoutProfileList } from "./layout-profile-list";
 import { useLayoutSettings } from "./use-layout-settings";
 import { useTranslation } from "react-i18next";
+import { SettingsTarget } from "@/components/settings/settings-target";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 type Controller = ReturnType<typeof useLayoutSettings>;
 
@@ -235,7 +237,11 @@ export function LayoutSettings() {
     discard: controller.cancel,
   });
   return (
-    <div className="min-w-0 space-y-6" data-testid="layout-settings">
+    <SettingsTarget
+      targetId={GENERAL_SETTINGS_TARGETS.layoutProfiles}
+      className="min-w-0 space-y-6"
+      data-testid="layout-settings"
+    >
       <LayoutSettingsHeader />
       {controller.error && (
         <Alert variant="destructive">
@@ -261,6 +267,6 @@ export function LayoutSettings() {
         </section>
       </div>
       <DeleteProfileDialog controller={controller} open={deleteOpen} onOpenChange={setDeleteOpen} />
-    </div>
+    </SettingsTarget>
   );
 }

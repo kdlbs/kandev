@@ -113,10 +113,11 @@ function buildFileContextItem(
     id: f.path,
     label: f.name,
     path: f.path,
+    isDirectory: f.isDirectory === true,
     pinned: f.pinned,
     onRemove: makeRemoveHandler(helpers.sid, f.path, helpers.removeContextFile),
     onUnpin: makeUnpinHandler(f.pinned, helpers.sid, f.path, helpers.unpinFile),
-    onOpen: onOpenFile ?? (() => {}),
+    onOpen: f.isDirectory ? undefined : onOpenFile,
   };
 }
 

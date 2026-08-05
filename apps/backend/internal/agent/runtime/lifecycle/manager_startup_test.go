@@ -2,11 +2,18 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // mockAgentProfileResolver returns a profile pointing to the mock-agent.
@@ -100,6 +107,72 @@ func TestStartAgentProcess_NonPassthrough_NoAgentctl(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "no agentctl client") {
 		t.Errorf("expected 'no agentctl client' error, got: %v", err)
+	}
+}
+
+func TestStartAgentProcess_RunsContributionPreflightBeforeAgentStart(t *testing.T) {
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/git/push-preflight":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": false,
+				"error":   "source branch is read-only",
+			})
+		default:
+			t.Errorf("unexpected agentctl request %s %s", r.Method, r.URL.Path)
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	binding := models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	execution := &AgentExecution{
+		ID:             "exec-preflight",
+		SessionID:      "session-preflight",
+		AgentCommand:   "agent",
+		AgentProfileID: "profile-preflight",
+		Metadata: map[string]interface{}{
+			MetadataKeyRemoteContributions: map[string]models.RemoteContribution{"": binding},
+		},
+		agentctl: agentctl.NewClient(host, port, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	err = mgr.StartAgentProcess(context.Background(), execution.ID)
+	if err == nil || !strings.Contains(err.Error(), "source branch is read-only") {
+		t.Fatalf("StartAgentProcess() error = %v, want preflight failure", err)
+	}
+	if len(paths) != 2 || paths[0] != "/health" || paths[1] != "/api/v1/git/push-preflight" {
+		t.Fatalf("agentctl request order = %v, want health then push-preflight only", paths)
 	}
 }
 

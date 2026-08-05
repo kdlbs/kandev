@@ -379,6 +379,15 @@ func (m *Manager) SetSessionAccessChecker(check func(ctx context.Context, sessio
 	m.sessionAccessCheck = check
 }
 
+// SetAttachmentReader wires the backend attachment reader used by prompt
+// dispatch. Claimed descriptors are streamed into the active agentctl
+// session immediately before an ACP prompt is sent.
+func (m *Manager) SetAttachmentReader(reader AttachmentReader) {
+	if m.sessionManager != nil {
+		m.sessionManager.SetAttachmentReader(reader)
+	}
+}
+
 // SetEnvironmentAccessChecker installs the per-user environment visibility
 // check used by GetOrEnsureExecutionForEnvironment (terminal env-shell route).
 func (m *Manager) SetEnvironmentAccessChecker(check func(ctx context.Context, environmentID string) error) {

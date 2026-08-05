@@ -73,6 +73,9 @@ type Client interface {
 	// ListPRCommits lists commits in a pull request.
 	ListPRCommits(ctx context.Context, owner, repo string, number int) ([]PRCommitInfo, error)
 
+	// GetPRCommitDetail retrieves one commit and all of its changed files.
+	GetPRCommitDetail(ctx context.Context, owner, repo, sha string) (PRCommitDetail, error)
+
 	// SubmitReview submits a review on a pull request.
 	// event is one of "APPROVE", "COMMENT", "REQUEST_CHANGES".
 	SubmitReview(ctx context.Context, owner, repo string, number int, event, body string) error

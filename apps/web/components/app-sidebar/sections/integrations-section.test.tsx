@@ -1,7 +1,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
+import { IconBrandGithub, IconBrandGitlab, IconChartBar, IconHexagon } from "@tabler/icons-react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AzureDevOpsIcon } from "@/components/icons/azure-devops-icon";
+import type { ResolvedDestination } from "@/lib/navigation/types";
 
 const navigationMock = vi.hoisted(() => ({
   pathname: "/",
@@ -11,12 +14,7 @@ const collapsibleMock = vi.hoisted(() => ({
   open: false,
 }));
 
-const linksMock = vi.hoisted(() =>
-  vi.fn(() => [
-    { id: "github", label: "GitHub", href: "/github" },
-    { id: "jira", label: "Jira", href: "/jira" },
-  ]),
-);
+const destinationsMock = vi.hoisted(() => vi.fn());
 
 const storeState = {
   appSidebar: {
@@ -36,24 +34,11 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }));
 
-vi.mock("@/components/integrations/integrations-menu", () => ({
-  useConfiguredIntegrationLinks: linksMock,
-}));
-
-const pluginsMock = vi.hoisted(() => ({
-  navItems: [] as Array<{
-    id: string;
-    label: string;
-    path: string;
-    icon?: string;
-    section?: string;
-  }>,
-}));
-
-vi.mock("@/lib/plugins/registry", () => ({
-  usePluginRegistry: () => ({
-    getNavItems: () => pluginsMock.navItems,
-  }),
+// The section renders whatever the navigation manifest resolves for the sidebar's
+// integrations group; availability gating and plugin merging are covered in
+// `lib/navigation/core-destinations.test.ts`.
+vi.mock("@/hooks/use-app-destinations", () => ({
+  useAppDestinations: destinationsMock,
 }));
 
 vi.mock("@kandev/ui/collapsible", () => ({
@@ -66,6 +51,39 @@ vi.mock("@kandev/ui/collapsible", () => ({
 }));
 
 import { IntegrationsSection } from "./integrations-section";
+
+function destination(
+  id: string,
+  label: string,
+  icon: ResolvedDestination["icon"],
+): ResolvedDestination {
+  return { id, label, icon, section: "integrations", href: `/${id}` };
+}
+
+/** Plugin entries arrive namespaced, with the raw item id kept for test ids. */
+function pluginDestination(
+  itemId: string,
+  label: string,
+  icon: ResolvedDestination["icon"],
+): ResolvedDestination {
+  return {
+    id: `plugin:${itemId}`,
+    pluginItemId: itemId,
+    label,
+    icon,
+    section: "integrations",
+    href: `/${itemId}`,
+    source: "plugin",
+  };
+}
+
+const AZURE = destination("azure-devops", "Azure DevOps", AzureDevOpsIcon);
+const GITHUB = destination("github", "GitHub", IconBrandGithub);
+const GITLAB = destination("gitlab", "GitLab", IconBrandGitlab);
+const JIRA = destination("jira", "Jira", IconHexagon);
+const LINEAR = destination("linear", "Linear", IconHexagon);
+const PLUGIN_PAGE = pluginDestination("cost-per-model", "Cost per Model", IconChartBar);
+const PLUGIN_TEST_ID = `plugin-nav-item-${PLUGIN_PAGE.pluginItemId}`;
 
 function renderSection() {
   return render(
@@ -81,110 +99,86 @@ describe("IntegrationsSection", () => {
     storeState.appSidebar.sectionExpanded.integrations = false;
     storeState.toggleAppSidebarSection.mockClear();
     storeState.setAppSidebarCollapsed.mockClear();
-    linksMock.mockReturnValue([
-      { id: "github", label: "GitHub", href: "/github" },
-      { id: "jira", label: "Jira", href: "/jira" },
-    ]);
-    pluginsMock.navItems = [];
+    destinationsMock.mockReturnValue([GITHUB, JIRA]);
   });
 
   afterEach(() => cleanup());
 
   it("keeps integration shortcuts visible while the section accordion is closed", () => {
-    linksMock.mockReturnValue([
-      { id: "github", label: "GitHub", href: "/github" },
-      { id: "gitlab", label: "GitLab", href: "/gitlab" },
-      { id: "jira", label: "Jira", href: "/jira" },
-      { id: "linear", label: "Linear", href: "/linear" },
-      { id: "sentry", label: "Sentry", href: "/sentry" },
-    ]);
+    destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
 
     renderSection();
 
     const shortcuts = screen.getAllByTestId("integration-header-shortcut");
     expect(shortcuts.map((shortcut) => shortcut.getAttribute("aria-label"))).toEqual([
+      "Azure DevOps",
       "GitHub",
       "GitLab",
       "Jira",
-      "Linear",
     ]);
     expect(shortcuts.map((shortcut) => shortcut.getAttribute("href"))).toEqual([
+      "/azure-devops",
       "/github",
       "/gitlab",
       "/jira",
-      "/linear",
     ]);
-    expect(screen.queryByRole("link", { name: "Sentry" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Linear" })).toBeNull();
   });
 
   it("limits shortcuts to four integrations and leaves the full list in the expanded section", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
-    linksMock.mockReturnValue([
-      { id: "github", label: "GitHub", href: "/github" },
-      { id: "gitlab", label: "GitLab", href: "/gitlab" },
-      { id: "jira", label: "Jira", href: "/jira" },
-      { id: "linear", label: "Linear", href: "/linear" },
-      { id: "sentry", label: "Sentry", href: "/sentry" },
-    ]);
+    destinationsMock.mockReturnValue([AZURE, GITHUB, GITLAB, JIRA, LINEAR]);
 
     renderSection();
 
     expect(screen.getAllByTestId("integration-header-shortcut")).toHaveLength(4);
-    expect(screen.getByRole("link", { name: "Sentry" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Linear" })).toBeTruthy();
   });
 
   it("uses the Azure DevOps product mark for Azure links", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
-    linksMock.mockReturnValue([
-      { id: "azure-devops", label: "Azure DevOps", href: "/azure-devops" },
-    ]);
+    destinationsMock.mockReturnValue([AZURE]);
 
     renderSection();
 
     expect(screen.getAllByTestId("azure-devops-icon")).toHaveLength(2);
   });
 
-  const costPerModelItem = {
-    id: "cost-per-model",
-    label: "Cost per Model",
-    path: "/cost-per-model",
-    icon: "chart",
-    section: "integrations",
-  };
-  const costPerModelTestId = `plugin-nav-item-${costPerModelItem.id}`;
-
-  it("renders plugin nav items registered with section integrations after the first-party links", () => {
+  it("renders plugin nav items after the first-party links, with their own test id", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
-    pluginsMock.navItems = [
-      costPerModelItem,
-      { id: "hello", label: "Hello", path: "/hello", section: "main" },
-    ];
+    destinationsMock.mockReturnValue([GITHUB, PLUGIN_PAGE]);
 
     renderSection();
 
-    const pluginRow = screen.getByTestId(costPerModelTestId);
-    expect(pluginRow.getAttribute("href")).toBe(costPerModelItem.path);
-    expect(screen.queryByRole("link", { name: "Hello" })).toBeNull();
+    const pluginRow = screen.getByTestId(PLUGIN_TEST_ID);
+    expect(pluginRow.getAttribute("href")).toBe(PLUGIN_PAGE.href);
+    expect(pluginRow.textContent).toContain(PLUGIN_PAGE.label);
   });
 
-  it("shows the section when only plugin integration items exist, with no empty header-action slot", () => {
-    storeState.appSidebar.sectionExpanded.integrations = true;
-    linksMock.mockReturnValue([]);
-    pluginsMock.navItems = [costPerModelItem];
+  it("keeps plugin items out of the header shortcut strip", () => {
+    destinationsMock.mockReturnValue([PLUGIN_PAGE]);
 
     const { container } = renderSection();
 
-    expect(screen.getByTestId(costPerModelTestId)).toBeTruthy();
     // Regression for the empty headerAction slot: AppSidebarSection renders
     // a "shrink-0 mr-1 flex items-center" wrapper whenever headerAction is
     // non-null, even with zero shortcuts inside it.
+    expect(screen.queryAllByTestId("integration-header-shortcut")).toEqual([]);
     expect(container.querySelector(".shrink-0.mr-1")).toBeNull();
   });
 
-  it("hides the section entirely when neither first-party links nor plugin items exist", () => {
+  it("shows the section when only plugin integration items exist", () => {
     storeState.appSidebar.sectionExpanded.integrations = true;
-    linksMock.mockReturnValue([]);
-    pluginsMock.navItems = [];
+    destinationsMock.mockReturnValue([PLUGIN_PAGE]);
+
+    renderSection();
+
+    expect(screen.getByTestId(PLUGIN_TEST_ID)).toBeTruthy();
+  });
+
+  it("hides the section entirely when the manifest resolves no destinations", () => {
+    storeState.appSidebar.sectionExpanded.integrations = true;
+    destinationsMock.mockReturnValue([]);
 
     const { container } = renderSection();
 

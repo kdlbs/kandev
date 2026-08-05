@@ -74,6 +74,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		AllowIndexing:    req.AllowIndexing,
 		AutoApprove:      req.AutoApprove,
 		CLIPassthrough:   req.CLIPassthrough,
+		Enabled:          true,
 		CLIFlags:         cliFlags,
 		EnvVars:          envVarsFromDTO(req.EnvVars),
 		CommandPrefix:    strings.TrimSpace(req.CommandPrefix),
@@ -134,6 +135,8 @@ type UpdateProfileRequest struct {
 	AllowIndexing  *bool
 	AutoApprove    *bool
 	CLIPassthrough *bool
+	// Enabled replaces the value when non-nil. Nil means "leave unchanged".
+	Enabled *bool
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the full desired list on save.
 	CLIFlags *[]dto.CLIFlagDTO
@@ -142,6 +145,13 @@ type UpdateProfileRequest struct {
 	// CommandPrefix replaces the value when non-nil. Nil means "leave
 	// unchanged" — the UI always sends the desired value on save.
 	CommandPrefix *string
+}
+
+func enabledOnlyUpdate(req UpdateProfileRequest) bool {
+	return req.Enabled != nil && req.Name == nil && req.Model == nil && req.Mode == nil &&
+		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
+		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
+		req.CommandPrefix == nil
 }
 
 func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest) (*dto.AgentProfileDTO, error) {
@@ -174,6 +184,19 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
+	}
+	if req.Enabled != nil {
+		profile.Enabled = *req.Enabled
+	}
+	if enabledOnlyUpdate(req) {
+		profile.UserModified = true
+		updatedAt, err := c.repo.UpdateAgentProfileEnabled(ctx, profile.ID, profile.Enabled)
+		if err != nil {
+			return nil, err
+		}
+		profile.UpdatedAt = updatedAt
+		result := toProfileDTO(profile)
+		return &result, nil
 	}
 	if req.CLIFlags != nil {
 		if err := validateCLIFlagDTOs(*req.CLIFlags); err != nil {
@@ -508,6 +531,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		CLIFlags:         cliFlagsToDTO(profile.CLIFlags),
 		EnvVars:          envVarsToDTO(profile.EnvVars),
 		CLIPassthrough:   profile.CLIPassthrough,
+		Enabled:          profile.Enabled,
 		CommandPrefix:    profile.CommandPrefix,
 		UserModified:     profile.UserModified,
 		WorkspaceID:      profile.WorkspaceID,

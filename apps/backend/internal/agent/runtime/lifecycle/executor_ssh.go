@@ -177,6 +177,9 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	if ok {
 		return r.buildResumedInstance(req, resumed), nil
 	}
+	if _, err := validateRemoteContributions(req.RemoteContributions); err != nil {
+		return nil, fmt.Errorf("ssh: validate remote contributions: %w", err)
+	}
 
 	target, err := r.targetFromMetadata(req.Metadata)
 	if err != nil {
@@ -216,6 +219,15 @@ func (r *SSHExecutor) CreateInstance(ctx context.Context, req *ExecutorCreateReq
 	port, pid, fwd, authToken, err := r.startAndForwardAgentctl(ctx, client, agentctlBin, taskDir, sessionDir, req, platform)
 	if err != nil {
 		return nil, err
+	}
+	if binding, ok := req.RemoteContributions[""]; ok {
+		if err := r.materializeSSHRemoteContribution(ctx, client, agentctlBin, taskDir, req, platform, &binding); err != nil {
+			_ = fwd.Close()
+			cleanupCtx, cancel := sshRemoteCleanupContext(ctx)
+			_ = stopRemoteAgentctl(cleanupCtx, client, sessionDir, pid)
+			cancel()
+			return nil, err
+		}
 	}
 
 	r.mu.Lock()

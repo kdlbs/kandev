@@ -36,7 +36,7 @@ async function seedAndOpenSheet(
 
   // Open the task-switcher sheet from the mobile session top bar.
   await testPage.getByTestId("mobile-session-menu").click();
-  const sheet = testPage.getByRole("dialog");
+  const sheet = testPage.getByRole("dialog", { name: "Tasks" });
   await expect(sheet.getByTestId("sidebar-filter-bar")).toBeVisible({ timeout: 10_000 });
   return sheet;
 }
@@ -102,6 +102,7 @@ test.describe("Mobile sidebar — view system", () => {
         () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
       ),
     ).toBe(true);
+    await expect(sheet.getByTestId("mobile-task-switcher-list")).toHaveCSS("overflow-y", "auto");
     await expect
       .poll(async () => {
         const { settings } = await apiClient.getUserSettings();
@@ -114,7 +115,7 @@ test.describe("Mobile sidebar — view system", () => {
     await testPage.reload();
     await new SessionPage(testPage).waitForLoad();
     await testPage.getByTestId("mobile-session-menu").click();
-    const reloadedSheet = testPage.getByRole("dialog");
+    const reloadedSheet = testPage.getByRole("dialog", { name: "Tasks" });
     await expect(
       reloadedSheet
         .getByTestId("sidebar-view-chip-row")
@@ -158,6 +159,58 @@ test.describe("Mobile sidebar — view system", () => {
     await expect(sheet.getByText("Fix auth bug")).toBeVisible();
     await expect(sheet.getByText("Refactor auth")).toBeVisible();
     await expect(sheet.getByText("Update deps")).toHaveCount(0);
+  });
+
+  test("offers archived as a filter dimension and loads archived rows", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const archivedTask = await apiClient.seedTask(seedData.workspaceId, "Mobile archived filter", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
+    await apiClient.archiveTask(archivedTask.task_id);
+    const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, ["Mobile filter options"]);
+    await sheet.getByTestId("sidebar-filter-gear").click();
+    const popover = testPage.getByTestId("sidebar-filter-popover");
+    await expect(popover).toBeVisible();
+    await popover.getByTestId("filter-add-button").click();
+    await popover.getByTestId("filter-dimension-select").click();
+
+    await expect(testPage.getByRole("option", { name: "Archived", exact: true })).toBeVisible();
+    await testPage.getByRole("option", { name: "Archived", exact: true }).click();
+    const viewport = testPage.viewportSize();
+    const sheetBox = await sheet.boundingBox();
+    const popoverBox = await popover.boundingBox();
+    expect(viewport).not.toBeNull();
+    expect(sheetBox).not.toBeNull();
+    expect(popoverBox).not.toBeNull();
+    for (const box of [sheetBox!, popoverBox!]) {
+      expect(box.x).toBeGreaterThanOrEqual(0);
+      expect(box.y).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width).toBeLessThanOrEqual(viewport!.width);
+      expect(box.y + box.height).toBeLessThanOrEqual(viewport!.height);
+    }
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
+    await testPage.keyboard.press("Escape");
+    await expect(sheet.getByText("Mobile archived filter")).toBeVisible({ timeout: 10_000 });
+    await expect(sheet.getByText("Archived", { exact: true })).toBeVisible();
+    await expect(sheet.getByText("Mobile filter options")).toHaveCount(0);
+    await sheet.getByText("Mobile archived filter").click();
+    await expect(testPage).toHaveURL((url) => url.pathname === `/t/${archivedTask.task_id}`);
+    // The mobile detail header uses the session top bar; desktop renders the
+    // unarchive button directly in its task top bar.
+    await expect(testPage.getByTestId("mobile-session-menu")).toBeVisible({ timeout: 10_000 });
+    await expect(
+      testPage
+        .getByTestId("mobile-task-layout")
+        .getByText("Mobile archived filter", { exact: true }),
+    ).toBeVisible();
   });
 
   test("switching saved views swaps the filtered list in the sheet", async ({

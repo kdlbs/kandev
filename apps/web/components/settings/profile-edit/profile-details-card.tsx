@@ -10,13 +10,19 @@ type ProfileDetailsCardProps = {
   name: string;
   baselineName?: string;
   onNameChange: (v: string) => void;
+  discoveryTargetId?: string;
 };
 
-export function ProfileDetailsCard({ name, baselineName, onNameChange }: ProfileDetailsCardProps) {
+export function ProfileDetailsCard({
+  name,
+  baselineName,
+  onNameChange,
+  discoveryTargetId,
+}: ProfileDetailsCardProps) {
   const { t } = useTranslation();
   const isDirty = baselineName !== undefined && name.trim() !== baselineName.trim();
   return (
-    <SettingsCard isDirty={isDirty}>
+    <SettingsCard isDirty={isDirty} discoveryTargetId={discoveryTargetId}>
       <CardHeader>
         <CardTitle>{t("executors:profileDetails")}</CardTitle>
       </CardHeader>

@@ -90,6 +90,7 @@ export function buildDialogFormBodyProps(
 export function buildDialogFooterProps(
   setup: ReturnType<typeof useTaskCreateDialogSetup>,
   props: TaskCreateDialogProps,
+  pendingAttachmentUploadReason?: string | null,
 ) {
   const { fs, computed, submitHandlers } = setup;
   return {
@@ -114,6 +115,6 @@ export function buildDialogFooterProps(
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
-    submitBlockedReason: props.submitBlockedReason,
+    submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
   };
 }

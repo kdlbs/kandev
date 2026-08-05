@@ -21,6 +21,7 @@ import {
   computeIsTaskStarted,
   findDuplicateRemoteRepo,
   validateCreateInputs,
+  hasPendingAttachmentUploads,
   toMessageAttachments,
 } from "@/components/task-create-dialog-helpers";
 
@@ -36,6 +37,24 @@ function notifyQueuedTask(
     title: "Task queued",
     description: "The workflow step is at its WIP limit; this task will start when capacity opens.",
   });
+}
+
+type NoAgentTaskRequirements = {
+  description: string;
+  workflowStepId: string;
+  workspaceId: string;
+  workflowId: string;
+};
+
+function hasNoAgentTaskRequirements(input: {
+  description: string;
+  workflowStepId: string | null;
+  workspaceId: string | null;
+  workflowId: string | null;
+}): input is NoAgentTaskRequirements {
+  return Boolean(
+    input.description && input.workflowStepId && input.workspaceId && input.workflowId,
+  );
 }
 
 // eslint-disable-next-line max-lines-per-function
@@ -202,11 +221,17 @@ export function useTaskSubmitHandlers({
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
     const attachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(attachments)) return;
     if (!agentProfileId) return;
     if (!trimmedDescription) return;
 
     if (onCreateSession) {
-      onCreateSession({ prompt: trimmedDescription, agentProfileId, executorId });
+      onCreateSession({
+        prompt: trimmedDescription,
+        agentProfileId,
+        executorId,
+        attachments: toMessageAttachments(attachments),
+      });
       onOpenChange(false);
       return;
     }
@@ -412,13 +437,18 @@ export function useTaskSubmitHandlers({
   );
 
   const handleCreatePlanMode = useCallback(
-    (trimmedTitle: string, consented: string[]) =>
+    (
+      trimmedTitle: string,
+      consented: string[],
+      attachments?: ReturnType<typeof toMessageAttachments>,
+    ) =>
       performCreate({
         trimmedTitle,
         trimmedDescription: "",
         consented,
         withAgent: false,
         planMode: true,
+        attachments,
       }),
     [performCreate],
   );
@@ -477,7 +507,9 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     const description = descriptionInputRef.current?.getValue() ?? "";
     const trimmedDescription = description.trim();
-    const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
+    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(selectedAttachments)) return;
+    const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
     if (checkRemoteDuplicates()) return;
     const consent = await ensureFreshBranchConsent();
@@ -514,17 +546,18 @@ export function useTaskSubmitHandlers({
     setIsCreatingTask,
   ]);
 
-  const handleCreateSubmit = useCallback(async () => {
-    const trimmedTitle = taskName.trim();
-    const description = descriptionInputRef.current?.getValue() ?? "";
-    const trimmedDescription = description.trim();
-    const attachments = toMessageAttachments(descriptionInputRef.current?.getAttachments() ?? []);
-    if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (checkRemoteDuplicates()) return;
-    const consent = await ensureFreshBranchConsent();
-    if (consent === null) return;
-    setIsCreatingTask(true);
-    try {
+  const submitCreateTask = useCallback(
+    async ({
+      trimmedTitle,
+      trimmedDescription,
+      consent,
+      attachments,
+    }: {
+      trimmedTitle: string;
+      trimmedDescription: string;
+      consent: string[];
+      attachments: ReturnType<typeof toMessageAttachments>;
+    }) => {
       if (trimmedDescription) {
         const finalDescription = transformDescriptionBeforeSubmit
           ? await transformDescriptionBeforeSubmit(trimmedDescription)
@@ -536,9 +569,29 @@ export function useTaskSubmitHandlers({
           withAgent: true,
           attachments,
         });
-      } else if (!autoTitle) {
-        await handleCreatePlanMode(trimmedTitle, consent);
+        return;
       }
+      if (!autoTitle) {
+        await handleCreatePlanMode(trimmedTitle, consent, attachments);
+      }
+    },
+    [autoTitle, handleCreatePlanMode, performCreate, transformDescriptionBeforeSubmit],
+  );
+
+  const handleCreateSubmit = useCallback(async () => {
+    const trimmedTitle = taskName.trim();
+    const description = descriptionInputRef.current?.getValue() ?? "";
+    const trimmedDescription = description.trim();
+    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(selectedAttachments)) return;
+    const attachments = toMessageAttachments(selectedAttachments);
+    if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
+    if (checkRemoteDuplicates()) return;
+    const consent = await ensureFreshBranchConsent();
+    if (consent === null) return;
+    setIsCreatingTask(true);
+    try {
+      await submitCreateTask({ trimmedTitle, trimmedDescription, consent, attachments });
     } catch (error) {
       toast({
         title: "Failed to create task",
@@ -550,13 +603,10 @@ export function useTaskSubmitHandlers({
     }
   }, [
     taskName,
-    autoTitle,
     validateForCreate,
     checkRemoteDuplicates,
     ensureFreshBranchConsent,
-    performCreate,
-    handleCreatePlanMode,
-    transformDescriptionBeforeSubmit,
+    submitCreateTask,
     toast,
     descriptionInputRef,
     setIsCreatingTask,
@@ -565,9 +615,17 @@ export function useTaskSubmitHandlers({
   const handleCreateWithoutAgent = useCallback(async () => {
     const trimmedTitle = taskName.trim();
     const trimmedDescription = (descriptionInputRef.current?.getValue() ?? "").trim();
+    const selectedAttachments = descriptionInputRef.current?.getAttachments() ?? [];
+    if (hasPendingAttachmentUploads(selectedAttachments)) return;
+    const attachments = toMessageAttachments(selectedAttachments);
     if (!validateForCreate(trimmedTitle, trimmedDescription)) return;
-    if (!trimmedDescription || !effectiveDefaultStepId || !workspaceId || !effectiveWorkflowId)
-      return;
+    const requirements = {
+      description: trimmedDescription,
+      workflowStepId: effectiveDefaultStepId,
+      workspaceId,
+      workflowId: effectiveWorkflowId,
+    };
+    if (!hasNoAgentTaskRequirements(requirements)) return;
     if (checkRemoteDuplicates()) return;
 
     const consent = await ensureFreshBranchConsent();
@@ -577,8 +635,8 @@ export function useTaskSubmitHandlers({
       let submittedPayload: ReturnType<typeof buildCreateTaskPayload> | null = null;
       const buildPayload = (c: string[]) => {
         const p = buildCreateTaskPayload({
-          workspaceId,
-          effectiveWorkflowId,
+          workspaceId: requirements.workspaceId,
+          effectiveWorkflowId: requirements.workflowId,
           trimmedTitle,
           trimmedDescription,
           autoTitle,
@@ -587,9 +645,10 @@ export function useTaskSubmitHandlers({
           executorId,
           executorProfileId,
           withAgent: false,
+          attachments,
           workspacePath: noRepository ? workspacePath.trim() || undefined : undefined,
         });
-        p.workflow_step_id = effectiveDefaultStepId;
+        p.workflow_step_id = requirements.workflowStepId;
         submittedPayload = p;
         return p;
       };

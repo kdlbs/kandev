@@ -61,6 +61,15 @@ func (c *Client) GitPush(ctx context.Context, force, setUpstream bool, repo stri
 	return c.gitOperation(ctx, "/api/v1/git/push", payload)
 }
 
+// GitPushPreflight validates the configured contribution push target without
+// mutating the remote. repo is the multi-repo workspace subpath.
+func (c *Client) GitPushPreflight(ctx context.Context, repo string) (*GitOperationResult, error) {
+	payload := struct {
+		Repo string `json:"repo,omitempty"`
+	}{Repo: repo}
+	return c.gitOperation(ctx, "/api/v1/git/push-preflight", payload)
+}
+
 // GitRebase rebases the worktree branch onto the specified base branch.
 // It first fetches origin/<baseBranch>, then rebases onto it.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.

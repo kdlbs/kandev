@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, type Dispatch, type SetStateAction } from "react";
+import { useTranslation } from "react-i18next";
 import { formatDistanceToNow } from "date-fns";
 import { IconArchive, IconArrowRight, IconHammer, IconLoader2 } from "@tabler/icons-react";
 import {
@@ -80,8 +81,23 @@ function CommandItemRow({
       keywords={getCommandSearchTerms(cmd)}
       onSelect={() => onSelect(cmd)}
     >
-      {cmd.icon && <span className="text-muted-foreground">{cmd.icon}</span>}
-      <span>{cmd.label}</span>
+      {cmd.icon && (
+        <span
+          className={
+            cmd.context ? "self-start pt-0.5 text-muted-foreground" : "text-muted-foreground"
+          }
+        >
+          {cmd.icon}
+        </span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="block truncate">{cmd.label}</span>
+        {cmd.context && (
+          <span className="block truncate text-[0.625rem] leading-4 text-muted-foreground">
+            {cmd.context}
+          </span>
+        )}
+      </span>
       {cmd.shortcut && <CommandShortcut>{formatShortcut(cmd.shortcut)}</CommandShortcut>}
       {cmd.enterMode && (
         <span className="ml-auto text-muted-foreground">
@@ -159,6 +175,45 @@ type CommandsListContentProps = {
   onTaskSelect: (task: Task) => void;
 };
 
+function SearchCommandGroups({
+  commands,
+  search,
+  onSelect,
+}: Pick<CommandsListContentProps, "commands" | "search" | "onSelect">) {
+  const { t } = useTranslation();
+  const matches = sortCommandsForSearch(commands, search).filter(
+    (cmd) => scoreCommandSearch(cmd.id, search, getCommandSearchTerms(cmd)) > 0,
+  );
+  const regularMatches = matches.filter((cmd) => !cmd.searchOnly);
+  const searchOnlyGroups = new Map<string, CommandItemType[]>();
+
+  for (const cmd of matches) {
+    if (!cmd.searchOnly) continue;
+    const groupItems = searchOnlyGroups.get(cmd.group) ?? [];
+    groupItems.push(cmd);
+    searchOnlyGroups.set(cmd.group, groupItems);
+  }
+
+  return (
+    <>
+      {regularMatches.length > 0 && (
+        <CommandGroup heading={t("common:commandGroupCommands")}>
+          {regularMatches.map((cmd) => (
+            <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+          ))}
+        </CommandGroup>
+      )}
+      {[...searchOnlyGroups].map(([group, items]) => (
+        <CommandGroup key={group} heading={group}>
+          {items.map((cmd) => (
+            <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+          ))}
+        </CommandGroup>
+      ))}
+    </>
+  );
+}
+
 function CommandsListContent({
   commands,
   grouped,
@@ -195,21 +250,19 @@ function CommandsListContent({
         </CommandGroup>
       )}
       {search.trim() ? (
-        <CommandGroup heading="Commands">
-          {sortCommandsForSearch(commands, search)
-            .filter((cmd) => scoreCommandSearch(cmd.id, search, getCommandSearchTerms(cmd)) > 0)
-            .map((cmd) => (
-              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-            ))}
-        </CommandGroup>
+        <SearchCommandGroups commands={commands} search={search} onSelect={onSelect} />
       ) : (
-        grouped.map(([group, items]) => (
-          <CommandGroup key={group} heading={group}>
-            {items.map((cmd) => (
-              <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
-            ))}
-          </CommandGroup>
-        ))
+        grouped.map(([group, items]) => {
+          const visibleItems = items.filter((cmd) => !cmd.searchOnly);
+          if (visibleItems.length === 0) return null;
+          return (
+            <CommandGroup key={group} heading={group}>
+              {visibleItems.map((cmd) => (
+                <CommandItemRow key={cmd.id} cmd={cmd} onSelect={onSelect} />
+              ))}
+            </CommandGroup>
+          );
+        })
       )}
     </>
   );

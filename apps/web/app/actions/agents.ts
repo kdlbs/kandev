@@ -123,6 +123,7 @@ export async function updateAgentProfileAction(
     allow_indexing?: boolean;
     auto_approve?: boolean;
     cli_passthrough?: boolean;
+    enabled?: boolean;
     cli_flags?: CLIFlag[];
     command_prefix?: string;
     env_vars?: ProfileEnvVar[];

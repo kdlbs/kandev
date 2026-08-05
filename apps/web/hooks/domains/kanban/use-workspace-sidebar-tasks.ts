@@ -1,16 +1,40 @@
 import { useMemo } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
+import { useSidebarArchivedTasks } from "@/hooks/domains/kanban/use-sidebar-archived-tasks";
+import { viewRequiresArchivedTasks } from "@/lib/sidebar/apply-view";
 import {
   aggregateSidebarTasks,
   type AggregatedSidebarTasks,
 } from "@/components/task/task-session-sidebar-aggregate";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
+import type { KanbanState } from "@/lib/state/slices/kanban/types";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   workflows: TaskMoveWorkflow[];
   isLoading: boolean;
+  archivedError: string | null;
+  retryArchivedTasks: () => void;
 };
+
+export function mergeSidebarArchivedTasks(
+  activeTasks: AggregatedSidebarTasks["allTasks"],
+  archivedTasks: KanbanState["tasks"],
+  workspaceId: string | null,
+  enabled: boolean,
+): AggregatedSidebarTasks["allTasks"] {
+  if (!enabled || !workspaceId || archivedTasks.length === 0) return activeTasks;
+  const seen = new Set(activeTasks.map((task) => task.id));
+  const archived = archivedTasks
+    .filter((task) => task.workspaceId === workspaceId && task.isArchived)
+    .filter((task) => {
+      if (seen.has(task.id)) return false;
+      seen.add(task.id);
+      return true;
+    })
+    .map((task) => ({ ...task, _workflowId: task.workflowId ?? "" }));
+  return archived.length > 0 ? [...activeTasks, ...archived] : activeTasks;
+}
 
 /**
  * Shared data source for the desktop sidebar and the mobile task-switcher sheet.
@@ -29,6 +53,19 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
  */
 export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceSidebarTasksResult {
   useAllWorkflowSnapshots(workspaceId);
+
+  const sidebarViews = useAppStore((state) => state.sidebarViews);
+  const effectiveView = useMemo(() => {
+    const active =
+      sidebarViews?.views.find((view) => view.id === sidebarViews.activeViewId) ??
+      sidebarViews?.views[0];
+    if (!active) return undefined;
+    const draft = sidebarViews.draft;
+    if (!draft || draft.baseViewId !== active.id) return active;
+    return { ...active, filters: draft.filters, sort: draft.sort, group: draft.group };
+  }, [sidebarViews]);
+  const needsArchivedTasks = viewRequiresArchivedTasks(effectiveView);
+  const archived = useSidebarArchivedTasks(workspaceId, needsArchivedTasks);
 
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isMultiLoading = useAppStore((state) => state.kanbanMulti.isLoading);
@@ -73,6 +110,15 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     [scopedSnapshots, fallbackWorkflowId, activeKanbanTasks, activeKanbanSteps],
   );
 
+  const allTasks = useMemo(() => {
+    return mergeSidebarArchivedTasks(
+      aggregated.allTasks,
+      archived.tasks,
+      workspaceId,
+      needsArchivedTasks,
+    );
+  }, [aggregated.allTasks, archived.tasks, needsArchivedTasks, workspaceId]);
+
   const workspaceWorkflows = useMemo<TaskMoveWorkflow[]>(
     () => filteredWorkflows.map((w) => ({ id: w.id, name: w.name, hidden: w.hidden })),
     [filteredWorkflows],
@@ -80,11 +126,15 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
 
   // Only flash a skeleton on the very first fetch (no snapshots yet); refreshes
   // shouldn't blow away the existing list.
-  const isLoading = isMultiLoading && Object.keys(scopedSnapshots).length === 0;
+  const isLoading =
+    (isMultiLoading && Object.keys(scopedSnapshots).length === 0) || archived.isLoading;
 
   return {
     ...aggregated,
+    allTasks,
     workflows: workspaceWorkflows,
     isLoading,
+    archivedError: archived.error,
+    retryArchivedTasks: archived.refresh,
   };
 }

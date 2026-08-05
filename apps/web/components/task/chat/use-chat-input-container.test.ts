@@ -1,5 +1,5 @@
 import React, { createRef } from "react";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
@@ -75,6 +75,47 @@ describe("useChatInputContainer", () => {
     expect(result.current.inputPlaceholder).toBe(
       "Queue instructions while the question is pending...",
     );
+  });
+
+  it("disables submit while a staged attachment upload is pending", async () => {
+    const originalFetch = globalThis.fetch;
+    let resolveUpload!: (response: Response) => void;
+    const uploadResponse = new Promise<Response>((resolve) => {
+      resolveUpload = resolve;
+    });
+    globalThis.fetch = vi.fn(() => uploadResponse) as typeof globalThis.fetch;
+    try {
+      const { result } = renderInputState({ workspaceId: "workspace-1" });
+      await act(async () => {
+        await result.current.addFiles([
+          new File([new Uint8Array(6 * 1024 * 1024)], "large.bin", {
+            type: "application/octet-stream",
+          }),
+        ]);
+      });
+
+      await waitFor(() => expect(result.current.hasPendingAttachmentUploads).toBe(true));
+      expect(result.current.isDisabled).toBe(false);
+      expect(result.current.submitDisabled).toBe(true);
+
+      resolveUpload(
+        new Response(
+          JSON.stringify({
+            attachment_id: "attachment-1",
+            name: "large.bin",
+            mime_type: "application/octet-stream",
+            kind: "resource",
+            delivery_mode: "path",
+            size_bytes: 6 * 1024 * 1024,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+      await waitFor(() => expect(result.current.hasPendingAttachmentUploads).toBe(false));
+      expect(result.current.submitDisabled).toBe(false);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
   });
 });
 

@@ -49,27 +49,26 @@ const POPULAR_SERVERS: Record<string, Record<string, unknown>> = {
   playwright: {
     type: "stdio",
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-playwright"],
+    args: ["-y", "@playwright/mcp"],
   },
   "chrome-devtools": {
     type: "stdio",
     command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-chrome-devtools"],
+    args: ["-y", "chrome-devtools-mcp"],
   },
   context7: {
     type: "stdio",
     command: "npx",
-    args: ["-y", "@context7/mcp"],
+    args: ["-y", "@upstash/context7-mcp"],
     env: {
       CONTEXT7_API_KEY: "your_api_key_here",
     },
   },
   github: {
-    type: "stdio",
-    command: "npx",
-    args: ["-y", "@modelcontextprotocol/server-github"],
-    env: {
-      GITHUB_TOKEN: "your_token_here",
+    type: "http",
+    url: "https://api.githubcopilot.com/mcp/",
+    headers: {
+      Authorization: "Bearer your_token_here",
     },
   },
 };

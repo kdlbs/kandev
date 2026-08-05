@@ -7,21 +7,27 @@ const mockSummarize = vi.fn();
 const mockBuildStartRequest = vi.fn();
 const mockLaunchSession = vi.fn();
 const mockSetActiveSession = vi.fn();
+let mockAgentSelectorValue: string | undefined;
+
+const BASE_PROFILE = {
+  id: "profile-1",
+  label: "Profile 1",
+  agent_name: "agent-1",
+  agent_id: "agent-id-1",
+  cli_passthrough: false,
+  enabled: true,
+};
 
 const mockState = {
   kanban: {
+    workflowId: null,
     tasks: [{ id: "task-1", title: "Task title" }],
   },
+  kanbanMulti: { snapshots: {} },
+  quickChat: { sessions: [] },
+  workflows: { items: [] },
   agentProfiles: {
-    items: [
-      {
-        id: "profile-1",
-        label: "Profile 1",
-        agent_name: "agent-1",
-        agent_id: "agent-id-1",
-        cli_passthrough: false,
-      },
-    ],
+    items: [BASE_PROFILE],
   },
   tasks: {
     activeSessionId: "session-1",
@@ -141,7 +147,13 @@ vi.mock("@/components/task-create-dialog-selectors", async () => {
       ),
     );
   }
-  return { AgentSelector: () => null, TaskFormInputs };
+  return {
+    AgentSelector: (props: { value?: string }) => {
+      mockAgentSelectorValue = props.value;
+      return null;
+    },
+    TaskFormInputs,
+  };
 });
 
 vi.mock("@/components/task-create-dialog-options", () => ({
@@ -219,6 +231,8 @@ import { NewSessionDialog } from "./new-session-dialog";
 describe("NewSessionDialog", () => {
   afterEach(() => {
     cleanup();
+    mockState.agentProfiles.items = [BASE_PROFILE];
+    mockAgentSelectorValue = undefined;
   });
 
   beforeEach(() => {
@@ -269,5 +283,33 @@ describe("NewSessionDialog", () => {
       "profile-1",
       expect.objectContaining({ prompt: "voice transcript" }),
     );
+  });
+
+  it("defaults to the first enabled profile when the session profile is disabled", () => {
+    mockState.agentProfiles.items = [
+      { ...BASE_PROFILE, enabled: false },
+      { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
+    ];
+    render(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+    expect(mockAgentSelectorValue).toBe("profile-2");
+  });
+
+  it("reconciles the selection when the active profile becomes disabled", async () => {
+    mockState.agentProfiles.items = [
+      BASE_PROFILE,
+      { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
+    ];
+    const { rerender } = render(
+      <NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />,
+    );
+    expect(mockAgentSelectorValue).toBe("profile-1");
+
+    mockState.agentProfiles.items = [
+      { ...BASE_PROFILE, enabled: false },
+      { ...BASE_PROFILE, id: "profile-2", label: "Profile 2" },
+    ];
+    rerender(<NewSessionDialog open={true} onOpenChange={vi.fn()} taskId="task-1" />);
+
+    await waitFor(() => expect(mockAgentSelectorValue).toBe("profile-2"));
   });
 });

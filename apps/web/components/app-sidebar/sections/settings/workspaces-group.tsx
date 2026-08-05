@@ -24,21 +24,21 @@ import { useJiraAuthed } from "@/hooks/domains/jira/use-jira-availability";
 import { useLinearAuthed } from "@/hooks/domains/linear/use-linear-availability";
 import { useSentryAvailable } from "@/hooks/domains/sentry/use-sentry-availability";
 import { useSlackAuthed } from "@/hooks/domains/slack/use-slack-availability";
+import { WORKSPACE_INTEGRATIONS } from "@/lib/settings-discovery/catalog/integrations";
+import { WORKSPACES_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/workspaces";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
-
-const ROOT_HREF = "/settings/workspace";
 
 type IntegrationIcon = ComponentType<{ className?: string }>;
 
-const INTEGRATIONS: Array<{ slug: string; label: string; icon: IntegrationIcon }> = [
-  { slug: "azure-devops", label: "Azure DevOps", icon: AzureDevOpsIcon },
-  { slug: "github", label: "GitHub", icon: IconBrandGithub },
-  { slug: "gitlab", label: "GitLab", icon: IconBrandGitlab },
-  { slug: "jira", label: "Jira", icon: IconTicket },
-  { slug: "linear", label: "Linear", icon: IconHexagon },
-  { slug: "sentry", label: "Sentry", icon: IconBrandSentry },
-  { slug: "slack", label: "Slack", icon: IconBrandSlack },
-];
+const INTEGRATION_ICONS: Record<(typeof WORKSPACE_INTEGRATIONS)[number][0], IntegrationIcon> = {
+  "azure-devops": AzureDevOpsIcon,
+  github: IconBrandGithub,
+  gitlab: IconBrandGitlab,
+  jira: IconTicket,
+  linear: IconHexagon,
+  sentry: IconBrandSentry,
+  slack: IconBrandSlack,
+};
 
 // Rendered as components, not module-scope JSX constants: `t()` must resolve at
 // render so a locale switch reaches them (a module-scope value freezes at boot).
@@ -86,7 +86,7 @@ function WorkspaceIntegrationItems({
     ...(slack ? ["slack"] : []),
   ]);
 
-  return INTEGRATIONS.map(({ slug, label, icon }) => {
+  return WORKSPACE_INTEGRATIONS.map(([slug, label]) => {
     const href = `${integrationsPath}/${slug}`;
     return (
       <SettingsLeaf
@@ -94,7 +94,7 @@ function WorkspaceIntegrationItems({
         href={href}
         label={label}
         labelSuffix={enabled.has(slug) ? <EnabledBadge /> : undefined}
-        icon={icon}
+        icon={INTEGRATION_ICONS[slug]}
         isActive={pathname === href}
         depth={3}
       />
@@ -109,7 +109,7 @@ type WorkspacesGroupProps = {
 };
 
 function isWorkspaceRoute(pathname: string, workspaceId: string): boolean {
-  const workspacePath = `${ROOT_HREF}/${workspaceId}`;
+  const workspacePath = `${WORKSPACES_SETTINGS_HREF}/${workspaceId}`;
   return pathname === workspacePath || pathname.startsWith(`${workspacePath}/`);
 }
 
@@ -155,13 +155,13 @@ export function WorkspacesGroup({ pathname, expanded, onToggle }: WorkspacesGrou
     <SettingsGroup
       label={t("common:workspaces")}
       icon={IconFolder}
-      href={ROOT_HREF}
-      isActive={pathname === ROOT_HREF}
+      href={WORKSPACES_SETTINGS_HREF}
+      isActive={pathname === WORKSPACES_SETTINGS_HREF}
       expanded={expanded}
       onToggle={onToggle}
     >
       {orderedWorkspaces.map((workspace) => {
-        const workspacePath = `${ROOT_HREF}/${workspace.id}`;
+        const workspacePath = `${WORKSPACES_SETTINGS_HREF}/${workspace.id}`;
         const repositoriesPath = `${workspacePath}/repositories`;
         const workflowsPath = `${workspacePath}/workflows`;
         const automationsPath = `${workspacePath}/automations`;

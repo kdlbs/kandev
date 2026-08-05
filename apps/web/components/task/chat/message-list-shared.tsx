@@ -60,8 +60,8 @@ export type MessageListProps = {
   anchoredBarHeight?: number;
 };
 
-/** Imperative handle exposed by `MessageList` and both rendering strategies,
- * letting the chat panel scroll to an arbitrary message (e.g. the last
+/** Imperative handle exposed by `MessageList`, letting the chat panel scroll
+ * to an arbitrary message (e.g. the last
  * prompt) from outside the list — from the composer's scroll-up button. */
 export type MessageListHandle = {
   scrollToMessage: (messageId: string, options?: { align?: "start" | "center" }) => void;
@@ -191,8 +191,7 @@ export function isElementFullyVisible(container: HTMLElement, target: HTMLElemen
  * last-prompt bar's pinned overlay, so a scroll-into-view target (namely
  * the unread "New" divider) lands below it instead of underneath it.
  * Clamps an unmeasured/negative height to zero and rounds to whole pixels
- * — callers feed this straight into a CSS `scroll-margin-top` or a
- * Virtuoso `scrollToIndex` offset. */
+ * — callers feed this straight into a CSS `scroll-margin-top`. */
 export function anchoredBarScrollOffsetPx(anchoredBarHeight: number | undefined): number {
   return Math.max(0, Math.round(anchoredBarHeight ?? 0));
 }

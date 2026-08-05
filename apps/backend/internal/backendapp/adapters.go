@@ -124,92 +124,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	if officeProfileID == "" {
 		officeProfileID = req.AgentProfileID
 	}
-	launchReq := &lifecycle.LaunchRequest{
-		TaskID:              req.TaskID,
-		WorkspaceID:         req.WorkspaceID,
-		SessionID:           req.SessionID,
-		TaskEnvironmentID:   req.TaskEnvironmentID,
-		TaskTitle:           req.TaskTitle,
-		AgentProfileID:      officeProfileID,
-		ExecutionProfileID:  req.AgentProfileID,
-		StartAgent:          req.StartAgent,
-		WorkspacePath:       workspacePath,
-		TaskDescription:     req.TaskDescription,
-		Attachments:         convertToLifecycleAttachments(req.Attachments),
-		Env:                 req.Env,
-		ACPSessionID:        req.ACPSessionID,
-		Metadata:            req.Metadata,
-		ModelOverride:       req.ModelOverride,
-		ExecutorType:        req.ExecutorType,
-		ExecutorConfig:      req.ExecutorConfig,
-		PreviousExecutionID: req.PreviousExecutionID,
-		McpMode:             req.McpMode,
-		IsEphemeral:         req.IsEphemeral,
-		IsPassthrough:       req.IsPassthrough,
-		SetupScript:         req.SetupScript,
-		CopyFiles:           req.CopyFiles,
-		// Worktree configuration for concurrent agent execution
-		UseWorktree:            req.UseWorktree,
-		WorktreeID:             req.WorktreeID,
-		RepositoryID:           req.RepositoryID,
-		RepositoryPath:         req.RepositoryPath,
-		BaseBranch:             req.BaseBranch,
-		DefaultBranch:          req.DefaultBranch,
-		CheckoutBranch:         req.CheckoutBranch,
-		PRNumber:               req.PRNumber,
-		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
-		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
-		WorktreeBranchTicket:   req.WorktreeBranchTicket,
-		PullBeforeWorktree:     req.PullBeforeWorktree,
-		// Task directory mode
-		TaskDirName:        req.TaskDirName,
-		RepoName:           req.RepoName,
-		BranchSlug:         req.BranchSlug,
-		BranchIdentitySlug: req.BranchIdentitySlug,
-	}
-	for _, f := range req.WorkspaceFolders {
-		launchReq.WorkspaceFolders = append(launchReq.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
-	}
-
-	if req.RouteOverride != nil {
-		launchReq.RouteOverride = &lifecycle.RouteOverride{
-			ExecutionProfileID: req.RouteOverride.ExecutionProfileID,
-			ProviderID:         req.RouteOverride.ProviderID,
-			Model:              req.RouteOverride.Model,
-			Tier:               req.RouteOverride.Tier,
-			Mode:               req.RouteOverride.Mode,
-			Flags:              req.RouteOverride.Flags,
-			Env:                req.RouteOverride.Env,
-		}
-	}
-
-	// Multi-repo: forward the explicit repo list when the orchestrator built one.
-	if len(req.Repositories) > 0 {
-		specs := make([]lifecycle.RepoLaunchSpec, 0, len(req.Repositories))
-		for _, r := range req.Repositories {
-			specs = append(specs, lifecycle.RepoLaunchSpec{
-				RepositoryID:           r.RepositoryID,
-				RepositoryPath:         r.RepositoryPath,
-				RepositoryURL:          r.RepositoryURL,
-				RepoName:               r.RepoName,
-				BaseBranch:             r.BaseBranch,
-				DefaultBranch:          r.DefaultBranch,
-				CheckoutBranch:         r.CheckoutBranch,
-				PRNumber:               r.PRNumber,
-				WorktreeID:             r.WorktreeID,
-				WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
-				WorktreeBranchTemplate: r.WorktreeBranchTemplate,
-				WorktreeBranchTicket:   r.WorktreeBranchTicket,
-				PullBeforeWorktree:     r.PullBeforeWorktree,
-				RepoSetupScript:        r.RepoSetupScript,
-				RepoCleanupScript:      r.RepoCleanupScript,
-				CopyFiles:              r.CopyFiles,
-				BranchSlug:             r.BranchSlug,
-				BranchIdentitySlug:     r.BranchIdentitySlug,
-			})
-		}
-		launchReq.Repositories = specs
-	}
+	launchReq := buildLifecycleLaunchRequest(req, workspacePath, officeProfileID)
 
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
@@ -263,6 +178,115 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	}, nil
 }
 
+func buildLifecycleLaunchRequest(
+	req *executor.LaunchAgentRequest, workspacePath, officeProfileID string,
+) *lifecycle.LaunchRequest {
+	launchReq := &lifecycle.LaunchRequest{
+		TaskID:                 req.TaskID,
+		WorkspaceID:            req.WorkspaceID,
+		SessionID:              req.SessionID,
+		TaskEnvironmentID:      req.TaskEnvironmentID,
+		TaskTitle:              req.TaskTitle,
+		AgentProfileID:         officeProfileID,
+		ExecutionProfileID:     req.AgentProfileID,
+		StartAgent:             req.StartAgent,
+		WorkspacePath:          workspacePath,
+		TaskDescription:        req.TaskDescription,
+		Attachments:            convertToLifecycleAttachments(req.Attachments),
+		Env:                    req.Env,
+		ACPSessionID:           req.ACPSessionID,
+		Metadata:               req.Metadata,
+		ModelOverride:          req.ModelOverride,
+		ExecutorType:           req.ExecutorType,
+		ExecutorConfig:         req.ExecutorConfig,
+		PreviousExecutionID:    req.PreviousExecutionID,
+		McpMode:                req.McpMode,
+		McpProviders:           req.McpProviders,
+		IsEphemeral:            req.IsEphemeral,
+		IsPassthrough:          req.IsPassthrough,
+		SetupScript:            req.SetupScript,
+		CopyFiles:              req.CopyFiles,
+		UseWorktree:            req.UseWorktree,
+		WorktreeID:             req.WorktreeID,
+		RepositoryID:           req.RepositoryID,
+		RepositoryPath:         req.RepositoryPath,
+		BaseBranch:             req.BaseBranch,
+		DefaultBranch:          req.DefaultBranch,
+		CheckoutBranch:         req.CheckoutBranch,
+		PRNumber:               req.PRNumber,
+		RemoteContribution:     req.RemoteContribution,
+		WorktreeBranchPrefix:   req.WorktreeBranchPrefix,
+		WorktreeBranchTemplate: req.WorktreeBranchTemplate,
+		WorktreeBranchTicket:   req.WorktreeBranchTicket,
+		PullBeforeWorktree:     req.PullBeforeWorktree,
+		TaskDirName:            req.TaskDirName,
+		RepoName:               req.RepoName,
+		BranchSlug:             req.BranchSlug,
+		BranchIdentitySlug:     req.BranchIdentitySlug,
+	}
+	launchReq.WorkspaceFolders = lifecycleWorkspaceFolders(req.WorkspaceFolders)
+	launchReq.RouteOverride = lifecycleRouteOverride(req.RouteOverride)
+	launchReq.Repositories = lifecycleRepoLaunchSpecs(req.Repositories)
+	return launchReq
+}
+
+func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecycle.WorkspaceFolderSpec {
+	if len(folders) == 0 {
+		return nil
+	}
+	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
+	for _, f := range folders {
+		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+	}
+	return result
+}
+
+func lifecycleRouteOverride(override *executor.RouteOverride) *lifecycle.RouteOverride {
+	if override == nil {
+		return nil
+	}
+	return &lifecycle.RouteOverride{
+		ExecutionProfileID: override.ExecutionProfileID,
+		ProviderID:         override.ProviderID,
+		Model:              override.Model,
+		Tier:               override.Tier,
+		Mode:               override.Mode,
+		Flags:              override.Flags,
+		Env:                override.Env,
+	}
+}
+
+func lifecycleRepoLaunchSpecs(repos []executor.RepoSpec) []lifecycle.RepoLaunchSpec {
+	if len(repos) == 0 {
+		return nil
+	}
+	specs := make([]lifecycle.RepoLaunchSpec, 0, len(repos))
+	for _, r := range repos {
+		specs = append(specs, lifecycle.RepoLaunchSpec{
+			RepositoryID:           r.RepositoryID,
+			RepositoryPath:         r.RepositoryPath,
+			RepositoryURL:          r.RepositoryURL,
+			RepoName:               r.RepoName,
+			BaseBranch:             r.BaseBranch,
+			DefaultBranch:          r.DefaultBranch,
+			CheckoutBranch:         r.CheckoutBranch,
+			PRNumber:               r.PRNumber,
+			RemoteContribution:     r.RemoteContribution,
+			WorktreeID:             r.WorktreeID,
+			WorktreeBranchPrefix:   r.WorktreeBranchPrefix,
+			WorktreeBranchTemplate: r.WorktreeBranchTemplate,
+			WorktreeBranchTicket:   r.WorktreeBranchTicket,
+			PullBeforeWorktree:     r.PullBeforeWorktree,
+			RepoSetupScript:        r.RepoSetupScript,
+			RepoCleanupScript:      r.RepoCleanupScript,
+			CopyFiles:              r.CopyFiles,
+			BranchSlug:             r.BranchSlug,
+			BranchIdentitySlug:     r.BranchIdentitySlug,
+		})
+	}
+	return specs
+}
+
 // convertToLifecycleAttachments converts v1.MessageAttachment to lifecycle.MessageAttachment.
 func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecycle.MessageAttachment {
 	if len(attachments) == 0 {
@@ -271,10 +295,12 @@ func convertToLifecycleAttachments(attachments []v1.MessageAttachment) []lifecyc
 	result := make([]lifecycle.MessageAttachment, len(attachments))
 	for i, att := range attachments {
 		result[i] = lifecycle.MessageAttachment{
+			AttachmentID: att.AttachmentID,
 			Type:         att.Type,
 			Data:         att.Data,
 			MimeType:     att.MimeType,
 			Name:         att.Name,
+			SizeBytes:    att.SizeBytes,
 			DeliveryMode: att.DeliveryMode,
 		}
 	}

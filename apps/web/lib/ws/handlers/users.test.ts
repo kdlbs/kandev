@@ -45,6 +45,25 @@ describe("startup page websocket sync", () => {
 });
 
 describe("user settings websocket handler", () => {
+  it("updates LSP status location, normalizes unknown values, and preserves omissions", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({ lsp_status_location: "status_bar" }),
+    );
+    expect(store.getState().userSettings.lspStatusLocation).toBe("status_bar");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().userSettings.lspStatusLocation).toBe("status_bar");
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        lsp_status_location: "sidebar",
+      } as unknown as Partial<BackendMessageMap["user.settings.updated"]["payload"]>),
+    );
+    expect(store.getState().userSettings.lspStatusLocation).toBe("toolbar");
+  });
+
   it("updates the List detail preference and preserves it when omitted", () => {
     const store = makeStore();
 
@@ -136,7 +155,9 @@ describe("user settings websocket handler", () => {
     registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
     expect(store.getState().userSettings.agentGeneratedTaskTitles).toBe(true);
   });
+});
 
+describe("user settings websocket transcript navigation", () => {
   it("syncs transcript navigation preferences and uses the documented defaults", () => {
     const store = makeStore();
 
@@ -308,6 +329,28 @@ describe("user settings websocket task-create last-used", () => {
       executorProfileId: "exec-1",
       synced: true,
     });
+  });
+});
+
+describe("user settings websocket sidebar draft migration", () => {
+  it("preserves an archived clause in a live draft", () => {
+    const store = makeStore();
+
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        sidebar_views: [],
+        sidebar_draft: {
+          base_view_id: "all",
+          filters: [{ id: "archived", dimension: "archived", op: "is", value: true }],
+          sort: { key: "state", direction: "asc" },
+          group: "none",
+        },
+      }),
+    );
+
+    expect(store.getState().sidebarViews.draft?.filters).toEqual([
+      { id: "archived", dimension: "archived", op: "is", value: true },
+    ]);
   });
 });
 

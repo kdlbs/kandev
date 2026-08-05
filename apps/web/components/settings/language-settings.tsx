@@ -17,6 +17,7 @@ import {
   selectableLocales,
   type SupportedLocale,
 } from "@/lib/i18n";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 
 /**
  * Language switcher. Applies immediately (no deferred save) — `activateLocale`
@@ -43,7 +44,7 @@ export function LanguageSettings() {
       title={t("settings:language")}
       description={t("settings:chooseTheLanguageUsedAcrossThe")}
     >
-      <SettingsCard>
+      <SettingsCard discoveryTargetId={GENERAL_SETTINGS_TARGETS.displayLanguage}>
         {/* Card only supplies vertical padding; the horizontal px-4 comes from
             CardContent, which every other settings card here goes through. */}
         <CardContent>

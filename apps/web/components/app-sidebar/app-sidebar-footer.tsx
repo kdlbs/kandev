@@ -5,14 +5,14 @@ import { useTranslation } from "react-i18next";
 import { useRouter, usePathname } from "@/lib/routing/client-router";
 import {
   IconBuildings,
-  IconChartBar,
   IconLayoutKanban,
   IconSettings,
   IconSparkles,
   IconStethoscope,
   IconWifiOff,
 } from "@tabler/icons-react";
-import type { Icon as TablerIcon } from "@tabler/icons-react";
+import { useStaticDestinations } from "@/hooks/use-app-destinations";
+import type { DestinationIcon } from "@/lib/navigation/types";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { ImproveKandevDialog } from "@/components/improve-kandev-dialog";
@@ -42,7 +42,7 @@ type AppSidebarFooterProps = {
 };
 
 type FooterIconButtonProps = {
-  icon: TablerIcon;
+  icon: DestinationIcon;
   label: string;
   collapsed: boolean;
   onClick?: () => void;
@@ -210,6 +210,10 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
   };
   const officeEnabled = useFeature("office");
   const appStatusBarEnabled = useFeature("appStatusBar");
+  // Stats today, and anything else the manifest adds to the insights section.
+  // The gear below stays bespoke: it toggles the sidebar's settings takeover as
+  // well as navigating, so it is an action, not a plain destination.
+  const insightDestinations = useStaticDestinations("sidebar", "insights");
   const releaseNotes = useReleaseNotes();
   const [improveOpen, setImproveOpen] = useState(false);
   const authMode = useAppStore((s) => s.auth.mode);
@@ -231,13 +235,16 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         active={settingsMode}
         testId="sidebar-settings-gear"
       />
-      <FooterIconButton
-        icon={IconChartBar}
-        label={t("sidebar:stats")}
-        collapsed={collapsed}
-        onClick={() => router.push("/stats")}
-        testId="sidebar-stats-button"
-      />
+      {insightDestinations.map((destination) => (
+        <FooterIconButton
+          key={destination.id}
+          icon={destination.icon}
+          label={destination.label}
+          collapsed={collapsed}
+          onClick={() => router.push(destination.href)}
+          testId={`sidebar-${destination.id}-button`}
+        />
+      ))}
       <FooterIconButton
         icon={IconStethoscope}
         label={t("sidebar:improveKandev")}

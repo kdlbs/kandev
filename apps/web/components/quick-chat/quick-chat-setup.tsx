@@ -12,6 +12,7 @@ import { useRepositoriesState } from "@/components/task-create-dialog-repositori
 import { useRepositories } from "@/hooks/domains/workspace/use-repositories";
 import type { QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
 import type { AgentProfileOption } from "@/lib/state/slices";
+import { isSelectableAgentProfile } from "@/lib/state/slices/settings/types";
 import type { Repository } from "@/lib/types/http";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { ConfigurationChatToggle } from "./configuration-chat-toggle";
@@ -197,11 +198,22 @@ export function QuickChatSetup({
       state.workspaces.items.find((workspace) => workspace.id === workspaceId)
         ?.default_agent_profile_id ?? "",
   );
-  const [agentProfileId, setAgentProfileId] = useState(defaultAgentId);
+  // A workspace default pointing at a disabled profile must not be applied —
+  // the selector would otherwise auto-start a new chat with a profile the
+  // user explicitly took out of rotation.
+  const selectableDefault =
+    defaultAgentId &&
+    agentProfiles.some((p) => p.id === defaultAgentId && isSelectableAgentProfile(p))
+      ? defaultAgentId
+      : "";
+  const [agentProfileId, setAgentProfileId] = useState(selectableDefault);
+  const hasSelectedEnabledProfile = agentProfiles.some(
+    (profile) => profile.id === agentProfileId && isSelectableAgentProfile(profile),
+  );
   useEffect(() => {
-    if (!defaultAgentId) return;
-    setAgentProfileId((current) => current || defaultAgentId);
-  }, [defaultAgentId]);
+    if (hasSelectedEnabledProfile) return;
+    setAgentProfileId(selectableDefault);
+  }, [hasSelectedEnabledProfile, selectableDefault]);
   const { repositories, isLoading } = useRepositories(workspaceId, true);
   const repoState = useRepositoriesState();
   const isStarting = pendingAgentId !== null;
@@ -228,7 +240,7 @@ export function QuickChatSetup({
         .map((row) => ({ repository_id: row.repositoryId as string, base_branch: row.branch })),
     [repoState.repositories],
   );
-  const startDisabled = !agentProfileId || hasIncompleteRow || isStarting;
+  const startDisabled = !hasSelectedEnabledProfile || hasIncompleteRow || isStarting;
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-popover" data-testid="quick-chat-setup">
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-6 sm:px-8 sm:py-8">
@@ -267,7 +279,9 @@ export function QuickChatSetup({
         isStarting={isStarting}
         startDisabled={startDisabled}
         onCancel={onCancel}
-        onStart={() => onStart(agentProfileId, selectedRepositories)}
+        onStart={() => {
+          if (hasSelectedEnabledProfile) onStart(agentProfileId, selectedRepositories);
+        }}
       />
     </div>
   );

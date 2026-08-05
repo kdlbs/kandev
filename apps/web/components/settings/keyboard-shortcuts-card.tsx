@@ -25,6 +25,7 @@ import {
   type ShortcutConflictGroup,
 } from "@/lib/keyboard/shortcut-conflicts";
 import { SettingsCard } from "./settings-card";
+import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/general";
 import { useTranslation } from "react-i18next";
 
 type ShortcutRecorderProps = {
@@ -228,6 +229,8 @@ function buildConflictLabels(groups: ShortcutConflictGroup[]): Map<string, strin
   return labels;
 }
 
+const CONFIGURABLE_SHORTCUT_IDS = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
+
 export function KeyboardShortcutsCard({
   overrides,
   baselineOverrides = {},
@@ -277,16 +280,17 @@ export function KeyboardShortcutsCard({
     [onChange, overrides],
   );
 
-  const ids = Object.keys(CONFIGURABLE_SHORTCUTS) as ConfigurableShortcutId[];
-
   return (
-    <SettingsCard isDirty={JSON.stringify(overrides) !== JSON.stringify(baselineOverrides)}>
+    <SettingsCard
+      isDirty={JSON.stringify(overrides) !== JSON.stringify(baselineOverrides)}
+      discoveryTargetId={GENERAL_SETTINGS_TARGETS.keyboardShortcuts}
+    >
       <CardHeader>
         <CardTitle className="text-base">{t("settings:keyboardShortcuts")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="divide-y divide-border">
-          {ids.map((id) => (
+          {CONFIGURABLE_SHORTCUT_IDS.map((id) => (
             <ShortcutRecorder
               key={id}
               shortcutId={id}
