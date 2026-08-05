@@ -220,6 +220,7 @@ export function WalkthroughStepInner({
   onSelectFile?: OpenFileFn;
   layout?: "inline" | "floating";
 }) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const walkthrough = useAppStore((s) =>
@@ -248,7 +249,12 @@ export function WalkthroughStepInner({
   if (!activeTaskId || !walkthrough) return null;
   if (!step) return null;
   const isFloating = layout === "floating";
-  const lineLabel = step.line_end ? `Lines ${step.line}–${step.line_end}` : `Line ${step.line}`;
+  // Two keys rather than one plural: a range and a single line are structurally
+  // different messages, not two counts of the same one. Left English, this fed
+  // the translated `stepProgress` header as a hardcoded "Line"/"Lines".
+  const lineLabel = step.line_end
+    ? t("diff:lineRangeLabel", { start: step.line, end: step.line_end })
+    : t("diff:lineLabel", { line: step.line });
   const navigation = (
     <StepNavigation
       activeStep={activeStep}

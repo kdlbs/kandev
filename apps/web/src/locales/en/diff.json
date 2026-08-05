@@ -12,6 +12,8 @@
   "enterToAddShiftEnterToRun": "{{modKey}}+Enter to add, {{modKey}}+Shift+Enter to run",
   "expandAllLines": "Expand all lines",
   "failedToSendWalkthroughNote": "Failed to send walkthrough note",
+  "lineLabel": "Line {{line}}",
+  "lineRangeLabel": "Lines {{start}}–{{end}}",
   "new": "new",
   "next": "Next",
   "noActiveSessionForWalkthroughNote": "No active session for walkthrough note",

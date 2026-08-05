@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatDistanceToNow } from "date-fns";
+import { formatRelative } from "@/lib/i18n/formats";
 import { IconAlertTriangle, IconCheck } from "@tabler/icons-react";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { useTranslation } from "react-i18next";
@@ -32,8 +32,11 @@ function LastCheckedLabel({ checkedAt }: { checkedAt: Date | null }) {
   if (!checkedAt) return null;
   return (
     <span className="text-xs text-muted-foreground ml-2">
+      {/* `formatRelative` routes its buckets through i18next; date-fns'
+          `formatDistanceToNow` would render English inside a translated
+          sentence. Same call as workflow-sync-status-banner.tsx. */}
       {t("integrations:checkedRelative", {
-        relative: formatDistanceToNow(checkedAt, { addSuffix: true }),
+        relative: formatRelative(checkedAt.toISOString()),
       })}
     </span>
   );

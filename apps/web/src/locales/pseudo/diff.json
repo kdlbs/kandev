@@ -12,6 +12,8 @@
   "enterToAddShiftEnterToRun": "{{modKey}}+Ēńţēŕ ţō àďď, {{modKey}}+Śĥĩƒţ+Ēńţēŕ ţō ŕũń",
   "expandAllLines": "Ēxƥàńď àĺĺ ĺĩńēś",
   "failedToSendWalkthroughNote": "Ƒàĩĺēď ţō śēńď ŵàĺķţĥŕōũĝĥ ńōţē",
+  "lineLabel": "Ĺĩńē {{line}}",
+  "lineRangeLabel": "Ĺĩńēś {{start}}–{{end}}",
   "new": "ńēŵ",
   "next": "Ńēxţ",
   "noActiveSessionForWalkthroughNote": "Ńō àćţĩvē śēśśĩōń ƒōŕ ŵàĺķţĥŕōũĝĥ ńōţē",
