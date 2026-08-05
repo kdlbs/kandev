@@ -1151,8 +1151,8 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 	}
 
 	switch {
-	case hasAutoStart && isPassthrough:
-		// Passthrough path: write prompt directly to PTY stdin.
+	case hasAutoStart && isPassthrough && session.State != models.TaskSessionStateCreated:
+		// Started passthrough path: write prompt directly to PTY stdin.
 		// By the time processOnEnter runs (from an on_turn_complete transition),
 		// the agent has finished its previous turn and the PTY is waiting for input.
 		effectivePrompt := s.buildWorkflowPrompt(ctx, taskDescription, step, taskID, sessionID, isPassthrough)
@@ -1585,6 +1585,42 @@ func workflowMessageMetadata(planMode bool, origin workflowMessageOrigin, refere
 	return meta
 }
 
+// handleCreatedAutoStartLaunchFailure preserves a workflow prompt when the
+// created-session launch loses a concurrent-start race. The prompt was already
+// recorded in chat history, so queueing it is the only way to deliver it after
+// the session becomes ready. If queueing is not applicable or fails, restore
+// the hand-off message that was taken before the prompt was merged.
+func (s *Service) handleCreatedAutoStartLaunchFailure(
+	ctx context.Context,
+	taskID, sessionID, stepName, prompt string,
+	launchErr error,
+	planMode, shouldQueueIfBusy, userMessageRecorded bool,
+	attachments []v1.MessageAttachment,
+	origin workflowMessageOrigin,
+	references []v1.EntityReference,
+	takenMsg *messagequeue.QueuedMessage,
+) {
+	promptQueued := false
+	if shouldQueueIfBusy && (isAgentAlreadyRunningError(launchErr) ||
+		isSessionBusyError(launchErr) || isTransientPromptError(launchErr)) {
+		if queueErr := s.queueAutoStartPrompt(
+			ctx, taskID, sessionID, prompt, planMode,
+			attachments, origin, userMessageRecorded, references,
+		); queueErr != nil {
+			s.logger.Warn("failed to queue auto-start prompt after launch failure",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("step_name", stepName),
+				zap.Error(queueErr))
+		} else {
+			promptQueued = true
+		}
+	}
+	if !promptQueued && takenMsg != nil {
+		s.requeueMessage(ctx, takenMsg, takenMsg.QueuedBy)
+	}
+}
+
 func (s *Service) autoStartStepPrompt(
 	ctx context.Context,
 	taskID string, session *models.TaskSession, step *wfmodels.WorkflowStep, prompt string,
@@ -1686,37 +1722,11 @@ func (s *Service) autoStartStepPrompt(
 			recordedPrompt, true, planMode, true, attachments, references,
 		)
 		if err != nil {
-			// recordAutoStartMessage already wrote the prompt to chat history,
-			// but requeueTaken only restores a taken handoff message — so a
-			// launch that loses to a concurrent start leaves the prompt as a
-			// chat row no agent will ever receive. Queue it for the boot-ready
-			// drain, matching the retry loop below, which queues on the same
-			// conditions. Permanent rejections (Office scheduler guard, missing
-			// profile) are deliberately not queued: nothing would drain them.
-			promptQueued := false
-			if shouldQueueIfBusy && (isAgentAlreadyRunningError(err) ||
-				isSessionBusyError(err) || isTransientPromptError(err)) {
-				if queueErr := s.queueAutoStartPrompt(
-					ctx, taskID, sessionID, prompt, planMode,
-					attachments, origin, userMsgRecorded, references,
-				); queueErr != nil {
-					s.logger.Warn("failed to queue auto-start prompt after launch failure",
-						zap.String("task_id", taskID),
-						zap.String("session_id", sessionID),
-						zap.String("step_name", stepName),
-						zap.Error(queueErr))
-				} else {
-					promptQueued = true
-				}
-			}
-			// `prompt` is the *merged* auto-start + hand-off content, so once it
-			// is queued the hand-off is already preserved. Restoring takenMsg on
-			// top of that leaves the hand-off in the queue twice and delivers it
-			// twice when the session recovers — the same rule the
-			// shouldQueueIfBusy branch above and the retry loop below follow.
-			if !promptQueued {
-				requeueTaken()
-			}
+			s.handleCreatedAutoStartLaunchFailure(
+				ctx, taskID, sessionID, stepName, prompt, err,
+				planMode, shouldQueueIfBusy, userMsgRecorded,
+				attachments, origin, references, takenMsg,
+			)
 		}
 		return err
 	}
