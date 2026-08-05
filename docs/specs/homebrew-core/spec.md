@@ -23,6 +23,7 @@ Kandev is currently installable via `brew install kdlbs/kandev/kandev` from the 
 - Install the bundle under `libexec/bin` and expose one `bin/kandev` wrapper produced by `write_env_script`. The wrapper sets `KANDEV_BUNDLE_DIR=<libexec>` and `KANDEV_VERSION=<version>`.
 - Use stable numeric tags for `livecheck`; prerelease and Nightly npm versions are not Homebrew channels.
 - Keep `kdlbs/homebrew-kandev` as the upstream binary fast path alongside Homebrew Core's source-built bottles. The shared release-bundle validator must run before those binary archives are published, and the generated tap formula must smoke-test its version, readiness endpoint, and embedded SPA.
+- Preserve all four remote `agentctl` helpers in custom-tap installations. The tap must use an exact-path Homebrew mismatched-binary audit allowlist rather than pruning helpers, so Docker and SSH targets can differ from the Homebrew host. Decision: [ADR-2026-08-05-homebrew-remote-helper-audit](../../decisions/2026-08-05-homebrew-remote-helper-audit.md).
 
 The runtime bundle contains exactly:
 
@@ -43,6 +44,7 @@ The Darwin arm64 helper must carry a Mach-O code signature so Apple Silicon can 
 - **GIVEN** a new kandev release `vX.Y.Z` is tagged, **WHEN** Homebrew's auto-bump worker runs, **THEN** `livecheck` resolves the new tag from GitHub Releases and a bump PR is opened against the formula.
 - **GIVEN** a maintainer reviews the PR, **WHEN** they run `brew install --build-from-source kandev` locally, **THEN** the build completes without network or sandbox failures and `brew test kandev` passes.
 - **GIVEN** a Stable release updates `kdlbs/homebrew-kandev`, **WHEN** its platform archive is built and the tap formula is tested, **THEN** the archive contains the complete executable runtime and the installed launcher serves both `/health` and the embedded Kandev page.
+- **GIVEN** a tap archive contains remote helpers for CPU architectures other than the Homebrew host, **WHEN** Homebrew audits the installed formula on macOS or Linux, **THEN** only the four declared remote-helper paths are exempted and the complete runtime remains installed.
 
 ## Out of scope
 
