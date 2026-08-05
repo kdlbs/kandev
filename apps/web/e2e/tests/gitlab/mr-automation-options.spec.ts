@@ -58,6 +58,92 @@ async function interceptLoadFailure(testPage: import("@playwright/test").Page) {
   });
 }
 
+test.describe("GitLab MR automation section (auto-fix / auto-merge)", () => {
+  test("renders above Review follow-up and persists auto-fix + auto-merge switches", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "MR automation section");
+    await openTask(testPage, taskId);
+    const controls = await openDropdown(testPage);
+
+    // AC1: the Automation group (exactly two switches) sits above the
+    // existing Review follow-up collapsible.
+    const autoFixSwitch = controls.getByRole("switch", {
+      name: "Auto-fix CI and address comments",
+    });
+    const autoMergeSwitch = controls.getByRole("switch", { name: "Auto-merge when ready" });
+    const reviewFollowUpTrigger = controls.getByTestId("mr-review-follow-up-trigger");
+    await expect(autoFixSwitch).toBeVisible();
+    await expect(autoMergeSwitch).toBeVisible();
+    const autoFixBox = await autoFixSwitch.boundingBox();
+    const triggerBox = await reviewFollowUpTrigger.boundingBox();
+    expect(autoFixBox, "auto-fix switch has no layout box").not.toBeNull();
+    expect(triggerBox, "review follow-up trigger has no layout box").not.toBeNull();
+    expect(autoFixBox!.y).toBeLessThan(triggerBox!.y);
+
+    await expect(autoFixSwitch).not.toBeChecked();
+    await expect(autoMergeSwitch).not.toBeChecked();
+
+    // AC2: PATCH persists and a subsequent GET reflects it.
+    await autoFixSwitch.click();
+    await expect
+      .poll(async () => apiClient.getTaskMRAutomationOptions(taskId))
+      .toMatchObject({ auto_fix_enabled: true });
+
+    await autoMergeSwitch.click();
+    await expect
+      .poll(async () => apiClient.getTaskMRAutomationOptions(taskId))
+      .toMatchObject({ auto_fix_enabled: true, auto_merge_enabled: true });
+
+    // AC4: default prompt fields are present once auto-fix is on.
+    const options = await apiClient.getTaskMRAutomationOptions(taskId);
+    expect(options.auto_fix_max_rounds).toBe(10);
+    expect(options.effective_auto_fix_prompt.length).toBeGreaterThan(0);
+    expect(options.using_default_prompt).toBe(true);
+
+    await testPage.reload();
+    await expect(testPage.getByTestId("mr-topbar-button")).toBeVisible({ timeout: 15_000 });
+    const reloadedControls = await openDropdown(testPage);
+    await expect(
+      reloadedControls.getByRole("switch", { name: "Auto-fix CI and address comments" }),
+    ).toBeChecked();
+    await expect(
+      reloadedControls.getByRole("switch", { name: "Auto-merge when ready" }),
+    ).toBeChecked();
+  });
+
+  // AC3 (unknown field / explicit null rejected with 400) is covered at the
+  // Go controller level (controller_mr_automation_test.go) — the request
+  // helper needed to hit the raw PATCH body from a spec is private, and the
+  // ApiClient's typed patch method can't construct an invalid payload.
+
+  test("AC5: a custom prompt override flips using_default_prompt, and resetting restores the default", async ({
+    apiClient,
+    seedData,
+  }) => {
+    const taskId = await seedTaskWithLinkedMR(apiClient, seedData, "MR automation prompt override");
+    const before = await apiClient.getTaskMRAutomationOptions(taskId);
+    const defaultPrompt = before.effective_auto_fix_prompt;
+
+    const withOverride = await apiClient.updateTaskMRAutomationOptions(taskId, {
+      auto_fix_prompt_override: "Custom auto-fix instructions for this task",
+    });
+    expect(withOverride.effective_auto_fix_prompt).toBe(
+      "Custom auto-fix instructions for this task",
+    );
+    expect(withOverride.using_default_prompt).toBe(false);
+
+    const reset = await apiClient.updateTaskMRAutomationOptions(taskId, {
+      auto_fix_prompt_override: "",
+    });
+    expect(reset.effective_auto_fix_prompt).toBe(defaultPrompt);
+    expect(reset.using_default_prompt).toBe(true);
+  });
+});
+
 test.describe("GitLab MR automation options", () => {
   test("desktop dropdown persists lifecycle notification switches and survives reload", async ({
     testPage,

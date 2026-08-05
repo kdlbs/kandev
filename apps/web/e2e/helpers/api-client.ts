@@ -19,6 +19,7 @@ import type {
   GitLabMRDiscussion,
   GitLabMRFile,
   GitLabPipeline,
+  GitLabPipelineJob,
   GitLabProjectMember,
   Issue as MockGitLabIssue,
   MR as MockGitLabMR,
@@ -140,7 +141,16 @@ export type MockGitHubAppRegistration = {
   app_id: number;
 };
 
-export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> & Partial<MockGitLabMR>;
+// GitLab 15.6+'s server-side merge-readiness verdict and the
+// project-scoped "blocking discussions resolved" flag exist on the
+// backend's MR struct (mr_auto_fix/mr_auto_merge readiness, Q3) but are
+// deliberately absent from the frontend MR type — nothing in the app
+// renders them today. Carried here only so e2e specs can seed them.
+export type MockGitLabMRSeed = Pick<MockGitLabMR, "iid" | "title"> &
+  Partial<MockGitLabMR> & {
+    detailed_merge_status?: string;
+    blocking_discussions_resolved?: boolean;
+  };
 export type MockGitLabIssueSeed = Pick<MockGitLabIssue, "iid" | "title"> & Partial<MockGitLabIssue>;
 
 function setIf(body: Record<string, unknown>, key: string, value: unknown) {
@@ -1570,6 +1580,18 @@ export class ApiClient {
       "POST",
       this.gitLabWorkspacePath("/api/v1/gitlab/mock/pipelines", workspaceId),
       { project, pipelines },
+    );
+  }
+
+  async mockGitLabAddPipelineJobs(
+    workspaceId: string,
+    pipelineId: number,
+    jobs: GitLabPipelineJob[],
+  ): Promise<void> {
+    await this.request(
+      "POST",
+      this.gitLabWorkspacePath("/api/v1/gitlab/mock/pipeline-jobs", workspaceId),
+      { pipeline_id: pipelineId, jobs },
     );
   }
 
