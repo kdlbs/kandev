@@ -5,6 +5,7 @@
 
 import type { editor as monacoEditor, IDisposable, languages } from "monaco-editor";
 import { getMonacoInstance } from "@/components/editors/monaco/monaco-init";
+import { getLspProviderSupport } from "./lsp-provider-capabilities";
 
 type MonacoModule = typeof import("monaco-editor");
 
@@ -467,6 +468,7 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
 
   const monacoLanguages = getMonacoLanguagesForLsp(opts.lspLanguage);
   const disposables: IDisposable[] = [];
+  const providerSupport = getLspProviderSupport(opts.serverCapabilities);
 
   for (const lang of monacoLanguages) {
     const ctx: ProviderCtx = {
@@ -477,12 +479,14 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
       getModelUri: opts.getModelUri,
       ensureModelsExist: opts.ensureModelsExist,
     };
-    disposables.push(
-      registerCompletionProvider(ctx, completionTriggerCharacters(opts.serverCapabilities)),
-    );
-    disposables.push(registerHoverProvider(ctx));
-    disposables.push(registerDefinitionProvider(ctx));
-    disposables.push(registerReferenceProvider(ctx));
+    if (providerSupport.completion) {
+      disposables.push(
+        registerCompletionProvider(ctx, completionTriggerCharacters(opts.serverCapabilities)),
+      );
+    }
+    if (providerSupport.hover) disposables.push(registerHoverProvider(ctx));
+    if (providerSupport.definition) disposables.push(registerDefinitionProvider(ctx));
+    if (providerSupport.references) disposables.push(registerReferenceProvider(ctx));
     const signatureHelp = signatureHelpCapability(opts.serverCapabilities);
     if (signatureHelp) disposables.push(registerSignatureHelpProvider(ctx, signatureHelp));
     disposables.push(

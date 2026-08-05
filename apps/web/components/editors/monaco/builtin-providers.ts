@@ -3,27 +3,38 @@
 // and lsp-client-manager.ts can import it without circular dependencies or
 // pulling in the full monaco-editor bundle.
 
+import type { LspMonacoProviderMethod } from "@/lib/lsp/lsp-provider-capabilities";
+
 let lspProviderRegistrationDepth = 0;
 type ModelSuppressionMatcher = (model: unknown) => boolean;
-const modelSuppressions = new Map<string, ModelSuppressionMatcher>();
+type ModelSuppression = {
+  matches: ModelSuppressionMatcher;
+  providerMethods: ReadonlySet<LspMonacoProviderMethod>;
+};
+const modelSuppressions = new Map<string, ModelSuppression>();
 
-/** Returns true when an active TS/JS LSP owns this specific Monaco model. */
-export function isBuiltinTsSuppressed(model: unknown): boolean {
-  for (const matches of modelSuppressions.values()) {
-    if (matches(model)) return true;
+/** Returns true when an active TS/JS LSP replaces this provider for this model. */
+export function isBuiltinTsSuppressed(
+  model: unknown,
+  providerMethod: LspMonacoProviderMethod,
+): boolean {
+  for (const suppression of modelSuppressions.values()) {
+    if (suppression.providerMethods.has(providerMethod) && suppression.matches(model)) return true;
   }
   return false;
 }
 
-/** Register model ownership for one active TS/JS LSP connection. */
+/** Register model and advertised-provider ownership for one active TS/JS LSP connection. */
 export function registerBuiltinTsSuppression(
   ownerId: string,
   matches: ModelSuppressionMatcher,
+  providerMethods: ReadonlySet<LspMonacoProviderMethod>,
 ): { dispose: () => void } {
-  modelSuppressions.set(ownerId, matches);
+  const suppression = { matches, providerMethods: new Set(providerMethods) };
+  modelSuppressions.set(ownerId, suppression);
   return {
     dispose: () => {
-      if (modelSuppressions.get(ownerId) === matches) modelSuppressions.delete(ownerId);
+      if (modelSuppressions.get(ownerId) === suppression) modelSuppressions.delete(ownerId);
     },
   };
 }

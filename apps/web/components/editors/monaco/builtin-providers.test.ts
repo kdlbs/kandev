@@ -13,31 +13,35 @@ describe("built-in TypeScript provider state", () => {
     const suppression = registerBuiltinTsSuppression(
       "session:typescript:1",
       (model) => model === ownedModel,
+      new Set(["provideCompletionItems"]),
     );
     const otherSuppression = registerBuiltinTsSuppression(
       "other-session:typescript:1",
       (model) => model === secondOwnedModel,
+      new Set(["provideHover"]),
     );
 
     try {
-      expect(isBuiltinTsSuppressed(ownedModel)).toBe(true);
-      expect(isBuiltinTsSuppressed(secondOwnedModel)).toBe(true);
+      expect(isBuiltinTsSuppressed(ownedModel, "provideCompletionItems")).toBe(true);
+      expect(isBuiltinTsSuppressed(ownedModel, "provideHover")).toBe(false);
+      expect(isBuiltinTsSuppressed(secondOwnedModel, "provideHover")).toBe(true);
+      expect(isBuiltinTsSuppressed(secondOwnedModel, "provideCompletionItems")).toBe(false);
       expect(isLspProviderRegistrationActive()).toBe(false);
       withLspProviderRegistration(() => {
-        expect(isBuiltinTsSuppressed(ownedModel)).toBe(true);
+        expect(isBuiltinTsSuppressed(ownedModel, "provideCompletionItems")).toBe(true);
         expect(isLspProviderRegistrationActive()).toBe(true);
       });
       expect(isLspProviderRegistrationActive()).toBe(false);
       suppression.dispose();
-      expect(isBuiltinTsSuppressed(ownedModel)).toBe(false);
-      expect(isBuiltinTsSuppressed(secondOwnedModel)).toBe(true);
+      expect(isBuiltinTsSuppressed(ownedModel, "provideCompletionItems")).toBe(false);
+      expect(isBuiltinTsSuppressed(secondOwnedModel, "provideHover")).toBe(true);
     } finally {
       suppression.dispose();
       otherSuppression.dispose();
     }
 
-    expect(isBuiltinTsSuppressed(ownedModel)).toBe(false);
-    expect(isBuiltinTsSuppressed(secondOwnedModel)).toBe(false);
+    expect(isBuiltinTsSuppressed(ownedModel, "provideCompletionItems")).toBe(false);
+    expect(isBuiltinTsSuppressed(secondOwnedModel, "provideHover")).toBe(false);
   });
 
   it("restores the registration guard when provider setup throws", () => {

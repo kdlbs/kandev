@@ -71,17 +71,24 @@ describe("LSP document subscriptions", () => {
     const secondModelUri = modelUriForDocument(DOCUMENT_URI, "other-session");
     const { models } = createMonacoHarness([firstModelUri, secondModelUri]);
     let ownsModel: ((model: TestModel) => boolean) | undefined;
+    let providerMethods: ReadonlySet<string> | undefined;
     mocks.registerBuiltinTsSuppression.mockImplementation(
-      (_ownerId: string, matcher: (model: TestModel) => boolean) => {
+      (_ownerId: string, matcher: (model: TestModel) => boolean, methods: ReadonlySet<string>) => {
         ownsModel = matcher;
+        providerMethods = methods;
         return { dispose: vi.fn() };
       },
     );
     mocks.registerLspProviders.mockReturnValue([]);
 
-    await connectReady(SESSION_ID, WORKSPACE_PATH);
+    await connectReady(SESSION_ID, WORKSPACE_PATH, {
+      textDocumentSync: { openClose: true, change: 1 },
+      completionProvider: {},
+      definitionProvider: true,
+    });
 
     expect(ownsModel).toBeDefined();
+    expect(providerMethods).toEqual(new Set(["provideCompletionItems", "provideDefinition"]));
     expect(ownsModel?.(requireModel(models, firstModelUri))).toBe(true);
     expect(ownsModel?.(requireModel(models, secondModelUri))).toBe(false);
   });

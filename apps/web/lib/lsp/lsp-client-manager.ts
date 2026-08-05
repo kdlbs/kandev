@@ -44,6 +44,7 @@ import {
 import { DISABLED_LSP_STATUS, LSP_IDLE_TIMEOUT } from "./lsp-client-config";
 import { LSP_DEFAULT_CONFIGS } from "./lsp-client-config";
 import { buildDocumentContentChanges, buildDocumentSaveParams } from "./lsp-document-sync";
+import { getLspMonacoProviderMethods } from "./lsp-provider-capabilities";
 
 export type { LspStatus } from "./lsp-json-rpc";
 export { toLspLanguage } from "./lsp-json-rpc";
@@ -88,12 +89,14 @@ function configurationsMatch(
 function registerTypeScriptModelSuppression(
   connection: ManagedLspConnection,
   lspLanguage: string,
+  serverCapabilities: Record<string, unknown> | null,
 ): void {
   if (lspLanguage !== "typescript") return;
   connection.providerDisposables.push(
     registerBuiltinTsSuppression(
       connection.ownerId,
       (model) => connectionDocumentUri(model as monacoEditor.ITextModel, connection) !== null,
+      getLspMonacoProviderMethods(serverCapabilities),
     ),
   );
 }
@@ -393,7 +396,7 @@ class LSPClientManager {
         this.editorState.applyCachedDiagnostics(conn, model);
       }
 
-      registerTypeScriptModelSuppression(conn, lspLanguage);
+      registerTypeScriptModelSuppression(conn, lspLanguage, conn.serverCapabilities);
 
       // Register Monaco providers for this language.
       conn.providerDisposables.push(

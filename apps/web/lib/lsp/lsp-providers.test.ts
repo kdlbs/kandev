@@ -102,6 +102,10 @@ let definitionProvider: DefinitionProvider;
 let completionProvider: CompletionProvider;
 let semanticTokensProvider: SemanticTokensProvider;
 let signatureHelpProvider: SignatureHelpProvider | undefined;
+let registerCompletionItemProvider: ReturnType<typeof vi.fn>;
+let registerHoverProvider: ReturnType<typeof vi.fn>;
+let registerDefinitionProvider: ReturnType<typeof vi.fn>;
+let registerReferenceProvider: ReturnType<typeof vi.fn>;
 let registerSignatureHelpProvider: ReturnType<typeof vi.fn>;
 const completionModel = {
   getWordUntilPosition: vi.fn(() => ({ word: "pri", startColumn: 4, endColumn: 7 })),
@@ -133,22 +137,26 @@ beforeEach(() => {
   vi.resetAllMocks();
   signatureHelpProvider = undefined;
   getModelUri.mockImplementation((uri: string) => uri);
+  registerCompletionItemProvider = vi.fn((_language: string, provider: CompletionProvider) => {
+    completionProvider = provider;
+    return disposable();
+  });
+  registerHoverProvider = vi.fn(() => disposable());
+  registerDefinitionProvider = vi.fn((_language: string, provider: DefinitionProvider) => {
+    definitionProvider = provider;
+    return disposable();
+  });
+  registerReferenceProvider = vi.fn(() => disposable());
   registerSignatureHelpProvider = vi.fn((_language: string, provider: SignatureHelpProvider) => {
     signatureHelpProvider = provider;
     return disposable();
   });
   const languages = {
     CompletionItemKind: MONACO_COMPLETION_ITEM_KIND,
-    registerCompletionItemProvider: vi.fn((_language: string, provider: CompletionProvider) => {
-      completionProvider = provider;
-      return disposable();
-    }),
-    registerHoverProvider: vi.fn(() => disposable()),
-    registerDefinitionProvider: vi.fn((_language: string, provider: DefinitionProvider) => {
-      definitionProvider = provider;
-      return disposable();
-    }),
-    registerReferenceProvider: vi.fn(() => disposable()),
+    registerCompletionItemProvider,
+    registerHoverProvider,
+    registerDefinitionProvider,
+    registerReferenceProvider,
     registerSignatureHelpProvider,
     registerDocumentSemanticTokensProvider: vi.fn(
       (_language: string, provider: SemanticTokensProvider) => {
@@ -164,7 +172,13 @@ beforeEach(() => {
   registerLspProviders({
     rpc,
     lspLanguage: "kotlin",
-    serverCapabilities: null,
+    serverCapabilities: {
+      completionProvider: {},
+      hoverProvider: true,
+      definitionProvider: true,
+      referencesProvider: true,
+      signatureHelpProvider: {},
+    },
     semanticRefreshCallbacks: [],
     getDocumentUri: () => SOURCE_URI,
     getModelUri,
@@ -172,9 +186,52 @@ beforeEach(() => {
   });
 });
 
+describe("LSP optional provider capabilities", () => {
+  it("registers only providers advertised by the server", () => {
+    const registrations = [
+      registerCompletionItemProvider,
+      registerHoverProvider,
+      registerDefinitionProvider,
+      registerReferenceProvider,
+      registerSignatureHelpProvider,
+    ];
+    registrations.forEach((registration) => registration.mockClear());
+
+    registerLspProviders({
+      rpc,
+      lspLanguage: "kotlin",
+      serverCapabilities: null,
+      semanticRefreshCallbacks: [],
+      getDocumentUri: () => SOURCE_URI,
+      getModelUri,
+      ensureModelsExist,
+    });
+
+    registrations.forEach((registration) => expect(registration).not.toHaveBeenCalled());
+
+    registerLspProviders({
+      rpc,
+      lspLanguage: "kotlin",
+      serverCapabilities: {
+        completionProvider: {},
+        hoverProvider: true,
+        definitionProvider: {},
+        referencesProvider: true,
+        signatureHelpProvider: {},
+      },
+      semanticRefreshCallbacks: [],
+      getDocumentUri: () => SOURCE_URI,
+      getModelUri,
+      ensureModelsExist,
+    });
+
+    registrations.forEach((registration) => expect(registration).toHaveBeenCalledOnce());
+  });
+});
+
 describe("LSP signature-help provider", () => {
   it("registers only when advertised and uses the server's trigger characters", () => {
-    expect(registerSignatureHelpProvider).not.toHaveBeenCalled();
+    registerSignatureHelpProvider.mockClear();
 
     registerLspProviders({
       rpc,

@@ -3,6 +3,7 @@ import type { Monaco } from "@monaco-editor/react";
 import type { IDisposable } from "monaco-editor";
 import { loader } from "@monaco-editor/react";
 import { isBuiltinTsSuppressed, isLspProviderRegistrationActive } from "./builtin-providers";
+import type { LspMonacoProviderMethod } from "@/lib/lsp/lsp-provider-capabilities";
 
 // Cast to Monaco type (from @monaco-editor/react) which has the full
 // languages.typescript typings. The main 'monaco-editor' export marks
@@ -17,8 +18,9 @@ const monaco = monacoImport as unknown as Monaco;
 // tsMode.js setupMode() function never subscribes to it — providers are
 // registered once and never torn down. So we intercept provider registration
 // to wrap built-in TS/JS providers with a model-ownership check. When an LSP
-// owns the requested model, the wrappers return null/empty instead of calling
-// the original. Built-ins remain available to unrelated sessions and models.
+// owns the requested model and advertises the overlapping feature, the wrapper
+// returns null/empty instead of calling the original. Built-ins remain available
+// to unrelated sessions, models, and features the external server did not offer.
 //
 // Key: the LSP client marks its own synchronous provider registration with a
 // dedicated guard. Every other TS/JS provider is treated as a Monaco built-in
@@ -88,7 +90,7 @@ if (typeof window !== "undefined") {
 
   function wrapRegistration(
     original: ProviderRegistrationFn,
-    methodName: string,
+    methodName: LspMonacoProviderMethod,
     emptyResult: unknown,
   ): ProviderRegistrationFn {
     return function (selector: string, provider: Record<string, unknown>, ...rest: unknown[]) {
@@ -103,7 +105,7 @@ if (typeof window !== "undefined") {
         const origMethod = (provider[methodName] as (...a: unknown[]) => unknown).bind(provider);
         const wrapped = Object.create(provider);
         wrapped[methodName] = function (...args: unknown[]) {
-          if (isBuiltinTsSuppressed(args[0])) return emptyResult;
+          if (isBuiltinTsSuppressed(args[0], methodName)) return emptyResult;
           return origMethod(...args);
         };
         return original.call(langs, selector, wrapped, ...rest);
@@ -137,26 +139,6 @@ if (typeof window !== "undefined") {
   l.registerReferenceProvider = wrapRegistration(
     l.registerReferenceProvider.bind(langs),
     "provideReferences",
-    null,
-  );
-  l.registerDocumentHighlightProvider = wrapRegistration(
-    l.registerDocumentHighlightProvider.bind(langs),
-    "provideDocumentHighlights",
-    null,
-  );
-  l.registerCodeActionProvider = wrapRegistration(
-    l.registerCodeActionProvider.bind(langs),
-    "provideCodeActions",
-    null,
-  );
-  l.registerRenameProvider = wrapRegistration(
-    l.registerRenameProvider.bind(langs),
-    "provideRenameEdits",
-    null,
-  );
-  l.registerInlayHintsProvider = wrapRegistration(
-    l.registerInlayHintsProvider.bind(langs),
-    "provideInlayHints",
     null,
   );
 }

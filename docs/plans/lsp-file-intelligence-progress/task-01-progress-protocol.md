@@ -73,12 +73,14 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: Monaco completion registration now uses only the trigger characters advertised by the active server, and a named 25-value mapping preserves every standard LSP completion category in Monaco instead of relying on mismatched numeric enums.
 - Review hardening: Monaco signature help is absent when the server omits that capability and otherwise preserves the server's trigger and retrigger characters; a bare install-failure close ignores generic task-host prose and resolves through the active locale while a preceding detailed installer payload remains authoritative.
 - Review hardening: LSP completion-list `isIncomplete` state reaches Monaco so continued typing can request refreshed results through trigger kind `3` instead of retaining stale partial suggestions.
+- Review hardening: completion, hover, definition, references, and signature help register only when advertised; TypeScript built-in suppression now follows the exact overlapping provider set, preserving built-in fallbacks for omitted capabilities and unwired rename, code-action, highlight, and inlay features.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts` (45 passed, including advertised completion triggers and all 25 standard completion kinds)
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts lib/lsp/lsp-language-mapping.test.ts lib/lsp/lsp-client-manager.progress.test.ts` (33 passed, including signature-help capability gating/triggers and localized bare `4003` fallback)
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-language-mapping.test.ts` (55 passed, including incomplete completion-list preservation)
+  - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts components/editors/monaco/builtin-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts lib/lsp/lsp-language-mapping.test.ts` (63 passed, including optional-provider gating and feature-scoped TypeScript fallback)
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts components/editors/monaco/builtin-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts` (49 passed)
   - `pnpm run typecheck`
   - `pnpm exec eslint lib/lsp/lsp-providers.ts lib/lsp/lsp-providers.test.ts e2e/tests/lsp/lsp-file-intelligence.spec.ts`
