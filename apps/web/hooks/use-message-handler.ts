@@ -299,6 +299,17 @@ function requireSessionInputMode(state: AppState, selectedSessionId: string): Se
   return inputMode;
 }
 
+function buildQueueAttachments(attachments?: MessageAttachment[]) {
+  return attachments?.map((att) => ({
+    type: att.type,
+    ...(att.attachment_id ? { attachment_id: att.attachment_id } : { data: att.data ?? "" }),
+    mime_type: att.mime_type,
+    name: att.name,
+    size_bytes: att.size_bytes,
+    delivery_mode: att.delivery_mode,
+  }));
+}
+
 export function useMessageHandler({
   resolvedSessionId,
   taskId,
@@ -355,14 +366,7 @@ export function useMessageHandler({
 
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
       if (hasPendingClarification || inputMode === "queue") {
-        const queueAttachments = payload.attachments?.map((att) => ({
-          type: att.type,
-          ...(att.attachment_id ? { attachment_id: att.attachment_id } : { data: att.data ?? "" }),
-          mime_type: att.mime_type,
-          name: att.name,
-          size_bytes: att.size_bytes,
-          delivery_mode: att.delivery_mode,
-        }));
+        const queueAttachments = buildQueueAttachments(payload.attachments);
         await queue({
           taskId,
           content: finalMessage,
