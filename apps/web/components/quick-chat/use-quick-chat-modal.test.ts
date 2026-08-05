@@ -7,7 +7,8 @@ const mockToast = vi.fn();
 const mockStartQuickChat = vi.fn();
 const mockDeleteTask = vi.fn();
 const mockUpdateTask = vi.fn();
-const mockStopAgentLogin = vi.fn();
+const mockDeleteQuickTerminalTab = vi.fn();
+const mockUpdateQuickTerminalTab = vi.fn();
 let mockAppState: ReturnType<typeof makeAppState>;
 
 vi.mock("@/components/state-provider", () => ({
@@ -28,8 +29,9 @@ vi.mock("@/lib/api/domains/kanban-api", () => ({
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));
 
-vi.mock("@/lib/api/domains/settings-api", () => ({
-  stopAgentLogin: (...args: unknown[]) => mockStopAgentLogin(...args),
+vi.mock("@/lib/api/domains/quick-terminal-api", () => ({
+  deleteQuickTerminalTab: (...args: unknown[]) => mockDeleteQuickTerminalTab(...args),
+  updateQuickTerminalTab: (...args: unknown[]) => mockUpdateQuickTerminalTab(...args),
 }));
 
 import { useAgentSelection, useQuickChatModal } from "./use-quick-chat-modal";
@@ -105,7 +107,14 @@ function flushPromises() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockStopAgentLogin.mockReset();
+  mockDeleteQuickTerminalTab.mockReset();
+  mockDeleteQuickTerminalTab.mockResolvedValue(undefined);
+  mockUpdateQuickTerminalTab.mockReset();
+  mockUpdateQuickTerminalTab.mockResolvedValue({
+    sequence: 1,
+    sessionId: null,
+    status: "running",
+  });
   mockAppState = makeAppState();
 });
 
@@ -120,7 +129,7 @@ describe("useQuickChatModal — terminal close lifecycle", () => {
 
   it("removes a terminal when the stop endpoint says it is already gone", async () => {
     mockAppState.quickChat.terminalTabs = [terminal(TERMINAL_ONE_ID, SESSION_ONE_ID)];
-    mockStopAgentLogin.mockRejectedValue(
+    mockDeleteQuickTerminalTab.mockRejectedValue(
       new (await import("@/lib/api/client")).ApiError("gone", 404, null),
     );
 
@@ -128,13 +137,13 @@ describe("useQuickChatModal — terminal close lifecycle", () => {
 
     await act(async () => result.current.handleCloseTerminal(TERMINAL_ONE_ID));
 
-    expect(mockStopAgentLogin).toHaveBeenCalledWith(SESSION_ONE_ID);
+    expect(mockDeleteQuickTerminalTab).toHaveBeenCalledWith(TERMINAL_ONE_ID);
     expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID);
   });
 
   it("keeps a terminal and records an error when stopping fails", async () => {
     mockAppState.quickChat.terminalTabs = [terminal(TERMINAL_ONE_ID, SESSION_ONE_ID)];
-    mockStopAgentLogin.mockRejectedValue(new Error("stop failed"));
+    mockDeleteQuickTerminalTab.mockRejectedValue(new Error("stop failed"));
 
     const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
 
@@ -158,8 +167,8 @@ describe("useQuickChatModal — terminal close lifecycle", () => {
 
     await act(async () => result.current.handleCloseTerminal(TERMINAL_ONE_ID));
 
-    expect(mockStopAgentLogin).toHaveBeenCalledTimes(1);
-    expect(mockStopAgentLogin).toHaveBeenCalledWith(SESSION_ONE_ID);
+    expect(mockDeleteQuickTerminalTab).toHaveBeenCalledTimes(1);
+    expect(mockDeleteQuickTerminalTab).toHaveBeenCalledWith(TERMINAL_ONE_ID);
     expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID);
     expect(mockAppState.removeQuickTerminal).not.toHaveBeenCalledWith("terminal-2");
   });
@@ -188,7 +197,7 @@ describe("useQuickChatModal — terminal close lifecycle", () => {
     );
     await act(async () => result.current.handleCloseTerminal(LATE_TERMINAL_ID));
 
-    expect(mockStopAgentLogin).toHaveBeenCalledWith(LATE_SESSION_ID);
+    expect(mockDeleteQuickTerminalTab).toHaveBeenCalledWith(LATE_TERMINAL_ID);
     expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(LATE_TERMINAL_ID);
   });
 });

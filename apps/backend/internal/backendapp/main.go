@@ -45,6 +45,7 @@ import (
 
 	// Agent infrastructure
 	"github.com/kandev/kandev/internal/agent/hostutility"
+	"github.com/kandev/kandev/internal/agent/loginpty"
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -109,6 +110,7 @@ import (
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 
 	// Repository cloning
+	"github.com/kandev/kandev/internal/quickterminal"
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/runtimeflags"
 
@@ -1797,6 +1799,16 @@ func buildHTTPServer(
 		return nil, fmt.Errorf("generate interim settings interlock token: %w", err)
 	}
 	userSecretStore := secrets.NewUserVisibleStore(repos.Secrets)
+	// The login PTY manager is shared by agent-login dialogs and Quick
+	// Terminal tabs. The latter uses an owner-aware exit callback to keep its
+	// durable descriptor accurate even while no browser is attached.
+	loginMgr := loginpty.NewManager(log, func(_ string, _ int, _ error) {
+		if agentSettingsController != nil {
+			agentSettingsController.InvalidateDiscoveryCache()
+		}
+	})
+	quickTerminalSvc := quickterminal.NewService(repos.QuickTerminal, loginMgr, services.Task)
+	loginMgr.SetSessionExitCallback(quickTerminalSvc.HandleSessionExit)
 
 	// Opt-in authentication. Runs after CORS; in disabled mode it only
 	// injects the synthetic single-user identity (behavior unchanged).
@@ -1817,6 +1829,8 @@ func buildHTTPServer(
 		analyticsRepo:                 repos.Analytics,
 		orchestratorSvc:               orchestratorSvc,
 		lifecycleMgr:                  lifecycleMgr,
+		loginMgr:                      loginMgr,
+		quickTerminalSvc:              quickTerminalSvc,
 		hostUtilityMgr:                hostUtilityMgr,
 		eventBus:                      eventBus,
 		services:                      services,

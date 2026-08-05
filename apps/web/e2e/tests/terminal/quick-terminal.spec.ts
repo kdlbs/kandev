@@ -84,6 +84,17 @@ test.describe("quick terminal tabs", () => {
       await sendMarker(testPage, "QUICK_TERMINAL_ONE");
       await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
 
+      // The descriptor and detached PTY survive a full page reload. The
+      // launcher must reattach the existing session instead of creating a
+      // second terminal, including the buffered marker output.
+      await testPage.reload();
+      await expect(terminalButton).toBeVisible();
+      await terminalButton.click();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+      await expect(dialog.getByTestId("quick-terminal-tab-panel")).toBeVisible();
+      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("QUICK_TERMINAL_ONE");
+
       // Dismissing the shared surface detaches the terminal but does not stop it.
       await testPage.keyboard.press("Escape");
       await expect(dialog).toBeHidden();

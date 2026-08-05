@@ -1,7 +1,10 @@
 import type { Draft } from "immer";
 import type { AppState, HydrationState } from "../store";
 import { migrateSidebarViewDraft, migrateView } from "../slices/ui/ui-slice";
-import { applyStoredQuickChatNames } from "@/lib/state/slices/ui/quick-chat-sync";
+import {
+  applyStoredQuickChatNames,
+  reconcileQuickTerminalTabs,
+} from "@/lib/state/slices/ui/quick-chat-sync";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -239,11 +242,42 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
       draft.quickChat.sessions = applyStoredQuickChatNames(state.quickChat.sessions);
       restoreQuickChatSelection(draft, previousSessions, previousActiveSessionId);
     }
+    if (state.quickChat.terminalTabs) hydrateQuickTerminalState(draft, state.quickChat);
   }
   if (state.connection) {
     const { status: _status, ...rest } = state.connection || {};
     if (Object.keys(rest).length > 0) {
       Object.assign(draft.connection, rest);
+    }
+  }
+}
+
+function hydrateQuickTerminalState(
+  draft: Draft<AppState>,
+  quickChat: NonNullable<HydrationState["quickChat"]>,
+): void {
+  const terminalTabs = quickChat.terminalTabs;
+  if (!terminalTabs) return;
+  const workspaceIds = new Set(terminalTabs.map((tab) => tab.workspaceId));
+  for (const tab of draft.quickChat.terminalTabs) workspaceIds.add(tab.workspaceId);
+  for (const session of quickChat.sessions ?? []) workspaceIds.add(session.workspaceId);
+  for (const workspaceId of workspaceIds) {
+    const tabs = terminalTabs.filter((tab) => tab.workspaceId === workspaceId);
+    draft.quickChat = reconcileQuickTerminalTabs(draft.quickChat, workspaceId, tabs);
+  }
+
+  const activeTerminalTabId = quickChat.activeTerminalTabId;
+  if (
+    quickChat.activeKind === "terminal" &&
+    activeTerminalTabId &&
+    draft.quickChat.terminalTabs.some((tab) => tab.tabId === activeTerminalTabId)
+  ) {
+    draft.quickChat.activeKind = "terminal";
+    draft.quickChat.activeTerminalTabId = activeTerminalTabId;
+  }
+  for (const [workspaceId, tabId] of Object.entries(quickChat.lastTerminalTabIdByWorkspace ?? {})) {
+    if (draft.quickChat.terminalTabs.some((tab) => tab.tabId === tabId)) {
+      draft.quickChat.lastTerminalTabIdByWorkspace[workspaceId] = tabId;
     }
   }
 }

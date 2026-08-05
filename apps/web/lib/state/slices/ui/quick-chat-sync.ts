@@ -1,6 +1,6 @@
 import { getStoredQuickChatNames } from "@/lib/local-storage";
 import { isQuickChatSetupSessionId } from "./quick-chat-session";
-import type { QuickChatSession, QuickChatState } from "./types";
+import type { QuickChatSession, QuickChatState, QuickTerminalTab } from "./types";
 
 /**
  * Applies locally stored tab renames over a server-provided session list.
@@ -70,6 +70,70 @@ export function reconcileQuickChatSessions(
 }
 
 /**
+ * Reconciles one workspace's server-owned terminal descriptors. A local tab
+ * that is still creating its descriptor is retained briefly so a socket
+ * reconnect cannot erase it before the POST response lands; every established
+ * descriptor follows the server list, including deletions from another client.
+ */
+export function reconcileQuickTerminalTabs(
+  state: QuickChatState,
+  workspaceId: string,
+  serverTabs: QuickTerminalTab[],
+): QuickChatState {
+  const otherWorkspaces = state.terminalTabs.filter((tab) => tab.workspaceId !== workspaceId);
+  const serverById = new Map(serverTabs.map((tab) => [tab.tabId, tab]));
+  const pendingLocal = state.terminalTabs.filter(
+    (tab) =>
+      tab.workspaceId === workspaceId &&
+      !serverById.has(tab.tabId) &&
+      tab.status === "connecting" &&
+      !tab.sessionId,
+  );
+  const nextTabs = [
+    ...otherWorkspaces,
+    ...[...serverTabs].sort((a, b) => a.sequence - b.sequence),
+    ...pendingLocal,
+  ];
+  const validIds = new Set(nextTabs.map((tab) => tab.tabId));
+  const lastTerminalTabIdByWorkspace = { ...state.lastTerminalTabIdByWorkspace };
+  for (const [workspace, tabId] of Object.entries(lastTerminalTabIdByWorkspace)) {
+    if (!validIds.has(tabId)) delete lastTerminalTabIdByWorkspace[workspace];
+  }
+
+  const next: QuickChatState = {
+    ...state,
+    terminalTabs: nextTabs,
+    lastTerminalTabIdByWorkspace,
+  };
+  if (next.activeKind !== "terminal") return next;
+
+  const active = nextTabs.find((tab) => tab.tabId === next.activeTerminalTabId);
+  if (active) {
+    next.lastTerminalTabIdByWorkspace[active.workspaceId] = active.tabId;
+    return next;
+  }
+
+  const previousWorkspaceId =
+    state.terminalTabs.find((tab) => tab.tabId === state.activeTerminalTabId)?.workspaceId ??
+    workspaceId;
+  const replacement = nextTabs
+    .filter((tab) => tab.workspaceId === previousWorkspaceId)
+    .sort((a, b) => a.sequence - b.sequence)[0];
+  if (replacement) {
+    next.activeTerminalTabId = replacement.tabId;
+    next.lastTerminalTabIdByWorkspace[replacement.workspaceId] = replacement.tabId;
+    return next;
+  }
+
+  const conversation = next.sessions.find((session) => session.workspaceId === previousWorkspaceId);
+  next.activeKind = "conversation";
+  next.activeTerminalTabId = null;
+  next.activeSessionId = conversation?.sessionId ?? null;
+  next.isOpen = conversation ? next.isOpen : false;
+  return next;
+}
+
+/**
  * Adds or updates a single quick-chat tab observed on the wire.
  *
  * Passive by design: it never changes which tab is active or opens the modal,
@@ -129,6 +193,7 @@ function preserveTerminalSelection(
       ...state,
       sessions,
       activeKind: "conversation",
+      activeTerminalTabId: null,
       activeSessionId: conversation?.sessionId ?? null,
       isOpen: conversation ? state.isOpen : false,
     };
@@ -179,6 +244,7 @@ function withValidActiveSession(
     sessions,
     activeSessionId: fallback?.sessionId ?? null,
     activeKind: "conversation",
+    activeTerminalTabId: null,
     isOpen: fallback ? state.isOpen : false,
   };
 }

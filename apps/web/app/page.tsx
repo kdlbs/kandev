@@ -8,9 +8,11 @@ import {
   listWorkspaces,
   listTaskSessionMessages,
   listQuickChatSessions,
+  listQuickTerminalTabs,
 } from "@/lib/api";
 import { listWorkspaceTaskPRs } from "@/lib/api/domains/github-api";
 import { toQuickChatSessions } from "@/lib/quick-chat/map-sessions";
+import { toQuickTerminalTab } from "@/lib/api/domains/quick-terminal-api";
 import { snapshotToState } from "@/lib/ssr/mapper";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
@@ -125,16 +127,18 @@ async function loadWorkspaceState({
   // The client will fetch the data after mount via useWorkspacePRs.
   listWorkspaceTaskPRs(activeWorkspaceId, { cache: "no-store" }).catch(() => {});
 
-  const [workflowList, repositoriesResponse, quickChatResponse] = await Promise.all([
-    listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
-    listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
-      repositories: [],
-    })),
-    listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({
-      sessions: [],
-      task_sessions: [],
-    })),
-  ]);
+  const [workflowList, repositoriesResponse, quickChatResponse, quickTerminalResponse] =
+    await Promise.all([
+      listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
+      listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
+        repositories: [],
+      })),
+      listQuickChatSessions(activeWorkspaceId, { cache: "no-store" }).catch(() => ({
+        sessions: [],
+        task_sessions: [],
+      })),
+      listQuickTerminalTabs(activeWorkspaceId, { cache: "no-store" }).catch(() => ({ tabs: [] })),
+    ]);
   // null preserves the user's explicit "All Workflows" choice.
   const workflowId = resolveDesiredWorkflowId({
     activeWorkflowId: workflowIdParam ?? null,
@@ -142,6 +146,7 @@ async function loadWorkspaceState({
     workspaceWorkflows: workflowList.workflows,
   });
   const quickChatSessions = toQuickChatSessions(quickChatResponse.sessions);
+  const quickTerminalTabs = quickTerminalResponse.tabs.map(toQuickTerminalTab);
 
   return {
     workflowId,
@@ -169,7 +174,7 @@ async function loadWorkspaceState({
         isOpen: false,
         sessions: quickChatSessions,
         activeSessionId: null,
-        terminalTabs: [],
+        terminalTabs: quickTerminalTabs,
         activeKind: "conversation" as const,
         activeTerminalTabId: null,
         lastTerminalTabIdByWorkspace: {},

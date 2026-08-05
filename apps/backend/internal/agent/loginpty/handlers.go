@@ -108,7 +108,9 @@ func (h *Handlers) RegisterRoutes(r *gin.Engine) {
 
 // hostShellAgentID is the synthetic key the session manager uses for host
 // shell sessions so they don't collide with agent login sessions.
-const hostShellAgentID = "_host_shell"
+const HostShellAgentID = "_host_shell"
+
+const hostShellAgentID = HostShellAgentID
 
 // httpStartHostShell spawns the user's interactive shell under a PTY. Returns
 // the standard session snapshot — the client uses the same

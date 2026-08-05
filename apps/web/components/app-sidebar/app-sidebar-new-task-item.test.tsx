@@ -167,10 +167,12 @@ describe("AppSidebarNewTaskItem row actions", () => {
     expect(mocks.openQuickTerminal).toHaveBeenCalledOnce();
   });
 
-  it("does not show the terminal tooltip when focus returns after closing", () => {
+  it("does not show the terminal tooltip when focus returns after closing", async () => {
     renderItem(false);
 
     const terminal = screen.getByTestId(QUICK_TERMINAL_TEST_ID);
+    fireEvent.pointerEnter(terminal);
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
     fireEvent.focus(terminal);
 
     expect(screen.queryByRole("tooltip")).toBeNull();

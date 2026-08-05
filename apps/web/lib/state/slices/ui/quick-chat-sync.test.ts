@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
+  reconcileQuickTerminalTabs,
   reconcileQuickChatSessions,
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
@@ -134,6 +135,60 @@ describe("reconcileQuickChatSessions", () => {
     expect(after.sessions).toEqual([]);
     expect(after.activeSessionId).toBeNull();
     expect(after.isOpen).toBe(false);
+  });
+});
+
+describe("reconcileQuickTerminalTabs", () => {
+  function terminal(tabId: string, overrides: Partial<QuickTerminalTab> = {}): QuickTerminalTab {
+    return {
+      tabId,
+      workspaceId: WS,
+      sessionId: `pty-${tabId}`,
+      sequence: 1,
+      status: "running",
+      ...overrides,
+    };
+  }
+
+  it("restores server descriptors and drops established tabs the server removed", () => {
+    const pending = terminal("pending", { sessionId: null, status: "connecting", sequence: 3 });
+    const removed = terminal("removed", { sequence: 1 });
+    const foreign = terminal("foreign", { workspaceId: OTHER_WS, sequence: 4 });
+    const before = state([], {
+      terminalTabs: [foreign, removed, pending],
+      activeKind: "terminal",
+      activeTerminalTabId: removed.tabId,
+      lastTerminalTabIdByWorkspace: { [WS]: removed.tabId, [OTHER_WS]: foreign.tabId },
+    });
+    const restored = terminal("restored", { sequence: 2, sessionId: "pty-restored" });
+
+    const after = reconcileQuickTerminalTabs(before, WS, [restored]);
+
+    expect(after.terminalTabs).toEqual([foreign, restored, pending]);
+    expect(after.terminalTabs).not.toContainEqual(removed);
+    expect(after.activeKind).toBe("terminal");
+    expect(after.activeTerminalTabId).toBe(restored.tabId);
+    expect(after.lastTerminalTabIdByWorkspace[WS]).toBe(restored.tabId);
+    expect(after.lastTerminalTabIdByWorkspace[OTHER_WS]).toBe(foreign.tabId);
+  });
+
+  it("uses a conversation or closes when the active workspace has no terminal left", () => {
+    const before = state([chat("chat-a")], {
+      activeKind: "terminal",
+      activeSessionId: "chat-a",
+      activeTerminalTabId: "removed",
+      terminalTabs: [terminal("removed")],
+      lastTerminalTabIdByWorkspace: { [WS]: "removed" },
+    });
+
+    const conversation = reconcileQuickTerminalTabs(before, WS, []);
+    expect(conversation.activeKind).toBe("conversation");
+    expect(conversation.activeSessionId).toBe("chat-a");
+    expect(conversation.isOpen).toBe(true);
+
+    const closed = reconcileQuickTerminalTabs({ ...before, sessions: [] }, WS, []);
+    expect(closed.isOpen).toBe(false);
+    expect(closed.activeSessionId).toBeNull();
   });
 });
 

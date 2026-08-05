@@ -6,13 +6,16 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { startQuickChat, type QuickChatRepositoryInput } from "@/lib/api/domains/workspace-api";
-import { stopAgentLogin } from "@/lib/api/domains/settings-api";
+import {
+  deleteQuickTerminalTab,
+  updateQuickTerminalTab,
+} from "@/lib/api/domains/quick-terminal-api";
 import { ApiError } from "@/lib/api/client";
 import { type PtyTerminalState } from "@/components/settings/pty-terminal-view";
 import { cancelPtyTerminalStart } from "@/components/settings/pty-terminal-lifecycle";
 import { isQuickChatSetupSessionId } from "@/lib/state/slices/ui/quick-chat-session";
 import { persistQuickChatRename } from "@/lib/quick-chat/rename";
-import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
+import type { QuickChatSessionKind, QuickTerminalTab } from "@/lib/state/slices/ui/types";
 
 const noop = () => {};
 
@@ -54,6 +57,55 @@ function useQuickChatStore(workspaceId: string) {
 }
 
 type QuickChatStore = ReturnType<typeof useQuickChatStore>;
+
+function persistQuickTerminalState(
+  store: QuickChatStore,
+  tabId: string,
+  state: PtyTerminalState,
+): void {
+  store.updateQuickTerminal(tabId, {
+    sessionId: state.sessionId,
+    status: state.status,
+    exitCode: state.exitCode,
+    error: state.error,
+  });
+  void updateQuickTerminalTab(tabId, {
+    sessionId: state.status === "exited" ? null : state.sessionId,
+    status: state.status,
+    exitCode: state.exitCode,
+    error: state.error,
+  })
+    .then((descriptor) => {
+      store.updateQuickTerminal(tabId, {
+        sequence: descriptor.sequence,
+        sessionId: descriptor.sessionId,
+        status: descriptor.status,
+        exitCode: descriptor.exitCode,
+        error: descriptor.error,
+      });
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ApiError && error.status === 404) return;
+      store.updateQuickTerminal(tabId, {
+        status: "error",
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+}
+
+function applyQuickTerminalDescriptor(
+  store: QuickChatStore,
+  tabId: string,
+  descriptor: QuickTerminalTab,
+): void {
+  store.updateQuickTerminal(tabId, {
+    sequence: descriptor.sequence,
+    sessionId: descriptor.sessionId,
+    status: descriptor.status,
+    exitCode: descriptor.exitCode,
+    error: descriptor.error,
+  });
+}
 
 /**
  * Resolves a tab's backing task. The tab carries `taskId` on every path that
@@ -236,13 +288,8 @@ function useQuickTerminalClose(store: QuickChatStore, resetPendingStarts: () => 
       cancelPtyTerminalStart(tabId);
       const tab = store.terminalTabs.find((item) => item.tabId === tabId);
       if (!tab) return;
-      if (!tab.sessionId) {
-        store.removeQuickTerminal(tabId);
-        return;
-      }
-
       try {
-        await stopAgentLogin(tab.sessionId);
+        await deleteQuickTerminalTab(tabId);
       } catch (error) {
         if (error instanceof ApiError && error.status === 404) {
           store.removeQuickTerminal(tabId);
@@ -321,12 +368,14 @@ function useQuickChatTabActions({
 
   const handleTerminalStateChange = useCallback(
     (tabId: string, state: PtyTerminalState) => {
-      store.updateQuickTerminal(tabId, {
-        sessionId: state.sessionId,
-        status: state.status,
-        exitCode: state.exitCode,
-        error: state.error,
-      });
+      persistQuickTerminalState(store, tabId, state);
+    },
+    [store],
+  );
+
+  const handleTerminalDescriptorReady = useCallback(
+    (tabId: string, descriptor: QuickTerminalTab) => {
+      applyQuickTerminalDescriptor(store, tabId, descriptor);
     },
     [store],
   );
@@ -374,6 +423,7 @@ function useQuickChatTabActions({
     handleNewTerminal,
     handleActivateTerminal,
     handleTerminalStateChange,
+    handleTerminalDescriptorReady,
     handleSetupKindChange,
     setActiveQuickChatSession,
     handleCloseTab,

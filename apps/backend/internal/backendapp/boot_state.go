@@ -331,9 +331,21 @@ func (b bootStateBuilder) addQuickChatState(
 		b.logBootError("list quick-chat sessions", err)
 		return
 	}
+	terminalTabs := []any{}
+	if b.p.quickTerminalSvc != nil {
+		if tabs, terminalErr := b.p.quickTerminalSvc.List(ctx, workspaceID); terminalErr != nil {
+			b.logBootError("list quick-terminal tabs", terminalErr)
+		} else {
+			terminalTabs = make([]any, 0, len(tabs))
+			for _, tab := range tabs {
+				terminalTabs = append(terminalTabs, tab)
+			}
+		}
+	}
 	state["quickChat"] = map[string]any{
 		"isOpen":          false,
 		"sessions":        quickChat.sessions,
+		"terminalTabs":    terminalTabs,
 		"activeSessionId": nil,
 	}
 	mergeBootTaskSessionItems(state, quickChat.taskSessions)

@@ -80,6 +80,10 @@ function RowActionButton({ icon: Icon, label, testId, onClick }: RowActionButton
             hoveredRef.current = false;
             setTooltipOpen(false);
           }}
+          onFocus={() => {
+            hoveredRef.current = false;
+            setTooltipOpen(false);
+          }}
           aria-label={label}
           data-testid={testId}
           className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground/70 hover:bg-muted hover:text-foreground cursor-pointer"

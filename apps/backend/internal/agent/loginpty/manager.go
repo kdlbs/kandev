@@ -55,6 +55,11 @@ type Manager struct {
 	// agent ID and exit code). Used by callers to invalidate discovery cache
 	// and broadcast updated availability. Optional.
 	onExit func(agentID string, exitCode int, exitErr error)
+
+	// onSessionExit is the owner-aware lifecycle hook. It carries the internal
+	// uniqueness key so keyed callers can reconcile their durable descriptor
+	// without changing the stable public AgentID passed to onExit.
+	onSessionExit func(managerKey, sessionID, agentID string, exitCode int, exitErr error)
 }
 
 // NewManager constructs a Manager. onExit may be nil.
@@ -65,6 +70,14 @@ func NewManager(log *logger.Logger, onExit func(agentID string, exitCode int, ex
 		log:      log.WithFields(zap.String("component", "login-pty")),
 		onExit:   onExit,
 	}
+}
+
+// SetSessionExitCallback registers the owner-aware lifecycle hook. Call this
+// during backend construction, before any sessions are started.
+func (m *Manager) SetSessionExitCallback(callback func(managerKey, sessionID, agentID string, exitCode int, exitErr error)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.onSessionExit = callback
 }
 
 // Start spawns a PTY-backed process for the agent. It preserves the legacy
@@ -130,6 +143,17 @@ func (m *Manager) Stop(agentID string) error {
 	sess, ok := m.sessions[agentID]
 	m.mu.Unlock()
 	if !ok {
+		return ErrSessionNotFound
+	}
+	sess.stop()
+	return nil
+}
+
+// StopSession terminates a session by its public session ID. It is used by
+// owners whose uniqueness key is intentionally different from AgentID.
+func (m *Manager) StopSession(sessionID string) error {
+	sess := m.GetByID(sessionID)
+	if sess == nil {
 		return ErrSessionNotFound
 	}
 	sess.stop()
@@ -244,6 +268,9 @@ loop:
 	if m.onExit != nil {
 		m.onExit(sess.AgentID, info.code, info.err)
 	}
+	if m.onSessionExit != nil {
+		m.onSessionExit(sess.managerKey, sess.ID, sess.AgentID, info.code, info.err)
+	}
 }
 
 type exitInfo struct {
@@ -289,6 +316,15 @@ type Session struct {
 	readDone   chan struct{} // closed when readLoop exits (all PTY output drained)
 
 	log *logger.Logger
+}
+
+// ManagerKey returns the internal uniqueness key used by Manager. It is
+// intentionally separate from AgentID so keyed host shells can prove their
+// descriptor owns the session without exposing the key as an agent identity.
+func (s *Session) ManagerKey() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.managerKey
 }
 
 func (s *Session) start(cmd []string, cols, rows uint16) error {

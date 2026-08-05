@@ -81,6 +81,7 @@ export function activateWorkspaceFallback(quickChat: QuickChatState, workspaceId
   }
   quickChat.activeSessionId = null;
   quickChat.activeKind = "conversation";
+  quickChat.activeTerminalTabId = null;
   quickChat.isOpen = false;
 }
 
@@ -126,6 +127,7 @@ export function buildQuickTerminalActions(set: ImmerSet) {
       set((draft) => {
         const tab = draft.quickChat.terminalTabs.find((item) => item.tabId === tabId);
         if (!tab) return;
+        if ("sequence" in update && update.sequence !== undefined) tab.sequence = update.sequence;
         if ("sessionId" in update) tab.sessionId = update.sessionId ?? null;
         if (update.status) tab.status = update.status;
         if ("exitCode" in update) {

@@ -2,11 +2,13 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 
 const mockListQuickChatSessions = vi.hoisted(() => vi.fn());
+const mockListQuickTerminalTabs = vi.hoisted(() => vi.fn());
 const mockUpdateTask = vi.hoisted(() => vi.fn());
 const mockState = vi.hoisted(() => ({
   value: {} as {
     connection: { status: string };
     syncQuickChatSessions: unknown;
+    syncQuickTerminalTabs: unknown;
     setTaskSession: unknown;
   },
 }));
@@ -19,6 +21,11 @@ vi.mock("@/lib/api/domains/workspace-api", () => ({
   listQuickChatSessions: (...args: unknown[]) => mockListQuickChatSessions(...args),
 }));
 
+vi.mock("@/lib/api/domains/quick-terminal-api", () => ({
+  listQuickTerminalTabs: (...args: unknown[]) => mockListQuickTerminalTabs(...args),
+  toQuickTerminalTab: (tab: unknown) => tab,
+}));
+
 vi.mock("@/lib/api/domains/kanban-api", () => ({
   updateTask: (...args: unknown[]) => mockUpdateTask(...args),
 }));
@@ -27,10 +34,16 @@ import { useQuickChatResync } from "./use-quick-chat-resync";
 import { getStoredQuickChatNames, setStoredQuickChatName } from "@/lib/local-storage";
 
 const syncQuickChatSessions = vi.fn();
+const syncQuickTerminalTabs = vi.fn();
 const setTaskSession = vi.fn();
 
 function setConnection(status: string) {
-  mockState.value = { connection: { status }, syncQuickChatSessions, setTaskSession };
+  mockState.value = {
+    connection: { status },
+    syncQuickChatSessions,
+    syncQuickTerminalTabs,
+    setTaskSession,
+  };
 }
 
 beforeEach(() => {
@@ -51,6 +64,7 @@ beforeEach(() => {
     ],
     task_sessions: [{ id: "session-1", task_id: "task-1" }],
   });
+  mockListQuickTerminalTabs.mockResolvedValue({ tabs: [] });
 });
 
 describe("useQuickChatResync", () => {
@@ -68,6 +82,7 @@ describe("useQuickChatResync", () => {
         agentProfileId: "agent-1",
       },
     ]);
+    expect(syncQuickTerminalTabs).toHaveBeenCalledWith("ws-1", []);
   });
 
   // A tab without its session row renders but cannot subscribe or accept

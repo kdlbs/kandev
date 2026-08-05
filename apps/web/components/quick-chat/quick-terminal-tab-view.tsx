@@ -1,8 +1,13 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { startHostShell } from "@/lib/api";
+import {
+  createQuickTerminalTab,
+  deleteQuickTerminalTab,
+  startHostShell,
+  toQuickTerminalTab,
+} from "@/lib/api";
 import {
   PtyTerminalView,
   type PtyTerminalState,
@@ -15,6 +20,7 @@ export type QuickTerminalTabDescriptor = QuickTerminalTab;
 type Props = {
   tab: QuickTerminalTab;
   onStateChange: (state: PtyTerminalState) => void;
+  onDescriptorReady?: (tab: QuickTerminalTab) => void;
 };
 
 function QuickTerminalLifecycleStatus({ tab }: { tab: QuickTerminalTab }) {
@@ -65,7 +71,47 @@ function QuickTerminalLifecycleStatus({ tab }: { tab: QuickTerminalTab }) {
 }
 
 /** Selected terminal content for the shared Quick Chat surface. */
-export function QuickTerminalTabView({ tab, onStateChange }: Props) {
+export function QuickTerminalTabView({ tab, onStateChange, onDescriptorReady }: Props) {
+  const needsDescriptor = !tab.sessionId && tab.status === "connecting";
+  const [descriptorReady, setDescriptorReady] = useState(!needsDescriptor);
+  const onStateChangeRef = useRef(onStateChange);
+  const onDescriptorReadyRef = useRef(onDescriptorReady);
+  onStateChangeRef.current = onStateChange;
+  onDescriptorReadyRef.current = onDescriptorReady;
+
+  useEffect(() => {
+    if (!needsDescriptor) {
+      setDescriptorReady(true);
+      return undefined;
+    }
+
+    let cancelled = false;
+    setDescriptorReady(false);
+    createQuickTerminalTab(tab.tabId, tab.workspaceId)
+      .then((descriptor) => {
+        if (cancelled) {
+          return deleteQuickTerminalTab(tab.tabId).catch(() => undefined);
+        }
+        const nextTab = toQuickTerminalTab(descriptor);
+        onDescriptorReadyRef.current?.(nextTab);
+        setDescriptorReady(true);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        onStateChangeRef.current({
+          status: "error",
+          sessionId: null,
+          exitCode: null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [needsDescriptor, tab.tabId, tab.workspaceId]);
+
+  const shouldRenderTerminal = Boolean(tab.sessionId) || (needsDescriptor && descriptorReady);
   const startSession = useCallback<StartPtySession>(
     (size, options) => startHostShell(size, options),
     [],
@@ -77,16 +123,18 @@ export function QuickTerminalTabView({ tab, onStateChange }: Props) {
       data-testid="quick-terminal-tab-panel"
       data-terminal-tab-id={tab.tabId}
     >
-      <PtyTerminalView
-        startSession={startSession}
-        sessionId={tab.sessionId}
-        clientId={tab.tabId}
-        ownerId={tab.tabId}
-        lifecycle="detach-on-unmount"
-        testIdPrefix="quick-terminal"
-        className="h-full min-h-0 flex-1 rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
-        onStateChange={onStateChange}
-      />
+      {shouldRenderTerminal && (
+        <PtyTerminalView
+          startSession={startSession}
+          sessionId={tab.sessionId}
+          clientId={tab.tabId}
+          ownerId={tab.tabId}
+          lifecycle="detach-on-unmount"
+          testIdPrefix="quick-terminal"
+          className="h-full min-h-0 flex-1 rounded-md bg-[#0b0b0c] p-2 overflow-hidden"
+          onStateChange={onStateChange}
+        />
+      )}
       <QuickTerminalLifecycleStatus tab={tab} />
     </div>
   );

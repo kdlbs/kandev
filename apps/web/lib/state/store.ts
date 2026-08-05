@@ -350,6 +350,7 @@ export type AppState = KanbanSlice & {
   activateQuickTerminal: UIA["activateQuickTerminal"];
   removeQuickTerminal: UIA["removeQuickTerminal"];
   syncQuickChatSessions: UIA["syncQuickChatSessions"];
+  syncQuickTerminalTabs: UIA["syncQuickTerminalTabs"];
   upsertQuickChatSessionFromEvent: UIA["upsertQuickChatSessionFromEvent"];
   removeQuickChatSessionsForTask: UIA["removeQuickChatSessionsForTask"];
   closeQuickChat: () => void;

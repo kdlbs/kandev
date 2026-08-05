@@ -130,6 +130,36 @@ describe("hydrateUI — typed quick chat sessions", () => {
 });
 
 describe("hydrateUI — quick chat lifecycle", () => {
+  it("restores server-owned terminal tabs during a fresh hydration", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+          terminalTabs: [
+            {
+              tabId: TERMINAL_TAB_ID,
+              workspaceId: "ws-1",
+              sessionId: "pty-1",
+              sequence: 1,
+              status: "running",
+            },
+          ],
+          activeKind: "terminal",
+          activeTerminalTabId: TERMINAL_TAB_ID,
+          lastTerminalTabIdByWorkspace: { "ws-1": TERMINAL_TAB_ID },
+        },
+      });
+    });
+
+    expect(result.quickChat.terminalTabs).toEqual([
+      expect.objectContaining({ tabId: TERMINAL_TAB_ID, sessionId: "pty-1" }),
+    ]);
+    expect(result.quickChat.activeKind).toBe("terminal");
+    expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
+  });
+
   it("clears stale quick chat sessions when the backend returns none", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       draft.quickChat = {
@@ -190,6 +220,43 @@ describe("hydrateUI — quick chat lifecycle", () => {
     expect(result.quickChat.activeKind).toBe("terminal");
     expect(result.quickChat.activeTerminalTabId).toBe(TERMINAL_TAB_ID);
     expect(result.quickChat.isOpen).toBe(true);
+  });
+});
+
+describe("hydrateUI — terminal descriptor reconciliation", () => {
+  it("treats an empty server terminal list as authoritative during hydration", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat = {
+        isOpen: true,
+        activeSessionId: null,
+        sessions: [],
+        terminalTabs: [
+          {
+            tabId: TERMINAL_TAB_ID,
+            workspaceId: "ws-1",
+            sessionId: "pty-stale",
+            sequence: 1,
+            status: "running",
+          },
+        ],
+        activeKind: "terminal",
+        activeTerminalTabId: TERMINAL_TAB_ID,
+        lastTerminalTabIdByWorkspace: { "ws-1": TERMINAL_TAB_ID },
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [],
+          terminalTabs: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.terminalTabs).toEqual([]);
+    expect(result.quickChat.activeKind).toBe("conversation");
+    expect(result.quickChat.activeTerminalTabId).toBeNull();
+    expect(result.quickChat.isOpen).toBe(false);
   });
 });
 

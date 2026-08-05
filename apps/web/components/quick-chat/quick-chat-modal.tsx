@@ -158,6 +158,9 @@ function QuickChatContent({
           onStateChange={(state) =>
             quickChat.handleTerminalStateChange(quickChat.activeTerminalTab!.tabId, state)
           }
+          onDescriptorReady={(descriptor) =>
+            quickChat.handleTerminalDescriptorReady(quickChat.activeTerminalTab!.tabId, descriptor)
+          }
         />
       )}
       {quickChat.activeKind === "conversation" &&

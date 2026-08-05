@@ -22,6 +22,7 @@ import type { ActiveDocument, QuickChatSession, UISlice, UISliceState } from "./
 import { getQuickChatSetupSessionId } from "./quick-chat-session";
 import {
   reconcileQuickChatSessions,
+  reconcileQuickTerminalTabs,
   removeQuickChatSessionsForTask,
   upsertQuickChatSession,
 } from "./quick-chat-sync";
@@ -452,6 +453,10 @@ function buildQuickChatActions(set: ImmerSet) {
     syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) =>
       set((draft) => {
         draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
+      }),
+    syncQuickTerminalTabs: (workspaceId: string, tabs: UISliceState["quickChat"]["terminalTabs"]) =>
+      set((draft) => {
+        draft.quickChat = reconcileQuickTerminalTabs(draft.quickChat, workspaceId, tabs);
       }),
     upsertQuickChatSessionFromEvent: (session: QuickChatSession) =>
       set((draft) => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const startHostShell = vi.hoisted(() =>
@@ -10,8 +10,23 @@ const startHostShell = vi.hoisted(() =>
     started_at: "2026-08-04T00:00:00Z",
   }),
 );
+const createQuickTerminalTab = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({
+    tabId: "6f2d7f2d-0d0c-4c9b-8b73-1c53a5ed5b6b",
+    workspaceId: "workspace-1",
+    sessionId: null,
+    sequence: 1,
+    status: "connecting",
+  }),
+);
+const deleteQuickTerminalTab = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 
-vi.mock("@/lib/api", () => ({ startHostShell }));
+vi.mock("@/lib/api", () => ({
+  startHostShell,
+  createQuickTerminalTab,
+  deleteQuickTerminalTab,
+  toQuickTerminalTab: (tab: unknown) => tab,
+}));
 vi.mock("@/components/settings/pty-terminal-view", () => ({
   PtyTerminalView: (props: {
     startSession: (
@@ -62,12 +77,15 @@ describe("QuickTerminalTabView", () => {
     const onStateChange = vi.fn();
     const view = render(<QuickTerminalTabView tab={tab} onStateChange={onStateChange} />);
 
-    expect(screen.getByTestId("pty-view-probe").getAttribute("data-lifecycle")).toBe(
-      "detach-on-unmount",
-    );
-    fireEvent.click(screen.getByTestId("pty-view-probe"));
-    expect(startHostShell).toHaveBeenCalledWith({ cols: 80, rows: 24 }, { clientId: tab.tabId });
-    view.unmount();
+    return waitFor(() =>
+      expect(screen.getByTestId("pty-view-probe").getAttribute("data-lifecycle")).toBe(
+        "detach-on-unmount",
+      ),
+    ).then(() => {
+      fireEvent.click(screen.getByTestId("pty-view-probe"));
+      expect(startHostShell).toHaveBeenCalledWith({ cols: 80, rows: 24 }, { clientId: tab.tabId });
+      view.unmount();
+    });
   });
 
   it("renders accessible lifecycle status for the selected terminal", () => {

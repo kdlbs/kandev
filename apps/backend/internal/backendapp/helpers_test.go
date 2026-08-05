@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/quickterminal"
+	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -1344,6 +1346,11 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()
 	repo := harness.taskRepo
+	quickTerminalRepo, err := quickterminalrepo.NewWithDB(harness.db, harness.db)
+	if err != nil {
+		t.Fatalf("quick terminal repository: %v", err)
+	}
+	quickTerminalSvc := quickterminal.NewService(quickTerminalRepo, nil, harness.taskSvc)
 
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-qc", Name: "Quick Chats"}); err != nil {
 		t.Fatalf("CreateWorkspace: %v", err)
@@ -1387,12 +1394,16 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 		id: "task-workflow", title: "Workflow Ephemeral", updatedAt: base, sessionUpdatedAt: base,
 		agentProfileID: "agent-workflow", workflowID: "wf-qc",
 	})
+	if _, err := quickTerminalSvc.Create(ctx, "ws-qc", "11111111-1111-4111-8111-111111111111"); err != nil {
+		t.Fatalf("create quick terminal descriptor: %v", err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/?workspaceId=ws-qc", nil)
 	payload := bootPayload(ctx, req, routeParams{
-		taskSvc:  harness.taskSvc,
-		services: &Services{Workflow: harness.workflowSvc},
-		userCtrl: harness.userCtrl,
+		taskSvc:          harness.taskSvc,
+		services:         &Services{Workflow: harness.workflowSvc},
+		userCtrl:         harness.userCtrl,
+		quickTerminalSvc: quickTerminalSvc,
 	}, webapp.ClassifyRoute("/"))
 
 	raw, err := json.Marshal(payload)
@@ -1411,6 +1422,12 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 				} `json:"sessions"`
 				IsOpen          bool    `json:"isOpen"`
 				ActiveSessionID *string `json:"activeSessionId"`
+				TerminalTabs    []struct {
+					TabID     string `json:"tabId"`
+					Status    string `json:"status"`
+					Error     string `json:"error"`
+					Workspace string `json:"workspaceId"`
+				} `json:"terminalTabs"`
 			} `json:"quickChat"`
 			TaskSessions struct {
 				Items map[string]struct {
@@ -1450,6 +1467,16 @@ func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	}
 	if decoded.InitialState.QuickChat.ActiveSessionID != nil {
 		t.Fatalf("quick chat active session = %q, want nil", *decoded.InitialState.QuickChat.ActiveSessionID)
+	}
+	if len(decoded.InitialState.QuickChat.TerminalTabs) != 1 {
+		t.Fatalf("quickChat terminal tabs = %#v, want one restored descriptor", decoded.InitialState.QuickChat.TerminalTabs)
+	}
+	tab := decoded.InitialState.QuickChat.TerminalTabs[0]
+	if tab.TabID != "11111111-1111-4111-8111-111111111111" || tab.Workspace != "ws-qc" {
+		t.Fatalf("restored terminal identity = %#v", tab)
+	}
+	if tab.Status != "exited" || tab.Error == "" {
+		t.Fatalf("stale terminal lifecycle = %#v, want exited/unavailable", tab)
 	}
 }
 
@@ -1804,6 +1831,7 @@ func TestQueryValueReadsRouteQueryFromAppStatePath(t *testing.T) {
 }
 
 type bootStateTestHarness struct {
+	db          *sqlx.DB
 	taskSvc     *taskservice.Service
 	taskRepo    *sqlitetaskrepo.Repository
 	workflowSvc *workflowservice.Service
@@ -1881,6 +1909,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
+		db:          sqlxDB,
 		taskSvc:     taskSvc,
 		taskRepo:    taskRepo,
 		workflowSvc: workflowSvc,

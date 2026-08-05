@@ -86,6 +86,15 @@ test.describe("mobile quick terminal tabs", () => {
       expect(firstCloseBox!.width).toBeGreaterThanOrEqual(44);
       expect(firstCloseBox!.height).toBeGreaterThanOrEqual(44);
 
+      // A mobile reload restores the durable descriptor and reattaches the
+      // detached PTY before the user creates any additional terminal.
+      await testPage.reload();
+      await expect(terminalButton).toBeVisible();
+      await terminalButton.tap();
+      await expect(dialog).toBeVisible();
+      await expect(dialog.locator('[data-testid="quick-terminal-tab"]')).toHaveCount(1);
+      await expect.poll(() => readQuickTerminalBuffer(testPage)).toContain("MOBILE_TERMINAL_ONE");
+
       const viewport = testPage.viewportSize();
       const dialogBox = await dialog.boundingBox();
       const terminalBox = await dialog.getByTestId("quick-terminal-terminal").boundingBox();

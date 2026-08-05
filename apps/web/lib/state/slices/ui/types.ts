@@ -109,6 +109,7 @@ export type QuickTerminalTab = {
 };
 
 export type QuickTerminalUpdate = {
+  sequence?: number;
   sessionId?: string | null;
   status?: QuickTerminalStatus;
   exitCode?: number | null;
@@ -288,6 +289,8 @@ export type UISliceActions = {
   renameQuickChatSession: (sessionId: string, name: string) => void;
   /** Replaces a workspace's quick-chat tabs with the server's authoritative list. */
   syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) => void;
+  /** Replaces a workspace's terminal descriptors with the server's list. */
+  syncQuickTerminalTabs: (workspaceId: string, tabs: QuickTerminalTab[]) => void;
   /** Adds or updates a tab observed on the wire, without stealing focus. */
   upsertQuickChatSessionFromEvent: (session: QuickChatSession) => void;
   /** Drops tabs whose backing task was deleted (possibly on another device). */
