@@ -67,8 +67,8 @@ The global command replaces the installed `kandev` channel. Return to Stable wit
 `npm install -g kandev@latest`.
 
 Nightly builds may be unstable. They are best-effort daily snapshots, and a new version appears
-only when `main` has commits after the latest Stable release. Homebrew, Desktop, and container
-installs have no Nightly channel.
+only when `main` has commits after the latest Stable release. Homebrew, Scoop, Desktop, and
+container installs have no Nightly channel.
 
 The launcher selects the platform runtime, starts the Go backend and agent runtime, serves the web app, and opens its local URL. The preferred backend port is `38429`; if it is unavailable, the launcher chooses another free port and prints the actual URL. Use `kandev --headless` (or `KANDEV_NO_BROWSER=1`) when a browser must not open.
 
