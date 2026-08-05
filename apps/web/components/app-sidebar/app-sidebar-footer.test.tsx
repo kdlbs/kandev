@@ -121,25 +121,30 @@ function renderFooter() {
   );
 }
 
+function resetFooterState() {
+  officeEnabled = false;
+  pathname = DEFAULT_PATHNAME;
+  state.workspaces.activeId = "kanban-1";
+  state.workspaces.items = [
+    { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
+    { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
+    { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
+  ];
+  state.appSidebar.settingsMode = false;
+  state.auth = { mode: "disabled", user: null };
+  state.connection.issueSeverity = "none";
+  appStatusBarEnabled = true;
+  window.localStorage.clear();
+  document.cookie = "office-active-workspace=; path=/; max-age=0";
+  mocks.routerPush.mockClear();
+  mocks.toggleSettingsMode.mockClear();
+}
+
+const KANBAN_HOME_HREF = "/?home=overview&workspaceId=kanban-1";
+const GEAR_TEST_ID = "sidebar-settings-gear";
+
 describe("AppSidebarFooter", () => {
-  beforeEach(() => {
-    officeEnabled = false;
-    pathname = DEFAULT_PATHNAME;
-    state.workspaces.activeId = "kanban-1";
-    state.workspaces.items = [
-      { id: "kanban-1", name: "Kanban", office_workflow_id: "" },
-      { id: "office-1", name: "Office", office_workflow_id: "wf-office" },
-      { id: "office-2", name: "Office 2", office_workflow_id: "wf-office-2" },
-    ];
-    state.appSidebar.settingsMode = false;
-    state.auth = { mode: "disabled", user: null };
-    state.connection.issueSeverity = "none";
-    appStatusBarEnabled = true;
-    window.localStorage.clear();
-    document.cookie = "office-active-workspace=; path=/; max-age=0";
-    mocks.routerPush.mockClear();
-    mocks.toggleSettingsMode.mockClear();
-  });
+  beforeEach(resetFooterState);
 
   afterEach(() => cleanup());
 
@@ -204,7 +209,7 @@ describe("AppSidebarFooter", () => {
     expect(screen.queryByRole("button", { name: "Office" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
   });
 
   it("remembers the current office workspace when toggling back to kanban", () => {
@@ -217,14 +222,20 @@ describe("AppSidebarFooter", () => {
     fireEvent.click(screen.getByRole("button", { name: "Kanban" }));
 
     expect(document.cookie).toContain("office-active-workspace=office-2");
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
   });
+});
+
+describe("AppSidebarFooter settings gear", () => {
+  beforeEach(resetFooterState);
+  afterEach(() => cleanup());
+
   it("navigates to /settings when the gear opens settings mode from a non-settings route", () => {
     pathname = DEFAULT_PATHNAME;
     state.appSidebar.settingsMode = false;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
     expect(mocks.routerPush).toHaveBeenCalledWith("/settings");
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
@@ -235,7 +246,7 @@ describe("AppSidebarFooter", () => {
     state.appSidebar.settingsMode = false;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
     expect(mocks.routerPush).not.toHaveBeenCalled();
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
@@ -246,11 +257,11 @@ describe("AppSidebarFooter", () => {
     state.appSidebar.settingsMode = true;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
     // Swapping the sidebar back while the main panel stayed on a settings page
     // left kanban navigation beside an open settings page.
-    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
+    expect(mocks.routerPush).toHaveBeenCalledWith(KANBAN_HOME_HREF);
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
   });
 
@@ -259,7 +270,7 @@ describe("AppSidebarFooter", () => {
     state.appSidebar.settingsMode = true;
 
     renderFooter();
-    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+    fireEvent.click(screen.getByTestId(GEAR_TEST_ID));
 
     expect(mocks.routerPush).not.toHaveBeenCalled();
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();

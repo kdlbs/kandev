@@ -19,7 +19,6 @@ import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import {
   SYSTEM_DISCOVERY_DEFINITIONS,
-  SYSTEM_SETTINGS_HREF,
   SYSTEM_STATUS_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog/system";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";

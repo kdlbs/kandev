@@ -6,7 +6,6 @@ import { useTranslation } from "react-i18next";
 import {
   ACCOUNT_DISCOVERY_DEFINITIONS,
   ACCOUNT_SECURITY_SETTINGS_HREF,
-  ACCOUNT_SETTINGS_HREF,
 } from "@/lib/settings-discovery/catalog/account";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
 
