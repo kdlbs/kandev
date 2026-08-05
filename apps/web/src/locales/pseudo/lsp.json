@@ -37,6 +37,7 @@
   "languageServerDescription": "{{language}} ĺàńĝũàĝē śēŕvēŕ: {{summary}}",
   "languageServerError": "ĹŚƤ ēŕŕōŕ",
   "languageServerExited": "ĺàńĝũàĝē śēŕvēŕ ēxĩţēď",
+  "languageServerFailedToStart": "Ĺàńĝũàĝē śēŕvēŕ ƒàĩĺēď ţō śţàŕţ",
   "languageServerIsOff": "Ĺàńĝũàĝē śēŕvēŕ ĩś ōƒƒ",
   "languageServerNotFound": "Ĺàńĝũàĝē śēŕvēŕ ńōţ ƒōũńď",
   "languageServerOpenStatus": "Ĺàńĝũàĝē śēŕvēŕ: {{summary}}. Ōƥēń śţàţũś",

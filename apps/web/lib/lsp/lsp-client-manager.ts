@@ -55,6 +55,15 @@ export { toLspLanguage } from "./lsp-json-rpc";
 type ChangeListener = (key: string) => void;
 type FileOpener = (uri: string, line?: number, column?: number) => boolean | Promise<boolean>;
 
+function lspErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message || String(error);
+  if (typeof error === "object" && error !== null) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message) return message;
+  }
+  return String(error);
+}
+
 function hasActiveLspWork(progress: LspProgressSnapshot): boolean {
   return progress.initializingSince !== null || progress.active.length > 0;
 }
@@ -406,7 +415,7 @@ class LSPClientManager {
       this.cleanupConnection(conn);
       if (!wasCurrent) return;
       console.error(`[LSP] initializeLsp error:`, err);
-      this.setStatus(key, { state: "error", reason: String(err) });
+      this.setStatus(key, { state: "error", reason: lspErrorMessage(err) });
     }
   }
 

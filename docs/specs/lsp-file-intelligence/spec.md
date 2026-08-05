@@ -106,8 +106,9 @@ Application close codes are:
 | `4005` | Active LSP connection cap reached.                                         |
 | `4006` | Language server exit or unexpected LSP proxy stream failure.               |
 | `4007` | Server binary missing and the task host has no supported installer.        |
+| `4008` | Language-server process failed to start.                                   |
 
-The browser translates categorical `4001`, `4002`, `4004`, `4005`, `4006`, and `4007` statuses from the close code instead of rendering transport prose. Only the `4003` installation failure may retain an actionable server-provided diagnostic.
+The browser translates categorical `4001`, `4002`, `4004`, `4005`, `4006`, `4007`, and `4008` statuses from the close code instead of rendering transport prose. Only the `4003` installation failure may retain an actionable task-host diagnostic; a JSON-RPC initialization rejection preserves the server-provided `error.message`.
 
 ### Browser LSP progress contract
 
@@ -160,7 +161,9 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **Unsupported Rust installer:** Windows rejects Rust auto-install with `4007`, the UI directs the user to install the server manually, and agentctl continues to discover a manually installed `rust-analyzer` from the task environment.
 - **Cold Monaco initialization:** TypeScript built-ins are wrapped before model-scoped LSP suppression is registered; the LSP provider registration guard does not depend on suppression state.
 - **Capacity exceeded:** the UI reports that too many language servers are active; the backend rejects the request before starting or resuming its supported task host.
+- **Process start failure:** agentctl logs the task-host execution error, closes with categorical `4008` and no transport prose, and the UI shows a localized start-failure status with Retry.
 - **Server crash:** the connection closes with categorical `4006`, Monaco providers and markers are cleaned up, and the status shows the localized server-exited message with a Retry action. Only intentional stop or idle teardown returns to Off.
+- **Initialize rejection:** when the server rejects the JSON-RPC `initialize` request, the UI preserves its `error.message` instead of stringifying the error object as `[object Object]`.
 - **No progress support or reports:** initialization still shows an indeterminate state and elapsed time; after initialize succeeds, the status surface says the server has not reported background analysis progress.
 - **Initialize response is slow or never arrives:** the UI confirms that the process launched, changes to a long-running initialization warning after 60 seconds, and keeps Stop available. Kandev does not automatically kill a cold project import or claim that the server is indexing.
 - **Indeterminate progress:** the UI shows the server title/message and elapsed time without a percentage or ETA.
@@ -193,6 +196,8 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 - **GIVEN** the user types again while a file save is in flight, **WHEN** the older snapshot finishes persisting, **THEN** the newer editor snapshot remains dirty and is the language server's current document, while `textDocument/didSave` omits the stale optional text instead of rewinding the document.
 - **GIVEN** an SSH, Sprites, or remote-Docker task, **WHEN** a user starts LSP, **THEN** the UI reports an unsupported executor and no language-server or task execution is started or resumed for that request.
 - **GIVEN** the configured connection cap is reached, **WHEN** another editor starts LSP for a stopped supported task, **THEN** the new connection closes with `4005` before Kandev starts or resumes that task host.
+- **GIVEN** a discovered language-server executable cannot be launched, **WHEN** agentctl starts it, **THEN** the task-host error stays in logs while the browser receives `4008` with no reason and shows the localized start-failure status.
+- **GIVEN** a language server rejects `initialize` with a JSON-RPC error object, **WHEN** the browser handles that response, **THEN** the error state shows the server's `error.message` rather than `[object Object]`.
 - **GIVEN** two task/session connections have active providers, placeholder models, or diagnostics, **WHEN** one connection stops or crashes, **THEN** cleanup removes only that connection's state and leaves the other connection fully functional.
 - **GIVEN** an initialized language server exits unexpectedly, **WHEN** agentctl closes the WebSocket with `4006` and no transport prose, **THEN** its editor shows the localized server-exited error with Retry rather than presenting the server as intentionally off.
 - **GIVEN** two sessions expose the same task-host file URI (for example two Docker tasks rooted at `/workspace`), **WHEN** both files are open, **THEN** Monaco keeps session-scoped models and content while both language servers receive the clean task-host URI.

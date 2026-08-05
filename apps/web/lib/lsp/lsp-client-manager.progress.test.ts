@@ -122,6 +122,28 @@ describe("LSP connection failure reporting", () => {
     });
   });
 
+  it("preserves the message from a JSON-RPC initialize error", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { initialize, socket } = beginInitialization();
+
+    socket.emitMessage(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: initialize.id,
+        error: { code: -32603, message: "Gradle project import failed" },
+      }),
+    );
+
+    await vi.waitFor(() => {
+      expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
+        state: "error",
+        reason: "Gradle project import failed",
+      });
+    });
+    expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    consoleError.mockRestore();
+  });
+
   it("describes an unexpected bridge close when the proxy omits its reason", async () => {
     const { initialize, socket } = beginInitialization();
     completeInitialization(socket, initialize.id);

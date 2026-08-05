@@ -68,6 +68,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: the browser-facing LSP capacity slot is acquired before `GetOrEnsureExecution`, so an over-cap request cannot start or resume a supported task host; all resolution failures release the provisional slot.
 - Review hardening: missing-binary close code `4001` now ignores backend prose and resolves through the active locale, Editors cards expose install prerequisites inline for pointer, keyboard, and touch users, and the test-only duplicate language table was removed in favor of the localized Settings metadata source.
 - Review hardening: the Monaco editor opener now opens regular targets inside the active task workspace and propagates `false` for unresolved targets, while agentctl reports unexpected server exit as categorical `4006` with no English close reason so the browser localizes it.
+- Review hardening: JSON-RPC initialize errors now preserve their `message` instead of rendering `[object Object]`, while task-host process-launch failures retain details in backend logs and close through localized categorical `4008` with no English transport reason.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
@@ -90,4 +91,6 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `pnpm exec eslint lib/lsp/lsp-json-rpc.ts lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.tsx components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.ts components/settings/lsp-language-options.test.ts`
   - `pnpm exec vitest run hooks/use-lsp-file-opener.test.ts components/editors/monaco/monaco-init.test.ts lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.test.ts` (23 passed)
   - `go test ./internal/agentctl/server/api -count=1` (categorical server-exit close included)
+  - `pnpm exec vitest run lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-language-mapping.test.ts hooks/use-lsp-file-opener.test.ts components/editors/monaco/monaco-init.test.ts components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.test.ts` (56 passed)
+  - `go test ./internal/agentctl/server/api -count=1` (categorical process-start failure included)
   - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`

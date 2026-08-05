@@ -12,7 +12,7 @@ Extend the browser-owned LSP connection with standard work-done progress before 
 
 ## Backend
 
-The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery, managed cache roots, and npm/Go auto-install resolve through the process manager's task environment, resolves Windows npm shims through PATHEXT and Go's default workspace through `USERPROFILE`, rejects Rust auto-install on task hosts without a packaged strategy through a distinct browser-visible close code, keeps that task-host decision out of the main backend's global settings policy, checks the persisted executor runtime before any cold execution is created for LSP, and acquires connection capacity before a supported task host can start or resume.
+The progress protocol itself requires no backend payload transform because both WebSocket proxy hops forward JSON-RPC bodies unchanged. Review hardening also makes task-host binary discovery, managed cache roots, and npm/Go auto-install resolve through the process manager's task environment, resolves Windows npm shims through PATHEXT and Go's default workspace through `USERPROFILE`, rejects Rust auto-install on task hosts without a packaged strategy through a distinct browser-visible close code, reports process-start failure through categorical `4008` while retaining the host error in logs, keeps task-host decisions out of the main backend's global settings policy, checks the persisted executor runtime before any cold execution is created for LSP, and acquires connection capacity before a supported task host can start or resume.
 
 ## Frontend
 
@@ -24,6 +24,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Clear initialization and work state on stop, idle teardown, crash, retry, or connection replacement.
 - Keep model-scoped TypeScript suppression separate from the synchronous LSP-provider registration guard so cold Monaco loads still wrap lazy built-in providers while unrelated sessions retain built-in intelligence.
 - Preserve detailed pre-bridge install errors when the following WebSocket close contains only a generic mapped reason.
+- Preserve the message from a JSON-RPC initialize error object while translating categorical task-host close codes instead of rendering backend prose.
 - Translate Monaco completion trigger context into the LSP request context advertised by the client capability.
 - Supply Monaco's current-word range for completion items without `textEdit`, while preserving explicit server `TextEdit` and `InsertReplaceEdit` ranges.
 - Keep per-language configuration mutable on the shared connection, notify initialized servers when settings change, and answer later `workspace/configuration` requests from that live value.
@@ -46,7 +47,8 @@ The progress protocol itself requires no backend payload transform because both 
 - **Navigation identity:** file-opener and Monaco registration tests prove an attached-repository target reuses an existing task-root-relative editor key, regular in-workspace `file://` targets open, and unresolved targets return unhandled to Monaco.
 - **Completion and configuration:** focused provider and manager tests prove range fallback/override behavior, connection reuse, live configuration notification, and updated request responses.
 - **Provider ownership and semantic tokens:** focused Monaco/manager/provider tests prove TypeScript built-in suppression follows the owning session model, independent connections dispose separately, and valid empty semantic-token arrays complete without self-scheduled polling.
-- **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in, and that `4001` and `4007` render localized categorical guidance instead of backend transport prose.
+- **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in, process launch failure closes with `4008`, and categorical statuses render localized guidance instead of backend transport prose.
+- **Initialization failure:** the manager regression proves a JSON-RPC initialize error object renders its `message` field and still cleans up the failed connection for Retry.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting; a rendered language-card regression proves auto-install prerequisites remain visible without tooltip interaction.
 - **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, read-only rejection of cold unsupported executors, and capacity rejection before supported execution startup.
 

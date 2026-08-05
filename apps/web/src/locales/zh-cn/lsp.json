@@ -37,6 +37,7 @@
   "languageServerDescription": "{{language}} 语言服务器：{{summary}}",
   "languageServerError": "LSP 错误",
   "languageServerExited": "语言服务器已退出",
+  "languageServerFailedToStart": "语言服务器启动失败",
   "languageServerIsOff": "语言服务器已关闭",
   "languageServerNotFound": "未找到语言服务器",
   "languageServerOpenStatus": "语言服务器：{{summary}}。打开状态",

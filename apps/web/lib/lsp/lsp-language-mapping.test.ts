@@ -82,6 +82,10 @@ describe("LSP task-host close codes", () => {
         reason: "Àũţō-ĩńśţàĺĺ ĩś ũńàvàĩĺàƀĺē ōń ţĥĩś ţàśķ ĥōśţ",
         cause: "auto_install_unsupported",
       });
+      expect(CLOSE_CODE_STATUS[4008](BACKEND_REASON)).toEqual({
+        state: "error",
+        reason: "Ĺàńĝũàĝē śēŕvēŕ ƒàĩĺēď ţō śţàŕţ",
+      });
     } finally {
       await activateLocale("en");
     }

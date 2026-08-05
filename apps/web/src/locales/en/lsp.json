@@ -37,6 +37,7 @@
   "languageServerDescription": "{{language}} language server: {{summary}}",
   "languageServerError": "LSP error",
   "languageServerExited": "language server exited",
+  "languageServerFailedToStart": "Language server failed to start",
   "languageServerIsOff": "Language server is off",
   "languageServerNotFound": "Language server not found",
   "languageServerOpenStatus": "Language server: {{summary}}. Open status",

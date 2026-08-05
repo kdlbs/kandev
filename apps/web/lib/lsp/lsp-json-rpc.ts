@@ -228,6 +228,7 @@ export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = 
     reason: t("lsp:autoInstallUnsupported"),
     cause: "auto_install_unsupported",
   }),
+  4008: () => ({ state: "error", reason: t("lsp:languageServerFailedToStart") }),
 };
 
 export function getLspUnavailableSetupHint(

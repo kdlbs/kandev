@@ -210,7 +210,7 @@ describe("LSP readiness failure cleanup", () => {
     await vi.waitFor(() => {
       expect(lspClientManager.getStatus("session", "typescript")).toEqual({
         state: "error",
-        reason: "Error: Monaco chunk failed",
+        reason: "Monaco chunk failed",
       });
     });
     expect(firstSocket.readyState).toBe(FakeWebSocket.CLOSED);

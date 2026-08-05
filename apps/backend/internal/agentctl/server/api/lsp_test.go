@@ -271,9 +271,13 @@ func (s *controlledLSPInstallStrategy) Install(ctx context.Context) (*tools.Inst
 type fakeLSPInstallerRegistry struct {
 	strategy   tools.Strategy
 	strategies map[string]tools.Strategy
+	binaryPath string
 }
 
 func (r *fakeLSPInstallerRegistry) BinaryPath(string) (string, error) {
+	if r.binaryPath != "" {
+		return r.binaryPath, nil
+	}
 	return "", os.ErrNotExist
 }
 
@@ -309,6 +313,32 @@ func TestHandleLSPStream_MissingBinaryWithoutAutoInstallClosesWithBinaryNotFound
 	}
 	if closeErr.Code != 4001 {
 		t.Fatalf("close code = %d, want 4001", closeErr.Code)
+	}
+}
+
+func TestHandleLSPStream_StartFailureClosesWithCategoricalStatus(t *testing.T) {
+	s := newTestServer(t)
+	s.lspInstaller = &fakeLSPInstallerRegistry{
+		binaryPath: filepath.Join(t.TempDir(), "missing-language-server"),
+	}
+	ts := httptest.NewServer(s.router)
+	t.Cleanup(ts.Close)
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/api/v1/lsp/stream?language=kotlin"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial lsp stream: %v", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, _, err = conn.ReadMessage()
+	closeErr, ok := err.(*websocket.CloseError)
+	if !ok {
+		t.Fatalf("start failure error = %T %v, want WebSocket close", err, err)
+	}
+	if closeErr.Code != 4008 || closeErr.Text != "" {
+		t.Fatalf("start failure close = %d %q, want 4008 with no reason", closeErr.Code, closeErr.Text)
 	}
 }
 

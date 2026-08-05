@@ -28,6 +28,7 @@ const (
 	lspCloseInstallFailed          = 4003
 	lspCloseServerExited           = 4006
 	lspCloseAutoInstallUnsupported = 4007
+	lspCloseStartFailed            = 4008
 
 	lspLanguageTypeScript    = "typescript"
 	lspLanguagePython        = "python"
@@ -205,7 +206,11 @@ func (s *Server) handleLSPBridge(conn *websocket.Conn, language, binaryPath stri
 	server, err := s.startLSPServer(language, binaryPath)
 	if err != nil {
 		s.logger.Error("LSP: failed to start language server", zap.String("language", language), zap.Error(err))
-		_ = conn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseInternalServerErr, err.Error()))
+		_ = writeLSPForwarderMessage(
+			conn,
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(lspCloseStartFailed, ""),
+		)
 		_ = conn.Close()
 		return
 	}
