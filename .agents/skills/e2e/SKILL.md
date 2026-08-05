@@ -367,11 +367,8 @@ Tests are grouped by feature area in subdirectories under `tests/`. When creatin
   `page.evaluate` callbacks execute in the browser, so they cannot close over
   Node/test variables. Pass expected values as the argument instead, for
   example `locator.evaluate((el, expected) => Math.abs(el.scrollTop - expected), baseline)`.
-- **Reset pointer state before hover assertions.** A prior click or pointer move
-  can leave the browser's hover target active, so an assertion can pass without
-  exercising the intended `hover()` path. Move the pointer to a neutral page
-  location (or otherwise clear the prior target) before hovering and asserting
-  tooltip, idle, or pointer-dependent UI state.
+- **Reset pointer state before hover assertions.** A prior click can leave the
+  hover target active; move to a neutral page location before asserting hover UI.
 - **Measure asynchronous layout from a settled baseline.** When the initiating
   UI action changes layout before its delayed result arrives, delay the mock
   response and capture the baseline after that synchronous layout settles. Then
