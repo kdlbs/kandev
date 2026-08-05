@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageShell } from "@/components/page-shell";
@@ -11,7 +10,6 @@ import { safeDecodePathSegment } from "@/lib/routing/path";
 import { SettingsPageNav } from "@/components/settings/settings-page-nav";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
-import { rememberSettingsPath } from "@/lib/settings/last-settings-page";
 import { useTranslation } from "react-i18next";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
@@ -223,13 +221,6 @@ function SettingsShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-
-  // Where bare `/settings` sends this device next time. Recorded here rather
-  // than in the index route so every settings page updates it, including the
-  // target a redirect stub lands on.
-  useEffect(() => {
-    rememberSettingsPath(pathname);
-  }, [pathname]);
 
   return (
     <TooltipProvider>

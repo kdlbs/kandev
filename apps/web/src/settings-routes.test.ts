@@ -18,7 +18,13 @@ import { TaskActionsSettings } from "@/components/settings/general-settings";
 import { SecretsSettings } from "@/components/settings/secrets-settings";
 import { workspaceId, workflowId } from "@/lib/types/ids";
 import type { ListWorkspacesResponse, UserSettingsResponse } from "@/lib/types/http";
-import { buildSettingsInitialStateForRoute, renderSettingsRoute } from "./settings-routes";
+import { GENERAL_SETTINGS_HOME } from "@/components/settings/general-nav";
+import { DEFAULT_SETTINGS_PATH } from "@/lib/settings/last-settings-page";
+import {
+  buildSettingsInitialStateForRoute,
+  renderSettingsRoute,
+  SETTINGS_ROUTE_PATHS,
+} from "./settings-routes";
 
 vi.mock("@/components/settings/system/updates-card", () => ({ UpdatesCard: () => null }));
 
@@ -361,3 +367,20 @@ function isThenable(value: unknown): value is PromiseLike<unknown> {
     typeof value.then === "function"
   );
 }
+
+describe("restorable settings paths", () => {
+  it("covers the default /settings target and excludes what cannot be restored", () => {
+    // `/settings` restores only into this set. It has to contain the fallback
+    // target, and must not contain the shapes that resolve against deletable
+    // records — those are matched dynamically, so membership is the guard.
+    expect(SETTINGS_ROUTE_PATHS.has(DEFAULT_SETTINGS_PATH)).toBe(true);
+    expect(DEFAULT_SETTINGS_PATH).toBe(GENERAL_SETTINGS_HOME);
+
+    for (const path of SETTINGS_ROUTE_PATHS) {
+      expect(path.startsWith("/settings"), `${path} is not a settings path`).toBe(true);
+      expect(path, `${path} looks like a dynamic route`).not.toMatch(/[[\]:*]/);
+    }
+    expect(SETTINGS_ROUTE_PATHS.has("/settings/plugins/kandev-plugin-e2e")).toBe(false);
+    expect(SETTINGS_ROUTE_PATHS.has("/settings/does-not-exist")).toBe(false);
+  });
+});

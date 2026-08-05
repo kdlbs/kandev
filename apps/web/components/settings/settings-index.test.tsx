@@ -24,11 +24,11 @@ vi.mock("@/components/settings/settings-page-nav", () => ({
 }));
 
 import { SettingsIndex } from "./settings-index";
-import { DEFAULT_SETTINGS_PATH, rememberSettingsPath } from "@/lib/settings/last-settings-page";
+
+const RESTORE_TO = "/settings/general/terminal";
 
 describe("SettingsIndex", () => {
   beforeEach(() => {
-    window.localStorage.clear();
     router.replace.mockClear();
     router.push.mockClear();
     breakpoint.isMobile = false;
@@ -38,7 +38,7 @@ describe("SettingsIndex", () => {
   it("is the settings index on a phone, opened on the General group", () => {
     breakpoint.isMobile = true;
 
-    render(<SettingsIndex />);
+    render(<SettingsIndex restoreTo={RESTORE_TO} />);
 
     expect(screen.getByTestId("settings-index")).not.toBeNull();
     const nav = screen.getByTestId("mock-page-nav");
@@ -49,23 +49,15 @@ describe("SettingsIndex", () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it("hands off to the last visited page on desktop, where the sidebar shows the tree", () => {
-    rememberSettingsPath("/settings/general/terminal");
+  it("hands off on desktop, where the sidebar shows the tree", () => {
+    render(<SettingsIndex restoreTo={RESTORE_TO} />);
 
-    render(<SettingsIndex />);
-
-    expect(router.replace).toHaveBeenCalledWith("/settings/general/terminal");
+    expect(router.replace).toHaveBeenCalledWith(RESTORE_TO);
     expect(screen.queryByTestId("settings-index")).toBeNull();
   });
 
-  it("falls back to the default page when this device has no history", () => {
-    render(<SettingsIndex />);
-
-    expect(router.replace).toHaveBeenCalledWith(DEFAULT_SETTINGS_PATH);
-  });
-
   it("replaces rather than pushes, so Back does not land here and redirect again", () => {
-    render(<SettingsIndex />);
+    render(<SettingsIndex restoreTo={RESTORE_TO} />);
 
     expect(router.push).not.toHaveBeenCalled();
     expect(router.replace).toHaveBeenCalledTimes(1);
@@ -73,12 +65,21 @@ describe("SettingsIndex", () => {
 
   it("decides once at mount: a later viewport change does not navigate", () => {
     breakpoint.isMobile = true;
-    const { rerender } = render(<SettingsIndex />);
+    const { rerender } = render(<SettingsIndex restoreTo={RESTORE_TO} />);
 
     breakpoint.isMobile = false;
-    rerender(<SettingsIndex />);
+    rerender(<SettingsIndex restoreTo={RESTORE_TO} />);
 
     expect(router.replace).not.toHaveBeenCalled();
     expect(screen.getByTestId("settings-index")).not.toBeNull();
+  });
+
+  it("keeps the target it mounted with", () => {
+    const { rerender } = render(<SettingsIndex restoreTo={RESTORE_TO} />);
+
+    rerender(<SettingsIndex restoreTo="/settings/prompts" />);
+
+    expect(router.replace).toHaveBeenCalledTimes(1);
+    expect(router.replace).toHaveBeenCalledWith(RESTORE_TO);
   });
 });

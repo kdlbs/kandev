@@ -8,12 +8,7 @@ import { STORAGE_KEYS } from "@/lib/settings/constants";
  */
 export const DEFAULT_SETTINGS_PATH = "/settings/general/appearance";
 
-/**
- * A path segment that identifies a record (workspace, agent, executor or plugin
- * id) rather than a page. Same shape the settings breadcrumb already skips when
- * deriving a page title.
- */
-const ID_SEGMENT = /^[0-9a-f-]{8,}$/i;
+const SETTINGS_INDEX_PATH = "/settings";
 
 function normalize(pathname: string): string {
   return pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
@@ -23,38 +18,49 @@ function normalize(pathname: string): string {
  * True when `pathname` is worth restoring the next time someone opens bare
  * `/settings`.
  *
- * Two exclusions, and only two:
+ * `knownPaths` is the static settings route table (`SETTINGS_ROUTE_PATHS`), and
+ * membership in it is the whole test. Restoring is a promise that the page will
+ * still be there, and only a static first-party route can keep it:
  *
- * - **`/settings` itself**, or it would restore to itself.
- * - **Anything carrying a record id** (`/settings/workspace/<id>/repositories`,
- *   `/settings/agents/<id>`). Deciding whether one of those still resolves needs
- *   the workspace/agent list, not a route table, and restoring a page for a
- *   deleted record is worse than restoring the default.
+ * - **Unknown paths** (`/settings/does-not-exist`, a route dropped in an
+ *   upgrade) would otherwise stick, because the settings shell renders — and so
+ *   records — even when the route falls through to `SettingsRouteFallback`.
+ * - **Record and slug routes** (`/settings/workspace/<id>/repositories`,
+ *   `/settings/agents/<name>`, a plugin's `/settings/plugins/<slug>`) resolve
+ *   against data that can disappear. Deciding whether one still resolves needs
+ *   the workspace/agent/plugin list, and landing on a page for something that
+ *   was deleted is worse than landing on the default.
+ * - **`/settings` itself** is a route, so it needs excluding by hand: it is the
+ *   route doing the restoring.
  *
  * Redirect stubs (`/settings/general/shell`, `/settings/system`, …) are
- * deliberately *not* excluded: they replace the URL on mount, so the very next
- * thing recorded is the page they land on.
+ * deliberately kept: they are static routes that replace the URL on mount, so
+ * the next thing recorded is the page they land on.
  */
-export function isRememberableSettingsPath(pathname: string): boolean {
+export function isRestorableSettingsPath(
+  pathname: string,
+  knownPaths: ReadonlySet<string>,
+): boolean {
   const path = normalize(pathname);
-  if (!path.startsWith("/settings/")) return false;
-  return !path.split("/").some((segment) => ID_SEGMENT.test(segment));
+  if (path === SETTINGS_INDEX_PATH) return false;
+  return knownPaths.has(path);
 }
 
 /** Record the settings page to return to. No-ops for paths we won't restore. */
-export function rememberSettingsPath(pathname: string): void {
+export function rememberSettingsPath(pathname: string, knownPaths: ReadonlySet<string>): void {
   const path = normalize(pathname);
-  if (!isRememberableSettingsPath(path)) return;
+  if (!isRestorableSettingsPath(path, knownPaths)) return;
   setLocalStorage(STORAGE_KEYS.LAST_SETTINGS_PATH, path);
 }
 
 /**
  * The settings page bare `/settings` should resolve to on this device.
  *
- * Re-validated on read rather than trusted: the stored value may predate a
- * release that moved or removed that page, or have been written by hand.
+ * Re-validated against `knownPaths` rather than trusted, so a page that existed
+ * when the value was written but has since moved or been removed falls back
+ * instead of resolving to a not-found surface forever.
  */
-export function readLastSettingsPath(): string {
+export function readLastSettingsPath(knownPaths: ReadonlySet<string>): string {
   const stored = getLocalStorage(STORAGE_KEYS.LAST_SETTINGS_PATH, "");
-  return isRememberableSettingsPath(stored) ? normalize(stored) : DEFAULT_SETTINGS_PATH;
+  return isRestorableSettingsPath(stored, knownPaths) ? normalize(stored) : DEFAULT_SETTINGS_PATH;
 }

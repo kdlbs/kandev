@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsPageNav } from "@/components/settings/settings-page-nav";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { readLastSettingsPath } from "@/lib/settings/last-settings-page";
 import { useRouter } from "@/lib/routing/client-router";
 
 const SETTINGS_INDEX_PATH = "/settings";
@@ -18,21 +17,24 @@ const SETTINGS_INDEX_PATH = "/settings";
  * emits) finally points at a page instead of a duplicate.
  *
  * From `md` up the sidebar already shows that tree, so a page repeating it would
- * be the duplication this route used to be: it hands off to the settings page
- * this device was last on (`readLastSettingsPath`).
+ * be the duplication this route used to be: it hands off to `restoreTo`, the
+ * settings page this device was last on.
+ *
+ * `restoreTo` is resolved by the route table, which owns the list of static
+ * settings paths that a stored value has to still be a member of — see
+ * `readLastSettingsPath`.
  *
  * Both decisions are made once, at mount. Resizing a window is not a reason to
  * navigate, and `useResponsiveBreakpoint` reads the real viewport on the first
  * client render, so there is no desktop-first flash to guard against.
  */
-export function SettingsIndex() {
+export function SettingsIndex({ restoreTo }: { restoreTo: string }) {
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
   const [showIndex] = useState(isMobile);
-  // Read once too: recording the visited page would otherwise race this read
-  // and could hand back `/settings` itself.
-  const restoreTarget = useRef(readLastSettingsPath());
+  // Captured so a re-render cannot retarget an in-flight handoff.
+  const restoreTarget = useRef(restoreTo);
 
   useEffect(() => {
     if (showIndex) return;

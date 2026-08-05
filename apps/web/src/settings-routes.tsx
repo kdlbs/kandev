@@ -43,6 +43,7 @@ import {
   TaskActionsSettings,
 } from "@/components/settings/general-settings";
 import { SettingsIndex } from "@/components/settings/settings-index";
+import { readLastSettingsPath, rememberSettingsPath } from "@/lib/settings/last-settings-page";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
@@ -141,7 +142,7 @@ const licenseEntries = licenses as LicenseEntry[];
 const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   // The index resolves per surface: the tree as a page on a phone, a handoff to
   // the last visited settings page on desktop. See `SettingsIndex`.
-  "/settings": () => <SettingsIndex />,
+  "/settings": () => <SettingsIndex restoreTo={readLastSettingsPath(SETTINGS_ROUTE_PATHS)} />,
   // `/settings/general` used to render the same card grid as `/settings`. It is
   // now a prefix only, like `/settings/system`.
   "/settings/general": () => <SettingsRedirect to={GENERAL_SETTINGS_HOME} />,
@@ -244,11 +245,26 @@ const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
   "/settings/changelog": () => <SettingsRedirect to="/settings/system/updates" />,
 };
 
+/**
+ * Every static settings path. Bare `/settings` restores only into this set: the
+ * shell renders — and would therefore record — any `/settings/*` path, including
+ * ones that fall through to `SettingsRouteFallback`, and the dynamic routes
+ * resolve against workspaces, agents and plugins that can be deleted. Derived
+ * from the table above so a removed route leaves the set in the same commit.
+ */
+export const SETTINGS_ROUTE_PATHS: ReadonlySet<string> = new Set(Object.keys(SETTINGS_ROUTES));
+
 export function SettingsRoutes({ pathname }: { pathname: string }) {
   const normalizedPathname = normalizeSettingsPath(pathname);
   // Subscribe so a plugin settings route registered after first paint
   // (async bundle load) re-resolves without requiring a navigation.
   usePluginRegistry();
+
+  // Where bare `/settings` sends this device next time. Recorded here, where the
+  // route table is in scope, so a path that does not resolve is never stored.
+  useEffect(() => {
+    rememberSettingsPath(normalizedPathname, SETTINGS_ROUTE_PATHS);
+  }, [normalizedPathname]);
 
   return (
     <>
