@@ -1,7 +1,7 @@
 ---
 id: "01-persist-canonical-sidebar-default"
 title: "Persist the canonical sidebar default"
-status: in_progress
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -135,3 +135,4 @@ and synchronize `plan.md` only after all acceptance criteria pass.
 - The review regression was reproduced in `TestApplySidebarViews` and the HTTP reset path before normalization; both now pass.
 - Added the real HTTP persistence regression, store coverage, canonical E2E reset state, and first-filter-edit browser scenario.
 - All verification commands above pass; no blockers remain.
+- PR #2293 was pushed as `b6ea4b50b` plus review-fix commit `cdc4f3737`. After the 15-minute fixup monitor, the current head reported 40 successful checks, zero failures, and zero unresolved review threads.

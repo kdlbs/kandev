@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/ui/sidebar-view-creation.md
 created: 2026-08-05
-status: building
+status: complete
 ---
 
 # Implementation Plan: Persist the Default Sidebar View
@@ -133,13 +133,15 @@ optimistic behavior remain the consumer contract being verified.
 - `cd apps/web && pnpm e2e:run --host --project chromium tests/task/sidebar-filter.spec.ts -- --grep "default 'All tasks' view"` — 1 Playwright test passed in 5.3s against the rebuilt backend; the managed runner exited cleanly and left no E2E backend/browser processes.
 - `git diff --check` — passed.
 
+- PR #2293 ([current head `cdc4f3737408d0aeb9c24b7076d98db2b21342b3`](https://github.com/kdlbs/kandev/pull/2293)) — all 40 reported checks passed after the review fixup; no failed checks or unresolved review threads remain.
+
 ---
 
 ## Implementation Waves And Parallel Candidates
 
 Sequential execution in the primary conversation:
 
-- [ ] [Task 01: Persist the canonical sidebar default](task-01-persist-canonical-sidebar-default.md) — in_progress (PR fixup)
+- [x] [Task 01: Persist the canonical sidebar default](task-01-persist-canonical-sidebar-default.md) — done
 
 This is one vertical fix spanning a shared persistence contract and its browser
 regression. It is not parallel-safe and does not authorize subagents.
