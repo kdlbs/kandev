@@ -142,6 +142,25 @@ describe("queue reference payloads", () => {
     });
   });
 
+  it("forwards context file metadata through message.queue.add", async () => {
+    const request = vi.fn().mockResolvedValue({ id: "q-1" });
+    getWebSocketClientMock.mockReturnValue({ request });
+
+    await queueMessage({
+      session_id: "session-1",
+      task_id: "task-1",
+      content: "queued context",
+      context_files: [{ path: "src/components", name: "components" }],
+    });
+
+    expect(request).toHaveBeenCalledWith("message.queue.add", {
+      session_id: "session-1",
+      task_id: "task-1",
+      content: "queued context",
+      context_files: [{ path: "src/components", name: "components" }],
+    });
+  });
+
   it("sends an explicit empty reference array when replacing a queued message", async () => {
     const request = vi.fn().mockResolvedValue({ entry_id: "q-1" });
     getWebSocketClientMock.mockReturnValue({ request });

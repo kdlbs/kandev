@@ -18,6 +18,7 @@ const SESSION_ID = "session-1";
 const RETRY_ID_ONE = "client-message-1";
 const RETRY_ID_TWO = "client-message-2";
 const MESSAGE_ADD_ACTION = "message.add";
+const CONTEXT_DIRECTORY_PATH = "src/components";
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
@@ -160,13 +161,13 @@ describe("buildContextFilesContext", () => {
     const out = buildContextFilesContext(
       [
         { path: "src/app.ts", name: "app.ts" },
-        { path: "src/components", name: "components", isDirectory: true },
+        { path: CONTEXT_DIRECTORY_PATH, name: "components", isDirectory: true },
       ],
       [],
     );
 
     expect(out).toContain("- file: src/app.ts");
-    expect(out).toContain("- directory: src/components");
+    expect(out).toContain(`- directory: ${CONTEXT_DIRECTORY_PATH}`);
   });
 
   it("sanitizes attached paths before embedding them in the system block", () => {
@@ -552,6 +553,43 @@ describe("useMessageHandler input routing", () => {
   });
 });
 
+describe("queued context file metadata", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getWebSocketClientMock.mockReturnValue({ request: vi.fn().mockResolvedValue(undefined) });
+  });
+
+  it("queues context file metadata alongside the hidden context paths", async () => {
+    selectedSession("RUNNING", "generating");
+    const { result } = renderHook(() =>
+      useMessageHandler({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        sessionModel: null,
+        activeModel: null,
+        contextFiles: [
+          { path: "src/app.ts", name: "app.ts" },
+          { path: CONTEXT_DIRECTORY_PATH, name: "components", isDirectory: true },
+        ],
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage(submit("inspect these paths"));
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextFilesMeta: [
+          { path: "src/app.ts", name: "app.ts" },
+          { path: CONTEXT_DIRECTORY_PATH, name: "components" },
+        ],
+      }),
+    );
+    expect(queueMock.mock.calls[0][0].content).toContain(`- directory: ${CONTEXT_DIRECTORY_PATH}`);
+  });
+});
+
 describe("directory context file submission", () => {
   it("keeps directory identity out of outbound metadata while describing it in the prompt", async () => {
     selectedSession("CREATED");
@@ -563,7 +601,7 @@ describe("directory context file submission", () => {
         taskId: TASK_ID,
         sessionModel: null,
         activeModel: null,
-        contextFiles: [{ path: "src/components", name: "components", isDirectory: true }],
+        contextFiles: [{ path: CONTEXT_DIRECTORY_PATH, name: "components", isDirectory: true }],
       }),
     );
 
@@ -574,8 +612,8 @@ describe("directory context file submission", () => {
     expect(request).toHaveBeenCalledWith(
       MESSAGE_ADD_ACTION,
       expect.objectContaining({
-        content: expect.stringContaining("- directory: src/components"),
-        context_files: [{ path: "src/components", name: "components" }],
+        content: expect.stringContaining(`- directory: ${CONTEXT_DIRECTORY_PATH}`),
+        context_files: [{ path: CONTEXT_DIRECTORY_PATH, name: "components" }],
       }),
       10000,
     );

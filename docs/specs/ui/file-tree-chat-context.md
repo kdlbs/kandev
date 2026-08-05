@@ -17,7 +17,7 @@ Users inspecting a task's Files tab must currently return to the chat composer a
 - A context path appears at most once per session. Choosing the action again for the same path leaves one context item.
 - File and directory context items are visually distinguishable before send. Directory items do not attempt to open a file preview when selected.
 - File-tree context items are ephemeral: they survive a reload and a failed send, and they are removed after the next successful send unless the user pins them through an existing context control.
-- Sending the message includes each selected path in the existing hidden context block and `context_files` message metadata so the agent is instructed to inspect the path and the sent user message records it.
+- Sending the message, directly or after a busy-session send is queued, includes each selected path in the existing hidden context block and `context_files` message metadata so the agent is instructed to inspect the path and the sent user message records it.
 - On phone and coarse-pointer layouts, each eligible file-tree row exposes a visible, accessible action trigger. The trigger opens the existing responsive menu treatment with a touch target at least 44px high; long press or right-click is not required.
 - All new visible labels and feedback use the existing localization catalogs.
 - Existing file opening, folder expansion, multi-selection, drag/drop, editor, rename, download, and delete behavior remains unchanged.
@@ -40,6 +40,8 @@ Users inspecting a task's Files tab must currently return to the chat composer a
 - **GIVEN** a path already present in chat context, **WHEN** the user adds the same node again, **THEN** the composer still contains exactly one item for that path.
 - **GIVEN** a pending file or directory context item, **WHEN** a message send succeeds, **THEN** the sent user message records the path and the unpinned composer item is cleared.
 - **GIVEN** a pending file or directory context item, **WHEN** a message send fails, **THEN** the item remains available for retry.
+- **GIVEN** a pending file or directory context item while the session is busy, **WHEN** the message is queued and later drained, **THEN** the hidden context instruction and sent user-message metadata both retain the selected path.
+- **GIVEN** a Files-tab search result, **WHEN** the user opens its right-click or touch overflow action and chooses Add to chat context, **THEN** the same session-bound context handler adds the result without opening the file.
 - **GIVEN** a phone or coarse-pointer task layout, **WHEN** the user opens the Files tab, **THEN** a visible touch action can add a file or directory to chat context without right-click or long press.
 - **GIVEN** more than one file-tree node is selected, **WHEN** the shared bulk context menu opens, **THEN** its existing bulk actions remain unchanged and no ambiguous single-node Add to chat context action is shown.
 
@@ -49,7 +51,7 @@ Users inspecting a task's Files tab must currently return to the chat composer a
 - Adding all nodes in a multi-selection as one bulk context operation.
 - Uploading file contents or introducing a new backend file-read API.
 - Automatically switching to or focusing the Chat panel after the action.
-- Persisting unsent chat context on the backend.
+- Persisting unsent composer context as a backend draft; queued messages are already user-message history and retain their attached metadata.
 
 ## Implementation plan
 

@@ -15,11 +15,13 @@ async function setupMobileContextTask(
 ) {
   const suffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   const directoryPath = `mobile-context-directory-${suffix}`;
+  const filePath = `mobile-context-file-${suffix}.md`;
   const git = new GitHelper(
     path.join(backend.tmpDir, "repos", "e2e-repo"),
     makeGitEnv(backend.tmpDir),
   );
   git.createFile(`${directoryPath}/nested.txt`, "mobile directory content\n");
+  git.createFile(filePath, "mobile file content\n");
   git.stageAll();
   git.commit(`add mobile chat context fixture ${suffix}`);
 
@@ -38,7 +40,7 @@ async function setupMobileContextTask(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 45_000 });
-  return { session, directoryPath };
+  return { session, directoryPath, filePath };
 }
 
 test.describe("Mobile file tree chat context", () => {
@@ -50,7 +52,7 @@ test.describe("Mobile file tree chat context", () => {
     prCapture,
   }) => {
     test.setTimeout(90_000);
-    const { session, directoryPath } = await setupMobileContextTask(
+    const { session, directoryPath, filePath } = await setupMobileContextTask(
       testPage,
       apiClient,
       seedData,
@@ -94,6 +96,19 @@ test.describe("Mobile file tree chat context", () => {
     });
 
     await addItem.tap();
+
+    // Search results use the same visible touch action and session-bound handler.
+    await session.fileSearchButton().tap();
+    await session.fileSearchInput().fill(filePath);
+    const searchResult = session.fileSearchResult(filePath);
+    await expect(searchResult).toBeVisible({ timeout: 15_000 });
+    const searchTrigger = session.fileTreeNodeActions(filePath);
+    await expect(searchTrigger).toBeVisible();
+    await searchTrigger.tap();
+    await expect(session.fileTreeTouchAddToChatContextItem()).toBeVisible();
+    await session.fileTreeTouchAddToChatContextItem().tap();
+    await session.fileSearchInput().press("Escape");
+
     await expect(testPage.getByTestId("mobile-file-viewer-panel")).toHaveCount(0);
     await testPage.getByRole("button", { name: "Chat" }).tap();
     await expect(session.chatContextFile(directoryPath)).toHaveCount(1);
@@ -105,8 +120,11 @@ test.describe("Mobile file tree chat context", () => {
       caption: "Pixel 5 Chat composer with a folder context chip",
     });
 
-    await session.sendMessageViaButton("Please inspect this directory.");
+    await expect(session.chatContextFile(filePath)).toHaveCount(1);
+    await session.sendMessageViaButton("Please inspect this directory and file.");
     await expect(session.sentMessageContextFile(directoryPath)).toBeVisible({ timeout: 15_000 });
+    await expect(session.sentMessageContextFile(filePath)).toBeVisible({ timeout: 15_000 });
     await expect(session.chatContextFile(directoryPath)).toHaveCount(0);
+    await expect(session.chatContextFile(filePath)).toHaveCount(0);
   });
 });

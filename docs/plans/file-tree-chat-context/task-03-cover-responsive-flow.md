@@ -80,3 +80,11 @@ Report RED/GREEN evidence, actual files changed, exact discovered/passed test co
 - Files added/updated: the focused `FileTreePage` composed by `SessionPage`, plus the desktop and
   mobile task specs. The final managed runs removed temporary E2E results, blob reports, PR
   assets, and shard logs before execution.
+- PR review remediation: the page objects now expose search input/result selectors. The desktop
+  flow right-clicks a search result and verifies the existing context action remains idempotent;
+  the Pixel 5 flow taps the search result's 44px overflow action in addition to the tree-row flow.
+- Final PR-remediation run: the first mobile attempt timed out on the desktop-only panel scope;
+  the next attempt established that workspace search returns files, not directories. After
+  widening the visible page-object scope and adding a real file fixture, the final Pixel 5 run
+  passed 1 test, including the 44px trigger/menu, viewport bounds, no horizontal overflow,
+  directory tree-row action, file search-result action, sent metadata, and ephemeral clearing.

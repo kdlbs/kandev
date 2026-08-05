@@ -78,6 +78,16 @@ test.describe("File tree chat context", () => {
     await session.fileTreeAddToChatContextMenuItem().click();
     await addNodeToContext(directoryPath);
 
+    // Search results expose the same secondary action and remain idempotent.
+    await session.fileSearchButton().click();
+    await session.fileSearchInput().fill(filePath);
+    const searchResult = session.fileSearchResult(filePath);
+    await expect(searchResult).toBeVisible({ timeout: 15_000 });
+    await searchResult.click({ button: "right" });
+    await expect(session.fileTreeAddToChatContextMenuItem()).toBeVisible();
+    await session.fileTreeAddToChatContextMenuItem().click();
+    await session.fileSearchInput().press("Escape");
+
     // The secondary action must not open a file or expand a directory.
     await expect(testPage.getByTestId("preview-tab-file-editor")).toHaveCount(0);
     await expect(session.fileTreeNode(`${directoryPath}/nested.txt`)).toHaveCount(0);

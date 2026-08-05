@@ -8,11 +8,11 @@ status: complete
 
 ## Overview
 
-Extend the existing session-scoped context-file model so it can represent directories without breaking stored file entries, then wire a single-node add action into the Files tree's context menu and a visible touch/coarse-pointer row menu. The work reuses the current chat composer, message formatting, `context_files` metadata, Radix menu primitives, and responsive bottom-sheet CSS; no backend or WebSocket contract change is required. Focused component tests land with each frontend step, followed by desktop and mobile Playwright coverage of the complete Files-to-Chat flow.
+Extend the existing session-scoped context-file model so it can represent directories without breaking stored file entries, then wire a single-node add action into the Files tree's context menu and a visible touch/coarse-pointer row menu. The work reuses the current chat composer, message formatting, `context_files` metadata, Radix menu primitives, and responsive bottom-sheet CSS. Direct sends reuse the existing `message.add.context_files` contract; queued sends carry the same `{ path, name }` metadata through `message.queue.add` into the existing user-message metadata path. Focused component tests land with each frontend step, followed by desktop and mobile Playwright coverage of the complete Files-to-Chat flow.
 
 ## Backend
 
-No backend, database, filesystem, or WebSocket changes are required. `message.add.context_files` already accepts task-root-relative `{ path, name }` references and persists them in user-message metadata. Directory identity is a local pending-composer presentation concern; the hidden prompt block tells the agent whether each pending path is a file or directory before send.
+No database or filesystem changes are required. `message.add.context_files` already accepts task-root-relative `{ path, name }` references and persists them in user-message metadata. The queue WebSocket request now accepts the same optional `context_files` array, and queue draining preserves it through the existing metadata path; no schema or new message contract is needed. Directory identity is a local pending-composer presentation concern; the hidden prompt block tells the agent whether each pending path is a file or directory before send.
 
 ## Frontend
 
@@ -21,7 +21,7 @@ No backend, database, filesystem, or WebSocket changes are required. `message.ad
 - Extend `ContextFile` in `apps/web/lib/state/context-files-store.ts` with optional directory identity while preserving hydration of older session-storage entries. Persist that property with the existing `path`, `name`, and `pinned` fields; retain path-based deduplication and ephemeral clearing.
 - Extend `FileContextItem` in `apps/web/lib/types/context.ts` and `buildFileContextItem` in `apps/web/components/task/chat-context-items.ts` so directory items have no file-open handler or lazy file preview.
 - Update `apps/web/components/task/chat/context-items/file-item.tsx` to render the existing `ContextChip` with `IconFolder` for directories and `IconFile` plus `LazyFilePreview` for files. Give path chips stable `data-testid`/path metadata through `ContextChip` for component and E2E assertions.
-- Update `buildContextFilesContext` in `apps/web/hooks/use-message-handler.ts` to describe attached context as file and directory paths while retaining the existing filtered `context_files` metadata payload. Add tests for file-only, directory-only, mixed, duplicate, legacy-hydration, and successful/failed-send retention behavior at the narrowest owning layers.
+- Update `buildContextFilesContext` in `apps/web/hooks/use-message-handler.ts` to describe attached context as file and directory paths while retaining the existing filtered `context_files` metadata payload. Forward that payload through direct and queued sends. Add tests for file-only, directory-only, mixed, duplicate, legacy-hydration, queued metadata, and successful/failed-send retention behavior at the narrowest owning layers.
 
 ### File-tree actions
 
@@ -49,19 +49,22 @@ No backend, database, filesystem, or WebSocket changes are required. `message.ad
   **Files:** `apps/web/components/task/chat-context-items.test.ts`, `apps/web/components/task/chat/context-items/file-item.test.tsx`.
   **How:** pure builder assertions plus React Testing Library interaction/render tests.
 - **What:** hidden context text names file and directory paths while outbound `context_files` metadata remains `{ path, name }`; failed sends do not clear pending context and successful sends do.
-  **Files:** `apps/web/hooks/use-message-handler.test.ts`, existing chat input area tests where clearing is already owned.
+  **Files:** `apps/web/hooks/use-message-handler.test.ts`, `apps/web/hooks/domains/session/use-queue.test.ts`, `apps/web/lib/api/domains/queue-api.test.ts`, `apps/backend/internal/orchestrator/handlers/queue_handlers_test.go`, and existing chat input area tests where clearing is already owned.
   **How:** focused formatter and submission-state tests with the existing WebSocket/store mocks.
+- **What:** queued context metadata survives the queue API and WebSocket handler into the stored user message.
+  **Files:** `apps/web/hooks/domains/session/use-queue.test.ts`, `apps/web/lib/api/domains/queue-api.test.ts`, and `apps/backend/internal/orchestrator/handlers/queue_handlers_test.go`.
+  **How:** focused frontend payload assertions plus a backend queue-handler metadata assertion.
 - **What:** right-click menus expose the action for a file and a directory, invoke the supplied node callback once, deduplicate through the owning store handler, and omit the action for bulk selection; the touch trigger stops the row's primary action.
-  **Files:** `apps/web/components/task/file-context-menu.test.tsx`, a focused file-browser row/action test beside `file-browser-parts.tsx`.
+  **Files:** `apps/web/components/task/file-context-menu.test.tsx`, `apps/web/components/task/file-browser-context-action.test.tsx`, and `apps/web/components/task/file-browser-search-context-action.test.tsx`.
   **How:** React Testing Library context-menu/dropdown events with mocked breakpoint and store state.
-- **Targeted command:** `cd apps && pnpm --filter @kandev/web test -- --run lib/state/context-files-store.test.ts components/task/chat-context-items.test.ts components/task/chat/context-items/file-item.test.tsx hooks/use-message-handler.test.ts components/task/chat/chat-input-area.test.tsx components/task/file-context-menu.test.tsx components/task/file-browser-context-action.test.tsx`.
+- **Targeted command:** `cd apps && pnpm --filter @kandev/web test -- --run lib/state/context-files-store.test.ts components/task/chat-context-items.test.ts components/task/chat/context-items/file-item.test.tsx hooks/use-message-handler.test.ts hooks/domains/session/use-queue.test.ts lib/api/domains/queue-api.test.ts components/task/chat/chat-input-area.test.tsx components/task/file-context-menu.test.tsx components/task/file-browser-context-action.test.tsx components/task/file-browser-search-context-action.test.tsx`.
 
 ## E2E Tests
 
 - **Scenario:** given a desktop task with a file and directory, right-clicking each node and choosing Add to chat context creates one correctly typed chip per path; adding a duplicate remains idempotent; sending records both paths and clears the ephemeral composer chips.
   **File:** `apps/web/e2e/tests/task/file-tree-chat-context.spec.ts`.
-  **What to verify:** stable node/menu/chip selectors, exact session ownership, deduplication, sent user-message badges, and no file-open side effect.
-- **Scenario:** given the same task on Pixel 5, a visible file-tree row action adds a directory without right-click or long press.
+  **What to verify:** stable node/search-result/menu/chip selectors, exact session ownership, deduplication, sent user-message badges, and no file-open side effect.
+- **Scenario:** given the same task on Pixel 5, visible file-tree and search-result row actions add a directory without right-click or long press.
   **File:** `apps/web/e2e/tests/task/mobile-file-tree-chat-context.spec.ts`.
   **What to verify:** `.tap()` opens the responsive menu, trigger and action rows meet the 44px contract, menu bounds stay inside the viewport, document horizontal overflow is absent, the Chat tab shows the folder chip, and send clears it after recording the path.
 - **Page object:** add focused file-tree context-menu, touch-trigger, and context-chip helpers through `apps/web/e2e/pages/file-tree-page.ts`, composed by `apps/web/e2e/pages/session-page.ts`.
@@ -79,15 +82,26 @@ No backend, database, filesystem, or WebSocket changes are required. `message.ad
   hooks/use-message-handler.test.ts components/task/chat/chat-input-area.test.tsx
   components/task/file-context-menu.test.tsx components/task/file-browser-context-action.test.tsx`.
 - `cd apps/web && pnpm run typecheck` passed. The i18n pseudo-catalog, key check, ratchet, and
-  Simplified Chinese catalog parity checks passed. Targeted ESLint passed with no errors or
-  warnings.
+  Simplified Chinese catalog parity checks passed. Targeted ESLint passed with no errors; the
+  current focused test files retain three non-blocking max-lines/duplicate-string warnings.
 - Desktop managed E2E: `file-tree-chat-context.spec.ts` — 1 test passed on the initial run and
   again after the PR fixup, including the explicit collapsed-directory assertion.
 - Mobile managed E2E: `mobile-file-tree-chat-context.spec.ts` with `mobile-chrome` — 1 test
   passed on the initial run and again after the PR fixup. The test observed a 44px row trigger,
   a settled 44px menu item, viewport-bounded menu geometry, and no document horizontal overflow.
 - Each managed runner started from a fresh production build and logged cleanup of E2E results,
-  blob reports, PR assets, and shard logs. No backend or protocol changes were required.
+  blob reports, PR assets, and shard logs. No database schema or filesystem changes were required;
+  the queue metadata extension reused the existing user-message metadata path.
+- PR review remediation: queued sends now preserve `context_files` through the frontend queue
+  hook/API and backend queue handler; Files search results now share the desktop context menu and
+  coarse-pointer overflow action with tree rows. The initial RED regressions were 2 failed
+  assertions in the queue tests, 2 failed search-action assertions, and a backend compile failure
+  for the missing queue metadata constant. GREEN coverage was 6 frontend files/69 tests, the
+  focused queue-handler test passed 9 tests, and the adjacent orchestrator packages passed 1,640
+  tests. The first mobile rerun also confirmed the search API returns files rather than directory
+  rows; the final fixture searches a file while retaining the directory tree-row flow. Final
+  managed E2E runs passed 1 desktop test and 1 Pixel 5 mobile test from fresh production builds,
+  with the expected menu hitbox, viewport, overflow, metadata, and cleanup checks.
 
 ## Implementation Waves And Parallel Candidates
 

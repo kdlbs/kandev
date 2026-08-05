@@ -15,6 +15,23 @@ export class FileTreePage {
     );
   }
 
+  /** Visible search button in the Files panel, including the mobile panel mount. */
+  fileSearchButton(): Locator {
+    return this.page.locator('button[aria-label="Search files"]:visible');
+  }
+
+  /** Search input shown in the visible Files panel. */
+  fileSearchInput(): Locator {
+    return this.page.locator('input[placeholder="Search files..."]:visible');
+  }
+
+  /** Search result by its task-root-relative path. */
+  fileSearchResult(nodePath: string): Locator {
+    return this.page.locator(
+      `[data-testid="file-search-result"][data-path=${JSON.stringify(nodePath)}]:visible`,
+    );
+  }
+
   /** All file tree nodes with data-selected="true". */
   fileTreeSelectedNodes(): Locator {
     return this.files.locator("[data-selected='true']");

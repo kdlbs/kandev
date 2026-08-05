@@ -251,7 +251,7 @@ func TestQueueHandlersDenyUnauthorizedTaskSessionPairActions(t *testing.T) {
 
 func TestWsQueueMessage(t *testing.T) {
 	t.Run("queues a message", func(t *testing.T) {
-		handlers, _ := setupQueueHandlers(t)
+		handlers, svc := setupQueueHandlers(t)
 		ctx := context.Background()
 
 		msg := createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
@@ -259,11 +259,17 @@ func TestWsQueueMessage(t *testing.T) {
 			"task_id":    "task-1",
 			"content":    "test message",
 			"user_id":    "user-1",
+			"context_files": []map[string]string{
+				{"path": "src/components", "name": "components"},
+			},
 		})
 
 		response, err := handlers.wsQueueMessage(ctx, msg)
 		require.NoError(t, err)
 		assert.Equal(t, ws.MessageTypeResponse, response.Type)
+		entries := svc.GetStatus(ctx, "session-1").Entries
+		require.Len(t, entries, 1)
+		assert.Equal(t, []v1.ContextFileMeta{{Path: "src/components", Name: "components"}}, entries[0].Metadata[messagequeue.MetadataContextFiles])
 	})
 
 	t.Run("rejects missing session_id", func(t *testing.T) {

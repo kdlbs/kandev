@@ -1489,6 +1489,21 @@ export class SessionPage {
     return this.fileTree.fileTreeNode(nodePath);
   }
 
+  /** Visible search button in the Files panel. */
+  fileSearchButton(): Locator {
+    return this.fileTree.fileSearchButton();
+  }
+
+  /** Search input shown in the visible Files panel. */
+  fileSearchInput(): Locator {
+    return this.fileTree.fileSearchInput();
+  }
+
+  /** Search result by its task-root-relative path. */
+  fileSearchResult(nodePath: string): Locator {
+    return this.fileTree.fileSearchResult(nodePath);
+  }
+
   /** All file tree nodes with data-selected="true". */
   fileTreeSelectedNodes(): Locator {
     return this.fileTree.fileTreeSelectedNodes();

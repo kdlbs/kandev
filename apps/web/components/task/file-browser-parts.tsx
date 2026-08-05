@@ -142,7 +142,7 @@ function getTreeNodeRowClass(
   );
 }
 
-function TreeNodeTouchActions({
+export function FileTreeNodeTouchActions({
   node,
   showTouchActions,
   onAddToChatContext,
@@ -262,7 +262,7 @@ export function TreeNodeItem(props: TreeNodeRowProps) {
       )}
       <TreeNodeFileIcon node={node} isExpanded={isExpanded} isActive={isActive} />
       <TreeNodeName node={node} isActive={isActive} gitStatus={gitStatus} rename={rename} />
-      <TreeNodeTouchActions
+      <FileTreeNodeTouchActions
         node={node}
         showTouchActions={showTouchActions}
         onAddToChatContext={onAddToChatContext}
@@ -292,12 +292,25 @@ type SearchResultsListProps = {
   searchResults: string[] | null;
   fileStatuses: Map<string, GitFileStatus>;
   onOpenFile: (path: string) => void;
+  showTouchActions?: boolean;
+  onAddToChatContext?: (node: FileTreeNode) => void;
 };
+
+function searchResultNode(path: string): FileTreeNode {
+  return {
+    name: path.split("/").pop() || path,
+    path,
+    is_dir: false,
+    size: 0,
+  };
+}
 
 export function SearchResultsList({
   searchResults,
   fileStatuses,
   onOpenFile,
+  showTouchActions,
+  onAddToChatContext,
 }: SearchResultsListProps) {
   if (!searchResults) return null;
 
@@ -308,12 +321,14 @@ export function SearchResultsList({
   return (
     <div className="pb-2">
       {searchResults.map((path) => {
-        const name = path.split("/").pop() || path;
+        const node = searchResultNode(path);
+        const name = node.name;
         const folder = path.includes("/") ? path.substring(0, path.lastIndexOf("/")) : "";
         const gitStatus = fileStatuses.get(path);
-        return (
+        const row = (
           <div
-            key={path}
+            data-testid="file-search-result"
+            data-path={path}
             className={cn(
               "group flex w-full items-center gap-1 px-2 py-0.5 text-left text-sm cursor-pointer",
               "hover:bg-muted",
@@ -335,7 +350,25 @@ export function SearchResultsList({
               {folder && <span>{folder}/</span>}
               <span>{name}</span>
             </span>
+            <FileTreeNodeTouchActions
+              node={node}
+              showTouchActions={showTouchActions}
+              onAddToChatContext={onAddToChatContext}
+            />
           </div>
+        );
+
+        return (
+          <FileContextMenu
+            key={path}
+            node={node}
+            tree={null}
+            setTree={() => {}}
+            onStartRename={() => {}}
+            onAddToChatContext={onAddToChatContext}
+          >
+            {row}
+          </FileContextMenu>
         );
       })}
     </div>
@@ -448,6 +481,8 @@ export function FileBrowserContentArea(props: FileBrowserContentAreaProps) {
         searchResults={props.searchResults}
         fileStatuses={props.fileStatuses}
         onOpenFile={props.onOpenFile}
+        showTouchActions={props.showTouchActions}
+        onAddToChatContext={props.onAddToChatContext}
       />
     );
   }

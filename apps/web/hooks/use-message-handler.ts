@@ -370,6 +370,7 @@ export function useMessageHandler({
           planMode: planModeEnabled,
           attachments: queueAttachments,
           entityReferences: payload.entityReferences,
+          ...(contextFilesMeta ? { contextFilesMeta } : {}),
         });
         return;
       }

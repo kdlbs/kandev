@@ -77,3 +77,8 @@ Report RED/GREEN evidence, actual files changed, exact commands and test counts,
 - Compatibility: `isDirectory` is optional for legacy session-storage entries;
   directory identity is presentation-only and outbound `context_files` remains
   `{ path, name }`.
+- PR review remediation: queued sends now forward the filtered `{ path, name }` metadata through
+  `useMessageHandler`, `useQueue`, the queue API, and the backend queue handler, so draining a
+  queued message preserves its sent-message context metadata. RED covered the missing frontend
+  payload and backend constant; GREEN was 3 frontend files/57 tests plus the focused backend
+  queue-handler test.

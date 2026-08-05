@@ -78,3 +78,7 @@ Report RED/GREEN evidence, actual files changed, exact commands/test counts, tra
   browser header and the focused E2E page object.
 - Localized keys added: `chat:addToChatContext`, `chat:fileTreeActions`, and
   `chat:addedToChatContext` in English, pseudo, and Simplified Chinese catalogs.
+- PR review remediation: Files-tab search results now wrap the same `FileContextMenu` and
+  `FileTreeNodeTouchActions` used by tree rows, with a synthetic file node carrying the searched
+  path/name. The new focused component test was RED before the wiring and GREEN at 2 tests; the
+  shared handler/store path remains unchanged and search-result additions stay idempotent.
