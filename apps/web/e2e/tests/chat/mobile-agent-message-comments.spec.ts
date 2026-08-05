@@ -46,6 +46,10 @@ test.describe("Agent message comments on mobile", () => {
       "Mobile Agent Message Comments",
     );
 
+    // This readiness helper may reload to recover stale startup state. Run it
+    // before opening the transient drawer so recovery cannot dismiss the UI
+    // that the remaining assertions exercise.
+    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
     await selectAgentReplyText(body, SELECTED_REPLY_TEXT);
     const commentTrigger = testPage.getByTestId("agent-message-comment-trigger");
     await expect(commentTrigger).toBeVisible();
@@ -62,10 +66,6 @@ test.describe("Agent message comments on mobile", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await drawer.getByTestId("agent-message-comment-input").fill("Run with this correction.");
-    // Under shard load the auto-started session can briefly return to STARTING
-    // after its first idle render. Wait for the stronger editable-idle state so
-    // Run exercises the direct-send path instead of racing into the queue.
-    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
     await runButton.click();
 
     await expect(drawer).not.toBeVisible({ timeout: 15_000 });
