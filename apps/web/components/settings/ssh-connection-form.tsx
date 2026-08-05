@@ -168,7 +168,15 @@ function IdentitySourceField({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="agent" data-testid="ssh-input-identity-source-agent">
-            ssh-agent (SSH_AUTH_SOCK)
+            {/* The OpenSSH agent program and the environment variable it
+                publishes its socket on are identifiers the user finds under
+                those names on their own machine, so both travel as interpolated
+                values and the pseudo-locale leaves them intact. Only the
+                bracketing around them is copy. */}
+            {t("executors:sshIdentitySourceAgent", {
+              program: "ssh-agent",
+              envVar: "SSH_AUTH_SOCK",
+            })}
           </SelectItem>
           <SelectItem value="file" data-testid="ssh-input-identity-source-file">
             {t("executors:sshIdentitySourceFile")}

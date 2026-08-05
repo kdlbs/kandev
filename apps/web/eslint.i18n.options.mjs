@@ -77,7 +77,16 @@ export const noLiteralStringOptions = {
       // separator, which the token patterns above do not cover. Copy chunks
       // ("Select task ", " tasks, over WIP limit") carry a capital, a space or
       // punctuation and so still get flagged.
-      "[a-z0-9]+(?:[-_][a-z0-9]*)*|[-_][a-z0-9]+(?:[-_][a-z0-9]*)*",
+      //
+      // The outer `(?:…)` is load-bearing. `^` and `$` bind tighter than `|`, so
+      // the ungrouped form compiled to `(^A)|(B$)` — a first branch with no end
+      // anchor, which matched ANY string starting with a lowercase letter or a
+      // digit. That swallowed every `<Trans>` split fragment that happens to
+      // begin lowercase ("open pull requests assigned to you") in silence, for
+      // the whole repo, for as long as the pattern has existed. See the compiled
+      // -pattern test in `eslint.i18n.options.test.ts`, which fails without the
+      // group.
+      "(?:[a-z0-9]+(?:[-_][a-z0-9]*)*|[-_][a-z0-9]+(?:[-_][a-z0-9]*)*)",
       // Single lowercase/camel/kebab tokens are prop enum values,
       // classnames, and identifiers (variant="ghost", side="top",
       // value="work-items") — never display copy, which is capitalized
@@ -92,7 +101,19 @@ export const noLiteralStringOptions = {
       "^(noopener|noreferrer)( (noopener|noreferrer))*$",
       "^__[a-z_]+__$",
       "^/[\\w/\\-\\[\\]:.]*(\\?[\\w=&%.\\-]*)?$",
-      "(?:-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*\\s+)*-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*",
+      // Whitespace-separated token lists: Tailwind class lists that reach the
+      // guard as an object property (`{ className: "h-4 w-4" }`) rather than as
+      // a `className` JSX attribute, plus `owner/repo` and `ns:key` values.
+      //
+      // At least ONE token must carry a `-`, `:` or `/` (the middle branch).
+      // Without that requirement the pattern was "any run of lowercase words
+      // separated by spaces", which is a description of TYPOGRAPHY, not of
+      // syntax — and so it silently excluded every lowercase English sentence
+      // that happens to carry no punctuation ("open pull requests assigned to
+      // you"). Separators are what make a token a class name or a path rather
+      // than a word; English copy that needs one is rare, English copy that
+      // needs none is most of it.
+      "(?:-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*\\s+)*-?[a-z0-9]+(?:[:/-][a-z0-9.]+)+(?:\\s+-?[a-z0-9]+(?:[:/-][a-z0-9.]+)*)*",
     ],
   },
   "jsx-attributes": {
@@ -120,6 +141,14 @@ export const noLiteralStringOptions = {
       // Identifiers and prefixes the caller composes into ids/testids.
       "id",
       "k",
+      // A prop whose NAME ends in `Key` carries a catalog key, not copy:
+      // `titleKey`, `descriptionKey`, `labelKey`, `i18nKey`. Migrating a surface
+      // that resolves its copy at render (`SystemRouteShell`, the preset-icon
+      // catalogs) produces exactly this shape, and the value is by construction
+      // `namespace:someKey` — already-migrated copy, flagged only for being a
+      // string. This keys off the prop NAME, a syntactic category, not off what
+      // the value happens to look like.
+      ".*[Kk]ey$",
       // Option/badge values are data the app compares and submits.
       "value",
       "cmd",

@@ -180,6 +180,10 @@ function RepositoryScopeFields({
               data-settings-dirty={orgs !== baseline.orgs}
               onChange={(event) => onOrgsChange(event.target.value)}
               disabled={loading || mode !== "orgs"}
+              // Sample GitHub organization logins, i.e. the shape of the value
+              // this field accepts. A translated `example-org` would stop being
+              // a usable example.
+              // eslint-disable-next-line i18next/no-literal-string -- example org logins
               placeholder="kdlbs, example-org"
               data-testid="github-scope-orgs-input"
             />
@@ -195,6 +199,9 @@ function RepositoryScopeFields({
               onChange={(event) => onReposChange(event.target.value)}
               disabled={loading || mode !== "repos"}
               aria-invalid={invalidRepos}
+              // Sample `owner/repo` slugs — the format the sibling validation
+              // message describes, not copy.
+              // eslint-disable-next-line i18next/no-literal-string -- example repo slugs
               placeholder="kdlbs/kandev, example/api"
               data-testid="github-scope-repos-input"
             />
