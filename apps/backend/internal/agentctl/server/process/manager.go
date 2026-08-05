@@ -997,7 +997,13 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 		}
 	}
 
-	full := filepath.Join(m.cfg.WorkDir, cleaned)
+	// Repository scope names are also used as API keys and Git paths. Keep
+	// those keys slash-separated on every platform; filepath.Clean uses the
+	// native separator, which made Windows lookups miss the trackers built
+	// from Git's slash-separated gitlink paths and create an unanchored lazy
+	// tracker instead.
+	scope := filepath.ToSlash(cleaned)
+	full := filepath.Join(m.cfg.WorkDir, filepath.FromSlash(scope))
 	info, err := os.Stat(full)
 	if err != nil {
 		return "", "", fmt.Errorf("repo subpath not found: %w", err)
@@ -1005,7 +1011,7 @@ func (m *Manager) resolveSubpath(subpath string) (string, string, error) {
 	if !info.IsDir() {
 		return "", "", fmt.Errorf("repo subpath is not a directory: %q", subpath)
 	}
-	return cleaned, full, nil
+	return scope, full, nil
 }
 
 // WorkDir returns the absolute workspace root for this agentctl instance.
