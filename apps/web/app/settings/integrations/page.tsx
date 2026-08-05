@@ -9,6 +9,7 @@ import {
   IconTicket,
 } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
+import { useTranslation } from "react-i18next";
 
 const INTEGRATIONS = [
   {
@@ -60,6 +61,7 @@ type IntegrationsIndexPageProps = {
 };
 
 export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndexPageProps = {}) {
+  const { t } = useTranslation();
   const rootHref = workspaceId
     ? `/settings/workspace/${encodeURIComponent(workspaceId)}/integrations`
     : "/settings/integrations";
@@ -67,10 +69,9 @@ export default function IntegrationsIndexPage({ workspaceId }: IntegrationsIndex
   return (
     <div className="space-y-6">
       <div>
-        <h2 className="text-2xl font-bold">Integrations</h2>
+        <h2 className="text-2xl font-bold">{t("common:integrations")}</h2>
         <p className="text-sm text-muted-foreground mt-1">
-          Connect Kandev to third-party services. Connection scope and available settings are shown
-          on each integration page.
+          {t("settings:connectKandevToThirdPartyServices")}
         </p>
       </div>
       <div className="grid auto-rows-fr gap-3 sm:grid-cols-2 lg:grid-cols-3">

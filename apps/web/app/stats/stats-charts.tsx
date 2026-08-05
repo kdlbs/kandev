@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { DailyActivityDTO, AgentUsageDTO, CompletedTaskActivityDTO } from "@/lib/types/http";
+import { useTranslation } from "react-i18next";
 
 function formatMonthLabel(date: Date): string {
   return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
@@ -27,6 +28,7 @@ function formatDate(dateStr: string): string {
 }
 
 function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxActivity: number }) {
+  const { t } = useTranslation();
   return (
     <TooltipProvider delayDuration={100}>
       <div className="flex gap-[3px]">
@@ -56,7 +58,10 @@ function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxA
                   <TooltipContent side="top" className="text-xs">
                     <div className="font-medium">{formatDate(day.date)}</div>
                     <div className="text-muted-foreground">
-                      {day.turn_count} turns, {day.message_count} messages
+                      {t("stats:turnsMessagesCount", {
+                        turns: day.turn_count,
+                        messages: day.message_count,
+                      })}
                     </div>
                   </TooltipContent>
                 </Tooltip>
@@ -70,6 +75,7 @@ function HeatmapGrid({ weeks, maxActivity }: { weeks: DailyActivityDTO[][]; maxA
 }
 
 export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivityDTO[] }) {
+  const { t } = useTranslation();
   const { weeks, maxActivity, monthLabels } = useMemo(() => {
     if (!dailyActivity || dailyActivity.length === 0) {
       return {
@@ -143,7 +149,7 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
       </div>
 
       <div className="flex items-center gap-1 mt-2 text-[10px] text-muted-foreground">
-        <span>Less</span>
+        <span>{t("stats:less")}</span>
         <div className="flex gap-[2px]">
           <div className="h-[10px] w-[10px] rounded-[2px] bg-muted" />
           <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500/30" />
@@ -151,15 +157,18 @@ export function ActivityHeatmap({ dailyActivity }: { dailyActivity: DailyActivit
           <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500/70" />
           <div className="h-[10px] w-[10px] rounded-[2px] bg-emerald-500/90" />
         </div>
-        <span>More</span>
+        <span>{t("stats:more")}</span>
       </div>
     </div>
   );
 }
 
 export function AgentUsageList({ agentUsage }: { agentUsage: AgentUsageDTO[] }) {
+  const { t } = useTranslation();
   if (!agentUsage || agentUsage.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No agent usage data yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noAgentUsageDataYet")}</div>
+    );
   }
 
   const maxSessions = Math.max(...agentUsage.map((a) => a.session_count));
@@ -280,19 +289,22 @@ export function CompletedTasksChart({
 }: {
   completedActivity: CompletedTaskActivityDTO[];
 }) {
+  const { t } = useTranslation();
   const [bucket, setBucket] = useState<CompletionBucket>("day");
   const safeCompleted = useMemo(() => completedActivity ?? [], [completedActivity]);
   const series = useBucketedSeries(safeCompleted, bucket);
   const maxCount = Math.max(...series.map((item) => item.count), 1);
 
   if (safeCompleted.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noCompletedTaskDataYet")}</div>
+    );
   }
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <span className="uppercase tracking-wider text-[10px]">Bucket</span>
+        <span className="uppercase tracking-wider text-[10px]">{t("stats:bucket")}</span>
         {(["day", "week", "month"] as CompletionBucket[]).map((b) => (
           <Button
             key={b}
@@ -322,6 +334,7 @@ export function MostProductiveSummary({
 }: {
   completedActivity: CompletedTaskActivityDTO[];
 }) {
+  const { t } = useTranslation();
   const safeCompleted = useMemo(() => completedActivity ?? [], [completedActivity]);
 
   const stats = useMemo(() => {
@@ -366,7 +379,9 @@ export function MostProductiveSummary({
   }, [safeCompleted]);
 
   if (safeCompleted.length === 0) {
-    return <div className="text-sm text-muted-foreground py-4">No completed task data yet.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-4">{t("stats:noCompletedTaskDataYet")}</div>
+    );
   }
 
   const weekdayNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -388,19 +403,19 @@ export function MostProductiveSummary({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Best weekday</span>
+        <span className="text-muted-foreground">{t("stats:bestWeekday")}</span>
         <span className="font-mono tabular-nums">
           {weekdayNames[stats.maxWeekday.idx]} · {stats.maxWeekday.value}
         </span>
       </div>
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Best month</span>
+        <span className="text-muted-foreground">{t("stats:bestMonth")}</span>
         <span className="font-mono tabular-nums">
           {monthNames[stats.maxMonth.idx]} · {stats.maxMonth.value}
         </span>
       </div>
       <div className="flex items-center justify-between text-sm">
-        <span className="text-muted-foreground">Best year</span>
+        <span className="text-muted-foreground">{t("stats:bestYear")}</span>
         <span className="font-mono tabular-nums">
           {stats.maxYear.year || "\u2014"} · {stats.maxYear.value}
         </span>

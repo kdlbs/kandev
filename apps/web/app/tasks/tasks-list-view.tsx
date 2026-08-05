@@ -24,6 +24,8 @@ import {
   type TasksListGroup,
   type TasksListSort,
 } from "@/lib/tasks/tasks-list-options";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 export type TasksListViewProps = {
   total: number;
@@ -123,17 +125,18 @@ function TasksListControls({
   tasksListGroup: TasksListGroup;
   onTasksListGroupChange: (group: TasksListGroup) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="hidden min-h-9 flex-wrap items-center justify-end gap-3 sm:flex">
       <ListOptionSelect
-        label="Sort"
+        label={t("tasks:sort")}
         value={tasksListSort}
         options={TASKS_LIST_SORT_OPTIONS}
         onChange={(value) => onTasksListSortChange(value as TasksListSort)}
         testId="tasks-list-sort"
       />
       <ListOptionSelect
-        label="Group"
+        label={t("tasks:group")}
         value={tasksListGroup}
         options={TASKS_LIST_GROUP_OPTIONS}
         onChange={(value) => onTasksListGroupChange(value as TasksListGroup)}
@@ -145,7 +148,7 @@ function TasksListControls({
           onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
           className="cursor-pointer"
         />
-        Show archived
+        {t("tasks:showArchived")}
       </Label>
     </div>
   );
@@ -220,6 +223,7 @@ function TaskRows({
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
   onRowClick: (task: Task) => void;
 }) {
+  const { t } = useTranslation();
   const workflowMap = useMemo(() => new Map(workflows.map((w) => [w.id, w.name])), [workflows]);
   const repoMap = useMemo(() => new Map(repositories.map((r) => [r.id, r.name])), [repositories]);
   const sections = useMemo(
@@ -230,14 +234,14 @@ function TaskRows({
   if (isLoading) {
     return (
       <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        Loading tasks...
+        {t("tasks:loadingTasks")}
       </div>
     );
   }
   if (tasks.length === 0) {
     return (
       <div className="rounded-lg border border-border p-8 text-center text-sm text-muted-foreground">
-        No tasks found.
+        {t("tasks:noTasksFound")}
       </div>
     );
   }
@@ -338,15 +342,15 @@ function groupForTask(
 ) {
   if (groupBy === "workflow") {
     const title = workflowMap.get(task.workflow_id);
-    if (!title) return { key: "workflow:none", title: "No workflow" };
+    if (!title) return { key: "workflow:none", title: t("tasks:noWorkflow") };
     return { key: `workflow:${task.workflow_id || "none"}`, title };
   }
   if (groupBy === "repository") {
     const primaryRepo = primaryTaskRepository(task.repositories);
-    if (!primaryRepo) return { key: "repository:none", title: "No repository" };
+    if (!primaryRepo) return { key: "repository:none", title: t("tasks:noRepository") };
     const repoId = primaryRepo?.repository_id ?? "none";
     const title = repoMap.get(repoId);
-    if (!title) return { key: "repository:none", title: "No repository" };
+    if (!title) return { key: "repository:none", title: t("tasks:noRepository") };
     return { key: `repository:${repoId}`, title };
   }
   const title = formatTaskStateLabel(task.state);
@@ -501,6 +505,7 @@ function UnarchiveRowAction({
   taskId: string;
   onUnarchive: (taskId: string) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   const [isPending, setIsPending] = useState(false);
   return (
     <Tooltip>
@@ -526,11 +531,11 @@ function UnarchiveRowAction({
             ) : (
               <IconArchiveOff className="h-4 w-4 text-muted-foreground" />
             )}
-            <span className="sr-only">Unarchive task</span>
+            <span className="sr-only">{t("tasks:unarchiveTask")}</span>
           </Button>
         </span>
       </TooltipTrigger>
-      <TooltipContent>Unarchive</TooltipContent>
+      <TooltipContent>{t("tasks:unarchive")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -558,6 +563,7 @@ function TaskRowActions({
   onUnarchive: (taskId: string) => Promise<void>;
   onDelete: (taskId: string, opts?: { cascade?: boolean }) => Promise<void>;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1" onClick={(event) => event.stopPropagation()}>
       {!isArchived && (
@@ -570,10 +576,10 @@ function TaskRowActions({
               onClick={() => onArchiveOpenChange(true)}
             >
               <IconArchive className="h-4 w-4 text-muted-foreground" />
-              <span className="sr-only">Archive task</span>
+              <span className="sr-only">{t("tasks:archiveTask")}</span>
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Archive</TooltipContent>
+          <TooltipContent>{t("tasks:archive")}</TooltipContent>
         </Tooltip>
       )}
       {isArchived && <UnarchiveRowAction taskId={task.id} onUnarchive={onUnarchive} />}
@@ -592,11 +598,11 @@ function TaskRowActions({
               ) : (
                 <IconTrash className="h-4 w-4 text-destructive" />
               )}
-              <span className="sr-only">Delete task</span>
+              <span className="sr-only">{t("tasks:deleteTask")}</span>
             </Button>
           </span>
         </TooltipTrigger>
-        <TooltipContent>Delete</TooltipContent>
+        <TooltipContent>{t("tasks:delete")}</TooltipContent>
       </Tooltip>
       <TaskDeleteConfirmDialog
         open={showDeleteConfirm}

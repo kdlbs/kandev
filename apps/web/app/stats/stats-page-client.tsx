@@ -58,6 +58,7 @@ import {
   type StatsSections,
   useStatsSections,
 } from "./stats-data";
+import { useTranslation } from "react-i18next";
 
 interface StatsPageClientProps {
   workspaceId?: string;
@@ -66,9 +67,10 @@ interface StatsPageClientProps {
 }
 
 function StatsEmptyState({ message }: { message: string }) {
+  const { t } = useTranslation();
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
-      <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
+      <PageTopbar title={t("stats:statistics")} icon={<IconChartBar className="h-4 w-4" />} />
       <div className="flex-1 flex items-center justify-center">
         <p className="text-muted-foreground">{message}</p>
       </div>
@@ -95,9 +97,10 @@ function StatsHeader({
   onRangeChange,
   onCopy,
 }: StatsHeaderProps) {
+  const { t } = useTranslation();
   return (
     <PageTopbar
-      title="Statistics"
+      title={t("stats:statistics")}
       icon={<IconChartBar className="h-4 w-4" />}
       subtitle={getSubtitle(global, hasError)}
       actions={
@@ -129,7 +132,7 @@ function StatsHeader({
             onClick={onCopy}
             disabled={copyDisabled}
           >
-            {copied ? "Copied" : "Copy Stats"}
+            {copied ? t("stats:copied") : t("stats:copyStats")}
           </Button>
         </>
       }
@@ -182,8 +185,10 @@ function OverviewPanel({
   global: SectionStatus<GlobalStatsDTO>;
   git: SectionStatus<GitStatsDTO>;
 }) {
+  const { t } = useTranslation();
   if (global.kind === "loading") return <OverviewCardsSkeleton />;
-  if (global.kind === "error") return <ErrorPanel title="Overview" message={global.message} />;
+  if (global.kind === "error")
+    return <ErrorPanel title={t("stats:overview")} message={global.message} />;
   // Render global cards as soon as `global` is ready; `git` is independent and
   // its failure must not blank the tasks/sessions/turns summary the user can
   // already see. OverviewCards.git_stats is optional → falls back to the
@@ -193,20 +198,21 @@ function OverviewPanel({
 }
 
 function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivityDTO[]> }) {
+  const { t } = useTranslation();
   return renderSection(status, {
     skeleton: (
       <div id="completed" className="scroll-mt-24">
         <ChartsSkeleton />
       </div>
     ),
-    errorTitle: "Completed Tasks Over Time",
+    errorTitle: t("stats:completedTasksOverTime"),
     ready: (data) => (
       <div id="completed" className="scroll-mt-24">
         <div className="grid gap-4 lg:grid-cols-3">
           <Card className="rounded-sm lg:col-span-2">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Completed Tasks Over Time
+                {t("stats:completedTasksOverTime")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -216,7 +222,7 @@ function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivit
           <Card className="rounded-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Most Productive
+                {t("stats:mostProductive")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -238,16 +244,17 @@ function ActivityPanel({
   agents: SectionStatus<AgentUsageDTO[]>;
   rangeLabel: string;
 }) {
+  const { t } = useTranslation();
   return (
     <div id="activity" className="grid gap-4 lg:grid-cols-2 scroll-mt-24">
       {renderSection(daily, {
         skeleton: <ActivitySkeleton />,
-        errorTitle: "Activity",
+        errorTitle: t("stats:activity"),
         ready: (data) => (
           <Card className="rounded-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Activity ({rangeLabel.toLowerCase()})
+                {t("stats:activityRange", { range: rangeLabel.toLowerCase() })}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -258,12 +265,12 @@ function ActivityPanel({
       })}
       {renderSection(agents, {
         skeleton: <ActivitySkeleton />,
-        errorTitle: "Top Agents",
+        errorTitle: t("stats:topAgents"),
         ready: (data) => (
           <Card className="rounded-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-muted-foreground">
-                Top Agents
+                {t("stats:topAgents")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -277,14 +284,15 @@ function ActivityPanel({
 }
 
 function RepositoryActivityPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+  const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <RepositoriesSkeleton />,
-    errorTitle: "Repository Activity",
+    errorTitle: t("stats:repositoryActivity"),
     ready: (data) => (
       <Card id="repositories" className="rounded-sm scroll-mt-24">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">
-            Repository Activity
+            {t("stats:repositoryActivity")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -296,14 +304,15 @@ function RepositoryActivityPanel({ status }: { status: SectionStatus<RepositoryS
 }
 
 function TopRepositoriesPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+  const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <TopRepositoriesSkeleton />,
-    errorTitle: "Top Repositories",
+    errorTitle: t("stats:topRepositories"),
     ready: (data) => (
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
           <CardTitle className="text-sm font-medium text-muted-foreground">
-            Top Repositories
+            {t("stats:topRepositories")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -315,13 +324,16 @@ function TopRepositoriesPanel({ status }: { status: SectionStatus<RepositoryStat
 }
 
 function RepoLeadersPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+  const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <RepoLeadersSkeleton />,
-    errorTitle: "Repo Leaders",
+    errorTitle: t("stats:repoLeaders"),
     ready: (data) => (
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Repo Leaders</CardTitle>
+          <CardTitle className="text-sm font-medium text-muted-foreground">
+            {t("stats:repoLeaders")}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <RepoLeaders repositoryStats={data} />
@@ -332,9 +344,10 @@ function RepoLeadersPanel({ status }: { status: SectionStatus<RepositoryStatsDTO
 }
 
 function WorkloadPanel({ status }: { status: SectionStatus<TaskStatsDTO[]> }) {
+  const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <WorkloadSkeleton />,
-    errorTitle: "Workload",
+    errorTitle: t("stats:workload"),
     ready: (data) => <WorkloadSection task_stats={data} />,
   });
 }
@@ -348,13 +361,14 @@ function StatsContent({
   rangeLabel: string;
   workspaceId?: string;
 }) {
+  const { t } = useTranslation();
   const taskStatus = flattenTaskStats(sections.tasks);
   return (
     <div className="flex-1 overflow-auto">
       <div className="max-w-7xl mx-auto p-6">
         <div className="space-y-5">
           <OverviewPanel global={sections.global} git={sections.git} />
-          <SectionDivider id="telemetry" label="Telemetry" />
+          <SectionDivider id="telemetry" label={t("stats:telemetry")} />
           <CompletedPanel status={sections.completed} />
           <ActivityPanel daily={sections.daily} agents={sections.agents} rangeLabel={rangeLabel} />
           <RepositoryActivityPanel status={sections.repos} />
@@ -362,7 +376,7 @@ function StatsContent({
           <RepoLeadersPanel status={sections.repos} />
           <SectionDivider id="github" label="GitHub" />
           <PRStatsPanel workspaceId={workspaceId ?? null} />
-          <SectionDivider id="workload" label="Workload" />
+          <SectionDivider id="workload" label={t("stats:workload")} />
           <WorkloadPanel status={taskStatus} />
         </div>
       </div>
@@ -371,6 +385,7 @@ function StatsContent({
 }
 
 export function StatsPageClient({ workspaceId, activeRange, initialError }: StatsPageClientProps) {
+  const { t } = useTranslation();
   const router = useRouter();
   const searchParams = useSearchParams();
   const { copied, copy } = useCopyToClipboard();
@@ -410,13 +425,16 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
   if (initialError)
     return (
       <div className="flex h-full min-h-0 w-full flex-col bg-background">
-        <PageTopbar title="Statistics" icon={<IconChartBar className="h-4 w-4" />} />
+        <PageTopbar title={t("stats:statistics")} icon={<IconChartBar className="h-4 w-4" />} />
         <div className="flex-1 flex items-center justify-center">
-          <p className="text-destructive">Error loading stats: {initialError}</p>
+          <p className="text-destructive">
+            {t("stats:errorLoadingStats", { error: initialError })}
+          </p>
         </div>
       </div>
     );
-  if (!workspaceId) return <StatsEmptyState message="Select a workspace to view statistics." />;
+  if (!workspaceId)
+    return <StatsEmptyState message={t("stats:selectAWorkspaceToViewStatistics")} />;
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">

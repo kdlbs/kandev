@@ -1523,4 +1523,28 @@ export const i18nGuardFiles = [
   "components/jira/my-jira/filter-bar.tsx",
   "components/sentry/sentry-issue-dialog.tsx",
   "components/task-create-dialog-multi-repo-guard.ts",
+  // Stats dashboard.
+  "app/stats/stats-sections.tsx",
+  "app/stats/stats-page-client.tsx",
+  "app/stats/stats-charts.tsx",
+  // Tasks list view.
+  "app/tasks/tasks-list-view.tsx",
+  "app/tasks/tasks-pagination.tsx",
+  "app/tasks/rich-task-list-row.tsx",
+  "app/tasks/[[]id[]]/kanban-task-shell.tsx",
+  "app/tasks/columns.tsx",
+  // Auth: login, invite, first-run setup.
+  "app/auth/invite-page.tsx",
+  "app/auth/setup-wizard.tsx",
+  "app/auth/login-page.tsx",
+  // Settings → Integrations index.
+  "app/settings/integrations/page.tsx",
+  // Settings → Agents: already fully migrated to the `agents:` namespace by
+  // #2193 and #2281, before this list caught up. No `settings:` copy here —
+  // recorded so the guard covers them going forward.
+  "app/settings/agents/[[]agentId[]]/use-profile-mcp-config.ts",
+  "app/settings/agents/page.tsx",
+  "app/settings/agents/[[]agentId[]]/profiles/[[]profileId[]]/command-preview-card.tsx",
+  // Home route redirect shell.
+  "app/page-client.tsx",
 ];
