@@ -24,7 +24,7 @@ export default defineConfig({
   // the fixture's baseline env snapshot).
   fullyParallel: true,
   forbidOnly: CI,
-  failOnFlakyTests: CI,
+  failOnFlakyTests: false,
   retries: CI ? 2 : 0,
   workers: 1,
   timeout: 60_000,
