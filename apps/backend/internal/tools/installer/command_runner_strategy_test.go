@@ -219,3 +219,32 @@ func TestGoInstallStrategyUsesRunnerEnvironmentForLookupAndResult(t *testing.T) 
 		t.Fatalf("BinaryPath = %q, want task-environment path %q", result.BinaryPath, goplsPath)
 	}
 }
+
+func TestFindGoBinaryWithRunnerUsesUserProfileFallback(t *testing.T) {
+	userProfile := t.TempDir()
+	binaryName := "gopls"
+	if runtime.GOOS == windowsOS {
+		binaryName += ".exe"
+	}
+	binaryPath := filepath.Join(userProfile, "go", "bin", binaryName)
+	if err := os.MkdirAll(filepath.Dir(binaryPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(binaryPath, []byte("fixture"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runner := &recordingCommandRunner{environment: map[string]string{
+		"GOBIN":       "",
+		"GOPATH":      "",
+		"HOME":        "",
+		"USERPROFILE": userProfile,
+	}}
+
+	got, err := FindGoBinaryWithRunner("gopls", runner)
+	if err != nil {
+		t.Fatalf("FindGoBinaryWithRunner() error = %v", err)
+	}
+	if got != binaryPath {
+		t.Fatalf("FindGoBinaryWithRunner() = %q, want %q", got, binaryPath)
+	}
+}

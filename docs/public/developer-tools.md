@@ -205,7 +205,7 @@ Only enable Kotlin language support for repositories you trust. Kotlin project i
 Server lookup checks the task host's `PATH` and its `~/.kandev/lsp-servers` directory. The managed cache resolves `~` from the same task `HOME` used to execute installer commands, including executor-provided environment overrides. Auto-install uses different toolchains:
 
 - TypeScript/JavaScript and Python install npm packages into Kandev's language-server storage;
-- Go runs `go install ...@latest` and therefore needs a working Go toolchain;
+- Go runs `go install ...@latest` and therefore needs a working Go toolchain. Result discovery follows `GOBIN`, `GOPATH`, and the task user's default Go workspace, including `%USERPROFILE%\go\bin` on Windows;
 - Rust downloads a release for supported macOS or Linux, x86-64 or ARM64 task hosts. The Editors checkbox is a global preference; agentctl applies it only when the active task host supports the installer. A Windows Local PC task therefore needs a manual installation, while a Linux Local Docker task can auto-install Rust even when Kandev itself runs on Windows. If the selected task host has no supported installer, its status directs you to install the server manually even before you enable auto-install;
 - Kotlin is manual-only. Follow the [official Kotlin LSP installation guide](https://kotlinlang.org/docs/kotlin-lsp.html), then verify `command -v kotlin-lsp` and `kotlin-lsp --version` in the task environment.
 

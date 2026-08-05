@@ -63,13 +63,14 @@ func (s *GoInstallStrategy) Install(ctx context.Context) (*InstallResult, error)
 	}, nil
 }
 
-// FindGoBinary looks for a Go binary in GOBIN, GOPATH/bin, and ~/go/bin.
+// FindGoBinary looks for a Go binary in GOBIN, GOPATH/bin, and the platform's
+// default user Go workspace.
 func FindGoBinary(binary string) (string, error) {
 	return FindGoBinaryWithRunner(binary, nil)
 }
 
 // FindGoBinaryWithRunner looks for a Go binary using the runner's task
-// environment, including GOBIN, GOPATH, and HOME.
+// environment, including GOBIN, GOPATH, HOME, and USERPROFILE.
 func FindGoBinaryWithRunner(binary string, runner CommandRunner) (string, error) {
 	env, _, err := commandEnvironment(runner)
 	if err != nil {
@@ -83,11 +84,11 @@ func FindGoBinaryWithRunner(binary string, runner CommandRunner) (string, error)
 			}
 		}
 	}
-	return "", fmt.Errorf("%s not found in GOBIN/GOPATH/~/go/bin", binary)
+	return "", fmt.Errorf("%s not found in GOBIN/GOPATH/user Go bin", binary)
 }
 
 func goBinaryDirectories(env map[string]string) []string {
-	directories := make([]string, 0, 3)
+	directories := make([]string, 0, 4)
 	if gobin := environmentValue(env, "GOBIN"); gobin != "" {
 		directories = append(directories, gobin)
 	}
@@ -98,6 +99,9 @@ func goBinaryDirectories(env map[string]string) []string {
 	}
 	if home := environmentValue(env, "HOME"); home != "" {
 		directories = append(directories, filepath.Join(home, "go", "bin"))
+	}
+	if userProfile := environmentValue(env, "USERPROFILE"); userProfile != "" {
+		directories = append(directories, filepath.Join(userProfile, "go", "bin"))
 	}
 	return directories
 }

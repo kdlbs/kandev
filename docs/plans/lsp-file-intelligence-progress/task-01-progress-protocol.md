@@ -64,6 +64,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: categorical task-host close codes for unsupported executors, capacity, and stream failures ignore English transport prose and resolve their status through the active frontend locale.
 - Review hardening: completion items without `textEdit` use Monaco's current-word range while `InsertReplaceEdit` keeps its dual range, live LSP JSON settings update the reused connection and its configuration request handler, and task hosts without an installer close with localized manual-install guidance through `4007` before or after preference opt-in.
 - Review hardening: TypeScript built-in suppression now follows per-connection model ownership instead of a global flag, so unrelated sessions keep Monaco intelligence; valid empty semantic-token arrays return an empty payload without periodic client polling.
+- Review hardening: Go post-install discovery now includes the task environment's `USERPROFILE\go\bin`, covering default Windows Local PC setups without explicit `GOBIN`, `GOPATH`, or `HOME`.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
@@ -71,6 +72,8 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `pnpm run typecheck`
   - `pnpm exec eslint lib/lsp/lsp-providers.ts lib/lsp/lsp-providers.test.ts e2e/tests/lsp/lsp-file-intelligence.spec.ts`
   - `go test ./internal/agentctl/server/api ./internal/lsp/installer ./internal/tools/installer`
+  - `go test ./internal/tools/installer ./internal/lsp/installer` (Windows USERPROFILE result discovery included)
+  - `GOOS=windows GOARCH=amd64 go test -c ./internal/tools/installer`
   - `go test ./internal/agent/runtime/lifecycle ./internal/gateway/websocket`
   - `make lint`
   - `GOOS=windows GOARCH=amd64 go test -c ./internal/lsp/installer` and `./internal/agentctl/server/api`
