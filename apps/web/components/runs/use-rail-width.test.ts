@@ -103,4 +103,69 @@ describe("useRailWidth", () => {
 
     await waitFor(() => expect(result.current.width).toBe(RAIL_DEFAULT_WIDTH));
   });
+
+  // Only mouseup used to detach the drag, and it is not guaranteed to arrive:
+  // switching workspace mid-drag redirects the detail page to the list. The
+  // listeners then outlived the hook for the life of the document, still
+  // setting state on it.
+  it("detaches the drag listeners when it unmounts mid-drag", () => {
+    const { result, unmount } = renderHook(() => useRailWidth());
+
+    act(() => {
+      result.current.onResizeStart({
+        preventDefault: () => {},
+        clientX: 1000,
+      } as React.MouseEvent);
+    });
+
+    const removed: string[] = [];
+    const realRemove = window.removeEventListener.bind(window);
+    window.removeEventListener = ((type: string, ...rest: unknown[]) => {
+      removed.push(type);
+      return (realRemove as (...args: unknown[]) => void)(type, ...rest);
+    }) as typeof window.removeEventListener;
+
+    try {
+      unmount();
+    } finally {
+      window.removeEventListener = realRemove;
+    }
+
+    expect(removed).toContain("mousemove");
+    expect(removed).toContain("mouseup");
+  });
+
+  // A drag that never sees its mouseup — pointer released over an iframe, or
+  // the browser stealing capture — would otherwise strand its listeners when
+  // the next drag starts. The width stays right either way (both handlers
+  // compute the same absolute value), so the leak is only visible as the
+  // listener that never comes off.
+  it("detaches a previous drag before starting another", () => {
+    const { result } = renderHook(() => useRailWidth());
+    const start = () =>
+      act(() => {
+        result.current.onResizeStart({
+          preventDefault: () => {},
+          clientX: 1000,
+        } as React.MouseEvent);
+      });
+
+    start();
+
+    const removed: string[] = [];
+    const realRemove = window.removeEventListener.bind(window);
+    window.removeEventListener = ((type: string, ...rest: unknown[]) => {
+      removed.push(type);
+      return (realRemove as (...args: unknown[]) => void)(type, ...rest);
+    }) as typeof window.removeEventListener;
+
+    try {
+      start();
+    } finally {
+      window.removeEventListener = realRemove;
+    }
+
+    expect(removed).toContain("mousemove");
+    expect(removed).toContain("mouseup");
+  });
 });

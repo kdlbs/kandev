@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 export const RAIL_MIN_WIDTH = 200;
 export const RAIL_DEFAULT_WIDTH = 288;
@@ -45,6 +45,13 @@ export function useRailWidth() {
     });
   }, []);
 
+  // Only mouseup detaches the drag listeners, and it may never arrive: a
+  // workspace switch redirects the detail page to the list mid-drag, and the
+  // listeners would outlive the hook for the life of the document, still
+  // calling setWidth. Holding the detach here lets unmount run it too.
+  const detachDragRef = useRef<(() => void) | null>(null);
+  useEffect(() => () => detachDragRef.current?.(), []);
+
   const onResizeStart = useCallback((event: React.MouseEvent) => {
     event.preventDefault();
     setResizing(true);
@@ -57,13 +64,21 @@ export function useRailWidth() {
       // inverted relative to the sidebar's handle.
       setWidth(clamp(startWidth + (startX - moveEvent.clientX), maxWidth));
     };
-    const onUp = () => {
-      setResizing(false);
+    const detach = () => {
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
+      detachDragRef.current = null;
     };
+    function onUp() {
+      setResizing(false);
+      detach();
+    }
+    // A second mousedown without an intervening mouseup would otherwise strand
+    // the first drag's listeners.
+    detachDragRef.current?.();
     window.addEventListener("mousemove", onMove);
     window.addEventListener("mouseup", onUp);
+    detachDragRef.current = detach;
   }, []);
 
   useEffect(() => {

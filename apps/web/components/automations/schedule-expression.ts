@@ -69,7 +69,14 @@ export function usesTimezone(expression: string): boolean {
   return !trimmed.startsWith("@every");
 }
 
-/** Expand the named descriptors the backend accepts into 5-field form. */
+/**
+ * Expand the named descriptors the backend accepts into 5-field form.
+ *
+ * The set has to match `cron.Descriptor` exactly (scheduler.go wires that
+ * option into its parser). A descriptor missing here fails `toFields`, so a
+ * schedule the backend runs happily falls back to the custom editor and the
+ * structured controls never load for it.
+ */
 function expandDescriptor(expression: string): string | null {
   switch (expression) {
     case "@hourly":
@@ -79,6 +86,11 @@ function expandDescriptor(expression: string): string | null {
       return "0 0 * * *";
     case "@weekly":
       return "0 0 * * 0";
+    case "@monthly":
+      return "0 0 1 * *";
+    case "@yearly":
+    case "@annually":
+      return "0 0 1 1 *";
     default:
       return null;
   }
@@ -220,8 +232,21 @@ function fieldMatches(field: string, value: number, min: number, max: number): b
   });
 }
 
+/**
+ * Whether a day field narrows the schedule at all.
+ *
+ * The wildcard spellings must be the same set `parseTerm` accepts, or the two
+ * disagree about what a field means. `?` was the case that bit: `parseTerm`
+ * reads it as the full range, but this read it as a restriction, so
+ * `0 9 ? * MON` counted both day fields as restricted and took the OR branch —
+ * where the `?` side matches every date — and the preview claimed 09:00 daily
+ * instead of Mondays.
+ */
 function isRestricted(field: string): boolean {
-  return !field.split(",").some((term) => term.split("/")[0] === "*");
+  return !field.split(",").some((term) => {
+    const spec = term.split("/")[0];
+    return spec === "*" || spec === "" || spec === "?";
+  });
 }
 
 /**

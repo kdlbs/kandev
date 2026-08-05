@@ -196,6 +196,44 @@ describe("nextRun with the named and aliased cron forms", () => {
     expect(anyDay?.toISOString()).toBe(star?.toISOString());
   });
 
+  // `0 9 ? * *` passes either way, because both readings of `?` land on the
+  // same answer when the weekday is unrestricted too. Pairing `?` with a real
+  // weekday is what separates them: reading `?` as a restriction takes the
+  // standard-cron OR branch, where the `?` side matches every date, so the
+  // preview promised 09:00 daily for a Mondays-only schedule.
+  it("does not let ? widen a restricted weekday to every day", () => {
+    const withQuestion = nextRun("0 9 ? * MON", SG, from);
+    const withStar = nextRun("0 9 * * MON", SG, from);
+    expect(withQuestion).not.toBeNull();
+    expect(withQuestion?.toISOString()).toBe(withStar?.toISOString());
+    // from is a Thursday, so the next 09:00 SGT Monday is the 3rd (01:00 UTC).
+    expect(withQuestion?.toISOString()).toBe("2026-08-03T01:00:00.000Z");
+  });
+});
+
+// The scheduler is built with cron.Descriptor, so every name it accepts has to
+// round-trip here. One the editor does not know fails toFields, drops the
+// schedule into the custom box, and leaves the structured controls unreachable
+// for an expression the backend runs without complaint.
+describe("nextRun with the named descriptors", () => {
+  const from = new Date("2026-07-30T14:30:00Z");
+
+  it("resolves @monthly as midnight on the first", () => {
+    const descriptor = nextRun("@monthly", SG, from);
+    const explicit = nextRun("0 0 1 * *", SG, from);
+    expect(descriptor).not.toBeNull();
+    expect(descriptor?.toISOString()).toBe(explicit?.toISOString());
+  });
+
+  it("resolves @yearly and @annually as midnight on 1 January", () => {
+    const yearly = nextRun("@yearly", SG, from);
+    const annually = nextRun("@annually", SG, from);
+    const explicit = nextRun("0 0 1 1 *", SG, from);
+    expect(yearly).not.toBeNull();
+    expect(yearly?.toISOString()).toBe(explicit?.toISOString());
+    expect(annually?.toISOString()).toBe(explicit?.toISOString());
+  });
+
   it("matches Sunday whether it is spelled 0 or 7", () => {
     const zero = nextRun("0 9 * * 0", SG, from);
     const seven = nextRun("0 9 * * 7", SG, from);
