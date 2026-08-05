@@ -115,7 +115,12 @@ describe("the live allowlist", () => {
  *
  * These run the REAL `fs.globSync` against a fixture tree rather than a
  * re-implementation of glob semantics — the bracket behaviour is the whole point,
- * so emulating it would only test the emulation.
+ * so emulating it would only test the emulation. **Do not simplify this back to a
+ * hand-rolled matcher.** The first draft did exactly that, and a malformed
+ * character class in it (`/[*?[]]{}]/` — a lost backslash) made EVERY entry look
+ * unmatched, so the live-allowlist test below reported a problem that did not
+ * exist. A false positive that reads as a find is the failure mode this whole
+ * area keeps producing; a fixture plus the real matcher cannot have it.
  *
  * As with `duplicateEntries` above, the helper is paired with a test showing both
  * existing checks are blind to it, so the reason it must be separate stays on the
