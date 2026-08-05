@@ -134,6 +134,10 @@ describe("create-page executor type registry", () => {
 
 describe("getExecutorDescription", () => {
   it.each([
+    // `local` is the SEEDED Executor.type and reached this helper unmapped
+    // before #2249's follow-up, so a local profile's header read "Custom
+    // executor." Both spellings must resolve to the same sentence.
+    ["local", "Runs agents directly in the repository folder."],
     ["local_pc", "Runs agents directly in the repository folder."],
     ["worktree", "Creates git worktrees for isolated agent sessions."],
     ["local_docker", "Runs Docker containers on this machine."],

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState, memo } from "react";
+import { useTranslation } from "react-i18next";
 import { IconMessageCircle, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
@@ -114,6 +115,8 @@ export function MobileTaskList({
   const collapsedSubtaskParents = useAppStore((s) => s.collapsedSubtaskParents);
   const toggleSubtaskCollapsed = useAppStore((s) => s.toggleSubtaskCollapsed);
   const handleToggleGroup = useSidebarGroupToggle(view.id);
+  // See useGroupedSidebarView: the executorType group label is catalog-backed.
+  const { i18n } = useTranslation();
   const grouped = useMemo(
     () =>
       applyView(tasks, view, {
@@ -121,7 +124,7 @@ export function MobileTaskList({
         orderedTaskIds,
         subtaskOrderByParentId,
       }),
-    [tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId],
+    [tasks, view, pinnedTaskIds, orderedTaskIds, subtaskOrderByParentId, i18n.language],
   );
   return (
     <TaskSwitcher

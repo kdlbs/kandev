@@ -10,7 +10,10 @@ import type { ExecutorType } from "@/lib/types/http";
  * create page — see the guard comment in eslint.i18n.options.mjs.
  */
 export function getExecutorDescription(type: ExecutorType): string {
-  if (type === "local_pc") return t("executors:descriptionLocalPc");
+  // Both spellings reach this helper: `local` is the seeded `Executor.type`
+  // (task/repository/sqlite/defaults.go) and `local_pc` comes from the Office
+  // meta listing and the SQLite backfill — see lib/types/executor.ts.
+  if (type === "local" || type === "local_pc") return t("executors:descriptionLocalPc");
   if (type === "worktree") return t("executors:descriptionWorktree");
   if (type === "local_docker") return t("executors:descriptionLocalDocker");
   if (type === "remote_docker") return t("executors:descriptionRemoteDocker");

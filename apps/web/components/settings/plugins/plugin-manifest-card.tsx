@@ -34,7 +34,7 @@ export function PluginManifestCard({ plugin }: { plugin: PluginRecord }) {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
           {/* Row VALUES are manifest data — the plugin id, its version, its
               author — and are never translated. Only the row labels are copy. */}
-          <ManifestRow label="ID" value={plugin.id} mono />
+          <ManifestRow label={t("plugins:manifestId")} value={plugin.id} mono />
           <ManifestRow label={t("plugins:manifestVersion")} value={plugin.version} mono />
           <ManifestRow label={t("plugins:manifestApiVersion")} value={String(plugin.api_version)} />
           <ManifestRow label={t("plugins:manifestAuthor")} value={plugin.author || "—"} />
