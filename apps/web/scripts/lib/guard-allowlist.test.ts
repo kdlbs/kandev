@@ -170,6 +170,26 @@ describe("unmatchedEntries", () => {
     expect(unmatchedEntries([entry], resolve)).toEqual([]);
   });
 
+  /**
+   * A bare directory is the same bug wearing different clothes: `existsSync`
+   * confirms it, but ESLint flat config matches `files` against FILE paths, so
+   * `components/automations` selects nothing — it does not stand for
+   * `components/automations/**`. Caught in review on this very PR.
+   */
+  it("does not count a bare directory as matched", () => {
+    expect(resolve("components/automations")).toEqual([]);
+    expect(unmatchedEntries(["components/automations"], resolve)).toEqual([
+      "components/automations",
+    ]);
+  });
+
+  it("does not count directories a glob happens to match", () => {
+    // `*` matches the nested directory as well as the file; only the file counts.
+    expect(resolve("app/settings/workspace/[[]id[]]/automations/*")).toEqual([
+      "app/settings/workspace/[id]/automations/page.tsx",
+    ]);
+  });
+
   it("names an entry whose path is gone", () => {
     expect(unmatchedEntries(["components/gone/page.tsx"], resolve)).toEqual([
       "components/gone/page.tsx",
@@ -189,11 +209,18 @@ describe("neither existing check can stand in for it", () => {
     const before = ["a.tsx"];
     const after = ["a.tsx", "app/settings/workspace/[id]/automations/**/*.tsx"];
 
+    // A resolver that is realistic rather than blanket: "a.tsx" exists, the
+    // unescaped glob matches nothing. A `() => []` stub would report BOTH and
+    // read as if the check flags live entries too.
+    const resolve = (entry: string) => (entry.includes("[id]") ? [] : [entry]);
+
     // Both existing checks are clean: nothing left, nothing repeated.
     expect(removedEntries(before, after)).toEqual([]);
     expect(duplicateEntries(after)).toEqual([]);
-    // Only the new one sees it.
-    expect(unmatchedEntries(after, () => [])).toEqual(after);
+    // Only the new check sees it, and it names just the dead entry.
+    expect(unmatchedEntries(after, resolve)).toEqual([
+      "app/settings/workspace/[id]/automations/**/*.tsx",
+    ]);
   });
 });
 

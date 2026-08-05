@@ -64,6 +64,15 @@ export function unmatchedEntries(entries, resolve) {
 /** An entry is a glob only if it carries glob metacharacters. */
 const GLOB_METACHARACTERS = /[*?[\]{}]/;
 
+function isFile(fsImpl, fullPath) {
+  try {
+    return fsImpl.statSync(fullPath).isFile();
+  } catch {
+    // Missing, or a broken symlink — either way it selects nothing.
+    return false;
+  }
+}
+
 /**
  * The files an allowlist entry currently matches, rooted at `cwd`.
  *
@@ -72,10 +81,16 @@ const GLOB_METACHARACTERS = /[*?[\]{}]/;
  * two copies of a rule about glob semantics is how they drift apart. `fsImpl` is
  * a seam for tests; it takes `node:fs` in the script.
  *
- * A path with no metacharacter is checked with `existsSync` rather than
- * `globSync`, because a plain filename is not a pattern.
+ * **Directories do not count, and that is the whole subtlety.** ESLint flat
+ * config matches `files` patterns against FILE paths, so an entry of
+ * `components/foo` selects nothing — it does not stand for `components/foo/**`.
+ * `existsSync` would happily confirm the directory exists and report the entry as
+ * live, which would let exactly the born-dead entry this module exists to catch
+ * through under a different spelling. Both branches are therefore filtered by
+ * `isFile`: `globSync` returns directories too (`components/automations/*`
+ * matches `.../trigger-configs`), so it is not only the literal case.
  */
 export function filesForEntry(entry, { cwd, fsImpl }) {
-  if (GLOB_METACHARACTERS.test(entry)) return fsImpl.globSync(entry, { cwd });
-  return fsImpl.existsSync(`${cwd}/${entry}`) ? [entry] : [];
+  const candidates = GLOB_METACHARACTERS.test(entry) ? fsImpl.globSync(entry, { cwd }) : [entry];
+  return candidates.filter((candidate) => isFile(fsImpl, `${cwd}/${candidate}`));
 }
