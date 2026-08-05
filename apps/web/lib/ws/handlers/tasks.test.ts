@@ -94,6 +94,15 @@ function makeMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
+function makeStateChangedMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.state_changed" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.state_changed"]>>[0];
+}
+
 // Shared setup for the primary-session focus-follow tests: a single task t1
 // whose kanban primary, plus the active/pinned session ids, are the only knobs
 // that vary between cases.
@@ -597,32 +606,33 @@ describe("task.updated executor preservation", () => {
   });
 });
 
-describe("task.updated parent preservation", () => {
+function makeParentTaskStore(parentTaskId: string) {
+  const existingTask = {
+    id: "t1",
+    workflowStepId: "step1",
+    title: "Old title",
+    position: 0,
+    primarySessionId: "session-1",
+    parentTaskId,
+  };
+  return makeStore({
+    kanban: {
+      workflowId: "wf1",
+      steps: [],
+      tasks: [existingTask],
+    } as unknown as AppState["kanban"],
+    kanbanMulti: {
+      isLoading: false,
+      snapshots: {
+        wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
+      },
+    } as unknown as AppState["kanbanMulti"],
+  });
+}
+
+describe("task parent preservation", () => {
   it("preserves parentTaskId when a partial update omits parent_id", () => {
-    // A task.updated for an unrelated field change (e.g. a title rename) must
-    // not silently un-nest a live child — only an explicit detach (parent_id:
-    // null) should clear the link. See parentIDEventField in service_tasks.go.
-    const existingTask = {
-      id: "t1",
-      workflowStepId: "step1",
-      title: "Old title",
-      position: 0,
-      primarySessionId: "session-1",
-      parentTaskId: "parent-1",
-    };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [existingTask],
-      } as unknown as AppState["kanban"],
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          wf1: { workflowId: "wf1", workflowName: "WF1", steps: [], tasks: [existingTask] },
-        },
-      } as unknown as AppState["kanbanMulti"],
-    });
+    const store = makeParentTaskStore("parent-1");
 
     registerTasksHandlers(store)["task.updated"]!(
       makeMessage({
@@ -630,59 +640,36 @@ describe("task.updated parent preservation", () => {
         title: "Retitled task",
       }),
     );
+    registerTasksHandlers(store)["task.state_changed"]!(
+      makeStateChangedMessage({ ...makeTask("t1", "session-1"), title: "Retitled again" }),
+    );
 
     const state = store.getState();
-    const kanbanTask = state.kanban.tasks.find((task) => task.id === "t1");
-    const snapshotTask = state.kanbanMulti.snapshots.wf1.tasks.find((task) => task.id === "t1");
-    expect(kanbanTask).toMatchObject({ parentTaskId: "parent-1" });
-    expect(snapshotTask).toMatchObject({ parentTaskId: "parent-1" });
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-1" });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: "parent-1" });
   });
 
   it("clears parentTaskId when the task is explicitly detached (parent_id: null)", () => {
-    const existingTask = {
-      id: "t1",
-      workflowStepId: "step1",
-      title: "Task",
-      position: 0,
-      primarySessionId: "session-1",
-      parentTaskId: "parent-1",
-    };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [existingTask],
-      } as unknown as AppState["kanban"],
-    });
+    const store = makeParentTaskStore("parent-1");
 
     registerTasksHandlers(store)["task.updated"]!(
       makeMessage({ ...makeTask("t1", "session-1"), parent_id: null }),
     );
 
-    expect(store.getState().kanban.tasks[0]).toMatchObject({ parentTaskId: undefined });
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: undefined });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: undefined });
   });
 
   it("adopts an explicit re-parent even while the previous parent is still preserved elsewhere", () => {
-    const existingTask = {
-      id: "t1",
-      workflowStepId: "step1",
-      title: "Task",
-      position: 0,
-      primarySessionId: "session-1",
-      parentTaskId: "parent-old",
-    };
-    const store = makeStore({
-      kanban: {
-        workflowId: "wf1",
-        steps: [],
-        tasks: [existingTask],
-      } as unknown as AppState["kanban"],
-    });
+    const store = makeParentTaskStore("parent-old");
 
     registerTasksHandlers(store)["task.updated"]!(
       makeMessage({ ...makeTask("t1", "session-1"), parent_id: "parent-new" }),
     );
 
-    expect(store.getState().kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
+    const state = store.getState();
+    expect(state.kanban.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
+    expect(state.kanbanMulti.snapshots.wf1.tasks[0]).toMatchObject({ parentTaskId: "parent-new" });
   });
 });

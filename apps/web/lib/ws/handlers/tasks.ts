@@ -57,18 +57,15 @@ function preserveOmittedStatusSummary(
   }
 }
 
-// A task.updated for an unrelated field change omits parent_id entirely when
-// the task's parent is unchanged from the last event that reported it — the
-// backend only sends an explicit `parent_id: null` on a real detach (see
-// parentIDEventField in service_tasks.go). Without this guard, any such
-// partial update silently un-nests an already-nested child.
+// Task lifecycle events may omit parent_id when the parent is unchanged. Only
+// an explicit `parent_id: null` means detach (see parentIDEventField in
+// service_tasks.go), so an omitted link must not un-nest a cached child.
 function preserveOmittedParent(
   existing: KanbanTask,
   merged: KanbanTask,
-  nextTask: KanbanTask,
   payload: TaskEventPayload,
 ): void {
-  if (!hasPayloadField(payload, "parent_id") && nextTask.parentTaskId === undefined) {
+  if (!hasPayloadField(payload, "parent_id")) {
     merged.parentTaskId = existing.parentTaskId;
   }
 }
@@ -83,7 +80,7 @@ function mergeTaskUpdate(
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),
   };
-  preserveOmittedParent(existing, merged, nextTask, payload);
+  preserveOmittedParent(existing, merged, payload);
   if (!hasPayloadField(payload, "primary_session_id") && nextTask.primarySessionId === undefined) {
     merged.primarySessionId = existing.primarySessionId;
   }
