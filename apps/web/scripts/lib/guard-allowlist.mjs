@@ -29,3 +29,53 @@
 export function duplicateEntries(entries) {
   return [...new Set(entries.filter((entry, index) => entries.indexOf(entry) !== index))];
 }
+
+/**
+ * Entries that match no file at all — listed, but guarding nothing.
+ *
+ * Both other checks ask what happened to an entry BETWEEN two states: the
+ * removal check inspects entries that left the array, and `duplicateEntries`
+ * compares the array with itself. Neither asks the prior question — does this
+ * entry match anything? An entry that matched nothing on the day it was added
+ * never leaves, is not a duplicate, and passes `pnpm lint` trivially because the
+ * rule simply has no files to apply it to. The list grows, the ratchet reports
+ * "N added", and the path is unguarded. It is the allowlist's own version of a
+ * pass it had not earned: green everywhere, protecting nothing.
+ *
+ * A dynamic route is how you hit it, because Next-style directories are named in
+ * glob syntax and `[id]` is a CHARACTER CLASS matching a single `i` or `d`:
+ *
+ *   app/settings/workspace/[id]/automations/**\/*.tsx      -> 0 files
+ *   app/settings/workspace/[[]id[]]/automations/**\/*.tsx  -> 4 files
+ *
+ * #2247 shipped the unescaped form and review caught it; escaping it turned a
+ * hardcoded literal in that route from 0 lint errors into 1. Three older entries
+ * had the same defect. This makes the class impossible rather than the instances
+ * fixed.
+ *
+ * `resolve` is injected so this is testable against a fixture: the calling
+ * script resolves this repository's own paths from fixed locations and cannot be
+ * pointed elsewhere.
+ */
+export function unmatchedEntries(entries, resolve) {
+  return entries.filter((entry) => resolve(entry).length === 0);
+}
+
+/** An entry is a glob only if it carries glob metacharacters. */
+const GLOB_METACHARACTERS = /[*?[\]{}]/;
+
+/**
+ * The files an allowlist entry currently matches, rooted at `cwd`.
+ *
+ * Exported so the removal check, the unmatched check and the tests share ONE
+ * definition of "this entry has files" — they used to state it separately, and
+ * two copies of a rule about glob semantics is how they drift apart. `fsImpl` is
+ * a seam for tests; it takes `node:fs` in the script.
+ *
+ * A path with no metacharacter is checked with `existsSync` rather than
+ * `globSync`, because a plain filename is not a pattern.
+ */
+export function filesForEntry(entry, { cwd, fsImpl }) {
+  if (GLOB_METACHARACTERS.test(entry)) return fsImpl.globSync(entry, { cwd });
+  return fsImpl.existsSync(`${cwd}/${entry}`) ? [entry] : [];
+}
