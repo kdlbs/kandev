@@ -1693,6 +1693,7 @@ func (s *Service) autoStartStepPrompt(
 			// drain, matching the retry loop below, which queues on the same
 			// conditions. Permanent rejections (Office scheduler guard, missing
 			// profile) are deliberately not queued: nothing would drain them.
+			promptQueued := false
 			if shouldQueueIfBusy && (isAgentAlreadyRunningError(err) ||
 				isSessionBusyError(err) || isTransientPromptError(err)) {
 				if queueErr := s.queueAutoStartPrompt(
@@ -1704,9 +1705,18 @@ func (s *Service) autoStartStepPrompt(
 						zap.String("session_id", sessionID),
 						zap.String("step_name", stepName),
 						zap.Error(queueErr))
+				} else {
+					promptQueued = true
 				}
 			}
-			requeueTaken()
+			// `prompt` is the *merged* auto-start + hand-off content, so once it
+			// is queued the hand-off is already preserved. Restoring takenMsg on
+			// top of that leaves the hand-off in the queue twice and delivers it
+			// twice when the session recovers — the same rule the
+			// shouldQueueIfBusy branch above and the retry loop below follow.
+			if !promptQueued {
+				requeueTaken()
+			}
 		}
 		return err
 	}

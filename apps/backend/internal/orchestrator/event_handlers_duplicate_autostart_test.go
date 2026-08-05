@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -602,5 +603,85 @@ func TestAutoStartCreatedLaunch_QueuesPromptWhenAgentAlreadyRunning(t *testing.T
 	// The chat row was already written, so the drain must not write a second.
 	if len(msgCreator.userMessages) != 1 {
 		t.Fatalf("expected exactly 1 recorded user message, got %d", len(msgCreator.userMessages))
+	}
+}
+
+// Regression for the same CREATED branch, with a hand-off message in play.
+//
+// autoStartStepPrompt takes any queued hand-off (e.g. from move_task_kandev)
+// and merges it into the auto-start prompt, so the queued prompt on the failure
+// path already carries the hand-off content. requeueTaken then restored the
+// *original* hand-off on top of it, leaving two entries whose combined text
+// contains the hand-off twice — so the boot-ready drain delivered it twice.
+//
+// Only a failure that did NOT preserve the merged prompt may restore the taken
+// message; the shouldQueueIfBusy branch above and the PromptTask retry loop
+// below both already follow that rule.
+func TestAutoStartCreatedLaunch_DoesNotRestoreHandoffAfterQueueingMergedPrompt(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID      = "task-handoff"
+		sessionID   = "session-handoff"
+		profile     = "profile-handoff"
+		autoStart   = "Do the work"
+		handoffText = "Also update the changelog"
+	)
+
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateCreated)
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{
+		ID: taskID, Title: "Handoff Task", State: v1.TaskStateInProgress,
+	}
+
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(context.Context, *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, lifecycle.ErrAgentAlreadyRunning
+		},
+	}
+
+	step := &wfmodels.WorkflowStep{ID: "step-work", WorkflowID: "wf1", Name: "Work"}
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[step.ID] = step
+
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+	svc.messageCreator = &mockMessageCreator{}
+
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.AgentProfileID = profile
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session profile: %v", err)
+	}
+
+	// The hand-off the user attached to the step move, waiting in the queue.
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, sessionID, taskID, handoffText, "", "user-1", false, nil,
+	); err != nil {
+		t.Fatalf("seed handoff message: %v", err)
+	}
+
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true)
+	if err == nil {
+		t.Fatal("expected autoStartStepPrompt to return the launch error")
+	}
+
+	status := svc.messageQueue.GetStatus(ctx, sessionID)
+	if status.Count != 1 {
+		t.Fatalf("expected exactly 1 queued entry after the failed launch, got %d: %+v",
+			status.Count, status.Entries)
+	}
+	// The single entry must be the merged prompt — the hand-off is preserved
+	// inside it, not alongside it.
+	content := status.Entries[0].Content
+	if !strings.Contains(content, autoStart) || !strings.Contains(content, handoffText) {
+		t.Fatalf("queued entry lost content, want both the auto-start prompt and the hand-off, got %q", content)
+	}
+	if strings.Count(content, handoffText) != 1 {
+		t.Fatalf("hand-off text appears %d times in the queued prompt, want 1: %q",
+			strings.Count(content, handoffText), content)
 	}
 }
