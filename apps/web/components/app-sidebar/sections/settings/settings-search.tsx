@@ -32,14 +32,16 @@ type SettingsSearchProps = {
 /**
  * Where the floating field sits.
  *
- * Bottom clears the status bar and the home-indicator inset. The right inset
- * clears the config-chat button, which is `right-6 w-12` — 4.5rem of occupied
- * edge — plus a gap, so the field ends before it instead of running underneath.
- * The left inset mirrors that button's own, so the field and the button read as
- * one centred row rather than two things that happen to overlap.
+ * Bottom clears the status bar and the home-indicator inset.
+ *
+ * The side insets are equal, which keeps the field centred, and each is wide
+ * enough to clear the config-chat button in the same corner: that button is
+ * `right-6 w-12`, so 4.5rem of occupied edge, plus a gap. Mirroring it on the
+ * left costs width rather than centring — on a phone the field has room to
+ * spare, and a centred field that never collides beats a wider offset one.
  */
 const FLOATING_POSITION =
-  "bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--app-status-bar-height))] left-6 right-20";
+  "bottom-[calc(0.75rem+env(safe-area-inset-bottom)+var(--app-status-bar-height))] left-20 right-20 mx-auto max-w-[26rem]";
 
 type ResultGroup = {
   id: string;

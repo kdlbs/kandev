@@ -47,7 +47,11 @@ test.describe("Settings index on a phone", () => {
     expect(box!.y).toBeGreaterThan(viewport.h / 2);
     expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.h);
 
-    // And clear of the config-chat button, which shares that corner.
+    // Centred, and clear of the config-chat button that shares that corner —
+    // the field gives up width for both rather than trading one against the other.
+    const centreOffset = Math.abs(box!.x + box!.width / 2 - viewport.w / 2);
+    expect(centreOffset).toBeLessThanOrEqual(2);
+
     const chat = testPage.getByRole("button", { name: "Configuration Chat" });
     const chatBox = await chat.boundingBox();
     expect(chatBox).not.toBeNull();
