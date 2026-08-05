@@ -37,11 +37,21 @@ type Service struct {
 	mu                sync.Mutex
 	status            Status
 	lease             Lease
+	leaseGeneration   uint64
 	cancel            context.CancelFunc
 	done              chan struct{}
 	signal            chan struct{}
 	subscription      bus.Subscription
 	wg                sync.WaitGroup
+}
+
+// leaseWatch binds a lease completion channel to the generation that owned it.
+// A lease can be released and replaced before its completion notification is
+// delivered. The generation prevents that stale notification from clearing the
+// replacement lease.
+type leaseWatch struct {
+	generation uint64
+	done       <-chan error
 }
 
 func NewService(store *Store, sessions SessionReader, inhibitor Inhibitor, eventBus bus.EventBus, log *logger.Logger, options ...Option) *Service {
@@ -173,16 +183,16 @@ func (s *Service) run(ctx context.Context, done chan struct{}) {
 	defer close(done)
 	ticker := time.NewTicker(s.reconcileInterval)
 	defer ticker.Stop()
-	var leaseDone <-chan error
+	var watch leaseWatch
 	for {
-		leaseDone = s.reconcile(ctx)
+		watch = s.reconcile(ctx)
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.signalChannel():
 		case <-ticker.C:
-		case err, ok := <-leaseDone:
-			s.handleLeaseExit(err, ok)
+		case err, ok := <-watch.done:
+			s.handleLeaseExit(watch, err, ok)
 		}
 	}
 }
@@ -193,7 +203,7 @@ func (s *Service) signalChannel() <-chan struct{} {
 	return s.signal
 }
 
-func (s *Service) reconcile(ctx context.Context) <-chan error {
+func (s *Service) reconcile(ctx context.Context) leaseWatch {
 	s.reconcileMu.Lock()
 	defer s.reconcileMu.Unlock()
 
@@ -204,28 +214,28 @@ func (s *Service) reconcile(ctx context.Context) <-chan error {
 			settings = Settings{}
 		} else {
 			s.warn("Unable to load task sleep inhibition settings", err)
-			return s.currentLeaseDone()
+			return s.currentLeaseWatch()
 		}
 	}
 
 	if !settings.Enabled {
 		s.clearLeaseStatus(ctx)
-		return nil
+		return leaseWatch{}
 	}
 
 	if !s.probeCapability(ctx) {
-		return s.currentLeaseDone()
+		return s.currentLeaseWatch()
 	}
 
 	working, err := s.hasWorkingSession(ctx)
 	if err != nil {
 		s.warn("Unable to read active task sessions for sleep inhibition", err)
-		return s.currentLeaseDone()
+		return s.currentLeaseWatch()
 	}
 
 	if !working {
 		s.clearLeaseStatus(ctx)
-		return nil
+		return leaseWatch{}
 	}
 
 	s.mu.Lock()
@@ -236,7 +246,7 @@ func (s *Service) reconcile(ctx context.Context) <-chan error {
 			status.Active = true
 			status.Issue = ""
 		})
-		return lease.Done()
+		return s.currentLeaseWatch()
 	}
 
 	if !s.inhibitor.Supported() {
@@ -244,7 +254,7 @@ func (s *Service) reconcile(ctx context.Context) <-chan error {
 			status.Active = false
 			status.Issue = IssueUnsupportedPlatform
 		})
-		return nil
+		return leaseWatch{}
 	}
 
 	lease, err = s.inhibitor.Acquire(ctx)
@@ -255,16 +265,18 @@ func (s *Service) reconcile(ctx context.Context) <-chan error {
 			status.Active = false
 			status.Issue = issue
 		})
-		return nil
+		return leaseWatch{}
 	}
 	s.mu.Lock()
 	s.lease = lease
+	s.leaseGeneration++
+	generation := s.leaseGeneration
 	s.mu.Unlock()
 	s.setStatus(func(status *Status) {
 		status.Active = true
 		status.Issue = ""
 	})
-	return lease.Done()
+	return leaseWatch{generation: generation, done: lease.Done()}
 }
 
 type capabilityProber interface {
@@ -317,22 +329,24 @@ func (s *Service) hasWorkingSession(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
-func (s *Service) currentLeaseDone() <-chan error {
+func (s *Service) currentLeaseWatch() leaseWatch {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.lease == nil {
-		return nil
+		return leaseWatch{}
 	}
-	return s.lease.Done()
+	return leaseWatch{generation: s.leaseGeneration, done: s.lease.Done()}
 }
 
-func (s *Service) handleLeaseExit(err error, ok bool) {
+func (s *Service) handleLeaseExit(watch leaseWatch, err error, ok bool) {
 	s.mu.Lock()
-	if s.lease == nil {
+	if s.lease == nil || watch.generation != s.leaseGeneration {
 		s.mu.Unlock()
 		return
 	}
+	lease := s.lease
 	s.lease = nil
+	s.leaseGeneration++
 	s.status.Active = false
 	switch {
 	case err != nil:
@@ -343,6 +357,9 @@ func (s *Service) handleLeaseExit(err error, ok bool) {
 		s.status.Issue = IssueRequestFailed
 	}
 	s.mu.Unlock()
+	if releaseErr := lease.Release(); releaseErr != nil {
+		s.warn("Unable to release ended task sleep inhibition lease", releaseErr)
+	}
 	if err != nil {
 		s.warn("Task sleep inhibition lease ended unexpectedly", err)
 	}
@@ -352,7 +369,10 @@ func (s *Service) handleLeaseExit(err error, ok bool) {
 func (s *Service) releaseLease(ctx context.Context) {
 	s.mu.Lock()
 	lease := s.lease
-	s.lease = nil
+	if lease != nil {
+		s.lease = nil
+		s.leaseGeneration++
+	}
 	s.mu.Unlock()
 	if lease == nil {
 		return

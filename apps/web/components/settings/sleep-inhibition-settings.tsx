@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Alert, AlertDescription } from "@kandev/ui/alert";
 import { Button } from "@kandev/ui/button";
@@ -21,11 +21,8 @@ import { IconAlertCircle, IconInfoCircle } from "@tabler/icons-react";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsCard } from "./settings-card";
 import { useSettingsSaveContributor } from "./settings-save-provider";
-import {
-  fetchSleepInhibitionSettings,
-  updateSleepInhibitionSettings,
-} from "@/lib/api/domains/settings-api";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useSleepInhibitionSettings } from "@/hooks/domains/settings/use-sleep-inhibition-settings";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 
 const MACOS_COMMAND = "/usr/bin/caffeinate -i -w <kandev-pid>";
@@ -47,7 +44,7 @@ function statusMessageKey(response: SleepInhibitionResponse): string {
 
 type SleepInhibitionState = {
   snapshot: SleepInhibitionResponse | null;
-  draft: boolean;
+  draft: boolean | null;
   setDraft: (value: boolean) => void;
   loading: boolean;
   loadFailed: boolean;
@@ -62,62 +59,48 @@ type SleepInhibitionState = {
 function useSleepInhibitionState(): SleepInhibitionState {
   const { t } = useTranslation();
   const role = useAppStore((state) => state.auth.user?.role);
-  const [snapshot, setSnapshot] = useState<SleepInhibitionResponse | null>(null);
-  const [draft, setDraft] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [loadFailed, setLoadFailed] = useState(false);
+  const remote = useSleepInhibitionSettings();
+  const snapshot = remote.response;
+  const [draft, setDraftState] = useState<boolean | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
-  const loadVersion = useRef(0);
   const isAdmin = role === undefined || role === "admin";
   const saved = snapshot?.settings.enabled;
-  const isDirty = saved !== undefined && draft !== saved;
-  const canEdit = isAdmin && !loading;
-
-  const reload = useCallback(async () => {
-    const version = ++loadVersion.current;
-    setLoading(true);
-    setLoadFailed(false);
-    try {
-      const response = await fetchSleepInhibitionSettings();
-      if (version !== loadVersion.current) return;
-      setSnapshot(response);
-      setDraft(response.settings.enabled);
-    } catch {
-      if (version === loadVersion.current) setLoadFailed(true);
-    } finally {
-      if (version === loadVersion.current) setLoading(false);
-    }
-  }, []);
+  const lastSaved = useRef<boolean | undefined>(undefined);
 
   useEffect(() => {
-    void reload();
-    return () => {
-      loadVersion.current += 1;
-    };
-  }, [reload]);
+    if (saved === undefined) return;
+    setDraftState((current) =>
+      current === null || current === lastSaved.current ? saved : current,
+    );
+    lastSaved.current = saved;
+  }, [saved]);
+
+  const draftValue = draft ?? saved ?? false;
+  const isDirty = saved !== undefined && draft !== null && draft !== saved;
+  const loading = remote.loading || !remote.loaded;
+  const canEdit = isAdmin && !loading && snapshot !== null;
 
   useSettingsSaveContributor({
     id: "general-task-sleep-inhibition",
     order: 30,
-    revision: draft ? "enabled" : "disabled",
+    revision: draftValue ? "enabled" : "disabled",
     isDirty,
     canSave: canEdit,
     invalidReason: !isAdmin ? t("settings:sleepInhibitionAdminOnly") : undefined,
     save: async () => {
       if (!canEdit) throw new Error(t("settings:sleepInhibitionAdminOnly"));
-      const submitted = draft;
+      const submitted = draft ?? saved ?? false;
       setSaveFailed(false);
       try {
-        const response = await updateSleepInhibitionSettings({ enabled: submitted });
-        setSnapshot(response);
-        setDraft((current) => (current === submitted ? response.settings.enabled : current));
+        const response = await remote.save({ enabled: submitted });
+        setDraftState((current) => (current === submitted ? response.settings.enabled : current));
       } catch (error) {
         setSaveFailed(true);
         throw error;
       }
     },
     discard: () => {
-      if (saved !== undefined) setDraft(saved);
+      if (saved !== undefined) setDraftState(saved);
       setSaveFailed(false);
     },
   });
@@ -125,15 +108,15 @@ function useSleepInhibitionState(): SleepInhibitionState {
   return {
     snapshot,
     draft,
-    setDraft,
+    setDraft: setDraftState,
     loading,
-    loadFailed,
+    loadFailed: remote.error,
     saveFailed,
     isDirty,
     isAdmin,
     canEdit,
     saved,
-    reload,
+    reload: remote.refresh,
   };
 }
 
@@ -280,7 +263,7 @@ function SleepInhibitionCard({ state }: { state: SleepInhibitionState }) {
           </div>
           <Switch
             id="task-sleep-inhibition"
-            checked={state.draft}
+            checked={state.draft ?? snapshot.settings.enabled}
             disabled={!state.canEdit}
             data-testid="sleep-inhibition-switch"
             data-settings-dirty={state.isDirty}

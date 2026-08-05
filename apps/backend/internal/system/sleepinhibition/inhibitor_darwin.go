@@ -4,6 +4,7 @@ package sleepinhibition
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"strconv"
@@ -55,11 +56,15 @@ func (c *darwinCommand) Kill() error {
 }
 
 type darwinLease struct {
-	process   darwinProcess
-	waitDone  chan error
-	done      chan error
-	releaseOn sync.Once
-	waitOnce  sync.Once
+	process     darwinProcess
+	waitDone    chan error
+	done        chan error
+	releaseOnce sync.Once
+	waitOnce    sync.Once
+	mu          sync.Mutex
+	released    bool
+	killErr     error
+	waitErr     error
 }
 
 func newDarwinLease(process darwinProcess) *darwinLease {
@@ -70,6 +75,13 @@ func newDarwinLease(process darwinProcess) *darwinLease {
 	}
 	go func() {
 		err := process.Wait()
+		lease.mu.Lock()
+		if lease.released {
+			// A process exit caused by our Release is normal. Keep unexpected
+			// exits visible when they happen before release is requested.
+			err = nil
+		}
+		lease.mu.Unlock()
 		lease.waitDone <- err
 		lease.done <- err
 		close(lease.done)
@@ -78,12 +90,19 @@ func newDarwinLease(process darwinProcess) *darwinLease {
 }
 
 func (l *darwinLease) Release() error {
-	l.releaseOn.Do(func() {
-		_ = l.process.Kill()
+	l.releaseOnce.Do(func() {
+		l.mu.Lock()
+		l.released = true
+		l.mu.Unlock()
+		if err := l.process.Kill(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+			l.killErr = err
+		}
 	})
-	var err error
-	l.waitOnce.Do(func() { err = <-l.waitDone })
-	return err
+	l.waitOnce.Do(func() { l.waitErr = <-l.waitDone })
+	if l.killErr != nil {
+		return l.killErr
+	}
+	return l.waitErr
 }
 
 func (l *darwinLease) Done() <-chan error { return l.done }

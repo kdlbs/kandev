@@ -2,20 +2,17 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SettingsSaveContributor } from "./settings-save-provider";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
+import { StateProvider } from "@/components/state-provider";
 
 const fetchSettingsMock = vi.fn();
 const updateSettingsMock = vi.fn();
 let saveContributor: SettingsSaveContributor | null = null;
 let currentRole: "admin" | "member" | undefined = "admin";
+const TEST_SWITCH_ID = "sleep-inhibition-switch";
 
 vi.mock("@/lib/api/domains/settings-api", () => ({
   fetchSleepInhibitionSettings: (...args: unknown[]) => fetchSettingsMock(...args),
   updateSleepInhibitionSettings: (...args: unknown[]) => updateSettingsMock(...args),
-}));
-
-vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: { auth: { user?: { role: string } } }) => unknown) =>
-    selector({ auth: { user: currentRole ? { role: currentRole } : undefined } }),
 }));
 
 vi.mock("./settings-save-provider", () => ({
@@ -37,6 +34,31 @@ function response(
   return { settings: { enabled }, status };
 }
 
+function renderSettings() {
+  return render(
+    <StateProvider
+      initialState={{
+        auth: {
+          mode: "enabled",
+          authenticated: true,
+          user: currentRole
+            ? {
+                id: "user-1",
+                email: "user@example.com",
+                display_name: "Test User",
+                role: currentRole,
+                status: "active",
+              }
+            : null,
+          ssoProviders: [],
+        },
+      }}
+    >
+      <SleepInhibitionSettings />
+    </StateProvider>,
+  );
+}
+
 beforeEach(() => {
   fetchSettingsMock.mockReset();
   updateSettingsMock.mockReset();
@@ -47,12 +69,13 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.clearAllMocks();
 });
 
 describe("SleepInhibitionSettings", () => {
   it("explains the host sleep controls from an accessible info button", async () => {
-    render(<SleepInhibitionSettings />);
+    renderSettings();
 
     const infoButton = await screen.findByRole("button", {
       name: "How host sleep prevention works",
@@ -71,9 +94,9 @@ describe("SleepInhibitionSettings", () => {
     updateSettingsMock.mockResolvedValueOnce(
       response(true, { platform: "linux", supported: true, active: true }),
     );
-    render(<SleepInhibitionSettings />);
+    renderSettings();
 
-    const toggle = await screen.findByTestId("sleep-inhibition-switch");
+    const toggle = await screen.findByTestId(TEST_SWITCH_ID);
     fireEvent.click(toggle);
     expect(updateSettingsMock).not.toHaveBeenCalled();
     expect(saveContributor?.isDirty).toBe(true);
@@ -96,9 +119,9 @@ describe("SleepInhibitionSettings", () => {
         issue: "unsupported_platform",
       }),
     );
-    render(<SleepInhibitionSettings />);
+    renderSettings();
 
-    const toggle = await screen.findByTestId("sleep-inhibition-switch");
+    const toggle = await screen.findByTestId(TEST_SWITCH_ID);
     expect(toggle).toHaveProperty("disabled", true);
     expect(toggle.getAttribute("data-state")).toBe("checked");
     expect(screen.getByTestId("sleep-inhibition-status").textContent).toContain("Unavailable");
@@ -107,8 +130,8 @@ describe("SleepInhibitionSettings", () => {
 
   it("reports failed saves without clearing the dirty draft", async () => {
     updateSettingsMock.mockRejectedValueOnce(new Error("offline"));
-    render(<SleepInhibitionSettings />);
-    fireEvent.click(await screen.findByTestId("sleep-inhibition-switch"));
+    renderSettings();
+    fireEvent.click(await screen.findByTestId(TEST_SWITCH_ID));
     if (!saveContributor) throw new Error("expected save contributor");
 
     await act(async () => {
@@ -116,6 +139,33 @@ describe("SleepInhibitionSettings", () => {
     });
 
     expect(screen.getByText("Failed to save host sleep settings.")).toBeTruthy();
+    expect(saveContributor?.isDirty).toBe(true);
+  });
+
+  it("refreshes runtime status without replacing an unsaved draft", async () => {
+    vi.useFakeTimers();
+    fetchSettingsMock.mockResolvedValueOnce(
+      response(false, { platform: "linux", supported: true, active: false }),
+    );
+    renderSettings();
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const toggle = screen.getByTestId(TEST_SWITCH_ID);
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("data-state")).toBe("checked");
+
+    fetchSettingsMock.mockResolvedValueOnce(
+      response(false, { platform: "linux", supported: true, active: true }),
+    );
+    await act(async () => {
+      vi.advanceTimersByTime(15_000);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByTestId("sleep-inhibition-status").textContent).toContain("Active");
+    expect(toggle.getAttribute("data-state")).toBe("checked");
     expect(saveContributor?.isDirty).toBe(true);
   });
 });

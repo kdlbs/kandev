@@ -119,6 +119,7 @@ export type {
   SecretsState,
   NotificationProvidersState,
   SettingsDataState,
+  SleepInhibitionStoreState,
   UserSettingsState,
 } from "./settings/types";
 export type {

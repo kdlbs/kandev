@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/godbus/dbus/v5"
 )
@@ -99,6 +100,32 @@ func TestLinuxInhibitorMapsProbeFailure(t *testing.T) {
 	}
 	if !connection.closed {
 		t.Fatal("failed probe did not close the D-Bus connection")
+	}
+}
+
+func TestLinuxLeaseReportsRemoteDescriptorLoss(t *testing.T) {
+	readFile, writeFile, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	defer func() { _ = readFile.Close() }()
+
+	connection := &fakeLinuxDBus{object: &fakeLinuxDBusObject{call: &dbus.Call{}}}
+	lease := newLinuxLease(connection, writeFile)
+	if err := readFile.Close(); err != nil {
+		t.Fatalf("close remote descriptor: %v", err)
+	}
+
+	select {
+	case err := <-lease.Done():
+		if IssueFromError(err) != IssueRequestFailed {
+			t.Fatalf("remote loss error = %v, want request_failed", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("lease did not report remote descriptor loss")
+	}
+	if err := lease.Release(); err != nil {
+		t.Fatalf("release after remote loss: %v", err)
 	}
 }
 

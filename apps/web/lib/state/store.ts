@@ -63,6 +63,7 @@ import {
   type SecretsState,
   type NotificationProvidersState,
   type SettingsDataState,
+  type SleepInhibitionStoreState,
   type UserSettingsState,
   type ProcessStatusEntry,
   type Worktree,
@@ -125,6 +126,7 @@ export type AppState = KanbanSlice & {
   sprites: (typeof defaultSettingsState)["sprites"];
   notificationProviders: (typeof defaultSettingsState)["notificationProviders"];
   settingsData: (typeof defaultSettingsState)["settingsData"];
+  sleepInhibition: (typeof defaultSettingsState)["sleepInhibition"];
   userSettings: (typeof defaultSettingsState)["userSettings"];
 
   // Session slice
@@ -293,6 +295,9 @@ export type AppState = KanbanSlice & {
   removeSpritesInstance: (name: string) => void;
   setNotificationProviders: (state: NotificationProvidersState) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
+  setSleepInhibition: (response: NonNullable<SleepInhibitionStoreState["response"]>) => void;
+  setSleepInhibitionLoading: (loading: boolean) => void;
+  setSleepInhibitionError: (error: boolean) => void;
   setUserSettings: (settings: UserSettingsState) => void;
   setTerminalOutput: (terminalId: string, data: string) => void;
   appendShellOutput: (sessionId: string, data: string) => void;

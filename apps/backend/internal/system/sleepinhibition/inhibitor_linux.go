@@ -4,10 +4,12 @@ package sleepinhibition
 
 import (
 	"context"
+	"errors"
 	"os"
 	"sync"
 
 	"github.com/godbus/dbus/v5"
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -34,7 +36,7 @@ type linuxInhibitor struct {
 
 func NewPlatformInhibitor() Inhibitor {
 	return newLinuxInhibitor(func() (linuxDBus, error) {
-		connection, err := dbus.SystemBus()
+		connection, err := dbus.ConnectSystemBus()
 		if err != nil {
 			return nil, err
 		}
@@ -92,32 +94,115 @@ func (i *linuxInhibitor) Acquire(ctx context.Context) (Lease, error) {
 }
 
 type linuxLease struct {
-	connection linuxDBus
-	file       *os.File
-	done       chan error
-	once       sync.Once
+	connection     linuxDBus
+	file           *os.File
+	fd             int
+	done           chan error
+	stop           chan struct{}
+	monitorDone    chan struct{}
+	releaseErr     error
+	releaseOnce    sync.Once
+	completionOnce sync.Once
 }
 
 func newLinuxLease(connection linuxDBus, file *os.File) *linuxLease {
-	return &linuxLease{connection: connection, file: file, done: make(chan error, 1)}
+	lease := &linuxLease{
+		connection:  connection,
+		file:        file,
+		fd:          int(file.Fd()),
+		done:        make(chan error, 1),
+		stop:        make(chan struct{}),
+		monitorDone: make(chan struct{}),
+	}
+	go lease.monitor()
+	return lease
 }
 
 func (l *linuxLease) Release() error {
-	var releaseErr error
-	l.once.Do(func() {
+	l.releaseOnce.Do(func() {
+		close(l.stop)
 		if err := l.file.Close(); err != nil {
-			releaseErr = err
+			l.releaseErr = err
 		}
-		if err := l.connection.Close(); err != nil && releaseErr == nil {
-			releaseErr = err
+		<-l.monitorDone
+		if err := l.connection.Close(); err != nil && l.releaseErr == nil {
+			l.releaseErr = err
 		}
-		l.done <- releaseErr
-		close(l.done)
+		l.complete(l.releaseErr)
 	})
-	return releaseErr
+	return l.releaseErr
 }
 
 func (l *linuxLease) Done() <-chan error { return l.done }
+
+func (l *linuxLease) complete(err error) {
+	l.completionOnce.Do(func() {
+		l.done <- err
+		close(l.done)
+	})
+}
+
+func (l *linuxLease) monitor() {
+	defer close(l.monitorDone)
+	fd := l.fd
+	// The descriptor returned by logind is a pipe. Non-blocking mode makes the
+	// EOF check safe if the platform reports readable data before HUP.
+	_ = unix.SetNonblock(fd, true)
+	pollFDs := []unix.PollFd{{
+		Fd:     int32(fd),
+		Events: unix.POLLIN | unix.POLLERR | unix.POLLHUP | unix.POLLNVAL,
+	}}
+	for {
+		_, err := unix.Poll(pollFDs, 100)
+		if err != nil {
+			if errors.Is(err, unix.EINTR) {
+				continue
+			}
+			if l.stopped() {
+				return
+			}
+			l.unexpectedLoss(err)
+			return
+		}
+		if l.stopped() {
+			return
+		}
+		revents := pollFDs[0].Revents
+		if revents&(unix.POLLERR|unix.POLLHUP|unix.POLLNVAL) != 0 {
+			l.unexpectedLoss(errors.New("logind inhibitor descriptor closed"))
+			return
+		}
+		if revents&unix.POLLIN == 0 {
+			continue
+		}
+		var buffer [1]byte
+		n, readErr := unix.Read(fd, buffer[:])
+		if n == 0 {
+			l.unexpectedLoss(errors.New("logind inhibitor descriptor reached EOF"))
+			return
+		}
+		if readErr != nil && !errors.Is(readErr, unix.EAGAIN) && !errors.Is(readErr, unix.EWOULDBLOCK) {
+			l.unexpectedLoss(readErr)
+			return
+		}
+	}
+}
+
+func (l *linuxLease) stopped() bool {
+	select {
+	case <-l.stop:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l *linuxLease) unexpectedLoss(err error) {
+	if l.stopped() {
+		return
+	}
+	l.complete(NewIssueError(IssueRequestFailed, err))
+}
 
 type realLinuxDBus struct{ connection *dbus.Conn }
 

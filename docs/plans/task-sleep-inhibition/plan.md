@@ -119,6 +119,19 @@ Add a concise how-to/reference section to `docs/public/operations.md` covering w
   ignored asset manifest contains both entries and no credentials or personal data.
 - Public documentation validation passed: 58 validator tests and
   `Validated 41 published docs pages.`
+- PR review remediation passed: lease completions now carry a generation, Linux
+  leases monitor logind descriptor loss, Darwin release normalizes intentional
+  termination and has build-tagged lifecycle tests, and the web card reads the
+  install-wide response from the settings-domain store with bounded polling.
+- Focused remediation checks passed: `go test -race
+  ./internal/system/sleepinhibition` (17 tests), Darwin and Windows compile-only
+  checks with `CGO_ENABLED=0 GOOS=darwin/windows GOARCH=amd64 go test -c`, and
+  Vitest for the sleep-inhibition card plus settings slice (9 tests), including
+  remote-status refresh without draft replacement.
+- `pnpm run typecheck`, targeted ESLint, `pnpm run i18n:check`,
+  `pnpm run i18n:ratchet`, and `git diff --check` passed. The branch was merged
+  with current `origin/main`; `apps/web/src/locales/zh-cn/chat.json` retains one
+  valid attachment catalog entry for each key.
 
 ---
 

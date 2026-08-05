@@ -160,17 +160,65 @@ func TestServiceReportsCapabilityFailureBeforeAWorkingSessionExists(t *testing.T
 
 func TestServiceClassifiesUnexpectedLeaseErrors(t *testing.T) {
 	service := newTestService(t, &fakeSessionReader{}, &fakeInhibitor{platform: PlatformLinux, supported: true})
+	lease := newFakeLease(&fakeInhibitor{platform: PlatformLinux, supported: true})
 	service.mu.Lock()
-	service.lease = newFakeLease(&fakeInhibitor{platform: PlatformLinux, supported: true})
+	service.lease = lease
+	service.leaseGeneration = 1
 	service.mu.Unlock()
 
-	service.handleLeaseExit(NewIssueError(IssueSystemServiceUnavailable, errors.New("logind stopped")), true)
+	service.handleLeaseExit(
+		leaseWatch{generation: 1, done: lease.Done()},
+		NewIssueError(IssueSystemServiceUnavailable, errors.New("logind stopped")),
+		true,
+	)
 	response, err := service.Get(context.Background())
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}
 	if response.Status.Issue != IssueSystemServiceUnavailable {
 		t.Fatalf("lease issue = %q, want %q", response.Status.Issue, IssueSystemServiceUnavailable)
+	}
+}
+
+func TestServiceIgnoresStaleLeaseCompletionAfterReplacement(t *testing.T) {
+	reader := &fakeSessionReader{}
+	reader.set(session(models.TaskSessionStateRunning))
+	inhibitor := &fakeInhibitor{platform: PlatformLinux, supported: true}
+	service := newTestService(t, reader, inhibitor)
+
+	if _, err := service.Update(context.Background(), Settings{Enabled: true}); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	first := inhibitor.lastLease()
+	service.mu.Lock()
+	firstWatch := leaseWatch{generation: service.leaseGeneration, done: first.Done()}
+	service.mu.Unlock()
+
+	service.clearLeaseStatus(context.Background())
+	if _, err := service.Update(context.Background(), Settings{Enabled: true}); err != nil {
+		t.Fatalf("re-enable: %v", err)
+	}
+	second := inhibitor.lastLease()
+	if second == first {
+		t.Fatal("re-enable reused the released lease")
+	}
+
+	// Deliver the completion from the first lease after the replacement is
+	// already active. It must not clear or release the replacement lease.
+	service.handleLeaseExit(firstWatch, errors.New("stale lease completion"), true)
+
+	service.mu.Lock()
+	current := service.lease
+	status := service.status
+	service.mu.Unlock()
+	if current != second {
+		t.Fatal("stale lease completion discarded the replacement lease")
+	}
+	if !status.Active {
+		t.Fatalf("stale lease completion marked replacement inactive: %#v", status)
+	}
+	if got := inhibitor.releaseCount(); got != 1 {
+		t.Fatalf("stale lease completion released %d leases, want only the first", got)
 	}
 }
 
