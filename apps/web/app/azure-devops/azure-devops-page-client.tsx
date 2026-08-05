@@ -100,17 +100,21 @@ function NotConfigured({ workspaceId }: { workspaceId?: string }) {
   );
 }
 
-const RESULT_LABELS: Record<AzureDevOpsBrowseMode, string> = {
-  [WORK_ITEMS_MODE]: "Work items",
-  [PULL_REQUESTS_MODE]: "Pull requests",
-  [BOARD_MODE]: "Board",
+// Keys, not text: resolving at module scope would freeze these at the boot locale.
+const RESULT_LABEL_KEYS: Record<AzureDevOpsBrowseMode, string> = {
+  [WORK_ITEMS_MODE]: "azuredevops:workItems",
+  [PULL_REQUESTS_MODE]: "azuredevops:pullRequests",
+  [BOARD_MODE]: "azuredevops:board",
 };
 
 function ResultHeader({ mode, count }: { mode: AzureDevOpsBrowseMode; count: number }) {
+  const { t } = useTranslation();
   return (
     <div className="flex min-h-12 items-center justify-between border-b px-4">
-      <h2 className="text-sm font-semibold">{RESULT_LABELS[mode]}</h2>
-      <span className="text-xs text-muted-foreground">{count} results</span>
+      <h2 className="text-sm font-semibold">{t(RESULT_LABEL_KEYS[mode])}</h2>
+      <span className="text-xs text-muted-foreground">
+        {t("azuredevops:resultsCount", { count })}
+      </span>
     </div>
   );
 }

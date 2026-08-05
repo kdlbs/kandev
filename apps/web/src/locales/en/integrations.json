@@ -1,6 +1,6 @@
 {
-  "authRequired": "{{name}} authentication required",
-  "authenticationRequired": "{{name}} authentication required.",
+  "authRequiredHeading": "{{name}} authentication required",
+  "authRequiredInline": "{{name}} authentication required.",
   "deleteSavedQuery": "Delete saved query",
   "noSavedQueriesYet": "No saved queries yet",
   "reconnectProvider": "Reconnect {{name}}",

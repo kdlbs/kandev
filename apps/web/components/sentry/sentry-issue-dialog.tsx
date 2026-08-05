@@ -32,6 +32,10 @@ import { useTranslation } from "react-i18next";
 const LEVELS: SentryLevel[] = ["fatal", "error", "warning", "info", "debug"];
 const STATUSES: SentryStatus[] = ["unresolved", "resolved", "ignored"];
 const PERIODS = ["1h", "24h", "7d", "14d", "30d"] as const;
+// Sentry search syntax, shown as the query placeholder. Deliberately not a
+// catalog value: a translated `is:` or `release:` is invalid syntax, and the
+// placeholder is text users copy. Only the "e.g." wrapper is translated.
+const SENTRY_QUERY_EXAMPLE = "is:unresolved release:1.2.3";
 type Period = (typeof PERIODS)[number];
 
 type FilterState = {
@@ -97,7 +101,17 @@ interface DialogState {
   instancesState: SentryAvailabilityState;
 }
 
+// Catalog key for the first unmet search precondition, or null when the search
+// can run. Returns the key rather than the message so the caller resolves it at
+// render-time locale.
+function searchBlockerKey(instanceId: string, orgSlug: string): string | null {
+  if (!instanceId) return "sentry:selectInstanceToSearch";
+  if (!orgSlug) return "sentry:orgSlugRequired";
+  return null;
+}
+
 function useDialogState(open: boolean, workspaceId?: string): DialogState {
+  const { t } = useTranslation();
   const { healthy, state: instancesState } = useSentryInstances(workspaceId);
   const [instanceId, setInstanceId] = useState("");
   const [filter, setFilter] = useState<FilterState>(initialFilter);
@@ -171,12 +185,9 @@ function useDialogState(open: boolean, workspaceId?: string): DialogState {
 
   const search = useCallback(
     async (nextCursorValue?: string) => {
-      if (!instanceId) {
-        setError("Select a Sentry instance to search");
-        return;
-      }
-      if (!filter.orgSlug) {
-        setError("Organization slug is required");
+      const blockerKey = searchBlockerKey(instanceId, filter.orgSlug);
+      if (blockerKey) {
+        setError(t(blockerKey));
         return;
       }
       if (!workspaceId) return;
@@ -504,7 +515,7 @@ function SearchActionRow({ state }: { state: DialogState }) {
           id="sentry-search-query"
           value={filter.query}
           onChange={(e) => updateFilter("query", e.target.value)}
-          placeholder={t("sentry:isUnresolvedRelease123")}
+          placeholder={t("sentry:queryExample", { query: SENTRY_QUERY_EXAMPLE })}
           className="h-8 text-xs"
           onKeyDown={(e) => {
             if (e.key === "Enter") {

@@ -325,7 +325,7 @@ function MetaFooter({ issue }: { issue: LinearIssue }) {
   if (!updated) return null;
   return (
     <div className="text-xs text-muted-foreground px-1" title={issue.updated}>
-      {t("linear:updated")} {updated}
+      {t("linear:updatedTime", { time: updated })}
     </div>
   );
 }

@@ -352,7 +352,7 @@ function MetaFooter({ ticket }: { ticket: JiraTicket }) {
   if (!updated) return null;
   return (
     <div className="text-xs text-muted-foreground px-1" title={ticket.updated}>
-      {t("jira:updated")} {updated}
+      {t("jira:updatedTime", { time: updated })}
     </div>
   );
 }

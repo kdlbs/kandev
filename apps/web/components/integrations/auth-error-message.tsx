@@ -52,7 +52,7 @@ export function IntegrationAuthErrorMessage({
       <div className="flex items-center gap-3 text-sm">
         <span className={isAuth ? "text-muted-foreground" : "text-destructive"}>
           {isAuth
-            ? t("integrations:authenticationRequired", { name })
+            ? t("integrations:authRequiredInline", { name })
             : cleanIntegrationErrorMessage(error)}
         </span>
         {isAuth && (
@@ -70,7 +70,9 @@ export function IntegrationAuthErrorMessage({
         <>
           <IconLockExclamation className="h-10 w-10 mx-auto text-muted-foreground" />
           <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">{t("integrations:authRequired", { name })}</h2>
+            <h2 className="text-lg font-semibold">
+              {t("integrations:authRequiredHeading", { name })}
+            </h2>
             <p className="text-sm text-muted-foreground">{authErrorBody}</p>
           </div>
           <Button asChild size="sm" className="cursor-pointer">

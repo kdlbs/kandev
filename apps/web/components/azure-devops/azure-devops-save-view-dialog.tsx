@@ -36,7 +36,7 @@ function SaveViewForm({
       await onSave(trimmed);
       onClose();
     } catch {
-      setError("Could not save this view. Try again.");
+      setError(t("azuredevops:couldNotSaveView"));
     } finally {
       setSaving(false);
     }

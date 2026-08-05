@@ -38,14 +38,23 @@ function EmptyResult({ loading, error }: { loading: boolean; error: string | nul
   );
 }
 
+// A discriminant, not copy: the aria-label is a whole sentence per kind, because
+// interpolating an English noun into a translated sentence is untranslatable.
+type TaskActionsItemKind = "workItem" | "pullRequest";
+
+const TASK_ACTIONS_LABEL_KEYS: Record<TaskActionsItemKind, string> = {
+  workItem: "azuredevops:taskActionsForWorkItem",
+  pullRequest: "azuredevops:taskActionsForPullRequest",
+};
+
 function TaskActionsMenu<T extends { id: number }>({
   item,
-  itemLabel,
+  itemKind,
   actions,
   onSelect,
 }: {
   item: T;
-  itemLabel: string;
+  itemKind: TaskActionsItemKind;
   actions: AzureDevOpsActionPreset[];
   onSelect: (item: T, action: AzureDevOpsActionPreset) => void;
 }) {
@@ -58,7 +67,7 @@ function TaskActionsMenu<T extends { id: number }>({
           size="sm"
           variant="outline"
           className="cursor-pointer"
-          aria-label={t("azuredevops:taskActionsFor", { itemLabel, id: item.id })}
+          aria-label={t(TASK_ACTIONS_LABEL_KEYS[itemKind], { id: item.id })}
         >
           <IconPlus className="h-4 w-4" /> {t("azuredevops:task")}{" "}
           <IconChevronDown className="h-3 w-3" />
@@ -142,7 +151,7 @@ export function AzureDevOpsWorkItemResults({
             {quickActions.length > 0 && onQuickAction ? (
               <TaskActionsMenu
                 item={item}
-                itemLabel="work item"
+                itemKind="workItem"
                 actions={quickActions}
                 onSelect={onQuickAction}
               />
@@ -222,7 +231,7 @@ export function AzureDevOpsPullRequestResults({
             {quickActions.length > 0 && onQuickAction ? (
               <TaskActionsMenu
                 item={pullRequest}
-                itemLabel="pull request"
+                itemKind="pullRequest"
                 actions={quickActions}
                 onSelect={onQuickAction}
               />

@@ -54,9 +54,7 @@ export function ResultsPagination({
             />
           </PaginationItem>
           <PaginationItem>
-            <span className="px-3 text-sm tabular-nums">
-              {t("jira:page")} {page}
-            </span>
+            <span className="px-3 text-sm tabular-nums">{t("jira:pageNumber", { page })}</span>
           </PaginationItem>
           <PaginationItem>
             <PaginationNext

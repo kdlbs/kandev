@@ -196,9 +196,6 @@ type StatusPillProps = {
   hasProjectSelected: boolean;
 };
 
-const NO_PROJECT_HINT = "Select a project to filter by status";
-const NO_STATUSES_HINT = "No statuses available for the selected project";
-
 export function StatusPill({ options, value, onChange, hasProjectSelected }: StatusPillProps) {
   const { t } = useTranslation();
   const [query, setQuery] = useState("");
@@ -223,7 +220,9 @@ export function StatusPill({ options, value, onChange, hasProjectSelected }: Sta
       active={value.length > 0}
       onClear={() => onChange([])}
       disabled={options.length === 0}
-      disabledHint={hasProjectSelected ? NO_STATUSES_HINT : NO_PROJECT_HINT}
+      disabledHint={
+        hasProjectSelected ? t("jira:noStatusesForProject") : t("jira:selectProjectToFilterStatus")
+      }
     >
       <div className="p-2 border-b">
         <Input
