@@ -5,7 +5,7 @@ test.describe("MCP-created task agent profile default on mobile", () => {
     testPage,
     apiClient,
   }) => {
-    await testPage.goto("/settings/general");
+    await testPage.goto("/settings");
     const taskActionsLink = testPage.getByRole("link", { name: /Task Actions/ });
     await expect(taskActionsLink).toBeVisible({ timeout: 15_000 });
     await taskActionsLink.tap();

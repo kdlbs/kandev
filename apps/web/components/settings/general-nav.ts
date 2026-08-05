@@ -77,6 +77,14 @@ export const GENERAL_NAV_ITEMS: GeneralNavItem[] = GENERAL_NAV_PRESENTATION.map(
   };
 });
 
+/**
+ * Where the General group leads: its first page. The group used to point at
+ * bare `/settings/general`, which rendered a card grid over this same list —
+ * `SystemGroup` and `AccountGroup` have always pointed at a first leaf instead.
+ * Derived from the list so reordering it moves the target too.
+ */
+export const GENERAL_SETTINGS_HOME = GENERAL_NAV_ITEMS[0].href;
+
 /** A nav item with its copy already translated, ready to render. */
 export type ResolvedGeneralNavItem = {
   href: string;

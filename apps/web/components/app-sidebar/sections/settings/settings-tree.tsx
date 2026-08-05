@@ -51,8 +51,8 @@ export function settingsGroupIdForPath(pathname: string): string | null {
   return GROUP_ROUTES.find((g) => pathname.startsWith(g.prefix))?.id ?? null;
 }
 
-export function settingsOpenGroupIdForPath(pathname: string): string {
-  return settingsGroupIdForPath(pathname) ?? DEFAULT_OPEN_GROUP;
+export function settingsOpenGroupIdForPath(pathname: string, fallbackGroup?: string): string {
+  return settingsGroupIdForPath(pathname) ?? fallbackGroup ?? DEFAULT_OPEN_GROUP;
 }
 
 /**
@@ -63,7 +63,18 @@ export function settingsOpenGroupIdForPath(pathname: string): string {
  * Rendered both inside the collapsible "Settings" sidebar section and, when the
  * footer gear is active, as the full-height sidebar takeover.
  */
-export function SettingsTree({ pathname }: { pathname: string }) {
+export function SettingsTree({
+  pathname,
+  defaultOpenGroup,
+}: {
+  pathname: string;
+  /**
+   * Group to open when `pathname` owns none — the `/settings` index passes
+   * "general" so the phone's settings home opens on the pages people reach for,
+   * rather than on `DEFAULT_OPEN_GROUP`.
+   */
+  defaultOpenGroup?: string;
+}) {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
   const authMode = useAppStore((s) => s.auth.mode);
@@ -71,14 +82,14 @@ export function SettingsTree({ pathname }: { pathname: string }) {
   const discoveryItems = useSettingsDiscovery();
   const [query, setQuery] = useState("");
   const [openGroup, setOpenGroup] = useState<string | null>(() =>
-    settingsOpenGroupIdForPath(pathname),
+    settingsOpenGroupIdForPath(pathname, defaultOpenGroup),
   );
 
   // Re-sync when navigation lands on a different section so the open group
   // always reflects the current page (a leaf with no owning group → all closed).
   useEffect(() => {
-    setOpenGroup(settingsOpenGroupIdForPath(pathname));
-  }, [pathname]);
+    setOpenGroup(settingsOpenGroupIdForPath(pathname, defaultOpenGroup));
+  }, [pathname, defaultOpenGroup]);
 
   const groupProps = (id: string) => ({
     expanded: openGroup === id,

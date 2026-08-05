@@ -7,12 +7,14 @@ import {
   rememberSettingsPath,
 } from "./last-settings-page";
 
+const APPEARANCE_PATH = "/settings/general/appearance";
+const PROMPTS_PATH = "/settings/prompts";
 const WORKSPACE_ID = "9694f4e6-c4eb-4800-aa93-1d947907703e";
 
 describe("isRememberableSettingsPath", () => {
   it("accepts static settings pages", () => {
-    expect(isRememberableSettingsPath("/settings/general/appearance")).toBe(true);
-    expect(isRememberableSettingsPath("/settings/prompts")).toBe(true);
+    expect(isRememberableSettingsPath(APPEARANCE_PATH)).toBe(true);
+    expect(isRememberableSettingsPath(PROMPTS_PATH)).toBe(true);
     expect(isRememberableSettingsPath("/settings/system/status")).toBe(true);
   });
 
@@ -58,9 +60,9 @@ describe("remember/read round trip", () => {
   });
 
   it("keeps the previous page when an unrestorable one is visited", () => {
-    rememberSettingsPath("/settings/prompts");
+    rememberSettingsPath(PROMPTS_PATH);
     rememberSettingsPath(`/settings/workspace/${WORKSPACE_ID}/integrations`);
-    expect(readLastSettingsPath()).toBe("/settings/prompts");
+    expect(readLastSettingsPath()).toBe(PROMPTS_PATH);
   });
 
   it("normalizes a trailing slash", () => {
@@ -75,7 +77,16 @@ describe("remember/read round trip", () => {
   });
 
   it("falls back when the stored value is not JSON", () => {
-    window.localStorage.setItem(STORAGE_KEYS.LAST_SETTINGS_PATH, "/settings/prompts");
+    window.localStorage.setItem(STORAGE_KEYS.LAST_SETTINGS_PATH, PROMPTS_PATH);
     expect(readLastSettingsPath()).toBe(DEFAULT_SETTINGS_PATH);
+  });
+});
+
+describe("default target", () => {
+  it("matches the General group's first page", async () => {
+    // The route redirect and the group header both use GENERAL_SETTINGS_HOME;
+    // this keeps the storage fallback from drifting away from it.
+    const { GENERAL_SETTINGS_HOME } = await import("@/components/settings/general-nav");
+    expect(DEFAULT_SETTINGS_PATH).toBe(GENERAL_SETTINGS_HOME);
   });
 });

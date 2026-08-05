@@ -1,15 +1,17 @@
 "use client";
 
+import { useEffect } from "react";
 import { usePathname } from "@/lib/routing/client-router";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { PageShell } from "@/components/page-shell";
-import { SettingsTree } from "@/components/app-sidebar/sections/settings/settings-tree";
 import { useAppStore } from "@/components/state-provider";
 import { IntegrationCopyConfigMenu } from "@/components/integrations/integration-copy-config-menu";
 import { integrationFromPathname } from "@/components/integrations/integration-copy-config";
 import { safeDecodePathSegment } from "@/lib/routing/path";
+import { SettingsPageNav } from "@/components/settings/settings-page-nav";
 import { SettingsSaveProvider } from "@/components/settings/settings-save-provider";
 import { SettingsTargetProvider } from "@/components/settings/settings-target-provider";
+import { rememberSettingsPath } from "@/lib/settings/last-settings-page";
 import { useTranslation } from "react-i18next";
 
 // Brand/initialism overrides so the derived label matches how the rest of the
@@ -205,19 +207,6 @@ function workspaceIdFromPathname(pathname: string): string | null {
   return safeDecodePathSegment(match?.[1]);
 }
 
-/**
- * The settings tree as the nav sheet's page section. The wrapper compacts the
- * sidebar-styled tree to the sheet's touch-row sizing; link clicks close the
- * sheet via AppNavSheet's own handler.
- */
-function SettingsPageNav({ pathname }: { pathname: string }) {
-  return (
-    <div className="flex flex-col gap-0.5 [&_a]:min-h-10 [&_a]:text-sm [&_button]:min-h-10 [&_button]:text-sm [&_svg]:h-4 [&_svg]:w-4">
-      <SettingsTree pathname={pathname} />
-    </div>
-  );
-}
-
 function SettingsShell({
   title,
   backHref,
@@ -234,6 +223,13 @@ function SettingsShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+
+  // Where bare `/settings` sends this device next time. Recorded here rather
+  // than in the index route so every settings page updates it, including the
+  // target a redirect stub lands on.
+  useEffect(() => {
+    rememberSettingsPath(pathname);
+  }, [pathname]);
 
   return (
     <TooltipProvider>

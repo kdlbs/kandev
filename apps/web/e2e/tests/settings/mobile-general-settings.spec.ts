@@ -173,8 +173,10 @@ test.describe("Mobile general settings", () => {
     }
   });
 
-  test("opens a dedicated General settings page from the overview", async ({ testPage }) => {
-    await testPage.goto("/settings/general");
+  test("opens a dedicated General settings page from the settings index", async ({ testPage }) => {
+    // `/settings` is the index on a phone: the settings tree as a page. It used
+    // to be a card grid over the same list, duplicated at /settings/general.
+    await testPage.goto("/settings");
 
     await expect(testPage.getByRole("link", { name: /Terminal/ })).toBeVisible({
       timeout: 15_000,

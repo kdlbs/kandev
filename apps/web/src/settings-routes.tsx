@@ -36,12 +36,13 @@ import WorkspacesPage from "@/app/settings/workspace/page";
 import Link from "@/components/routing/app-link";
 import { useAppStoreApi } from "@/components/state-provider";
 import { EditorsSettings } from "@/components/settings/editors-settings";
+import { GENERAL_SETTINGS_HOME } from "@/components/settings/general-nav";
 import {
   AppearanceSettings,
-  GeneralSettings,
   KeyboardShortcutsSettings,
   TaskActionsSettings,
 } from "@/components/settings/general-settings";
+import { SettingsIndex } from "@/components/settings/settings-index";
 import { NotificationsSettings } from "@/components/settings/notifications-settings";
 import { LayoutSettings } from "@/components/settings/layouts/layout-settings";
 import { PromptsSettings } from "@/components/settings/prompts-settings";
@@ -138,8 +139,12 @@ type SettingsInitialStateData = {
 const licenseEntries = licenses as LicenseEntry[];
 
 const SETTINGS_ROUTES: Record<string, RouteRenderer> = {
-  "/settings": () => <GeneralSettings />,
-  "/settings/general": () => <GeneralSettings />,
+  // The index resolves per surface: the tree as a page on a phone, a handoff to
+  // the last visited settings page on desktop. See `SettingsIndex`.
+  "/settings": () => <SettingsIndex />,
+  // `/settings/general` used to render the same card grid as `/settings`. It is
+  // now a prefix only, like `/settings/system`.
+  "/settings/general": () => <SettingsRedirect to={GENERAL_SETTINGS_HOME} />,
   "/settings/general/appearance": () => <AppearanceSettings />,
   "/settings/general/changes-panel": () => <SettingsRedirect to="/settings/general/appearance" />,
   "/settings/general/chat-input": () => (

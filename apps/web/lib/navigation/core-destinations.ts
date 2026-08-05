@@ -118,11 +118,14 @@ export const APP_DESTINATIONS: Destination[] = [
     // The sidebar's gear also toggles the sidebar's settings takeover, so it
     // stays bespoke; this entry serves the mobile menu and the palette.
     surfaces: MENU_AND_PALETTE,
+    // No href override: the command lands on `/settings`, which resolves to the
+    // page you were last on (desktop) or the settings index (phone). It used to
+    // point at `/settings/general` to skip the card grid that `/settings`
+    // rendered; that grid is gone and `/settings/general` only redirects now.
     palette: {
       id: "nav-settings",
       labelKey: "common:commandGoToSettings",
       keywordsKey: "common:commandGoToSettingsKeywords",
-      href: "/settings/general",
     },
   },
   {

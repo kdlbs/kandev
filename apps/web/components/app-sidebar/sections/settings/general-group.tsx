@@ -1,9 +1,13 @@
 "use client";
 import { IconSettings } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
-import { useGeneralNavItems } from "@/components/settings/general-nav";
-import { GENERAL_SETTINGS_HREF } from "@/lib/settings-discovery/catalog/general";
+import { GENERAL_SETTINGS_HOME, useGeneralNavItems } from "@/components/settings/general-nav";
 import { SettingsGroup, SettingsLeaf } from "./settings-nav-primitives";
+
+// The header leads to the group's first page, matching SystemGroup and
+// AccountGroup. It used to point at bare `/settings/general`, which rendered a
+// card grid over this same list.
+const GENERAL_HREF = GENERAL_SETTINGS_HOME;
 
 type GeneralGroupProps = {
   pathname: string;
@@ -18,8 +22,8 @@ export function GeneralGroup({ pathname, expanded, onToggle }: GeneralGroupProps
     <SettingsGroup
       label={t("settings:general")}
       icon={IconSettings}
-      href={GENERAL_SETTINGS_HREF}
-      isActive={pathname === GENERAL_SETTINGS_HREF}
+      href={GENERAL_HREF}
+      isActive={pathname === GENERAL_HREF}
       expanded={expanded}
       onToggle={onToggle}
     >

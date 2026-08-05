@@ -1,7 +1,6 @@
 "use client";
 import { useCallback, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import Link from "@/components/routing/app-link";
 import { useTheme } from "@/components/theme/app-theme";
 import {
   IconActivity,
@@ -14,7 +13,7 @@ import {
   IconListCheck,
   IconHome,
 } from "@tabler/icons-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Label } from "@kandev/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { Separator } from "@kandev/ui/separator";
@@ -22,7 +21,6 @@ import { SettingsSection } from "@/components/settings/settings-section";
 import { SettingsCard } from "@/components/settings/settings-card";
 import { KeyboardShortcutsCard } from "@/components/settings/keyboard-shortcuts-card";
 import { SystemMetricsSettingsCard } from "@/components/settings/system-metrics-settings-card";
-import { useGeneralNavItems } from "@/components/settings/general-nav";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
@@ -227,31 +225,6 @@ function AppearanceThemeSection({
     >
       <ThemeSettingsCard theme={theme} isDirty={isDirty} onChange={onChange} />
     </SettingsSection>
-  );
-}
-
-export function GeneralSettings() {
-  const navItems = useGeneralNavItems();
-  return (
-    <div className="space-y-8">
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {navItems.map(({ href, label, description, icon: Icon }) => (
-          <Link key={href} href={href} className="cursor-pointer">
-            <Card className="h-full transition-colors hover:bg-muted/40">
-              <CardHeader className="pb-3">
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Icon className="h-4 w-4 text-muted-foreground" />
-                  {label}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{description}</p>
-              </CardContent>
-            </Card>
-          </Link>
-        ))}
-      </div>
-    </div>
   );
 }
 

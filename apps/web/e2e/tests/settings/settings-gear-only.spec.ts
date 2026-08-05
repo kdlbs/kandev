@@ -21,6 +21,11 @@ test.describe("Settings sidebar takeover", () => {
     // Gear opens the takeover again.
     await gear.click();
     await expect(takeover).toBeVisible();
+
+    // The tree opens the group that owns the current route, and `/settings` now
+    // hands off to a General page, so reach the workspace subtree explicitly.
+    await takeover.getByRole("link", { name: "Workspaces" }).click();
+    await expect(testPage).toHaveURL(/\/settings\/workspace$/);
     await expect(takeover.getByText("Active", { exact: true })).toBeVisible();
     await expect(takeover.getByRole("link", { name: "Repositories" })).toBeVisible();
     await expect(
@@ -97,7 +102,9 @@ test.describe("Settings sidebar takeover", () => {
 
     await testPage.getByTestId("sidebar-settings-gear").click();
 
-    await expect(testPage).toHaveURL(/\/settings$/);
+    // The gear pushes `/settings`, which on desktop hands off to the settings
+    // page this device was last on — Appearance in a fresh profile.
+    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
     await expect(takeover).toBeVisible();
   });
 
