@@ -69,6 +69,7 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
   const [commit, setCommit] = useState<PRCommitDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const requestSeqRef = useRef(0);
   const key = targetKey(target);
   const stableTarget = useMemo(() => target, [key]);
@@ -99,11 +100,13 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
       if (stableTarget.source === "github" && !response.success) {
         throw new CommitDetailProtocolError("invalid_response");
       }
+      setLoadedKey(key);
       setFiles(response.success && response.files ? response.files : null);
       setCommit(response.source === "github" ? (response.commit ?? null) : null);
     } catch (err) {
       if (requestSeq !== requestSeqRef.current) return;
       const message = detailErrorMessage(err, unexpectedError);
+      setLoadedKey(key);
       setFiles(null);
       setCommit(null);
       setError(message);
@@ -115,11 +118,18 @@ export function useCommitDetail(target: CommitDetailTarget): UseCommitDetailResu
     } finally {
       if (requestSeq === requestSeqRef.current) setLoading(false);
     }
-  }, [localRequest, requestFailed, stableTarget, toast, unexpectedError]);
+  }, [key, localRequest, requestFailed, stableTarget, toast, unexpectedError]);
 
   useEffect(() => {
     void fetchDetail();
   }, [fetchDetail]);
 
-  return { files, commit, loading, error, refetch: fetchDetail };
+  const isCurrentTargetLoaded = loadedKey === key;
+  return {
+    files: isCurrentTargetLoaded ? files : null,
+    commit: isCurrentTargetLoaded ? commit : null,
+    loading: loading || !isCurrentTargetLoaded,
+    error: isCurrentTargetLoaded ? error : null,
+    refetch: fetchDetail,
+  };
 }

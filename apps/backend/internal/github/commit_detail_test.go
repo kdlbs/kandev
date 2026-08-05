@@ -83,6 +83,16 @@ func TestParsePRCommitDetailJSONMergesPages(t *testing.T) {
 	}
 }
 
+func TestParsePRCommitDetailJSONRejectsEmptyPayloads(t *testing.T) {
+	for _, payload := range []string{`null`, `[null]`, `{}`, `[{}]`} {
+		t.Run(payload, func(t *testing.T) {
+			if _, err := parsePRCommitDetailJSON(payload); err == nil {
+				t.Fatalf("parsePRCommitDetailJSON(%q) succeeded, want malformed payload error", payload)
+			}
+		})
+	}
+}
+
 func TestGetPRCommitDetailForWorkspaceUsesAuthorizedClient(t *testing.T) {
 	const sha = "3333333333333333333333333333333333333333"
 	client := NewMockClient()

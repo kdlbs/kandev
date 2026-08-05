@@ -340,7 +340,7 @@ export function mergeCommits(
   prCommits: PRCommitForMerge[],
 ): MergedCommit[] {
   const shaMatches = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
-  const repositoryMatches = (a?: string, b?: string) => !a || !b || a === b;
+  const repositoryMatches = (a?: string, b?: string) => (a ?? "") === (b ?? "");
   const commitsMatch = (
     local: { commit_sha: string; repository_name?: string },
     pr: PRCommitForMerge,

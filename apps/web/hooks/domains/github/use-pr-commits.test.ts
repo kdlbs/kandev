@@ -74,21 +74,13 @@ describe("usePRCommits request ownership", () => {
     );
 
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
-    await act(async () => {
-      first.resolve({ commits: [commit("first-sha")] });
-      await first.promise;
-    });
-    await waitFor(() => expect(result.current.commits[0]?.sha).toBe("first-sha"));
-
-    websocketClient = null;
     rerender({ number: 2 });
-    expect(result.current).toMatchObject({ commits: [], error: null });
 
-    websocketClient = { request: requestMock };
+    await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(2));
     await act(async () => {
-      void result.current.refresh();
+      second.resolve({ commits: [commit("second-sha")] });
+      await second.promise;
     });
-    second.resolve({ commits: [commit("second-sha")] });
     await waitFor(() => expect(result.current.commits[0]?.sha).toBe("second-sha"));
 
     await act(async () => {

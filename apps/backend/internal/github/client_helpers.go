@@ -722,6 +722,9 @@ func parsePRCommitDetailJSON(data string) (PRCommitDetail, error) {
 	}
 
 	first := pages[0]
+	if first.SHA == "" {
+		return PRCommitDetail{}, errors.New("parse PR commit detail: missing commit SHA")
+	}
 	detail := PRCommitDetail{
 		SHA:        first.SHA,
 		Message:    first.Commit.Message,

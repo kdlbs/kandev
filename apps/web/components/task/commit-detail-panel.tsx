@@ -29,9 +29,25 @@ type CommitDiffViewProps = {
 
 function isCommitDetailTarget(value: unknown): value is CommitDetailTarget {
   if (!value || typeof value !== "object") return false;
-  const target = value as { source?: unknown; sha?: unknown };
+  const target = value as {
+    source?: unknown;
+    sha?: unknown;
+    repo?: unknown;
+    workspaceId?: unknown;
+    owner?: unknown;
+  };
+  if (typeof target.sha !== "string" || target.sha.length === 0) return false;
+  if (target.source === "local") {
+    return target.repo === undefined || typeof target.repo === "string";
+  }
   return (
-    (target.source === "local" || target.source === "github") && typeof target.sha === "string"
+    target.source === "github" &&
+    typeof target.workspaceId === "string" &&
+    target.workspaceId.length > 0 &&
+    typeof target.owner === "string" &&
+    target.owner.length > 0 &&
+    typeof target.repo === "string" &&
+    target.repo.length > 0
   );
 }
 

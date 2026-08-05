@@ -198,6 +198,12 @@ git diff --check
   The broader focused frontend suite passed (8 files, 69 tests), plus the
   remediation request/hook/panel tests (4 files, 15 tests), typecheck, lint,
   i18n checks, and ratchet.
+- Review follow-up after rebasing onto `main`: root repository identity is now
+  matched exactly, invalid/null commit payloads are rejected at both backend
+  and frontend boundaries, target switches cannot expose prior detail state,
+  and serialized GitHub targets require complete identity. Backend GitHub tests
+  passed (1,086); focused frontend tests passed (8 files, 73 tests), with
+  typecheck, lint, i18n checks, ratchet, and diff checks green.
 
 ## Risks and out of scope
 

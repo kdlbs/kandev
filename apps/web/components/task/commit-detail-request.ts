@@ -23,6 +23,48 @@ export class CommitDetailProtocolError extends Error {
   }
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isInteger(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value);
+}
+
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
+function isCompleteGitHubFile(value: unknown): value is PRCommitDetail["files"][number] {
+  if (!value || typeof value !== "object") return false;
+  const file = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(file.filename) &&
+    isNonEmptyString(file.status) &&
+    isInteger(file.additions) &&
+    isInteger(file.deletions) &&
+    isOptionalString(file.old_path) &&
+    isOptionalString(file.patch)
+  );
+}
+
+function isCompleteGitHubCommitDetail(value: unknown): value is PRCommitDetail {
+  if (!value || typeof value !== "object") return false;
+  const commit = value as Record<string, unknown>;
+  return (
+    isNonEmptyString(commit.sha) &&
+    typeof commit.message === "string" &&
+    typeof commit.author_login === "string" &&
+    isNonEmptyString(commit.author_name) &&
+    isNonEmptyString(commit.author_date) &&
+    isInteger(commit.additions) &&
+    isInteger(commit.deletions) &&
+    isInteger(commit.files_changed) &&
+    Array.isArray(commit.files) &&
+    commit.files.every(isCompleteGitHubFile)
+  );
+}
+
 function mapGitHubFile(file: PRCommitDetail["files"][number]): FileInfo {
   return {
     path: file.filename,
@@ -55,7 +97,9 @@ async function requestGitHubCommitDetail(
     },
     10000,
   );
-  if (!response?.commit) throw new CommitDetailProtocolError("invalid_response");
+  if (!isCompleteGitHubCommitDetail(response?.commit)) {
+    throw new CommitDetailProtocolError("invalid_response");
+  }
   return {
     source: "github",
     success: true,

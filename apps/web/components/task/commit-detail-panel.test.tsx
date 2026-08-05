@@ -3,6 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   refetch: vi.fn(),
+  useCommitDetail: vi.fn(() => ({
+    files: null,
+    commit: null,
+    loading: false,
+    error: "Commit detail unavailable",
+    refetch: mocks.refetch,
+  })),
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -15,13 +22,7 @@ vi.mock("@/hooks/domains/session/use-session-commits", () => ({
 }));
 
 vi.mock("@/hooks/domains/session/use-commit-detail", () => ({
-  useCommitDetail: () => ({
-    files: null,
-    commit: null,
-    loading: false,
-    error: "Commit detail unavailable",
-    refetch: mocks.refetch,
-  }),
+  useCommitDetail: mocks.useCommitDetail,
 }));
 
 vi.mock("@/hooks/use-panel-actions", () => ({
@@ -41,10 +42,11 @@ vi.mock("./panel-primitives", () => ({
   PanelBody: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
-import { CommitDiffView } from "./commit-detail-panel";
+import { CommitDetailPanel, CommitDiffView } from "./commit-detail-panel";
 
 afterEach(() => {
   mocks.refetch.mockReset();
+  mocks.useCommitDetail.mockClear();
 });
 
 describe("CommitDiffView error state", () => {
@@ -66,5 +68,18 @@ describe("CommitDiffView error state", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "system:featureTogglesRetry" }));
     expect(mocks.refetch).toHaveBeenCalledOnce();
+  });
+});
+
+describe("CommitDetailPanel target validation", () => {
+  it("does not accept a partial GitHub target from serialized params", () => {
+    render(
+      <CommitDetailPanel
+        panelId="commit-detail"
+        params={{ target: { source: "github", sha: "partial" } }}
+      />,
+    );
+
+    expect(mocks.useCommitDetail).toHaveBeenCalledWith({ source: "local", sha: "" });
   });
 });

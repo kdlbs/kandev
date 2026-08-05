@@ -119,3 +119,32 @@ describe("mergeCommits source provenance", () => {
     });
   });
 });
+
+describe("mergeCommits repository identity", () => {
+  it("does not match a root local commit to a named repository PR", () => {
+    const local = [makeLocal(SHARED_SHA, "root local")];
+    const pr = {
+      ...makePR(SHARED_SHA, "remote"),
+      stats_available: false,
+      workspace_id: WORKSPACE_ID,
+      owner: "acme",
+      repo: WIDGET_REPO,
+      repository_name: WIDGET_REPO,
+    };
+
+    const result = mergeCommits(local, [pr]);
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({
+      commit_message: "root local",
+      pushed: false,
+      detailTarget: { source: "local", sha: SHARED_SHA },
+    });
+    expect(result[1]).toMatchObject({
+      commit_message: "remote",
+      pushed: true,
+      repository_name: WIDGET_REPO,
+      detailTarget: { source: "github", repo: WIDGET_REPO },
+    });
+  });
+});

@@ -76,3 +76,9 @@ spec: "../../specs/pr-only-commit-details/spec.md"
   refetch when local agent readiness changes. The remediation suite passed
   (8 files, 69 tests), with additional focused regressions covering the PR
   switch, protocol failures, retry rendering, and remote dependency boundary.
+- Review follow-up: normalized missing repository names to the workspace-root
+  identity, rejected malformed backend and frontend commit-detail payloads,
+  bound loaded detail state to the selected target, hardened serialized GitHub
+  target validation, and corrected the late-response regression. The rebased
+  verification passed with 1,086 backend GitHub tests and 73 focused frontend
+  tests.

@@ -46,6 +46,15 @@ const remoteTarget = {
   owner: "acme",
   repo: "widget",
 };
+const nextRemoteTarget = { ...remoteTarget, sha: "remote456" };
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
 
 afterEach(() => {
   cleanup();
@@ -153,5 +162,48 @@ describe("useCommitDetail", () => {
       await result.current.refetch();
     });
     expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useCommitDetail target switching", () => {
+  it("hides the previous detail while switching targets", async () => {
+    const first = deferred<{
+      source: "github";
+      success: true;
+      files: Record<string, FileInfo>;
+      commit: { sha: string; message: string };
+    }>();
+    const second = deferred<{
+      source: "github";
+      success: true;
+      files: Record<string, FileInfo>;
+      commit: { sha: string; message: string };
+    }>();
+    mocks.requestCommitDetail.mockImplementation(({ target }: { target: { sha: string } }) =>
+      target.sha === remoteTarget.sha ? first.promise : second.promise,
+    );
+
+    const { result, rerender } = renderHook(({ target }) => useCommitDetail(target), {
+      initialProps: { target: remoteTarget },
+    });
+
+    await waitFor(() => expect(mocks.requestCommitDetail).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      first.resolve({
+        source: "github",
+        success: true,
+        files: remoteFiles,
+        commit: { sha: remoteTarget.sha, message: "first commit" },
+      });
+      await first.promise;
+    });
+    await waitFor(() => expect(result.current.commit?.message).toBe("first commit"));
+
+    rerender({ target: nextRemoteTarget });
+
+    expect(result.current.files).toBeNull();
+    expect(result.current.commit).toBeNull();
+    expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(true);
   });
 });

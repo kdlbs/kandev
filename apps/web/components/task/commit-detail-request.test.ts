@@ -159,6 +159,16 @@ describe("requestCommitDetail", () => {
       }),
     ).rejects.toThrow();
   });
+
+  it("rejects a present but incomplete GitHub commit payload", async () => {
+    mocks.request.mockResolvedValue({ commit: { files: [] } });
+
+    await expect(
+      requestCommitDetail({
+        target: remoteTarget,
+      }),
+    ).rejects.toThrow();
+  });
 });
 
 describe("mapGitHubCommitFiles", () => {
