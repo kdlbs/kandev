@@ -166,8 +166,8 @@ printf '%s\n' '{"number":7,"title":"Remote contribution","url":"https://github.c
 	if pr.HeadRepoNodeID != "R_kgDOFork123" || pr.HeadRepoOwner != "contributor" || pr.HeadRepoName != "widget-fork" {
 		t.Fatalf("source repository = (%q, %q, %q), want CLI node ID and owner shape", pr.HeadRepoNodeID, pr.HeadRepoOwner, pr.HeadRepoName)
 	}
-	if pr.BaseRepoOwner != "acme" || pr.BaseRepoName != "widget" || pr.BaseDefaultBranch != "main" {
-		t.Fatalf("target repository = (%q, %q, %q), want acme/widget/main", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseDefaultBranch)
+	if pr.BaseRepoOwner != "acme" || pr.BaseRepoName != "widget" || pr.BaseDefaultBranch != "" {
+		t.Fatalf("target repository = (%q, %q, %q), want acme/widget with no guessed default branch", pr.BaseRepoOwner, pr.BaseRepoName, pr.BaseDefaultBranch)
 	}
 	args, err := os.ReadFile(logPath)
 	if err != nil {

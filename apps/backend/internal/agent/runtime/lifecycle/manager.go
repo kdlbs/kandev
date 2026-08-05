@@ -97,9 +97,12 @@ type Manager struct {
 	remoteStatusPollInterval time.Duration
 	remoteStatusMu           sync.RWMutex
 	remoteStatusBySession    map[string]*RemoteStatus
-	stopCh                   chan struct{}
-	stopOnce                 sync.Once
-	wg                       sync.WaitGroup
+	// Bounds the non-mutating contribution push check before agent launch.
+	// A zero value uses the production default and keeps test Manager literals safe.
+	remoteContributionPreflightTimeout time.Duration
+	stopCh                             chan struct{}
+	stopOnce                           sync.Once
+	wg                                 sync.WaitGroup
 	// shuttingDown is flipped true when graceful shutdown begins (see
 	// StopAllAgents) so handlers running in detached goroutines can
 	// short-circuit work that would otherwise race the teardown and log

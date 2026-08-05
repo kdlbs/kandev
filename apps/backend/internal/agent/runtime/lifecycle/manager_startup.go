@@ -18,6 +18,15 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+const defaultRemoteContributionPreflightTimeout = 30 * time.Second
+
+func (m *Manager) contributionPreflightTimeout() time.Duration {
+	if m.remoteContributionPreflightTimeout > 0 {
+		return m.remoteContributionPreflightTimeout
+	}
+	return defaultRemoteContributionPreflightTimeout
+}
+
 // startPassthroughExecution dispatches a passthrough-routed execution to the
 // resume or fresh launch path. profileInfo may be nil — see routePassthrough's
 // contract.
@@ -133,7 +142,10 @@ func (m *Manager) StartAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
-	if err := m.preflightRemoteContributionPushes(operationCtx, execution); err != nil {
+	preflightCtx, cancelPreflight := context.WithTimeout(operationCtx, m.contributionPreflightTimeout())
+	err = m.preflightRemoteContributionPushes(preflightCtx, execution)
+	cancelPreflight()
+	if err != nil {
 		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
 		return err
 	}

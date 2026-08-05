@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
@@ -173,6 +174,79 @@ func TestStartAgentProcess_RunsContributionPreflightBeforeAgentStart(t *testing.
 	}
 	if len(paths) != 2 || paths[0] != "/health" || paths[1] != "/api/v1/git/push-preflight" {
 		t.Fatalf("agentctl request order = %v, want health then push-preflight only", paths)
+	}
+}
+
+func TestStartAgentProcessBoundsContributionPreflight(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+		case "/api/v1/git/push-preflight":
+			close(started)
+			<-release
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+	host, portText, err := net.SplitHostPort(strings.TrimPrefix(server.URL, "http://"))
+	if err != nil {
+		t.Fatalf("parse agentctl test URL: %v", err)
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil {
+		t.Fatalf("parse agentctl test port: %v", err)
+	}
+
+	mgr := newTestManager(t)
+	mgr.remoteContributionPreflightTimeout = 10 * time.Millisecond
+	binding := models.RemoteContribution{
+		Version:      models.RemoteContributionVersion,
+		Provider:     models.RemoteContributionProviderGitHub,
+		Kind:         models.RemoteContributionKindPullRequest,
+		CanonicalURL: "https://github.com/acme/widget/pull/7",
+		Number:       7,
+		State:        models.RemoteContributionStateOpen,
+		BaseBranch:   "main",
+		HeadBranch:   "feature/remote",
+		HeadSHA:      strings.Repeat("a", 40),
+		SourceRepository: models.RemoteContributionRepository{
+			Host: "github.com", Path: "contributor/widget", RemoteURL: "https://github.com/contributor/widget.git",
+		},
+		CollaborationAllowed: true,
+	}
+	execution := &AgentExecution{
+		ID: "exec-preflight-timeout", SessionID: "session-preflight-timeout",
+		AgentCommand: "agent", AgentProfileID: "profile-preflight-timeout",
+		Metadata: map[string]interface{}{
+			MetadataKeyRemoteContributions: map[string]models.RemoteContribution{"": binding},
+		},
+		agentctl: agentctl.NewClient(host, port, newTestLogger()),
+	}
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("seed execution: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- mgr.StartAgentProcess(context.Background(), execution.ID) }()
+	<-started
+	startedAt := time.Now()
+	select {
+	case err := <-errCh:
+		close(release)
+		if err == nil {
+			t.Fatal("StartAgentProcess() succeeded after preflight timeout")
+		}
+		if elapsed := time.Since(startedAt); elapsed > 500*time.Millisecond {
+			t.Fatalf("StartAgentProcess() returned after %s; want bounded preflight", elapsed)
+		}
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("StartAgentProcess() did not return after preflight timeout")
 	}
 }
 

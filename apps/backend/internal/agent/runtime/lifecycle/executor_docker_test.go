@@ -898,7 +898,10 @@ func TestResolvePrepareScript(t *testing.T) {
 			},
 			Env: map[string]string{"GH_TOKEN": "ghp_test"},
 		}
-		script := exec.resolvePrepareScript(req)
+		script, err := exec.resolvePrepareScript(req)
+		if err != nil {
+			t.Fatalf("resolvePrepareScript() error = %v", err)
+		}
 		if script == "" {
 			t.Fatal("expected non-empty script")
 		}
@@ -923,7 +926,10 @@ func TestResolvePrepareScript(t *testing.T) {
 			Metadata: map[string]interface{}{},
 			Env:      map[string]string{},
 		}
-		script := exec.resolvePrepareScript(req)
+		script, err := exec.resolvePrepareScript(req)
+		if err != nil {
+			t.Fatalf("resolvePrepareScript() error = %v", err)
+		}
 		// Should still produce a script (default docker script)
 		if script == "" {
 			t.Fatal("expected non-empty default script")
@@ -942,7 +948,10 @@ func TestResolvePrepareScript(t *testing.T) {
 				"KANDEV_GITLAB_HOST": "http://gitlab.internal:8080",
 			},
 		}
-		script := exec.resolvePrepareScript(req)
+		script, err := exec.resolvePrepareScript(req)
+		if err != nil {
+			t.Fatalf("resolvePrepareScript() error = %v", err)
+		}
 		if !strings.Contains(script, "'http://gitlab.internal:8080/group/repo.git'") {
 			t.Fatalf("resolved script does not retain raw clone URL:\n%s", script)
 		}

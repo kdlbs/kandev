@@ -240,7 +240,7 @@ type Handlers struct {
 	diagnosticBundles      DiagnosticBundleProvider
 	diagnosticMaterializer DiagnosticBundleMaterializer
 	// Optional task-bound GitLab MR automation controls.
-	taskMRAutomation       TaskMRAutomationService
+	taskMRAutomation TaskMRAutomationService
 }
 
 // NewHandlers creates new MCP handlers.
@@ -815,7 +815,9 @@ func (h *Handlers) resolveMCPRemoteContributions(
 		repo.ProviderRepoID = resolution.TargetProviderID
 		repo.ProviderOwner = owner
 		repo.ProviderName = name
-		repo.DefaultBranch = resolution.TargetDefaultBranch
+		if resolution.TargetDefaultBranch != "" {
+			repo.DefaultBranch = resolution.TargetDefaultBranch
+		}
 		repo.BaseBranch = resolution.Binding.BaseBranch
 		repo.CheckoutBranch = resolution.Binding.HeadBranch
 		repo.RemoteContribution = &resolution.Binding

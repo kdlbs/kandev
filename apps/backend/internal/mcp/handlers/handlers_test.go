@@ -275,6 +275,27 @@ func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
 	}
 }
 
+func TestResolveMCPRemoteContributionsPreservesExistingDefaultBranch(t *testing.T) {
+	resolution := testRemoteContributionResolution()
+	resolution.TargetDefaultBranch = ""
+	remote := &recordingRemoteContributionService{resolution: resolution}
+	h := &Handlers{remoteContributionSvc: remote, logger: testLogger(t)}
+	repos := []service.TaskRepositoryInput{{
+		RemoteURL:     "https://github.com/acme/widget/pull/7",
+		DefaultBranch: "trunk",
+	}}
+	resolutions, err := h.resolveMCPRemoteContributions(context.Background(), "workspace-1", "user-1", repos)
+	if err != nil {
+		t.Fatalf("resolveMCPRemoteContributions() error = %v", err)
+	}
+	if len(resolutions) != 1 || resolutions[0] == nil {
+		t.Fatalf("resolutions = %#v, want one resolution", resolutions)
+	}
+	if repos[0].DefaultBranch != "trunk" {
+		t.Fatalf("default branch = %q, want existing branch trunk", repos[0].DefaultBranch)
+	}
+}
+
 func TestHandleCreateTask_RollsBackWhenRemoteContributionAssociationFails(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
