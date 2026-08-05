@@ -1164,11 +1164,13 @@ export const i18nGuardFiles = [
   //   - `components/settings/config-chat-agent-section.tsx`, the Configuration
   //     Chat card on Settings → Utility Agents. #2218 migrates it with the page
   //     that owns it, into `settings:configChatAgent*`.
-  //   - `components/quick-chat/**`. `quick-chat-modal.tsx` renders
-  //     `ConfigChatSetup` in its `presentation="dialog"` form and calls
-  //     `useConfigChat`, so it inherits everything migrated here, but its own
-  //     chrome — and `configuration-chat-toggle.tsx`, which `ConfigChatSetup`
-  //     renders — is still English and belongs to the quick-chat migration.
+  //
+  // `components/quick-chat/**` was the other entry here until #2300 migrated it
+  // — `quick-chat-modal.tsx` renders `ConfigChatSetup` in its
+  // `presentation="dialog"` form and calls `useConfigChat`, so it inherited
+  // everything migrated here, and its own chrome (plus
+  // `configuration-chat-toggle.tsx`, which `ConfigChatSetup` renders) now lands
+  // on the same `chat:` namespace. It is listed at the end of this file.
   "components/config-chat/*.{ts,tsx}",
 
   // Automations — `components/automations/**` (incl. `trigger-configs/`) and
