@@ -22,6 +22,8 @@ without putting archived cards back on active Kanban boards.
   apply to those tasks normally.
 - **Archived: Hide**, and views with no Archived clause, continue to display
   only active tasks.
+- Persisted clauses equivalent to **Archived: Show** (for example,
+  `archived is_not false`) also load archived candidates.
 - Archived tasks never enter active workflow snapshots or Kanban columns.
 - Archived rows use the existing archived badge and open the archived task
   detail when selected. The detail's existing **Unarchive** action remains the

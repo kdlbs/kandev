@@ -125,6 +125,7 @@ export type SidebarArchivedTasksState = {
   loadedByWorkspaceId: Record<string, boolean>;
   loadingByWorkspaceId: Record<string, boolean>;
   errorByWorkspaceId: Record<string, string | null>;
+  revisionByWorkspaceId: Record<string, number>;
 };
 
 export type WorkflowsState = {
@@ -187,7 +188,11 @@ export type KanbanSliceActions = {
   clearKanbanMulti: () => void;
   updateMultiTask: (workflowId: string, task: KanbanState["tasks"][number]) => void;
   removeMultiTask: (workflowId: string, taskId: string) => void;
-  setSidebarArchivedTasks: (workspaceId: string, tasks: KanbanState["tasks"]) => void;
+  setSidebarArchivedTasks: (
+    workspaceId: string,
+    tasks: KanbanState["tasks"],
+    expectedRevision?: number,
+  ) => boolean;
   setSidebarArchivedTasksLoading: (workspaceId: string, loading: boolean) => void;
   setSidebarArchivedTasksError: (workspaceId: string, error: string | null) => void;
   upsertSidebarArchivedTask: (workspaceId: string, task: KanbanState["tasks"][number]) => void;

@@ -1,5 +1,5 @@
 import type { StateCreator } from "zustand";
-import type { KanbanSlice, KanbanSliceState } from "./types";
+import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
@@ -9,6 +9,7 @@ export const defaultKanbanState: KanbanSliceState = {
     loadedByWorkspaceId: {},
     loadingByWorkspaceId: {},
     errorByWorkspaceId: {},
+    revisionByWorkspaceId: {},
   },
   workflows: { items: [], activeId: null },
   workspaceContextGeneration: 0,
@@ -20,7 +21,74 @@ export const defaultKanbanState: KanbanSliceState = {
   },
 };
 
-/* eslint-disable max-lines-per-function -- the slice keeps related task and archived-cache actions together. */
+type KanbanSliceSet = Parameters<
+  StateCreator<KanbanSlice, [["zustand/immer", never]], [], KanbanSlice>
+>[0];
+
+type SidebarArchivedTaskActions = Pick<
+  KanbanSliceActions,
+  | "setSidebarArchivedTasks"
+  | "setSidebarArchivedTasksLoading"
+  | "setSidebarArchivedTasksError"
+  | "upsertSidebarArchivedTask"
+  | "removeSidebarArchivedTask"
+>;
+
+function createSidebarArchivedTaskActions(set: KanbanSliceSet): SidebarArchivedTaskActions {
+  return {
+    setSidebarArchivedTasks: (workspaceId, tasks, expectedRevision) => {
+      let applied = false;
+      set((draft) => {
+        const revision = draft.sidebarArchivedTasks.revisionByWorkspaceId[workspaceId] ?? 0;
+        if (expectedRevision !== undefined && revision !== expectedRevision) return;
+        const seen = new Set<string>();
+        draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] = tasks.filter((task) => {
+          if (seen.has(task.id)) return false;
+          seen.add(task.id);
+          return true;
+        });
+        draft.sidebarArchivedTasks.loadedByWorkspaceId[workspaceId] = true;
+        draft.sidebarArchivedTasks.errorByWorkspaceId[workspaceId] = null;
+        draft.sidebarArchivedTasks.revisionByWorkspaceId[workspaceId] = revision + 1;
+        applied = true;
+      });
+      return applied;
+    },
+    setSidebarArchivedTasksLoading: (workspaceId, loading) =>
+      set((draft) => {
+        draft.sidebarArchivedTasks.loadingByWorkspaceId[workspaceId] = loading;
+      }),
+    setSidebarArchivedTasksError: (workspaceId, error) =>
+      set((draft) => {
+        draft.sidebarArchivedTasks.errorByWorkspaceId[workspaceId] = error;
+      }),
+    upsertSidebarArchivedTask: (workspaceId, task) =>
+      set((draft) => {
+        const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
+        const index = items.findIndex((item) => item.id === task.id);
+        if (index >= 0) items[index] = task;
+        else items.push(task);
+        const revision = draft.sidebarArchivedTasks.revisionByWorkspaceId[workspaceId] ?? 0;
+        draft.sidebarArchivedTasks.revisionByWorkspaceId[workspaceId] = revision + 1;
+      }),
+    removeSidebarArchivedTask: (taskId, workspaceId) =>
+      set((draft) => {
+        const workspaceIds = workspaceId
+          ? [workspaceId]
+          : Object.keys(draft.sidebarArchivedTasks.itemsByWorkspaceId);
+        for (const id of workspaceIds) {
+          const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[id];
+          if (!items || !items.some((task) => task.id === taskId)) continue;
+          draft.sidebarArchivedTasks.itemsByWorkspaceId[id] = items.filter(
+            (task) => task.id !== taskId,
+          );
+          const revision = draft.sidebarArchivedTasks.revisionByWorkspaceId[id] ?? 0;
+          draft.sidebarArchivedTasks.revisionByWorkspaceId[id] = revision + 1;
+        }
+      }),
+  };
+}
+
 export const createKanbanSlice: StateCreator<
   KanbanSlice,
   [["zustand/immer", never]],
@@ -28,6 +96,7 @@ export const createKanbanSlice: StateCreator<
   KanbanSlice
 > = (set) => ({
   ...defaultKanbanState,
+  ...createSidebarArchivedTaskActions(set),
   resetKanbanWorkspaceContext: () =>
     set((draft) => {
       const nextGeneration = draft.workspaceContextGeneration + 1;
@@ -114,45 +183,4 @@ export const createKanbanSlice: StateCreator<
       if (!snapshot) return;
       snapshot.tasks = snapshot.tasks.filter((t) => t.id !== taskId);
     }),
-  setSidebarArchivedTasks: (workspaceId, tasks) =>
-    set((draft) => {
-      const seen = new Set<string>();
-      draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] = tasks.filter((task) => {
-        if (seen.has(task.id)) return false;
-        seen.add(task.id);
-        return true;
-      });
-      draft.sidebarArchivedTasks.loadedByWorkspaceId[workspaceId] = true;
-      draft.sidebarArchivedTasks.errorByWorkspaceId[workspaceId] = null;
-    }),
-  setSidebarArchivedTasksLoading: (workspaceId, loading) =>
-    set((draft) => {
-      draft.sidebarArchivedTasks.loadingByWorkspaceId[workspaceId] = loading;
-    }),
-  setSidebarArchivedTasksError: (workspaceId, error) =>
-    set((draft) => {
-      draft.sidebarArchivedTasks.errorByWorkspaceId[workspaceId] = error;
-    }),
-  upsertSidebarArchivedTask: (workspaceId, task) =>
-    set((draft) => {
-      const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[workspaceId] ?? [];
-      const index = items.findIndex((item) => item.id === task.id);
-      if (index >= 0) items[index] = task;
-      else items.push(task);
-    }),
-  removeSidebarArchivedTask: (taskId, workspaceId) =>
-    set((draft) => {
-      const workspaceIds = workspaceId
-        ? [workspaceId]
-        : Object.keys(draft.sidebarArchivedTasks.itemsByWorkspaceId);
-      for (const id of workspaceIds) {
-        const items = draft.sidebarArchivedTasks.itemsByWorkspaceId[id];
-        if (items) {
-          draft.sidebarArchivedTasks.itemsByWorkspaceId[id] = items.filter(
-            (task) => task.id !== taskId,
-          );
-        }
-      }
-    }),
 });
-/* eslint-enable max-lines-per-function */

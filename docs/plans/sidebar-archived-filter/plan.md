@@ -50,9 +50,10 @@ replace the retirement tests; they do not revert unrelated work on the branch.
 - Keep the generic draft migration helper and its boot/hydration/WebSocket
   calls, but update regressions so valid archived clauses are preserved rather
   than removed.
-- Add a pure predicate that returns true only when an effective view contains
-  the positive boolean clause `archived is true`. The default view and
-  `Archived: Hide` must not request or merge archived candidates.
+- Add a pure predicate that returns true when an effective view contains the
+  positive boolean clause `archived is true` or its equivalent
+  `archived is_not false`. The default view and `Archived: Hide` must not
+  request or merge archived candidates.
 
 ### Archived task runtime projection
 

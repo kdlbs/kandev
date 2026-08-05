@@ -65,7 +65,10 @@ export function viewRequiresArchivedTasks(
 ): boolean {
   return (
     view?.filters.some(
-      (clause) => clause.dimension === "archived" && clause.op === "is" && clause.value === true,
+      (clause) =>
+        clause.dimension === "archived" &&
+        ((clause.op === "is" && clause.value === true) ||
+          (clause.op === "is_not" && clause.value === false)),
     ) ?? false
   );
 }

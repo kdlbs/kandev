@@ -692,6 +692,11 @@ describe("viewRequiresArchivedTasks", () => {
         filters: [C({ dimension: "archived", op: "is_not", value: true })],
       }),
     ).toBe(false);
+    expect(
+      viewRequiresArchivedTasks({
+        filters: [C({ dimension: "archived", op: "is_not", value: false })],
+      }),
+    ).toBe(true);
     expect(viewRequiresArchivedTasks({ filters: [] })).toBe(false);
   });
 });

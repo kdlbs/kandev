@@ -69,6 +69,8 @@ export function useSidebarArchivedTasks(workspaceId: string | null, enabled: boo
     lastRequestKeyRef.current = requestKey;
     const requestGeneration = ++requestGenerationRef.current;
     const workspaceGeneration = currentState.workspaceContextGeneration;
+    const archivedRevision =
+      currentState.sidebarArchivedTasks?.revisionByWorkspaceId[workspaceId] ?? 0;
     currentState.setSidebarArchivedTasksLoading(workspaceId, true);
     currentState.setSidebarArchivedTasksError(workspaceId, null);
 
@@ -82,10 +84,12 @@ export function useSidebarArchivedTasks(workspaceId: string | null, enabled: boo
         ) {
           return;
         }
-        latest.setSidebarArchivedTasks(
+        const applied = latest.setSidebarArchivedTasks(
           workspaceId,
           response.map((task) => toKanbanTask(task)),
+          archivedRevision,
         );
+        if (!applied) refresh();
       } catch (loadError) {
         const latest = store.getState();
         if (

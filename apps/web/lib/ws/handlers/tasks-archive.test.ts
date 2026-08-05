@@ -103,6 +103,8 @@ function makeStoreWithTask(initial: Partial<AppState> = {}) {
   });
 }
 
+// Keep the lifecycle cases together so archive cleanup stays covered end to end.
+// eslint-disable-next-line max-lines-per-function -- lifecycle cases share one store harness
 describe("task.updated archive cleanup", () => {
   beforeEach(() => {
     vi.mocked(removeRecentTask).mockClear();
@@ -164,6 +166,35 @@ describe("task.updated archive cleanup", () => {
     const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
     expect(archived).toHaveLength(1);
     expect(archived[0]).toMatchObject({ id: TASK_ID, workspaceId: "ws-1", isArchived: true });
+  });
+
+  it("preserves the resolved workspace on partial archived updates", () => {
+    const store = makeStore({
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {
+          "ws-1": [{ id: TASK_ID, workspaceId: "ws-1", isArchived: true }],
+        },
+        loadedByWorkspaceId: { "ws-1": true },
+        loadingByWorkspaceId: { "ws-1": false },
+        errorByWorkspaceId: { "ws-1": null },
+      },
+    } as unknown as Partial<AppState>);
+
+    registerTasksHandlers(store)["task.updated"]!(
+      makeUpdatedMessage({
+        ...taskPayload(TASK_ID),
+        archived_at: ARCHIVED_AT,
+        title: "Updated archived task",
+      }),
+    );
+
+    const archived = store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"];
+    expect(archived[0]).toMatchObject({
+      id: TASK_ID,
+      title: "Updated archived task",
+      workspaceId: "ws-1",
+      isArchived: true,
+    });
   });
 
   it("clears active task state, pin, recent history, and sidebar prefs for archived task events", () => {

@@ -10,7 +10,7 @@ import (
 
 func TestSQLiteRepository_ArchiveTask(t *testing.T) {
 	repo, cleanup := createTestSQLiteRepo(t)
-	defer cleanup()
+	t.Cleanup(cleanup)
 	ctx := context.Background()
 
 	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace 1"})

@@ -56,8 +56,9 @@ function makeUpdatedMessage(payload: Record<string, unknown>) {
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
 }
 
-// The backend omits archived_at after unarchive because the field is nil. The
-// resulting task.updated event must still re-add the task to the kanban caches.
+// The backend sends archived_at=null after unarchive. The resulting
+// task.updated event must re-add the task to the kanban caches.
+// eslint-disable-next-line max-lines-per-function -- lifecycle cases share one store harness
 describe("task.updated unarchive restore", () => {
   it("removes the task from the archived sidebar projection", () => {
     const store = makeStore({
@@ -81,10 +82,51 @@ describe("task.updated unarchive restore", () => {
         title: "Restored task",
         state: "TODO",
         is_ephemeral: false,
+        archived_at: null,
       }),
     );
 
     expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"]).toEqual([]);
+  });
+
+  it("keeps an archived task in the archive projection for a partial update", () => {
+    const store = makeStore({
+      kanban: {
+        workflowId: "wf1",
+        steps: [],
+        tasks: [{ id: TASK_ID, workflowId: "wf1" }],
+      } as unknown as AppState["kanban"],
+      sidebarArchivedTasks: {
+        itemsByWorkspaceId: {
+          "ws-1": [{ id: TASK_ID, workspaceId: "ws-1", isArchived: true }],
+        },
+        loadedByWorkspaceId: { "ws-1": true },
+        loadingByWorkspaceId: { "ws-1": false },
+        errorByWorkspaceId: { "ws-1": null },
+      },
+    } as unknown as Partial<AppState>);
+    const handlers = registerTasksHandlers(store);
+
+    handlers["task.updated"]!(
+      makeUpdatedMessage({
+        task_id: TASK_ID,
+        workflow_id: "wf1",
+        workflow_step_id: "step1",
+        title: "Updated archived task",
+        state: "TODO",
+        is_ephemeral: false,
+      }),
+    );
+
+    expect(store.getState().kanban.tasks.map((task) => task.id)).not.toContain(TASK_ID);
+    expect(store.getState().sidebarArchivedTasks.itemsByWorkspaceId["ws-1"]).toEqual([
+      expect.objectContaining({
+        id: TASK_ID,
+        title: "Updated archived task",
+        workspaceId: "ws-1",
+        isArchived: true,
+      }),
+    ]);
   });
 
   it("re-adds the task to the active kanban when archived_at is omitted", () => {
@@ -99,6 +141,7 @@ describe("task.updated unarchive restore", () => {
         title: "Restored task",
         state: "TODO",
         is_ephemeral: false,
+        archived_at: null,
       }),
     );
 
