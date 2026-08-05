@@ -38,7 +38,6 @@ const integrationAvailability = vi.hoisted(() => ({
   jira: false,
   linear: false,
   sentry: false,
-  slack: false,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -70,10 +69,6 @@ vi.mock("@/hooks/domains/linear/use-linear-availability", () => ({
 vi.mock("@/hooks/domains/sentry/use-sentry-availability", () => ({
   useSentryAvailable: () => integrationAvailability.sentry,
 }));
-vi.mock("@/hooks/domains/slack/use-slack-availability", () => ({
-  useSlackAuthed: () => integrationAvailability.slack,
-}));
-
 vi.mock("@kandev/ui/collapsible", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   const CollapsibleContext = React.createContext(false);
@@ -105,7 +100,6 @@ describe("SettingsTree rendering", () => {
     integrationAvailability.jira = false;
     integrationAvailability.linear = false;
     integrationAvailability.sentry = false;
-    integrationAvailability.slack = false;
   });
 
   afterEach(() => cleanup());

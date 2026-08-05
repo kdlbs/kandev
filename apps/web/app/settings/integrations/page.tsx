@@ -4,7 +4,6 @@ import {
   IconBrandGitlab,
   IconBrandAzure,
   IconBrandSentry,
-  IconBrandSlack,
   IconHexagon,
   IconTicket,
 } from "@tabler/icons-react";
@@ -47,12 +46,6 @@ const INTEGRATIONS = [
     label: "Sentry",
     descriptionKey: "settings:integrationDescriptionSentry",
     Icon: IconBrandSentry,
-  },
-  {
-    slug: "slack",
-    label: "Slack",
-    descriptionKey: "settings:integrationDescriptionSlack",
-    Icon: IconBrandSlack,
   },
 ];
 

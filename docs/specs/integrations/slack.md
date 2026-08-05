@@ -1,10 +1,22 @@
 ---
-status: shipped
+status: archived
 created: 2026-05-02
+archived: 2026-08-05
 owner: tbd
 ---
 
 # Slack Integration
+
+> **Archived — moved out of this repository.** Slack now ships as the
+> standalone `kandev-plugin-slack` plugin
+> ([kdlbs/kandev-plugin-slack](https://github.com/kdlbs/kandev-plugin-slack)),
+> installed from Settings → Plugins. The in-tree `internal/slack` package, its
+> `/api/v1/slack/*` routes, and the `/settings/integrations/slack` page were
+> removed, and the retired `slack_configs` table plus the `slack:*` vault
+> entries are dropped on upgrade. The plugin keeps this spec's `!kandev`
+> trigger and in-thread reply, and adds official `xoxp-` user-token and
+> `xoxb-` bot-token auth alongside the browser-session mode below. This
+> document is kept as the record of what shipped in-tree.
 
 ## Why
 

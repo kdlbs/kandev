@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/hostutility"
 	"github.com/kandev/kandev/internal/agent/registry"
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
-	agentctlutil "github.com/kandev/kandev/internal/agentctl/server/utility"
 	analyticsservice "github.com/kandev/kandev/internal/analytics/service"
 	"github.com/kandev/kandev/internal/automation"
 	"github.com/kandev/kandev/internal/azuredevops"
@@ -32,7 +31,6 @@ import (
 	promptservice "github.com/kandev/kandev/internal/prompts/service"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -136,7 +134,6 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	jiraSvc := initJiraService(dbPool, eventBus, repos.Secrets, log)
 	linearSvc := initLinearService(dbPool, eventBus, repos.Secrets, log)
 	sentrySvc := initSentryService(dbPool, eventBus, repos.Secrets, log)
-	slackSvc := initSlackService(dbPool, repos.Secrets, log)
 	workflowSyncSvc := initWorkflowSyncService(dbPool, githubSvc, workflowSvc, taskSvc, log)
 	pluginsSvc := initPluginsService(cfg, dbPool, eventBus, repos.Secrets, log)
 	if pluginsSvc != nil {
@@ -194,7 +191,6 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Jira:         jiraSvc,
 		Linear:       linearSvc,
 		Sentry:       sentrySvc,
-		Slack:        slackSvc,
 		WorkflowSync: workflowSyncSvc,
 		Share:        shareHTTP,
 		Automation:   automationComponents,
@@ -658,16 +654,11 @@ func initShareHandlers(
 	return h
 }
 
-// initSlackService wires up the Slack integration. Failures are non-fatal.
-// The agent runner is wired post-construction by main.go once hostutility +
-// utility services exist.
-func initSlackService(dbPool *db.Pool, secretsStore secrets.SecretStore, log *logger.Logger) *slack.Service {
-	svc, _, err := slack.Provide(dbPool.Writer(), dbPool.Reader(), secretadapter.New(secretsStore), log)
-	if err != nil {
-		log.Warn("Slack service initialization failed (non-fatal)", zap.Error(err))
-	}
-	return svc
-}
+// portsBackendDefault is the default backend HTTP port. We don't import
+// internal/common/ports here to avoid pulling its transitive deps into
+// services.go's import graph; the value is a fallback for when
+// cfg.Server.Port is left at zero (which shouldn't happen in practice).
+const portsBackendDefault = 38429
 
 // initPluginsService wires up the plugin system's core Service
 // (registration registry, config, plugin_state store). Failures are
@@ -687,54 +678,11 @@ func initPluginsService(cfg *config.Config, dbPool *db.Pool, eventBus bus.EventB
 	return svc
 }
 
-// buildKandevMCPURL is the URL passed to the Slack triage agent for the
-// Kandev MCP server. The MCP server is mounted on the same port as the rest
-// of the backend's HTTP API; this just centralises the path so it stays in
-// sync with internal/mcp/server's mount point ("/mcp").
-func buildKandevMCPURL(port int) string {
-	if port == 0 {
-		port = portsBackendDefault
-	}
-	return fmt.Sprintf("http://localhost:%d/mcp", port)
-}
-
-// portsBackendDefault is the default backend HTTP port. We don't import
-// internal/common/ports here to avoid pulling its transitive deps into
-// services.go's import graph; the value is duplicated only as a fallback for
-// when cfg.Server.Port is left at zero (which shouldn't happen in practice).
-const portsBackendDefault = 38429
-
-// slackHostUtilityAdapter adapts *hostutility.Manager to slack.HostUtilityRunner.
-// The slack package can't import hostutility without a transitive cycle (it
-// would need to import agentctl + lifecycle), so we shim through the agentctl
-// utility DTO here in the cmd package where both are already imported.
-type slackHostUtilityAdapter struct {
-	mgr *hostutility.Manager
-}
-
-func (a slackHostUtilityAdapter) ExecutePromptWithMCP(
-	ctx context.Context,
-	agentType, model, mode, prompt string,
-	mcpServers []agentctlutil.MCPServerDTO,
-) (slack.HostPromptResult, error) {
-	res, err := a.mgr.ExecutePromptWithMCP(ctx, agentType, model, mode, prompt, mcpServers)
-	if err != nil {
-		return slack.HostPromptResult{}, err
-	}
-	return slack.HostPromptResult{
-		Response:       res.Response,
-		Model:          res.Model,
-		PromptTokens:   res.PromptTokens,
-		ResponseTokens: res.ResponseTokens,
-		DurationMs:     res.DurationMs,
-	}, nil
-}
-
 // pluginsHostUtilityAdapter adapts *hostutility.Manager to the plugins
 // package's utilityRunner interface (Host.InvokeUtilityAgent, ADR 0048),
 // returning just the response text. Lives here for the same cycle-avoidance
-// reason as slackHostUtilityAdapter — internal/plugins must not import the
-// agent runtime.
+// reason as the review adapter — internal/plugins must not import the agent
+// runtime.
 type pluginsHostUtilityAdapter struct {
 	mgr *hostutility.Manager
 }

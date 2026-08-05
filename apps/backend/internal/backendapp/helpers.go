@@ -74,7 +74,6 @@ import (
 	"github.com/kandev/kandev/internal/runtimeflags"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/sentry"
-	"github.com/kandev/kandev/internal/slack"
 	spriteshandlers "github.com/kandev/kandev/internal/sprites"
 	sshhandlers "github.com/kandev/kandev/internal/ssh"
 	systemsvc "github.com/kandev/kandev/internal/system"
@@ -642,9 +641,6 @@ func registerRoutes(p routeParams) {
 		p.services.Linear.SetRepositoryLookup(repoLookup)
 		p.services.Linear.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
-	if p.services.Slack != nil {
-		p.services.Slack.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
-	}
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
@@ -1143,11 +1139,6 @@ func registerSecondaryRoutes(
 		p.log.Debug("Registered Sentry handlers (HTTP)")
 	}
 
-	if p.services.Slack != nil {
-		slack.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Slack, p.log)
-		p.log.Debug("Registered Slack handlers (HTTP + WebSocket)")
-	}
-
 	if p.services.WorkflowSync != nil {
 		workflowsync.RegisterRoutes(p.router, p.services.WorkflowSync, p.log)
 		p.log.Debug("Registered workflow sync handlers (HTTP)")
@@ -1265,7 +1256,7 @@ func officeWorkspaceScopeMiddleware(authSvc *auth.Service, taskSvc *taskservice.
 // gitlab) with no per-user gate of their own, so this global middleware
 // authorizes ownership for them when auth is enabled.
 var integrationWorkspacePrefixes = []string{
-	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/", "/api/v1/slack/",
+	"/api/v1/jira/", "/api/v1/linear/", "/api/v1/sentry/",
 	"/api/v1/azure-devops/", "/api/v1/gitlab/", "/api/v1/github/", "/api/v1/workflow-sync/",
 }
 

@@ -40,7 +40,6 @@ import (
 	jirapkg "github.com/kandev/kandev/internal/jira"
 	linearpkg "github.com/kandev/kandev/internal/linear"
 	sentrypkg "github.com/kandev/kandev/internal/sentry"
-	slackpkg "github.com/kandev/kandev/internal/slack"
 	workflowsyncpkg "github.com/kandev/kandev/internal/workflowsync"
 
 	// Agent infrastructure
@@ -619,20 +618,6 @@ func startAgentInfrastructure(
 		addCleanup(func() error { sentryPoller.Stop(); return nil })
 	}
 
-	// Start Slack auth-health poller and the trigger loop. The trigger
-	// polls each configured workspace every 30s for new `!kandev …`
-	// messages from the authenticated user and turns them into Kandev
-	// tasks via taskSvc.
-	if services.Slack != nil {
-		slackPoller := slackpkg.NewPoller(services.Slack, log)
-		slackPoller.Start(ctx)
-		addCleanup(func() error { slackPoller.Stop(); return nil })
-
-		slackTrigger := slackpkg.NewTrigger(services.Slack, log)
-		slackTrigger.Start(ctx)
-		addCleanup(func() error { slackTrigger.Stop(); return nil })
-	}
-
 	// Start workflow-sync poller: periodically pulls workflow definition
 	// files from each workspace's configured GitHub repo and reconciles the
 	// workspace's synced workflows with them.
@@ -754,28 +739,10 @@ func startGatewayAndServe(
 		return nil
 	})
 
-	// Wire the Slack agent runner. Slack triage uses the host-utility
-	// inference path (single-shot ACP subprocess) with the Kandev MCP
-	// server attached so the agent can call list_workflows_kandev /
-	// create_task_kandev / etc. mid-prompt. Both deps land here at the
-	// same time: hostUtilityMgr just bootstrapped above, services.Utility
-	// was constructed in provideServices.
-	if services.Slack != nil && services.Utility != nil {
-		mcpURL := buildKandevMCPURL(cfg.Server.Port)
-		slackRunner := slackpkg.NewRunner(
-			services.Utility,
-			services.User,
-			slackHostUtilityAdapter{mgr: hostUtilityMgr},
-			[]slackpkg.MCPDescriptor{{Name: "kandev", URL: mcpURL}},
-			log,
-		)
-		services.Slack.SetRunner(slackRunner)
-	}
-
 	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
 	// calls to the utility agent selected in each plugin's configuration and
-	// runs them through the sessionless host-utility
-	// tier. Same landing point as the Slack runner — hostUtilityMgr is live.
+	// runs them through the sessionless host-utility tier, at the first point
+	// where hostUtilityMgr is live.
 	if services.Plugins != nil && services.Utility != nil {
 		services.Plugins.SetUtilityAgent(pluginsUtilityAgentAdapter{svc: services.Utility}, pluginsHostUtilityAdapter{mgr: hostUtilityMgr})
 	}

@@ -306,7 +306,6 @@
   "integrationDescriptionJira": "Atlassian Cloud credentials and JQL issue watchers.",
   "integrationDescriptionLinear": "Personal API key and team defaults.",
   "integrationDescriptionSentry": "Auth token, org/project defaults, and issue browsing.",
-  "integrationDescriptionSlack": "Browser-session credentials and {{trigger}} triage agent.",
   "invalidJson": "Invalid JSON",
   "keyboardShortcuts": "Keyboard Shortcuts",
   "language": "Language",
