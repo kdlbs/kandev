@@ -133,7 +133,7 @@ optimistic behavior remain the consumer contract being verified.
 - `cd apps/web && pnpm e2e:run --host --project chromium tests/task/sidebar-filter.spec.ts -- --grep "default 'All tasks' view"` — 1 Playwright test passed in 5.3s against the rebuilt backend; the managed runner exited cleanly and left no E2E backend/browser processes.
 - `git diff --check` — passed.
 
-- PR #2293 ([implementation head `cdc4f3737408d0aeb9c24b7076d98db2b21342b3`](https://github.com/kdlbs/kandev/pull/2293)) — all 40 reported checks passed after the review fixup; the final documentation-only head `63a97ce189007388c072cf3bed83f871fc39d30e` is pushed with no failures or unresolved review threads while its fresh checks run.
+- PR #2293 ([implementation head `cdc4f3737408d0aeb9c24b7076d98db2b21342b3`](https://github.com/kdlbs/kandev/pull/2293)) — all 40 reported checks passed after the review fixup; subsequent documentation-only commits are pushed with no failures or unresolved review threads observed while their fresh checks run.
 
 ---
 
