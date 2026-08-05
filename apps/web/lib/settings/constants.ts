@@ -1,6 +1,8 @@
 export const STORAGE_KEYS = {
   BACKEND_URL: "kandev.settings.backendUrl",
   ONBOARDING_COMPLETED: "kandev.onboarding.completed",
+  /** Last settings page opened on this device; where bare `/settings` resolves. */
+  LAST_SETTINGS_PATH: "kandev.settings.lastPath",
 } as const;
 
 export const DEFAULT_BACKEND_URL = "http://localhost:38429";
