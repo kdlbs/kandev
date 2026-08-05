@@ -71,10 +71,12 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: JSON-RPC initialize errors now preserve their `message` instead of rendering `[object Object]`, while task-host process-launch failures retain details in backend logs and close through localized categorical `4008` with no English transport reason.
 - Review hardening: task teardown during auto-install keeps the standard `1001` going-away close but omits the English `task stopping` reason, allowing the browser's existing localized pre-bridge fallback to own the user-visible status.
 - Review hardening: Monaco completion registration now uses only the trigger characters advertised by the active server, and a named 25-value mapping preserves every standard LSP completion category in Monaco instead of relying on mismatched numeric enums.
+- Review hardening: Monaco signature help is absent when the server omits that capability and otherwise preserves the server's trigger and retrigger characters; a bare install-failure close ignores generic task-host prose and resolves through the active locale while a preceding detailed installer payload remains authoritative.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts` (45 passed, including advertised completion triggers and all 25 standard completion kinds)
+  - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts lib/lsp/lsp-language-mapping.test.ts lib/lsp/lsp-client-manager.progress.test.ts` (33 passed, including signature-help capability gating/triggers and localized bare `4003` fallback)
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts components/editors/monaco/builtin-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts` (49 passed)
   - `pnpm run typecheck`
   - `pnpm exec eslint lib/lsp/lsp-providers.ts lib/lsp/lsp-providers.test.ts e2e/tests/lsp/lsp-file-intelligence.spec.ts`

@@ -311,10 +311,30 @@ function registerReferenceProvider(ctx: ProviderCtx): IDisposable {
   });
 }
 
-function registerSignatureHelpProvider(ctx: ProviderCtx): IDisposable {
+type SignatureHelpCapability = {
+  triggerCharacters?: unknown;
+  retriggerCharacters?: unknown;
+};
+
+function stringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  return value.filter((item): item is string => typeof item === "string");
+}
+
+function registerSignatureHelpProvider(
+  ctx: ProviderCtx,
+  capability: SignatureHelpCapability,
+): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
+  const triggerCharacters = stringArray(capability.triggerCharacters);
+  const retriggerCharacters = stringArray(capability.retriggerCharacters);
   return monaco.languages.registerSignatureHelpProvider(lang, {
-    signatureHelpTriggerCharacters: ["(", ","],
+    ...(triggerCharacters === undefined
+      ? {}
+      : { signatureHelpTriggerCharacters: triggerCharacters }),
+    ...(retriggerCharacters === undefined
+      ? {}
+      : { signatureHelpRetriggerCharacters: retriggerCharacters }),
     provideSignatureHelp: async (model, position) => {
       const uri = getDocumentUri(model);
       if (!uri) return null;
@@ -425,8 +445,15 @@ function completionTriggerCharacters(
   if (!completionProvider || typeof completionProvider !== "object") return undefined;
   const triggerCharacters = (completionProvider as { triggerCharacters?: unknown })
     .triggerCharacters;
-  if (!Array.isArray(triggerCharacters)) return undefined;
-  return triggerCharacters.filter((value): value is string => typeof value === "string");
+  return stringArray(triggerCharacters);
+}
+
+function signatureHelpCapability(
+  serverCapabilities: Record<string, unknown> | null,
+): SignatureHelpCapability | null {
+  const capability = serverCapabilities?.signatureHelpProvider;
+  if (!capability || typeof capability !== "object" || Array.isArray(capability)) return null;
+  return capability as SignatureHelpCapability;
 }
 
 export function registerLspProviders(opts: RegisterLspProvidersOptions): IDisposable[] {
@@ -451,7 +478,8 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
     disposables.push(registerHoverProvider(ctx));
     disposables.push(registerDefinitionProvider(ctx));
     disposables.push(registerReferenceProvider(ctx));
-    disposables.push(registerSignatureHelpProvider(ctx));
+    const signatureHelp = signatureHelpCapability(opts.serverCapabilities);
+    if (signatureHelp) disposables.push(registerSignatureHelpProvider(ctx, signatureHelp));
     disposables.push(
       ...registerSemanticTokensProvider(
         ctx,

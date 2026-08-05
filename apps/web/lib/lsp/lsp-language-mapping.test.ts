@@ -63,6 +63,10 @@ describe("LSP task-host close codes", () => {
         reason: "Ĺàńĝũàĝē śēŕvēŕ ńōţ ƒōũńď",
         cause: "missing_binary",
       });
+      expect(CLOSE_CODE_STATUS[4003](BACKEND_REASON)).toEqual({
+        state: "error",
+        reason: "Ĩńśţàĺĺ ƒàĩĺēď",
+      });
       expect(CLOSE_CODE_STATUS[4004](BACKEND_REASON)).toEqual({
         state: "unavailable",
         reason: "Ĺàńĝũàĝē śēŕvēŕś àŕē ńōţ śũƥƥōŕţēď ƀŷ ţĥĩś ţàśķ ēxēćũţōŕ",

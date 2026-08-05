@@ -211,7 +211,7 @@ export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = 
     reason: t("lsp:noActiveWorkspace"),
     cause: "workspace_unavailable",
   }),
-  4003: (reason) => ({ state: "error", reason: reason || t("lsp:installFailed") }),
+  4003: () => ({ state: "error", reason: t("lsp:installFailed") }),
   4004: () => ({
     state: "unavailable",
     reason: t("lsp:taskExecutorUnsupported"),

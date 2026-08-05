@@ -28,6 +28,11 @@ type CompletionProvider = {
   ) => Promise<unknown>;
 };
 
+type SignatureHelpProvider = {
+  signatureHelpTriggerCharacters?: string[];
+  signatureHelpRetriggerCharacters?: string[];
+};
+
 type SemanticTokensProvider = {
   onDidChange: (listener: () => void) => { dispose: () => void };
   provideDocumentSemanticTokens: (
@@ -96,6 +101,8 @@ const getModelUri = vi.fn((uri: string) => uri);
 let definitionProvider: DefinitionProvider;
 let completionProvider: CompletionProvider;
 let semanticTokensProvider: SemanticTokensProvider;
+let signatureHelpProvider: SignatureHelpProvider | undefined;
+let registerSignatureHelpProvider: ReturnType<typeof vi.fn>;
 const completionModel = {
   getWordUntilPosition: vi.fn(() => ({ word: "pri", startColumn: 4, endColumn: 7 })),
 };
@@ -124,7 +131,12 @@ async function provideDefinition(result: unknown): Promise<MonacoLocation[] | nu
 
 beforeEach(() => {
   vi.resetAllMocks();
+  signatureHelpProvider = undefined;
   getModelUri.mockImplementation((uri: string) => uri);
+  registerSignatureHelpProvider = vi.fn((_language: string, provider: SignatureHelpProvider) => {
+    signatureHelpProvider = provider;
+    return disposable();
+  });
   const languages = {
     CompletionItemKind: MONACO_COMPLETION_ITEM_KIND,
     registerCompletionItemProvider: vi.fn((_language: string, provider: CompletionProvider) => {
@@ -137,7 +149,7 @@ beforeEach(() => {
       return disposable();
     }),
     registerReferenceProvider: vi.fn(() => disposable()),
-    registerSignatureHelpProvider: vi.fn(() => disposable()),
+    registerSignatureHelpProvider,
     registerDocumentSemanticTokensProvider: vi.fn(
       (_language: string, provider: SemanticTokensProvider) => {
         semanticTokensProvider = provider;
@@ -157,6 +169,33 @@ beforeEach(() => {
     getDocumentUri: () => SOURCE_URI,
     getModelUri,
     ensureModelsExist,
+  });
+});
+
+describe("LSP signature-help provider", () => {
+  it("registers only when advertised and uses the server's trigger characters", () => {
+    expect(registerSignatureHelpProvider).not.toHaveBeenCalled();
+
+    registerLspProviders({
+      rpc,
+      lspLanguage: "kotlin",
+      serverCapabilities: {
+        signatureHelpProvider: {
+          triggerCharacters: ["<", "("],
+          retriggerCharacters: [",", ">"],
+        },
+      },
+      semanticRefreshCallbacks: [],
+      getDocumentUri: () => SOURCE_URI,
+      getModelUri,
+      ensureModelsExist,
+    });
+
+    expect(registerSignatureHelpProvider).toHaveBeenCalledOnce();
+    expect(signatureHelpProvider).toMatchObject({
+      signatureHelpTriggerCharacters: ["<", "("],
+      signatureHelpRetriggerCharacters: [",", ">"],
+    });
   });
 });
 
