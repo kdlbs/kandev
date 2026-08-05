@@ -1,7 +1,7 @@
 ---
 id: "05-wire-gitlab-provider"
 title: "Wire the GitLab provider into workflow sync"
-status: pending
+status: done
 wave: 3
 depends_on: ["03-gitlab-workspace-repo-contents", "04-workflowsync-provider-dispatch"]
 plan: "plan.md"

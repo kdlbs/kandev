@@ -2,7 +2,7 @@
 spec: docs/specs/gitlab-workflow-sync/spec.md
 created: 2026-08-06
 updated: 2026-08-06
-status: draft
+status: building
 ---
 
 # GitLab Workflow Sync Plan
@@ -149,9 +149,9 @@ cd apps && pnpm --filter @kandev/web run i18n:check && pnpm --filter @kandev/web
 
 | Task | Status |
 | --- | --- |
-| 01 gitlab-repo-content-client | pending |
-| 02 workflowsync-config-provider | pending |
-| 03 gitlab-workspace-repo-contents | pending |
-| 04 workflowsync-provider-dispatch | pending |
-| 05 wire-gitlab-provider | pending |
-| 06 frontend-provider-selector | pending |
+| 01 gitlab-repo-content-client | done |
+| 02 workflowsync-config-provider | done |
+| 03 gitlab-workspace-repo-contents | done |
+| 04 workflowsync-provider-dispatch | done |
+| 05 wire-gitlab-provider | done |
+| 06 frontend-provider-selector | done |

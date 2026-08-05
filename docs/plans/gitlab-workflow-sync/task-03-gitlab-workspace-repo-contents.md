@@ -1,7 +1,7 @@
 ---
 id: "03-gitlab-workspace-repo-contents"
 title: "GitLab workspace-routed repository content reads"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-gitlab-repo-content-client"]
 plan: "plan.md"

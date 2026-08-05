@@ -18,39 +18,82 @@ import type {
   WorkflowSyncController,
   WorkflowSyncFormState,
 } from "@/hooks/domains/settings/use-workflow-sync";
+import type { WorkflowSyncProvider } from "@/lib/types/workflow-sync";
+import { RemoteRepoProviderTabs } from "@/components/task-create-dialog-remote-repo-provider-tabs";
+import type { RemoteRepositoryProvider } from "@/hooks/domains/integrations/use-remote-repositories";
 
 const WORKFLOW_EXPORT_FORMAT = "kandev_workflow";
 const WORKFLOW_EXPORT_EXTENSIONS = ".yml/.yaml/.json";
+const SYNC_PROVIDERS: RemoteRepositoryProvider[] = ["github", "gitlab"];
+
+type ProviderFieldProps = {
+  provider: WorkflowSyncProvider;
+  onChange: (provider: WorkflowSyncProvider) => void;
+};
+
+// ProviderField lets the user pick which host workflow sync reads from.
+// Only one source syncs per workspace — picking a different provider than
+// the currently-saved config replaces it on the next save (see the warning
+// surfaced in WorkflowSyncDialog).
+function ProviderField({ provider, onChange }: ProviderFieldProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Label>{t("workflows:syncProviderLabel")}</Label>
+      <div className="overflow-hidden rounded-md border">
+        <RemoteRepoProviderTabs
+          providers={SYNC_PROVIDERS}
+          value={provider}
+          onChange={(next) => onChange(next as WorkflowSyncProvider)}
+        />
+      </div>
+    </div>
+  );
+}
 
 type RepoUrlFieldProps = {
+  provider: WorkflowSyncProvider;
   url: string;
   invalid: boolean;
   resolved: string;
   onChange: (value: string) => void;
 };
 
-// RepoUrlField is the primary input: a full GitHub link (optionally with
-// /tree/<branch>/<directory>) that resolves into the stored owner, repo,
-// branch, and directory. The resolved target is echoed underneath so the
-// structured fields stay visible to the user.
-function RepoUrlField({ url, invalid, resolved, onChange }: RepoUrlFieldProps) {
+// RepoUrlField is the primary input: a full repository link (optionally with
+// a branch + directory suffix) that resolves into the stored coordinates —
+// owner/repo/branch/directory for GitHub, project_path/branch/directory for
+// GitLab. GitLab sync has no host of its own (it always uses the workspace's
+// configured GitLab connection, including self-managed instances), so a
+// saved GitLab config redisplays as a bare "group/project" reference rather
+// than a full URL — pasting a full link still works to fill the fields. The
+// resolved target is echoed underneath so the structured fields stay visible.
+function RepoUrlField({ provider, url, invalid, resolved, onChange }: RepoUrlFieldProps) {
   const { t } = useTranslation();
+  const providerLabel = provider === "gitlab" ? "GitLab" : "GitHub";
+  const placeholder =
+    provider === "gitlab"
+      ? "https://gitlab.com/group/project/-/tree/main/.kandev/workflows"
+      : "https://github.com/kdlbs/kandev/tree/main/.kandev/workflows";
   return (
     <div className="space-y-1.5">
-      <Label htmlFor="workflow-sync-url">{t("workflows:repositoryLink")}</Label>
+      <Label htmlFor="workflow-sync-url">
+        {provider === "gitlab" ? t("workflows:projectPathOrLink") : t("workflows:repositoryLink")}
+      </Label>
       <Input
         id="workflow-sync-url"
         data-testid="workflow-sync-url-input"
-        placeholder="https://github.com/kdlbs/kandev/tree/main/.kandev/workflows"
+        placeholder={placeholder}
         value={url}
         onChange={(e) => onChange(e.target.value)}
         aria-invalid={invalid}
       />
       {invalid ? (
-        <p className="text-xs text-destructive">{t("workflows:notARecognizedGitHubLink")}</p>
+        <p className="text-xs text-destructive">
+          {t("workflows:notARecognizedRepositoryLink", { provider: providerLabel })}
+        </p>
       ) : (
         <p className="text-xs text-muted-foreground" data-testid="workflow-sync-resolved">
-          {resolved || t("workflows:pasteGitHubLinkHint")}
+          {resolved || t("workflows:pasteRepositoryLinkHint", { provider: providerLabel })}
         </p>
       )}
     </div>
@@ -106,37 +149,44 @@ function PollFields({ form, update }: FieldsProps) {
   );
 }
 
+function resolvedTarget(t: TFunction, form: WorkflowSyncFormState): string {
+  const directory = form.path || t("workflows:repositoryRoot");
+  // `main` is git's default branch name, not copy.
+  const branch = form.branch || "main";
+  if (form.provider === "gitlab") {
+    return form.project_path
+      ? t("workflows:syncResolvedTargetGitLab", { projectPath: form.project_path, branch, directory })
+      : "";
+  }
+  return form.repo_owner
+    ? t("workflows:syncResolvedTarget", { owner: form.repo_owner, repo: form.repo_name, branch, directory })
+    : "";
+}
+
+function isSaveDisabled(sync: WorkflowSyncController, intervalInvalid: boolean): boolean {
+  const targetMissing =
+    sync.form.provider === "gitlab" ? !sync.form.project_path.trim() : !sync.form.repo_owner.trim() || !sync.form.repo_name.trim();
+  return sync.saving || sync.loading || sync.urlInvalid || intervalInvalid || targetMissing;
+}
+
 type WorkflowSyncDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sync: WorkflowSyncController;
 };
 
-// WorkflowSyncDialog holds the GitHub Sync configuration form. It closes
+// WorkflowSyncDialog holds the workflow sync configuration form. It closes
 // itself after a successful save or removal; failures keep it open with the
 // error surfaced via toast.
 export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDialogProps) {
   const { t } = useTranslation();
   const hasConfig = !!sync.config;
+  const switchingProvider = hasConfig && sync.config?.provider !== sync.form.provider;
   const intervalInvalid =
     sync.form.poll_enabled &&
     (!Number.isInteger(sync.form.interval_seconds) || sync.form.interval_seconds < 60);
-  const disableSave =
-    sync.saving ||
-    sync.loading ||
-    sync.urlInvalid ||
-    intervalInvalid ||
-    !sync.form.repo_owner.trim() ||
-    !sync.form.repo_name.trim();
-  const resolved = sync.form.repo_owner
-    ? t("workflows:syncResolvedTarget", {
-        owner: sync.form.repo_owner,
-        repo: sync.form.repo_name,
-        // `main` is git's default branch name, not copy.
-        branch: sync.form.branch || "main",
-        directory: sync.form.path || t("workflows:repositoryRoot"),
-      })
-    : "";
+  const disableSave = isSaveDisabled(sync, intervalInvalid);
+  const resolved = resolvedTarget(t, sync.form);
 
   const handleSave = async () => {
     if (await sync.handleSave()) onOpenChange(false);
@@ -149,11 +199,18 @@ export function WorkflowSyncDialog({ open, onOpenChange, sync }: WorkflowSyncDia
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg" data-testid="workflow-sync-dialog">
         <DialogHeader>
-          <DialogTitle>{t("workflows:githubSync")}</DialogTitle>
-          <DialogDescription>{t("workflows:githubSyncDescription")}</DialogDescription>
+          <DialogTitle>{t("workflows:syncTitle")}</DialogTitle>
+          <DialogDescription>{t("workflows:syncDescription")}</DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
+          <ProviderField provider={sync.form.provider} onChange={sync.setProvider} />
+          {switchingProvider && (
+            <p className="text-xs text-destructive" data-testid="workflow-sync-provider-switch-warning">
+              {t("workflows:switchProviderWarning")}
+            </p>
+          )}
           <RepoUrlField
+            provider={sync.form.provider}
             url={sync.url}
             invalid={sync.urlInvalid}
             resolved={resolved}

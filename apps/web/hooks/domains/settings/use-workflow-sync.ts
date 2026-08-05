@@ -11,12 +11,19 @@ import {
   deleteWorkflowSyncConfig,
   forceWorkflowSync,
 } from "@/lib/api/domains/workflow-sync-api";
-import type { WorkflowSyncConfig, WorkflowSyncSetConfigRequest } from "@/lib/types/workflow-sync";
+import type {
+  WorkflowSyncConfig,
+  WorkflowSyncProvider,
+  WorkflowSyncSetConfigRequest,
+} from "@/lib/types/workflow-sync";
 import { buildGitHubRepoUrl, parseGitHubRepoUrl } from "@/lib/utils/github-repo-url";
+import { buildGitLabProjectRef, parseGitLabProjectUrl } from "@/lib/utils/gitlab-repo-url";
 
 export type WorkflowSyncFormState = {
+  provider: WorkflowSyncProvider;
   repo_owner: string;
   repo_name: string;
+  project_path: string;
   branch: string;
   path: string;
   interval_seconds: number;
@@ -24,8 +31,10 @@ export type WorkflowSyncFormState = {
 };
 
 const DEFAULT_FORM: WorkflowSyncFormState = {
+  provider: "github",
   repo_owner: "",
   repo_name: "",
+  project_path: "",
   branch: "main",
   path: ".kandev/workflows",
   interval_seconds: 300,
@@ -35,13 +44,35 @@ const DEFAULT_FORM: WorkflowSyncFormState = {
 function configToForm(cfg: WorkflowSyncConfig | null): WorkflowSyncFormState {
   if (!cfg) return DEFAULT_FORM;
   return {
+    provider: cfg.provider,
     repo_owner: cfg.repo_owner,
     repo_name: cfg.repo_name,
+    project_path: cfg.project_path,
     branch: cfg.branch,
     path: cfg.path,
     interval_seconds: cfg.interval_seconds,
     poll_enabled: cfg.poll_enabled,
   };
+}
+
+function displayUrl(form: Pick<WorkflowSyncFormState, "provider" | "repo_owner" | "repo_name" | "project_path" | "branch" | "path">): string {
+  if (form.provider === "gitlab") {
+    return form.project_path
+      ? buildGitLabProjectRef({ projectPath: form.project_path, branch: form.branch, path: form.path })
+      : "";
+  }
+  return form.repo_owner
+    ? buildGitHubRepoUrl({
+        owner: form.repo_owner,
+        repo: form.repo_name,
+        branch: form.branch,
+        path: form.path,
+      })
+    : "";
+}
+
+function parseRepoUrl(provider: WorkflowSyncProvider, value: string) {
+  return provider === "gitlab" ? parseGitLabProjectUrl(value) : parseGitHubRepoUrl(value);
 }
 
 // Background refresh so the status banner picks up new poller results
@@ -71,11 +102,11 @@ function useWorkflowSyncConfigRefresh(
 }
 
 // useWorkflowSyncForm owns the editable form state. The repository link is
-// the primary input: owner, repo, and directory only change through it (or a
-// loaded config), while branch and interval remain individually editable via
-// `update`. Branch and directory are only overwritten when the link actually
-// carried them (/tree/... or /blob/... forms), so a bare repo URL keeps the
-// current values.
+// the primary input: owner/repo (GitHub) or project path (GitLab), plus
+// directory, only change through it (or a loaded config), while branch and
+// interval remain individually editable via `update`. Branch and directory
+// are only overwritten when the link actually carried them (/tree/... or
+// /blob/... forms), so a bare repo reference keeps the current values.
 function useWorkflowSyncForm() {
   const [form, setForm] = useState<WorkflowSyncFormState>(DEFAULT_FORM);
   const [url, setUrl] = useState("");
@@ -88,35 +119,55 @@ function useWorkflowSyncForm() {
 
   const setUrlInput = useCallback((value: string) => {
     setUrl(value);
-    const parsed = parseGitHubRepoUrl(value);
-    if (!parsed) return;
+    setForm((prev) => {
+      const parsed = parseRepoUrl(prev.provider, value);
+      if (!parsed) return prev;
+      if (prev.provider === "gitlab" && "projectPath" in parsed) {
+        return {
+          ...prev,
+          project_path: parsed.projectPath,
+          branch: parsed.branch ?? prev.branch,
+          path: parsed.path ?? prev.path,
+        };
+      }
+      if (prev.provider === "github" && "owner" in parsed) {
+        return {
+          ...prev,
+          repo_owner: parsed.owner,
+          repo_name: parsed.repo,
+          branch: parsed.branch ?? prev.branch,
+          path: parsed.path ?? prev.path,
+        };
+      }
+      return prev;
+    });
+  }, []);
+
+  // Switching providers changes what the link/project-path field means, so
+  // the field-set that belonged to the other provider is cleared — otherwise
+  // a stale repo_owner would sit alongside a new project_path, and Normalize
+  // on the backend rejects a request carrying both.
+  const setProvider = useCallback((provider: WorkflowSyncProvider) => {
+    setUrl("");
     setForm((prev) => ({
       ...prev,
-      repo_owner: parsed.owner,
-      repo_name: parsed.repo,
-      branch: parsed.branch ?? prev.branch,
-      path: parsed.path ?? prev.path,
+      provider,
+      repo_owner: "",
+      repo_name: "",
+      project_path: "",
     }));
   }, []);
 
   // reset re-derives both the structured form and the displayed link from a
   // loaded/saved config (or clears them when the config was removed).
   const reset = useCallback((cfg: WorkflowSyncConfig | null) => {
-    setForm(configToForm(cfg));
-    setUrl(
-      cfg
-        ? buildGitHubRepoUrl({
-            owner: cfg.repo_owner,
-            repo: cfg.repo_name,
-            branch: cfg.branch,
-            path: cfg.path,
-          })
-        : "",
-    );
+    const next = configToForm(cfg);
+    setForm(next);
+    setUrl(displayUrl(next));
   }, []);
 
-  const urlInvalid = !!url.trim() && !parseGitHubRepoUrl(url);
-  return { form, url, urlInvalid, update, setUrlInput, reset };
+  const urlInvalid = !!url.trim() && !parseRepoUrl(form.provider, url);
+  return { form, url, urlInvalid, update, setUrlInput, setProvider, reset };
 }
 
 type SyncToast = { description: string; variant?: "success" | "error" | "default" };
@@ -175,7 +226,7 @@ export function useWorkflowSync(workspaceId: string) {
   const { toast } = useToast();
   const router = useRouter();
   const [config, setConfig] = useState<WorkflowSyncConfig | null>(null);
-  const { form, url, urlInvalid, update, setUrlInput, reset } = useWorkflowSyncForm();
+  const { form, url, urlInvalid, update, setUrlInput, setProvider, reset } = useWorkflowSyncForm();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -187,14 +238,25 @@ export function useWorkflowSync(workspaceId: string) {
   const handleSave = useCallback(async () => {
     setSaving(true);
     try {
-      const payload: WorkflowSyncSetConfigRequest = {
-        repo_owner: form.repo_owner.trim(),
-        repo_name: form.repo_name.trim(),
-        branch: form.branch.trim(),
-        path: form.path.trim(),
-        interval_seconds: form.interval_seconds,
-        poll_enabled: form.poll_enabled,
-      };
+      const payload: WorkflowSyncSetConfigRequest =
+        form.provider === "gitlab"
+          ? {
+              provider: "gitlab",
+              project_path: form.project_path.trim(),
+              branch: form.branch.trim(),
+              path: form.path.trim(),
+              interval_seconds: form.interval_seconds,
+              poll_enabled: form.poll_enabled,
+            }
+          : {
+              provider: "github",
+              repo_owner: form.repo_owner.trim(),
+              repo_name: form.repo_name.trim(),
+              branch: form.branch.trim(),
+              path: form.path.trim(),
+              interval_seconds: form.interval_seconds,
+              poll_enabled: form.poll_enabled,
+            };
       const saved = await setWorkflowSyncConfig(payload, { workspaceId });
       setConfig(saved);
       reset(saved);
@@ -262,6 +324,7 @@ export function useWorkflowSync(workspaceId: string) {
     syncing,
     update,
     setUrlInput,
+    setProvider,
     handleSave,
     handleDelete,
     handleSyncNow,

@@ -25,8 +25,10 @@ import { useWorkflowSync } from "./use-workflow-sync";
 function makeConfig(overrides: Partial<WorkflowSyncConfig> = {}): WorkflowSyncConfig {
   return {
     workspace_id: "ws-1",
+    provider: "github",
     repo_owner: "kdlbs",
     repo_name: "kandev",
+    project_path: "",
     branch: "main",
     path: ".kandev/workflows",
     interval_seconds: 300,

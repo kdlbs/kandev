@@ -1,7 +1,7 @@
 ---
 id: "01-gitlab-repo-content-client"
 title: "GitLab client repository-content methods"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"

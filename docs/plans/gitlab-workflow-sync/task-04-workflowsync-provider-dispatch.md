@@ -1,7 +1,7 @@
 ---
 id: "04-workflowsync-provider-dispatch"
 title: "Workflow sync provider dispatch"
-status: pending
+status: done
 wave: 2
 depends_on: ["02-workflowsync-config-provider"]
 plan: "plan.md"

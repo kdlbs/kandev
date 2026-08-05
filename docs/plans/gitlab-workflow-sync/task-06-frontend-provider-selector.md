@@ -1,7 +1,7 @@
 ---
 id: "06-frontend-provider-selector"
 title: "Workflow sync provider selector"
-status: pending
+status: done
 wave: 4
 depends_on: ["05-wire-gitlab-provider"]
 plan: "plan.md"

@@ -1,7 +1,7 @@
 ---
 id: "02-workflowsync-config-provider"
 title: "Workflow sync config provider field and schema"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
