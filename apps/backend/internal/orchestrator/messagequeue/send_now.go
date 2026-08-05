@@ -40,6 +40,32 @@ type SendNowClaim struct {
 	Dispatch QueuedMessage   `json:"dispatch"`
 }
 
+func requestedSendNowIDs(expected []QueuedMessage) (map[string]struct{}, error) {
+	requested := make(map[string]struct{}, len(expected))
+	for _, entry := range expected {
+		if entry.ID == "" {
+			return nil, ErrSendNowClaimChanged
+		}
+		if _, duplicate := requested[entry.ID]; duplicate {
+			return nil, ErrSendNowClaimChanged
+		}
+		requested[entry.ID] = struct{}{}
+	}
+	return requested, nil
+}
+
+func validateSendNowSnapshot(selected []*QueuedMessage, expected []QueuedMessage) error {
+	if len(selected) != len(expected) {
+		return ErrSendNowClaimChanged
+	}
+	for index, entry := range selected {
+		if !sameQueuedMessageContent(entry, &expected[index]) {
+			return ErrSendNowClaimChanged
+		}
+	}
+	return nil
+}
+
 // BuildSendNowEnvelope validates and combines an exact, FIFO-ordered source
 // snapshot. It performs no repository mutation, which lets callers validate a
 // bulk selection before interrupting an active turn.

@@ -2,6 +2,7 @@ package messagequeue
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -315,26 +316,20 @@ func (r *memoryRepository) TakeByID(_ context.Context, sessionID, entryID string
 	return nil, nil
 }
 
-func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, entryIDs []string) (*SendNowClaim, error) {
+func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if len(entryIDs) == 0 {
+	if len(expected) == 0 {
 		return nil, ErrSendNowEmpty
 	}
 
-	requested := make(map[string]struct{}, len(entryIDs))
-	for _, entryID := range entryIDs {
-		if entryID == "" {
-			return nil, ErrSendNowClaimChanged
-		}
-		if _, duplicate := requested[entryID]; duplicate {
-			return nil, ErrSendNowClaimChanged
-		}
-		requested[entryID] = struct{}{}
+	requested, err := requestedSendNowIDs(expected)
+	if err != nil {
+		return nil, err
 	}
 
 	list := r.entries[sessionID]
-	selected := make([]*QueuedMessage, 0, len(entryIDs))
+	selected := make([]*QueuedMessage, 0, len(expected))
 	for _, entry := range list {
 		if _, ok := requested[entry.ID]; !ok {
 			continue
@@ -344,7 +339,10 @@ func (r *memoryRepository) ClaimSendNow(_ context.Context, sessionID string, ent
 		}
 		selected = append(selected, entry)
 	}
-	if len(selected) != len(entryIDs) {
+	if len(selected) != len(expected) {
+		return nil, ErrSendNowClaimChanged
+	}
+	if err := validateSendNowSnapshot(selected, expected); err != nil {
 		return nil, ErrSendNowClaimChanged
 	}
 
@@ -394,7 +392,7 @@ func (r *memoryRepository) RestoreSendNowClaim(_ context.Context, claim *SendNow
 	for _, source := range claim.Sources {
 		if existing[source.ID] != nil {
 			if source.IsDurableLifecycle() {
-				existing[source.ID].Metadata = clearReservedMetadata(existing[source.ID].Metadata)
+				existing[source.ID].Metadata = clearReservedMetadata(source.Metadata)
 			}
 			continue
 		}
@@ -497,8 +495,13 @@ func sameQueuedMessageContent(left, right *QueuedMessage) bool {
 	if left == nil || right == nil {
 		return false
 	}
-	return left.ID == right.ID && left.SessionID == right.SessionID && left.Position == right.Position &&
-		left.Content == right.Content && left.TaskID == right.TaskID && left.QueuedBy == right.QueuedBy
+	leftCopy := cloneQueuedMessage(left)
+	rightCopy := cloneQueuedMessage(right)
+	leftCopy.Metadata = clearReservedMetadata(leftCopy.Metadata)
+	rightCopy.Metadata = clearReservedMetadata(rightCopy.Metadata)
+	leftCopy.reservedLifecycleDelivery = false
+	rightCopy.reservedLifecycleDelivery = false
+	return reflect.DeepEqual(leftCopy, rightCopy)
 }
 
 func (r *memoryRepository) UpdateContent(ctx context.Context, sessionID, entryID, content string, attachments []MessageAttachment, queuedBy string) error {

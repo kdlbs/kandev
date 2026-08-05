@@ -74,11 +74,11 @@ func (s *Service) SendQueuedNow(ctx context.Context, sessionID, scope, entryID s
 		return 0, err
 	}
 
-	taskID, sessionState, entryIDs, err := s.loadSendNowSelection(ctx, sessionID, scope, entryID)
+	taskID, sessionState, entries, err := s.loadSendNowSelection(ctx, sessionID, scope, entryID)
 	if err != nil {
 		return 0, err
 	}
-	return s.dispatchSendNowSelection(ctx, sessionID, taskID, sessionState, scope, entryIDs, turnBefore, unlockGuard, relockGuard)
+	return s.dispatchSendNowSelection(ctx, sessionID, taskID, sessionState, scope, entries, turnBefore, unlockGuard, relockGuard)
 }
 
 func validateSendNowInput(sessionID, scope, entryID string) error {
@@ -118,7 +118,7 @@ func (s *Service) verifySendNowTurn(ctx context.Context, sessionID, expectedTurn
 func (s *Service) loadSendNowSelection(
 	ctx context.Context,
 	sessionID, scope, entryID string,
-) (string, models.TaskSessionState, []string, error) {
+) (string, models.TaskSessionState, []messagequeue.QueuedMessage, error) {
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
 		return "", "", nil, fmt.Errorf("load session for send now: %w", err)
@@ -126,14 +126,14 @@ func (s *Service) loadSendNowSelection(
 	if session == nil {
 		return "", "", nil, ErrSessionNotPromptable
 	}
-	entries, entryIDs, err := selectSendNowEntries(s.messageQueue.GetStatus(ctx, sessionID), scope, entryID)
+	entries, _, err := selectSendNowEntries(s.messageQueue.GetStatus(ctx, sessionID), scope, entryID)
 	if err != nil {
 		return "", "", nil, err
 	}
 	if _, err := messagequeue.BuildSendNowEnvelope(entries); err != nil {
 		return "", "", nil, err
 	}
-	return session.TaskID, session.State, entryIDs, nil
+	return session.TaskID, session.State, entries, nil
 }
 
 func (s *Service) dispatchSendNowSelection(
@@ -141,20 +141,20 @@ func (s *Service) dispatchSendNowSelection(
 	sessionID, taskID string,
 	sessionState models.TaskSessionState,
 	scope string,
-	entryIDs []string,
+	entries []messagequeue.QueuedMessage,
 	turnBefore string,
 	unlockGuard, relockGuard func(),
 ) (int, error) {
 	promptabilityErr := s.checkSessionPromptable(taskID, sessionID, sessionState)
 	if promptabilityErr == nil {
-		dispatched, err := s.claimAndDispatchSendNow(ctx, sessionID, scope, entryIDs)
+		dispatched, err := s.claimAndDispatchSendNow(ctx, sessionID, scope, entries)
 		if err != nil {
 			return 0, err
 		}
 		if !dispatched {
 			return 0, ErrSendNowQueueChanged
 		}
-		return len(entryIDs), nil
+		return len(entries), nil
 	}
 	if !errors.Is(promptabilityErr, ErrAgentPromptInProgress) {
 		return 0, promptabilityErr
@@ -167,7 +167,7 @@ func (s *Service) dispatchSendNowSelection(
 		unlockGuard,
 		relockGuard,
 		func(actionCtx context.Context) (bool, error) {
-			return s.claimAndDispatchSendNow(actionCtx, sessionID, scope, entryIDs)
+			return s.claimAndDispatchSendNow(actionCtx, sessionID, scope, entries)
 		},
 		cancellationKindQueueSendNow,
 		turnBefore,
@@ -178,7 +178,7 @@ func (s *Service) dispatchSendNowSelection(
 	if !dispatched {
 		return 0, ErrSendNowQueueChanged
 	}
-	return len(entryIDs), nil
+	return len(entries), nil
 }
 
 func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID string) ([]messagequeue.QueuedMessage, []string, error) {
@@ -201,8 +201,8 @@ func selectSendNowEntries(status *messagequeue.QueueStatus, scope, entryID strin
 	return entries, entryIDs, nil
 }
 
-func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope string, entryIDs []string) (bool, error) {
-	claim, err := s.messageQueue.ClaimSendNow(ctx, sessionID, entryIDs)
+func (s *Service) claimAndDispatchSendNow(ctx context.Context, sessionID, scope string, entries []messagequeue.QueuedMessage) (bool, error) {
+	claim, err := s.messageQueue.ClaimSendNow(ctx, sessionID, entries)
 	if err != nil {
 		return false, mapSendNowClaimError(scope, err)
 	}
@@ -265,6 +265,10 @@ func (s *Service) executeSendNowClaim(claim *messagequeue.SendNowClaim) {
 	if err := s.recordQueuedUserMessage(ctx, &claim.Dispatch, attachments); err != nil {
 		s.logger.Warn("failed to record send-now user message before prompt",
 			zap.String("session_id", sessionID), zap.Error(err))
+	} else if s.messageCreator != nil {
+		for i := range claim.Sources {
+			markQueuedUserMessageRecorded(&claim.Sources[i])
+		}
 	}
 	if session, err := s.repo.GetTaskSession(ctx, sessionID); err == nil && session != nil {
 		s.processOnTurnStartViaEngine(ctx, claim.Dispatch.TaskID, session)

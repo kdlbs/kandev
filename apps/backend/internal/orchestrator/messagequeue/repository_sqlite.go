@@ -729,14 +729,14 @@ func (r *sqliteRepository) TakeByID(ctx context.Context, sessionID, entryID stri
 	return msg, nil
 }
 
-func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, entryIDs []string) (*SendNowClaim, error) {
-	if len(entryIDs) == 0 {
+func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	if len(expected) == 0 {
 		return nil, ErrSendNowEmpty
 	}
 	unlock := r.withSessionLock(sessionID)
 	defer unlock()
 
-	requested, err := requestedSendNowIDs(entryIDs)
+	requested, err := requestedSendNowIDs(expected)
 	if err != nil {
 		return nil, err
 	}
@@ -751,7 +751,7 @@ func (r *sqliteRepository) ClaimSendNow(ctx context.Context, sessionID string, e
 	if err != nil {
 		return nil, err
 	}
-	sources, err := selectSQLiteSendNowSources(ordered, storedByID, requested, entryIDs)
+	sources, err := selectSQLiteSendNowSources(ordered, storedByID, requested, expected)
 	if err != nil {
 		return nil, err
 	}
@@ -871,27 +871,14 @@ func (r *sqliteRepository) listOrderedStoredSessionEntries(ctx context.Context, 
 	return ordered, entries, nil
 }
 
-func requestedSendNowIDs(entryIDs []string) (map[string]struct{}, error) {
-	requested := make(map[string]struct{}, len(entryIDs))
-	for _, entryID := range entryIDs {
-		if entryID == "" {
-			return nil, ErrSendNowClaimChanged
-		}
-		if _, duplicate := requested[entryID]; duplicate {
-			return nil, ErrSendNowClaimChanged
-		}
-		requested[entryID] = struct{}{}
-	}
-	return requested, nil
-}
-
 func selectSQLiteSendNowSources(
 	ordered []storedQueueEntry,
 	byID map[string]storedQueueEntry,
 	requested map[string]struct{},
-	entryIDs []string,
+	expected []QueuedMessage,
 ) ([]QueuedMessage, error) {
-	for _, entryID := range entryIDs {
+	for _, expectedEntry := range expected {
+		entryID := expectedEntry.ID
 		entry, ok := byID[entryID]
 		if !ok {
 			return nil, ErrSendNowClaimChanged
@@ -901,11 +888,17 @@ func selectSQLiteSendNowSources(
 		}
 	}
 
-	selected := make([]*QueuedMessage, 0, len(entryIDs))
+	selected := make([]*QueuedMessage, 0, len(expected))
 	for _, entry := range ordered {
 		if _, ok := requested[entry.message.ID]; ok {
 			selected = append(selected, entry.message)
 		}
+	}
+	if len(selected) != len(expected) {
+		return nil, ErrSendNowClaimChanged
+	}
+	if err := validateSendNowSnapshot(selected, expected); err != nil {
+		return nil, err
 	}
 	return cloneSendNowSources(selected), nil
 }
@@ -1010,7 +1003,7 @@ func (r *sqliteRepository) restoreSQLiteSendNowSource(
 	if !source.IsDurableLifecycle() || !entry.message.IsReservedInFlight() {
 		return nil
 	}
-	metadataJSON, err := marshalMetadata(clearReservedMetadata(entry.message.Metadata))
+	metadataJSON, err := marshalMetadata(clearReservedMetadata(source.Metadata))
 	if err != nil {
 		return err
 	}

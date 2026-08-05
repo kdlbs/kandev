@@ -74,6 +74,6 @@ this task plus `plan.md` status/results.
 ## Results
 
 - Added `SendNowClaim`, FIFO envelope aggregation, exact session-scoped claims, restoration, and durable-source acknowledgement to the memory and SQLite/PostgreSQL-compatible repositories.
-- Claims are all-or-none, reject missing/duplicate/reserved IDs without mutation, retain durable rows with an in-flight reservation, restore ordinary rows at their persisted positions, and acknowledge every durable source only after prompt acceptance.
-- GREEN: `cd apps/backend && go test -race ./internal/orchestrator/messagequeue -count=1 -v` — 115 tests passed across memory and SQLite; env-gated PostgreSQL cases are included and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- Claims are all-or-none, reject missing/duplicate/reserved or changed click-time snapshots without mutation, retain durable rows with an in-flight reservation, restore ordinary rows at their persisted positions, and acknowledge every durable source only after prompt acceptance.
+- GREEN: `cd apps/backend && go test -race ./internal/orchestrator/messagequeue -count=1 -v` — 116 tests passed across memory and SQLite; env-gated PostgreSQL cases are included and skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
 - Aggregate envelope coverage proves FIFO content/attachments, oldest execution metadata, canonical reference de-duplication, provenance, attachment-only entries, and pre-mutation attachment/reference overflow errors.

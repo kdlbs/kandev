@@ -25,7 +25,7 @@ func TestSendNowClaimIsExactAtomicAndRestorable(t *testing.T) {
 				map[string]interface{}{MetadataLifecycleDurable: true})
 			third := insertTestEntry(t, repo, "session-1", "task-1", "third", QueuedByUser, nil, nil)
 
-			claim, err := repo.ClaimSendNow(ctx, "session-1", []string{third.ID, durable.ID, first.ID})
+			claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first, *durable, *third})
 			if err != nil {
 				t.Fatalf("claim: %v", err)
 			}
@@ -58,7 +58,7 @@ func TestSendNowClaimIsExactAtomicAndRestorable(t *testing.T) {
 				t.Fatal("restore left durable source reserved")
 			}
 
-			claim, err = repo.ClaimSendNow(ctx, "session-1", []string{first.ID, durable.ID, third.ID})
+			claim, err = repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first, *durable, *third})
 			if err != nil {
 				t.Fatalf("claim before acknowledge: %v", err)
 			}
@@ -93,7 +93,7 @@ func TestSendNowClaimRejectsMissingOrReservedSelectionWithoutMutation(t *testing
 			first := insertTestEntry(t, repo, "session-1", "task-1", "first", QueuedByUser, nil, nil)
 			second := insertTestEntry(t, repo, "session-1", "task-1", "second", QueuedByUser, nil, nil)
 
-			if _, err := repo.ClaimSendNow(ctx, "session-1", []string{first.ID, "missing"}); !errors.Is(err, ErrSendNowClaimChanged) {
+			if _, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first, {ID: "missing"}}); !errors.Is(err, ErrSendNowClaimChanged) {
 				t.Fatalf("missing claim error = %v, want ErrSendNowClaimChanged", err)
 			}
 			entries, err := repo.ListBySession(ctx, "session-1")
@@ -102,6 +102,22 @@ func TestSendNowClaimRejectsMissingOrReservedSelectionWithoutMutation(t *testing
 			}
 			if len(entries) != 2 || entries[0].ID != first.ID || entries[1].ID != second.ID {
 				t.Fatalf("entries changed after missing claim = %#v", entries)
+			}
+
+			snapshot := *first
+			if err := repo.UpdateContentAndMetadata(ctx, "session-1", first.ID, "edited", nil,
+				map[string]interface{}{"snapshot": "edited"}, QueuedByUser); err != nil {
+				t.Fatalf("edit queued snapshot: %v", err)
+			}
+			if _, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{snapshot}); !errors.Is(err, ErrSendNowClaimChanged) {
+				t.Fatalf("changed snapshot error = %v, want ErrSendNowClaimChanged", err)
+			}
+			entries, err = repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list after changed snapshot: %v", err)
+			}
+			if len(entries) != 2 || entries[0].ID != first.ID || entries[0].Content != "edited" || entries[1].ID != second.ID {
+				t.Fatalf("entries changed after changed snapshot = %#v", entries)
 			}
 
 			reserved := insertTestEntry(t, repo, "session-1", "task-1", "reserved", QueuedByWorkflow, nil,
@@ -116,7 +132,7 @@ func TestSendNowClaimRejectsMissingOrReservedSelectionWithoutMutation(t *testing
 			if _, err := repo.ReserveHead(ctx, "session-1"); err != nil {
 				t.Fatalf("reserve head: %v", err)
 			}
-			if _, err := repo.ClaimSendNow(ctx, "session-1", []string{after.ID, reserved.ID}); !errors.Is(err, ErrSendNowReservationConflict) {
+			if _, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*reserved, *after}); !errors.Is(err, ErrSendNowReservationConflict) {
 				t.Fatalf("reserved claim error = %v, want ErrSendNowReservationConflict", err)
 			}
 			entries, err = repo.ListBySession(ctx, "session-1")
@@ -127,5 +143,31 @@ func TestSendNowClaimRejectsMissingOrReservedSelectionWithoutMutation(t *testing
 				t.Fatalf("entries changed after reserved claim = %#v", entries)
 			}
 		})
+	}
+}
+
+func TestSameQueuedMessageContentIncludesStoredSnapshot(t *testing.T) {
+	base := &QueuedMessage{
+		ID:        "entry-1",
+		SessionID: "session-1",
+		TaskID:    "task-1",
+		Position:  1,
+		Content:   "original",
+		Model:     "model-a",
+		PlanMode:  true,
+		Metadata:  map[string]interface{}{"source": "original"},
+		QueuedBy:  QueuedByUser,
+	}
+
+	changedMetadata := *base
+	changedMetadata.Metadata = map[string]interface{}{"source": "edited"}
+	if sameQueuedMessageContent(base, &changedMetadata) {
+		t.Fatal("metadata edit matched the click-time queue snapshot")
+	}
+
+	changedModel := *base
+	changedModel.Model = "model-b"
+	if sameQueuedMessageContent(base, &changedModel) {
+		t.Fatal("model edit matched the click-time queue snapshot")
 	}
 }

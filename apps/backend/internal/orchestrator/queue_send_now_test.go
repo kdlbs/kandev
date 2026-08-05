@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestSelectSendNowEntriesUsesExactEntryOrSnapshot(t *testing.T) {
@@ -82,5 +84,61 @@ func TestExplicitCancellationDoesNotJoinSendNowOperation(t *testing.T) {
 	case <-operation.joined:
 		t.Fatal("explicit cancellation should not mark Send Now as joined")
 	default:
+	}
+}
+
+func TestExecuteSendNowClaimRestorePreservesRecordedSources(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	seedExecutorRunning(t, repo, "session-1", "task-1", "exec-1")
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session: %v", err)
+	}
+	session.State = models.TaskSessionStateWaitingForInput
+	if err := repo.UpdateTaskSession(ctx, session); err != nil {
+		t.Fatalf("set session waiting: %v", err)
+	}
+
+	agentMgr := &mockAgentManager{
+		isAgentRunning:         true,
+		promptErr:              errors.New("replacement prompt rejected"),
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	messageCreator := &mockMessageCreator{}
+	svc.messageCreator = messageCreator
+	svc.activeTurns.Store("session-1", "turn-1")
+
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(ctx, "session-1", "task-1", "first", "", messagequeue.QueuedByUser, false, nil, nil); err != nil {
+		t.Fatalf("seed ordinary replacement source: %v", err)
+	}
+	if _, err := svc.messageQueue.QueueMessageWithMetadata(ctx, "session-1", "task-1", "second", "", messagequeue.QueuedByWorkflow, false, nil,
+		map[string]interface{}{messagequeue.MetadataLifecycleDurable: true}); err != nil {
+		t.Fatalf("seed durable replacement source: %v", err)
+	}
+	sources := svc.messageQueue.GetStatus(ctx, "session-1").Entries
+	if len(sources) != 2 {
+		t.Fatalf("seeded replacement source count = %d, want 2", len(sources))
+	}
+	claimed, err := svc.messageQueue.ClaimSendNow(ctx, "session-1", []messagequeue.QueuedMessage{sources[0], sources[1]})
+	if err != nil {
+		t.Fatalf("claim replacement sources: %v", err)
+	}
+
+	svc.executeSendNowClaim(claimed)
+	if len(messageCreator.userMessages) != 1 {
+		t.Fatalf("replacement retry created %d user messages, want 1", len(messageCreator.userMessages))
+	}
+	entries := svc.messageQueue.GetStatus(ctx, "session-1").Entries
+	if len(entries) != 2 {
+		t.Fatalf("restored source count = %d, want 2", len(entries))
+	}
+	for _, entry := range entries {
+		if recorded, _ := entry.Metadata[metaKeyUserMessageRecorded].(bool); !recorded {
+			t.Fatalf("restored source %q lost user_message_recorded marker: %#v", entry.ID, entry.Metadata)
+		}
 	}
 }

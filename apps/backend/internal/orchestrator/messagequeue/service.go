@@ -409,12 +409,13 @@ func (s *Service) GetEntry(ctx context.Context, sessionID, entryID string) (*Que
 	return nil, ErrEntryNotFound
 }
 
-// ClaimSendNow atomically claims the exact pending entries for an interrupt-
-// and-replace dispatch. The repository orders the retained sources by FIFO
-// position and constructs the synthetic dispatch envelope before mutating any
-// row, so aggregate validation failures leave the queue untouched.
-func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, entryIDs []string) (*SendNowClaim, error) {
-	claim, err := s.repo.ClaimSendNow(ctx, sessionID, entryIDs)
+// ClaimSendNow atomically claims the exact pending source snapshot for an
+// interrupt-and-replace dispatch. The repository orders the retained sources
+// by FIFO position and constructs the synthetic dispatch envelope before
+// mutating any row, so aggregate validation failures or click-time edits leave
+// the queue untouched.
+func (s *Service) ClaimSendNow(ctx context.Context, sessionID string, expected []QueuedMessage) (*SendNowClaim, error) {
+	claim, err := s.repo.ClaimSendNow(ctx, sessionID, expected)
 	if err != nil {
 		return nil, err
 	}

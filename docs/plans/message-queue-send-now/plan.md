@@ -172,13 +172,14 @@ action group wrap on narrow viewports rather than shrink or overflow.
 
 ## Tests
 
-- **What:** exact-entry and exact-ID batch claims are atomic, preserve FIFO
+- **What:** exact-entry and exact-snapshot batch claims are atomic, preserve FIFO
   source order, reserve durable rows, restore originals, and acknowledge every
   durable source.
   **Files:** new `repository_*_send_now_test.go` coverage for memory, SQLite,
   and env-gated PostgreSQL plus `service_test.go`.
-  **How:** table-driven repository tests for selected/all claims, missing IDs,
-  mixed ordinary/durable rows, restoration, and no cross-session mutation.
+  **How:** table-driven repository tests for selected/all claims, missing or
+  changed snapshots, mixed ordinary/durable rows, restoration, and no
+  cross-session mutation.
 - **What:** bulk aggregation joins content correctly, preserves FIFO
   attachments, deduplicates references, uses the oldest envelope, and rejects
   attachment/reference overflow before mutation.
@@ -242,8 +243,8 @@ normal Cancel control. No new page or navigation entry is required.
 
 ## Verification Results
 
-- Backend queue claims and envelope aggregation: `cd apps/backend && go test -race ./internal/orchestrator/messagequeue -count=1 -v` — 115 tests passed. The memory and SQLite claim suites cover exact atomic selection, FIFO restoration, durable reservation, acknowledgement, aggregate attachments, and reference limits. The env-gated PostgreSQL cases were included but skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
-- Backend replacement orchestration: `cd apps/backend && go test -race ./internal/orchestrator -run 'SendNow|ExplicitCancellationDoesNotJoin' -count=1 -v` — 5 tests passed; `cd apps/backend && go test -race ./internal/orchestrator/handlers -run 'SendNow|QueueHandler' -count=1 -v` — 24 tests passed; existing cancellation/peer-interrupt regressions — 56 tests passed.
+- Backend queue claims and envelope aggregation: `cd apps/backend && go test -race ./internal/orchestrator/messagequeue -count=1 -v` — 116 tests passed. The memory and SQLite claim suites cover exact atomic selection, click-time snapshot changes, FIFO restoration, durable reservation, acknowledgement, aggregate attachments, and reference limits. The env-gated PostgreSQL cases were included but skipped because `KANDEV_TEST_POSTGRES_DSN` is unset.
+- Backend replacement orchestration: `cd apps/backend && go test -race ./internal/orchestrator -run 'SendNow|ExplicitCancellationDoesNotJoin' -count=1 -v` — 6 tests passed; `cd apps/backend && go test -race ./internal/orchestrator/handlers -run 'SendNow|QueueHandler' -count=1 -v` — 24 tests passed; existing cancellation/peer-interrupt regressions — 56 tests passed. The retry regression also proves restored ordinary and durable sources retain the recorded-user-message marker.
 - Backend compile sweep: `cd apps/backend && go test ./... -run '^$'` — completed with no test bodies selected, compiling all packages successfully.
 - Backend lint: `make -C apps/backend lint` — completed with 0 issues after extracting the repository, handler, and orchestration validation helpers.
 - Frontend queue API, hook, and component suite: 4 files, 97 tests passed. `cd apps/web && pnpm run typecheck` passed; full web lint passed with `pnpm --filter @kandev/web run lint`; `i18n:pseudo`, `i18n:check`, and `i18n:ratchet` all passed.
