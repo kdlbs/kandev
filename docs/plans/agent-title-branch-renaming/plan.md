@@ -84,7 +84,9 @@ Relevant decisions:
 
 - **What:** final-title rendering uses default/custom templates and current task metadata, while an
   explicit checkout and Local executor are preserved before Git is called. **Files:**
-  `apps/backend/internal/orchestrator/task_title_branch_test.go` and existing worktree config tests.
+  `apps/backend/internal/orchestrator/task_title_branch_test.go`,
+  `apps/backend/internal/orchestrator/task_title_branch_service_test.go`, and existing worktree config
+  tests.
   **How:** table-driven tests with fake lifecycle/repository dependencies, covering single repository,
   mixed multi-repository, custom template, direct GitHub PR checkout, and Local executor cases.
 - **What:** the lifecycle operation resolves the correct execution and repository subpath and relays
@@ -103,7 +105,7 @@ Relevant decisions:
   accepted title. **File:** `apps/backend/internal/mcp/handlers/set_task_title_test.go`. **How:** fail
   the fake branch rename and reload the task after the handler response.
 - **What:** only the persisted owner session is targeted; concurrent non-owner worktrees remain
-  unchanged. **File:** `apps/backend/internal/orchestrator/task_title_branch_test.go`. **How:** seed two
+  unchanged. **File:** `apps/backend/internal/orchestrator/task_title_branch_service_test.go`. **How:** seed two
   sessions and assert Git and snapshot mutations are scoped to the owner.
 
 No new frontend or browser E2E test is planned. The existing option and creation payload are unchanged;
@@ -126,6 +128,9 @@ the new behavior begins after the task-bound MCP call and is covered at the back
 - Addressed review findings for manual-branch preservation, synchronized lifecycle metadata, execution-ID
   compare-and-swap snapshots, repository-scoped branch-switch updates, nil-runtime handling, deterministic
   worktree suffixes, and surfaced snapshot failures.
+- Follow-up review fixes add owner/non-owner session isolation and actual snapshot-write failure coverage,
+  document the `switched_branch` preservation reason, make repeated-repository fixtures deterministic,
+  and correct the recorded test paths and verification command scope.
 - Remediation verification: targeted backend check — 32 passed in 6 packages; affected-package backend
   check — 3473 passed in 6 packages; focused race check — 12 passed in 3 packages; architecture lint,
   backend lint (0 issues), public-doc checks (58 tests and 41 pages), and `git diff --check` passed.

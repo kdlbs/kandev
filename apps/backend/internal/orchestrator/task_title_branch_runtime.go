@@ -327,7 +327,7 @@ func (s *Service) renameTitleBranchBinding(
 		return
 	}
 	if generatedBranch != branch {
-		addTitleBranchPreservation(result, binding.taskRepository.RepositoryID, branch, "branch_changed")
+		addTitleBranchPreservation(result, binding.taskRepository.RepositoryID, branch, "switched_branch")
 		return
 	}
 	if s.titleBranchRuntime == nil {

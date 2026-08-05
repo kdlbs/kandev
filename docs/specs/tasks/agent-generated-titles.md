@@ -125,7 +125,7 @@ The tool targets the current task bound to the MCP server. A successful response
 `{"accepted": true, "task_id": "...", "title": "...", "branch_rename": {...}}`. The
 `branch_rename` object reports an aggregate `status` of `renamed`, `preserved`, `partial`, `failed`, or
 `not_applicable`, plus repository-scoped `renamed`, `preserved`, and `failed` entries. Preserved entries
-identify `remote_checkout` or `local_executor` as their reason. `renamed` means at least one rename
+identify `remote_checkout`, `local_executor`, or `switched_branch` as their reason. `renamed` means at least one rename
 succeeded and none failed, even when other repositories were intentionally preserved; `partial` means
 some eligible renames succeeded and others failed; `failed` means every eligible rename failed;
 `preserved` means there were branches but none were eligible; and `not_applicable` means the owner had

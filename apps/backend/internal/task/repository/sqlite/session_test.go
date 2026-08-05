@@ -820,8 +820,8 @@ func TestUpdateTaskSessionWorktreeBranchByWorktreeScopesRepeatedRepository(t *te
 	ctx := context.Background()
 	seedForMsgTest(t, repo, "task-repeated-repo", "session-repeated-repo", "turn-repeated-repo")
 	for _, wt := range []*models.TaskSessionWorktree{
-		{ID: "wt-repeated-one", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", WorktreeBranch: "feature/one"},
-		{ID: "wt-repeated-two", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", WorktreeBranch: "feature/two"},
+		{ID: "wt-repeated-one", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-one", RepositoryID: "repo-repeated", WorktreeBranch: "feature/one", Position: 0},
+		{ID: "wt-repeated-two", SessionID: "session-repeated-repo", WorktreeID: "worktree-repeated-two", RepositoryID: "repo-repeated", WorktreeBranch: "feature/two", Position: 1},
 	} {
 		require.NoError(t, repo.CreateTaskSessionWorktree(ctx, wt))
 	}

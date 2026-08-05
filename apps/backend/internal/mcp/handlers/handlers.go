@@ -1379,9 +1379,7 @@ func (h *Handlers) handleSetTaskTitle(ctx context.Context, msg *ws.Message) (*ws
 	if h.titleBranchRenamer != nil {
 		branchResult, branchErr := h.titleBranchRenamer.RenameGeneratedBranchesForTaskTitle(ctx, req.TaskID, req.SessionID, task.Title)
 		if branchErr != nil {
-			if h.logger != nil {
-				h.logger.Warn("failed to rename generated task branches", zap.String("task_id", req.TaskID), zap.Error(branchErr))
-			}
+			h.logger.Warn("failed to rename generated task branches", zap.String("task_id", req.TaskID), zap.Error(branchErr))
 			branchResult = orchestrator.TitleBranchRenameResult{
 				Status: orchestrator.TitleBranchStatusFailed,
 				Failed: []orchestrator.TitleBranchFailure{{Message: branchErr.Error()}},
