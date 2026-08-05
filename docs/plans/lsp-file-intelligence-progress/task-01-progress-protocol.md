@@ -59,7 +59,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: completion providers forward Monaco trigger context using LSP enum values, and managed installer caches resolve from the merged task `HOME`.
 - Review hardening: cold SSH, Sprites, and remote-Docker sessions are rejected through a read-only runtime lookup before LSP can create or resume an execution.
 - Review hardening: both Monaco save paths now flush a pending content change before emitting capability-gated `textDocument/didSave` after successful persistence, with canonical repo-aware URIs and `includeText` snapshots when requested.
-- Review hardening: reasonless WebSocket closes now resolve their pre-bridge and post-bridge fallback copy through the active locale instead of leaking English into localized status UI and toasts.
+- Review hardening: installer failures without details, WebSocket errors, and reasonless pre-bridge or post-bridge closes now resolve their fallback copy through the active locale instead of leaking English into localized status UI and toasts.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`

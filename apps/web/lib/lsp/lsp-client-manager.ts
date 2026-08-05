@@ -208,7 +208,7 @@ class LSPClientManager {
       } else if (data.status === "install_failed") {
         ws.removeEventListener("message", statusHandler);
         terminalStatusReceived = true;
-        this.setStatus(key, { state: "error", reason: data.error || "Install failed" });
+        this.setStatus(key, { state: "error", reason: data.error || t("lsp:installFailed") });
       }
     };
     ws.addEventListener("message", statusHandler);
@@ -242,7 +242,7 @@ class LSPClientManager {
       if (!this.isCurrentConnection(conn)) return;
       const current = this.statuses.get(key);
       if (current?.state !== "error" && current?.state !== "unavailable") {
-        this.setStatus(key, { state: "error", reason: "WebSocket error" });
+        this.setStatus(key, { state: "error", reason: t("lsp:webSocketError") });
       }
     };
 

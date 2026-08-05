@@ -30,6 +30,8 @@ import { lspClientManager } from "./lsp-client-manager";
 const { createMonacoHarness } = createLspManagerHarness(lspClientManager, mocks);
 const SESSION_ID = "progress-session";
 const REPLACEMENT_SESSION_ID = "progress-replacement-session";
+const ERROR_SESSION_ID = "progress-error-session";
+const INSTALL_SESSION_ID = "progress-install-session";
 const LANGUAGE = "typescript";
 const WORKSPACE_PATH = "/workspace";
 const PROGRESS_METHOD = "$/progress";
@@ -133,10 +135,22 @@ describe("LSP connection failure reporting", () => {
       reason: "language server exited",
     });
   });
+});
 
+describe("LSP connection failure localization", () => {
   it("localizes fallback reasons when the proxy omits its close reason", async () => {
     await activateLocale("pseudo");
     try {
+      lspClientManager.connect(INSTALL_SESSION_ID, LANGUAGE);
+      const installSocket = FakeWebSocket.instances.at(-1);
+      if (!installSocket) throw new Error(EXPECTED_SOCKET_ERROR);
+      installSocket.emitMessage(JSON.stringify({ status: "install_failed" }));
+
+      expect(lspClientManager.getStatus(INSTALL_SESSION_ID, LANGUAGE)).toEqual({
+        state: "error",
+        reason: "Ĩńśţàĺĺ ƒàĩĺēď",
+      });
+
       lspClientManager.connect(SESSION_ID, LANGUAGE);
       const startingSocket = FakeWebSocket.instances.at(-1);
       if (!startingSocket) throw new Error(EXPECTED_SOCKET_ERROR);
@@ -146,6 +160,16 @@ describe("LSP connection failure reporting", () => {
       expect(lspClientManager.getStatus(SESSION_ID, LANGUAGE)).toEqual({
         state: "error",
         reason: "Ćōńńēćţĩōń ćĺōśēď",
+      });
+
+      lspClientManager.connect(ERROR_SESSION_ID, LANGUAGE);
+      const errorSocket = FakeWebSocket.instances.at(-1);
+      if (!errorSocket) throw new Error(EXPECTED_SOCKET_ERROR);
+      errorSocket.onerror?.(new Event("error"));
+
+      expect(lspClientManager.getStatus(ERROR_SESSION_ID, LANGUAGE)).toEqual({
+        state: "error",
+        reason: "ŴēƀŚōćķēţ ēŕŕōŕ",
       });
 
       const { initialize, socket } = beginInitialization(REPLACEMENT_SESSION_ID);

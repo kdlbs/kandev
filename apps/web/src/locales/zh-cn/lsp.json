@@ -70,5 +70,6 @@
   "tooManyLanguageServers": "活动的语言服务器过多",
   "unavailable": "不可用",
   "waitingForInitializeResponse": "正在等待语言服务器响应 LSP 初始化请求。",
-  "waitingForLanguageServer": "正在等待语言服务器"
+  "waitingForLanguageServer": "正在等待语言服务器",
+  "webSocketError": "WebSocket 错误"
 }

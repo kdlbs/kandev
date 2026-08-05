@@ -70,5 +70,6 @@
   "tooManyLanguageServers": "Too many language servers are active",
   "unavailable": "Unavailable",
   "waitingForInitializeResponse": "Waiting for the language server to respond to the LSP initialize request.",
-  "waitingForLanguageServer": "Waiting for the language server"
+  "waitingForLanguageServer": "Waiting for the language server",
+  "webSocketError": "WebSocket error"
 }

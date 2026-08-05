@@ -70,5 +70,6 @@
   "tooManyLanguageServers": "Ţōō ḿàńŷ ĺàńĝũàĝē śēŕvēŕś àŕē àćţĩvē",
   "unavailable": "Ũńàvàĩĺàƀĺē",
   "waitingForInitializeResponse": "Ŵàĩţĩńĝ ƒōŕ ţĥē ĺàńĝũàĝē śēŕvēŕ ţō ŕēśƥōńď ţō ţĥē ĹŚƤ ĩńĩţĩàĺĩźē ŕēqũēśţ.",
-  "waitingForLanguageServer": "Ŵàĩţĩńĝ ƒōŕ ţĥē ĺàńĝũàĝē śēŕvēŕ"
+  "waitingForLanguageServer": "Ŵàĩţĩńĝ ƒōŕ ţĥē ĺàńĝũàĝē śēŕvēŕ",
+  "webSocketError": "ŴēƀŚōćķēţ ēŕŕōŕ"
 }
