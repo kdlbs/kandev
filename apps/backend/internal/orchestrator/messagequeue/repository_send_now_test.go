@@ -24,8 +24,15 @@ func TestSendNowClaimIsExactAtomicAndRestorable(t *testing.T) {
 			durable := insertTestEntry(t, repo, "session-1", "task-1", "durable", QueuedByWorkflow, nil,
 				map[string]interface{}{MetadataLifecycleDurable: true})
 			third := insertTestEntry(t, repo, "session-1", "task-1", "third", QueuedByUser, nil, nil)
+			clickSnapshot, err := repo.ListBySession(ctx, "session-1")
+			if err != nil {
+				t.Fatalf("list click-time snapshot: %v", err)
+			}
+			if len(clickSnapshot) != 3 {
+				t.Fatalf("click-time snapshot = %#v, want three entries", clickSnapshot)
+			}
 
-			claim, err := repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first, *durable, *third})
+			claim, err := repo.ClaimSendNow(ctx, "session-1", clickSnapshot)
 			if err != nil {
 				t.Fatalf("claim: %v", err)
 			}
@@ -58,7 +65,7 @@ func TestSendNowClaimIsExactAtomicAndRestorable(t *testing.T) {
 				t.Fatal("restore left durable source reserved")
 			}
 
-			claim, err = repo.ClaimSendNow(ctx, "session-1", []QueuedMessage{*first, *durable, *third})
+			claim, err = repo.ClaimSendNow(ctx, "session-1", clickSnapshot)
 			if err != nil {
 				t.Fatalf("claim before acknowledge: %v", err)
 			}
