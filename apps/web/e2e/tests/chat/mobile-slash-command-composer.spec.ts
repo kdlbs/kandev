@@ -45,12 +45,10 @@ test.describe("Mobile slash command composer", () => {
     const session = await openTaskChat(testPage, task.id);
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
-    // Multiple TipTap instances can be mounted in mobile layouts; scope to the
-    // first visible one that TipTap has already flipped to editable (with
-    // immediatelyRender:false the contenteditable host mounts a beat after the
-    // node appears, so gate on the editable host, not just any .tiptap node).
-    const editor = testPage.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
-    await expect(editor).toBeEditable();
+    // Resolve the active editor through the same startup-aware gate used by
+    // send helpers; the visible idle placeholder can briefly precede TipTap's
+    // editable host while the mobile session finishes starting.
+    const editor = await session.composerReady();
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");
