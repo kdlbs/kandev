@@ -3,7 +3,6 @@
 import {
   useCallback,
   useEffect,
-  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
@@ -17,6 +16,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import { renameSession } from "@/lib/api/domains/session-api";
 import {
+  type RemoveSessionOptions,
   useSessionActions,
   isSessionDeletable as isDeletable,
 } from "@/hooks/domains/session/use-session-actions";
@@ -33,6 +33,7 @@ import { isSessionActive } from "./session-sort";
 import { resolveSessionTabTitle } from "./session-tab-title";
 import { TabRenameInput } from "./tab-rename-input";
 import { useTabMaximizeOnDoubleClick } from "./use-tab-maximize";
+import { SessionTabCloseAction } from "./session-tab-close-action";
 
 function useSessionTabState(sessionId: string | undefined) {
   const isPrimary = useAppStore((state) => {
@@ -237,6 +238,7 @@ function SessionTabTriggerContent({
   sessionState,
   isActive,
   showDeleteOnClose,
+  isDeleting,
   onCloseTab,
 }: {
   props: IDockviewPanelHeaderProps;
@@ -248,20 +250,11 @@ function SessionTabTriggerContent({
   sessionState: TaskSessionState | null;
   isActive: boolean;
   showDeleteOnClose: boolean;
+  isDeleting: boolean;
   onCloseTab: () => void;
 }) {
-  const tabContentRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!showDeleteOnClose || !sessionId) return;
-    const closeAction = tabContentRef.current?.querySelector(".dv-default-tab-action");
-    if (!closeAction) return;
-    closeAction.setAttribute("data-testid", `session-tab-close-${sessionId}`);
-    return () => closeAction.removeAttribute("data-testid");
-  }, [showDeleteOnClose, sessionId, isActive]); // isActive: re-run when tab activates so Dockview renders .dv-default-tab-action
-
   return (
-    <div ref={tabContentRef} className="flex items-center">
+    <div className="flex items-center">
       {isPrimary && showMultiSessionBadges && (
         <IconStar className="h-3 w-3 fill-foreground/50 stroke-0 shrink-0 ml-2" />
       )}
@@ -282,11 +275,10 @@ function SessionTabTriggerContent({
             className={`ml-1.5 shrink-0${isActive ? "" : " opacity-50"}`}
           />
         ))}
-      <DockviewDefaultTab
-        {...props}
-        hideClose={!showDeleteOnClose}
-        closeActionOverride={showDeleteOnClose ? onCloseTab : undefined}
-      />
+      <DockviewDefaultTab {...props} hideClose />
+      {showDeleteOnClose && (
+        <SessionTabCloseAction sessionId={sessionId} isDeleting={isDeleting} onClose={onCloseTab} />
+      )}
     </div>
   );
 }
@@ -321,6 +313,45 @@ function useSessionTabDialogState(sessionId: string | undefined) {
   };
 }
 
+function useSessionTabDelete(
+  setConfirmDelete: (open: boolean) => void,
+  handleDelete: (options?: RemoveSessionOptions) => Promise<boolean>,
+) {
+  const [deleteOrigin, setDeleteOrigin] = useState<"tab" | "menu" | null>(null);
+  const [isDeletingFromTab, setIsDeletingFromTab] = useState(false);
+  const handleCloseTab = useCallback(() => {
+    setDeleteOrigin("tab");
+    setConfirmDelete(true);
+  }, [setConfirmDelete]);
+  const handleDeleteDialogOpenChange = useCallback(
+    (open: boolean) => {
+      setConfirmDelete(open);
+      if (!open) setDeleteOrigin(null);
+    },
+    [setConfirmDelete],
+  );
+  const handleConfirmDelete = useCallback(async () => {
+    const isTabDelete = deleteOrigin === "tab";
+    if (isTabDelete) setIsDeletingFromTab(true);
+
+    const deleted = await handleDelete({ feedback: isTabDelete ? "inline" : "toast" });
+
+    if (!deleted && isTabDelete) setIsDeletingFromTab(false);
+    setDeleteOrigin(null);
+  }, [deleteOrigin, handleDelete]);
+  const handleMenuDelete = useCallback(() => {
+    setDeleteOrigin("menu");
+    setConfirmDelete(true);
+  }, [setConfirmDelete]);
+  return {
+    handleCloseTab,
+    handleDeleteDialogOpenChange,
+    handleConfirmDelete,
+    handleMenuDelete,
+    isDeletingFromTab,
+  };
+}
+
 /** Tab body: inline rename input while renaming, normal trigger content otherwise. */
 function SessionTabBody({
   props,
@@ -345,6 +376,7 @@ function SessionTabBody({
   sessionState: TaskSessionState | null;
   isActive: boolean;
   showDeleteOnClose: boolean;
+  isDeleting: boolean;
   onCloseTab: () => void;
 }) {
   if (isRenaming) {
@@ -408,9 +440,13 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
   // not deletable, so we omit the X rather than reviving hide-only close behavior.
   const showDeleteOnClose = showMultiSessionBadges && !!sessionState && isDeletable(sessionState);
   const { setConfirmDelete, setIsRenaming, setShareOpen } = dialogs;
-  const handleCloseTab = useCallback(() => {
-    setConfirmDelete(true);
-  }, [setConfirmDelete]);
+  const {
+    handleCloseTab,
+    handleDeleteDialogOpenChange,
+    handleConfirmDelete,
+    handleMenuDelete,
+    isDeletingFromTab,
+  } = useSessionTabDelete(setConfirmDelete, actions.handleDelete);
   const { handlePointerDownCapture, handleKeyDownCapture } = useSessionTabUserActivationIntent(
     sessionId,
     activeSessionId,
@@ -442,6 +478,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
             sessionState={sessionState}
             isActive={isActive}
             showDeleteOnClose={showDeleteOnClose}
+            isDeleting={isDeletingFromTab}
             onCloseTab={handleCloseTab}
           />
         </ContextMenuTrigger>
@@ -452,7 +489,7 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
           taskId={taskId}
           sessionId={sessionId}
           actions={actions}
-          onDelete={() => setConfirmDelete(true)}
+          onDelete={handleMenuDelete}
           onShare={() => setShareOpen(true)}
           onHandoffProfile={dialogs.handleHandoffProfile}
           onStartRename={() => setIsRenaming(true)}
@@ -460,10 +497,10 @@ export function SessionTab(props: IDockviewPanelHeaderProps) {
       </ContextMenu>
       <SessionTabDialogs
         confirmDelete={dialogs.confirmDelete}
-        setConfirmDelete={setConfirmDelete}
+        setConfirmDelete={handleDeleteDialogOpenChange}
         isPrimary={isPrimary}
         sessionCount={sessionCount}
-        onConfirmDelete={actions.handleDelete}
+        onConfirmDelete={handleConfirmDelete}
         taskId={taskId}
         sessionId={sessionId}
         shareOpen={dialogs.shareOpen}

@@ -36,6 +36,7 @@
   "contextCompactions": "Compactions",
   "createAWorkspaceToConfigureThisIntegration": "Create a workspace to configure this integration.",
   "dAgo": "{{diffDay}}d ago",
+  "deleteSession": "Delete session",
   "edit": "Edit",
   "editTask": "Edit task",
   "executors": "Executors",
