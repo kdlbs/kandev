@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const setQuickChatInitialPrompt = vi.fn();
@@ -7,7 +7,6 @@ const handleNewTerminal = vi.fn();
 const handleCloseTerminal = vi.fn();
 const handleOpenChange = vi.fn();
 const handleNewChat = vi.fn();
-const handleSetActiveSession = vi.fn();
 const CHAT_NAME = "Chat one";
 const WORKSPACE_ID = "ws-1";
 const TERMINAL_TAB_ID = "terminal-1";
@@ -130,7 +129,7 @@ vi.mock("./use-quick-chat-modal", () => ({
     setupKey: 0,
     activeSessionNeedsAgent: true,
     pendingAgentId: null,
-    setActiveQuickChatSession: handleSetActiveSession,
+    setActiveQuickChatSession: vi.fn(),
     setSessionToClose: vi.fn(),
     handleOpenChange,
     handleNewChat,
@@ -167,8 +166,7 @@ describe("QuickChatModal mixed tabs", () => {
     expect(screen.getByTestId("quick-chat-add-menu-trigger")).toBeTruthy();
     expect(screen.getByText("Agents")).toBeTruthy();
     expect(screen.getByText("Terminals")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("quick-chat-menu-session-chat-1"));
-    expect(handleSetActiveSession).toHaveBeenCalledWith("chat-1");
+    expect(screen.queryByTestId("quick-chat-menu-session-chat-1")).toBeNull();
+    expect(screen.queryByTestId("quick-chat-menu-terminal-terminal-1")).toBeNull();
   });
 });

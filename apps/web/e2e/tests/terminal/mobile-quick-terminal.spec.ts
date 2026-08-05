@@ -118,6 +118,7 @@ test.describe("mobile quick terminal tabs", () => {
       await expect(testPage.getByText("Agents", { exact: true })).toBeVisible();
       const menu = testPage.locator('[data-slot="dropdown-menu-content"]');
       await expect(menu).toBeVisible();
+      await expect(menu.getByRole("menuitem", { name: "Terminal 1", exact: true })).toHaveCount(0);
       const menuBox = await menu.boundingBox();
       expect(menuBox).not.toBeNull();
       expect(menuBox!.y).toBeGreaterThan(viewport!.height / 2);

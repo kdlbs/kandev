@@ -88,11 +88,12 @@ test.describe("Quick Chat cross-device sync", () => {
 
     await expect(dialogB.getByTestId("quick-chat-tab")).toHaveCount(2, { timeout: 30_000 });
 
-    // Renaming on A must re-label the same tab on B, because the name now
-    // lives on the backing task rather than in A's localStorage.
+    // Renaming from the tab context menu on A must re-label the same tab on B,
+    // because the name now lives on the backing task rather than localStorage.
     const renamed = "Renamed from desktop";
     const activeTabA = dialogA.getByTestId("quick-chat-tab").last();
-    await activeTabA.dblclick();
+    await activeTabA.click({ button: "right" });
+    await testPage.getByRole("menuitem", { name: "Rename", exact: true }).click();
     const renameInput = dialogA.locator('[data-testid="quick-chat-tab"] input');
     await expect(renameInput).toBeVisible({ timeout: 5_000 });
     await renameInput.fill(renamed);

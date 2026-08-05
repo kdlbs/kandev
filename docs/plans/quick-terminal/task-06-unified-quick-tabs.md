@@ -15,10 +15,12 @@ spec: "../../specs/quick-terminal/spec.md"
 - One workspace-scoped store and Quick Chat dialog render chat/configuration and terminal tabs;
   terminal launchers reuse the last terminal or create the first, while **New Terminal** always
   appends a distinct tab and conversation launchers retain their own latest selection.
-- The plus action exposes a translated, accessible **Agents**/**Terminals** add/switch menu with
-  existing-tab activation, and terminal close stops only its PTY while modal dismissal, tab switch,
-  boot hydration, and server resync preserve local terminal tabs; active-tab removal selects the
-  nearest remaining same-workspace tab or closes the empty dialog.
+- The plus action exposes a translated, accessible **Agents**/**Terminals** creation menu without
+  duplicating existing tabs; conversation and terminal switching remains in the tab strip. Chat
+  tabs can be renamed from their context menu while terminal labels stay fixed. Terminal close
+  stops only its PTY while modal dismissal, tab switch, boot hydration, and server resync preserve
+  local terminal tabs; active-tab removal selects the nearest remaining same-workspace tab or
+  closes the empty dialog.
 - The standalone Quick Terminal dialog/provider is removed from both app shells; desktop/tablet and
   phone launchers retain visibility, order, hitboxes, focus return, tooltip behavior, and the shared
   dialog's intentional responsive composition.
@@ -127,13 +129,13 @@ to `in_progress` before changes and replace `## Results` before marking it `done
   lifecycle updates, activation, workspace-aware fallback, and explicit removal while preserving
   server-owned conversation reconciliation.
 - Unified Quick Chat and terminal content in one responsive dialog with a grouped Agents/Terminals
-  add-and-switch menu, translated terminal labels/errors, terminal-specific close ownership, and
-  shared launcher focus restoration.
+  creation menu, conversation context-menu rename, translated terminal labels/errors,
+  terminal-specific close ownership, and shared launcher focus restoration.
 - Removed the standalone Quick Terminal provider from both application shells while retaining lazy
   xterm loading and standard Agents/login dialog cleanup semantics.
 - Focused frontend suite: 16 files, 126 tests passed.
 - `cd apps/web && pnpm run typecheck` — passed.
 - Changed-file frontend and E2E ESLint — passed with zero warnings.
 - `cd apps/web && pnpm run i18n:ratchet` — passed; `pnpm run i18n:check` passed with the existing
-  four orphan catalog entries reported by the checker.
+  orphan catalog entries reported by the checker.
 - `git diff --check` — passed.

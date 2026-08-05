@@ -1,7 +1,7 @@
 ---
 status: shipped
 created: 2026-08-03
-updated: 2026-08-04
+updated: 2026-08-05
 owner: kandev
 ---
 
@@ -24,16 +24,19 @@ them without losing work, and return to the most recent terminal without managin
 - The existing Quick Terminal launchers use a reuse-or-create policy scoped to the active workspace:
   they open the most recently activated terminal tab when one exists, and create the first terminal
   tab otherwise.
-- The tab-strip plus button opens an add/switch menu modeled on the task-detail Dockview add menu:
-  an **Agents** section leads with **New Agent** and lists existing ordinary/configuration chat tabs;
-  a **Terminals** section leads with **New Terminal** and lists existing terminal tabs.
+- The tab-strip plus button opens a creation menu grouped like the task-detail Dockview add menu:
+  an **Agents** section with **New Agent**, a separator, and a **Terminals** section with
+  **New Terminal**. Existing tabs remain directly selectable in the tab strip rather than being
+  duplicated in the creation menu.
 - Choosing **New Agent** preserves the current ordinary/configuration setup flow. Choosing
   **New Terminal** always creates and activates a distinct host-shell terminal, even when another
   terminal exists.
-- Selecting an existing menu row activates the same tab; the menu does not create a duplicate.
 - Chat and terminal tabs share one horizontal tab strip. Conversation ordering and configuration
   indicators remain unchanged; terminal tabs are ordered by creation and use a terminal icon with
   workspace-local labels such as `Terminal 1`, `Terminal 2`.
+- Renameable conversation tabs expose **Rename** from a context menu on desktop right-click and
+  the equivalent touch long-press gesture. The existing inline editor and backing-task rename
+  persistence remain unchanged; terminal labels stay fixed.
 - Multiple terminal tabs can run concurrently. Input, output, resize, exit, and error state belong
   to the selected terminal and must not affect sibling terminals.
 - Switching to another tab or dismissing the shared dialog detaches the terminal presentation but
@@ -157,8 +160,11 @@ Agents-page authorization behavior remain unchanged.
   **THEN** the shared dialog selects the most recently activated terminal without creating another.
 - **GIVEN** any chat or terminal tab is active, **WHEN** the user chooses **New Terminal** from the
   plus menu, **THEN** a distinct terminal tab and host-shell session are created and activated.
-- **GIVEN** the plus menu is open, **WHEN** it renders, **THEN** it groups create actions and existing
-  tabs under **Agents** and **Terminals**, and selecting an existing row activates that tab.
+- **GIVEN** the plus menu is open, **WHEN** it renders, **THEN** it shows only **New Agent** under
+  **Agents** and **New Terminal** under **Terminals**; existing tabs remain in the tab strip.
+- **GIVEN** a renameable conversation tab is present, **WHEN** the user right-clicks it or
+  long-presses it and chooses **Rename**, **THEN** the inline editor opens and a submitted name
+  continues to persist through the existing conversation rename path.
 - **GIVEN** two running terminal tabs, **WHEN** the user executes different marker commands in each
   and switches between them, **THEN** each tab displays only its own PTY output.
 - **GIVEN** a running terminal tab, **WHEN** the user closes and later reopens the shared dialog,

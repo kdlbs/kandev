@@ -1,7 +1,15 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { IconSparkles, IconX } from "@tabler/icons-react";
+import { useTranslation } from "react-i18next";
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@kandev/ui/context-menu";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 import { useTranslation } from "react-i18next";
 
@@ -15,7 +23,22 @@ type QuickChatTabItemProps = {
   onRename: (name: string) => void;
 };
 
-/** Tab in the quick-chat modal. Double-click the label to rename (local-only). */
+function RenameContextMenu({ children, onRename }: { children: ReactNode; onRename: () => void }) {
+  const { t } = useTranslation();
+
+  return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>{children}</ContextMenuTrigger>
+      <ContextMenuContent>
+        <ContextMenuItem className="min-h-11 cursor-pointer sm:min-h-7" onSelect={onRename}>
+          {t("common:rename")}
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
+/** Tab in the quick-chat modal. Renameable tabs support double-click and context-menu editing. */
 export const QuickChatTabItem = memo(function QuickChatTabItem({
   name,
   isActive,
@@ -65,7 +88,7 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
     setIsEditing(true);
   }, [isRenameable, name]);
 
-  return (
+  const tabContent = (
     <div
       data-testid="quick-chat-tab"
       className={`flex items-center gap-1 rounded transition-colors whitespace-nowrap ${
@@ -124,4 +147,8 @@ export const QuickChatTabItem = memo(function QuickChatTabItem({
       </button>
     </div>
   );
+
+  if (!isRenameable) return tabContent;
+
+  return <RenameContextMenu onRename={handleStartEdit}>{tabContent}</RenameContextMenu>;
 });

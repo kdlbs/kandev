@@ -16,8 +16,9 @@ spec: "../../specs/quick-terminal/spec.md"
 ## Acceptance
 
 - Desktop E2E proves first-create versus last-terminal reuse, same-session reconnect after modal
-  dismissal, grouped add/switch behavior, two independent PTYs, chat/terminal launcher selection,
-  single-tab stop, fallback, focus return, and tooltip absence.
+  dismissal, grouped creation-menu behavior with tab-strip switching, conversation context-menu
+  rename, two independent PTYs, chat/terminal launcher selection, single-tab stop, fallback, focus
+  return, and tooltip absence.
 - Host-shell integration E2E proves same-client idempotency, different-client concurrency,
   independent command streams and stops, plus omitted-client compatibility.
 - Pixel 5 E2E proves the same user value through touch with contained full-height geometry,
@@ -97,8 +98,9 @@ synchronized task/plan status. Set this task to `in_progress` before test edits 
 ## Results
 
 - Updated desktop shared Quick Chat scenarios to cover first-terminal creation, dismissal and
-  same-session reattach, grouped add/switch behavior, independent PTYs, launcher selection,
-  single-terminal close/fallback, focus return, and the absence of the old standalone footer.
+  same-session reattach, grouped creation-menu behavior with tab-strip switching, independent
+  PTYs, launcher selection, single-terminal close/fallback, focus return, and the absence of the old
+  standalone footer; the cross-device chat scenario also covers context-menu rename.
 - Added low-level host-shell coverage for legacy starts, same-client idempotency, distinct-client
   concurrency and streams, independent stop, malformed UUID rejection, and omitted-client
   compatibility.

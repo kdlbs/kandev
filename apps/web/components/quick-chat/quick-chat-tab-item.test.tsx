@@ -2,6 +2,29 @@ import { afterEach, describe, it, expect, vi } from "vitest";
 import { cleanup, render, fireEvent } from "@testing-library/react";
 import { QuickChatTabItem } from "./quick-chat-tab-item";
 
+vi.mock("@kandev/ui/context-menu", () => ({
+  ContextMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ContextMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ContextMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ContextMenuItem: ({
+    children,
+    onSelect,
+  }: {
+    children: React.ReactNode;
+    onSelect?: () => void;
+  }) => (
+    <button type="button" onClick={onSelect}>
+      {children}
+    </button>
+  ),
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) => (key === "common:rename" ? "Rename" : key),
+  }),
+}));
+
 afterEach(cleanup);
 
 function makeProps(overrides: Partial<Parameters<typeof QuickChatTabItem>[0]> = {}) {
@@ -23,6 +46,15 @@ function startEditing(label: HTMLElement) {
 }
 
 describe("QuickChatTabItem rename", () => {
+  it("starts renaming from the tab context menu", () => {
+    const { getByRole, getByLabelText } = render(<QuickChatTabItem {...makeProps()} />);
+
+    fireEvent.contextMenu(getByRole("button", { name: "Original" }));
+    fireEvent.click(getByRole("button", { name: "Rename" }));
+
+    expect(getByLabelText(RENAME_LABEL)).toBeTruthy();
+  });
+
   it("renders an accessible configuration indicator", () => {
     const { getByLabelText } = render(
       <QuickChatTabItem

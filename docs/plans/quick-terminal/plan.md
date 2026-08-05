@@ -14,7 +14,7 @@ but it owns a separate provider/dialog and the backend permits only one host she
 keeps those launchers while moving terminal content into the existing workspace-scoped Quick Chat
 tab surface. The backend first gains per-tab idempotent host-shell sessions, then the frontend
 separates reusable PTY rendering from stop-on-dialog-close ownership, adds browser-local terminal
-tab state, and replaces the Quick Chat plus action with the grouped add/switch menu.
+tab state, and replaces the Quick Chat plus action with a grouped creation menu.
 
 Tasks 01–03 remain the completed record of the shipped baseline. Tasks 04–07 complete this
 revision's backend, lifecycle, shared-tab, and viewport verification work.
@@ -123,11 +123,11 @@ revision's backend, lifecycle, shared-tab, and viewport verification work.
   `DropdownMenu` implemented in a focused component such as
   `apps/web/components/quick-chat/quick-tab-add-menu.tsx`.
 - Mirror the task-detail add-menu information hierarchy without importing task/Dockview state:
-  - **Agents** label, **New Agent**, then existing ordinary/configuration tabs;
+  - **Agents** label and **New Agent**;
   - separator;
-  - **Terminals** label, **New Terminal**, then existing terminal tabs.
-- Selecting an existing row activates it. Mark the active row without disabling its focus target;
-  retain configuration and terminal icons and accessible names.
+  - **Terminals** label and **New Terminal**.
+- Keep existing conversation and terminal tabs selectable from the horizontal tab strip; the
+  creation menu does not duplicate those rows.
 - Keep the plus trigger at least 44×44 px on phone. Reuse the existing global Radix menu mobile
   treatment so the menu becomes a contained, safe-area-aware bottom sheet with 44 px rows on
   coarse/narrow viewports.
@@ -159,19 +159,20 @@ revision's backend, lifecycle, shared-tab, and viewport verification work.
 ### Mobile design contract
 
 - **Desktop outcome:** the sidebar terminal launcher opens the shared large Quick Chat dialog on the
-  last terminal or a first new terminal; the plus menu creates and switches both content kinds.
+  last terminal or a first new terminal; the plus menu creates either content kind while the tab
+  strip switches between existing content.
 - **Mobile entry point:** the existing 44 px Home/Tasks terminal and Quick Chat actions remain. The
   terminal action selects terminal content inside the same full-height dialog as Quick Chat.
 - **Nearest shipped exemplars:** `quick-chat-modal.tsx` owns the full-height phone/floating wider
   surface and horizontal tab strip; `dockview-add-panel-items.tsx`,
-  `session-reopen-menu.tsx`, and `terminal-reopen-menu.tsx` supply the grouped add/switch menu
-  hierarchy; the global Radix menu treatment supplies the phone bottom sheet.
+  `session-reopen-menu.tsx`, and `terminal-reopen-menu.tsx` supply the grouped menu hierarchy;
+  the global Radix menu treatment supplies the phone bottom sheet.
 - **Hierarchy and primary action:** the fixed strip identifies the active tab; the selected chat or
-  terminal is the sole content focus. The plus control is the visible creation/switch overflow and
-  the phone close control remains fixed.
+  terminal is the sole content focus. The plus control is the visible creation overflow and the
+  phone close control remains fixed.
 - **Presentation rationale:** conversations and terminals are frequently revisited dense content,
   so they share a full-height phone workspace rather than nesting another dialog or temporary
-  drawer. Only the short add/switch choice rises in the menu bottom sheet.
+  drawer. Only the short creation choice rises in the menu bottom sheet.
 - **Geometry:** `100dvh` on phone, current bounded `85vh` floating geometry on wider viewports,
   one selected-content scroll owner, safe-area clearance, a horizontally scrollable tab strip, and
   no document horizontal overflow.
@@ -204,13 +205,14 @@ revision's backend, lifecycle, shared-tab, and viewport verification work.
   `apps/web/lib/state/hydration/hydrator.test.ts`.
   **How:** pure Zustand/helper tests with two workspaces, several chat kinds, several terminal IDs,
   and empty server resync.
-- **What:** the shared modal renders mixed tabs and a grouped add/switch menu, while both launcher
-  kinds select the intended last tab and restore focus.
+- **What:** the shared modal renders mixed tabs and a grouped creation menu, while both launcher
+  kinds select the intended last tab and restore focus; conversation tabs also expose context-menu
+  rename.
   **Files:** `apps/web/components/quick-chat/quick-chat-modal.test.ts`, a new menu component test,
   `apps/web/hooks/use-quick-chat-launcher.test.ts`, the replacement terminal-launcher/provider
   tests, and existing sidebar/mobile-header component tests.
-  **How:** mocked store/API/component tests assert menu grouping, creation versus activation,
-  accessible labels, workspace gating, focus restoration, and tooltip behavior.
+  **How:** mocked store/API/component tests assert menu grouping, creation callbacks, context-menu
+  rename, accessible labels, workspace gating, focus restoration, and tooltip behavior.
 
 ## E2E Tests
 

@@ -97,6 +97,7 @@
   "reload": "Reload",
   "reloadTheApplicationToTryAgain": "Reload the application to try again.",
   "requestFailed": "Request failed",
+  "rename": "Rename",
   "reset": "Reset",
   "resetWatchChecking": "Checking how many tasks would be deleted…",
   "resetWatchDeleteAllTasks": "This will delete every task previously created by the watch, including archived tasks. The watch's polling cursor is also cleared so the next check re-imports every currently-matching item. This cannot be undone.",

@@ -95,18 +95,7 @@ function QuickChatTabs({
             onClose={() => onTerminalClose(tab.tabId)}
           />
         ))}
-        <QuickTabAddMenu
-          sessions={sessions}
-          terminalTabs={terminalTabs}
-          activeKind={activeKind}
-          activeSessionId={activeSessionId}
-          activeTerminalTabId={activeTerminalTabId}
-          sessionLabel={(session, index) => quickChatTabName(t, session, index)}
-          onNewAgent={onNewChat}
-          onActivateSession={onTabChange}
-          onNewTerminal={onNewTerminal}
-          onActivateTerminal={onTerminalActivate}
-        />
+        <QuickTabAddMenu onNewAgent={onNewChat} onNewTerminal={onNewTerminal} />
       </div>
       {/* Touch devices have no Escape key or visible overlay to dismiss the
           full-screen dialog, so give them an explicit close control. */}

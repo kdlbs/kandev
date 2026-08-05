@@ -43,32 +43,9 @@ vi.mock("react-i18next", () => ({
 afterEach(() => cleanup());
 
 describe("QuickTabAddMenu", () => {
-  it("groups create actions and existing tabs while keeping the active row selectable", async () => {
-    const onActivateSession = vi.fn();
-    const onActivateTerminal = vi.fn();
+  it("offers creation actions without duplicating the tab strip", async () => {
     const onNewTerminal = vi.fn();
-    render(
-      <QuickTabAddMenu
-        sessions={[{ sessionId: "chat-1", workspaceId: "ws-1", kind: "chat", name: "Chat one" }]}
-        terminalTabs={[
-          {
-            tabId: "terminal-1",
-            workspaceId: "ws-1",
-            sessionId: "session-1",
-            sequence: 1,
-            status: "running",
-          },
-        ]}
-        activeKind="terminal"
-        activeSessionId="chat-1"
-        activeTerminalTabId="terminal-1"
-        sessionLabel={(session) => session.name ?? session.sessionId}
-        onNewAgent={vi.fn()}
-        onActivateSession={onActivateSession}
-        onNewTerminal={onNewTerminal}
-        onActivateTerminal={onActivateTerminal}
-      />,
-    );
+    render(<QuickTabAddMenu onNewAgent={vi.fn()} onNewTerminal={onNewTerminal} />);
 
     fireEvent.click(screen.getByTestId("quick-chat-add-menu-trigger"));
 
@@ -76,15 +53,7 @@ describe("QuickTabAddMenu", () => {
     expect(screen.getByText("New Agent")).toBeTruthy();
     expect(screen.getByText("Terminals")).toBeTruthy();
     expect(screen.getByText("New Terminal")).toBeTruthy();
-    const terminalRow = screen.getByTestId("quick-chat-menu-terminal-terminal-1");
-    expect(terminalRow.getAttribute("aria-current")).toBe("page");
-    expect(terminalRow.getAttribute("data-disabled")).toBeNull();
-
-    fireEvent.click(screen.getByTestId("quick-chat-menu-session-chat-1"));
-    expect(onActivateSession).toHaveBeenCalledWith("chat-1");
     fireEvent.click(screen.getByTestId("quick-chat-new-terminal"));
     expect(onNewTerminal).toHaveBeenCalledTimes(1);
-    fireEvent.click(terminalRow);
-    expect(onActivateTerminal).toHaveBeenCalledWith("terminal-1");
   });
 });
