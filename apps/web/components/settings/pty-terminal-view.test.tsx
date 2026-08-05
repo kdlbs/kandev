@@ -44,6 +44,7 @@ const mocks = vi.hoisted(() => {
     resizeAgentLogin: vi.fn().mockResolvedValue(undefined),
     sockets,
     terminals,
+    resizeCallbacks: [] as ResizeObserverCallback[],
     MockTerminal,
     MockWebSocket,
   };
@@ -85,13 +86,16 @@ beforeEach(() => {
   mocks.resizeAgentLogin.mockClear();
   mocks.sockets.length = 0;
   mocks.terminals.length = 0;
+  mocks.resizeCallbacks.length = 0;
   vi.stubGlobal("WebSocket", mocks.MockWebSocket);
   vi.stubGlobal(
     "ResizeObserver",
     class {
       observe = vi.fn();
       disconnect = vi.fn();
-      constructor(_callback: ResizeObserverCallback) {}
+      constructor(callback: ResizeObserverCallback) {
+        mocks.resizeCallbacks.push(callback);
+      }
     },
   );
 });
@@ -127,6 +131,37 @@ describe("PtyTerminalView lifecycle", () => {
 
     expect(mocks.stopAgentLogin).not.toHaveBeenCalled();
     expect(mocks.sockets[0]?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports a detached late start so the tab retains its session identity", async () => {
+    let resolveStart: ((value: typeof session) => void) | undefined;
+    const start = vi.fn(
+      () =>
+        new Promise<typeof session>((resolve) => {
+          resolveStart = resolve;
+        }),
+    );
+    const onStateChange = vi.fn();
+    const view = render(
+      <PtyTerminalView
+        startSession={start}
+        lifecycle="detach-on-unmount"
+        ownerId="tab-late-start"
+        onStateChange={onStateChange}
+      />,
+    );
+
+    await waitFor(() => expect(start).toHaveBeenCalled());
+    view.unmount();
+    await act(async () => resolveStart?.(session));
+
+    expect(onStateChange).toHaveBeenLastCalledWith({
+      status: "running",
+      sessionId: "session-1",
+      exitCode: null,
+      error: null,
+    });
+    expect(mocks.stopAgentLogin).not.toHaveBeenCalled();
   });
 
   it("attaches to an existing session without starting or stopping it on detach", async () => {
@@ -207,28 +242,6 @@ describe("PtyTerminalView lifecycle races", () => {
     view.unmount();
   });
 
-  it("reports a WebSocket exit without replacing the terminal session", async () => {
-    const onStateChange = vi.fn();
-    const view = render(
-      <PtyTerminalView startSession={startSession} onStateChange={onStateChange} />,
-    );
-
-    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
-    act(() => {
-      mocks.sockets[0]?.onmessage?.({
-        data: JSON.stringify({ type: "exit", exit_code: 7 }),
-      } as MessageEvent);
-    });
-
-    expect(onStateChange).toHaveBeenLastCalledWith({
-      status: "exited",
-      sessionId: "session-1",
-      exitCode: 7,
-      error: null,
-    });
-    view.unmount();
-  });
-
   it("reports a missing attached session without attempting replacement", async () => {
     mocks.getAgentLoginStatus.mockRejectedValueOnce({ status: 404 });
     const onStateChange = vi.fn();
@@ -252,6 +265,45 @@ describe("PtyTerminalView lifecycle races", () => {
     );
     expect(start).not.toHaveBeenCalled();
     expect(mocks.sockets).toHaveLength(0);
+    view.unmount();
+  });
+});
+
+describe("PtyTerminalView resize lifecycle", () => {
+  it("disarms resize after a WebSocket exit", async () => {
+    const onStateChange = vi.fn();
+    const view = render(
+      <PtyTerminalView startSession={startSession} onStateChange={onStateChange} />,
+    );
+
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    act(() => {
+      mocks.sockets[0]?.onmessage?.({
+        data: JSON.stringify({ type: "exit", exit_code: 7 }),
+      } as MessageEvent);
+    });
+
+    expect(onStateChange).toHaveBeenLastCalledWith({
+      status: "exited",
+      sessionId: "session-1",
+      exitCode: 7,
+      error: null,
+    });
+
+    mocks.resizeAgentLogin.mockClear();
+    act(() => mocks.resizeCallbacks[0]?.([], {} as ResizeObserver));
+    expect(mocks.resizeAgentLogin).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("disarms resize after the WebSocket closes", async () => {
+    const view = render(<PtyTerminalView startSession={startSession} />);
+
+    await waitFor(() => expect(mocks.sockets).toHaveLength(1));
+    mocks.sockets[0]?.onclose?.();
+    act(() => mocks.resizeCallbacks[0]?.([], {} as ResizeObserver));
+
+    expect(mocks.resizeAgentLogin).not.toHaveBeenCalled();
     view.unmount();
   });
 });

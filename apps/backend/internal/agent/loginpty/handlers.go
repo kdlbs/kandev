@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -109,9 +110,9 @@ func (h *Handlers) RegisterRoutes(r *gin.Engine) {
 // shell sessions so they don't collide with agent login sessions.
 const hostShellAgentID = "_host_shell"
 
-// httpStartHostShell spawns the user's $SHELL (or /bin/bash, then /bin/sh)
-// under a PTY. Returns the standard session snapshot — the client uses the
-// same stop/resize/stream endpoints.
+// httpStartHostShell spawns the user's interactive shell under a PTY. Returns
+// the standard session snapshot — the client uses the same
+// stop/resize/stream endpoints.
 func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	var req startRequest
 	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
@@ -134,8 +135,9 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 		managerKey += ":" + parsedClientID.String()
 	}
 
-	shell := detectShell()
-	sess, err := h.mgr.StartWithKey(managerKey, hostShellAgentID, []string{shell}, req.Cols, req.Rows)
+	shell, shellArgs := detectShell()
+	command := append([]string{shell}, shellArgs...)
+	sess, err := h.mgr.StartWithKey(managerKey, hostShellAgentID, command, req.Cols, req.Rows)
 	if err != nil && err != ErrSessionAlreadyRunning {
 		h.logger.Warn("host shell start failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -144,19 +146,38 @@ func (h *Handlers) httpStartHostShell(c *gin.Context) {
 	c.JSON(http.StatusOK, sess.Status())
 }
 
-// detectShell picks a sensible interactive shell, preferring $SHELL.
-func detectShell() string {
-	if s := os.Getenv("SHELL"); s != "" {
-		if _, err := exec.LookPath(s); err == nil {
-			return s
+// detectShell picks a sensible interactive shell, preferring $SHELL on Unix
+// and PowerShell on Windows. The returned arguments are part of the shell
+// command because PowerShell needs flags to remain an interactive PTY shell.
+func detectShell() (string, []string) {
+	return detectShellForOS(runtime.GOOS, os.Getenv, func(candidate string) bool {
+		_, err := exec.LookPath(candidate)
+		return err == nil
+	})
+}
+
+func detectShellForOS(goos string, getenv func(string) string, exists func(string) bool) (string, []string) {
+	if goos == "windows" {
+		for _, candidate := range []string{"pwsh.exe", "powershell.exe"} {
+			if exists(candidate) {
+				return candidate, []string{"-NoLogo", "-NoExit"}
+			}
 		}
+		if comspec := strings.TrimSpace(getenv("COMSPEC")); comspec != "" {
+			return comspec, nil
+		}
+		return "cmd.exe", nil
+	}
+
+	if shell := strings.TrimSpace(getenv("SHELL")); shell != "" && exists(shell) {
+		return shell, nil
 	}
 	for _, candidate := range []string{"/bin/bash", "/bin/zsh", "/bin/sh"} {
-		if _, err := os.Stat(candidate); err == nil {
-			return candidate
+		if exists(candidate) {
+			return candidate, nil
 		}
 	}
-	return "/bin/sh"
+	return "/bin/sh", nil
 }
 
 type startRequest struct {

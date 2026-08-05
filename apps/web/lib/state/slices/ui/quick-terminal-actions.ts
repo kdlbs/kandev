@@ -68,7 +68,8 @@ export function activateWorkspaceFallback(quickChat: QuickChatState, workspaceId
     quickChat.isOpen = false;
     return;
   }
-  const conversation = quickChat.sessions.find((session) => session.workspaceId === workspaceId);
+  const conversations = quickChat.sessions.filter((session) => session.workspaceId === workspaceId);
+  const conversation = conversations[conversations.length - 1];
   if (conversation) {
     activateConversationDraft(quickChat, conversation.sessionId, workspaceId);
     return;

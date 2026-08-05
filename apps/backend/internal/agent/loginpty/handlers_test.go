@@ -5,11 +5,60 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
+
+func TestDetectShellWindows(t *testing.T) {
+	tests := []struct {
+		name      string
+		env       map[string]string
+		available map[string]bool
+		wantShell string
+		wantArgs  []string
+	}{
+		{
+			name:      "prefers PowerShell 7",
+			available: map[string]bool{"pwsh.exe": true, "powershell.exe": true},
+			wantShell: "pwsh.exe",
+			wantArgs:  []string{"-NoLogo", "-NoExit"},
+		},
+		{
+			name:      "falls back to Windows PowerShell",
+			available: map[string]bool{"powershell.exe": true},
+			wantShell: "powershell.exe",
+			wantArgs:  []string{"-NoLogo", "-NoExit"},
+		},
+		{
+			name:      "uses COMSPEC when PowerShell is unavailable",
+			env:       map[string]string{"COMSPEC": `C:\\Windows\\System32\\cmd.exe`},
+			wantShell: `C:\\Windows\\System32\\cmd.exe`,
+		},
+		{
+			name:      "falls back to cmd when COMSPEC is unset",
+			wantShell: "cmd.exe",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			shell, args := detectShellForOS(
+				"windows",
+				func(key string) string { return tt.env[key] },
+				func(candidate string) bool { return tt.available[candidate] },
+			)
+			if shell != tt.wantShell {
+				t.Fatalf("shell = %q, want %q", shell, tt.wantShell)
+			}
+			if !reflect.DeepEqual(args, tt.wantArgs) {
+				t.Fatalf("args = %#v, want %#v", args, tt.wantArgs)
+			}
+		})
+	}
+}
 
 func newHostShellRouter(t *testing.T, mgr *Manager) *gin.Engine {
 	t.Helper()

@@ -39,6 +39,8 @@ const WORKSPACE_ID = "ws-1";
 const TERMINAL_ONE_ID = "terminal-1";
 const SESSION_ONE_ID = "session-1";
 const CHAT_SETUP_ID = getQuickChatSetupSessionId(WORKSPACE_ID, "chat");
+const LATE_TERMINAL_ID = "terminal-late";
+const LATE_SESSION_ID = "late-session";
 
 type MockStore = Parameters<typeof useAgentSelection>[1];
 
@@ -160,6 +162,34 @@ describe("useQuickChatModal — terminal close lifecycle", () => {
     expect(mockStopAgentLogin).toHaveBeenCalledWith(SESSION_ONE_ID);
     expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(TERMINAL_ONE_ID);
     expect(mockAppState.removeQuickTerminal).not.toHaveBeenCalledWith("terminal-2");
+  });
+
+  it("stops a detached terminal after its late start reports the session", async () => {
+    const tab: QuickTerminalTab = {
+      tabId: LATE_TERMINAL_ID,
+      workspaceId: WORKSPACE_ID,
+      sessionId: null,
+      sequence: 1,
+      status: "connecting",
+    };
+    mockAppState.quickChat.terminalTabs = [tab];
+    mockAppState.updateQuickTerminal = vi.fn((_tabId, update) => {
+      Object.assign(tab, update);
+    });
+    const { result } = renderHook(() => useQuickChatModal(WORKSPACE_ID));
+
+    act(() =>
+      result.current.handleTerminalStateChange(LATE_TERMINAL_ID, {
+        status: "running",
+        sessionId: LATE_SESSION_ID,
+        exitCode: null,
+        error: null,
+      }),
+    );
+    await act(async () => result.current.handleCloseTerminal(LATE_TERMINAL_ID));
+
+    expect(mockStopAgentLogin).toHaveBeenCalledWith(LATE_SESSION_ID);
+    expect(mockAppState.removeQuickTerminal).toHaveBeenCalledWith(LATE_TERMINAL_ID);
   });
 });
 

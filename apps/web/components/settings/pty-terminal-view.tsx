@@ -101,7 +101,9 @@ function reportExit(
   sessionId: string,
   exitCode: number | null,
   report: (state: PtyTerminalState) => void,
+  disarm: () => void,
 ) {
+  disarm();
   report({ status: "exited", sessionId, exitCode, error: null });
 }
 
@@ -110,6 +112,7 @@ function openSessionWebSocket(
   term: Terminal,
   initialInput: string | undefined,
   report: (state: PtyTerminalState) => void,
+  disarm: () => void,
 ): WebSocket {
   const ws = new WebSocket(agentLoginStreamUrl(sessionId));
   ws.binaryType = "arraybuffer";
@@ -118,7 +121,7 @@ function openSessionWebSocket(
       try {
         const message = JSON.parse(event.data) as { type: string; exit_code?: number };
         if (message.type === "exit") {
-          reportExit(sessionId, message.exit_code ?? null, report);
+          reportExit(sessionId, message.exit_code ?? null, report, disarm);
         }
       } catch {
         // Ignore non-JSON text frames.
@@ -128,12 +131,16 @@ function openSessionWebSocket(
     term.write(new Uint8Array(event.data as ArrayBuffer));
   };
   ws.onerror = () => {
+    disarm();
     report({
       status: "error",
       sessionId,
       exitCode: null,
       error: translate("agents:ptyConnectionError"),
     });
+  };
+  ws.onclose = () => {
+    disarm();
   };
   if (initialInput) {
     ws.addEventListener("open", () => ws.send(new TextEncoder().encode(initialInput)), {
@@ -223,18 +230,25 @@ function reportSession(
   isAttached: boolean,
 ): void {
   args.sessionIdRef.current = session.session_id;
+  reportSessionState(args, session);
+  args.wsRef.current = openSessionWebSocket(
+    session.session_id,
+    term,
+    isAttached ? undefined : args.initialInput,
+    args.report,
+    () => {
+      args.sessionIdRef.current = null;
+    },
+  );
+}
+
+function reportSessionState(args: MountArgs, session: AgentLoginSession): void {
   args.report({
     status: session.running ? "running" : "exited",
     sessionId: session.session_id,
     exitCode: session.exit_code ?? null,
     error: null,
   });
-  args.wsRef.current = openSessionWebSocket(
-    session.session_id,
-    term,
-    isAttached ? undefined : args.initialInput,
-    args.report,
-  );
 }
 
 function reportSessionError(args: MountArgs, error: unknown, cancelled: boolean): void {
@@ -269,12 +283,21 @@ async function attachOrStart(args: MountArgs, cancelledRef: { value: boolean }):
     // for its tab owner, but must not attach a WebSocket or xterm instance to
     // the disposed StrictMode generation. A later mount will reattach through
     // the stable client/session identity.
-    if (cancelledRef.value) return;
+    if (cancelledRef.value) {
+      // A Quick Chat terminal may detach while its start request is in
+      // flight. Keep the resolved identity in the tab store so an explicit
+      // close can still stop the PTY. Do not attach a socket to the disposed
+      // terminal; a later mount will reattach through the stored identity.
+      if (args.lifecycle === "detach-on-unmount") reportSessionState(args, session);
+      return;
+    }
 
     reportSession(args, session, term, isAttached);
   } catch (error) {
     clearPendingStart(args.ownerId, pending);
-    reportSessionError(args, error, cancelledRef.value);
+    const detachedQuickTab =
+      args.lifecycle === "detach-on-unmount" && cancelledRef.value && !pending?.cancelled;
+    reportSessionError(args, error, cancelledRef.value && !detachedQuickTab);
   }
 }
 

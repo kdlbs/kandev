@@ -49,7 +49,7 @@ export const QuickTerminalTabItem = memo(function QuickTerminalTabItem({
         type="button"
         aria-label={closeLabel}
         title={closeLabel}
-        className="flex h-11 w-8 shrink-0 cursor-pointer items-center justify-center opacity-60 hover:opacity-100 sm:h-6 sm:w-6"
+        className="flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center opacity-60 hover:opacity-100 sm:h-6 sm:w-6"
         onClick={onClose}
       >
         <IconX className="h-3 w-3" aria-hidden />

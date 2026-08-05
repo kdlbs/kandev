@@ -271,4 +271,17 @@ describe("quick terminal tabs", () => {
     expect(terminalState(store).activeTerminalTabId).toBe(terminalId);
     expect(store.getState().quickChat.isOpen).toBe(true);
   });
+
+  it("falls back to the final conversation in rendered order", () => {
+    const store = makeStore();
+    const actions = withTerminalActions(store);
+    store.getState().openQuickChat(SESSION_A, WORKSPACE_A, undefined, "chat");
+    store.getState().openQuickChat(SESSION_B, WORKSPACE_A, undefined, "config");
+    const terminalId = actions.createQuickTerminal(WORKSPACE_A);
+
+    actions.removeQuickTerminal(terminalId);
+
+    expect(store.getState().quickChat.activeSessionId).toBe(SESSION_B);
+    expect(terminalState(store).activeKind).toBe("conversation");
+  });
 });

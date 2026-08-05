@@ -31,6 +31,21 @@ vi.mock("@/components/settings/pty-terminal-view", () => ({
     </button>
   ),
 }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, values?: { code?: number; error?: string }) => {
+      if (key === "sidebar:quickChatTerminalConnecting") return "Connecting to terminal…";
+      if (key === "sidebar:quickChatTerminalExited") return "Terminal exited.";
+      if (key === "sidebar:quickChatTerminalExitedWithCode") {
+        return `Terminal exited with code ${values?.code}.`;
+      }
+      if (key === "sidebar:quickChatTerminalError") {
+        return `Terminal error: ${values?.error ?? "The terminal could not be started."}`;
+      }
+      return key;
+    },
+  }),
+}));
 
 import { QuickTerminalTabView } from "./quick-terminal-tab-view";
 
@@ -53,5 +68,27 @@ describe("QuickTerminalTabView", () => {
     fireEvent.click(screen.getByTestId("pty-view-probe"));
     expect(startHostShell).toHaveBeenCalledWith({ cols: 80, rows: 24 }, { clientId: tab.tabId });
     view.unmount();
+  });
+
+  it("renders accessible lifecycle status for the selected terminal", () => {
+    const { rerender } = render(<QuickTerminalTabView tab={tab} onStateChange={vi.fn()} />);
+
+    expect(screen.getByRole("status").textContent).toContain("Connecting to terminal…");
+
+    rerender(
+      <QuickTerminalTabView
+        tab={{ ...tab, status: "error", error: "Unable to reattach." }}
+        onStateChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("alert").textContent).toContain("Terminal error: Unable to reattach.");
+
+    rerender(
+      <QuickTerminalTabView
+        tab={{ ...tab, status: "exited", exitCode: 7 }}
+        onStateChange={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("status").textContent).toContain("Terminal exited with code 7.");
   });
 });
