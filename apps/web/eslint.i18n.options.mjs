@@ -1439,4 +1439,59 @@ export const i18nGuardFiles = [
   "components/integrations/presets-scope-bar-base.tsx",
   "components/github/my-github/presets-scope-bar.tsx",
   "components/gitlab/my-gitlab/presets-scope-bar.tsx",
+  // Azure DevOps, Jira, Linear and Sentry TASK surfaces: the board / work-item /
+  // PR views, the ticket and issue dialogs and their launchers, the My-Jira and
+  // My-Linear browse pages, and the four `/azure-devops`, `/jira`, `/linear`
+  // page clients. With the settings halves listed far above, this completes all
+  // four directories.
+  //
+  // Two shared files ride along because each is now converted COMPLETELY, which
+  // is the criterion for listing — shared-ness is not:
+  //   - `components/integrations/auth-error-message.tsx`: props-driven apart from
+  //     one heading and one link label, rendered by the Jira, Linear and Sentry
+  //     issue-common surfaces.
+  //   - `components/task-create-dialog-multi-repo-guard.ts`: migrated by the
+  //     Automations PR, which then argued itself out of listing it. See the
+  //     corrected comment in that file.
+  //
+  // `components/jira/my-jira/filter-pills.tsx` carried the same defect review
+  // found in the GitLab sidebar: `data-testid` was built as
+  // `jira-filter-pill-${label.toLowerCase()}` from a label this PR translates.
+  // Here it was a LIVE break — `e2e/tests/integrations/jira-default-project.spec.ts`
+  // selects `jira-filter-pill-project` and `-status` by name. The pill id and the
+  // visible label are now separate props.
+  //
+  // Deliberately left in English: JQL and WIQL (query languages, and the bare
+  // acronyms label them), every Azure DevOps / Jira / Linear / Sentry state,
+  // level, priority and work-item type, all provider ids, keys and names, and
+  // the persisted prompt templates the settings halves already recorded.
+  "app/azure-devops/azure-devops-page-client.tsx",
+  "app/jira/jira-page-client.tsx",
+  "app/linear/linear-page-client.tsx",
+  "components/azure-devops/azure-devops-board.tsx",
+  "components/azure-devops/azure-devops-feedback-dialog.tsx",
+  "components/azure-devops/azure-devops-filters.tsx",
+  "components/azure-devops/azure-devops-pull-request-pagination.tsx",
+  "components/azure-devops/azure-devops-results.tsx",
+  "components/azure-devops/azure-devops-save-view-dialog.tsx",
+  "components/azure-devops/azure-devops-work-item-detail.tsx",
+  "components/integrations/auth-error-message.tsx",
+  "components/jira/jira-import-bar.tsx",
+  "components/jira/jira-ticket-button.tsx",
+  "components/jira/jira-ticket-common.tsx",
+  "components/jira/jira-ticket-dialog.tsx",
+  "components/jira/my-jira/filter-pills.tsx",
+  "components/jira/my-jira/jql-editor.tsx",
+  "components/jira/my-jira/list-toolbar.tsx",
+  "components/jira/my-jira/results-pagination.tsx",
+  "components/jira/my-jira/ticket-row.tsx",
+  "components/linear/linear-import-bar.tsx",
+  "components/linear/linear-issue-button.tsx",
+  "components/linear/linear-issue-common.tsx",
+  "components/linear/linear-issue-dialog.tsx",
+  "components/sentry/sentry-issue-button.tsx",
+  "components/sentry/sentry-issue-common.tsx",
+  "components/jira/my-jira/filter-bar.tsx",
+  "components/sentry/sentry-issue-dialog.tsx",
+  "components/task-create-dialog-multi-repo-guard.ts",
 ];

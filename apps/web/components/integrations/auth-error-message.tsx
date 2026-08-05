@@ -3,6 +3,7 @@
 import Link from "@/components/routing/app-link";
 import { IconLockExclamation } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { useTranslation } from "react-i18next";
 
 // Drops support URLs upstream APIs sometimes inline into error response
 // bodies — they're noise once the user has a clear CTA. Shared because both
@@ -43,17 +44,20 @@ export function IntegrationAuthErrorMessage({
   authErrorBody,
   compact,
 }: IntegrationAuthErrorMessageProps) {
+  const { t } = useTranslation();
   const isAuth = isAuthError(error);
 
   if (compact) {
     return (
       <div className="flex items-center gap-3 text-sm">
         <span className={isAuth ? "text-muted-foreground" : "text-destructive"}>
-          {isAuth ? `${name} authentication required.` : cleanIntegrationErrorMessage(error)}
+          {isAuth
+            ? t("integrations:authenticationRequired", { name })
+            : cleanIntegrationErrorMessage(error)}
         </span>
         {isAuth && (
           <Button asChild size="sm" variant="outline" className="cursor-pointer h-7 text-xs">
-            <Link href={reconnectHref}>Reconnect {name}</Link>
+            <Link href={reconnectHref}>{t("integrations:reconnectProvider", { name })}</Link>
           </Button>
         )}
       </div>
@@ -66,11 +70,11 @@ export function IntegrationAuthErrorMessage({
         <>
           <IconLockExclamation className="h-10 w-10 mx-auto text-muted-foreground" />
           <div className="space-y-1.5">
-            <h2 className="text-lg font-semibold">{name} authentication required</h2>
+            <h2 className="text-lg font-semibold">{t("integrations:authRequired", { name })}</h2>
             <p className="text-sm text-muted-foreground">{authErrorBody}</p>
           </div>
           <Button asChild size="sm" className="cursor-pointer">
-            <Link href={reconnectHref}>Reconnect {name}</Link>
+            <Link href={reconnectHref}>{t("integrations:reconnectProvider", { name })}</Link>
           </Button>
         </>
       ) : (

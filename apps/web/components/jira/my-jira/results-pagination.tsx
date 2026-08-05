@@ -7,6 +7,7 @@ import {
   PaginationNext,
   PaginationPrevious,
 } from "@kandev/ui/pagination";
+import { useTranslation } from "react-i18next";
 
 type ResultsPaginationProps = {
   page: number;
@@ -27,6 +28,7 @@ export function ResultsPagination({
   onNext,
   onPrev,
 }: ResultsPaginationProps) {
+  const { t } = useTranslation();
   if (page === 1 && isLast) return null;
   const start = (page - 1) * pageSize + 1;
   const end = (page - 1) * pageSize + itemCount;
@@ -36,7 +38,7 @@ export function ResultsPagination({
   return (
     <div className="flex items-center justify-between px-6 py-3 border-t shrink-0">
       <div className="text-xs text-muted-foreground tabular-nums">
-        {itemCount === 0 ? "No results" : `${start}–${end}`}
+        {itemCount === 0 ? t("jira:noResults") : `${start}–${end}`}
       </div>
       <Pagination className="mx-0 w-auto justify-end">
         <PaginationContent>
@@ -52,7 +54,9 @@ export function ResultsPagination({
             />
           </PaginationItem>
           <PaginationItem>
-            <span className="px-3 text-sm tabular-nums">Page {page}</span>
+            <span className="px-3 text-sm tabular-nums">
+              {t("jira:page")} {page}
+            </span>
           </PaginationItem>
           <PaginationItem>
             <PaginationNext

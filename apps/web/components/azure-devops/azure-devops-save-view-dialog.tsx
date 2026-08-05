@@ -13,6 +13,7 @@ import {
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import type { AzureDevOpsPresetKind } from "./azure-devops-presets";
+import { useTranslation } from "react-i18next";
 
 function SaveViewForm({
   kind,
@@ -23,6 +24,7 @@ function SaveViewForm({
   onSave: (label: string) => Promise<void>;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const [label, setLabel] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -42,14 +44,18 @@ function SaveViewForm({
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Save Azure DevOps view</DialogTitle>
+        <DialogTitle>{t("azuredevops:saveAzureDevopsView")}</DialogTitle>
         <DialogDescription>
-          Save the current {kind === "work_item" ? "work-item query" : "pull-request filters"} for
-          this workspace.
+          {t("azuredevops:saveViewDescription", {
+            kind:
+              kind === "work_item"
+                ? t("azuredevops:workItemQuery2")
+                : t("azuredevops:pullRequestFilters"),
+          })}
         </DialogDescription>
       </DialogHeader>
       <div className="space-y-1.5">
-        <Label htmlFor="azure-devops-view-name">Name</Label>
+        <Label htmlFor="azure-devops-view-name">{t("azuredevops:name")}</Label>
         <Input
           id="azure-devops-view-name"
           autoFocus
@@ -58,7 +64,7 @@ function SaveViewForm({
             setLabel(event.target.value);
             setError("");
           }}
-          placeholder="e.g. Platform triage"
+          placeholder={t("azuredevops:eGPlatformTriage")}
         />
         {error && (
           <p role="alert" className="text-xs text-destructive">
@@ -74,7 +80,7 @@ function SaveViewForm({
           disabled={saving}
           onClick={onClose}
         >
-          Cancel
+          {t("common:cancel")}
         </Button>
         <Button
           type="button"
@@ -82,7 +88,7 @@ function SaveViewForm({
           disabled={!trimmed || saving}
           onClick={() => void handleSave()}
         >
-          {saving ? "Saving..." : "Save"}
+          {saving ? t("azuredevops:saving") : t("azuredevops:save")}
         </Button>
       </DialogFooter>
     </>

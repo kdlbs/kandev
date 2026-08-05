@@ -1,6 +1,9 @@
 {
+  "authRequired": "{{name}} àũţĥēńţĩćàţĩōń ŕēqũĩŕēď",
+  "authenticationRequired": "{{name}} àũţĥēńţĩćàţĩōń ŕēqũĩŕēď.",
   "deleteSavedQuery": "Ďēĺēţē śàvēď qũēŕŷ",
   "noSavedQueriesYet": "Ńō śàvēď qũēŕĩēś ŷēţ",
+  "reconnectProvider": "Ŕēćōńńēćţ {{name}}",
   "saveCurrentQuery": "Śàvē ćũŕŕēńţ qũēŕŷ",
   "savedQueries": "Śàvēď"
 }

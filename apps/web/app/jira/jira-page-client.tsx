@@ -32,6 +32,7 @@ import { ResultsPagination } from "@/components/jira/my-jira/results-pagination"
 import { JqlEditor } from "@/components/jira/my-jira/jql-editor";
 import { useJiraTaskPresets } from "@/components/jira/my-jira/use-task-presets";
 import type { JiraTaskPreset } from "@/components/jira/my-jira/presets";
+import { Trans, useTranslation } from "react-i18next";
 
 type JiraPageClientProps = {
   workspaceId?: string;
@@ -44,11 +45,14 @@ function NotConfiguredNotice() {
     <div className="p-6 max-w-2xl">
       <Alert>
         <AlertDescription>
-          Jira is not configured.{" "}
-          <Link href="/settings/integrations/jira" className="underline font-medium cursor-pointer">
-            Configure Jira
-          </Link>{" "}
-          to see your tickets here.
+          <Trans i18nKey="jira:notConfiguredNotice">
+            Jira is not configured.{" "}
+            <Link
+              href="/settings/integrations/jira"
+              className="underline font-medium cursor-pointer"
+            />{" "}
+            to see your tickets here.
+          </Trans>
         </AlertDescription>
       </Alert>
     </div>
@@ -134,6 +138,7 @@ function TicketResults({
   onStartTask: (ticket: JiraTicket, preset: JiraTaskPreset) => void;
   onOpen: (ticket: JiraTicket) => void;
 }) {
+  const { t } = useTranslation();
   if (error) {
     return (
       <div className="flex justify-center py-16">
@@ -142,7 +147,11 @@ function TicketResults({
     );
   }
   if (!loading && items.length === 0) {
-    return <div className="text-sm text-muted-foreground py-8 text-center">No tickets found.</div>;
+    return (
+      <div className="text-sm text-muted-foreground py-8 text-center">
+        {t("jira:noTicketsFound")}
+      </div>
+    );
   }
   return (
     <div>
@@ -316,6 +325,7 @@ function useFilterState(defaultProjectKey: string) {
 }
 
 export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClientProps) {
+  const { t } = useTranslation();
   const { loaded, configured, projects, defaultProjectKey } = useJiraPageData(workspaceId);
   const { taskPresets } = useJiraTaskPresets();
   const [launchPayload, setLaunchPayload] = useState<JiraLaunchPayload | null>(null);
@@ -331,10 +341,12 @@ export function JiraPageClient({ workspaceId, workflows, steps }: JiraPageClient
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <PageTopbar
         title="Jira"
-        subtitle="Tickets across your Atlassian projects."
+        subtitle={t("jira:ticketsAcrossYourAtlassianProjects")}
         icon={<IconTicket className="h-4 w-4" />}
       />
-      {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking Jira status…</div>}
+      {!loaded && (
+        <div className="p-6 text-sm text-muted-foreground">{t("jira:checkingJiraStatus")}</div>
+      )}
       {loaded && !configured && <NotConfiguredNotice />}
       {loaded && configured && (
         <AuthenticatedView

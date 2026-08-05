@@ -27,6 +27,7 @@ import {
   levelBadgeClass,
   statusBadgeClass,
 } from "./sentry-issue-common";
+import { useTranslation } from "react-i18next";
 
 const LEVELS: SentryLevel[] = ["fatal", "error", "warning", "info", "debug"];
 const STATUSES: SentryStatus[] = ["unresolved", "resolved", "ignored"];
@@ -60,12 +61,13 @@ type SentryIssueDialogProps = {
 };
 
 export function SentryIssueDialog({ open, onOpenChange, workspaceId }: SentryIssueDialogProps) {
+  const { t } = useTranslation();
   const dialog = useDialogState(open, workspaceId);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!max-w-[min(1080px,95vw)] w-[95vw] max-h-[90vh] overflow-hidden flex flex-col gap-0 p-0 sm:rounded-lg">
-        <DialogTitle className="sr-only">Browse Sentry issues</DialogTitle>
+        <DialogTitle className="sr-only">{t("sentry:browseSentryIssues")}</DialogTitle>
         <FiltersBar state={dialog} />
         <ResultsBody state={dialog} />
       </DialogContent>
@@ -289,19 +291,20 @@ function useBrowseProjects({
 }
 
 function FiltersBar({ state }: { state: DialogState }) {
+  const { t } = useTranslation();
   return (
     <div className="border-b px-5 py-4 space-y-3 shrink-0">
       <InstanceSelectRow state={state} />
       <FilterTopRow state={state} />
       <FilterChipRow
-        label="Level"
+        label={t("sentry:level")}
         options={LEVELS}
         selected={state.filter.levels}
         onToggle={(next) => state.updateFilter("levels", next as SentryLevel[])}
         chipClass={(v) => levelBadgeClass(v as SentryLevel)}
       />
       <FilterChipRow
-        label="Status"
+        label={t("common:status")}
         options={STATUSES}
         selected={state.filter.statuses}
         onToggle={(next) => state.updateFilter("statuses", next as SentryStatus[])}
@@ -316,28 +319,27 @@ function FiltersBar({ state }: { state: DialogState }) {
 // healthy instances, a hint when none are usable, and nothing when a sole
 // instance was auto-selected.
 function InstanceSelectRow({ state }: { state: DialogState }) {
+  const { t } = useTranslation();
   const { healthy, instanceId, setInstanceId, instancesState } = state;
   if (instancesState === "empty") {
     return (
       <p className="text-xs text-muted-foreground">
-        No Sentry instances configured for this workspace.
+        {t("sentry:noSentryInstancesConfiguredForThis")}
       </p>
     );
   }
   if (instancesState === "unhealthy") {
     return (
-      <p className="text-xs text-muted-foreground">
-        No healthy Sentry instance — check the integration settings.
-      </p>
+      <p className="text-xs text-muted-foreground">{t("sentry:noHealthySentryInstanceCheckThe")}</p>
     );
   }
   if (healthy.length <= 1) return null;
   return (
     <div className="space-y-1 max-w-sm">
-      <Label className="text-xs text-muted-foreground">Sentry instance</Label>
+      <Label className="text-xs text-muted-foreground">{t("sentry:sentryInstance")}</Label>
       <Select value={instanceId || undefined} onValueChange={setInstanceId}>
         <SelectTrigger className="h-8 text-xs" data-testid="sentry-browse-instance-select">
-          <SelectValue placeholder="Select an instance to browse" />
+          <SelectValue placeholder={t("sentry:selectAnInstanceToBrowse")} />
         </SelectTrigger>
         <SelectContent>
           {healthy.map((instance) => (
@@ -352,12 +354,13 @@ function InstanceSelectRow({ state }: { state: DialogState }) {
 }
 
 function FilterTopRow({ state }: { state: DialogState }) {
+  const { t } = useTranslation();
   const { filter, updateFilter, projects } = state;
   return (
     <div className="grid gap-2 sm:grid-cols-[1fr_1fr_180px_120px]">
       <LabeledInput
         id="sentry-search-org"
-        label="Organization"
+        label={t("sentry:organization")}
         value={filter.orgSlug}
         onChange={(v) => updateFilter("orgSlug", v)}
         placeholder="my-org"
@@ -369,10 +372,10 @@ function FilterTopRow({ state }: { state: DialogState }) {
       />
       <LabeledInput
         id="sentry-search-env"
-        label="Environment"
+        label={t("sentry:environment")}
         value={filter.environment}
         onChange={(v) => updateFilter("environment", v)}
-        placeholder="production"
+        placeholder={t("sentry:production")}
       />
       <PeriodSelect value={filter.statsPeriod} onChange={(v) => updateFilter("statsPeriod", v)} />
     </div>
@@ -411,15 +414,16 @@ type ProjectFilterSelectProps = {
 };
 
 function ProjectFilterSelect({ value, projects, onChange }: ProjectFilterSelectProps) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">Project</Label>
+      <Label className="text-xs text-muted-foreground">{t("sentry:project")}</Label>
       <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
         <SelectTrigger className="h-8 text-xs">
-          <SelectValue placeholder="All projects" />
+          <SelectValue placeholder={t("sentry:allProjects")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__all__">All projects</SelectItem>
+          <SelectItem value="__all__">{t("sentry:allProjects")}</SelectItem>
           {projects.map((p) => (
             <SelectItem key={p.id} value={p.slug}>
               {p.name}
@@ -432,9 +436,10 @@ function ProjectFilterSelect({ value, projects, onChange }: ProjectFilterSelectP
 }
 
 function PeriodSelect({ value, onChange }: { value: Period; onChange: (v: Period) => void }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1">
-      <Label className="text-xs text-muted-foreground">Period</Label>
+      <Label className="text-xs text-muted-foreground">{t("sentry:period")}</Label>
       <Select value={value} onValueChange={(v) => onChange(v as Period)}>
         <SelectTrigger className="h-8 text-xs">
           <SelectValue />
@@ -487,18 +492,19 @@ function FilterChipRow({ label, options, selected, onToggle, chipClass }: ChipRo
 }
 
 function SearchActionRow({ state }: { state: DialogState }) {
+  const { t } = useTranslation();
   const { filter, updateFilter, loading, search, instanceId } = state;
   return (
     <div className="flex items-end gap-2">
       <div className="flex-1 space-y-1">
         <Label htmlFor="sentry-search-query" className="text-xs text-muted-foreground">
-          Query
+          {t("sentry:query")}
         </Label>
         <Input
           id="sentry-search-query"
           value={filter.query}
           onChange={(e) => updateFilter("query", e.target.value)}
-          placeholder="is:unresolved release:1.2.3"
+          placeholder={t("sentry:isUnresolvedRelease123")}
           className="h-8 text-xs"
           onKeyDown={(e) => {
             if (e.key === "Enter") {
@@ -520,13 +526,14 @@ function SearchActionRow({ state }: { state: DialogState }) {
         ) : (
           <IconSearch className="h-4 w-4" />
         )}
-        Search
+        {t("common:presetIconSearch")}
       </Button>
     </div>
   );
 }
 
 function ResultsBody({ state }: { state: DialogState }) {
+  const { t } = useTranslation();
   const { issues, loading, error, isLast, nextCursor, search, instanceId } = state;
   const empty = useMemo(() => !loading && !error && issues.length === 0, [loading, error, issues]);
 
@@ -536,8 +543,8 @@ function ResultsBody({ state }: { state: DialogState }) {
       {empty && (
         <div className="text-sm text-muted-foreground py-12 text-center">
           {instanceId
-            ? "No issues yet. Run a search to begin."
-            : "Select a Sentry instance to browse its issues."}
+            ? t("sentry:noIssuesYetRunASearch")
+            : t("sentry:selectASentryInstanceToBrowse")}
         </div>
       )}
       {issues.map((issue) => (
@@ -561,7 +568,7 @@ function ResultsBody({ state }: { state: DialogState }) {
             disabled={loading}
             className="cursor-pointer"
           >
-            Load more
+            {t("sentry:loadMore")}
           </Button>
         </div>
       )}

@@ -56,6 +56,7 @@ import type {
   AzureDevOpsSavedView,
   AzureDevOpsWorkItem,
 } from "@/lib/types/azure-devops";
+import { Trans, useTranslation } from "react-i18next";
 
 const PAGE_SIZE = 25;
 const WORK_ITEMS_MODE: AzureDevOpsBrowseMode = "work-items";
@@ -89,10 +90,10 @@ function NotConfigured({ workspaceId }: { workspaceId?: string }) {
     <div className="max-w-2xl p-6">
       <Alert>
         <AlertDescription>
-          Azure DevOps is not connected for this workspace.{" "}
-          <Link href={href} className="cursor-pointer font-medium underline">
-            Configure Azure DevOps
-          </Link>
+          <Trans i18nKey="azuredevops:notConnectedNotice">
+            Azure DevOps is not connected for this workspace.{" "}
+            <Link href={href} className="cursor-pointer font-medium underline" />
+          </Trans>
         </AlertDescription>
       </Alert>
     </div>
@@ -553,11 +554,12 @@ function MobileFilters({
   state: PageState;
   filterProps: Omit<ComponentProps<typeof AzureDevOpsFilters>, "idSuffix">;
 }) {
+  const { t } = useTranslation();
   return (
     <Sheet open={state.mobileFiltersOpen} onOpenChange={state.setMobileFiltersOpen}>
       <SheetContent side="left" className="w-80 max-w-[90vw] overflow-y-auto">
         <SheetHeader className="mb-5 text-left">
-          <SheetTitle>Azure DevOps filters</SheetTitle>
+          <SheetTitle>{t("azuredevops:azureDevopsFilters")}</SheetTitle>
         </SheetHeader>
         <AzureDevOpsFilters {...filterProps} idSuffix="-mobile" />
       </SheetContent>
@@ -567,6 +569,7 @@ function MobileFilters({
 
 // eslint-disable-next-line max-lines-per-function -- the page content owns the responsive browse composition.
 function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }: PageProps) {
+  const { t } = useTranslation();
   const state = useAzureDevOpsPageState(workspaceId);
 
   if (!state.preferencesLoaded) return null;
@@ -589,7 +592,9 @@ function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }:
     <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <PageTopbar
         title="Azure DevOps"
-        subtitle={`${state.connection.data.organizationUrl} · Boards and Repos`}
+        subtitle={t("azuredevops:boardsAndRepos", {
+          organizationUrl: state.connection.data.organizationUrl,
+        })}
         icon={<AzureDevOpsIcon className="h-4 w-4" />}
         actions={
           <Button
@@ -598,7 +603,7 @@ function AzureDevOpsPageContent({ workspaceId, workflows, steps, repositories }:
             size="icon-lg"
             onClick={() => state.setMobileFiltersOpen(true)}
             className="cursor-pointer md:hidden"
-            aria-label="Open Azure DevOps filters"
+            aria-label={t("azuredevops:openAzureDevopsFilters")}
             data-testid="azure-devops-mobile-filter-button"
           >
             <IconAdjustments className="h-4 w-4" />

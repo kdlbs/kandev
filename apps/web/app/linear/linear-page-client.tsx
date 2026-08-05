@@ -32,6 +32,7 @@ import {
 } from "@/components/linear/use-linear-issue-search";
 import type { LinearIssue, LinearTeam } from "@/lib/types/linear";
 import type { Workflow, WorkflowStep } from "@/lib/types/http";
+import { Trans, useTranslation } from "react-i18next";
 
 type LinearPageClientProps = {
   workspaceId?: string;
@@ -44,14 +45,14 @@ function NotConfiguredNotice() {
     <div className="p-6 max-w-2xl">
       <Alert>
         <AlertDescription>
-          Linear is not configured.{" "}
-          <Link
-            href="/settings/integrations/linear"
-            className="underline font-medium cursor-pointer"
-          >
-            Configure Linear
-          </Link>{" "}
-          to see your issues here.
+          <Trans i18nKey="linear:notConfiguredNotice">
+            Linear is not configured.{" "}
+            <Link
+              href="/settings/integrations/linear"
+              className="underline font-medium cursor-pointer"
+            />{" "}
+            to see your issues here.
+          </Trans>
         </AlertDescription>
       </Alert>
     </div>
@@ -97,8 +98,9 @@ function useLinearPageData(workspaceId?: string) {
 }
 
 function AssigneeCell({ issue }: { issue: LinearIssue }) {
+  const { t } = useTranslation();
   if (!issue.assigneeName) {
-    return <span className="text-xs text-muted-foreground">Unassigned</span>;
+    return <span className="text-xs text-muted-foreground">{t("linear:unassigned")}</span>;
   }
   return (
     <div className="flex items-center gap-1.5 min-w-0">
@@ -120,6 +122,7 @@ function IssueRow({
   onOpen: (i: LinearIssue) => void;
   onStartTask: (i: LinearIssue) => void;
 }) {
+  const { t } = useTranslation();
   const relative = formatRelative(issue.updated);
   return (
     <div className="flex items-start gap-3 py-3 border-b last:border-b-0">
@@ -127,7 +130,7 @@ function IssueRow({
         type="button"
         onClick={() => onOpen(issue)}
         className="flex-1 min-w-0 space-y-1 text-left cursor-pointer rounded -mx-2 px-2 py-1 hover:bg-muted/50 transition-colors"
-        title="Open issue details"
+        title={t("linear:openIssueDetails")}
       >
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono">{issue.identifier}</span>
@@ -143,12 +146,16 @@ function IssueRow({
             </Badge>
           )}
           <AssigneeCell issue={issue} />
-          {relative && <span className="text-xs text-muted-foreground">· updated {relative}</span>}
+          {relative && (
+            <span className="text-xs text-muted-foreground">
+              {t("linear:updatedAgo", { time: relative })}
+            </span>
+          )}
         </div>
       </button>
       <div className="flex items-center gap-1 shrink-0">
         <Button asChild variant="ghost" size="icon-sm" className="cursor-pointer">
-          <a href={issue.url} target="_blank" rel="noreferrer" title="Open in Linear">
+          <a href={issue.url} target="_blank" rel="noreferrer" title={t("linear:openInLinear")}>
             <IconExternalLink className="h-3.5 w-3.5" />
           </a>
         </Button>
@@ -159,7 +166,7 @@ function IssueRow({
           onClick={() => onStartTask(issue)}
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Start task
+          {t("linear:startTask")}
         </Button>
       </div>
     </div>
@@ -183,12 +190,13 @@ function FilterControls({
   setAssigned: (v: string) => void;
   teams: LinearTeam[];
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2 px-6 py-3 border-b">
       <div className="relative flex-1 min-w-[280px]">
         <IconSearch className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search by ID, title, or description"
+          placeholder={t("linear:searchByIdTitleOrDescription")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="pl-8"
@@ -199,10 +207,10 @@ function FilterControls({
         onValueChange={(v) => setTeamKey(v === "__all__" ? "" : v)}
       >
         <SelectTrigger className="w-44">
-          <SelectValue placeholder="All teams" />
+          <SelectValue placeholder={t("linear:allTeams")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__all__">All teams</SelectItem>
+          <SelectItem value="__all__">{t("linear:allTeams")}</SelectItem>
           {teams.map((t) => (
             <SelectItem key={t.id} value={t.key}>
               {t.name}
@@ -218,9 +226,9 @@ function FilterControls({
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__any__">Any assignee</SelectItem>
-          <SelectItem value="me">Assigned to me</SelectItem>
-          <SelectItem value="unassigned">Unassigned</SelectItem>
+          <SelectItem value="__any__">{t("linear:anyAssignee")}</SelectItem>
+          <SelectItem value="me">{t("linear:assignedToMe")}</SelectItem>
+          <SelectItem value="unassigned">{t("linear:unassigned")}</SelectItem>
         </SelectContent>
       </Select>
     </div>
@@ -242,6 +250,7 @@ function PaginationBar({
   onNext: () => void;
   onPrev: () => void;
 }) {
+  const { t } = useTranslation();
   if (page === 1 && isLast) return null;
   const start = (page - 1) * pageSize + 1;
   const end = (page - 1) * pageSize + itemCount;
@@ -250,7 +259,7 @@ function PaginationBar({
   return (
     <div className="flex items-center justify-between px-6 py-3 border-t shrink-0">
       <div className="text-xs text-muted-foreground tabular-nums">
-        {itemCount === 0 ? "No results" : `${start}–${end}`}
+        {itemCount === 0 ? t("linear:noResults") : `${start}–${end}`}
       </div>
       <Pagination className="mx-0 w-auto justify-end">
         <PaginationContent>
@@ -266,7 +275,9 @@ function PaginationBar({
             />
           </PaginationItem>
           <PaginationItem>
-            <span className="px-3 text-sm tabular-nums">Page {page}</span>
+            <span className="px-3 text-sm tabular-nums">
+              {t("linear:page")} {page}
+            </span>
           </PaginationItem>
           <PaginationItem>
             <PaginationNext
@@ -295,16 +306,17 @@ function PageShell({ children }: { children: React.ReactNode }) {
 }
 
 function DisabledNotice() {
+  const { t } = useTranslation();
   return (
     <div className="p-6 max-w-2xl">
       <Alert>
         <AlertDescription>
-          Linear integration is disabled.{" "}
+          {t("linear:integrationDisabled")}{" "}
           <Link
             href="/settings/integrations/linear"
             className="underline font-medium cursor-pointer"
           >
-            Re-enable it in settings
+            {t("linear:reEnableItInSettings")}
           </Link>
           .
         </AlertDescription>
@@ -324,6 +336,7 @@ function ResultsArea({
   onOpen: (issue: LinearIssue) => void;
   onStartTask: (issue: LinearIssue) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex-1 overflow-y-auto px-6 py-3">
       {search.error && !search.loading && (
@@ -333,14 +346,16 @@ function ResultsArea({
       )}
       {!search.error && empty && (
         <div className="text-sm text-muted-foreground py-12 text-center">
-          No issues match your filters.
+          {t("linear:noIssuesMatchYourFilters")}
         </div>
       )}
       {search.items.map((issue) => (
         <IssueRow key={issue.id} issue={issue} onOpen={onOpen} onStartTask={onStartTask} />
       ))}
       {search.loading && search.items.length === 0 && (
-        <div className="text-sm text-muted-foreground py-12 text-center">Loading issues…</div>
+        <div className="text-sm text-muted-foreground py-12 text-center">
+          {t("linear:loadingIssues")}
+        </div>
       )}
     </div>
   );

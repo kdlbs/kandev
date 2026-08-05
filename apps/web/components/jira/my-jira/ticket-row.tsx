@@ -13,6 +13,7 @@ import {
 import type { JiraTicket } from "@/lib/types/jira";
 import { formatRelative, statusBadgeClass } from "@/components/jira/jira-ticket-common";
 import type { JiraTaskPreset } from "./presets";
+import { useTranslation } from "react-i18next";
 
 type TicketRowProps = {
   ticket: JiraTicket;
@@ -22,8 +23,9 @@ type TicketRowProps = {
 };
 
 function AssigneeCell({ ticket }: { ticket: JiraTicket }) {
+  const { t } = useTranslation();
   if (!ticket.assigneeName) {
-    return <span className="text-xs text-muted-foreground">Unassigned</span>;
+    return <span className="text-xs text-muted-foreground">{t("jira:unassigned")}</span>;
   }
   return (
     <div className="flex items-center gap-1.5 min-w-0">
@@ -47,12 +49,13 @@ function StartTaskMenu({
   presets: JiraTaskPreset[];
   onStartTask: TicketRowProps["onStartTask"];
 }) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="outline" className="cursor-pointer h-7 px-2 gap-1 text-xs">
           <IconPlus className="h-3.5 w-3.5" />
-          Start task
+          {t("jira:startTask")}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
@@ -78,6 +81,7 @@ function StartTaskMenu({
 }
 
 export function TicketRow({ ticket, presets, onStartTask, onOpen }: TicketRowProps) {
+  const { t } = useTranslation();
   const relative = formatRelative(ticket.updated);
   return (
     <div className="flex items-start gap-3 py-3 border-b last:border-b-0">
@@ -85,7 +89,7 @@ export function TicketRow({ ticket, presets, onStartTask, onOpen }: TicketRowPro
         type="button"
         onClick={() => onOpen?.(ticket)}
         className="flex-1 min-w-0 space-y-1 text-left cursor-pointer rounded -mx-2 px-2 py-1 hover:bg-muted/50 transition-colors"
-        title="Open ticket details"
+        title={t("jira:openTicketDetails")}
       >
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="font-mono">{ticket.key}</span>
@@ -102,12 +106,16 @@ export function TicketRow({ ticket, presets, onStartTask, onOpen }: TicketRowPro
             </Badge>
           )}
           <AssigneeCell ticket={ticket} />
-          {relative && <span className="text-xs text-muted-foreground">· updated {relative}</span>}
+          {relative && (
+            <span className="text-xs text-muted-foreground">
+              {t("jira:updatedAgo", { time: relative })}
+            </span>
+          )}
         </div>
       </button>
       <div className="flex items-center gap-1 shrink-0">
         <Button asChild variant="ghost" size="icon-sm" className="cursor-pointer">
-          <a href={ticket.url} target="_blank" rel="noreferrer" title="Open in Atlassian">
+          <a href={ticket.url} target="_blank" rel="noreferrer" title={t("jira:openInAtlassian")}>
             <IconExternalLink className="h-3.5 w-3.5" />
           </a>
         </Button>

@@ -6,6 +6,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@kandev/ui/avatar";
 import { getLinearIssue, setLinearIssueState } from "@/lib/api/domains/linear-api";
 import type { LinearIssue, LinearStateCategory } from "@/lib/types/linear";
 import { IntegrationAuthErrorMessage } from "@/components/integrations/auth-error-message";
+import { useTranslation } from "react-i18next";
 
 // Matches Linear identifiers like ENG-123. Linear team keys are always
 // uppercase and 1+ chars; we require a leading capital letter to avoid catching
@@ -42,7 +43,8 @@ export function formatRelative(iso: string | undefined): string {
 }
 
 export function PersonCell({ name, avatar }: { name?: string; avatar?: string }) {
-  if (!name) return <span className="text-muted-foreground">Unassigned</span>;
+  const { t } = useTranslation();
+  if (!name) return <span className="text-muted-foreground">{t("linear:unassigned")}</span>;
   return (
     <>
       <Avatar size="sm" className="size-5">
@@ -163,13 +165,14 @@ type LinearErrorMessageProps = {
 };
 
 export function LinearErrorMessage({ error, compact }: LinearErrorMessageProps) {
+  const { t } = useTranslation();
   return (
     <IntegrationAuthErrorMessage
       error={error}
       name="Linear"
       reconnectHref="/settings/integrations/linear"
       isAuthError={isLinearAuthError}
-      authErrorBody="Your Linear API key is invalid or has been revoked. Reconnect to view this issue."
+      authErrorBody={t("linear:yourLinearApiKeyIsInvalid")}
       compact={compact}
     />
   );
