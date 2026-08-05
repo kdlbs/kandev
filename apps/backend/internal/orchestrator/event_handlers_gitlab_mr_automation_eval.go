@@ -67,12 +67,33 @@ func (s *Service) handleTaskMRLifecycleAutomationWithObservation(
 		return nil
 	}
 	options := evaluation.Options
-	if !options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed {
+	if !options.AutoFixEnabled && !options.AutoMergeEnabled &&
+		!options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed {
 		return nil
 	}
-	delivered, err := s.evalTaskMRLifecycleAtCheckpoint(
-		ctx, mr, options, evaluation.Checkpoint, observation, s.gitlabMRAutomation,
-	)
+	// Auto-fix and auto-merge run first (mirrors GitHub's
+	// handleTaskPRCIAutomationWithRefresh ordering): a fresh auto-fix
+	// dispatch in this pass must be able to block the same pass's
+	// auto-merge attempt (AC16), and both must complete before the
+	// lifecycle notification switches (merged/closed) observe the MR's
+	// state for this pass.
+	s.handleTaskMRCIAutomation(ctx, mr, options)
+	s.evalTaskMRLifecycleSwitches(ctx, mr, options, evaluation.Checkpoint, observation)
+	return nil
+}
+
+// evalTaskMRLifecycleSwitches runs the #2125 lifecycle-notification
+// evaluation when at least one of its three switches is on. Split out of
+// handleTaskMRLifecycleAutomationWithObservation to keep that function
+// under the cyclomatic complexity limit.
+func (s *Service) evalTaskMRLifecycleSwitches(
+	ctx context.Context, mr *gitlab.TaskMR, options *gitlab.TaskMRAutomationResponse,
+	checkpoint *gitlab.TaskMRLifecycleState, observation *taskMRReviewerObservation,
+) {
+	if !options.PromptOnReviewRequested && !options.PromptOnMerged && !options.PromptOnClosed {
+		return
+	}
+	delivered, err := s.evalTaskMRLifecycleAtCheckpoint(ctx, mr, options, checkpoint, observation, s.gitlabMRAutomation)
 	if err != nil {
 		s.logger.Debug("task MR lifecycle automation failed",
 			zap.String("task_id", mr.TaskID),
@@ -82,12 +103,11 @@ func (s *Service) handleTaskMRLifecycleAutomationWithObservation(
 			zap.Error(err))
 		s.recordMRAutomationError(ctx, mr, err)
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
-		return nil
+		return
 	}
 	if delivered {
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 	}
-	return nil
 }
 
 func (s *Service) evalTaskMRLifecycle(

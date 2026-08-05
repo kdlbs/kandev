@@ -54,6 +54,9 @@ func TestService_GetMRAutomationSnapshot_IncludesFailingJobsAndUnresolvedDiscuss
 	if snapshot.MR == nil || snapshot.MR.IID != 1 {
 		t.Errorf("MR = %+v, want IID 1", snapshot.MR)
 	}
+	if snapshot.PipelineStatus != "failed" {
+		t.Errorf("PipelineStatus = %q, want failed", snapshot.PipelineStatus)
+	}
 }
 
 func TestService_GetMRAutomationSnapshot_NoPipelineYet(t *testing.T) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"go.uber.org/zap"
 
@@ -130,6 +131,58 @@ func (s *Service) queueOrReplaceCIAutomationPrompt(
 		return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedReplace}, nil
 	}
 	return ciAutomationDispatchResult{kind: ciAutomationDispatchQueuedInsert}, nil
+}
+
+// resolveAutoFixSession picks the session to receive the next auto-fix
+// prompt: the previously used session (lastFixSessionID) when it can still
+// receive one, otherwise the task's primary (or first) promptable active
+// session. Shared between GitHub PR auto-fix and GitLab MR auto-fix (C5) —
+// provider-specific checkpoint state stays in the caller, which passes in
+// just the one field this needs.
+func (s *Service) resolveAutoFixSession(ctx context.Context, taskID string, lastFixSessionID *string) (*models.TaskSession, error) {
+	if lastFixSessionID != nil && strings.TrimSpace(*lastFixSessionID) != "" {
+		session, err := s.repo.GetTaskSession(ctx, *lastFixSessionID)
+		if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
+			return nil, err
+		}
+		if session != nil && session.TaskID != taskID {
+			return nil, fmt.Errorf("previous auto-fix session belongs to task %s", session.TaskID)
+		}
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
+	}
+	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	for _, session := range sessions {
+		if ciAutomationSessionCanReceivePrompt(session) && session.IsPrimary {
+			return session, nil
+		}
+	}
+	for _, session := range sessions {
+		if ciAutomationSessionCanReceivePrompt(session) {
+			return session, nil
+		}
+	}
+	return nil, fmt.Errorf("no active agent session for task: %s", taskID)
+}
+
+func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
+	if session == nil {
+		return false
+	}
+	switch session.State {
+	case models.TaskSessionStateCreated,
+		models.TaskSessionStateStarting,
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		models.TaskSessionStateIdle:
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *Service) recordCIAutomationUserMessage(ctx context.Context, taskID, sessionID, prompt string, meta map[string]interface{}) bool {

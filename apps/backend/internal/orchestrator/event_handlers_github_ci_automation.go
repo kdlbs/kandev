@@ -308,50 +308,14 @@ func ciAutomationCanPromptForFeedback(pr *github.TaskPR, feedback *github.PRFeed
 	return ciAutomationCanAutoFixFromFeedbackPR(feedback) && ciAutomationChecksSettledForAutoFix(pr, feedback)
 }
 
+// resolveCIAutoFixSession adapts the provider-agnostic resolveAutoFixSession
+// (ci_automation_dispatch.go, C5) to GitHub's checkpoint state shape.
 func (s *Service) resolveCIAutoFixSession(ctx context.Context, taskID string, state *github.TaskCIPRAutomationState) (*models.TaskSession, error) {
-	if state != nil && state.LastFixSessionID != nil && strings.TrimSpace(*state.LastFixSessionID) != "" {
-		session, err := s.repo.GetTaskSession(ctx, *state.LastFixSessionID)
-		if err != nil && !errors.Is(err, models.ErrTaskSessionNotFound) {
-			return nil, err
-		}
-		if session != nil && session.TaskID != taskID {
-			return nil, fmt.Errorf("previous CI auto-fix session belongs to task %s", session.TaskID)
-		}
-		if ciAutomationSessionCanReceivePrompt(session) {
-			return session, nil
-		}
+	var lastFixSessionID *string
+	if state != nil {
+		lastFixSessionID = state.LastFixSessionID
 	}
-	sessions, err := s.repo.ListActiveTaskSessionsByTaskID(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	for _, session := range sessions {
-		if ciAutomationSessionCanReceivePrompt(session) && session.IsPrimary {
-			return session, nil
-		}
-	}
-	for _, session := range sessions {
-		if ciAutomationSessionCanReceivePrompt(session) {
-			return session, nil
-		}
-	}
-	return nil, fmt.Errorf("no active agent session for task: %s", taskID)
-}
-
-func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
-	if session == nil {
-		return false
-	}
-	switch session.State {
-	case models.TaskSessionStateCreated,
-		models.TaskSessionStateStarting,
-		models.TaskSessionStateRunning,
-		models.TaskSessionStateWaitingForInput,
-		models.TaskSessionStateIdle:
-		return true
-	default:
-		return false
-	}
+	return s.resolveAutoFixSession(ctx, taskID, lastFixSessionID)
 }
 
 func (s *Service) handleTaskPRCIAutoFixEmptyDelta(ctx context.Context, pr *github.TaskPR, state *github.TaskCIPRAutomationState, previous ciAutomationCheckpoint, signature, checkpointJSON string) bool {

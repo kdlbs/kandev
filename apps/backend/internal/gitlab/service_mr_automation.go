@@ -311,6 +311,42 @@ func (s *Service) RecordTaskMRSyncError(ctx context.Context, taskID, repositoryI
 	return store.RecordTaskMRSyncError(ctx, taskID, repositoryID, projectPath, mrIID, message)
 }
 
+// RecordTaskMRFixAttempt pass-through to the store.
+func (s *Service) RecordTaskMRFixAttempt(ctx context.Context, attempt TaskMRFixAttempt) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.RecordTaskMRFixAttempt(ctx, attempt)
+}
+
+// RefreshTaskMRFixCheckpoint pass-through to the store.
+func (s *Service) RefreshTaskMRFixCheckpoint(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, signature, checkpointJSON string) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.RefreshTaskMRFixCheckpoint(ctx, taskID, repositoryID, projectPath, mrIID, signature, checkpointJSON)
+}
+
+// MarkTaskMRAutoFixExhausted pass-through to the store.
+func (s *Service) MarkTaskMRAutoFixExhausted(ctx context.Context, taskID, repositoryID, projectPath string, mrIID int, message string) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.MarkTaskMRAutoFixExhausted(ctx, taskID, repositoryID, projectPath, mrIID, message)
+}
+
+// RecordTaskMRMergeAttempt pass-through to the store.
+func (s *Service) RecordTaskMRMergeAttempt(ctx context.Context, attempt TaskMRMergeAttempt) error {
+	store := s.requireStore()
+	if store == nil {
+		return errStoreUnavailable
+	}
+	return store.RecordTaskMRMergeAttempt(ctx, attempt)
+}
+
 // ClearTaskMRSyncError pass-through to the store. Called after a successful
 // lifecycle sync so a recovered sync failure doesn't linger in
 // last_sync_error and read as an active problem.
