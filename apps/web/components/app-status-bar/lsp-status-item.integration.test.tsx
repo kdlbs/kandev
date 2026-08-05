@@ -51,11 +51,13 @@ function activateFile(
     repo = "app",
     component = "file-editor",
     loaded = true,
+    classified = true,
     isBinary = false,
   }: {
     repo?: string;
     component?: string;
     loaded?: boolean;
+    classified?: boolean;
     isBinary?: boolean;
   } = {},
 ) {
@@ -67,7 +69,7 @@ function activateFile(
     originalContent: "fun main() = Unit",
     originalHash: "hash",
     isDirty: false,
-    isBinary,
+    ...(classified ? { isBinary } : {}),
   };
   useDockviewStore.setState({
     activeFilePath: path,
@@ -147,5 +149,13 @@ describe("active-editor LSP status item integration", () => {
 
     act(() => activateFile(ACTIVE_KOTLIN_PATH, { component: "diff-viewer" }));
     expect(lspItem()).toBeNull();
+  });
+
+  it("hides while a restored file is waiting for text-or-binary classification", () => {
+    activateFile(ACTIVE_KOTLIN_PATH, { classified: false });
+
+    renderBar("status_bar");
+
+    expect(document.querySelector(`[data-status-item-id="${APP_STATUS_LSP_ID}"]`)).toBeNull();
   });
 });

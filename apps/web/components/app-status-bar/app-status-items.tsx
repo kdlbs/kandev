@@ -59,7 +59,10 @@ export function useAppStatusItems(
     activePanelComponent === "file-editor" &&
     codeEditorProvider === "monaco" &&
     activeFileBuffer !== null &&
-    !activeFileBuffer.isBinary;
+    // Restored tabs are seeded before their content is loaded. Require the
+    // server's explicit text classification so that placeholder buffers do
+    // not expose or auto-start LSP before the real editor can mount.
+    activeFileBuffer.isBinary === false;
   const metricsEnabled = useAppStore(
     (state) => state.userSettings.systemMetricsDisplay.showInTopbar,
   );
