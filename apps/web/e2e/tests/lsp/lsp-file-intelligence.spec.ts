@@ -422,10 +422,21 @@ test.describe("LSP file intelligence", () => {
     );
     expect(manualCompletion.params?.context).toEqual({ triggerKind: 1 });
     await expect(testPage.locator(".suggest-widget")).toContainText("fakeGreeting");
+    await testPage.keyboard.insertText("f");
+    const incompleteRetrigger = await expectFakeLspEvent(
+      backend,
+      (event) =>
+        event.event === "message" &&
+        event.method === "textDocument/completion" &&
+        (event.params?.context as { triggerKind?: number } | undefined)?.triggerKind === 3,
+      "incomplete completion retrigger",
+    );
+    expect(incompleteRetrigger.params?.context).toEqual({ triggerKind: 3 });
     await testPage.keyboard.press("Enter");
     await expect(testPage.locator(".monaco-editor:visible .view-lines")).toContainText(
       "fakeGreeting",
     );
+    await testPage.keyboard.press("Control+Z");
     await testPage.keyboard.press("Control+Z");
 
     await testPage

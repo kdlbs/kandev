@@ -311,6 +311,27 @@ describe("LSP completion provider", () => {
   });
 });
 
+describe("LSP incomplete completion lists", () => {
+  it("preserves the marker for follow-up requests", async () => {
+    rpc.sendRequest.mockResolvedValue({
+      isIncomplete: true,
+      items: [{ label: "partialResult" }],
+    });
+
+    const result = await completionProvider.provideCompletionItems(
+      completionModel,
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 0 },
+      { isCancellationRequested: false },
+    );
+
+    expect(result).toMatchObject({
+      incomplete: true,
+      suggestions: [{ label: "partialResult" }],
+    });
+  });
+});
+
 describe("LSP completion ranges", () => {
   it("uses the current Monaco word as the range when the server omits textEdit", async () => {
     rpc.sendRequest.mockResolvedValue([{ label: "println", insertText: "println" }]);

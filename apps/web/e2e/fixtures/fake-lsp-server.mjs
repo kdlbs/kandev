@@ -167,7 +167,7 @@ function handleRequest(message) {
       send({
         id: message.id,
         result: {
-          isIncomplete: false,
+          isIncomplete: true,
           items: [
             {
               label: "fakeGreeting",

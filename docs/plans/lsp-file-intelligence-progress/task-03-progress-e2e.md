@@ -56,9 +56,11 @@ Record RED/GREEN E2E evidence, exact commands and outcomes, migrated selectors/a
 - Review hardening: elapsed-time E2E assertions follow the localized English unit catalog (`sec`) instead of the removed hard-coded suffix.
 - Review hardening: the secondary-repository task-host scenario pins a target opened from the Files tree, navigates back to it through LSP, and proves the existing task-root-relative tab is reused instead of duplicated.
 - Review hardening: the full Kotlin protocol scenario accepts the fake server's completion item without `textEdit`, verifies Monaco inserts it through the current-word fallback range, and undoes the edit before continuing navigation and save coverage.
+- Review hardening: the fake server marks its completion list incomplete, and the full Kotlin protocol scenario proves continued typing produces a trigger-kind-3 refresh before accepting the item.
 - CI hardening: the SSH boundary scenario asserts the localized unsupported-executor category instead of the removed backend transport sentence.
 - Verified:
   - `pnpm e2e:run --no-build -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` — 13 passed
+  - `pnpm e2e:run tests/lsp/lsp-file-intelligence.spec.ts -- --grep "runs Kotlin intelligence through the task host"` — 1 production-build Chromium scenario passed with incomplete completion retriggering
   - `pnpm e2e:run --no-build -- --project=mobile-chrome tests/lsp/mobile-lsp-file-intelligence.spec.ts` — 3 passed
   - `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --no-build -- --project=containers tests/docker/lsp-file-intelligence.spec.ts` — 3 passed
   - `KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --no-build -- --project=containers tests/ssh/lsp-unsupported-executor.spec.ts` — 1 passed

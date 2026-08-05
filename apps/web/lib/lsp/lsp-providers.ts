@@ -217,13 +217,18 @@ function registerCompletionProvider(
           context: toLspCompletionContext(context),
         });
         if (token.isCancellationRequested) return { suggestions: [] };
-        const items = Array.isArray(result)
-          ? result
-          : ((result as { items?: unknown[] })?.items ?? []);
+        const completionList =
+          result && typeof result === "object" && !Array.isArray(result)
+            ? (result as { items?: unknown[]; isIncomplete?: unknown })
+            : null;
+        const items = Array.isArray(result) ? result : (completionList?.items ?? []);
         return {
           suggestions: (items as LspCompletionItem[]).map((item) =>
             mapCompletionItem(monaco, item, defaultRange),
           ),
+          ...(typeof completionList?.isIncomplete === "boolean"
+            ? { incomplete: completionList.isIncomplete }
+            : {}),
         };
       } catch {
         return { suggestions: [] };
