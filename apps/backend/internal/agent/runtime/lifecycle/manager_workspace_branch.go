@@ -7,6 +7,31 @@ import (
 	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 )
 
+// BranchSnapshotError reports that Git renamed the branch, but the primary
+// execution snapshot could not be updated. The Git operation must not be
+// retried because the branch already has its new name.
+type BranchSnapshotError struct {
+	Cause error
+}
+
+func (e *BranchSnapshotError) Error() string {
+	if e == nil || e.Cause == nil {
+		return "branch renamed but branch snapshot persistence failed"
+	}
+	return fmt.Sprintf("branch renamed but branch snapshot persistence failed: %v", e.Cause)
+}
+
+func (e *BranchSnapshotError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// Retryable is intentionally false: retrying the Git operation after a
+// snapshot failure would target the already-renamed branch.
+func (e *BranchSnapshotError) Retryable() bool { return false }
+
 // RenameBranchForSession renames the branch for an existing workspace
 // execution. The repo argument is the workspace-relative repository path and
 // is empty for the primary repository.
@@ -86,9 +111,9 @@ func (m *Manager) renameBranchForSession(
 		if updater, ok := m.runningWriter.(interface {
 			UpdateExecutorRunningWorktreeBranch(context.Context, string, string, string) error
 		}); ok {
-			// Git has already been renamed. Persistence failure must not turn a
-			// successful workspace operation into a retryable Git operation.
-			_ = updater.UpdateExecutorRunningWorktreeBranch(ctx, sessionID, execution.ID, newName)
+			if err := updater.UpdateExecutorRunningWorktreeBranch(ctx, sessionID, execution.ID, newName); err != nil {
+				return result, &BranchSnapshotError{Cause: err}
+			}
 		}
 	}
 

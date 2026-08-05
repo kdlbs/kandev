@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 type branchSnapshotWriter struct {
 	executionID string
 	branch      string
+	err         error
 }
 
 func (w *branchSnapshotWriter) UpsertExecutorRunning(context.Context, *models.ExecutorRunning) error {
@@ -33,7 +35,7 @@ func (w *branchSnapshotWriter) RepairExecutorRunningDead(context.Context, string
 func (w *branchSnapshotWriter) UpdateExecutorRunningWorktreeBranch(_ context.Context, _, executionID, branch string) error {
 	w.executionID = executionID
 	w.branch = branch
-	return nil
+	return w.err
 }
 
 func TestRenameBranchForSessionUsesRepositoryScopedAgentctlOperation(t *testing.T) {
@@ -129,5 +131,56 @@ func TestRenameBranchForSessionUpdatesPrimaryExecutionMetadata(t *testing.T) {
 	}
 	if writer.executionID != "execution-1" {
 		t.Fatalf("running snapshot execution = %q, want execution-1", writer.executionID)
+	}
+}
+
+func TestRenameBranchForSessionReportsPrimarySnapshotFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "operation": "rename_branch"})
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatalf("parse server URL: %v", err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatalf("parse server port: %v", err)
+	}
+	execution := &AgentExecution{
+		ID:        "execution-rotated",
+		SessionID: "session-rotated",
+		Metadata:  map[string]interface{}{MetadataKeyWorktreeBranch: "feature/provisional-abc"},
+		agentctl:  agentctlclient.NewClient(parsed.Hostname(), port, newTestLogger()),
+	}
+	store := NewExecutionStore()
+	if err := store.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+	writer := &branchSnapshotWriter{err: models.ErrExecutionRotated}
+	mgr := &Manager{executionStore: store}
+	mgr.SetExecutorRunningWriter(writer)
+
+	result, err := mgr.RenameBranchForSessionWithPrimary(
+		t.Context(), "session-rotated", "feature/final-title-abc", "", true,
+	)
+	if err == nil {
+		t.Fatal("RenameBranchForSession returned nil error, want snapshot failure")
+	}
+	var snapshotErr *BranchSnapshotError
+	if !errors.As(err, &snapshotErr) {
+		t.Fatalf("error = %v, want BranchSnapshotError", err)
+	}
+	if snapshotErr.Retryable() {
+		t.Fatal("snapshot failure is retryable, want non-retryable")
+	}
+	if !errors.Is(err, models.ErrExecutionRotated) {
+		t.Fatalf("error = %v, want ErrExecutionRotated", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("result = %#v, want successful Git result", result)
+	}
+	if got, _ := execution.Metadata[MetadataKeyWorktreeBranch].(string); got != "feature/final-title-abc" {
+		t.Fatalf("primary metadata branch = %q, want final branch", got)
 	}
 }

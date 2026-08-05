@@ -24,7 +24,7 @@ spec: "../../specs/tasks/agent-generated-titles.md"
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/mcp/handlers ./internal/mcp/server ./internal/task/repository/sqlite ./internal/worktree -run 'Test.*(TaskTitleBranch|SetTaskTitle|Rename.*Branch|BranchName)'
+(cd apps/backend && go test ./internal/agent/runtime/lifecycle ./internal/orchestrator ./internal/mcp/handlers ./internal/mcp/server ./internal/task/repository/sqlite ./internal/worktree -run 'Test.*(TaskTitleBranch|SetTaskTitle|Rename.*Branch|BranchName)')
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 git diff --check

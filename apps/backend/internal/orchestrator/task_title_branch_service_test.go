@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,6 +15,7 @@ import (
 type titleBranchRuntimeStub struct {
 	calls        []titleBranchRuntimeCall
 	primaryCalls []bool
+	err          error
 }
 
 type titleBranchRuntimeCall struct {
@@ -24,7 +26,7 @@ type titleBranchRuntimeCall struct {
 
 func (s *titleBranchRuntimeStub) RenameBranchForSession(_ context.Context, sessionID, newName, repo string) (*agentctlclient.GitOperationResult, error) {
 	s.calls = append(s.calls, titleBranchRuntimeCall{sessionID: sessionID, newName: newName, repo: repo})
-	return &agentctlclient.GitOperationResult{Success: true, Operation: "rename_branch"}, nil
+	return &agentctlclient.GitOperationResult{Success: true, Operation: "rename_branch"}, s.err
 }
 
 func (s *titleBranchRuntimeStub) RenameBranchForSessionWithPrimary(ctx context.Context, sessionID, newName, repo string, primary bool) (*agentctlclient.GitOperationResult, error) {
@@ -276,4 +278,31 @@ func TestRenameGeneratedBranchesForTaskTitlePreservesLocalExecutor(t *testing.T)
 	require.Equal(t, TitleBranchStatusPreserved, aggregateTitleBranchRenameStatus(result.Renamed, result.Preserved, result.Failed))
 	require.Equal(t, "local_executor", result.Preserved[0].Reason)
 	require.Empty(t, runtime.calls)
+}
+
+func TestRenameGeneratedBranchesForTaskTitleReportsSnapshotFailure(t *testing.T) {
+	runtime := &titleBranchRuntimeStub{err: errors.New("branch snapshot persistence failed")}
+	service := &Service{titleBranchRuntime: runtime}
+	result := TitleBranchRenameResult{}
+	service.renameTitleBranchBinding(
+		context.Background(),
+		&models.Task{ID: "task-snapshot-failure", Title: "Final title"},
+		"Final title",
+		models.ExecutorTypeWorktree,
+		nil,
+		false,
+		titleBranchBinding{
+			taskRepository:  &models.TaskRepository{RepositoryID: "repo-snapshot-failure", Position: 0},
+			repository:      &models.Repository{ID: "repo-snapshot-failure", WorktreeBranchTemplate: "feature/{title}"},
+			worktree:        &models.TaskSessionWorktree{SessionID: "session-snapshot-failure", RepositoryID: "repo-snapshot-failure", WorktreeBranch: "feature/provisional"},
+			environmentRepo: &models.TaskEnvironmentRepo{RepositoryID: "repo-snapshot-failure", WorktreeBranch: "feature/provisional"},
+		},
+		&result,
+	)
+
+	require.Equal(t, TitleBranchStatusFailed, aggregateTitleBranchRenameStatus(result.Renamed, result.Preserved, result.Failed))
+	require.Len(t, result.Failed, 1)
+	require.Equal(t, "repo-snapshot-failure", result.Failed[0].RepositoryID)
+	require.Equal(t, "feature/provisional", result.Failed[0].Branch)
+	require.Contains(t, result.Failed[0].Message, "branch snapshot persistence failed")
 }
