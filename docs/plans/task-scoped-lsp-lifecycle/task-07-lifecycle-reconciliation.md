@@ -1,0 +1,84 @@
+---
+id: "07-lifecycle-reconciliation"
+title: "Lifecycle reconciliation"
+status: pending
+wave: 3
+depends_on: ["06-task-controller"]
+plan: "plan.md"
+spec: "../../specs/lsp-file-intelligence/spec.md"
+---
+
+# Task 07: Lifecycle Reconciliation
+
+## Acceptance
+
+- Backend startup adopts any live task-host generation before considering a new launch, restores
+  capacity/watch state, stops orphan/disabled runtimes, and starts at most one missing desired
+  generation.
+- Task stop, archive, delete, task-environment teardown/replacement, and backend/agentctl failure
+  deterministically cancel recovery, clear progress, and reap the full LSP process tree without
+  making session/browser/editor lifecycle an owner.
+- Crash recovery uses 1s/5s/30s bounded retries with a five-ready-minute reset; task resume,
+  multi-session access, and workspace-source changes follow the spec and leak no workers/timers.
+
+## TDD sequence
+
+1. Add integration fakes for persisted task language rows plus live task-host snapshots. Write
+   failing startup cases for adopt, missing desired start, stale transient state, disabled orphan
+   stop, capacity reconstruction, unreachable host, and duplicate prevention.
+2. Add failing fake-clock recovery cases for the three backoffs, retry exhaustion, explicit Stop
+   cancellation, five-minute reset, long-running initialize exclusion, and controller shutdown.
+3. Add task service/lifecycle tests for stop, archive, delete, environment replacement, resume,
+   cleanup failure fallback, policy retention, row cascade, and two sessions sharing one runtime.
+4. Implement owned watch/reconcile workers, semantic event publication, task cleanup hooks, and
+   source-root dynamic-update/restart-required handling. Join all goroutines and timers on Close.
+5. Run race/goleak repetitions and real child-process cleanup tests before refactoring.
+
+## Verification
+
+```bash
+cd apps/backend && go test ./internal/lsp/... ./internal/task/service ./internal/agent/runtime/lifecycle ./internal/backendapp -run 'Test(LSP|Lsp|TaskLSP|TaskLsp)'
+cd apps/backend && go test -race ./internal/lsp/... ./internal/task/service -run 'Test(LSP|Lsp|Reconcile|Recovery|Cleanup)'
+cd apps/backend && go test ./internal/lsp/... -run 'Test(Reconcile|Recovery|Cleanup|Watch)' -count=20
+```
+
+## Files likely touched
+
+- `apps/backend/internal/lsp/reconcile.go`
+- `apps/backend/internal/lsp/reconcile_test.go`
+- `apps/backend/internal/lsp/watch.go`
+- `apps/backend/internal/lsp/watch_test.go`
+- `apps/backend/internal/lsp/lifecycle.go`
+- `apps/backend/internal/lsp/lifecycle_test.go`
+- `apps/backend/internal/task/service/service.go`
+- `apps/backend/internal/task/service/service_tasks.go`
+- `apps/backend/internal/task/service/service_resources.go`
+- `apps/backend/internal/task/service/resource_cleanup_jobs.go`
+- `apps/backend/internal/task/service/service_test.go`
+- `apps/backend/internal/agent/runtime/lifecycle/manager_execution.go`
+- `apps/backend/internal/agent/runtime/lifecycle/events.go`
+- `apps/backend/internal/backendapp/gateway.go`
+- `apps/backend/internal/backendapp/main.go`
+
+## Dependencies
+
+Task 06 supplies the authorized controller, capacity, task-host client, and event snapshot contract.
+
+## Parallelism
+
+Sequential. It mutates controller state and task/runtime cleanup wiring used by every later surface.
+
+## Inputs
+
+- Spec: State machine; Failure modes; Persistence guarantees; recovery and task-cleanup scenarios.
+- Existing durable task-resource cleanup inventory and `executors_running` recovery contract.
+- Existing task archive/delete ordering and `GetOrEnsureExecutionForEnvironment` deduplication.
+
+## Output contract
+
+Report every startup/cleanup transition, retry timing evidence, adopted/new generation counts,
+race/goleak results, child-process cleanup, and any recovery limitation. Update task/plan status.
+
+## Results
+
+Pending.

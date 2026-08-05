@@ -265,7 +265,7 @@ System pages (Radarr/Sonarr-style) for status, disk usage, database maintenance,
 | [native-kandev-cli](native-kandev-cli/spec.md) | draft |
 | [desktop-tauri-app](desktop-tauri-app/spec.md) | shipped |
 | [port-collision-safety](port-collision-safety/spec.md) | building |
-| [lsp-file-intelligence](lsp-file-intelligence/spec.md) | building |
+| [lsp-file-intelligence](lsp-file-intelligence/spec.md) | approved |
 | [public-share-links](public-share-links/spec.md) | draft |
 | [ssh-executor](ssh-executor/spec.md) | draft |
 | [cli-mode-parity](cli-mode-parity/spec.md) | draft |
