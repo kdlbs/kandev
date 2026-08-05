@@ -19,6 +19,7 @@ type DefinitionProvider = {
 };
 
 type CompletionProvider = {
+  triggerCharacters?: string[];
   provideCompletionItems: (
     model: unknown,
     position: { lineNumber: number; column: number },
@@ -61,6 +62,33 @@ const LINK_SELECTION_RANGE = {
   start: { line: 6, character: 5 },
   end: { line: 6, character: 11 },
 };
+const MONACO_COMPLETION_ITEM_KIND = {
+  Method: 0,
+  Function: 1,
+  Constructor: 2,
+  Field: 3,
+  Variable: 4,
+  Class: 5,
+  Struct: 6,
+  Interface: 7,
+  Module: 8,
+  Property: 9,
+  Event: 10,
+  Operator: 11,
+  Unit: 12,
+  Value: 13,
+  Constant: 14,
+  Enum: 15,
+  EnumMember: 16,
+  Keyword: 17,
+  Text: 18,
+  Color: 19,
+  File: 20,
+  Reference: 21,
+  Folder: 23,
+  TypeParameter: 24,
+  Snippet: 28,
+} as const;
 
 const rpc = { sendRequest: vi.fn() };
 const ensureModelsExist = vi.fn();
@@ -98,6 +126,7 @@ beforeEach(() => {
   vi.resetAllMocks();
   getModelUri.mockImplementation((uri: string) => uri);
   const languages = {
+    CompletionItemKind: MONACO_COMPLETION_ITEM_KIND,
     registerCompletionItemProvider: vi.fn((_language: string, provider: CompletionProvider) => {
       completionProvider = provider;
       return disposable();
@@ -132,6 +161,66 @@ beforeEach(() => {
 });
 
 describe("LSP completion provider", () => {
+  it("registers only completion triggers advertised by the server", () => {
+    expect(completionProvider.triggerCharacters).toBeUndefined();
+
+    registerLspProviders({
+      rpc,
+      lspLanguage: "kotlin",
+      serverCapabilities: {
+        completionProvider: { triggerCharacters: [".", ":"] },
+      },
+      semanticRefreshCallbacks: [],
+      getDocumentUri: () => SOURCE_URI,
+      getModelUri,
+      ensureModelsExist,
+    });
+
+    expect(completionProvider.triggerCharacters).toEqual([".", ":"]);
+  });
+
+  it("maps every standard LSP completion kind to Monaco's enum", async () => {
+    const expectedKinds = [
+      MONACO_COMPLETION_ITEM_KIND.Text,
+      MONACO_COMPLETION_ITEM_KIND.Method,
+      MONACO_COMPLETION_ITEM_KIND.Function,
+      MONACO_COMPLETION_ITEM_KIND.Constructor,
+      MONACO_COMPLETION_ITEM_KIND.Field,
+      MONACO_COMPLETION_ITEM_KIND.Variable,
+      MONACO_COMPLETION_ITEM_KIND.Class,
+      MONACO_COMPLETION_ITEM_KIND.Interface,
+      MONACO_COMPLETION_ITEM_KIND.Module,
+      MONACO_COMPLETION_ITEM_KIND.Property,
+      MONACO_COMPLETION_ITEM_KIND.Unit,
+      MONACO_COMPLETION_ITEM_KIND.Value,
+      MONACO_COMPLETION_ITEM_KIND.Enum,
+      MONACO_COMPLETION_ITEM_KIND.Keyword,
+      MONACO_COMPLETION_ITEM_KIND.Snippet,
+      MONACO_COMPLETION_ITEM_KIND.Color,
+      MONACO_COMPLETION_ITEM_KIND.File,
+      MONACO_COMPLETION_ITEM_KIND.Reference,
+      MONACO_COMPLETION_ITEM_KIND.Folder,
+      MONACO_COMPLETION_ITEM_KIND.EnumMember,
+      MONACO_COMPLETION_ITEM_KIND.Constant,
+      MONACO_COMPLETION_ITEM_KIND.Struct,
+      MONACO_COMPLETION_ITEM_KIND.Event,
+      MONACO_COMPLETION_ITEM_KIND.Operator,
+      MONACO_COMPLETION_ITEM_KIND.TypeParameter,
+    ];
+    rpc.sendRequest.mockResolvedValue(
+      expectedKinds.map((_kind, index) => ({ label: `item-${index + 1}`, kind: index + 1 })),
+    );
+
+    const result = (await completionProvider.provideCompletionItems(
+      completionModel,
+      { lineNumber: 3, column: 7 },
+      { triggerKind: 0 },
+      { isCancellationRequested: false },
+    )) as { suggestions: Array<{ kind: number }> };
+
+    expect(result.suggestions.map((item) => item.kind)).toEqual(expectedKinds);
+  });
+
   it("forwards trigger-character context using LSP enum values", async () => {
     rpc.sendRequest.mockResolvedValue([]);
 

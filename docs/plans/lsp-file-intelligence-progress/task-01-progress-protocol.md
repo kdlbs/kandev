@@ -70,9 +70,11 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: the Monaco editor opener now opens regular targets inside the active task workspace and propagates `false` for unresolved targets, while agentctl reports unexpected server exit as categorical `4006` with no English close reason so the browser localizes it.
 - Review hardening: JSON-RPC initialize errors now preserve their `message` instead of rendering `[object Object]`, while task-host process-launch failures retain details in backend logs and close through localized categorical `4008` with no English transport reason.
 - Review hardening: task teardown during auto-install keeps the standard `1001` going-away close but omits the English `task stopping` reason, allowing the browser's existing localized pre-bridge fallback to own the user-visible status.
+- Review hardening: Monaco completion registration now uses only the trigger characters advertised by the active server, and a named 25-value mapping preserves every standard LSP completion category in Monaco instead of relying on mismatched numeric enums.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
+  - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts` (45 passed, including advertised completion triggers and all 25 standard completion kinds)
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts components/editors/monaco/builtin-providers.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.progress.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts` (49 passed)
   - `pnpm run typecheck`
   - `pnpm exec eslint lib/lsp/lsp-providers.ts lib/lsp/lsp-providers.test.ts e2e/tests/lsp/lsp-file-intelligence.spec.ts`
@@ -84,6 +86,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `make lint`
   - `GOOS=windows GOARCH=amd64 go test -c ./internal/lsp/installer` and `./internal/agentctl/server/api`
   - `pnpm e2e:run -- --project=chromium tests/lsp/lsp-file-intelligence.spec.ts` (13 passed)
+  - `pnpm e2e:run tests/lsp/lsp-file-intelligence.spec.ts -- --grep "runs Kotlin intelligence through the task host"` (1 production-build Chromium scenario passed)
   - `pnpm exec vitest run lib/lsp/lsp-document-sync.test.ts lib/lsp/lsp-client-manager.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts hooks/use-file-save-delete.test.ts components/task/task-center-panel-restoration.test.ts` (46 passed)
   - `pnpm exec vitest run hooks/use-file-save-delete.test.ts hooks/use-lsp-file-opener.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts components/task/task-center-panel-restoration.test.ts lib/lsp/lsp-document-sync.test.ts` (35 passed)
   - `pnpm test` (1,122 files; 8,657 passed, 4 skipped)

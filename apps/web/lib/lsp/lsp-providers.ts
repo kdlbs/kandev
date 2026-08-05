@@ -71,35 +71,39 @@ function normalizeDefinitionLocation(definition: LspDefinition): LspLocation {
   return definition;
 }
 
-function toMonacoCompletionKind(lspKind: number | undefined): number {
-  const map: Record<number, number> = {
-    1: 14,
-    2: 1,
-    3: 0,
-    4: 8,
-    5: 4,
-    6: 5,
-    7: 7,
-    8: 7,
-    9: 8,
-    10: 9,
-    11: 12,
-    12: 14,
-    13: 15,
-    14: 17,
-    15: 27,
-    16: 19,
-    17: 20,
-    18: 21,
-    19: 23,
-    20: 16,
-    21: 14,
-    22: 6,
-    23: 24,
-    24: 25,
-    25: 26,
+function toMonacoCompletionKind(
+  monaco: MonacoModule,
+  lspKind: number | undefined,
+): languages.CompletionItemKind {
+  const kind = monaco.languages.CompletionItemKind;
+  const map: Record<number, languages.CompletionItemKind> = {
+    1: kind.Text,
+    2: kind.Method,
+    3: kind.Function,
+    4: kind.Constructor,
+    5: kind.Field,
+    6: kind.Variable,
+    7: kind.Class,
+    8: kind.Interface,
+    9: kind.Module,
+    10: kind.Property,
+    11: kind.Unit,
+    12: kind.Value,
+    13: kind.Enum,
+    14: kind.Keyword,
+    15: kind.Snippet,
+    16: kind.Color,
+    17: kind.File,
+    18: kind.Reference,
+    19: kind.Folder,
+    20: kind.EnumMember,
+    21: kind.Constant,
+    22: kind.Struct,
+    23: kind.Event,
+    24: kind.Operator,
+    25: kind.TypeParameter,
   };
-  return map[lspKind ?? 1] ?? 14;
+  return map[lspKind ?? 1] ?? kind.Text;
 }
 
 function extractDocumentation(doc: unknown): string | { value: string } | undefined {
@@ -161,6 +165,7 @@ function completionRange(
 }
 
 function mapCompletionItem(
+  monaco: MonacoModule,
   item: LspCompletionItem,
   defaultRange: MonacoRange,
 ): languages.CompletionItem {
@@ -169,7 +174,7 @@ function mapCompletionItem(
   const isSnippet = item.insertTextFormat === 2;
   return {
     label,
-    kind: toMonacoCompletionKind(item.kind),
+    kind: toMonacoCompletionKind(monaco, item.kind),
     detail: item.detail,
     documentation: extractDocumentation(item.documentation),
     insertText,
@@ -188,10 +193,13 @@ function mapCompletionItem(
 // Provider registration
 // ---------------------------------------------------------------------------
 
-function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
+function registerCompletionProvider(
+  ctx: ProviderCtx,
+  triggerCharacters: string[] | undefined,
+): IDisposable {
   const { monaco, lang, rpc, getDocumentUri } = ctx;
   return monaco.languages.registerCompletionItemProvider(lang, {
-    triggerCharacters: [".", ":", "<", '"', "'", "/", "@", "#", " "],
+    ...(triggerCharacters === undefined ? {} : { triggerCharacters }),
     provideCompletionItems: async (model, position, context, token) => {
       const uri = getDocumentUri(model);
       if (!uri) return { suggestions: [] };
@@ -214,7 +222,7 @@ function registerCompletionProvider(ctx: ProviderCtx): IDisposable {
           : ((result as { items?: unknown[] })?.items ?? []);
         return {
           suggestions: (items as LspCompletionItem[]).map((item) =>
-            mapCompletionItem(item, defaultRange),
+            mapCompletionItem(monaco, item, defaultRange),
           ),
         };
       } catch {
@@ -410,6 +418,17 @@ export interface RegisterLspProvidersOptions {
   ensureModelsExist: EnsureModelsExist;
 }
 
+function completionTriggerCharacters(
+  serverCapabilities: Record<string, unknown> | null,
+): string[] | undefined {
+  const completionProvider = serverCapabilities?.completionProvider;
+  if (!completionProvider || typeof completionProvider !== "object") return undefined;
+  const triggerCharacters = (completionProvider as { triggerCharacters?: unknown })
+    .triggerCharacters;
+  if (!Array.isArray(triggerCharacters)) return undefined;
+  return triggerCharacters.filter((value): value is string => typeof value === "string");
+}
+
 export function registerLspProviders(opts: RegisterLspProvidersOptions): IDisposable[] {
   const monaco = getMonacoInstance();
   if (!monaco) return [];
@@ -426,7 +445,9 @@ export function registerLspProviders(opts: RegisterLspProvidersOptions): IDispos
       getModelUri: opts.getModelUri,
       ensureModelsExist: opts.ensureModelsExist,
     };
-    disposables.push(registerCompletionProvider(ctx));
+    disposables.push(
+      registerCompletionProvider(ctx, completionTriggerCharacters(opts.serverCapabilities)),
+    );
     disposables.push(registerHoverProvider(ctx));
     disposables.push(registerDefinitionProvider(ctx));
     disposables.push(registerReferenceProvider(ctx));
