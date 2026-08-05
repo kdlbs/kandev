@@ -39,14 +39,8 @@ import {
   TaskDeleteItem,
   TaskDetachItem,
 } from "./task-switcher-action-items";
-import type { TaskSwitcherItem } from "./task-switcher";
-
-export type StepDef = {
-  id: string;
-  title: string;
-  color?: string;
-  events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
-};
+import type { StepDef, TaskSwitcherItem } from "./task-switcher-types";
+export type { StepDef } from "./task-switcher-types";
 
 type ContextMenuProps = {
   task: TaskSwitcherItem;

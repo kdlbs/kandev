@@ -334,7 +334,6 @@ describe("TaskSwitcher — create subtask menu", () => {
   });
 });
 
-// eslint-disable-next-line max-lines-per-function -- edit and archived action coverage shares setup to assert the complete menu contract.
 describe("TaskSwitcher — edit menu", () => {
   it("passes the clicked task to the edit action", () => {
     const editableTask = item("Editable task", undefined, {
@@ -411,7 +410,9 @@ describe("TaskSwitcher — edit menu", () => {
     fireEvent.contextMenu(screen.getByText(editableTask.title));
     expect(screen.queryByRole("menuitem", { name: "Edit" })).toBeNull();
   });
+});
 
+describe("TaskSwitcher — archived rows action menu", () => {
   it("keeps archived rows navigation-only apart from delete", () => {
     const archivedTask = item("Archived task", undefined, {
       isArchived: true,
@@ -454,7 +455,9 @@ describe("TaskSwitcher — edit menu", () => {
     expect(screen.queryByText("Send to workflow")).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
+});
 
+describe("TaskSwitcher — edit menu prerequisites", () => {
   it("omits edit when a task lacks workflow metadata", () => {
     const task = item("No workflow task");
     render(
