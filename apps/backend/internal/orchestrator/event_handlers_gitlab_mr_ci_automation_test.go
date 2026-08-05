@@ -457,3 +457,72 @@ func TestHandleTaskMRCIAutomation_AutoFixBlocksAutoMergeInSamePass(t *testing.T)
 		t.Fatalf("expected the auto-fix prompt to still dispatch, got %+v", status)
 	}
 }
+
+// TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillMergesWhenReady is the
+// regression for the QA finding that a spent auto-fix round cap stranded
+// auto-merge permanently. Once AutoFixExhaustedAt is set, a human can still
+// fix CI by hand; the MR then satisfies every readiness gate and auto-merge
+// must fire. Before the fix, handleTaskMRCIAutoFix returned true
+// unconditionally here, so autoFixBlockedMerge stayed true on every
+// subsequent poll and the only recovery was toggling auto-fix off.
+func TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillMergesWhenReady(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	mr := &gitlab.TaskMR{TaskID: "task-1", Host: "https://gitlab.example.com", ProjectPath: "group/widget", MRIID: 1, State: gitlabMRStateOpen}
+	exhaustedAt := time.Now().UTC()
+	fake := &mockGitLabMRAutomationService{
+		snapshot: &gitlab.MRAutomationSnapshot{
+			MR: &gitlab.MR{
+				State: gitlabMRStateOpen, IID: 1, ProjectPath: "group/widget",
+				MergeStatus: "can_be_merged", DetailedMergeStatus: "mergeable",
+			},
+			PipelineStatus:        "success",
+			UnresolvedDiscussions: 0,
+		},
+		checkpoint: &gitlab.TaskMRLifecycleState{AutoFixExhaustedAt: &exhaustedAt},
+	}
+	svc.SetGitLabMRAutomationService(fake)
+
+	svc.handleTaskMRCIAutomation(ctx, mr, &gitlab.TaskMRAutomationResponse{
+		TaskID: "task-1", AutoFixEnabled: true, AutoMergeEnabled: true, WorkspaceID: "ws-1",
+		EffectiveAutoFixPrompt: "Fix it",
+	})
+
+	if fake.mergeCalls.Load() != 1 {
+		t.Fatalf("MergeMRForAutomation calls = %d, want 1 — an exhausted round cap must not strand a ready MR", fake.mergeCalls.Load())
+	}
+}
+
+// TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillBlocksUnreadyMerge pins
+// the other half of the same fix: deferring to the readiness gate must not
+// become "merge anything once exhausted". A failing pipeline still blocks.
+func TestHandleTaskMRCIAutomation_ExhaustedAutoFixStillBlocksUnreadyMerge(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	mr := &gitlab.TaskMR{TaskID: "task-1", Host: "https://gitlab.example.com", ProjectPath: "group/widget", MRIID: 1, State: gitlabMRStateOpen}
+	exhaustedAt := time.Now().UTC()
+	fake := &mockGitLabMRAutomationService{
+		snapshot: &gitlab.MRAutomationSnapshot{
+			MR: &gitlab.MR{
+				State: gitlabMRStateOpen, IID: 1, ProjectPath: "group/widget",
+				MergeStatus: "can_be_merged", DetailedMergeStatus: "mergeable",
+			},
+			PipelineStatus: "failed",
+		},
+		checkpoint: &gitlab.TaskMRLifecycleState{AutoFixExhaustedAt: &exhaustedAt},
+	}
+	svc.SetGitLabMRAutomationService(fake)
+
+	svc.handleTaskMRCIAutomation(ctx, mr, &gitlab.TaskMRAutomationResponse{
+		TaskID: "task-1", AutoFixEnabled: true, AutoMergeEnabled: true, WorkspaceID: "ws-1",
+		EffectiveAutoFixPrompt: "Fix it",
+	})
+
+	if fake.mergeCalls.Load() != 0 {
+		t.Fatalf("MergeMRForAutomation calls = %d, want 0 — a failing pipeline must still block auto-merge", fake.mergeCalls.Load())
+	}
+}

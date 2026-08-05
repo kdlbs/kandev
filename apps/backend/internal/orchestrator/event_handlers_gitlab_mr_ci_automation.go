@@ -137,8 +137,13 @@ func (s *Service) handleTaskMRCIAutoFix(
 		s.publishTaskMRAutomationState(ctx, mr.TaskID)
 		return true
 	}
+	// Exhausted auto-fix must not block auto-merge forever: once the round
+	// cap is spent, a human may still fix CI by hand and leave the MR
+	// genuinely ready. Blocking unconditionally here stranded auto-merge
+	// permanently (recoverable only by toggling auto-fix off), so defer to
+	// the readiness gate exactly as GitHub's handleTaskPRCIAutoFix does.
 	if state != nil && state.AutoFixExhaustedAt != nil {
-		return true
+		return !mrAutomationReadyToMerge(snapshot)
 	}
 	if !mrAutoFixChecksSettled(snapshot) {
 		return false
