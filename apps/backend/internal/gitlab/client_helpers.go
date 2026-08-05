@@ -9,21 +9,23 @@ import (
 // rawMR is the JSON shape of a GitLab merge request as returned by the
 // REST v4 API.
 type rawMR struct {
-	ID             int64  `json:"id"`
-	IID            int    `json:"iid"`
-	ProjectID      int64  `json:"project_id"`
-	Title          string `json:"title"`
-	Description    string `json:"description"`
-	State          string `json:"state"` // opened, closed, merged, locked
-	WebURL         string `json:"web_url"`
-	Draft          bool   `json:"draft"`
-	WorkInProgress bool   `json:"work_in_progress"`
-	MergeStatus    string `json:"merge_status"`
-	HasConflicts   bool   `json:"has_conflicts"`
-	SourceBranch   string `json:"source_branch"`
-	TargetBranch   string `json:"target_branch"`
-	SHA            string `json:"sha"`
-	References     struct {
+	ID                          int64  `json:"id"`
+	IID                         int    `json:"iid"`
+	ProjectID                   int64  `json:"project_id"`
+	Title                       string `json:"title"`
+	Description                 string `json:"description"`
+	State                       string `json:"state"` // opened, closed, merged, locked
+	WebURL                      string `json:"web_url"`
+	Draft                       bool   `json:"draft"`
+	WorkInProgress              bool   `json:"work_in_progress"`
+	MergeStatus                 string `json:"merge_status"`
+	DetailedMergeStatus         string `json:"detailed_merge_status"`
+	BlockingDiscussionsResolved bool   `json:"blocking_discussions_resolved"`
+	HasConflicts                bool   `json:"has_conflicts"`
+	SourceBranch                string `json:"source_branch"`
+	TargetBranch                string `json:"target_branch"`
+	SHA                         string `json:"sha"`
+	References                  struct {
 		Full string `json:"full"`
 	} `json:"references"`
 	Author             rawUser    `json:"author"`
@@ -139,33 +141,35 @@ func convertRawMR(raw *rawMR) *MR {
 		targetProjectID = raw.ProjectID
 	}
 	mr := &MR{
-		ID:                 raw.ID,
-		IID:                raw.IID,
-		ProjectID:          raw.ProjectID,
-		Title:              raw.Title,
-		URL:                raw.WebURL,
-		WebURL:             raw.WebURL,
-		State:              state,
-		HeadBranch:         raw.SourceBranch,
-		HeadSHA:            raw.SHA,
-		BaseBranch:         raw.TargetBranch,
-		AuthorUsername:     raw.Author.Username,
-		ProjectNamespace:   namespace,
-		ProjectPath:        projectPath,
-		SourceProjectID:    raw.SourceProjectID,
-		TargetProjectID:    targetProjectID,
-		AllowCollaboration: raw.AllowCollaboration,
-		Body:               raw.Description,
-		Draft:              raw.Draft || raw.WorkInProgress,
-		MergeStatus:        raw.MergeStatus,
-		HasConflicts:       raw.HasConflicts,
-		Reviewers:          convertReviewers(raw.Reviewers),
-		Assignees:          convertReviewers(raw.Assignees),
-		Labels:             append([]string(nil), raw.Labels...),
-		CreatedAt:          raw.CreatedAt,
-		UpdatedAt:          raw.UpdatedAt,
-		MergedAt:           raw.MergedAt,
-		ClosedAt:           raw.ClosedAt,
+		ID:                          raw.ID,
+		IID:                         raw.IID,
+		ProjectID:                   raw.ProjectID,
+		Title:                       raw.Title,
+		URL:                         raw.WebURL,
+		WebURL:                      raw.WebURL,
+		State:                       state,
+		HeadBranch:                  raw.SourceBranch,
+		HeadSHA:                     raw.SHA,
+		BaseBranch:                  raw.TargetBranch,
+		AuthorUsername:              raw.Author.Username,
+		ProjectNamespace:            namespace,
+		ProjectPath:                 projectPath,
+		SourceProjectID:             raw.SourceProjectID,
+		TargetProjectID:             targetProjectID,
+		AllowCollaboration:          raw.AllowCollaboration,
+		Body:                        raw.Description,
+		Draft:                       raw.Draft || raw.WorkInProgress,
+		MergeStatus:                 raw.MergeStatus,
+		DetailedMergeStatus:         raw.DetailedMergeStatus,
+		BlockingDiscussionsResolved: raw.BlockingDiscussionsResolved,
+		HasConflicts:                raw.HasConflicts,
+		Reviewers:                   convertReviewers(raw.Reviewers),
+		Assignees:                   convertReviewers(raw.Assignees),
+		Labels:                      append([]string(nil), raw.Labels...),
+		CreatedAt:                   raw.CreatedAt,
+		UpdatedAt:                   raw.UpdatedAt,
+		MergedAt:                    raw.MergedAt,
+		ClosedAt:                    raw.ClosedAt,
 	}
 	if raw.SourceProject.PathWithNamespace != "" {
 		mr.SourceProjectPath = raw.SourceProject.PathWithNamespace
@@ -404,6 +408,24 @@ func summarizePipelines(pipelines []Pipeline) (state string, jobsTotal, jobsPass
 		state = statusPending
 	}
 	return state, jobsTotal, jobsPassing
+}
+
+// countUnapprovedReviewers counts assigned reviewers who have not yet
+// recorded an approval (Q2's "awaiting review" signal). GitLab has no
+// distinct "requested but hasn't looked" state, so this only distinguishes
+// "approved" from "everyone else assigned".
+func countUnapprovedReviewers(reviewers []MRReviewer, approvals []MRApproval) int {
+	approved := make(map[string]bool, len(approvals))
+	for _, a := range approvals {
+		approved[a.Username] = true
+	}
+	count := 0
+	for _, r := range reviewers {
+		if !approved[r.Username] {
+			count++
+		}
+	}
+	return count
 }
 
 func summarizeApprovals(have, required int) string {

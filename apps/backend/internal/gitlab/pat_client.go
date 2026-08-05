@@ -502,6 +502,9 @@ func (c *PATClient) GetMRStatus(ctx context.Context, projectPath string, iid int
 		RequiredApprovals:   required,
 		PipelineJobsTotal:   jobsTotal,
 		PipelineJobsPassing: jobsPassing,
+		DetailedMergeStatus: mr.DetailedMergeStatus,
+		ReviewerCount:       len(mr.Reviewers),
+		UnapprovedReviewers: countUnapprovedReviewers(mr.Reviewers, approvals),
 	}, nil
 }
 
