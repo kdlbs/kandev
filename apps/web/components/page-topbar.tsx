@@ -134,7 +134,9 @@ function TopbarBreadcrumb({
           <>
             <BreadcrumbItem className={homeCrumbClass} data-testid="topbar-phone-home">
               <BreadcrumbLink asChild>
-                <BackLink href={homeHref} label="Home" isHome />
+                {/* The crumb is icon-only, so this label is its accessible
+                    name — same catalog key the nav manifest's Home row uses. */}
+                <BackLink href={homeHref} label={t("sidebar:home")} isHome />
               </BreadcrumbLink>
             </BreadcrumbItem>
             <BreadcrumbSeparator className={homeCrumbClass} />

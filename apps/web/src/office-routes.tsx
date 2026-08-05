@@ -8,7 +8,7 @@ import AgentMemoryPage from "@/app/office/agents/[id]/memory/page";
 import AgentPermissionsPage from "@/app/office/agents/[id]/permissions/page";
 import AgentSkillsPage from "@/app/office/agents/[id]/skills/page";
 import { AgentsPageClient } from "@/app/office/agents/agents-page-client";
-import { OfficeShell } from "@/app/office/components/office-topbar";
+import { OfficeShell } from "@/app/office/components/office-shell";
 import { InboxPageClient } from "@/app/office/inbox/inbox-page-client";
 import { OfficePageClient } from "@/app/office/page-client";
 import { ProjectsPageClient } from "@/app/office/projects/projects-page-client";

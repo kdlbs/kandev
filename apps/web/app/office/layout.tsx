@@ -13,7 +13,7 @@ import {
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { readCookies } from "@/lib/server/cookies";
 import type { AppState } from "@/lib/state/store";
-import { OfficeShell } from "./components/office-topbar";
+import { OfficeShell } from "./components/office-shell";
 
 function resolveActiveOfficeWorkspaceId(
   workspaceItems: { id: string }[],
