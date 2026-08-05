@@ -426,6 +426,44 @@ func TestRescanRepositories_PromotedRootTracksPlainFolderWithOneRepository(t *te
 	}
 }
 
+// A remote workspace can start as a plain task root and receive its first
+// repository after the agent has launched. The root must remain the file-tree
+// scope so files already present at the task root and the attached repository
+// directory are visible together.
+func TestRescanRepositories_PromotesBareTaskRootWhenFirstRepositoryAppears(t *testing.T) {
+	taskRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(taskRoot, "remote-source.txt"), []byte("source\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	log, _ := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	m := NewManager(&config.InstanceConfig{WorkDir: taskRoot}, log)
+	defer m.stopWorkspaceTrackers()
+
+	repository := filepath.Join(taskRoot, "attached-repository")
+	initGitRepoAt(t, repository)
+
+	if err := m.RescanRepositories(context.Background(), ""); err != nil {
+		t.Fatalf("rescan after first repository appears: %v", err)
+	}
+
+	if m.workspaceTracker.workDir != taskRoot {
+		t.Fatalf("workspace tracker path = %q, want task root %q", m.workspaceTracker.workDir, taskRoot)
+	}
+	if len(m.repoTrackers) != 1 || m.repoTrackers[0].RepositoryName() != "attached-repository" {
+		t.Fatalf("repository trackers = %+v, want attached-repository", m.repoTrackers)
+	}
+
+	tree, err := m.workspaceTracker.GetFileTree("", 1)
+	if err != nil {
+		t.Fatalf("GetFileTree: %v", err)
+	}
+	names := fileTreeChildNames(tree)
+	if !names["remote-source.txt"] || !names["attached-repository"] {
+		t.Fatalf("task-root file scope = %v, want root file and repository directory", names)
+	}
+}
+
 // Source-root policy is installed after a successful API rescan. It must
 // therefore be applied to the bare root tracker that replaces the original
 // primary tracker as well as every newly-created child tracker.

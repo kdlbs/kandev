@@ -58,5 +58,5 @@ Implemented recursive initialized-submodule discovery with slash-delimited task-
 Verification:
 
 - `go test ./internal/agentctl/server/process -run 'Test(ReconcileRepositories_PrunesRemovedTrackerAndPreservesSubscription|Manager_DiscoversNestedSubmoduleScopesWithStableAnchors|Manager_RescanDiscoversNewNestedSubmoduleAndRetainsRoot|Manager_SkipsUninitializedSubmoduleWithoutLosingRoot)' -count=1` — 4 passed.
-- `go test ./internal/agentctl/server/process -count=1` — 579 passed.
+- `go test ./internal/agentctl/server/process -count=1` — 584 passed, including the post-rebase task-root rescan regression.
 - `make -C apps/backend test` — passed; `make -C apps/backend lint` — 0 issues.

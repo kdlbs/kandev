@@ -78,9 +78,10 @@ The approach follows [ADR-2026-08-05-nested-submodules-as-repository-scopes](../
 
 ## Verification Results
 
-- Backend graph, aggregation, and mutation-support changes are implemented. `go test ./internal/agentctl/server/process -count=1` passed 579 tests; the nested graph subset passed 4 tests; the nested API aggregation subset passed 3 tests. `make -C apps/backend test` passed, `make -C apps/backend lint` reported 0 issues, and `make -C apps/backend build` completed.
+- Backend graph, aggregation, and mutation-support changes are implemented. `go test ./internal/agentctl/server/process -count=1` passed 584 tests after the post-rebase task-root rescan regression; the nested graph subset passed 4 tests; the nested API aggregation subset passed 3 tests. `make -C apps/backend test` passed, `make -C apps/backend lint` reported 0 issues, and `make -C apps/backend build` completed.
 - Frontend source, hierarchy, and mutation tests passed: 9 Vitest files, 118 tests. `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` completed successfully.
 - `pnpm run build:vite` completed. The managed desktop Chromium E2E passed 1 test and the managed `mobile-chrome` E2E passed 1 test; each fixture removes its disposable repository tree in `finally`.
+- The host-mode SSH workspace-source E2E passed after the task-root rescan fix, and the six-test workflow-start-step suite passed after a fresh backend/Vite build.
 - Public documentation validation passed 58 tests and validated 41 published pages.
 
 ## Implementation Waves And Parallel Candidates

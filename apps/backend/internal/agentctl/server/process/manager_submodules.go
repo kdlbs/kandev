@@ -23,6 +23,16 @@ func (m *Manager) hasBareMultiRepoTrackerGraph() bool {
 	return root != nil && root.repositoryName == "" && root.gitIndexPath == "" && len(trackers) > 0
 }
 
+// hasBareTaskRootTracker reports whether the active root tracker is already a
+// plain task-root scope with no per-repository children. A rescan must keep
+// this scope when a repository appears beneath it so the file tree continues
+// to expose both task-root files and the attached repository directory.
+func (m *Manager) hasBareTaskRootTracker(workDir string) bool {
+	root, trackers := m.snapshotTrackers()
+	return root != nil && len(trackers) == 0 && root.repositoryName == "" &&
+		root.gitIndexPath == "" && filepath.Clean(root.workDir) == filepath.Clean(workDir)
+}
+
 // buildWorkspaceTrackerGraph preserves the existing bare multi-repository
 // shape while adding initialized submodules below each real repository. A
 // single sibling repository remains the unnamed root for compatibility with

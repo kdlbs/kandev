@@ -68,7 +68,12 @@ func (m *Manager) RescanRepositoriesWithSourceRoots(ctx context.Context, newWork
 	} else {
 		roots = canonicalWorkspaceSourceRoots(roots)
 	}
-	forceBareRoot := scopeChanged || m.hasBareMultiRepoTrackerGraph()
+	// A remote workspace may launch with a plain task root and no repository,
+	// then receive its first repository after launch. Preserve that root as the
+	// file-tree scope when it is rescanned; otherwise NewWorkspaceTracker's
+	// single-repo compatibility fallback would replace it with the new child
+	// and hide files that remain at the task root.
+	forceBareRoot := scopeChanged || m.hasBareMultiRepoTrackerGraph() || m.hasBareTaskRootTracker(candidate)
 	return m.reconcileWorkspaceTrackerGraph(ctx, candidate, roots, forceBareRoot)
 }
 
