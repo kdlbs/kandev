@@ -248,3 +248,44 @@ func TestFindGoBinaryWithRunnerUsesUserProfileFallback(t *testing.T) {
 		t.Fatalf("FindGoBinaryWithRunner() = %q, want %q", got, binaryPath)
 	}
 }
+
+func TestFindGoBinaryWithRunnerRejectsRelativeDirectories(t *testing.T) {
+	t.Chdir(t.TempDir())
+	binaryName := "gopls"
+	if runtime.GOOS == windowsOS {
+		binaryName += ".exe"
+	}
+	tests := []struct {
+		name      string
+		envKey    string
+		envValue  string
+		binaryDir string
+	}{
+		{name: "GOBIN", envKey: "GOBIN", envValue: "controlled-gobin", binaryDir: "controlled-gobin"},
+		{name: "GOPATH", envKey: "GOPATH", envValue: "controlled-gopath", binaryDir: filepath.Join("controlled-gopath", "bin")},
+		{name: "HOME", envKey: "HOME", envValue: "controlled-home", binaryDir: filepath.Join("controlled-home", "go", "bin")},
+		{name: "USERPROFILE", envKey: "USERPROFILE", envValue: "controlled-profile", binaryDir: filepath.Join("controlled-profile", "go", "bin")},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := os.MkdirAll(tt.binaryDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(filepath.Join(tt.binaryDir, binaryName), []byte("fixture"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			env := map[string]string{
+				"GOBIN":       "",
+				"GOPATH":      "",
+				"HOME":        "",
+				"USERPROFILE": "",
+			}
+			env[tt.envKey] = tt.envValue
+
+			if got, err := FindGoBinaryWithRunner("gopls", &recordingCommandRunner{environment: env}); err == nil {
+				t.Fatalf("FindGoBinaryWithRunner() = %q from relative %s, want not found", got, tt.envKey)
+			}
+		})
+	}
+}

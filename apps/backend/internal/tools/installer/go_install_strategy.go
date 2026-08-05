@@ -89,18 +89,18 @@ func FindGoBinaryWithRunner(binary string, runner CommandRunner) (string, error)
 
 func goBinaryDirectories(env map[string]string) []string {
 	directories := make([]string, 0, 4)
-	if gobin := environmentValue(env, "GOBIN"); gobin != "" {
+	if gobin := environmentValue(env, "GOBIN"); filepath.IsAbs(gobin) {
 		directories = append(directories, gobin)
 	}
 	for _, gopath := range filepath.SplitList(environmentValue(env, "GOPATH")) {
-		if gopath != "" {
+		if filepath.IsAbs(gopath) {
 			directories = append(directories, filepath.Join(gopath, "bin"))
 		}
 	}
-	if home := environmentValue(env, "HOME"); home != "" {
+	if home := environmentValue(env, "HOME"); filepath.IsAbs(home) {
 		directories = append(directories, filepath.Join(home, "go", "bin"))
 	}
-	if userProfile := environmentValue(env, "USERPROFILE"); userProfile != "" {
+	if userProfile := environmentValue(env, "USERPROFILE"); filepath.IsAbs(userProfile) {
 		directories = append(directories, filepath.Join(userProfile, "go", "bin"))
 	}
 	return directories

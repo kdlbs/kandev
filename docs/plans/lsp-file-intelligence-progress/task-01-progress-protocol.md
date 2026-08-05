@@ -77,6 +77,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: every task-host LSP WebSocket frame now uses the same five-second write deadline, so an unread pre-bridge status or ready frame cannot pin the handler or leak its owned language-server process.
 - Review hardening: a terminating stdout forwarder closes language-server stdin to release active writes immediately, while a cross-platform 30-second cutoff closes a pipe whose server remains alive but stops reading; both paths converge on owned-process cleanup.
 - Review hardening: a single pending task-host WebSocket read cancels connection-owned auto-install work when the browser stops or disconnects, then hands the first client frame into the bridge after a successful install without concurrent reads or a dropped initialize request.
+- Review hardening: Go post-install lookup now rejects relative `GOBIN`, every relative `GOPATH` entry, `HOME`, and `USERPROFILE`, preventing repository-controlled directories from supplying the launched `gopls` binary while retaining absolute task-host fallbacks.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
@@ -112,4 +113,6 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `go test -race ./internal/agentctl/server/api -run 'Test(RunLSPBridgeForwarderExitUnblocksStdinWrite|WriteLSPStdinWithTimeoutClosesBlockedWrite)' -count=1`
   - `go test ./internal/agentctl/server/api -run 'Test(HandleLSPStreamAutoInstallHandsFirstClientMessageToBridge|LSPAutoInstallIsCanceledByClientDisconnect|LSPAutoInstallIsCanceledAndDrainedByInstanceTeardown)' -count=1`
   - `go test -race ./internal/agentctl/server/api -run 'Test(HandleLSPStreamAutoInstallHandsFirstClientMessageToBridge|LSPAutoInstallIsCanceledByClientDisconnect)' -count=1`
+  - `go test ./internal/tools/installer -run 'Test(FindGoBinaryWithRunnerRejectsRelativeDirectories|FindGoBinaryWithRunnerUsesUserProfileFallback|GoInstallStrategyUsesRunnerEnvironmentForLookupAndResult)' -count=1`
+  - `go test ./internal/tools/installer -count=1`
   - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`

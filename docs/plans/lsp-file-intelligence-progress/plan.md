@@ -54,7 +54,7 @@ The progress protocol itself requires no backend payload transform because both 
 - **Initialization failure:** the manager regression proves a JSON-RPC initialize error object renders its `message` field and still cleans up the failed connection for Retry.
 - **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting; a rendered language-card regression proves auto-install prerequisites remain visible without tooltip interaction.
 - **Auto-start lifecycle:** hook coverage stops an auto-started lease, rerenders with changed configuration, and proves only explicit Start reacquires it; desktop E2E repeats the boundary across a matching editor reopen.
-- **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, read-only rejection of cold unsupported executors, and capacity rejection before supported execution startup.
+- **Task-host environment:** focused Go tests cover absolute-only PATH and Go result directories, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, read-only rejection of cold unsupported executors, and capacity rejection before supported execution startup.
 
 ## E2E Tests
 
