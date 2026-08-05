@@ -233,9 +233,9 @@ type UseCommitDialogReturn = {
   setBody: (v: string) => void;
   stageAll: boolean;
   setStageAll: (v: boolean) => void;
-  /** Repo this commit is scoped to in multi-repo mode; "" = all repos with staged. */
-  repo: string;
-  setRepo: (v: string) => void;
+  /** Undefined means all repos; "" is an explicit workspace-root scope. */
+  repo: string | undefined;
+  setRepo: (v: string | undefined) => void;
   openDialog: (repo?: string) => void;
 };
 
@@ -244,14 +244,14 @@ function useCommitDialogState(): UseCommitDialogReturn {
   const [message, setMessage] = useState("");
   const [body, setBody] = useState("");
   const [stageAll, setStageAll] = useState(false);
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState<string | undefined>(undefined);
   const openDialog = useCallback((nextRepo?: string) => {
     setMessage("");
     setBody("");
     setStageAll(false);
     // Defensive: callers binding `openDialog` directly to onClick can leak the
     // React MouseEvent into nextRepo. Only accept actual repo strings.
-    setRepo(typeof nextRepo === "string" ? nextRepo : "");
+    setRepo(typeof nextRepo === "string" ? nextRepo : undefined);
     setOpen(true);
   }, []);
   return {
@@ -280,9 +280,9 @@ type UsePRDialogReturn = {
   setDraft: (v: boolean) => void;
   branchPushed: boolean;
   setBranchPushed: (v: boolean) => void;
-  /** Repo this PR is scoped to in multi-repo mode; "" = workspace root. */
-  repo: string;
-  setRepo: (v: string) => void;
+  /** Undefined means the default scope; "" is an explicit workspace-root scope. */
+  repo: string | undefined;
+  setRepo: (v: string | undefined) => void;
   openDialog: (taskTitle?: string, repo?: string) => void;
 };
 
@@ -292,14 +292,14 @@ function usePRDialogState(): UsePRDialogReturn {
   const [body, setBody] = useState("");
   const [draft, setDraft] = useState(true);
   const [branchPushed, setBranchPushed] = useState(false);
-  const [repo, setRepo] = useState("");
+  const [repo, setRepo] = useState<string | undefined>(undefined);
   const openDialog = useCallback((taskTitle?: string, nextRepo?: string) => {
     setTitle(taskTitle || "");
     setBody("");
     setBranchPushed(false);
     // Defensive: callers binding `openDialog` directly to onClick can leak the
     // React MouseEvent into nextRepo. Only accept actual repo strings.
-    setRepo(typeof nextRepo === "string" ? nextRepo : "");
+    setRepo(typeof nextRepo === "string" ? nextRepo : undefined);
     setOpen(true);
   }, []);
   return {
@@ -321,8 +321,8 @@ function usePRDialogState(): UsePRDialogReturn {
 
 /**
  * Computes the file summary for the commit dialog: an explicit repo scope
- * uses that repo's files; an empty scope in multi-repo sums across every
- * repo (showing the fan-out total); single-repo falls back to the legacy
+ * uses that repo's files; no scope in multi-repo sums across every repo
+ * (showing the fan-out total); single-repo falls back to the legacy
  * workspace-level status.
  */
 function useScopedFileSummary({
@@ -332,7 +332,7 @@ function useScopedFileSummary({
   isMultiRepo,
   stageAll,
 }: {
-  scopedRepo: string;
+  scopedRepo: string | undefined;
   statusByRepo: ReturnType<typeof useSessionGitStatusByRepo>;
   gitStatus: ReturnType<typeof useSessionGitStatus>;
   isMultiRepo: boolean;
@@ -340,7 +340,7 @@ function useScopedFileSummary({
   stageAll: boolean;
 }): FileSummary {
   return useMemo(() => {
-    if (scopedRepo) {
+    if (scopedRepo !== undefined) {
       const scoped = statusByRepo.find((s) => s.repository_name === scopedRepo);
       return computeFileSummary(scoped?.status?.files, stageAll);
     }
@@ -366,7 +366,7 @@ function useScopedFileSummary({
  * repos" when the workspace has multiple repos and the dialog is fanning out.
  */
 export function pickRepoLabel(
-  scopedRepo: string,
+  scopedRepo: string | undefined,
   isMultiRepo: boolean,
   resolveDisplayName: (name: string) => string | undefined,
   // Structural, matching the other translate-taking helpers in the app: this
@@ -374,7 +374,11 @@ export function pickRepoLabel(
   // from `@/lib/i18n` qualify. The branded `TFunction` excluded the latter.
   t: (key: string) => string,
 ): string {
-  if (scopedRepo) return resolveDisplayName(scopedRepo) || scopedRepo;
+  if (scopedRepo !== undefined) {
+    return scopedRepo
+      ? resolveDisplayName(scopedRepo) || scopedRepo
+      : resolveDisplayName("") || t("integrations:repository");
+  }
   if (isMultiRepo) return t("integrations:allRepos");
   return resolveDisplayName("") || t("integrations:repository");
 }
@@ -393,13 +397,7 @@ function useCreatePRHandler(
     if (!ps.title.trim()) return;
     ps.setOpen(false);
     try {
-      const result = await createPR(
-        ps.title.trim(),
-        ps.body.trim(),
-        baseBranch,
-        ps.draft,
-        ps.repo || undefined,
-      );
+      const result = await createPR(ps.title.trim(), ps.body.trim(), baseBranch, ps.draft, ps.repo);
       if (result.success) {
         const terms = resolveChangeRequestTerminology(result.provider, defaultTerminology);
         const title = ps.draft
@@ -465,7 +463,7 @@ function useVcsDialogsState(
   const { commit, createPR, repoNames, isLoading: isGitLoading } = useSessionGit(sessionId);
   const repoDisplayName = useRepoDisplayName(sessionId);
   const isMultiRepo = repoNames.length > 1;
-  const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo || undefined);
+  const changeRequestTerminology = useChangeRequestTerminology(sessionId, ps.repo);
   const fileSummary = useScopedFileSummary({
     scopedRepo: cs.repo,
     statusByRepo,
@@ -484,13 +482,10 @@ function useVcsDialogsState(
     // hook is not migrated. Translating only the label would produce a
     // half-translated toast.
     const label = cs.repo ? `Commit (${cs.repo})` : "Commit";
-    await gitWithFeedback(
-      () => commit(fullMessage, cs.stageAll, false, cs.repo || undefined),
-      label,
-    );
+    await gitWithFeedback(() => commit(fullMessage, cs.stageAll, false, cs.repo), label);
     cs.setMessage("");
     cs.setBody("");
-    cs.setRepo("");
+    cs.setRepo(undefined);
   }, [cs, gitWithFeedback, commit]);
   const handleCreatePR = useCreatePRHandler(
     ps,

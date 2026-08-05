@@ -146,19 +146,23 @@ function collectPathsFromFiles(
   paths: Set<string>,
   files: Record<string, UncommittedFile>,
   repositoryName?: string,
+  useRepositoryKeys: boolean = true,
 ): void {
   for (const path of Object.keys(files)) {
-    // Always add bare path (for deduping repo-unaware sources like cumulative
-    // diffs that may not carry repository_name).
-    paths.add(path);
-    // Also add composite key (for repo-aware dedup when sources carry repo info).
-    if (repositoryName) paths.add(reviewFileKey({ path, repository_name: repositoryName }));
+    // In multi-repo mode a bare path identifies the workspace root. A child
+    // path must stay composite-keyed so it cannot hide a same-named root file
+    // in the cumulative diff.
+    if (!useRepositoryKeys || !repositoryName) paths.add(path);
+    if (useRepositoryKeys && repositoryName) {
+      paths.add(reviewFileKey({ path, repository_name: repositoryName }));
+    }
   }
 }
 
 function collectUncommittedPaths(
   statusByRepo: BuildReviewSourcesInput["statusByRepo"],
   gitStatus: BuildReviewSourcesInput["gitStatus"],
+  useRepositoryKeys: boolean,
 ): Set<string> {
   const paths = new Set<string>();
   if (statusByRepo && statusByRepo.length > 0) {
@@ -168,10 +172,16 @@ function collectUncommittedPaths(
           paths,
           status.files as Record<string, UncommittedFile>,
           repository_name || undefined,
+          useRepositoryKeys,
         );
     }
   } else if (gitStatus?.files) {
-    collectPathsFromFiles(paths, gitStatus.files as Record<string, UncommittedFile>);
+    collectPathsFromFiles(
+      paths,
+      gitStatus.files as Record<string, UncommittedFile>,
+      undefined,
+      useRepositoryKeys,
+    );
   }
   return paths;
 }
@@ -311,8 +321,9 @@ function countReviewSources(files: ReviewFile[]): SourceCounts {
 export function buildReviewSources(input: BuildReviewSourcesInput): BuildReviewSourcesResult {
   const { gitStatus, statusByRepo } = input;
   const fileMap = new Map<string, ReviewFile>();
+  const useRepositoryKeys = input.useRepositoryKeys ?? true;
 
-  const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus);
+  const uncommittedPaths = collectUncommittedPaths(statusByRepo, gitStatus, useRepositoryKeys);
   addUncommittedSources(fileMap, statusByRepo, gitStatus);
   addCommittedAndPRSources(fileMap, input, uncommittedPaths);
   const allFiles = suppressAvailableGitlinkFiles(sortReviewFiles(fileMap));

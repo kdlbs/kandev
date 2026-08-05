@@ -276,8 +276,17 @@ func (m *Manager) initializedSubmodulePath(workspaceRoot, parentPath, relativePa
 		m.logger.Warn("submodule discovery rejected unsafe path", zap.String("path", relativePath))
 		return "", false
 	}
+	parentRoot, err := os.OpenRoot(parentPath)
+	if err != nil {
+		m.logger.Warn("submodule discovery could not open parent worktree",
+			zap.String("path", parentPath), zap.Error(err))
+		return "", false
+	}
+	defer func() { _ = parentRoot.Close() }()
+	// Root.Lstat bounds the Git-declared relative path to the authenticated
+	// parent worktree before the absolute path is used by the tracker.
+	childInfo, err := parentRoot.Lstat(filepath.FromSlash(relativePath))
 	childPath := filepath.Clean(filepath.Join(parentPath, filepath.FromSlash(relativePath)))
-	childInfo, err := os.Lstat(childPath)
 	if err != nil || !childInfo.IsDir() || childInfo.Mode()&os.ModeSymlink != 0 {
 		m.logger.Warn("submodule discovery rejected child worktree",
 			zap.String("path", childPath), zap.Error(err))

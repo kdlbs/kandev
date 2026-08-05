@@ -184,6 +184,37 @@ describe("nested scope review sources", () => {
       `${NESTED_SCOPE}\u0000README.md`,
     ]);
   });
+
+  it("keeps a root cumulative file beside a same-named child uncommitted file", () => {
+    const result = buildReviewSources({
+      gitStatus: undefined,
+      statusByRepo: [nestedStatus],
+      cumulativeDiff: {
+        files: {
+          "README.md": {
+            path: "README.md",
+            diff: "@@root-committed@@",
+            status: "modified",
+            additions: 1,
+            deletions: 0,
+          },
+        },
+      },
+      prDiffFiles: undefined,
+      useRepositoryKeys: true,
+    });
+
+    expect(result.allFiles.map(reviewFileKey).sort()).toEqual([
+      "README.md",
+      `${NESTED_SCOPE}\u0000src/local.ts`,
+    ]);
+    expect(result.allFiles.find((file) => file.repository_name === undefined)?.source).toBe(
+      "committed",
+    );
+    expect(result.allFiles.find((file) => file.repository_name === NESTED_SCOPE)?.source).toBe(
+      "uncommitted",
+    );
+  });
 });
 
 describe("nested scope gitlink sources", () => {

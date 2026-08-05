@@ -338,9 +338,7 @@ function useStageDispatch({
   const stageAll = useCallback(
     async (): Promise<GitOperationResult> => {
       if (reposInFiles.length <= 1) return gitOps.stage(undefined, reposInFiles[0]);
-      return fanOutAcrossRepositoryWaves(reposInFiles, "stage", (r) =>
-        gitOps.stage(undefined, r || undefined),
-      );
+      return fanOutAcrossRepositoryWaves(reposInFiles, "stage", (r) => gitOps.stage(undefined, r));
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
     [reposInFiles, gitOps.stage],
@@ -349,7 +347,7 @@ function useStageDispatch({
     async (): Promise<GitOperationResult> => {
       if (reposInFiles.length <= 1) return gitOps.unstage(undefined, reposInFiles[0]);
       return fanOutAcrossRepositoryWaves(reposInFiles, "unstage", (r) =>
-        gitOps.unstage(undefined, r || undefined),
+        gitOps.unstage(undefined, r),
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
@@ -367,15 +365,15 @@ function useStageDispatch({
       amend: boolean = false,
       repo?: string,
     ): Promise<GitOperationResult> => {
-      if (repo !== undefined) return gitOps.commit(message, stageAllOpt, amend, repo || undefined);
+      if (repo !== undefined) return gitOps.commit(message, stageAllOpt, amend, repo);
       const reposWithStaged = Array.from(new Set(stagedFiles.map((f) => f.repository_name ?? "")));
       const reposToCommit = stageAllOpt ? reposInFiles : reposWithStaged;
       if (reposToCommit.length === 0) return gitOps.commit(message, stageAllOpt, amend);
       if (reposToCommit.length === 1) {
-        return gitOps.commit(message, stageAllOpt, amend, reposToCommit[0] || undefined);
+        return gitOps.commit(message, stageAllOpt, amend, reposToCommit[0]);
       }
       return fanOutAcrossRepositoryWaves(reposToCommit, "commit", (r) =>
-        gitOps.commit(message, stageAllOpt, amend, r || undefined),
+        gitOps.commit(message, stageAllOpt, amend, r),
       );
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps -- stable fn ref
@@ -388,14 +386,14 @@ function useStageDispatch({
       operation: string,
       op: (paths: string[], repo: string | undefined) => Promise<GitOperationResult>,
     ): Promise<GitOperationResult> => {
-      if (explicitRepo !== undefined) return op(paths, explicitRepo || undefined);
+      if (explicitRepo !== undefined) return op(paths, explicitRepo);
       const buckets = groupPathsByRepo(paths);
       if (buckets.size <= 1) {
         const [repo, repoPaths] = buckets.entries().next().value as [string, string[]];
-        return op(repoPaths, repo || undefined);
+        return op(repoPaths, repo);
       }
       return fanOutAcrossRepositoryWaves(Array.from(buckets.keys()), operation, (repo) =>
-        op(buckets.get(repo) ?? [], repo || undefined),
+        op(buckets.get(repo) ?? [], repo),
       );
     },
     [groupPathsByRepo],
@@ -714,14 +712,14 @@ export function useSessionGit(sessionId: string | null | undefined): SessionGit 
     // (single-repo). With paths, we route to the right repo per file.
     stage: (paths?: string[], repo?: string) => {
       if (paths && paths.length > 0) return stageFile(paths, repo);
-      if (repo) return gitOps.stage(undefined, repo);
+      if (repo !== undefined) return gitOps.stage(undefined, repo);
       return stageAll();
     },
     stageFile,
     stageAll,
     unstage: (paths?: string[], repo?: string) => {
       if (paths && paths.length > 0) return unstageFile(paths, repo);
-      if (repo) return gitOps.unstage(undefined, repo);
+      if (repo !== undefined) return gitOps.unstage(undefined, repo);
       return unstageAll();
     },
     unstageFile,
