@@ -2,7 +2,12 @@
 
 import { useMemo } from "react";
 import { useDroppable } from "@dnd-kit/core";
-import { KanbanCard, resolveTaskRepositoryChips, Task } from "./kanban-card";
+import {
+  KanbanCard,
+  resolveTaskRepositoryChips,
+  Task,
+  type KanbanPresentation,
+} from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
 import { cn } from "@/lib/utils";
 import { useAppStore } from "@/components/state-provider";
@@ -25,6 +30,7 @@ export interface WorkflowStep {
 interface KanbanColumnProps {
   step: WorkflowStep;
   tasks: Task[];
+  presentation?: KanbanPresentation;
   onPreviewTask: (task: Task) => void;
   onOpenTask: (task: Task) => void;
   onEditTask: (task: Task) => void;
@@ -47,6 +53,7 @@ interface KanbanColumnProps {
 export function KanbanColumn({
   step,
   tasks,
+  presentation = "desktop",
   onPreviewTask,
   onOpenTask,
   onEditTask,
@@ -122,6 +129,7 @@ export function KanbanColumn({
             key={task.id}
             task={queuedTaskWithTitle(task, steps, step)}
             workspaceId={activeWorkspaceId}
+            presentation={presentation}
             externalLinkAvailability={externalLinkAvailability}
             repositoryChips={resolveTaskRepositoryChips(task, repositories)}
             onClick={onPreviewTask}

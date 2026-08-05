@@ -22,9 +22,12 @@ diverge without updating this file.
      destroy?(): void,
    })
    ```
-4. After the module resolves, the host calls `initialize(registry, host)`. On
-   plugin disable/uninstall the host calls `destroy?.()` and unregisters everything
-   that plugin added (registrations are tracked per pluginId).
+4. After the module resolves, the host calls `initialize(registry, host)`. A
+   reload/update may unregister the previous generation before starting the next
+   one; the host keeps that transition unresolved until the current generation's
+   initialization finishes. Slow or failed reloads do not by themselves revoke
+   open or saved task panels. On explicit plugin disable/uninstall the host calls
+   `destroy?.()`, removes the plugin's registrations, and closes its panels.
 
 ## Global entry point
 
@@ -363,7 +366,7 @@ interface TaskPanelRegistration {
   title: string;        // add-panel-menu row label and dockview tab title
   icon?: string;         // curated icon name (apps/web/lib/plugins/icons.ts)
   Component: React.ComponentType<PluginTaskPanelProps>; // wrapped in a PluginErrorBoundary
-  mobileEnabled?: boolean; // also render a phone bottom-nav entry. Default: false.
+  mobileEnabled?: boolean; // include in the phone's grouped Panels picker. Default: false.
 }
 
 interface PluginTaskMenuContext {
@@ -371,7 +374,7 @@ interface PluginTaskMenuContext {
   taskId: string;
   taskTitle: string;
   workflowStepId: string | null;
-  presentation: PluginPresentation; // kanban cards are desktop-only today
+  presentation: PluginPresentation; // the actual kanban layout: desktop or mobile
 }
 
 interface TaskMenuActionRegistration {
@@ -444,10 +447,15 @@ exception). A plugin `Component` that throws during render shows a small
 "failed to load" fallback inside just that panel — the panel error boundary
 is scoped to your panel only, not the surrounding dockview layout.
 
-On a phone viewport, `mobileEnabled: true` additionally appends a bottom-nav
-entry (after Terminal) with your panel's title/icon; selecting it renders
-your `Component` with `presentation: "mobile"` full-width in the mobile panel
-area — the same `Component`, no separate mobile registration.
+On a phone viewport, `mobileEnabled: true` adds the panel to one grouped
+**Panels** bottom-nav action (after Terminal); it does not add one navigation item
+per panel. The touch-sized `MobilePickerSheet` presents every available panel in
+an internally scrolling list. Selecting a row dismisses the picker and renders
+your `Component` as the single full-height mobile surface with
+`presentation: "mobile"` — the same `Component`, no separate mobile
+registration. During a slow or failed reload, the host preserves a selected panel;
+after a ready generation, a panel omitted by the new registration is closed. An
+explicit disable or uninstall closes every panel owned by the plugin.
 
 ### Kanban card contributions
 
@@ -511,9 +519,10 @@ defaults, or the bare component when the route opted out (`topbar: false`).
   `registry.getTaskPanels()`. `use-close-revoked-plugin-panels.ts` closes an
   open panel whose registration disappeared.
 - `components/task/mobile/session-mobile-bottom-nav.tsx` /
-  `session-mobile-layout.tsx`: append one bottom-nav entry per
-  `mobileEnabled` task panel; `MobilePanelArea` renders it for a
-  `plugin:{pluginId}:{panelKey}` panel id.
+  `plugin-panel-picker.tsx` / `session-mobile-layout.tsx`: expose all
+  `mobileEnabled` registrations through one grouped Panels picker, and reconcile
+  the focused panel against host lifecycle state; `MobilePanelArea` renders the
+  selected `plugin:{pluginId}:{panelKey}` panel.
 - `components/kanban-card-edit-submenu.tsx`: builds the card's `Edit` entry
   from `registry.getTaskMenuActions("edit")`.
 - `lib/state/layout-manager/plugin-panels.ts`: `pluginPanelId`/

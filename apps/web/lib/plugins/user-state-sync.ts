@@ -10,6 +10,11 @@ import type { PluginStorageScope, PluginUserStateChange } from "./types";
 /** Must match `ActionPluginUserStateUpdated` in apps/backend/pkg/websocket/actions.go. */
 export const PLUGIN_USER_STATE_UPDATED_ACTION = "plugin.user-state.updated";
 
+/** Keep writer ids identical on both the storage write and subscribe paths. */
+export function composeWriterId(baseWriterId: string, surfaceId: string | undefined): string {
+  return surfaceId ? `${baseWriterId}:${surfaceId}` : baseWriterId;
+}
+
 export interface UserStateSubscribeFilter {
   scope?: PluginStorageScope;
   scopeId?: string;
@@ -70,7 +75,7 @@ export function subscribeToUserStateChanges(
   filter: UserStateSubscribeFilter,
   handler: (change: PluginUserStateChange) => void,
 ): () => void {
-  const ownWriterId = filter.writerId ? `${localWriterId}:${filter.writerId}` : localWriterId;
+  const ownWriterId = composeWriterId(localWriterId, filter.writerId);
   const wsHandler = (payload: unknown): void => {
     const raw = payload as UserStateUpdatedPayload | undefined;
     if (!raw || raw.pluginId !== pluginId) return;

@@ -61,9 +61,9 @@ async function loadIfActive(
   const active = toActivePlugin(record);
   if (!active) return;
   if (evictCache) {
-    unloadPlugin(record.id, { evictCache: true });
+    unloadPlugin(record.id, { evictCache: true, transition: "reload" });
   } else {
-    unloadPlugin(record.id);
+    unloadPlugin(record.id, { transition: "reload" });
   }
   await loadPlugins([active], (pluginId) => buildHostApi(pluginId, storeApi, theme));
 }

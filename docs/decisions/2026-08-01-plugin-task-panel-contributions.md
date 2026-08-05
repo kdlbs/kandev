@@ -1,10 +1,16 @@
 # ADR-2026-08-01-plugin-task-panel-contributions: Plugin Task Panel, Kanban Menu Action, and Card Indicator Contributions
 
-**Status:** accepted
+**Status:** accepted (mobile navigation and lifecycle amended by ADR-2026-08-04-plugin-contribution-lifecycle-authority)
 **Date:** 2026-08-01
 **Area:** frontend
 
 ## Context
+
+> **Amendment:**
+> [ADR-2026-08-04-plugin-contribution-lifecycle-authority](2026-08-04-plugin-contribution-lifecycle-authority.md)
+> replaces the elapsed-time revocation heuristic with authoritative lifecycle
+> state and groups mobile-enabled task panels behind one bounded Panels picker.
+> The registration API and generic `"plugin-panel"` identity remain unchanged.
 
 The plugin contract's only UI surfaces are top-level routes, nav items,
 settings routes, and a fixed `PluginSlot` name list — there is no way for a
@@ -50,13 +56,14 @@ wrapped in a `PluginErrorBoundary`. Consequences of this shape:
   an unresolvable reference as droppable rather than throwing, and
   `Settings > Layouts` renders a generic placeholder box for one it can't
   render live.
-- `mobileEnabled: true` appends a phone bottom-nav entry rendering the same
-  `Component` with `presentation: "mobile"` — no separate mobile
-  registration, no separate mobile-only contract.
+- `mobileEnabled: true` adds the panel to one grouped Panels bottom-nav action;
+  the picker renders the same `Component` with `presentation: "mobile"` — no
+  separate mobile registration or mobile-only contract.
 - Disabling/uninstalling a plugin closes its currently open panels
-  (`useCloseRevokedPluginPanels`, driven by the registry's reactive version
-  counter) and removes its add-panel-menu row; a `Component` that throws
-  during render shows a fallback scoped to just that panel.
+  (`useCloseRevokedPluginPanels`, driven by authoritative lifecycle state) and
+  removes its add-panel-menu row; a `Component` that throws during render shows
+  a fallback scoped to just that panel. Slow or failed reloads preserve a panel
+  until a ready generation omits it.
 
 **Kanban menu action — data, not a rendered slot.**
 `registry.registerTaskMenuAction({ id, label, icon?, group: "edit", visible?, run })`

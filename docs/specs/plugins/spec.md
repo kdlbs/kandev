@@ -609,11 +609,18 @@ Mattermost-webapp model), not iframes. The full contract lives in
   component (identity in `params.pluginId`/`params.panelKey`), so a saved layout
   round-trips even when the owning plugin is later uninstalled — the layout manager
   drops an unresolvable reference instead of throwing, and `Settings > Layouts`
-  renders a placeholder box for it. `mobileEnabled: true` also appends a phone
-  bottom-nav entry rendering the same `Component` with `presentation: "mobile"`.
-  Disabling/uninstalling the plugin closes its open panels in the current session; a
-  `Component` that throws renders a per-panel error-boundary fallback without
-  affecting the rest of the layout.
+  renders a placeholder box for it. On phones, one bounded **Panels**
+  bottom-navigation entry opens a touch-native picker containing every
+  `mobileEnabled: true` registration; choosing one renders the same `Component`
+  full-height with `presentation: "mobile"`. Plugin loading and reloading are
+  authoritative lifecycle states, not elapsed-time guesses: a temporarily missing
+  registration never deletes an open or saved panel while its plugin is loading.
+  A successful initialization that omits a previously registered panel, or a
+  definitive disable/uninstall, closes that panel. If the removed panel is focused
+  on a phone, the session deterministically returns to Chat. A `Component` that
+  throws renders a per-panel error-boundary fallback without affecting the rest of
+  the layout. Decision:
+  ADR-2026-08-04-plugin-contribution-lifecycle-authority.
 - **Kanban card contributions:** `registerTaskMenuAction({ id, label, icon?,
   group: "edit", visible?, run })` adds an item to the kanban card's `Edit`
   submenu (the flat `Edit` item becomes `Edit > Edit task` once any plugin
@@ -722,6 +729,13 @@ complete.
   a message naming the missing capability.
 - **Checksum mismatch or unresolvable host-platform executable at install time**:
   install is rejected before any code runs.
+- **Frontend bundle import or initialization remains in flight**: open and saved
+  plugin-panel identities are preserved regardless of duration. A failed or timed-out
+  initialization leaves the panel recoverable for a later successful load; it is not
+  interpreted as disable or uninstall.
+- **Per-user state purge fails during uninstall**: uninstall fails closed before the
+  package or plugin record is removed. The stopped-but-installed plugin remains
+  retryable and a successful retry purges every user's rows before removal completes.
 
 ## Persistence guarantees
 
@@ -731,6 +745,9 @@ complete.
 - Extracted plugin packages persist at `~/.kandev/plugins/<id>/<version>/` until
   uninstall.
 - Plugin state in SQLite survives restarts.
+- `plugin_user_state` survives restarts and ordinary disable/enable cycles, but no row
+  survives a successful uninstall. If its purge fails, uninstall does not report
+  success and leaves the plugin installed so the cleanup can be retried.
 - Event delivery buffer is in-memory; events in the buffer do not survive a backend
   restart.
 - There are no plugin credentials to persist or lose — auth is re-derived from the
@@ -866,6 +883,35 @@ complete.
   a failed delivery leaves no durable user message and a retry can't duplicate
   the prompt.
 
+- **GIVEN** a saved or open plugin task panel and a plugin reload whose import or
+  `initialize()` takes longer than 500 milliseconds, **WHEN** registration eventually
+  succeeds with the same panel identity, **THEN** the panel remains in the layout and
+  renders the reloaded component without being closed or deleted.
+
+- **GIVEN** an open plugin task panel and a successfully initialized replacement
+  version that no longer registers that panel identity, **WHEN** initialization
+  completes, **THEN** the obsolete panel closes exactly once.
+
+- **GIVEN** a plugin task panel focused on a phone, **WHEN** the plugin is disabled or
+  uninstalled, **THEN** its picker row disappears, its component unmounts, and the
+  session focuses Chat instead of leaving an unavailable panel selected.
+
+- **GIVEN** several plugins register mobile-enabled task panels, **WHEN** a user opens
+  the task workspace on a phone, **THEN** the fixed bottom navigation exposes one
+  touch-sized Panels entry whose picker lists every panel without shrinking the other
+  navigation targets or causing document-level horizontal overflow.
+
+- **GIVEN** a plugin task-menu action is invoked from the phone kanban, **WHEN** its
+  `visible(context)` or `run(context)` callback executes, **THEN**
+  `context.presentation` is `"mobile"`; the same action invoked from desktop receives
+  `"desktop"`.
+
+- **GIVEN** a plugin has per-user state and deleting those rows returns an error,
+  **WHEN** an operator uninstalls it, **THEN** the request fails, the package and plugin
+  record remain installed for retry, and no successful-uninstall response is emitted.
+  **WHEN** cleanup later succeeds and uninstall is retried, **THEN** all users' rows,
+  the package, and the record are removed.
+
 ## Out of scope
 
 - **Remote / operator-hosted plugin tier.** The earlier `base_url` registration model,
@@ -908,6 +954,11 @@ complete.
   scope for now. See "Host data API".
 - **Per-session code-stats precomputation.** `SessionCodeStats` is computed on
   demand per request in v1; a materialized or cached aggregation is future work.
+- **New plugin contribution hooks or storage contracts.** This hardening does not add
+  registration methods, change the `plugin_user_state` schema, alter user-state HTTP
+  routes or WS payloads, or broaden the rich-text wrappers.
+- **A general mobile navigation redesign.** The bounded Panels picker applies only to
+  plugin-contributed task panels and reuses the existing task-mobile picker pattern.
 - **Workspace-scoped plugin data access.** v1 reads are global to the instance with
   a reserved scoping hook; per-plugin or per-user workspace restriction is future
   work (see ADR 0043 open decisions).

@@ -1,7 +1,6 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "@/lib/plugins/registry";
-import { pluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
 import { SessionMobileBottomNav } from "./session-mobile-bottom-nav";
 
 const PLUGIN_A = "plugin-a";
@@ -92,8 +91,10 @@ describe("SessionMobileBottomNav", () => {
 
     expect(screen.queryByRole("button", { name: "Status" })).toBeNull();
   });
+});
 
-  it("keeps two same-titled plugin panels independently navigable (distinct keys, not label)", () => {
+describe("SessionMobileBottomNav plugin panels", () => {
+  it("groups multiple mobile plugin panels behind one bounded Panels action", () => {
     function Notes() {
       return null;
     }
@@ -114,13 +115,38 @@ describe("SessionMobileBottomNav", () => {
       />,
     );
 
-    const notesButtons = screen.getAllByRole("button", { name: "Notes" });
-    expect(notesButtons).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Panels" })).toHaveLength(1);
+    expect(screen.queryAllByRole("button", { name: "Notes" })).toHaveLength(0);
 
-    fireEvent.click(notesButtons[0]);
-    expect(onPanelChange).toHaveBeenLastCalledWith(pluginPanelId(PLUGIN_A, "notes"));
+    fireEvent.click(screen.getByRole("button", { name: "Panels" }));
 
-    fireEvent.click(notesButtons[1]);
-    expect(onPanelChange).toHaveBeenLastCalledWith(pluginPanelId(PLUGIN_B, "notes"));
+    const options = screen.getAllByTestId(/^mobile-plugin-panel-option-/);
+    expect(options).toHaveLength(2);
+    expect(options[0]?.className).toContain("min-h-11");
+    expect(options[1]?.className).toContain("min-h-11");
+
+    fireEvent.click(options[1]!);
+    expect(onPanelChange).toHaveBeenLastCalledWith("plugin:plugin-b:notes");
+    expect(screen.queryByTestId("mobile-plugin-panel-option-plugin-b-notes")).toBeNull();
+  });
+
+  it("keeps the grouped Panels action active for a selected plugin panel", () => {
+    function Notes() {
+      return null;
+    }
+    pluginRegistry
+      .forPlugin(PLUGIN_A)
+      .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes, mobileEnabled: true });
+
+    render(
+      <SessionMobileBottomNav
+        activePanel="plugin:plugin-a:notes"
+        onPanelChange={vi.fn()}
+        showStatus={false}
+        onOpenStatus={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Panels" }).className).toContain("text-primary");
   });
 });

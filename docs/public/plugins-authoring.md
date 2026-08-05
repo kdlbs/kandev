@@ -47,7 +47,10 @@ and the current host executable before extraction. Kandev then supervises the
 declared subprocess and injects a Host connection. The UI bundle is static
 package content loaded by the browser; it does not run inside the backend
 subprocess. On disable or uninstall, the host calls destroy when present and
-bulk-revokes registrations, styles, routes, handlers, and navigation.
+bulk-revokes registrations, styles, routes, handlers, and navigation. Reloads and
+updates are generation-safe: a slow or failed initialization is not treated as a
+definitive revocation, while a successfully ready generation can remove panels it
+no longer registers.
 
 ## Package and data layout
 
@@ -167,7 +170,11 @@ host may call initialize more than once across disable/enable cycles. Make it
 repeatable; return a cleanup function from subscriptions and timers, and use
 destroy to remove side effects that are not registrations. The host revokes all
 registry entries, closes plugin modals, and removes plugin styles on
-disable/uninstall.
+disable/uninstall. Reloads can temporarily leave a plugin in a loading or failed
+state; open and saved panels remain until the current generation is ready. A
+ready generation that no longer registers a panel closes it, while an explicit
+disable or uninstall closes every panel owned by the plugin. This lifecycle
+bookkeeping is host-internal; plugins do not call lifecycle methods.
 
 ### Frontend hook/API matrix
 
@@ -179,7 +186,7 @@ disable/uninstall.
 | registerComponent | registerComponent(slot, Component); component receives { slotProps?: unknown } | Active ui.bundle | Every registration is owner-tracked, error-isolated, and bulk-revoked | registry.registerComponent("task-sidebar", Panel) |
 | registerWsHandler | registerWsHandler(action, handler(payload)); receives actions bridged from lib/ws | Active ui.bundle | Handler is removed on disable/uninstall; tolerate duplicate/replayed actions | registry.registerWsHandler("acme.updated", renderUpdate) |
 | registerKeybinding | registerKeybinding(id, handler(event)); id must be declared in ui.keybindings; users can override the effective combo | ui.bundle and ui.keybindings[] | Handler is removed on disable/uninstall; editable targets/core shortcuts win | registry.registerKeybinding("open-panel", () => host.openModal(...)) |
-| registerTaskPanel | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation } | Active ui.bundle | Panel renders behind its own error boundary; disable/uninstall closes any open instance | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel }) |
+| registerTaskPanel | { id, title, icon?, Component, mobileEnabled? }; adds a row to the task workspace's "+" (add panel) menu; Component receives { panelId, taskId, sessionId, presentation } | Active ui.bundle | Panel renders behind its own error boundary; slow/failed reloads preserve it, a ready generation missing it closes it, and disable/uninstall closes every owned instance | registry.registerTaskPanel({ id: "notes", title: "Notes", Component: NotesPanel }) |
 | registerTaskMenuAction | { id, label, icon?, group: "edit", visible?(context), run(context) }; adds an item to the kanban card's Edit submenu | Active ui.bundle | Action is revoked on disable/uninstall; a throwing/rejecting run is caught and logged | registry.registerTaskMenuAction({ id: "enhance", label: "Enhance", group: "edit", run: doEnhance }) |
 | host.React / host.jsx | Shared React instance and React.createElement alias | Active ui.bundle | No cleanup; never bundle a second React/Radix runtime | const h = host.jsx |
 | host.store | Curated Zustand { getState, setState, subscribe } for the live app store | Active ui.bundle | Unsubscribe in destroy; setState mutates the whole SPA and is not a plugin database | const stop = host.store.subscribe(render) |
@@ -371,32 +378,39 @@ capabilities:
 function useNoteValue(taskId, panelId) {
   const [value, setValue] = host.React.useState("");
   const [loadedTaskId, setLoadedTaskId] = host.React.useState(null);
+  const [readError, setReadError] = host.React.useState(false);
   const updatedAtRef = host.React.useRef(undefined);
+  const dirtyRef = host.React.useRef(false);
   // Holds cancellation/generation state outside the effect so `refresh` is a
   // stable function the conflict-refetch below can also call, instead of
   // duplicating the read-and-commit logic without its guards.
   const guardRef = host.React.useRef({ cancelled: false, generation: 0 });
 
-  const refresh = host.React.useCallback(() => {
+  const refresh = host.React.useCallback((options = {}) => {
+    const preserveValue = options.preserveValue ?? dirtyRef.current;
     const guard = guardRef.current;
     const generation = ++guard.generation;
-    host.storage.get("task", taskId, "note").then(
+    return host.storage.get("task", taskId, "note").then(
       (entry) => {
         // Ignore a response that resolves after taskId changed, the panel
         // unmounted, or a newer refresh started — otherwise a stale read
         // (the previous task's note, or one of two overlapping reads that
         // resolved out of order) can land in the current field.
         if (guard.cancelled || generation !== guard.generation) return;
-        setValue(entry ? entry.value : "");
+        if (!preserveValue && !dirtyRef.current) setValue(entry ? entry.value : "");
         updatedAtRef.current = entry ? entry.updatedAt : undefined;
         setLoadedTaskId(taskId);
+        setReadError(false);
+        return true;
       },
       () => {
-        // A rejected read still counts as "loaded" — render the (empty)
-        // editor rather than leaving the panel stuck with no error or retry
-        // state.
-        if (guard.cancelled || generation !== guard.generation) return;
-        setLoadedTaskId(taskId);
+        // Do not mark the task loaded after a rejected read. Rendering an
+        // empty editor here would allow its first save to omit
+        // ifUnmodifiedSince and overwrite an existing note. Keep the panel
+        // in a retry state until an authoritative read succeeds.
+        if (guard.cancelled || generation !== guard.generation) return false;
+        setReadError(true);
+        return false;
       },
     );
   }, [taskId]);
@@ -409,7 +423,9 @@ function useNoteValue(taskId, panelId) {
     // taskId) until this effect's first refresh() resolves.
     setValue("");
     updatedAtRef.current = undefined;
+    dirtyRef.current = false;
     setLoadedTaskId(null);
+    setReadError(false);
     refresh();
     // Scope echo suppression to this panel instance rather than the shared
     // per-tab default writer id — otherwise a second surface editing the
@@ -424,40 +440,162 @@ function useNoteValue(taskId, panelId) {
       unsubscribe();
     };
   }, [taskId, panelId, refresh]);
-  return [value, setValue, updatedAtRef, loadedTaskId === taskId, refresh];
+  return {
+    value,
+    setValue,
+    updatedAtRef,
+    dirtyRef,
+    loaded: loadedTaskId === taskId,
+    readError,
+    refresh,
+  };
 }
 
 function NotesPanel({ taskId, panelId }) {
-  const [value, setValue, updatedAtRef, loaded, refresh] = useNoteValue(taskId, panelId);
+  const { value, setValue, updatedAtRef, dirtyRef, loaded, readError, refresh } = useNoteValue(
+    taskId,
+    panelId,
+  );
+  const [conflict, setConflict] = host.React.useState(false);
+  const [writeError, setWriteError] = host.React.useState(false);
+  const pendingValueRef = host.React.useRef(undefined);
+  const writeTimerRef = host.React.useRef(undefined);
+  const writeInFlightRef = host.React.useRef(false);
+  const writeBlockedRef = host.React.useRef(false);
+  const writeGenerationRef = host.React.useRef(0);
+
+  const flushWrite = host.React.useCallback(() => {
+    if (
+      writeBlockedRef.current ||
+      writeInFlightRef.current ||
+      pendingValueRef.current === undefined
+    ) {
+      return;
+    }
+    const generation = writeGenerationRef.current;
+    const next = pendingValueRef.current;
+    pendingValueRef.current = undefined;
+    writeInFlightRef.current = true;
+    host.storage
+      .set("task", taskId, "note", next, {
+        writerId: panelId,
+        ifUnmodifiedSince: updatedAtRef.current,
+      })
+      .then((result) => {
+        if (writeGenerationRef.current !== generation) return;
+        updatedAtRef.current = result.updatedAt;
+        dirtyRef.current = pendingValueRef.current !== undefined;
+        setConflict(false);
+        setWriteError(false);
+      })
+      .catch((error) => {
+        if (writeGenerationRef.current !== generation) return;
+        // Stop the queue on a conflict. Refresh only the authoritative
+        // timestamp and preserve the local value so the user can choose
+        // whether to retry their edit; never replace dirty text silently.
+        pendingValueRef.current = pendingValueRef.current ?? next;
+        writeBlockedRef.current = true;
+        if (error.name === "PluginStorageConflictError") {
+          setConflict(true);
+          return refresh({ preserveValue: true });
+        }
+        setWriteError(true);
+      })
+      .finally(() => {
+        if (writeGenerationRef.current !== generation) return;
+        writeInFlightRef.current = false;
+        if (!writeBlockedRef.current && pendingValueRef.current !== undefined) {
+          writeTimerRef.current = setTimeout(() => {
+            if (writeGenerationRef.current !== generation) return;
+            writeTimerRef.current = undefined;
+            flushWrite();
+          }, 150);
+        }
+      });
+  }, [dirtyRef, panelId, refresh, taskId, updatedAtRef]);
+
+  const scheduleWrite = host.React.useCallback(() => {
+    if (writeBlockedRef.current || writeTimerRef.current !== undefined) return;
+    const generation = writeGenerationRef.current;
+    writeTimerRef.current = setTimeout(() => {
+      if (writeGenerationRef.current !== generation) return;
+      writeTimerRef.current = undefined;
+      flushWrite();
+    }, 150);
+  }, [flushWrite]);
+
+  const retryWrite = host.React.useCallback(async () => {
+    if (!(await refresh({ preserveValue: true }))) return;
+    writeBlockedRef.current = false;
+    setConflict(false);
+    setWriteError(false);
+    scheduleWrite();
+  }, [refresh, scheduleWrite]);
+
+  host.React.useEffect(() => {
+    const generation = ++writeGenerationRef.current;
+    pendingValueRef.current = undefined;
+    writeInFlightRef.current = false;
+    writeBlockedRef.current = false;
+    setConflict(false);
+    setWriteError(false);
+    return () => {
+      if (writeGenerationRef.current === generation) writeGenerationRef.current += 1;
+      pendingValueRef.current = undefined;
+      writeInFlightRef.current = false;
+      writeBlockedRef.current = false;
+      if (writeTimerRef.current !== undefined) clearTimeout(writeTimerRef.current);
+      writeTimerRef.current = undefined;
+    };
+  }, [taskId, panelId]);
+
+  if (readError) {
+    return host.jsx(
+      "button",
+      { type: "button", onClick: refresh },
+      "Could not load this note. Retry",
+    );
+  }
   if (!loaded) return host.jsx("div", null, "Loading...");
-  return host.jsx(host.ui.RichTextEditor, {
+  const editor = host.jsx(host.ui.RichTextEditor, {
     taskId,
     value,
     onChange: (next) => {
       setValue(next);
-      host.storage
-        .set("task", taskId, "note", next, {
-          writerId: panelId,
-          ifUnmodifiedSince: updatedAtRef.current,
-        })
-        .then((result) => {
-          updatedAtRef.current = result.updatedAt;
-        })
-        .catch((error) => {
-          // A 409 means another surface wrote first; re-fetch through the
-          // same guarded refresh — not a standalone get() — so this reload
-          // can't land after a newer one and let the user decide rather
-          // than silently overwriting their edit. Check error.name, not
-          // instanceof — a plugin bundle runs as a separate script, not an
-          // ES module importing the host's error class.
-          if (error.name === "PluginStorageConflictError") refresh();
-        });
+      dirtyRef.current = true;
+      pendingValueRef.current = next;
+      scheduleWrite();
     },
   });
+  const status = conflict
+    ? host.jsx(
+        "div",
+        null,
+        "This note changed elsewhere. Your edit is preserved.",
+        host.jsx("button", { type: "button", onClick: retryWrite }, "Retry my edit"),
+      )
+    : writeError
+      ? host.jsx(
+          "div",
+          null,
+          "Could not save this note.",
+          host.jsx("button", { type: "button", onClick: retryWrite }, "Retry"),
+        )
+      : null;
+  return host.jsx("div", null, editor, status);
 }
 
 registry.registerTaskPanel({ id: "notes", title: "Notes", icon: "book", Component: NotesPanel, mobileEnabled: true });
 ```
+
+On a phone, all `mobileEnabled` panels appear under one **Panels** bottom-nav
+action. The picker uses a touch-sized, internally scrolling sheet with each
+panel's icon and title; selecting a row dismisses the picker and focuses that
+panel as the single full-height mobile surface. The component receives
+`presentation: "mobile"`; desktop dockview receives `presentation: "desktop"`.
+The same registration and panel identity drive both viewports, so a panel remains
+selected through a slow or failed reload and is closed only after a ready
+generation omits it or the plugin is explicitly disabled/uninstalled.
 
 `writerId` is appended to the host's own per-tab id, not a full replacement —
 a static value like `panelId` is the same across every tab that has that
@@ -521,7 +659,10 @@ Host reader because event queues are bounded and delivery is best-effort.
 
 `registerTaskMenuAction` adds an item to the kanban card's `Edit` submenu;
 `task-card-indicators` (see the named slots table) is the matching read-only
-surface, rendered beside the PR status icon on every card.
+surface, rendered beside the PR status icon on every card. Both `visible(context)`
+and `run(context)` receive the card's actual `presentation`: `"desktop"` on the
+desktop kanban and `"mobile"` on the phone kanban. Use it when an action needs to
+choose responsive behavior; the host supplies it through the card composition.
 
 ```js
 registry.registerTaskMenuAction({

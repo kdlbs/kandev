@@ -56,41 +56,6 @@ function isAncestor(maybeAncestor, descendant, cwd) {
   }
 }
 
-function mergeHeadRef(cwd) {
-  try {
-    return git(["rev-parse", "-q", "--verify", "MERGE_HEAD"], { quiet: true, cwd }).trim();
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Raise base to MERGE_HEAD when a merge commit is in progress (e.g. a
- * pre-commit hook running mid `git merge`).
- *
- * HEAD has not moved yet at that point — it is still the pre-merge parent —
- * so `merge-base(base, HEAD)` reflects the branch's state BEFORE this merge.
- * Every commit the merge is pulling in from the base branch then reads as
- * "new code in this change", the exact failure this file exists to prevent
- * (see the top comment), just triggered by hook timing instead of a stale
- * `--base`. Only trust MERGE_HEAD as already-known content when it is
- * reachable from the base branch: a normal "sync this branch with base"
- * merge, not pulling in an unrelated branch's unreviewed commits.
- */
-function pendingMergeFloor(base, cwd) {
-  const mergeHead = mergeHeadRef(cwd);
-  if (!mergeHead) return base;
-  if (!isAncestor(mergeHead, BASE_BRANCH, cwd)) return base;
-  if (!isAncestor(base, mergeHead, cwd)) return base;
-
-  console.log(
-    `ℹ base advanced to the in-progress merge's MERGE_HEAD ${mergeHead.slice(0, 9)} — ` +
-      `HEAD has not moved yet, and everything MERGE_HEAD brings in from\n` +
-      `  ${BASE_BRANCH} is not this change's code.`,
-  );
-  return mergeHead;
-}
-
 /**
  * Raise a caller-supplied base to the point HEAD forked from the base branch.
  *
@@ -178,6 +143,5 @@ export function resolveBase(argv = process.argv, cwd = REPO_ROOT) {
   }
 
   // Only an explicit base can be stale; the default IS the fork point already.
-  const floored = explicit ? forkPointFloor(base, cwd) : base;
-  return { base: pendingMergeFloor(floored, cwd) };
+  return { base: explicit ? forkPointFloor(base, cwd) : base };
 }

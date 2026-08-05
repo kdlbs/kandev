@@ -11,29 +11,13 @@
  * slot component, and an "edit"-group kanban menu action — see
  * apps/backend/cmd/plugin-fixture/fixture-package/ui/bundle.js.
  */
-import path from "node:path";
-import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { ApiClient } from "../../helpers/api-client";
 
-const PLUGIN_ID = "kandev-plugin-e2e";
 const PANEL_ID = "notes";
-const PACKAGE_PATH = path.resolve(
-  __dirname,
-  "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
-);
-
-async function installFixturePlugin(page: Page): Promise<void> {
-  await page.goto("/settings/plugins");
-  await page.getByTestId("install-plugin-trigger").click();
-  await expect(page.getByTestId("install-plugin-dialog")).toBeVisible();
-  await page.getByTestId("install-plugin-tab-upload").click();
-  await page.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
-  await page.getByTestId("install-plugin-upload-submit").click();
-  await expect(page.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 15_000 });
-}
 
 async function uninstallViaApi(apiClient: ApiClient): Promise<void> {
   await apiClient.rawRequest("DELETE", `/api/plugins/${PLUGIN_ID}`).catch(() => undefined);
@@ -194,6 +178,21 @@ test.describe("Plugins — task panel / kanban Edit submenu / card indicator", (
         { timeout: 10_000, intervals: [250, 500, 1000] },
       )
       .toBe("Enhanced via plugin action");
+
+    await expect
+      .poll(
+        async () => {
+          const res = await apiClient.rawRequest(
+            "GET",
+            `/api/plugins/${PLUGIN_ID}/user-state/task/${seedTask.id}/menu-presentation`,
+          );
+          if (res.status !== 200) return null;
+          const body = (await res.json()) as { value: string };
+          return body.value;
+        },
+        { timeout: 10_000, intervals: [250, 500, 1000] },
+      )
+      .toBe("desktop");
   });
 
   test("a sibling surface's write (the kanban action's default writerId) still reaches an open task panel in the same tab", async ({

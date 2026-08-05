@@ -41,10 +41,12 @@ vi.mock("@/components/github/pr-detail-panel", async () => {
 
 import {
   MobilePanelArea,
+  resolveMobilePluginPanel,
   resolveMobileReviewSource,
   terminalPaddingBottom,
   useMobilePanelHandlers,
 } from "./session-mobile-layout";
+import type { PluginLifecycleSnapshot } from "@/lib/plugins/registry";
 import { pluginRegistry } from "@/lib/plugins/registry";
 
 const MOCK_FILE: OpenFileTab = {
@@ -255,6 +257,28 @@ describe("resolveMobileReviewSource", () => {
 
   it("keeps GitLab Review when no GitHub PR exists", () => {
     expect(resolveMobileReviewSource(false, true)).toBe("gitlab");
+  });
+});
+
+describe("resolveMobilePluginPanel", () => {
+  const panel = "plugin:plugin-a:notes" as const;
+
+  function lifecycle(status: PluginLifecycleSnapshot["status"]): PluginLifecycleSnapshot {
+    return { status, generation: 3 };
+  }
+
+  it("preserves the selected panel while its plugin is loading or recovering", () => {
+    expect(resolveMobilePluginPanel(panel, lifecycle("loading"), false)).toBe(panel);
+    expect(resolveMobilePluginPanel(panel, lifecycle("failed"), false)).toBe(panel);
+  });
+
+  it("falls back to Chat only after definitive removal or a ready missing registration", () => {
+    expect(resolveMobilePluginPanel(panel, lifecycle("removed"), false)).toBe("chat");
+    expect(resolveMobilePluginPanel(panel, lifecycle("ready"), false)).toBe("chat");
+  });
+
+  it("keeps a ready selected panel when its registration is present", () => {
+    expect(resolveMobilePluginPanel(panel, lifecycle("ready"), true)).toBe(panel);
   });
 });
 

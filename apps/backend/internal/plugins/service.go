@@ -32,6 +32,10 @@ const maxDownloadSize = 100 << 20
 // download.
 const downloadTimeout = 60 * time.Second
 
+type userStateCleanupStore interface {
+	DeleteAllForPlugin(context.Context, string) error
+}
+
 // Service is the core plugin service: install/uninstall, the in-memory
 // Registry, the lifecycle state machine, and the runtime.Manager wiring
 // that spawns/supervises each plugin's subprocess.
@@ -71,13 +75,14 @@ type Service struct {
 	// cannot deadlock against it.
 	lifecycleLocks *keyedMutex
 
-	pluginsDir string
-	store      store.Store
-	registry   *Registry
-	state      *state.Store
-	userState  *state.UserStore
-	eventBus   bus.EventBus
-	log        *logger.Logger
+	pluginsDir       string
+	store            store.Store
+	registry         *Registry
+	state            *state.Store
+	userState        *state.UserStore
+	userStateCleanup userStateCleanupStore
+	eventBus         bus.EventBus
+	log              *logger.Logger
 
 	deliverer Deliverer
 	runtime   PluginRuntime
@@ -211,6 +216,14 @@ func (s *Service) StateStore() *state.Store {
 // StateStore.
 func (s *Service) SetUserState(st *state.UserStore) {
 	s.userState = st
+	s.userStateCleanup = st
+}
+
+// setUserStateCleanupStore replaces the narrow uninstall-cleanup seam. The
+// concrete UserStore remains the handler-facing store; this seam lets tests
+// exercise fail-closed uninstall behavior without weakening that accessor.
+func (s *Service) setUserStateCleanupStore(cleanup userStateCleanupStore) {
+	s.userStateCleanup = cleanup
 }
 
 // UserState returns the plugin_user_state store Provide constructed, for the
@@ -877,23 +890,23 @@ func validateInstallURL(raw string) error {
 	return nil
 }
 
-// Uninstall stops id's process (if running), purges its vault namespace,
-// removes its extracted package tree from disk, deletes its record from both
-// the store and the in-memory registry, and deletes every plugin_state row
-// scoped to id (best-effort — a failure there is logged but does not fail
-// the overall Uninstall, since the package/record are already gone by that
-// point), then notifies the attached Deliverer. Clearing plugin_state and
-// the vault namespace matters so a plugin reinstalled under the same id (or
-// an id later reused by a different plugin) never silently inherits stale
-// state or secrets.
+// Uninstall stops id's process (if running), purges its vault namespace and
+// every plugin_user_state row, removes its extracted package tree from disk,
+// deletes its record from both the store and the in-memory registry, and
+// deletes every plugin_state row scoped to id (best-effort — a failure there
+// is logged but does not fail the overall Uninstall, since the package/record
+// are already gone by that point), then notifies the attached Deliverer.
+// Clearing plugin_state, plugin_user_state, and the vault namespace matters so
+// a plugin reinstalled under the same id (or an id later reused by a different
+// plugin) never silently inherits stale state or secrets.
 //
 // Ordering is deliberate: the process is stopped FIRST so the plugin can no
 // longer race the cleanup by writing a fresh secret (SetSecret) between the
 // vault list and the deletes; then the vault namespace is purged and any
 // failure aborts the uninstall — nothing destructive (package/record
-// removal) has happened yet, so the operator simply retries (Stop and the
-// vault deletes are both idempotent). A failed uninstall therefore leaves
-// the plugin stopped-but-installed, resolved by a retry.
+// removal) has happened yet, so the operator simply retries (Stop, the vault
+// deletes, and the user-state purge are all idempotent). A failed uninstall
+// therefore leaves the plugin stopped-but-installed, resolved by a retry.
 func (s *Service) Uninstall(ctx context.Context, id string) error {
 	lock := s.lifecycleLocks.lockFor(id)
 	lock.Lock()
@@ -907,18 +920,12 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.runtime.Stop(id)
 	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
-		// The process is stopped but nothing else was removed. If it had been
-		// running, its persisted status still says active — reconcile it to
-		// error and notify observers so it isn't reported as running while no
-		// process is, before returning the retryable failure.
-		if wasRunning {
-			if setErr := s.SetStatus(id, StatusError); setErr != nil {
-				s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
-					zap.String("plugin_id", id), zap.Error(setErr))
-			}
-			s.notifyDeliverer()
-		}
+		s.reconcileAbortedUninstall(id, wasRunning)
 		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin secrets: %w", err)
+	}
+	if err := s.deletePluginUserState(ctx, id); err != nil {
+		s.reconcileAbortedUninstall(id, wasRunning)
+		return fmt.Errorf("plugins: uninstall aborted, could not purge plugin user state: %w", err)
 	}
 	if err := pkgtar.Remove(s.pluginsDir, id); err != nil {
 		return fmt.Errorf("plugins: remove installed package: %w", err)
@@ -928,9 +935,19 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 	}
 	s.registry.Remove(id)
 	s.deletePluginState(id)
-	s.deletePluginUserState(id)
 	s.notifyDeliverer()
 	return nil
+}
+
+func (s *Service) reconcileAbortedUninstall(id string, wasRunning bool) {
+	if !wasRunning {
+		return
+	}
+	if setErr := s.SetStatus(id, StatusError); setErr != nil {
+		s.log.Warn("plugins: could not mark plugin errored after an aborted uninstall",
+			zap.String("plugin_id", id), zap.Error(setErr))
+	}
+	s.notifyDeliverer()
 }
 
 // deletePluginSecrets removes every vault entry in id's namespace
@@ -974,16 +991,14 @@ func (s *Service) deletePluginState(id string) {
 	}
 }
 
-// deletePluginUserState best-effort removes every plugin_user_state row for
-// id, across every user (AC20) — the per-user counterpart to
-// deletePluginState. A nil userState store is a silent no-op.
-func (s *Service) deletePluginUserState(id string) {
-	if s.userState == nil {
-		return
+// deletePluginUserState removes every plugin_user_state row for id, across
+// every user (AC20). A nil cleanup store is a silent no-op for narrowly
+// constructed tests where per-user storage could never have been written.
+func (s *Service) deletePluginUserState(ctx context.Context, id string) error {
+	if s.userStateCleanup == nil {
+		return nil
 	}
-	if err := s.userState.DeleteAllForPlugin(context.Background(), id); err != nil {
-		s.log.Warn("plugins: failed to delete plugin_user_state on uninstall", zap.String("plugin_id", id), zap.Error(err))
-	}
+	return s.userStateCleanup.DeleteAllForPlugin(ctx, id)
 }
 
 // Enable transitions id to StatusActive, spawning its process first if it

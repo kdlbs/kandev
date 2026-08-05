@@ -99,9 +99,12 @@ export interface WorkflowStep {
   };
 }
 
+export type KanbanPresentation = PluginTaskMenuContext["presentation"];
+
 interface KanbanCardProps {
   task: Task;
   workspaceId: string | null;
+  presentation?: KanbanPresentation;
   externalLinkAvailability: KanbanExternalLinkAvailability;
   /** Display labels and hover paths of every repository linked to the task, primary first. */
   repositoryChips?: RepositoryChip[];
@@ -206,15 +209,17 @@ function buildLinkDialogHandlers(
   };
 }
 
-// Kanban cards render only on desktop today — no mobile board layout exists
-// yet, so presentation is always "desktop".
-function buildPluginMenuContext(task: Task, workspaceId: string | null): PluginTaskMenuContext {
+export function buildPluginMenuContext(
+  task: Task,
+  workspaceId: string | null,
+  presentation: KanbanPresentation,
+): PluginTaskMenuContext {
   return {
     workspaceId: workspaceId ?? "",
     taskId: task.id,
     taskTitle: task.title,
     workflowStepId: task.workflowStepId ?? null,
-    presentation: "desktop",
+    presentation,
   };
 }
 
@@ -250,6 +255,7 @@ function useKanbanCardDialogState() {
 function useKanbanCardMenus({
   task,
   workspaceId,
+  presentation = "desktop",
   steps,
   isDeleting,
   isArchiving,
@@ -264,6 +270,7 @@ function useKanbanCardMenus({
   KanbanCardProps,
   | "task"
   | "workspaceId"
+  | "presentation"
   | "externalLinkAvailability"
   | "steps"
   | "isDeleting"
@@ -316,7 +323,7 @@ function useKanbanCardMenus({
     ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
   };
 
-  const pluginMenuContext = buildPluginMenuContext(task, workspaceId);
+  const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);
 
   return {
     ...dialogs,
@@ -531,6 +538,7 @@ function KanbanCardFrame({
 export function KanbanCard({
   task,
   workspaceId,
+  presentation = "desktop",
   externalLinkAvailability,
   repositoryChips,
   onClick,
@@ -558,6 +566,7 @@ export function KanbanCard({
   const menu = useKanbanCardMenus({
     task,
     workspaceId,
+    presentation,
     externalLinkAvailability,
     steps,
     isDeleting,

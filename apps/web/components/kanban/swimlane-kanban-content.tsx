@@ -311,6 +311,7 @@ function MobileKanbanLayout({
       ) : (
         <SwipeableColumns
           steps={steps}
+          presentation="mobile"
           moveTargetSteps={moveTargetSteps}
           tasks={tasks}
           activeIndex={activeIndex}
@@ -394,6 +395,7 @@ function TabletKanbanLayout({
           <KanbanColumn
             step={step}
             tasks={getTasksForStep(step.id)}
+            presentation="desktop"
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}
             onEditTask={onEditTask}
@@ -444,6 +446,7 @@ function DesktopKanbanLayout({
         <KanbanColumn
           step={step}
           tasks={getTasksForStep(step.id)}
+          presentation="desktop"
           onPreviewTask={onPreviewTask}
           onOpenTask={onOpenTask}
           onEditTask={onEditTask}

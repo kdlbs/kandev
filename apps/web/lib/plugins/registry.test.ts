@@ -137,6 +137,34 @@ describe("pluginRegistry — lifecycle", () => {
     cleanup("plugin-a", "plugin-b");
   });
 
+  it("tracks host lifecycle snapshots without extending the plugin-facing registry", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 3,
+    });
+    expect("markPluginLoading" in pluginRegistry.forPlugin("plugin-a")).toBe(false);
+
+    pluginRegistry.markPluginReady("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "ready",
+      generation: 3,
+    });
+  });
+
+  it("does not let an older generation overwrite the current lifecycle", () => {
+    pluginRegistry.markPluginLoading("plugin-a", 4);
+    pluginRegistry.markPluginReady("plugin-a", 3);
+    pluginRegistry.markPluginFailed("plugin-a", 3);
+
+    expect(pluginRegistry.getPluginLifecycle("plugin-a")).toEqual({
+      status: "loading",
+      generation: 4,
+    });
+  });
+
   it("registers a WS handler and only returns it for the matching action", () => {
     const scoped = pluginRegistry.forPlugin("plugin-a");
     const handler = () => {};

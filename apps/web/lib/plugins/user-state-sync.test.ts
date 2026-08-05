@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { pluginRegistry } from "./registry";
-import { PLUGIN_USER_STATE_UPDATED_ACTION, subscribeToUserStateChanges } from "./user-state-sync";
+import {
+  composeWriterId,
+  PLUGIN_USER_STATE_UPDATED_ACTION,
+  subscribeToUserStateChanges,
+} from "./user-state-sync";
 
 function dispatch(payload: unknown) {
   pluginRegistry
@@ -92,6 +96,16 @@ describe("subscribeToUserStateChanges", () => {
       writerId: "tab-2",
     });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("composeWriterId", () => {
+  it("keeps the base id when there is no surface discriminator", () => {
+    expect(composeWriterId("tab-1", undefined)).toBe("tab-1");
+  });
+
+  it("uses the same separator and order for surface-scoped ids", () => {
+    expect(composeWriterId("tab-1", "panel-xyz")).toBe("tab-1:panel-xyz");
   });
 });
 

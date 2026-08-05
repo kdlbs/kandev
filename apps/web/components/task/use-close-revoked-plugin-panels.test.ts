@@ -1,10 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import { useCloseRevokedPluginPanels } from "./use-close-revoked-plugin-panels";
 
 const PLUGIN_ID = "plugin-a";
 const PLUGIN_PANEL_ID = "plugin:plugin-a:notes";
+const REVOKED_PLUGIN_PANEL_ID = "plugin:plugin-gone:notes";
+const UNKNOWN_PLUGIN_PANEL_ID = "plugin:plugin-unknown:notes";
 
 type FakePanel = { id: string };
 
@@ -33,13 +35,8 @@ function registerNotesPanel() {
     .registerTaskPanel({ id: "notes", title: "Notes", Component: Notes });
 }
 
-beforeEach(() => {
-  vi.useFakeTimers();
-});
-
 afterEach(() => {
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
-  vi.useRealTimers();
 });
 
 describe("useCloseRevokedPluginPanels", () => {
@@ -52,19 +49,27 @@ describe("useCloseRevokedPluginPanels", () => {
     const { api } = makeFakeApi(["chat", PLUGIN_PANEL_ID]);
 
     renderHook(() => useCloseRevokedPluginPanels(api as never));
-    vi.runAllTimers();
 
     expect(api.panels.map((p) => p.id)).toEqual(["chat", PLUGIN_PANEL_ID]);
   });
 
   it("closes a plugin panel whose plugin is no longer registered (AC4)", () => {
-    const { api, removed } = makeFakeApi(["chat", "plugin:plugin-gone:notes"]);
+    pluginRegistry.markPluginReady("plugin-gone", 1);
+    const { api, removed } = makeFakeApi(["chat", REVOKED_PLUGIN_PANEL_ID]);
 
     renderHook(() => useCloseRevokedPluginPanels(api as never));
-    vi.runAllTimers();
 
     expect(api.panels.map((p) => p.id)).toEqual(["chat"]);
-    expect(removed).toEqual(["plugin:plugin-gone:notes"]);
+    expect(removed).toEqual([REVOKED_PLUGIN_PANEL_ID]);
+  });
+
+  it("preserves a plugin panel until its lifecycle snapshot is known", () => {
+    const { api, removed } = makeFakeApi([UNKNOWN_PLUGIN_PANEL_ID]);
+
+    renderHook(() => useCloseRevokedPluginPanels(api as never));
+
+    expect(api.panels.map((p) => p.id)).toEqual([UNKNOWN_PLUGIN_PANEL_ID]);
+    expect(removed).toEqual([]);
   });
 
   it("closes a plugin panel after its plugin is unregistered mid-session (AC4)", () => {
@@ -75,26 +80,46 @@ describe("useCloseRevokedPluginPanels", () => {
     expect(api.panels.map((p) => p.id)).toEqual([PLUGIN_PANEL_ID]);
 
     pluginRegistry.unregisterPlugin(PLUGIN_ID);
+    pluginRegistry.markPluginReady(PLUGIN_ID, 11);
     rerender();
-    vi.runAllTimers();
 
     expect(api.panels.map((p) => p.id)).toEqual([]);
   });
 
-  it("does not close a panel whose plugin re-registers within the grace window (live reload)", () => {
+  it("preserves missing panels while a plugin generation is loading or failed", () => {
     registerNotesPanel();
     const { api } = makeFakeApi([PLUGIN_PANEL_ID]);
 
     const { rerender } = renderHook(() => useCloseRevokedPluginPanels(api as never));
 
-    // host.ts's loadPlugin unregisters, then (after an await) re-registers —
-    // simulate that in-flight reload landing before the grace window elapses.
+    pluginRegistry.markPluginLoading(PLUGIN_ID, 20);
     pluginRegistry.unregisterPlugin(PLUGIN_ID);
     rerender();
-    registerNotesPanel();
-    rerender();
-    vi.runAllTimers();
 
     expect(api.panels.map((p) => p.id)).toEqual([PLUGIN_PANEL_ID]);
+
+    pluginRegistry.markPluginFailed(PLUGIN_ID, 20);
+    rerender();
+
+    expect(api.panels.map((p) => p.id)).toEqual([PLUGIN_PANEL_ID]);
+
+    pluginRegistry.markPluginReady(PLUGIN_ID, 20);
+    rerender();
+
+    expect(api.panels).toEqual([]);
+  });
+
+  it("closes every owned panel immediately after definitive removal", () => {
+    const { api, removed } = makeFakeApi([
+      "plugin:plugin-gone:notes",
+      "plugin:plugin-gone:other",
+      "chat",
+    ]);
+
+    pluginRegistry.markPluginRemoved("plugin-gone", 11);
+    renderHook(() => useCloseRevokedPluginPanels(api as never));
+
+    expect(api.panels.map((p) => p.id)).toEqual(["chat"]);
+    expect(removed).toEqual(["plugin:plugin-gone:notes", "plugin:plugin-gone:other"]);
   });
 });

@@ -213,9 +213,20 @@
         id: "enhance-notes",
         label: "Enhance notes",
         group: "edit",
-        run: function (context) {
-          return host.storage.set("task", context.taskId, "note", "Enhanced via plugin action");
-        },
+      run: function (context) {
+          return host.storage
+            .set("task", context.taskId, "note", "Enhanced via plugin action")
+            .then(function () {
+              // Keep the received responsive context observable to the E2E
+              // fixture without changing the plugin-facing action contract.
+              return host.storage.set(
+                "task",
+                context.taskId,
+                "menu-presentation",
+                context.presentation,
+              );
+            });
+      },
       });
 
       registry.registerKeybinding("open-demo", function () {

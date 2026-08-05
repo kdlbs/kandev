@@ -85,6 +85,15 @@ export interface PluginTaskMenuActionRegistration extends TaskMenuActionRegistra
   pluginId: string;
 }
 
+/** Host-owned lifecycle states used to reconcile registrations with UI state. */
+export type PluginLifecycleStatus = "loading" | "ready" | "failed" | "removed";
+
+/** A generation-fenced lifecycle snapshot; never exposed through PluginRegistry. */
+export interface PluginLifecycleSnapshot {
+  status: PluginLifecycleStatus;
+  generation: number;
+}
+
 function removeByPlugin<T>(list: Owned<T>[], pluginId: string): Owned<T>[] {
   return list.filter((entry) => entry.pluginId !== pluginId);
 }
@@ -101,6 +110,8 @@ class PluginRegistryStore {
   private nextSlotRegistrationId = 0;
   /** Display names from the boot payload, used for derived page-chrome titles. */
   private pluginNames = new Map<string, string>();
+  /** Host-owned lifecycle state; plugin-facing registries only expose registrations. */
+  private pluginLifecycles = new Map<string, PluginLifecycleSnapshot>();
   /**
    * Keybinding ids declared in each plugin's `ui.keybindings` manifest,
    * synced by the shortcut dispatcher (`hooks/use-plugin-shortcuts.ts`) from
@@ -120,6 +131,27 @@ class PluginRegistryStore {
   };
 
   getVersion = (): number => this.version;
+
+  getPluginLifecycle(pluginId: string): PluginLifecycleSnapshot | undefined {
+    const snapshot = this.pluginLifecycles.get(pluginId);
+    return snapshot ? { ...snapshot } : undefined;
+  }
+
+  markPluginLoading(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "loading", generation);
+  }
+
+  markPluginReady(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "ready", generation);
+  }
+
+  markPluginFailed(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "failed", generation);
+  }
+
+  markPluginRemoved(pluginId: string, generation: number): void {
+    this.setPluginLifecycle(pluginId, "removed", generation);
+  }
 
   registerRoute(
     pluginId: string,
@@ -362,6 +394,23 @@ class PluginRegistryStore {
   private notify(): void {
     this.version += 1;
     this.listeners.forEach((listener) => listener());
+  }
+
+  private setPluginLifecycle(
+    pluginId: string,
+    status: PluginLifecycleStatus,
+    generation: number,
+  ): void {
+    const current = this.pluginLifecycles.get(pluginId);
+    if (
+      current &&
+      (generation < current.generation ||
+        (generation === current.generation && current.status === status))
+    ) {
+      return;
+    }
+    this.pluginLifecycles.set(pluginId, { status, generation });
+    this.notify();
   }
 }
 

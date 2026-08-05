@@ -1,6 +1,7 @@
 "use client";
 
 import { IconPencil } from "@tabler/icons-react";
+import { t } from "@/lib/i18n";
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { PluginTaskMenuContext } from "@/lib/plugins/types";
 import type { KanbanCardMenuEntry } from "./kanban-card-menu-items";
@@ -62,7 +63,7 @@ export function buildEditMenuEntry({
         kind: "item",
         key: "edit-task",
         icon,
-        label: "Edit task",
+        label: t("common:editTask"),
         disabled: disabled || !onEdit,
         onSelect: onEdit,
       },

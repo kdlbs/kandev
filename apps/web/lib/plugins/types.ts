@@ -129,7 +129,7 @@ export interface PluginTaskPanelProps {
 /**
  * Registration accepted by `PluginRegistry.registerTaskPanel`: contributes a
  * dockview panel to the task workspace `+` (add panel) menu on desktop, and
- * (when `mobileEnabled`) a phone bottom-nav entry.
+ * (when `mobileEnabled`) the grouped Panels picker on a phone.
  */
 export interface TaskPanelRegistration {
   /** Plugin-local panel id (unique within the plugin, not globally). */
@@ -140,7 +140,7 @@ export interface TaskPanelRegistration {
   icon?: string;
   /** Rendered as the panel body, wrapped in a `PluginErrorBoundary`. */
   Component: ReactType.ComponentType<PluginTaskPanelProps>;
-  /** Also render a phone bottom-nav entry for this panel. Default: false. */
+  /** Include this panel in the phone's grouped Panels picker. Default: false. */
   mobileEnabled?: boolean;
 }
 

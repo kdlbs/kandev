@@ -10,16 +10,10 @@
  * The cross-user negative (a *different* user gets nothing) is a Go-level
  * test — see internal/gateway/websocket/user_notifications_test.go.
  */
-import path from "node:path";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
+import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
-
-const PLUGIN_ID = "kandev-plugin-e2e";
-const PACKAGE_PATH = path.resolve(
-  __dirname,
-  "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
-);
 
 async function openSecondContext(
   testPage: Page,
@@ -52,12 +46,7 @@ test.describe("Plugins — host.storage realtime sync", () => {
     test.setTimeout(120_000);
 
     // --- Install once; both contexts share the same backend/session. ---
-    await testPage.goto("/settings/plugins");
-    await testPage.getByTestId("install-plugin-trigger").click();
-    await testPage.getByTestId("install-plugin-tab-upload").click();
-    await testPage.getByTestId("install-plugin-file-input").setInputFiles(PACKAGE_PATH);
-    await testPage.getByTestId("install-plugin-upload-submit").click();
-    await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toBeVisible({ timeout: 30_000 });
+    await installFixturePlugin(testPage);
 
     const seedTask = await apiClient.createTask(seedData.workspaceId, "Sync spec task", {
       workflow_id: seedData.workflowId,

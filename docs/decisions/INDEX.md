@@ -115,4 +115,5 @@ Read individual ADRs for full context. Create new ones via `/record decision` or
 | 2026-08-02-isolate-replaceable-session-stream-traffic | [Isolate Replaceable Session Stream Traffic](2026-08-02-isolate-replaceable-session-stream-traffic.md) | accepted | backend, frontend, protocol | 2026-08-02 |
 | 2026-08-03-backend-owned-cancellation-progress | [Keep Cancellation Progress Backend Owned](2026-08-03-backend-owned-cancellation-progress.md) | accepted | backend, frontend, protocol | 2026-08-03 |
 | 2026-08-03-separate-message-queue-provenance-cancellation-and-capacity | [Separate Message Queue Provenance, Cancellation, and Capacity](2026-08-03-separate-message-queue-provenance-cancellation-and-capacity.md) | accepted | backend, frontend, protocol, security | 2026-08-03 |
+| 2026-08-04-plugin-contribution-lifecycle-authority | [Make Plugin Contribution Lifecycle Authoritative](2026-08-04-plugin-contribution-lifecycle-authority.md) | accepted | frontend, security | 2026-08-04 |
 | 2026-08-04-navigation-manifest-boundaries | [Centralize Navigation and Namespace Plugin Destinations](2026-08-04-navigation-manifest-boundaries.md) | accepted | frontend | 2026-08-04 |

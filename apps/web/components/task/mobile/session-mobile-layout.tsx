@@ -30,8 +30,9 @@ import { ReviewPRSelector } from "@/components/review/review-pr-selector";
 import { MRDetailPanelComponent, mrTaskKey } from "@/components/gitlab/mr-detail-panel";
 import { PluginTaskPanel } from "../plugin-task-panel";
 import { parsePluginPanelId } from "@/lib/state/layout-manager/plugin-panels";
+import { useEffectiveMobilePanel, type MobileReviewSource } from "./mobile-plugin-panel-lifecycle";
 
-export type MobileReviewSource = "github" | "gitlab" | null;
+export { resolveMobilePluginPanel } from "./mobile-plugin-panel-lifecycle";
 
 function useMobilePanelChangeHandler(
   reviewSource: MobileReviewSource,
@@ -545,8 +546,11 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     mobilePR.prs.length > 0,
   );
   const reviewSource = resolveMobileReviewSource(mobilePR.prs.length > 0, mobileMR.mrs.length > 0);
-  const effectiveMobilePanel =
-    currentMobilePanel === "review" && !reviewSource ? "chat" : currentMobilePanel;
+  const effectiveMobilePanel = useEffectiveMobilePanel(
+    currentMobilePanel,
+    reviewSource,
+    handlePanelChange,
+  );
   const handleMobilePanelChange = useMobilePanelChangeHandler(
     reviewSource,
     handlePanelChangeAndClearSheet,

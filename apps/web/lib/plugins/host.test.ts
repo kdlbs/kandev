@@ -573,6 +573,7 @@ describe("overlapping loads for the same plugin: newest-initiated load wins", ()
     );
     await loadPlugins([activePlugin({ id: PLUGIN_CONC_A_ID })], makeHostFactory, newImporter);
     expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+    expect(pluginRegistry.getPluginLifecycle(PLUGIN_CONC_A_ID)?.status).toBe("ready");
 
     // The stale import finally resolves — it must bail before touching the
     // registry, leaving the newer registration intact (no unregister, no OldWidget).
@@ -580,6 +581,7 @@ describe("overlapping loads for the same plugin: newest-initiated load wins", ()
     await oldLoad;
 
     expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+    expect(pluginRegistry.getPluginLifecycle(PLUGIN_CONC_A_ID)?.status).toBe("ready");
   });
 
   it("a superseded load whose initialize() registers after an await does not append a duplicate slot entry", async () => {
@@ -625,6 +627,7 @@ describe("overlapping loads for the same plugin: newest-initiated load wins", ()
     await oldLoad;
 
     expect(pluginRegistry.getSlotComponents(SLOT)).toEqual([NewWidget]);
+    expect(pluginRegistry.getPluginLifecycle(PLUGIN_CONC_B_ID)?.status).toBe("ready");
   });
 });
 

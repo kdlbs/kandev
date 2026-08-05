@@ -74,7 +74,7 @@ import { generateUUID } from "@/lib/utils";
 import { softNavigate } from "@/lib/routing/client-router";
 import type { AppState } from "@/lib/state/store";
 import { pluginModalManager } from "./modal-manager";
-import { subscribeToUserStateChanges } from "./user-state-sync";
+import { composeWriterId, subscribeToUserStateChanges } from "./user-state-sync";
 import {
   PluginStorageConflictError,
   type PluginHostApi,
@@ -209,7 +209,7 @@ const TAB_WRITER_ID: string = generateUUID();
  * always differ (the discriminator differs).
  */
 function effectiveWriterId(surfaceId: string | undefined): string {
-  return surfaceId ? `${TAB_WRITER_ID}:${surfaceId}` : TAB_WRITER_ID;
+  return composeWriterId(TAB_WRITER_ID, surfaceId);
 }
 
 export function buildHostApi(
