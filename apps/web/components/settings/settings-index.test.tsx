@@ -63,15 +63,18 @@ describe("SettingsIndex", () => {
     expect(router.replace).toHaveBeenCalledTimes(1);
   });
 
-  it("decides once at mount: a later viewport change does not navigate", () => {
+  it("hands off when the viewport grows past the sidebar boundary", () => {
     breakpoint.isMobile = true;
     const { rerender } = render(<SettingsIndex restoreTo={RESTORE_TO} />);
+    expect(router.replace).not.toHaveBeenCalled();
 
+    // From md up the sidebar renders this same tree, so staying would show two
+    // identical menus side by side.
     breakpoint.isMobile = false;
     rerender(<SettingsIndex restoreTo={RESTORE_TO} />);
 
-    expect(router.replace).not.toHaveBeenCalled();
-    expect(screen.getByTestId("settings-index")).not.toBeNull();
+    expect(router.replace).toHaveBeenCalledWith(RESTORE_TO);
+    expect(screen.queryByTestId("settings-index")).toBeNull();
   });
 
   it("keeps the target it mounted with", () => {

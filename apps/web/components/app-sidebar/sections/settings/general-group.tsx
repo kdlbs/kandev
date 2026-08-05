@@ -23,7 +23,10 @@ export function GeneralGroup({ pathname, expanded, onToggle }: GeneralGroupProps
       label={t("settings:general")}
       icon={IconSettings}
       href={GENERAL_HREF}
-      isActive={pathname === GENERAL_HREF}
+      // Never active: the header only links to the group's first page, so the
+      // leaf for that page already carries the indicator. Marking both draws
+      // two active rows for one location.
+      isActive={false}
       expanded={expanded}
       onToggle={onToggle}
     >

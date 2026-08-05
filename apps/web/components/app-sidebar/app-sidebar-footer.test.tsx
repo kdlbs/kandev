@@ -241,8 +241,21 @@ describe("AppSidebarFooter", () => {
     expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
   });
 
-  it("does not navigate when the gear closes an already-open settings mode", () => {
-    pathname = "/settings";
+  it("leaves the settings surface when the gear closes an open settings mode", () => {
+    pathname = "/settings/general/appearance";
+    state.appSidebar.settingsMode = true;
+
+    renderFooter();
+    fireEvent.click(screen.getByTestId("sidebar-settings-gear"));
+
+    // Swapping the sidebar back while the main panel stayed on a settings page
+    // left kanban navigation beside an open settings page.
+    expect(mocks.routerPush).toHaveBeenCalledWith("/?home=overview&workspaceId=kanban-1");
+    expect(mocks.toggleSettingsMode).toHaveBeenCalledOnce();
+  });
+
+  it("does not navigate when the gear closes settings mode off a settings route", () => {
+    pathname = "/tasks";
     state.appSidebar.settingsMode = true;
 
     renderFooter();

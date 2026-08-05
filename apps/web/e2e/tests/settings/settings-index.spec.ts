@@ -37,6 +37,36 @@ test.describe("Settings index on desktop", () => {
     await expect(testPage).not.toHaveURL(/\/settings$/);
   });
 
+  test("hands off when a phone-width window grows past the sidebar boundary", async ({
+    testPage,
+  }) => {
+    await testPage.setViewportSize({ width: 390, height: 844 });
+    await testPage.goto("/settings");
+    await expect(testPage.getByTestId("settings-index")).toBeVisible();
+
+    // The sidebar appears at md and brings its own copy of this tree; two
+    // identical menus side by side is what this route exists to avoid.
+    await testPage.setViewportSize({ width: 1280, height: 860 });
+
+    await expect(testPage).toHaveURL(/\/settings\/general\/appearance$/);
+    await expect(testPage.getByTestId("settings-index")).toHaveCount(0);
+  });
+
+  test("marks only the active leaf, not the group header that links to it", async ({
+    testPage,
+  }) => {
+    await testPage.goto("/settings/general/appearance");
+
+    const takeover = testPage.getByTestId("app-sidebar-settings-mode");
+    await expect(takeover.getByRole("link", { name: "Appearance" })).toBeVisible();
+
+    // The General header links to Appearance, so marking both draws two active
+    // rows for one location. Same shape as System → Status.
+    const active = takeover.locator("a[data-active='true']");
+    await expect(active).toHaveCount(1);
+    await expect(active).toHaveAccessibleName(/Appearance/);
+  });
+
   test("redirects the /settings/general prefix to its first page", async ({ testPage }) => {
     await testPage.goto("/settings/general");
 

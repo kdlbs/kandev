@@ -71,7 +71,9 @@ export function SystemGroup({ pathname, expanded, onToggle }: SystemGroupProps) 
       label={t("common:system")}
       icon={IconServerCog}
       href={SYSTEM_STATUS_SETTINGS_HREF}
-      isActive={pathname.startsWith(SYSTEM_SETTINGS_HREF)}
+      // Never active: every /settings/system route has a leaf of its own, so the
+      // header would double the indicator (Status was the visible case).
+      isActive={false}
       expanded={expanded}
       onToggle={onToggle}
     >

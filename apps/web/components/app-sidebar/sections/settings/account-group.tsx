@@ -36,7 +36,9 @@ export function AccountGroup({ pathname, expanded, onToggle }: AccountGroupProps
       label={t("sidebar:account")}
       icon={IconUserCircle}
       href={ACCOUNT_SECURITY_SETTINGS_HREF}
-      isActive={pathname.startsWith(ACCOUNT_SETTINGS_HREF)}
+      // Never active: same as General and System — the header links to the first
+      // leaf, which owns the indicator.
+      isActive={false}
       expanded={expanded}
       onToggle={onToggle}
     >

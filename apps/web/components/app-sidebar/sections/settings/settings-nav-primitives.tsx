@@ -47,6 +47,10 @@ export function SettingsLeaf({
   return (
     <Link
       href={href}
+      // Exposed so a test can count the active rows: exactly one row may claim
+      // the current location, which is what group headers linking to their first
+      // leaf used to break.
+      data-active={isActive ? "true" : undefined}
       className={cn(
         "flex items-center gap-2 py-1.5 text-[13px] font-medium rounded-md cursor-pointer",
         NAV_FOCUS_CLASS,
@@ -128,6 +132,7 @@ export function SettingsGroup({
         {href ? (
           <Link
             href={href}
+            data-active={isActive ? "true" : undefined}
             className={cn(
               "flex flex-1 min-w-0 items-center gap-2 py-1.5 text-[13px] font-medium cursor-pointer",
               NAV_FOCUS_CLASS,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { SettingsPageNav } from "@/components/settings/settings-page-nav";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -24,26 +24,28 @@ const SETTINGS_INDEX_PATH = "/settings";
  * settings paths that a stored value has to still be a member of — see
  * `readLastSettingsPath`.
  *
- * Both decisions are made once, at mount. Resizing a window is not a reason to
- * navigate, and `useResponsiveBreakpoint` reads the real viewport on the first
- * client render, so there is no desktop-first flash to guard against.
+ * The handoff follows the live breakpoint rather than the one at mount: growing
+ * a window past `md` reveals the sidebar's copy of this tree, and two identical
+ * menus side by side is the duplication this route exists to remove.
+ * `useResponsiveBreakpoint` reads the real viewport on the first client render,
+ * so there is no desktop-first flash to guard against either way.
  */
 export function SettingsIndex({ restoreTo }: { restoreTo: string }) {
   const { t } = useTranslation();
   const router = useRouter();
   const { isMobile } = useResponsiveBreakpoint();
-  const [showIndex] = useState(isMobile);
-  // Captured so a re-render cannot retarget an in-flight handoff.
+  // Captured so a re-render cannot retarget an in-flight handoff. Nothing
+  // records `/settings`, so the stored value cannot change while we sit here.
   const restoreTarget = useRef(restoreTo);
 
   useEffect(() => {
-    if (showIndex) return;
+    if (isMobile) return;
     // `replace`, not `push`: with a history entry for `/settings` still in
     // place, Back would land here and immediately redirect again.
     router.replace(restoreTarget.current);
-  }, [router, showIndex]);
+  }, [router, isMobile]);
 
-  if (!showIndex) return null;
+  if (!isMobile) return null;
 
   return (
     <nav data-testid="settings-index" aria-label={t("common:settings")}>

@@ -14,9 +14,11 @@ test.describe("Settings sidebar takeover", () => {
     await expect(gear).toBeVisible();
     await expect(takeover).toBeVisible();
 
-    // Gear closes the takeover even though we're sitting on a settings page.
+    // Closing leaves the settings surface too: the sidebar and the main panel
+    // must not disagree (kanban navigation beside an open settings page).
     await gear.click();
     await expect(takeover).toHaveCount(0);
+    await expect(testPage).not.toHaveURL(/\/settings/);
 
     // Gear opens the takeover again.
     await gear.click();
@@ -38,10 +40,11 @@ test.describe("Settings sidebar takeover", () => {
     await expect(testPage).toHaveURL(/\/settings\/agents/);
     await expect(takeover).toBeVisible();
 
-    // Clicking the gear again must close the tree even though we're still on a
-    // settings page (the previous bug left it open).
+    // Clicking the gear again closes the tree and leaves the settings route,
+    // from a nested page too.
     await gear.click();
     await expect(takeover).toHaveCount(0);
+    await expect(testPage).not.toHaveURL(/\/settings/);
   });
 
   test("navigating off settings (Kandev brand → Home) closes the takeover", async ({
