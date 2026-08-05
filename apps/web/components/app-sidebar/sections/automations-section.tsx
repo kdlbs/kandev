@@ -145,6 +145,7 @@ export function AutomationsSection({ collapsed }: { collapsed: boolean }) {
       icon={IconBolt}
       headerAction={<OpenListShortcut />}
       headerActionVisibility="always"
+      defaultExpanded={false}
       collapsedSummary={rows.length > 0 ? rows.length : undefined}
     >
       {rows.length === 0 ? (

@@ -223,6 +223,18 @@ describe("AutomationsSection", () => {
   });
 });
 
+describe("AutomationsSection empty state", () => {
+  it("keeps an empty section folded until the user opens it", () => {
+    mocks.listAutomations.mockResolvedValue([]);
+
+    renderSection();
+
+    const header = screen.getByRole("button", { name: "Automations" });
+    expect(header.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("sidebar-automations-empty")).toBeNull();
+  });
+});
+
 describe("AutomationsSection last-run age", () => {
   // Nothing pushes an update for this label — the automation did not change,
   // the clock did. An idle sidebar re-renders only when its data does, so
