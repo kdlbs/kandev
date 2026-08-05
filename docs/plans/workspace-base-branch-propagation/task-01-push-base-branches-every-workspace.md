@@ -51,9 +51,15 @@ would require a fixture repo and would not fail for the right reason.
 (cd apps/backend && go test ./internal/agent/runtime/lifecycle/... ./internal/task/service/... -race)
 ```
 
+PASS — `ok .../internal/task/service 40.100s`, `ok .../internal/agent/runtime/lifecycle 22.957s`,
+`ok .../internal/agent/runtime/lifecycle/skill 3.889s`.
+
 ```bash
 (cd apps/backend && go test ./internal/agentctl/server/process/... ./internal/orchestrator/... -race)
 ```
+
+PASS — `ok .../internal/agentctl/server/process 90.732s`; every `./internal/orchestrator/...`
+package reported `ok` or had no test files.
 
 ## Files Likely Touched
 

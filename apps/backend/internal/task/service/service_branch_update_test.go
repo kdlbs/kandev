@@ -372,3 +372,123 @@ func TestUpdateRepositoryBaseBranch_PartialHydrationIsNotPushed(t *testing.T) {
 		t.Fatalf("expected no push for an incomplete hydration, got %d calls: %+v", len(calls), calls)
 	}
 }
+
+// Regression: collectTaskBaseBranches keyed the map by the bare Repository.Name.
+// A task may attach the same repository on several branches, and those siblings
+// live in `{RepoName}-{BranchSlug}` worktree directories — which is the name
+// their WorkspaceTracker reports. Keying by name alone collapsed every sibling
+// onto one entry, so the non-flat trackers found no key and fell back to
+// origin/main. Worse, because SetBaseBranches *replaces* the stored map, this
+// push overwrote the correctly-keyed map the launch path had already seeded.
+//
+// The keys must match lifecycle.baseBranchMetadataKey: the lowest-positioned
+// branch of a repeated repository keeps the flat legacy path, the rest are
+// suffixed with their branch-identity path slug.
+func TestUpdateRepositoryBaseBranch_MultiBranchKeysPerWorktree(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+	pusher := &fakeBaseBranchPusher{}
+	svc.SetAgentBaseBranchPusher(pusher)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "frontend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID:    "ws-1",
+		WorkflowID:     "wf-1",
+		WorkflowStepID: "step-1",
+		Title:          "Same repo, two branches",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	rows, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("ListTaskRepositories: %v, rows=%d", err, len(rows))
+	}
+	var sibling string
+	for _, r := range rows {
+		if r.CheckoutBranch == "feature/b" {
+			sibling = r.ID
+		}
+	}
+	if sibling == "" {
+		t.Fatal("no task_repositories row for feature/b")
+	}
+
+	if _, err := svc.UpdateRepositoryBaseBranch(ctx, UpdateRepositoryBaseBranchRequest{
+		TaskID:           task.ID,
+		TaskRepositoryID: sibling,
+		BaseBranch:       "staging",
+	}); err != nil {
+		t.Fatalf("UpdateRepositoryBaseBranch: %v", err)
+	}
+
+	calls := pusher.snapshot()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 pusher call, got %d", len(calls))
+	}
+	got := calls[0].branches
+
+	// feature/a is position 0, so it keeps the flat directory.
+	if got["frontend"] != "main" {
+		t.Errorf("branches[frontend] = %q, want main (flat sibling keeps its base)", got["frontend"])
+	}
+	// feature/b is the suffixed sibling and is the row we just updated.
+	if got["frontend-feature-b"] != "staging" {
+		t.Errorf("branches[frontend-feature-b] = %q, want staging", got["frontend-feature-b"])
+	}
+	// Multi-row tasks must not publish the empty-key fallback: lookupBaseBranch
+	// falls back to it for any unmatched tracker, which would hand one sibling's
+	// base branch to the other.
+	if _, ok := got[""]; ok {
+		t.Errorf("branches[\"\"] present for a multi-row task: %+v", got)
+	}
+}
+
+// The map keys are read by WorkspaceTracker, whose repositoryName is the
+// worktree *directory* basename — a sanitised repo name, not the raw
+// Repository.Name. A name with characters the directory sanitiser rewrites
+// (e.g. a space) produced a key no tracker could ever match.
+func TestCollectTaskBaseBranches_SanitizesRepositoryName(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	setBranchUpdateWorkflowStep(svc)
+
+	_ = repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "WS"})
+	_ = repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "WF"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-1", WorkspaceID: "ws-1", Name: "my repo", DefaultBranch: "main"})
+	_ = repo.CreateRepository(ctx, &models.Repository{ID: "repo-2", WorkspaceID: "ws-1", Name: "backend", DefaultBranch: "main"})
+
+	task, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "Unsanitised name",
+		Repositories: []TaskRepositoryInput{
+			{RepositoryID: "repo-1", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			{RepositoryID: "repo-2", BaseBranch: "develop", CheckoutBranch: "feature/b"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	branches, err := svc.collectTaskBaseBranches(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("collectTaskBaseBranches: %v", err)
+	}
+	if branches["my-repo"] != "main" {
+		t.Errorf("branches[my-repo] = %q, want main; got map %+v", branches["my-repo"], branches)
+	}
+	if _, ok := branches["my repo"]; ok {
+		t.Errorf("raw repository name leaked as a key: %+v", branches)
+	}
+	if branches["backend"] != "develop" {
+		t.Errorf("branches[backend] = %q, want develop", branches["backend"])
+	}
+}

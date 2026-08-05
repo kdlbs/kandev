@@ -38,13 +38,20 @@ spec: "../../specs/workspace-base-branch-propagation/spec.md"
 
 ## Verification
 
+Recorded against `4b52037` (the merge-base with `main` at the time of the run),
+which is the revision passed to `--new-from-rev`.
+
 ```bash
 (cd apps/backend && go test ./internal/agentctl/server/process/... -race)
 ```
 
+PASS — `ok github.com/kandev/kandev/internal/agentctl/server/process 90.732s`.
+
 ```bash
-(cd apps/backend && golangci-lint run ./... --new-from-rev=origin/main --timeout=5m)
+(cd apps/backend && golangci-lint run ./... --new-from-rev=4b52037 --timeout=5m)
 ```
+
+PASS — `0 issues.`
 
 ## Files Likely Touched
 
