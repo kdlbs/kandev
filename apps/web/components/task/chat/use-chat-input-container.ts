@@ -14,6 +14,7 @@ import type {
   MessageAttachment,
   ChatInputContainerHandle,
 } from "./chat-input-container";
+import { t } from "@/lib/i18n";
 
 type UseChatInputContainerParams = {
   ref: React.ForwardedRef<ChatInputContainerHandle>;
@@ -83,11 +84,11 @@ function getInputPlaceholder(
   hasAgentCommands: boolean,
   isStarting: boolean,
 ): string {
-  if (isStarting) return "Preparing workspace...";
+  if (isStarting) return t("task:preparingWorkspace");
   if (placeholder) return placeholder;
-  if (isAgentBusy) return "Queue more instructions...";
-  if (hasAgentCommands) return "Ask to make changes, @mention files, run /commands";
-  return "Ask to make changes, @mention files";
+  if (isAgentBusy) return t("task:queueMoreInstructions");
+  if (hasAgentCommands) return t("task:askToMakeChangesWithCommands");
+  return t("task:askToMakeChanges");
 }
 
 export function shouldShowChatFocusHint(args: {

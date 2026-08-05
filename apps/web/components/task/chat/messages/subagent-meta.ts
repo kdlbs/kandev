@@ -1,4 +1,5 @@
 import type { SubagentTaskPayload } from "@/components/task/chat/types";
+import { t } from "@/lib/i18n";
 
 export type SubagentMetaChip = {
   label: string;
@@ -45,13 +46,13 @@ export function subagentMetaChips(
   // but the subagent runs out-of-band and writes its result to output_file.
   // Surface a "background" chip so the UI doesn't look like a normal completion.
   if (payload.is_async || payload.status === "async_launched") {
-    chips.push({ label: "background", value: "background" });
+    chips.push({ label: t("task:background"), value: "background" });
   }
   if (typeof payload.duration_ms === "number" && payload.duration_ms > 0) {
-    chips.push({ label: "duration", value: formatDuration(payload.duration_ms) });
+    chips.push({ label: t("task:duration"), value: formatDuration(payload.duration_ms) });
   }
   if (typeof payload.total_tokens === "number" && payload.total_tokens > 0) {
-    chips.push({ label: "tokens", value: formatTokens(payload.total_tokens) });
+    chips.push({ label: t("task:tokens"), value: formatTokens(payload.total_tokens) });
   }
   // The header already states the child count ("10 tool calls"), so a chip
   // repeating the same number is noise. A divergence is not: it means the agent
@@ -63,13 +64,13 @@ export function subagentMetaChips(
     typeof payload.tool_use_count === "number" &&
     !(headerStatesCount && payload.tool_use_count === childCount)
   ) {
-    chips.push({ label: "tools", value: formatTools(payload.tool_use_count) });
+    chips.push({ label: t("task:tools"), value: formatTools(payload.tool_use_count) });
   }
   if (payload.model) {
-    chips.push({ label: "model", value: payload.model });
+    chips.push({ label: t("task:model"), value: payload.model });
   }
   if (payload.child_session_id) {
-    chips.push({ label: "session", value: truncateId(payload.child_session_id) });
+    chips.push({ label: t("task:session"), value: truncateId(payload.child_session_id) });
   }
 
   return chips;

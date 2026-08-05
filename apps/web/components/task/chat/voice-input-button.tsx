@@ -18,6 +18,8 @@ import { useToast } from "@/components/toast-provider";
 import { getShortcut } from "@/lib/keyboard/shortcut-overrides";
 import { whisperModelConfig } from "@/lib/voice/whisper-web-models";
 import { VoiceModelLoadIndicator } from "./voice-model-load-indicator";
+import { useTranslation } from "react-i18next";
+import { t } from "@/lib/i18n";
 
 type VoiceInputButtonProps = {
   /** Inserts the recognized transcript at the current cursor position. */
@@ -28,18 +30,20 @@ type VoiceInputButtonProps = {
   disabled?: boolean;
 };
 
-const TOOLTIP_BY_STATE: Record<VoiceInputState, string> = {
-  idle: "Voice input",
-  requesting: "Requesting microphone…",
-  recording: "Stop recording",
-  processing: "Transcribing…",
+// Catalog keys, not copy: both tables are built at module load, where a `t()`
+// call would freeze at the boot locale. They resolve at render.
+const TOOLTIP_KEY_BY_STATE: Record<VoiceInputState, string> = {
+  idle: "task:voiceInput",
+  requesting: "task:requestingMicrophone",
+  recording: "task:stopRecording",
+  processing: "task:transcribing",
 };
 
-const ARIA_BY_STATE: Record<VoiceInputState, string> = {
-  idle: "Start voice input",
-  requesting: "Requesting microphone permission",
-  recording: "Stop voice input",
-  processing: "Transcribing voice input",
+const ARIA_KEY_BY_STATE: Record<VoiceInputState, string> = {
+  idle: "task:startVoiceInput",
+  requesting: "task:requestingMicrophonePermission",
+  recording: "task:stopVoiceInput",
+  processing: "task:transcribingVoiceInput",
 };
 
 function ButtonIcon({
@@ -199,20 +203,19 @@ function useVoiceShortcut(
 
 // ── Unsupported fallback ────────────────────────────────────────────────
 
-function buildUnsupportedReason(): string {
-  if (typeof window === "undefined") return "Voice input is unavailable here.";
-  if (!window.isSecureContext) {
-    return "Voice input needs HTTPS. Open this site over https:// (or http://localhost) — most mobile browsers block microphone APIs on insecure origins.";
-  }
-  return "Voice input isn't supported in this browser. Try Chrome, Edge, or Safari 14.5+.";
+function buildUnsupportedReasonKey(): string {
+  if (typeof window === "undefined") return "task:voiceInputUnavailableHere";
+  if (!window.isSecureContext) return "task:voiceInputNeedsHttps";
+  return "task:voiceInputUnsupportedBrowser";
 }
 
 function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const handleClick = () => {
     toast({
-      title: "Voice input unavailable",
-      description: buildUnsupportedReason(),
+      title: t("task:voiceInputUnavailable"),
+      description: t(buildUnsupportedReasonKey()),
       variant: "error",
     });
   };
@@ -223,7 +226,7 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
           type="button"
           variant="ghost"
           size="icon"
-          aria-label="Voice input unavailable"
+          aria-label={t("task:voiceInputUnavailable")}
           data-testid="voice-input-button"
           data-state="unsupported"
           disabled={!!disabled}
@@ -233,7 +236,7 @@ function UnsupportedVoiceButton({ disabled }: { disabled?: boolean }) {
           <IconMicrophone className="h-4 w-4" />
         </Button>
       </TooltipTrigger>
-      <TooltipContent>Voice input unavailable — tap for details</TooltipContent>
+      <TooltipContent>{t("task:voiceInputUnavailableTapForDetails")}</TooltipContent>
     </Tooltip>
   );
 }
@@ -279,9 +282,10 @@ function resolveTooltip(args: {
     const pct = Number.isFinite(modelLoad.progress)
       ? Math.min(100, Math.max(0, Math.round(modelLoad.progress * 100)))
       : 0;
-    return `Downloading ${modelLabel}… ${pct}%`;
+    return t("task:downloadingModelPercent", { modelLabel, pct });
   }
-  return `${TOOLTIP_BY_STATE[state]}${holdMode && state === "idle" ? " (hold)" : ""}`;
+  const tooltip = t(TOOLTIP_KEY_BY_STATE[state]);
+  return holdMode && state === "idle" ? t("task:voiceTooltipHold", { tooltip }) : tooltip;
 }
 
 type VoiceMicButtonProps = {
@@ -318,7 +322,7 @@ function VoiceMicButton({
       type="button"
       variant="ghost"
       size="icon"
-      aria-label={ARIA_BY_STATE[state]}
+      aria-label={t(ARIA_KEY_BY_STATE[state])}
       aria-pressed={isRecording}
       data-testid="voice-input-button"
       data-state={state}

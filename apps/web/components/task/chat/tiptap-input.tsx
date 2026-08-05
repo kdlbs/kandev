@@ -35,6 +35,7 @@ import type { SlashCommand } from "./slash-command-types";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import { useEntityReferenceComposer } from "./use-entity-reference-composer";
 import type { ImagePasteIssue } from "./clipboard-attachments";
+import { useTranslation } from "react-i18next";
 
 export type { TipTapInputHandle } from "./use-tiptap-editor";
 
@@ -127,6 +128,7 @@ async function fetchFileResults(
 }
 
 function useMentionItems(sessionId: string | null, taskId: string | null) {
+  const { t } = useTranslation();
   const { prompts } = useCustomPrompts();
   const storeApi = useAppStoreApi();
   const promptsRef = useRef(prompts);
@@ -149,8 +151,8 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
       allItems.push({
         id: "__plan__",
         kind: "plan",
-        label: "Plan",
-        description: "Include the plan as context",
+        label: t("task:plan"),
+        description: t("task:includeThePlanAsContext"),
         onSelect: () => {},
       });
       for (const p of promptsRef.current) {
@@ -171,7 +173,7 @@ function useMentionItems(sessionId: string | null, taskId: string | null) {
               id: filePath,
               kind: "file",
               label: filePath,
-              description: "File",
+              description: t("task:file"),
               onSelect: () => {},
             });
           }
@@ -204,6 +206,7 @@ function useSuggestionConfigs({
   setMentionMenu,
   setSlashMenu,
 }: SuggestionConfigsInput) {
+  const { t } = useTranslation();
   const agentCommands = useAppStore((state) =>
     sessionId ? state.availableCommands.bySessionId[sessionId] : undefined,
   );
@@ -214,7 +217,7 @@ function useSuggestionConfigs({
       .map((cmd) => ({
         id: `agent-${cmd.name}`,
         label: `/${cmd.name}`,
-        description: cmd.description || `Run /${cmd.name} command`,
+        description: cmd.description || t("task:runCommand", { name: cmd.name }),
         action: "agent" as const,
         agentCommandName: cmd.name,
       }));

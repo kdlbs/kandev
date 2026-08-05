@@ -1,17 +1,10 @@
 "use client";
 
 import { IconRoute } from "@tabler/icons-react";
-import {
-  IdChip,
-  KandevBody,
-  KandevRow,
-  KeyValueRow,
-  ListItemRow,
-  SummaryDot,
-  pluralCount,
-} from "./shared";
+import { IdChip, KandevBody, KandevRow, KeyValueRow, ListItemRow, SummaryDot } from "./shared";
 import { pickArray, pickNumber, pickString } from "./parse";
 import type { KandevRenderer } from "./types";
+import { useTranslation } from "react-i18next";
 
 const DEFAULT_TITLE = "Walkthrough";
 const RESULT_JSON_PREFIX = "Walkthrough saved:";
@@ -77,13 +70,14 @@ function stepPreview(step: WalkthroughStepLike): string | null {
 }
 
 export const ShowWalkthroughRenderer: KandevRenderer = ({ args, result, status }) => {
+  const { t } = useTranslation();
   const taskId = pickString(args, "task_id");
   const title = titleFrom(args, result);
   const steps = stepsFrom(args, result);
   return (
     <KandevRow
       Icon={IconRoute}
-      title={`Walkthrough: ${title}`}
+      title={t("task:walkthrough", { title })}
       summary={
         <span className="inline-flex min-w-0 items-center gap-1.5">
           {taskId && (
@@ -92,14 +86,14 @@ export const ShowWalkthroughRenderer: KandevRenderer = ({ args, result, status }
               <SummaryDot />
             </>
           )}
-          <span>{pluralCount(steps.length, "step")}</span>
+          <span>{t("task:stepCount", { count: steps.length })}</span>
         </span>
       }
       status={status}
       hasExpandableContent={steps.length > 0}
     >
       <KandevBody>
-        <KeyValueRow label="title">{title}</KeyValueRow>
+        <KeyValueRow label={t("task:title")}>{title}</KeyValueRow>
         <div className="space-y-1.5">
           {steps.map((step, index) => {
             const location = stepLocation(step);
@@ -107,7 +101,9 @@ export const ShowWalkthroughRenderer: KandevRenderer = ({ args, result, status }
             return (
               <ListItemRow key={`${location ?? "step"}-${index}`}>
                 <div className="flex min-w-0 items-baseline gap-2">
-                  <span className="shrink-0 text-muted-foreground/70">Step {index + 1}</span>
+                  <span className="shrink-0 text-muted-foreground/70">
+                    {t("task:stepNumber", { index: index + 1 })}
+                  </span>
                   {location && (
                     <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                       {location}

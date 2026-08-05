@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type { ClarificationOption } from "@/lib/types/http";
 import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip";
 import { KEYS } from "@/lib/keyboard/constants";
+import { useTranslation } from "react-i18next";
 
 // Grow the custom-answer box up to ~6 lines, then scroll internally so the
 // clarification overlay stays compact.
@@ -38,6 +39,7 @@ export function ClarificationStepper({
   onJump,
   isSubmitting,
 }: StepperProps) {
+  const { t } = useTranslation();
   return (
     <div
       className="flex items-center gap-1.5 select-none"
@@ -53,7 +55,11 @@ export function ClarificationStepper({
               type="button"
               role="tab"
               aria-selected={active}
-              aria-label={`Question ${i + 1} of ${total}${answered ? " (answered)" : ""}`}
+              aria-label={
+                answered
+                  ? t("task:questionOfTotalAnswered", { index: i + 1, total })
+                  : t("task:questionOfTotal", { index: i + 1, total })
+              }
               onClick={() => onJump(i)}
               disabled={isSubmitting}
               data-testid="clarification-step"
@@ -179,6 +185,7 @@ function CustomInputControls({
   isSubmitting: boolean;
   onSubmit: (text: string) => void;
 }) {
+  const { t } = useTranslation();
   if (isFinePointer) {
     return (
       <div className="flex flex-shrink-0 items-center gap-1">
@@ -190,7 +197,7 @@ function CustomInputControls({
           Enter
         </kbd>
         <span aria-hidden="true" className="select-none text-[10px] text-muted-foreground/60">
-          ⇧↵ newline
+          {t("task:newline")}
         </span>
       </div>
     );
@@ -202,7 +209,7 @@ function CustomInputControls({
       onClick={() => onSubmit(trimmed)}
       disabled={!canSend}
       data-testid="clarification-custom-submit"
-      aria-label="Send answer"
+      aria-label={t("task:sendAnswer")}
       className={cn(
         "flex flex-shrink-0 items-center gap-1 text-xs px-2 py-1 rounded font-medium transition-colors",
         canSend
@@ -210,7 +217,7 @@ function CustomInputControls({
           : "bg-muted text-muted-foreground cursor-not-allowed",
       )}
     >
-      Send
+      {t("task:send")}
       <IconCornerDownLeft className="h-3 w-3" />
     </button>
   );
@@ -225,6 +232,7 @@ export function ClarificationCustomInput({
   onSubmit,
   onRequestFinalSubmit,
 }: CustomInputProps) {
+  const { t } = useTranslation();
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const trimmed = draft.trim();
   // Touch keyboards have no Shift+Enter chord, so on coarse-pointer devices we
@@ -265,7 +273,9 @@ export function ClarificationCustomInput({
         ref={textareaRef}
         rows={1}
         placeholder={
-          committedText !== null ? "Press Enter to update your answer…" : "Or type a custom answer…"
+          committedText !== null
+            ? t("task:pressEnterToUpdateYourAnswer")
+            : t("task:orTypeACustomAnswer")
         }
         value={draft}
         onChange={(e) => onChange(e.target.value)}
@@ -329,13 +339,14 @@ export function ClarificationCarouselNav({
   onPrev,
   onNext,
 }: CarouselNavProps) {
+  const { t } = useTranslation();
   const isFirst = activeIndex === 0;
   const isLast = activeIndex === total - 1;
   return (
     <div className="flex items-center justify-between gap-2 px-4 pb-3">
       <KeyboardShortcutTooltip
         shortcut={{ key: KEYS.ARROW_LEFT }}
-        description="Previous question"
+        description={t("task:previousQuestion")}
         enabled={!isFirst && !isSubmitting}
       >
         <span className="inline-flex">
@@ -352,13 +363,13 @@ export function ClarificationCarouselNav({
             )}
           >
             <IconArrowLeft className="h-3 w-3" />
-            Back
+            {t("task:back")}
           </button>
         </span>
       </KeyboardShortcutTooltip>
       <KeyboardShortcutTooltip
         shortcut={{ key: KEYS.ARROW_RIGHT }}
-        description="Next question"
+        description={t("task:nextQuestion")}
         enabled={!isLast && !isSubmitting}
       >
         <span className="inline-flex">
@@ -374,7 +385,7 @@ export function ClarificationCarouselNav({
                 : "border-border text-foreground/80 hover:bg-muted/50 cursor-pointer",
             )}
           >
-            Next
+            {t("task:next")}
             <IconArrowRight className="h-3 w-3" />
           </button>
         </span>

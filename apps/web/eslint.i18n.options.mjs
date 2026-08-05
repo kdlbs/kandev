@@ -1638,4 +1638,17 @@ export const i18nGuardFiles = [
   // copy is also on `common`. Route names reach `RouteLoading` as catalog keys
   // rather than resolved copy — see the comment there.
   "src/*.{ts,tsx}",
+  // Task chat surface: the composer, the transcript, the message renderers and
+  // the Kandev tool-call renderers. A directory glob rather than a file list —
+  // the whole tree is migrated, including the `.ts` helpers that hold copy
+  // (`subagent-meta.ts`, `use-attachment-file-feedback.ts`, `agent-error-label.ts`)
+  // which `mode: "jsx-only"` never inspects; only the pseudo-locale can prove
+  // those stay clean.
+  //
+  // Deliberately left in English inside this tree, because they are protocol
+  // rather than copy: message `author_type` values, the `prompt:<id>` context
+  // path, the `null` rendered in the debug-metadata dialog, the highlight CSS
+  // in `message-comment-decorations.tsx`, and the programming-language names in
+  // `tiptap-code-block-view.tsx`.
+  "components/task/chat/**/*.{ts,tsx}",
 ];
