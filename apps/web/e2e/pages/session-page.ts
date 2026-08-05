@@ -1016,24 +1016,52 @@ export class SessionPage {
     const editor = await this.composerReady();
     await editor.click();
     await editor.fill(text);
-    await this.page.getByTestId("submit-message-button").click();
+    await this.tapSubmitWhenReady();
+  }
+
+  /** The composer's send/submit button (scoped to the active chat panel). */
+  submitButton(): Locator {
+    return this.activeChat().getByTestId("submit-message-button");
+  }
+
+  /**
+   * Tap the submit button only once it is actually enabled.
+   *
+   * The button renders a spinner and is `disabled` while the composer is in a
+   * transient not-ready state (`isSending`/`isStarting`/`isMoving`) — most
+   * commonly the brief STARTING lifecycle an auto-started session passes through
+   * right after it first goes idle. Acting on the button during that window is a
+   * no-op tap that silently drops the message, so we gate on `toBeEnabled`
+   * (waiting for the `disabled` attribute to clear — a condition, not a longer
+   * fixed delay) before tapping. Mirrors `clickSubmitWhenReady` for desktop.
+   */
+  async tapSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.tap();
+  }
+
+  /** Desktop analog of `tapSubmitWhenReady` (uses click instead of tap). */
+  async clickSubmitWhenReady() {
+    const submit = this.submitButton();
+    await expect(submit).toBeEnabled();
+    await submit.click();
   }
 
   /**
    * Resolve the active chat's ProseMirror composer and wait until it is
    * actually editable before returning it.
    *
-   * TipTap flips the host to `contenteditable="true"` only after the editor
-   * instance mounts, and on mobile-chrome under CI shard load that mount can
-   * lag well past Playwright's implicit 5s `toBeEditable` budget — the composer
-   * node exists but is still `contenteditable="false"`, so a bare `fill`/`tap`
-   * throws "element is not ... [contenteditable]" or "element(s) not found".
-   * Gate on an explicit, generous editability wait so callers act on a ready
-   * editor instead of racing hydration.
+   * TipTap uses `immediatelyRender: false`, so `EditorContent` mounts the
+   * `.tiptap.ProseMirror` node only after the editor instance is created in a
+   * post-mount effect; until then the contenteditable host is absent or still
+   * `contenteditable="false"`. Callers reach here after `waitForLoad` /
+   * `waitForChatIdle` have already driven hydration, so the default
+   * `toBeEditable` wait is the correct condition to synchronize on.
    */
   private async composerReady(): Promise<Locator> {
     const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    await expect(editor).toBeEditable({ timeout: 20_000 });
+    await expect(editor).toBeEditable();
     return editor;
   }
 

@@ -481,11 +481,6 @@ test.describe("Git Changes Panel", () => {
     seedData,
     backend,
   }) => {
-    // Two real git commits + navigation + commit-list hydration + the reset
-    // dialog flow make this heavier than the default 60s budget under CI shard
-    // load, where it has timed out mid-flow. Give it explicit headroom.
-    test.setTimeout(90_000);
-
     const profile = await createStandardProfile(apiClient, "Git Reset Profile");
 
     await apiClient.createTaskWithAgent(seedData.workspaceId, "Git Reset Test", profile.id, {

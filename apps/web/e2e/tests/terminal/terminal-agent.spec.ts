@@ -222,12 +222,6 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     apiClient,
     seedData,
   }) => {
-    // Heavier than the plain cascade: this variant also kills and relaunches the
-    // PTY on the reset_agent_context step. Under CI shard load the default 60s
-    // budget can be consumed by slow initial navigation/boot before the cascade
-    // assertions even run, so give it explicit headroom.
-    test.setTimeout(90_000);
-
     const { workflow, backlogStep, analyzeStep } = await seedCascadeWorkflow(
       apiClient,
       seedData,

@@ -46,13 +46,11 @@ test.describe("Mobile slash command composer", () => {
     await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
     // Multiple TipTap instances can be mounted in mobile layouts; scope to the
-    // first visible one that TipTap has already flipped to editable. Under
-    // mobile-chrome CI shard load the editor node mounts before its
-    // contenteditable host is ready, so tapping/filling too early throws
-    // "element is not ... [contenteditable]". Gate on an explicit editability
-    // wait rather than the implicit 5s default.
+    // first visible one that TipTap has already flipped to editable (with
+    // immediatelyRender:false the contenteditable host mounts a beat after the
+    // node appears, so gate on the editable host, not just any .tiptap node).
     const editor = testPage.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
-    await expect(editor).toBeEditable({ timeout: 20_000 });
+    await expect(editor).toBeEditable();
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");
@@ -68,7 +66,11 @@ test.describe("Mobile slash command composer", () => {
 
     await editor.pressSequentially("1s");
     await expect(editor).toHaveText(/slow\s+1s/, { timeout: 5_000 });
-    await testPage.getByTestId("submit-message-button").tap();
+    // The submit button shows a spinner and is `disabled` while the auto-started
+    // session finishes its brief STARTING transition. Tapping it then is a no-op
+    // that drops the message, so wait for it to be enabled before tapping.
+    await expect(session.submitButton()).toBeEnabled();
+    await session.submitButton().tap();
     await expect(chatList.getByText("/slow 1s", { exact: false })).toBeVisible({
       timeout: 10_000,
     });
