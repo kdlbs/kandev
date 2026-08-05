@@ -29,8 +29,9 @@ active-task state change while an off-screen sidebar row remains outside the vis
   bounded `requestAnimationFrame` retry helper. It resolves the row only inside a rendered, visible
   `task-sidebar-scroll` viewport and calls `scrollIntoView({ block: "nearest", inline: "nearest" })`.
   A missing or hidden target resolves as a no-op rather than affecting navigation.
-- Add `data-task-id` to the interactive row in `apps/web/components/task/task-item.tsx`. Keep the
-  existing test ID and active-task accessibility attributes intact.
+- Add a row-specific task marker to the interactive row in
+  `apps/web/components/task/task-item.tsx`. Keep the existing test ID and active-task accessibility
+  attributes intact.
 - Update `useCommandPanelHandlers.handleTaskSelect` in
   `apps/web/components/command-panel.tsx` to start the sidebar reveal alongside the existing
   canonical task navigation. Do not move focus or change active sidebar view/collapse state.

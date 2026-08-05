@@ -1,4 +1,4 @@
-export const TASK_ROW_DOM_ATTR = "data-task-id";
+export const TASK_ROW_DOM_ATTR = "data-task-row-id";
 export const TASK_SIDEBAR_SCROLL_SELECTOR = '[data-testid="task-sidebar-scroll"]';
 
 const MAX_TASK_NAVIGATION_ATTEMPTS = 60;
@@ -8,8 +8,12 @@ export function taskRowSelector(taskId: string): string {
   return `[${TASK_ROW_DOM_ATTR}="${CSS.escape(taskId)}"]`;
 }
 
-function isVisible(element: HTMLElement): boolean {
-  for (let current: HTMLElement | null = element; current; current = current.parentElement) {
+function isVisible(element: HTMLElement, stopBefore?: HTMLElement): boolean {
+  for (
+    let current: HTMLElement | null = element;
+    current && current !== stopBefore;
+    current = current.parentElement
+  ) {
     const styles = window.getComputedStyle(current);
     if (
       styles.display === "none" ||
@@ -29,7 +33,7 @@ function findVisibleTaskRow(taskId: string): { row: HTMLElement; viewport: HTMLE
   for (const viewport of viewports) {
     if (!isVisible(viewport)) continue;
     const row = viewport.querySelector<HTMLElement>(selector);
-    if (row && isVisible(row)) return { row, viewport };
+    if (row && isVisible(row, viewport)) return { row, viewport };
   }
   return null;
 }

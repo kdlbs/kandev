@@ -489,7 +489,7 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
-      data-task-id={taskId}
+      data-task-row-id={taskId}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TASK_ROW_DOM_ATTR, revealSidebarTask, taskRowSelector } from "./task-navigation";
 
 type Rect = { x: number; y: number; width: number; height: number };
+const TEST_TASK_ID = "task-1";
 
 function setRect(element: HTMLElement, rect: Rect) {
   vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
@@ -49,17 +50,17 @@ describe("taskRowSelector", () => {
 describe("revealSidebarTask", () => {
   it("scrolls an off-screen rendered row with nearest alignment", async () => {
     const viewport = mountViewport();
-    const row = mountRow(viewport, "task-1", { x: 0, y: 120, width: 320, height: 24 });
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 120, width: 320, height: 24 });
 
-    await expect(revealSidebarTask("task-1", (callback) => callback())).resolves.toBe(true);
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
     expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
   });
 
   it("does not reposition a row that is already inside the viewport", async () => {
     const viewport = mountViewport();
-    const row = mountRow(viewport, "task-1", { x: 0, y: 20, width: 320, height: 24 });
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 20, width: 320, height: 24 });
 
-    await expect(revealSidebarTask("task-1", (callback) => callback())).resolves.toBe(true);
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
     expect(row.scrollIntoView).not.toHaveBeenCalled();
   });
 
@@ -78,21 +79,21 @@ describe("revealSidebarTask", () => {
 
   it("ignores a matching row inside a hidden sidebar viewport", async () => {
     const hiddenViewport = mountViewport(false);
-    const hiddenRow = mountRow(hiddenViewport, "task-1", {
+    const hiddenRow = mountRow(hiddenViewport, TEST_TASK_ID, {
       x: 0,
       y: 120,
       width: 320,
       height: 24,
     });
     const visibleViewport = mountViewport();
-    const visibleRow = mountRow(visibleViewport, "task-1", {
+    const visibleRow = mountRow(visibleViewport, TEST_TASK_ID, {
       x: 0,
       y: 120,
       width: 320,
       height: 24,
     });
 
-    await expect(revealSidebarTask("task-1", (callback) => callback())).resolves.toBe(true);
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
     expect(hiddenRow.scrollIntoView).not.toHaveBeenCalled();
     expect(visibleRow.scrollIntoView).toHaveBeenCalledTimes(1);
   });

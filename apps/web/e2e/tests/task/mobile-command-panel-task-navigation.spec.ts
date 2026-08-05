@@ -34,8 +34,7 @@ test.describe("mobile: command panel task navigation", () => {
     await dialog.getByRole("combobox").fill("Mobile command destination");
     const option = dialog
       .getByRole("option")
-      .filter({ hasText: "Mobile command destination task" })
-      .first();
+      .filter({ hasText: "Mobile command destination task" });
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
 

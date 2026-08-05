@@ -313,7 +313,7 @@ test.describe("sidebar scrolling", () => {
     );
     if (!offscreenTitle) throw new Error("Expected a rendered task row outside the viewport");
     const targetTask = created.find(({ title }) => title === offscreenTitle)!;
-    const targetRow = session.sidebarTaskItem(targetTask.title).first();
+    const targetRow = session.sidebarTaskItem(targetTask.title);
     await expect(targetRow).toBeVisible();
     const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
     if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
@@ -329,7 +329,7 @@ test.describe("sidebar scrolling", () => {
     const dialog = testPage.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 5_000 });
     await dialog.getByRole("combobox").fill(targetTask.title);
-    const option = dialog.getByRole("option").filter({ hasText: targetTask.title }).first();
+    const option = dialog.getByRole("option").filter({ hasText: targetTask.title });
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
 
