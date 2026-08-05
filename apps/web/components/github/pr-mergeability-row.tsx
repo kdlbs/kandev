@@ -12,6 +12,7 @@ import {
 import type { TaskPR } from "@/lib/types/github";
 import { isPRAwaitingReview, isPRWaitingOnBranchProtection } from "./pr-task-icon";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
+import { useTranslation } from "react-i18next";
 
 /**
  * Wires the "Resolve conflicts" CTA to chat context, mirroring the PR detail
@@ -22,6 +23,7 @@ function useResolveConflicts(pr: TaskPR): {
   onResolveConflicts: (() => void) | null;
   conflictQueued: boolean;
 } {
+  const { t } = useTranslation();
   const sessionId = useAppStore((s) => s.tasks.activeSessionId);
   const addComment = useCommentsStore((s) => s.addComment);
   const { toast } = useToast();
@@ -59,7 +61,7 @@ function useResolveConflicts(pr: TaskPR): {
       content,
     };
     addComment(comment);
-    toast({ description: "Added to chat context" });
+    toast({ description: t("github:addedToChatContext") });
   }, [sessionId, conflictQueued, prNumber, headBranch, baseBranch, addComment, toast]);
 
   return { onResolveConflicts: sessionId ? handler : null, conflictQueued };
@@ -123,6 +125,7 @@ export function blockedReason(pr: TaskPR): string {
 }
 
 function BlockedNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
   return (
     <div data-testid="pr-blocked-note" className="flex items-start gap-1.5 px-1 py-1 text-xs">
       <IconShield
@@ -131,7 +134,7 @@ function BlockedNote({ reason }: { reason: string }) {
       />
       <div className="min-w-0">
         <div className="font-medium text-amber-600 dark:text-amber-400">
-          Blocked by branch protection
+          {t("github:blockedByBranchProtection")}
         </div>
         <p className="text-[11px] leading-snug text-muted-foreground">{reason}</p>
       </div>
@@ -140,6 +143,7 @@ function BlockedNote({ reason }: { reason: string }) {
 }
 
 function BranchProtectionWaitNote({ reason }: { reason: string }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="pr-branch-protection-wait-note"
@@ -147,7 +151,9 @@ function BranchProtectionWaitNote({ reason }: { reason: string }) {
     >
       <IconClock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
       <div className="min-w-0">
-        <div className="font-medium text-muted-foreground">Waiting on branch protection</div>
+        <div className="font-medium text-muted-foreground">
+          {t("github:waitingOnBranchProtection")}
+        </div>
         <p className="text-[11px] leading-snug text-muted-foreground">{reason}</p>
       </div>
     </div>

@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import type { GitLabTaskPreset } from "./quick-task-launcher";
+import { useTranslation } from "react-i18next";
 
 export function StartTaskMenu({
   presets,
@@ -17,6 +18,7 @@ export function StartTaskMenu({
   presets: GitLabTaskPreset[];
   onSelect: (preset: GitLabTaskPreset) => void;
 }) {
+  const { t } = useTranslation();
   if (presets.length === 0) return null;
   return (
     <DropdownMenu>
@@ -25,10 +27,10 @@ export function StartTaskMenu({
           size="sm"
           variant="outline"
           className="h-11 sm:h-7 gap-1 cursor-pointer"
-          aria-label="Create task"
+          aria-label={t("gitlab:createTask")}
         >
           <IconPlus className="h-3.5 w-3.5" />
-          Task
+          {t("gitlab:task")}
           <IconChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>

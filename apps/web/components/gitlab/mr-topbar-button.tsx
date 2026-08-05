@@ -34,6 +34,7 @@ import type { Repository } from "@/lib/types/http";
 import { TaskMRLinkDialog } from "./task-mr-link-dialog";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import { mrTaskKey } from "./mr-detail-panel";
+import { useTranslation } from "react-i18next";
 
 /**
  * Icon + colour for an MR's combined state. Mirrors github's pr-task-icon
@@ -96,6 +97,7 @@ function MRTriggerContent({
   single: TaskMR | null;
   count: number;
 }) {
+  const { t } = useTranslation();
   if (compact) return <IconBrandGitlab className="h-4 w-4 text-orange-500" />;
   if (single) {
     return (
@@ -109,7 +111,9 @@ function MRTriggerContent({
   return (
     <>
       <IconBrandGitlab className="h-4 w-4 text-orange-500" />
-      <span className="text-xs font-medium">{count} MRs</span>
+      <span className="text-xs font-medium">
+        {count} {t("gitlab:mrs")}
+      </span>
     </>
   );
 }
@@ -129,6 +133,7 @@ function MRMenuButton({
   onLink: () => void;
   onUnlink: (associationId: string) => void;
 }) {
+  const { t } = useTranslation();
   const single = mrs.length === 1 ? mrs[0] : null;
   const addMRPanel = useDockviewStore((state) => state.addMRPanel);
   const dockviewReady = useDockviewStore((state) => state.api !== null);
@@ -165,8 +170,8 @@ function MRMenuButton({
           className={mrTriggerClass(compact, mobile)}
           aria-label={
             single
-              ? `GitLab merge request !${single.mr_iid}`
-              : `${mrs.length} GitLab merge requests`
+              ? t("gitlab:gitlabMergeRequest", { mriid: single.mr_iid })
+              : t("gitlab:gitlabMergeRequests", { length: mrs.length })
           }
         >
           <MRTriggerContent compact={compact} single={single} count={mrs.length} />
@@ -178,12 +183,12 @@ function MRMenuButton({
             <DropdownMenuItem className="cursor-pointer" onSelect={() => openReview(mr)}>
               <IconGitMerge className="h-4 w-4" />
               <span className="min-w-0 truncate">
-                Review {mr.project_path}!{mr.mr_iid}
+                {t("gitlab:review")} {mr.project_path}!{mr.mr_iid}
               </span>
             </DropdownMenuItem>
             <DropdownMenuItem asChild className="cursor-pointer">
               <Link href={mr.mr_url} target="_blank" rel="noopener noreferrer">
-                <IconExternalLink className="h-4 w-4" /> Open in GitLab
+                <IconExternalLink className="h-4 w-4" /> {t("gitlab:openInGitlab")}
               </Link>
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -191,7 +196,8 @@ function MRMenuButton({
               onSelect={() => onUnlink(mr.id)}
             >
               <IconUnlink className="h-4 w-4" />
-              Unlink !{mr.mr_iid}
+              {t("gitlab:unlink")}
+              {mr.mr_iid}
             </DropdownMenuItem>
           </div>
         ))}
@@ -200,7 +206,7 @@ function MRMenuButton({
             <DropdownMenuSeparator />
             <DropdownMenuItem className="cursor-pointer" onSelect={onLink}>
               <IconPlus className="h-4 w-4" />
-              Link another merge request
+              {t("gitlab:linkAnotherMergeRequest")}
             </DropdownMenuItem>
           </>
         ) : null}
@@ -249,6 +255,7 @@ export const MRTopbarButton = memo(function MRTopbarButton({
   compact?: boolean;
   mobile?: boolean;
 }) {
+  const { t } = useTranslation();
   const [linkOpen, setLinkOpen] = useState(false);
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
@@ -272,8 +279,9 @@ export const MRTopbarButton = memo(function MRTopbarButton({
       removeTaskMR(workspaceId, associationId);
     } catch (error) {
       toast({
-        title: "Failed to unlink merge request",
-        description: error instanceof Error ? error.message : "The merge request is still linked.",
+        title: t("gitlab:failedToUnlinkMergeRequest"),
+        description:
+          error instanceof Error ? error.message : t("gitlab:theMergeRequestIsStillLinked"),
         variant: "error",
       });
     }

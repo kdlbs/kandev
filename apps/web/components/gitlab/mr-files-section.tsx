@@ -1,12 +1,14 @@
 import { Badge } from "@kandev/ui/badge";
 import type { GitLabMRFile } from "@/lib/types/gitlab";
 import { CollapsibleSection } from "@/components/github/pr-shared";
+import { useTranslation } from "react-i18next";
 
 export function MRFilesSection({ files }: { files: GitLabMRFile[] }) {
+  const { t } = useTranslation();
   return (
-    <CollapsibleSection title="Files" count={files.length} defaultOpen={false}>
+    <CollapsibleSection title={t("gitlab:files")} count={files.length} defaultOpen={false}>
       {files.length === 0 && (
-        <p className="px-2 py-2 text-xs text-muted-foreground">No changed files</p>
+        <p className="px-2 py-2 text-xs text-muted-foreground">{t("gitlab:noChangedFiles")}</p>
       )}
       {files.map((file) => (
         <article

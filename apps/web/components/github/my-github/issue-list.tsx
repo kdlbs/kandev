@@ -16,6 +16,7 @@ import { formatRelativeTime } from "@/lib/utils";
 import type { GitHubIssue, TaskIssueLink } from "@/lib/types/github";
 import type { LaunchPayload, TaskPreset } from "./quick-task-launcher";
 import { TaskRowIndicator } from "./task-row-indicator";
+import { useTranslation } from "react-i18next";
 
 type IssueListProps = {
   items: GitHubIssue[];
@@ -35,13 +36,14 @@ function StartTaskMenu({
   presets: TaskPreset[];
   onStartTask: IssueListProps["onStartTask"];
 }) {
+  const { t } = useTranslation();
   const launch = (preset: TaskPreset) => onStartTask({ kind: "issue", issue, preset });
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="sm" variant="outline" className="h-7 gap-1 cursor-pointer">
           <IconPlus className="h-3.5 w-3.5" />
-          Task
+          {t("github:task")}
           <IconChevronDown className="h-3 w-3" />
         </Button>
       </DropdownMenuTrigger>
@@ -94,6 +96,7 @@ function IssueRow({
   onStartTask: IssueListProps["onStartTask"];
   tasks: TaskIssueLink[] | undefined;
 }) {
+  const { t } = useTranslation();
   const StateIcon = issue.state === "open" ? IconCircle : IconCircleCheck;
   const stateClass =
     issue.state === "open"
@@ -121,7 +124,10 @@ function IssueRow({
           </span>
           <span>·</span>
           <span className="whitespace-nowrap">
-            by {issue.author_login} · opened {formatRelativeTime(issue.created_at)}
+            {t("github:byAuthorOpenedAgo", {
+              author: issue.author_login,
+              time: formatRelativeTime(issue.created_at),
+            })}
           </span>
           <IssueLabels labels={issue.labels} />
           <TaskRowIndicator
@@ -149,6 +155,7 @@ function IssueListBody({
   onStartTask,
   issueKeyToTasks,
 }: IssueListProps) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -162,7 +169,7 @@ function IssueListBody({
   if (items.length === 0) {
     return (
       <div className="text-center py-10 text-muted-foreground text-sm">
-        No issues match this filter.
+        {t("github:noIssuesMatchThisFilter")}
       </div>
     );
   }

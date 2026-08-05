@@ -40,6 +40,7 @@ import { ChecksSection } from "./pr-checks-section";
 import { ReviewsSection } from "./pr-reviews-section";
 import { CommentsSection } from "./pr-comments-section";
 import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
+import { Trans, useTranslation } from "react-i18next";
 
 // --- Dockview panel wrapper ---
 
@@ -50,6 +51,7 @@ type PRDetailPanelProps = {
 };
 
 export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   const { prs } = useTaskPR(activeTaskId);
   const activePR = useActiveTaskPR();
@@ -68,7 +70,7 @@ export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) 
   if (!pr || !sessionId) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-        No pull request linked to this session.
+        {t("github:noPullRequestLinkedToThis")}
       </div>
     );
   }
@@ -83,6 +85,7 @@ export function PRDetailPanelComponent({ panelId, params }: PRDetailPanelProps) 
 // --- Add PR feedback as chat context ---
 
 function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const addComment = useCommentsStore((s) => s.addComment);
 
@@ -100,7 +103,7 @@ function useAddPRFeedbackAsContext(sessionId: string, prNumber: number) {
         content,
       };
       addComment(comment);
-      toast({ description: "Added to chat context" });
+      toast({ description: t("github:addedToChatContext") });
     },
     [sessionId, prNumber, addComment, toast],
   );
@@ -218,9 +221,10 @@ function derivePanelMetrics(taskPR: TaskPR, feedback: PRFeedback | null): PRPane
 }
 
 function DescriptionSection({ body }: { body: string }) {
+  const { t } = useTranslation();
   if (!body) return null;
   return (
-    <CollapsibleSection title="Description" count={1} defaultOpen={false}>
+    <CollapsibleSection title={t("github:description")} count={1} defaultOpen={false}>
       <div className="px-2">
         <PRMarkdownBody body={body} />
       </div>
@@ -267,6 +271,7 @@ function ApproveButton({
   feedback: PRFeedback | null;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const { toast } = useToast();
   const [submitting, setSubmitting] = useState(false);
   // Ensures status (and thus the authenticated username) is fetched even when
@@ -288,12 +293,12 @@ function ApproveButton({
         { owner: taskPR.owner, repo: taskPR.repo, number: taskPR.pr_number },
         "APPROVE",
       );
-      toast({ description: "PR approved", variant: "success" });
+      toast({ description: t("github:prApproved"), variant: "success" });
       onRefresh();
     } catch (e) {
       toast({
-        title: "Failed to approve",
-        description: e instanceof Error ? e.message : "An error occurred",
+        title: t("github:failedToApprove"),
+        description: e instanceof Error ? e.message : t("github:anErrorOccurred"),
         variant: "error",
       });
     } finally {
@@ -310,12 +315,33 @@ function ApproveButton({
       disabled={submitting}
     >
       <IconCheck className="h-3.5 w-3.5" />
-      {submitting ? "Approving..." : `Approve as ${mutationActor}`}
+      {submitting ? t("github:approving") : t("github:approveAs", { mutationActor })}
     </Button>
   );
 }
 
+/**
+ * True once a conflict prompt for this PR is already queued — avoids piling up
+ * identical instructions if the user clicks "Resolve conflicts" again. Extracted
+ * from PRDetailContent, which is at the 100-line function cap.
+ */
+function useConflictQueued(sessionId: string, prNumber: number): boolean {
+  return useCommentsStore((s) =>
+    s.pendingForChat.some((id) => {
+      const c = s.byId[id];
+      return (
+        !!c &&
+        isPRFeedbackComment(c) &&
+        c.feedbackType === "conflict" &&
+        c.sessionId === sessionId &&
+        c.prNumber === prNumber
+      );
+    }),
+  );
+}
+
 export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; sessionId: string }) {
+  const { t } = useTranslation();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { feedback, loading, refresh } = usePRFeedback(
     workspaceId,
@@ -337,20 +363,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
 
   const metrics = derivePanelMetrics(taskPR, feedback);
 
-  // True once a conflict prompt for this PR is already queued — avoids piling
-  // up identical instructions if the user clicks "Resolve conflicts" again.
-  const conflictQueued = useCommentsStore((s) =>
-    s.pendingForChat.some((id) => {
-      const c = s.byId[id];
-      return (
-        !!c &&
-        isPRFeedbackComment(c) &&
-        c.feedbackType === "conflict" &&
-        c.sessionId === sessionId &&
-        c.prNumber === taskPR.pr_number
-      );
-    }),
-  );
+  const conflictQueued = useConflictQueued(sessionId, taskPR.pr_number);
 
   const onResolveConflicts = useCallback(() => {
     if (conflictQueued) return;
@@ -415,7 +428,7 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         <>
           <Separator />
           <div className="px-3 py-2 text-[10px] text-muted-foreground text-center">
-            Last synced {formatTimeAgo(taskPR.last_synced_at)}
+            {t("github:lastSynced")} {formatTimeAgo(taskPR.last_synced_at)}
           </div>
         </>
       )}
@@ -446,6 +459,7 @@ function HeaderTitleRow({
   loading: boolean;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-start justify-between gap-2">
       <a
@@ -468,35 +482,38 @@ function HeaderTitleRow({
             <IconRefresh className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Refresh</TooltipContent>
+        <TooltipContent>{t("github:refresh")}</TooltipContent>
       </Tooltip>
     </div>
   );
 }
 
 function HeaderDateLine({ taskPR }: { taskPR: TaskPR }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-1.5 text-xs text-muted-foreground flex-wrap">
       <span className="flex items-center gap-0.5">
-        by <AuthorLink author={taskPR.author_login} />
+        <Trans i18nKey="github:byAuthor">
+          by <AuthorLink author={taskPR.author_login} />
+        </Trans>
       </span>
       <span>&middot;</span>
       <span className={getTimeAgoColor(taskPR.created_at)}>
-        opened {formatTimeAgo(taskPR.created_at)}
+        {t("github:openedAgo", { time: formatTimeAgo(taskPR.created_at) })}
       </span>
       {taskPR.merged_at && (
         <>
           <span>&middot;</span>
           <span className="flex items-center gap-0.5">
             <IconGitMerge className="h-3 w-3 text-purple-500" />
-            merged {formatTimeAgo(taskPR.merged_at)}
+            {t("github:mergedAgo", { time: formatTimeAgo(taskPR.merged_at) })}
           </span>
         </>
       )}
       {taskPR.closed_at && !taskPR.merged_at && (
         <>
           <span>&middot;</span>
-          <span>closed {formatTimeAgo(taskPR.closed_at)}</span>
+          <span>{t("github:closedAgo", { time: formatTimeAgo(taskPR.closed_at) })}</span>
         </>
       )}
     </div>
@@ -504,6 +521,7 @@ function HeaderDateLine({ taskPR }: { taskPR: TaskPR }) {
 }
 
 function HeaderStatsLine({ taskPR, metrics }: { taskPR: TaskPR; metrics: PRPanelMetrics }) {
+  const { t } = useTranslation();
   return (
     <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
       <span className="flex items-center gap-1">
@@ -516,18 +534,16 @@ function HeaderStatsLine({ taskPR, metrics }: { taskPR: TaskPR; metrics: PRPanel
       </span>
       <span>&middot;</span>
       <span>
-        {metrics.reviewCount} review{metrics.reviewCount !== 1 ? "s" : ""}
+        {t("github:reviewCount", { count: metrics.reviewCount })}
         {metrics.pendingReviewCount > 0 && (
           <span className="text-yellow-600 dark:text-yellow-400">
             {" "}
-            ({metrics.pendingReviewCount} pending)
+            {t("github:pendingReviewCount", { count: metrics.pendingReviewCount })}
           </span>
         )}
       </span>
       <span>&middot;</span>
-      <span>
-        {metrics.commentCount} comment{metrics.commentCount !== 1 ? "s" : ""}
-      </span>
+      <span>{t("github:commentCount", { count: metrics.commentCount })}</span>
       {metrics.reviewState && <ReviewStateBadge state={metrics.reviewState} />}
     </div>
   );

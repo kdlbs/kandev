@@ -5,6 +5,7 @@ import type { Icon } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { MR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./presets";
 import type { SavedPreset } from "./use-saved-presets";
+import { useTranslation } from "react-i18next";
 
 export type SidebarSelection = {
   kind: "mr" | "issue";
@@ -30,6 +31,7 @@ function KindToggle({
   kind: "mr" | "issue";
   onChange: (k: "mr" | "issue") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       className="mx-2 mb-3 grid grid-cols-2 rounded-md border p-0.5 text-xs"
@@ -48,7 +50,7 @@ function KindToggle({
           )}
           data-testid={`gitlab-kind-${value}`}
         >
-          {value === "mr" ? "Merge requests" : "Issues"}
+          {value === "mr" ? t("gitlab:mergeRequests") : t("gitlab:issues")}
         </button>
       ))}
     </div>
@@ -121,11 +123,12 @@ function PresetGroupList({
   onSelect: (s: SidebarSelection) => void;
   kind: "mr" | "issue";
 }) {
+  const { t } = useTranslation();
   const items = presets.filter((p) => p.group === group);
   if (items.length === 0) return null;
   return (
     <>
-      <SectionHeader title={group === "inbox" ? "Inbox" : "Created"} />
+      <SectionHeader title={group === "inbox" ? t("gitlab:inbox") : t("gitlab:created")} />
       {items.map((p) => (
         <PresetItem
           key={`${kind}-${p.value}`}
@@ -156,12 +159,13 @@ function SavedSection({
   canSaveCurrent: boolean;
   onSaveCurrent: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <SectionHeader title="Saved" />
+      <SectionHeader title={t("gitlab:saved")} />
       {saved.length === 0 && (
         <div className="mx-2 px-2 py-1 text-xs text-muted-foreground/80 italic">
-          No saved queries yet.
+          {t("gitlab:noSavedQueriesYet")}
         </div>
       )}
       {saved.map((s) => (
@@ -179,8 +183,8 @@ function SavedSection({
                 onDelete(s.id);
               }}
               className="opacity-0 group-hover/item:opacity-100 transition-opacity text-muted-foreground hover:text-foreground cursor-pointer"
-              title="Delete saved query"
-              aria-label={`Delete saved query ${s.label}`}
+              title={t("gitlab:deleteSavedQuery")}
+              aria-label={t("gitlab:deleteSavedQuery2", { label: s.label })}
               data-testid={`gitlab-saved-delete-${s.id}`}
             >
               <IconX className="h-3.5 w-3.5" />
@@ -198,11 +202,11 @@ function SavedSection({
             ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
             : "text-muted-foreground/50 cursor-not-allowed",
         )}
-        title={canSaveCurrent ? "Save current query" : "Type a custom query first"}
+        title={canSaveCurrent ? t("gitlab:saveCurrentQuery") : t("gitlab:typeACustomQueryFirst")}
         data-testid="gitlab-save-current-query"
       >
         <IconDeviceFloppy className="h-4 w-4 shrink-0" />
-        <span>Save current query</span>
+        <span>{t("gitlab:saveCurrentQuery")}</span>
       </button>
     </>
   );

@@ -1345,4 +1345,72 @@ export const i18nGuardFiles = [
   "lib/executor-icons.ts",
   "lib/plugins/sync-summary.ts",
   "src/settings-routes.tsx",
+  // GitHub + GitLab TASK surfaces: the PR/MR detail panels and their sections,
+  // the topbar buttons and CI popovers, the My-GitHub / My-GitLab browse lists
+  // and their preset sidebars and dialogs, and the two `/github` + `/gitlab`
+  // page clients. Together with the settings entries listed far above, this
+  // completes both directories; the file lists are kept rather than collapsed to
+  // `components/github/**` because collapsing would mean REMOVING entries, which
+  // `check-guard-allowlist.mjs` cannot distinguish from un-protecting a path.
+  //
+  // `hooks/domains/gitlab/use-mr-actions.ts` is listed because the task surface
+  // reaches its toasts. Its `run()` first argument used to be the human label —
+  // one string serving as both `pendingAction` state and the interpolated
+  // failure title `${label} failed`. That is the dual-use shape AGENTS.md warns
+  // about, so it is now an `MRActionKind` id plus a per-action catalog key.
+  // `mr-reviewer-control.tsx` had the same shape in a prop typed
+  // `"Reviewers" | "Assignees"`, which TypeScript caught the moment the codemod
+  // translated it; it is now a `kind` discriminant.
+  //
+  // Deliberately left in English, all of it protocol or provider data: GitHub
+  // and GitLab state values (`open`/`merged`/`closed`/`opened`, review states,
+  // check conclusions) which are compared with `===`; every id, branch name,
+  // repo/project path, label and username from the provider API; and the
+  // `PR_FEEDBACK_PLACEHOLDER` token, which the agent prompt matches verbatim and
+  // which therefore travels as an interpolation value rather than as catalog
+  // text. The example values in `placeholder` attributes (`kdlbs, example-org`,
+  // `group/api, group/web`, `state=opened`) are data a user types, not copy.
+  "app/github/github-page-client.tsx",
+  "app/gitlab/gitlab-page-client.tsx",
+  "components/github/issue-task-icon.tsx",
+  "components/github/multi-pr-ci-popover.tsx",
+  "components/github/my-github/issue-list.tsx",
+  "components/github/my-github/list-toolbar.tsx",
+  "components/github/my-github/pr-list.tsx",
+  "components/github/my-github/pr-row-task-indicator.tsx",
+  "components/github/my-github/pr-status-badges.tsx",
+  "components/github/my-github/presets-sidebar.tsx",
+  "components/github/my-github/repo-filter-combobox.tsx",
+  "components/github/my-github/save-preset-dialog.tsx",
+  "components/github/my-github/task-row-indicator.tsx",
+  "components/github/my-github/use-pr-statuses.ts",
+  "components/github/pr-checks-section.tsx",
+  "components/github/pr-ci-automation-controls.tsx",
+  "components/github/pr-ci-popover.tsx",
+  "components/github/pr-comments-section.tsx",
+  "components/github/pr-detail-panel.tsx",
+  "components/github/pr-merge-button.tsx",
+  "components/github/pr-mergeability-notice.tsx",
+  "components/github/pr-mergeability-row.tsx",
+  "components/github/pr-reviews-section.tsx",
+  "components/github/pr-shared.tsx",
+  "components/github/pr-status-chip.tsx",
+  "components/github/pr-topbar-button.tsx",
+  "components/gitlab/mr-commits-section.tsx",
+  "components/gitlab/mr-detail-panel.tsx",
+  "components/gitlab/mr-discussions-section.tsx",
+  "components/gitlab/mr-files-section.tsx",
+  "components/gitlab/mr-overview-section.tsx",
+  "components/gitlab/mr-reviewer-control.tsx",
+  "components/gitlab/mr-topbar-button.tsx",
+  "components/gitlab/my-gitlab/issue-list.tsx",
+  "components/gitlab/my-gitlab/list-toolbar.tsx",
+  "components/gitlab/my-gitlab/mr-list.tsx",
+  "components/gitlab/my-gitlab/mr-row-task-indicator.tsx",
+  "components/gitlab/my-gitlab/presets-sidebar.tsx",
+  "components/gitlab/my-gitlab/save-preset-dialog.tsx",
+  "components/gitlab/my-gitlab/start-task-menu.tsx",
+  "components/gitlab/subscription-toggle.tsx",
+  "components/gitlab/task-mr-link-dialog.tsx",
+  "hooks/domains/gitlab/use-mr-actions.ts",
 ];

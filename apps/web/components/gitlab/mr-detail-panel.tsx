@@ -54,6 +54,7 @@ import { MRCommitsSection } from "./mr-commits-section";
 import { MRDiscussionsSection } from "./mr-discussions-section";
 import { MRReviewerControl } from "./mr-reviewer-control";
 import { SubscriptionToggle } from "./subscription-toggle";
+import { useTranslation } from "react-i18next";
 
 type MRKeyInput = Pick<TaskMR, "host" | "project_path" | "mr_iid">;
 const EMPTY_LABELS: string[] = [];
@@ -99,17 +100,18 @@ function LabelsControl({
   busy: boolean;
   onSave: (labels: string[]) => void;
 }) {
+  const { t } = useTranslation();
   const [labels, setLabels] = useState(value.join(", "));
   useEffect(() => setLabels(value.join(", ")), [value]);
   return (
     <section className="space-y-2">
-      <h4 className="text-xs font-semibold">Labels</h4>
+      <h4 className="text-xs font-semibold">{t("gitlab:labels")}</h4>
       <div className="flex gap-2">
         <Input
           value={labels}
           onChange={(event) => setLabels(event.target.value)}
-          placeholder="bug, backend"
-          aria-label="Merge request labels"
+          placeholder={t("gitlab:bugBackend")}
+          aria-label={t("gitlab:mergeRequestLabels")}
         />
         <Button
           size="sm"
@@ -125,7 +127,7 @@ function LabelsControl({
             )
           }
         >
-          Apply
+          {t("gitlab:apply")}
         </Button>
       </div>
     </section>
@@ -143,13 +145,14 @@ function PanelHeader({
   onRefresh: () => void;
   onUnlink: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <header className="border-b px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
         <IconBrandGitlab className="h-4 w-4 shrink-0 text-orange-500" />
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold">
-            {mr.mr_title || `Merge request !${mr.mr_iid}`}
+            {mr.mr_title || t("gitlab:mergeRequest", { mriid: mr.mr_iid })}
           </h2>
           <p className="truncate text-[10px] text-muted-foreground">
             {mr.project_path}!{mr.mr_iid}
@@ -159,7 +162,7 @@ function PanelHeader({
           size="icon-sm"
           variant="ghost"
           className="h-10 w-10 cursor-pointer sm:h-8 sm:w-8"
-          aria-label="Refresh merge request"
+          aria-label={t("gitlab:refreshMergeRequest")}
           onClick={onRefresh}
         >
           <IconRefresh className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
@@ -168,7 +171,7 @@ function PanelHeader({
           size="icon-sm"
           variant="ghost"
           className="h-10 w-10 cursor-pointer sm:h-8 sm:w-8"
-          aria-label="Open merge request in GitLab"
+          aria-label={t("gitlab:openMergeRequestInGitlab")}
           onClick={() => void openExternalLink(mr.mr_url).catch(() => undefined)}
         >
           <IconExternalLink className="h-4 w-4" />
@@ -177,7 +180,7 @@ function PanelHeader({
           size="icon-sm"
           variant="ghost"
           className="h-10 w-10 cursor-pointer text-destructive sm:h-8 sm:w-8"
-          aria-label="Unlink merge request"
+          aria-label={t("gitlab:unlinkMergeRequest")}
           onClick={onUnlink}
         >
           <IconUnlink className="h-4 w-4" />
@@ -202,6 +205,7 @@ function MRActionButtons({
   run: RunMRAction;
   onMerge: () => void;
 }) {
+  const { t } = useTranslation();
   const disabled = busy || !isOpenMRState(state);
   return (
     <div className="flex flex-wrap gap-2">
@@ -209,18 +213,18 @@ function MRActionButtons({
         size="sm"
         className="h-11 cursor-pointer gap-1.5 bg-green-600 text-white hover:bg-green-700 sm:h-8"
         disabled={disabled}
-        onClick={() => void run("Approve", () => approveMR(identity), "Merge request approved")}
+        onClick={() => void run("approve", () => approveMR(identity))}
       >
-        <IconCheck className="h-4 w-4" /> Approve
+        <IconCheck className="h-4 w-4" /> {t("gitlab:approve")}
       </Button>
       <Button
         size="sm"
         variant="outline"
         className="h-11 cursor-pointer sm:h-8"
         disabled={disabled}
-        onClick={() => void run("Unapprove", () => unapproveMR(identity), "Approval removed")}
+        onClick={() => void run("unapprove", () => unapproveMR(identity))}
       >
-        Unapprove
+        {t("gitlab:unapprove")}
       </Button>
       <Button
         size="sm"
@@ -229,7 +233,7 @@ function MRActionButtons({
         disabled={disabled || hasConflicts}
         onClick={onMerge}
       >
-        <IconGitMerge className="h-4 w-4" /> Merge
+        <IconGitMerge className="h-4 w-4" /> {t("gitlab:merge")}
       </Button>
       <SubscriptionToggle {...identity} />
     </div>
@@ -258,20 +262,20 @@ function MRPeopleControls({
     <div className="grid gap-4 lg:grid-cols-2">
       <MRReviewerControl
         {...shared}
-        label="Reviewers"
+        kind="reviewers"
         current={reviewers}
         busy={busy}
         onSave={(reviewerIds) =>
-          run("Reviewers", () => setMRReviewers({ ...identity, reviewerIds }), "Reviewers updated")
+          run("reviewers", () => setMRReviewers({ ...identity, reviewerIds }))
         }
       />
       <MRReviewerControl
         {...shared}
-        label="Assignees"
+        kind="assignees"
         current={assignees}
         busy={busy}
         onSave={(assigneeIds) =>
-          run("Assignees", () => setMRAssignees({ ...identity, assigneeIds }), "Assignees updated")
+          run("assignees", () => setMRAssignees({ ...identity, assigneeIds }))
         }
       />
     </div>
@@ -293,29 +297,26 @@ function MergeConfirmation({
   identity: GitLabMRIdentity;
   run: RunMRAction;
 }) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent className="w-[calc(100vw-2rem)] sm:max-w-md">
         <AlertDialogHeader>
-          <AlertDialogTitle>Merge this merge request?</AlertDialogTitle>
+          <AlertDialogTitle>{t("gitlab:mergeThisMergeRequest")}</AlertDialogTitle>
           <AlertDialogDescription>
-            GitLab will merge {taskMR.project_path}!{taskMR.mr_iid} into {baseBranch} using the
-            project default.
+            {t("gitlab:gitlabWillMergeDescription", {
+              mr: `${taskMR.project_path}!${taskMR.mr_iid}`,
+              baseBranch,
+            })}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
+          <AlertDialogCancel className="cursor-pointer">{t("common:cancel")}</AlertDialogCancel>
           <AlertDialogAction
             className="cursor-pointer"
-            onClick={() =>
-              void run(
-                "Merge",
-                () => mergeMR({ ...identity, squash: false }),
-                "Merge request merged",
-              )
-            }
+            onClick={() => void run("merge", () => mergeMR({ ...identity, squash: false }))}
           >
-            Merge
+            {t("gitlab:merge")}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -324,19 +325,20 @@ function MergeConfirmation({
 }
 
 function FeedbackPlaceholder({ error, onRetry }: { error: string | null; onRetry: () => void }) {
+  const { t } = useTranslation();
   if (error) {
     return (
       <div className="p-4 text-sm text-destructive">
         {error}
         <Button variant="outline" size="sm" className="ml-2 cursor-pointer" onClick={onRetry}>
-          Retry
+          {t("gitlab:retry")}
         </Button>
       </div>
     );
   }
   return (
     <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-      <IconLoader2 className="h-4 w-4 animate-spin" /> Loading merge request
+      <IconLoader2 className="h-4 w-4 animate-spin" /> {t("gitlab:loadingMergeRequest")}
     </div>
   );
 }
@@ -348,15 +350,27 @@ async function unlinkTaskMR(
   run: RunMRAction,
   removeTaskMR: (workspaceId: string, associationId: string) => void,
 ) {
-  if (
-    !(await run("Unlink", () => deleteTaskMR(taskMR.id, workspaceId), "Merge request unlinked"))
-  ) {
+  if (!(await run("unlink", () => deleteTaskMR(taskMR.id, workspaceId)))) {
     return;
   }
   removeTaskMR(workspaceId, taskMR.id);
   const api = useDockviewStore.getState().api;
   const panel = api?.getPanel(panelId);
   if (api && panel) api.removePanel(panel);
+}
+
+/**
+ * The two discussion callbacks, lifted out of MRDetailContent to keep it under
+ * the 100-line function cap. The action names and toast strings stay English:
+ * they are `useMRActions` bookkeeping, not copy a user reads.
+ */
+function discussionHandlers(identity: GitLabMRIdentity & { host: string }, run: RunMRAction) {
+  return {
+    reply: (discussionId: string, body: string) =>
+      run("reply", () => createMRDiscussionNote({ ...identity, discussionId, body })),
+    resolve: (discussionId: string) =>
+      run("resolve", () => resolveMRDiscussion({ ...identity, discussionId })),
+  };
 }
 
 function MRDetailContent({
@@ -370,6 +384,7 @@ function MRDetailContent({
   sessionId: string;
   workspaceId: string;
 }) {
+  const { t } = useTranslation();
   const [mergeOpen, setMergeOpen] = useState(false);
   const removeTaskMR = useAppStore((state) => state.removeTaskMR);
   const { feedback, files, commits, loading, error, refresh } = useMRFeedback(
@@ -387,10 +402,7 @@ function MRDetailContent({
   const busy = pendingAction !== null;
   if (!feedback) return <FeedbackPlaceholder error={error} onRetry={refresh} />;
   const mr = feedback.mr;
-  const reply = (discussionId: string, body: string) =>
-    run("Reply", () => createMRDiscussionNote({ ...identity, discussionId, body }), "Reply added");
-  const resolve = (discussionId: string) =>
-    run("Resolve", () => resolveMRDiscussion({ ...identity, discussionId }), "Discussion resolved");
+  const { reply, resolve } = discussionHandlers(identity, run);
   return (
     <div className="flex h-full min-h-0 flex-col" data-testid="mr-detail-panel">
       <PanelHeader
@@ -404,7 +416,7 @@ function MRDetailContent({
           {error ? (
             <Alert variant="destructive">
               <AlertDescription>
-                GitLab refresh failed: {error}. Showing the last successfully loaded review data.
+                {t("gitlab:refreshFailedShowingCached", { error })}
               </AlertDescription>
             </Alert>
           ) : null}
@@ -428,9 +440,7 @@ function MRDetailContent({
           <LabelsControl
             value={mr.labels ?? EMPTY_LABELS}
             busy={busy}
-            onSave={(labels) =>
-              void run("Labels", () => setMRLabels({ ...identity, labels }), "Labels updated")
-            }
+            onSave={(labels) => void run("labels", () => setMRLabels({ ...identity, labels }))}
           />
           <Separator />
           <MRFilesSection files={files} />
@@ -443,7 +453,9 @@ function MRDetailContent({
             onResolve={resolve}
             onAddContext={addContext}
           />
-          {error && <p className="text-xs text-destructive">Refresh failed: {error}</p>}
+          {error && (
+            <p className="text-xs text-destructive">{t("gitlab:refreshFailed", { error })}</p>
+          )}
         </div>
       </ScrollArea>
       <MergeConfirmation
@@ -465,6 +477,7 @@ export function MRDetailPanelComponent({
   panelId: string;
   params?: { mrKey?: string };
 }) {
+  const { t } = useTranslation();
   const mr = usePanelMR(params?.mrKey);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const sessionId = useAppStore((state) => state.tasks.activeSessionId);
@@ -474,20 +487,20 @@ export function MRDetailPanelComponent({
     return (
       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
         <IconLink className="mr-2 h-4 w-4" />
-        No merge request linked to this session.
+        {t("gitlab:noMergeRequestLinked")}
       </div>
     );
   if (loading)
     return (
       <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
         <IconLoader2 className="h-4 w-4 animate-spin" />
-        Verifying GitLab connection
+        {t("gitlab:verifyingGitlabConnection")}
       </div>
     );
   if (!isTaskMRHostAllowed(mr.host, status?.host ?? null)) {
     return (
       <div className="flex h-full items-center justify-center p-4 text-center text-sm text-destructive">
-        This merge request belongs to a different GitLab host than the active workspace connection.
+        {t("gitlab:thisMergeRequestBelongsToA")}
       </div>
     );
   }

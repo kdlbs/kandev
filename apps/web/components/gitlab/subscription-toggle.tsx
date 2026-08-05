@@ -11,6 +11,7 @@ import {
 } from "@/lib/api/domains/gitlab-api";
 import { useToast } from "@/components/toast-provider";
 import { isCurrentIdentityRequest } from "@/hooks/domains/gitlab/request-identity";
+import { useTranslation } from "react-i18next";
 
 function requestIsActive(
   generation: number,
@@ -45,6 +46,7 @@ function useGitLabSubscription({
   project,
   iid,
 }: SubscriptionIdentity) {
+  const { t } = useTranslation();
   const [subscribed, setSubscribed] = useState(false);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
@@ -68,8 +70,9 @@ function useGitLabSubscription({
       .catch((error: unknown) => {
         if (requestIsActive(generation, requestIdentity, requestGeneration, currentIdentity)) {
           toast({
-            title: "Notification status unavailable",
-            description: error instanceof Error ? error.message : "GitLab rejected the request.",
+            title: t("gitlab:notificationStatusUnavailable"),
+            description:
+              error instanceof Error ? error.message : t("gitlab:gitlabRejectedTheRequest"),
             variant: "error",
           });
         }
@@ -96,16 +99,16 @@ function useGitLabSubscription({
         setSubscribed(state.subscribed);
         toast({
           description: state.subscribed
-            ? "Subscribed to GitLab notifications"
-            : "Unsubscribed from GitLab notifications",
+            ? t("gitlab:subscribedToGitlabNotifications")
+            : t("gitlab:unsubscribedFromGitlabNotifications"),
           variant: "success",
         });
       }
     } catch (error) {
       if (requestIsActive(generation, requestIdentity, requestGeneration, currentIdentity)) {
         toast({
-          title: "Notification update failed",
-          description: error instanceof Error ? error.message : "GitLab rejected the action.",
+          title: t("gitlab:notificationUpdateFailed"),
+          description: error instanceof Error ? error.message : t("gitlab:gitlabRejectedTheAction"),
           variant: "error",
         });
       }
@@ -120,6 +123,7 @@ function useGitLabSubscription({
 }
 
 export function SubscriptionToggle(identity: SubscriptionIdentity) {
+  const { t } = useTranslation();
   const { subscribed, loading, toggle } = useGitLabSubscription(identity);
 
   const label = subscriptionActionLabel(subscribed);
@@ -135,7 +139,9 @@ export function SubscriptionToggle(identity: SubscriptionIdentity) {
       onClick={() => void toggle()}
     >
       <Icon className="h-4 w-4" />
-      <span className="hidden lg:inline">{subscribed ? "Unsubscribe" : "Subscribe"}</span>
+      <span className="hidden lg:inline">
+        {subscribed ? t("gitlab:unsubscribe") : t("gitlab:subscribe")}
+      </span>
     </Button>
   );
 }

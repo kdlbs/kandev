@@ -2,6 +2,7 @@ import { useMemo, useState, useEffect } from "react";
 import { IconCheck, IconX, IconClock } from "@tabler/icons-react";
 import type { CheckRun } from "@/lib/types/github";
 import { CollapsibleSection, AddToContextButton, formatDuration, formatElapsed } from "./pr-shared";
+import { useTranslation } from "react-i18next";
 
 function CheckStatusIcon({ check }: { check: CheckRun }) {
   const value = check.conclusion || check.status;
@@ -80,6 +81,7 @@ export function ChecksSection({
   checks: CheckRun[];
   onAddAsContext: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const hasRunning = useMemo(() => checks.some((c) => c.started_at && !c.completed_at), [checks]);
 
   const [, setTick] = useState(0);
@@ -94,13 +96,15 @@ export function ChecksSection({
 
   return (
     <CollapsibleSection
-      title={`CI Checks${summary}`}
+      title={t("github:ciChecks", { summary })}
       count={checks.length}
       defaultOpen
       onAddAll={hasFailed ? () => onAddAsContext(buildAllFailedMessage(checks)) : undefined}
-      addAllLabel="Add all failed checks to chat context"
+      addAllLabel={t("github:addAllFailedChecksToChat")}
     >
-      {checks.length === 0 && <p className="text-xs text-muted-foreground px-2 py-2">No checks</p>}
+      {checks.length === 0 && (
+        <p className="text-xs text-muted-foreground px-2 py-2">{t("github:noChecks")}</p>
+      )}
       {checks.map((check) => {
         const label = conclusionLabel(check);
         const duration = checkDurationText(check);

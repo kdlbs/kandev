@@ -10,6 +10,7 @@ import { gitLabMRKey } from "@/lib/gitlab-identity";
 import { MRRowTaskIndicator } from "./mr-row-task-indicator";
 import { StartTaskMenu } from "./start-task-menu";
 import { RowTitleLink } from "./row-title-link";
+import { useTranslation } from "react-i18next";
 
 type MRListProps = {
   items: MR[];
@@ -41,6 +42,7 @@ function MRRow({
   presets: GitLabTaskPreset[];
   onStartTask?: MRListProps["onStartTask"];
 }) {
+  const { t } = useTranslation();
   const { Icon: StateIcon, className: stateIconClass } = mrStateIcon(mr);
   return (
     <div
@@ -61,7 +63,10 @@ function MRRow({
           </span>
           <span>·</span>
           <span className="whitespace-nowrap">
-            by {mr.author_username} · opened {formatRelativeTime(mr.created_at)}
+            {t("gitlab:byAuthorOpenedAgo", {
+              author: mr.author_username,
+              time: formatRelativeTime(mr.created_at),
+            })}
           </span>
           <MRRowTaskIndicator tasks={tasks} />
         </div>
@@ -86,6 +91,7 @@ function MRListBody({
   onStartTask,
   mrKeyToTasks,
 }: MRListProps) {
+  const { t } = useTranslation();
   if (loading) {
     return (
       <div className="flex justify-center py-10">
@@ -99,7 +105,7 @@ function MRListBody({
   if (items.length === 0) {
     return (
       <div className="text-center py-10 text-muted-foreground text-sm">
-        No merge requests match this filter.
+        {t("gitlab:noMergeRequestsMatchThisFilter")}
       </div>
     );
   }

@@ -48,6 +48,7 @@ import {
 import { useGitHubActionPresets } from "@/hooks/domains/github/use-github-action-presets";
 import { useAllWorkflowSnapshots } from "@/hooks/domains/kanban/use-all-workflow-snapshots";
 import { hasGitHubPersonalActor } from "@/lib/github-auth";
+import { Trans, useTranslation } from "react-i18next";
 
 type GitHubPageClientProps = {
   workspaceId?: string;
@@ -57,10 +58,11 @@ type GitHubPageClientProps = {
 };
 
 function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void }) {
+  const { t } = useTranslation();
   return (
     <PageTopbar
       title="GitHub"
-      subtitle="Pull requests and issues across your repos."
+      subtitle={t("github:pullRequestsAndIssuesAcrossYour")}
       icon={<IconBrandGithub className="h-4 w-4" />}
       actions={
         onOpenMobileSidebar && (
@@ -70,7 +72,7 @@ function PageHeader({ onOpenMobileSidebar }: { onOpenMobileSidebar?: () => void 
             onClick={onOpenMobileSidebar}
             className="md:hidden cursor-pointer"
             data-testid="github-mobile-menu-button"
-            aria-label="Open GitHub filters"
+            aria-label={t("github:openGithubFilters")}
           >
             <IconMenu2 className="h-4 w-4" />
           </Button>
@@ -87,6 +89,7 @@ function NotAuthenticatedNotice({
   workspaceId?: string;
   personalRequired: boolean;
 }) {
+  const { t } = useTranslation();
   const settingsHref = workspaceId
     ? `/settings/workspace/${workspaceId}/integrations/github`
     : "/settings/integrations/github";
@@ -94,24 +97,23 @@ function NotAuthenticatedNotice({
     <Alert>
       <AlertDescription>
         {personalRequired
-          ? "Connect your personal GitHub identity to see pull requests and issues assigned to you."
-          : "GitHub is not connected. Configure workspace automation with gh CLI or a personal access token."}{" "}
-        <Link href={settingsHref} className="underline font-medium cursor-pointer">
-          Open GitHub settings
-        </Link>{" "}
-        to see your pull requests and issues.
+          ? t("github:connectYourPersonalGithubIdentityTo")
+          : t("github:githubIsNotConnectedConfigureWorkspace")}{" "}
+        <Trans i18nKey="github:openSettingsToSeePrsAndIssues">
+          <Link href={settingsHref} className="underline font-medium cursor-pointer" />
+          to see your pull requests and issues.
+        </Trans>
       </AlertDescription>
     </Alert>
   );
 }
 
 function NoWorkspaceNotice() {
+  const { t } = useTranslation();
   return (
     <div className="px-6 py-3 border-b shrink-0">
       <Alert>
-        <AlertDescription>
-          No workspace configured. Create a workspace first to start tasks from PRs/issues.
-        </AlertDescription>
+        <AlertDescription>{t("github:noWorkspaceConfiguredCreateAWorkspace")}</AlertDescription>
       </Alert>
     </div>
   );
@@ -492,6 +494,7 @@ export function GitHubPageClient({
   steps,
   repositories,
 }: GitHubPageClientProps) {
+  const { t } = useTranslation();
   const { status, loaded } = useGitHubStatus(workspaceId ?? null);
   const authed = hasGitHubUserIdentity(status);
   const [launchPayload, setLaunchPayload] = useState<LaunchPayload | null>(null);
@@ -525,7 +528,9 @@ export function GitHubPageClient({
   return (
     <div className="flex h-full min-h-0 w-full flex-col bg-background">
       <PageHeader onOpenMobileSidebar={loaded && authed ? onOpenMobileSidebar : undefined} />
-      {!loaded && <div className="p-6 text-sm text-muted-foreground">Checking GitHub status…</div>}
+      {!loaded && (
+        <div className="p-6 text-sm text-muted-foreground">{t("github:checkingGithubStatus")}</div>
+      )}
       {loaded && !authed && (
         <div className="p-6 max-w-2xl">
           <NotAuthenticatedNotice
@@ -550,7 +555,7 @@ export function GitHubPageClient({
           data-testid="github-mobile-sidebar"
         >
           <SheetHeader className="px-4 pt-4 pb-2">
-            <SheetTitle>Filters</SheetTitle>
+            <SheetTitle>{t("github:filters")}</SheetTitle>
           </SheetHeader>
           <PresetsSidebar
             selected={state.selection}

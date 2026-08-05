@@ -10,6 +10,7 @@ import { usePRFeedbackBackgroundSync } from "@/hooks/domains/github/use-pr-ci-po
 import { useAppStore } from "@/components/state-provider";
 import { useToast } from "@/components/toast-provider";
 import type { TaskPR } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 /**
  * Renders nothing — just keeps one PR's feedback cache warm while the popover
@@ -53,6 +54,7 @@ function PRTab({
   removing: boolean;
   onRemove?: (pr: TaskPR) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="flex shrink-0 items-center rounded-md border border-transparent">
       <button
@@ -83,7 +85,7 @@ function PRTab({
         <button
           type="button"
           data-testid={`pr-popover-remove-${prIdentitySlug(pr)}`}
-          aria-label={`Remove ${pr.repo} #${pr.pr_number} from task`}
+          aria-label={t("github:removeFromTask", { repo: pr.repo, prnumber: pr.pr_number })}
           disabled={removing}
           onClick={(event) => {
             event.preventDefault();
@@ -124,6 +126,7 @@ export function MultiPRCIPopover({
   onRemovePR?: (pr: TaskPR) => Promise<void>;
   onCollapseFocus?: (remainingPR: TaskPR) => void;
 }) {
+  const { t } = useTranslation();
   // `overrideId` is only set when the user activates a tab. The displayed PR is
   // derived: honour the override while it still exists, otherwise fall back to
   // the worst-status PR. This keeps the selection valid as the list changes
@@ -160,8 +163,9 @@ export function MultiPRCIPopover({
       }
     } catch (error) {
       toast({
-        title: "Failed to unlink pull request",
-        description: error instanceof Error ? error.message : "The pull request is still linked.",
+        title: t("github:failedToUnlinkPullRequest"),
+        description:
+          error instanceof Error ? error.message : t("github:thePullRequestIsStillLinked"),
         variant: "error",
       });
     } finally {
@@ -190,7 +194,7 @@ export function MultiPRCIPopover({
         ))}
       <div
         role="tablist"
-        aria-label="Pull requests"
+        aria-label={t("github:pullRequests")}
         data-testid="pr-multi-popover-tabs"
         className="flex gap-1 overflow-x-auto border-b border-border/50 pb-2"
         onKeyDown={onTablistKeyDown}
