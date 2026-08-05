@@ -170,6 +170,66 @@ func TestRequiredAgentctlRemoteHelpers(t *testing.T) {
 	}
 }
 
+func TestBundleDirForLauncherPathAcceptsBinLayout(t *testing.T) {
+	dir := filepath.Join("opt", "kandev")
+	got, ok := bundleDirForLauncherPath(filepath.Join(dir, "bin", executableName("kandev")))
+	if !ok {
+		t.Fatal("expected the <bundle>/bin/kandev layout to be accepted")
+	}
+	if got != dir {
+		t.Fatalf("bundle dir = %q, want %q", got, dir)
+	}
+}
+
+func TestBundleDirForLauncherPathRejectsLauncherOutsideBin(t *testing.T) {
+	for _, exe := range []string{
+		filepath.Join("opt", "kandev", executableName("kandev")),
+		filepath.Join("usr", "local", "sbin", executableName("kandev")),
+		executableName("kandev"),
+	} {
+		if got, ok := bundleDirForLauncherPath(exe); ok {
+			t.Fatalf("exe %q was accepted as bundle %q", exe, got)
+		}
+	}
+}
+
+func TestResolveRuntimeBundlePrefersEnvOverExecutable(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "bin", executableName("kandev")))
+	writeFile(t, filepath.Join(dir, "bin", executableName("agentctl")))
+	writeRemoteAgentctlHelpers(t, dir)
+	t.Setenv("KANDEV_BUNDLE_DIR", dir)
+
+	bundle, err := resolveRuntimeBundle()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bundle.Source != "env" {
+		t.Fatalf("Source = %q, want %q", bundle.Source, "env")
+	}
+	if bundle.Dir != dir {
+		t.Fatalf("Dir = %q, want %q", bundle.Dir, dir)
+	}
+}
+
+func TestResolveRuntimeBundleReportsBothLookupsInError(t *testing.T) {
+	t.Setenv("KANDEV_BUNDLE_DIR", "")
+
+	// The test binary does not live in a <bundle>/bin directory, so the
+	// executable-relative lookup finds nothing and the error must say so rather
+	// than blaming the environment variable alone.
+	_, err := resolveRuntimeBundle()
+	if err == nil {
+		t.Fatal("expected an error when neither lookup resolves")
+	}
+	if !strings.Contains(err.Error(), "KANDEV_BUNDLE_DIR") {
+		t.Fatalf("error does not mention the env var: %v", err)
+	}
+	if !strings.Contains(err.Error(), "next to the launcher") {
+		t.Fatalf("error does not mention the executable-relative lookup: %v", err)
+	}
+}
+
 func writeRemoteAgentctlHelpers(t *testing.T, dir string) {
 	t.Helper()
 	for _, helper := range requiredAgentctlRemoteHelpers {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 type runtimeBundle struct {
@@ -34,11 +35,54 @@ var requiredAgentctlRemoteHelpers = []agentctlRemoteHelper{
 }
 
 func resolveRuntimeBundle() (runtimeBundle, error) {
-	dir := os.Getenv("KANDEV_BUNDLE_DIR")
-	if dir == "" {
-		return runtimeBundle{}, fmt.Errorf("no Kandev runtime found; KANDEV_BUNDLE_DIR is not set")
+	if dir := os.Getenv("KANDEV_BUNDLE_DIR"); dir != "" {
+		return validateRuntimeBundle(dir, "env")
 	}
-	return validateRuntimeBundle(dir, "env")
+	if dir, ok := bundleDirFromExecutable(); ok {
+		return validateRuntimeBundle(dir, "executable")
+	}
+	return runtimeBundle{}, fmt.Errorf(
+		"no Kandev runtime found; KANDEV_BUNDLE_DIR is not set and no bundle was found next to the launcher")
+}
+
+// bundleDirFromExecutable locates the bundle from the running launcher's own
+// path. Homebrew, npm and Scoop each set KANDEV_BUNDLE_DIR through a different
+// mechanism (write_env_script, the native shim, env_set); package managers that
+// only unpack the tree and put the launcher on PATH — winget, Chocolatey, a
+// plain archive extraction — have no equivalent, and the launcher already sits
+// inside the bundle it is looking for.
+//
+// The environment variable keeps priority: `kandev service install` writes it
+// into the systemd unit and launchd plist, and a self-update repoints it at the
+// new bundle while the outgoing launcher is still running.
+func bundleDirFromExecutable() (string, bool) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", false
+	}
+	// Windows resolves a symlinked launcher to its target at process creation,
+	// but not every platform does, and Homebrew links its wrapper into the
+	// prefix. Resolving is best-effort: EvalSymlinks fails on Windows junctions,
+	// and the unresolved path is still worth trying.
+	if resolved, rerr := filepath.EvalSymlinks(exe); rerr == nil {
+		exe = resolved
+	}
+	return bundleDirForLauncherPath(exe)
+}
+
+// bundleDirForLauncherPath maps <bundle>/bin/kandev back to <bundle>. Any other
+// layout is refused, so a launcher sitting somewhere unrelated cannot make
+// validateRuntimeBundle probe an arbitrary directory.
+func bundleDirForLauncherPath(exe string) (string, bool) {
+	binDir := filepath.Dir(exe)
+	if !strings.EqualFold(filepath.Base(binDir), "bin") {
+		return "", false
+	}
+	dir := filepath.Dir(binDir)
+	if dir == "" || dir == binDir {
+		return "", false
+	}
+	return dir, true
 }
 
 func validateRuntimeBundle(dir, source string) (runtimeBundle, error) {
