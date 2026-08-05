@@ -16,16 +16,19 @@ spec: "../../specs/ui/command-panel-sidebar-task-reveal.md"
   chosen rendered task row outside the overflowing sidebar viewport, then passes after the fix.
 - Cmd+K task selection navigates normally and reveals an available row with nearest-block scrolling
   without moving focus, scrolling the document, or changing sidebar view/collapse preferences.
+- Guarded navigation can outlive the initial reveal retry budget without losing the queued reveal;
+  a newer selection supersedes an older pending reveal.
 - Phone Cmd+K task navigation remains direct and does not target the hidden desktop sidebar.
 
 ## Verification
 
 1. `cd apps && pnpm install --frozen-lockfile`
-2. RED, before production changes: `cd apps/web && pnpm e2e:run tests/task/sidebar-scroll-preservation.spec.ts -- --grep "reveals a command-selected task"`
-3. Unit: `cd apps && pnpm --filter @kandev/web test -- --run lib/sidebar/task-navigation.test.ts`
-4. Typecheck: `cd apps/web && pnpm run typecheck`
-5. Desktop GREEN: `cd apps/web && pnpm e2e:run tests/task/sidebar-scroll-preservation.spec.ts -- --grep "reveals a command-selected task"`
-6. Mobile GREEN: `cd apps/web && pnpm e2e:run --project mobile-chrome tests/task/mobile-command-panel-task-navigation.spec.ts`
+2. RED, before production changes: `cd apps/web && pnpm e2e:run --host --no-build tests/task/sidebar-scroll-preservation.spec.ts --grep "after a delayed settings navigation blocker"`
+3. Unit: `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts`
+4. Typecheck: `cd apps/web && pnpm exec tsc --noEmit`
+5. Build: `cd apps && pnpm --filter @kandev/web build:vite`
+6. Desktop GREEN: `cd apps/web && pnpm e2e:run --host --no-build tests/task/sidebar-scroll-preservation.spec.ts`
+7. Mobile GREEN: `cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome tests/task/mobile-command-panel-task-navigation.spec.ts`
 
 Confirm Playwright discovers the expected focused tests before treating either browser command as
 evidence. The managed runner performs the required production build and teardown.
@@ -34,6 +37,7 @@ evidence. The managed runner performs the required production build and teardown
 
 - `apps/web/lib/sidebar/task-navigation.ts`
 - `apps/web/lib/sidebar/task-navigation.test.ts`
+- `apps/web/hooks/use-command-panel-task-navigation.ts`
 - `apps/web/components/command-panel.tsx`
 - `apps/web/components/task/task-item.tsx`
 - `apps/web/e2e/tests/task/sidebar-scroll-preservation.spec.ts`
@@ -65,12 +69,13 @@ targeted checks pass.
 
 ## Results
 
-Implemented the bounded visible-sidebar reveal helper, task-row marker, command-panel wiring, and
-desktop/mobile coverage. The RED desktop regression failed before the wiring and passed after it.
+Implemented the bounded visible-sidebar reveal helper, latest-request cancellation, post-navigation
+command-panel queue, task-row marker, and desktop/mobile coverage. The RED supersession unit test
+and delayed-blocker desktop regression failed before their respective fixes and passed afterward.
 
-- Unit: 1 file, 6 tests passed.
-- Typecheck: passed.
-- Desktop focused E2E: 1 passed.
+- Unit: 1 file, 8 tests passed; related command-panel consumers: 2 files, 22 tests passed.
+- Typecheck and Vite build: passed.
+- Desktop full sidebar-scroll E2E: 8 passed, including delayed guarded navigation and above-viewport reveal.
 - Mobile focused E2E: 1 passed under `mobile-chrome`.
 - Focused Prettier and ESLint (`--max-warnings 0`): passed.
 - `git diff --check`: passed.

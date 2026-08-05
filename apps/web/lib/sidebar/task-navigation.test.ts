@@ -56,6 +56,14 @@ describe("revealSidebarTask", () => {
     expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
   });
 
+  it("scrolls an off-screen row above the viewport with nearest alignment", async () => {
+    const viewport = mountViewport();
+    const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: -24, width: 320, height: 24 });
+
+    await expect(revealSidebarTask(TEST_TASK_ID, (callback) => callback())).resolves.toBe(true);
+    expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "nearest", inline: "nearest" });
+  });
+
   it("does not reposition a row that is already inside the viewport", async () => {
     const viewport = mountViewport();
     const row = mountRow(viewport, TEST_TASK_ID, { x: 0, y: 20, width: 320, height: 24 });
@@ -75,6 +83,26 @@ describe("revealSidebarTask", () => {
 
     await expect(navigation).resolves.toBe(true);
     expect(row.scrollIntoView).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not scroll a superseded task when its row renders late", async () => {
+    const viewport = mountViewport();
+    const firstCallbacks: Array<() => void> = [];
+    const firstNavigation = revealSidebarTask("task-a", (callback) =>
+      firstCallbacks.push(callback),
+    );
+
+    expect(firstCallbacks).toHaveLength(1);
+
+    const secondRow = mountRow(viewport, "task-b", { x: 0, y: 120, width: 320, height: 24 });
+    await expect(revealSidebarTask("task-b", (callback) => callback())).resolves.toBe(true);
+    expect(secondRow.scrollIntoView).toHaveBeenCalledTimes(1);
+
+    const firstRow = mountRow(viewport, "task-a", { x: 0, y: 120, width: 320, height: 24 });
+    firstCallbacks.shift()!();
+
+    await expect(firstNavigation).resolves.toBe(false);
+    expect(firstRow.scrollIntoView).not.toHaveBeenCalled();
   });
 
   it("ignores a matching row inside a hidden sidebar viewport", async () => {

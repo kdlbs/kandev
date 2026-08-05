@@ -2,6 +2,7 @@ export const TASK_ROW_DOM_ATTR = "data-task-row-id";
 export const TASK_SIDEBAR_SCROLL_SELECTOR = '[data-testid="task-sidebar-scroll"]';
 
 const MAX_TASK_NAVIGATION_ATTEMPTS = 60;
+let latestNavigationRequestId = 0;
 
 /** CSS selector for a rendered task row by its stable task id. */
 export function taskRowSelector(taskId: string): string {
@@ -70,11 +71,21 @@ export function revealSidebarTask(
 ): Promise<boolean> {
   if (typeof document === "undefined") return Promise.resolve(false);
 
+  const requestId = ++latestNavigationRequestId;
   return new Promise((resolve) => {
     let attempts = 0;
     const tick = () => {
+      if (requestId !== latestNavigationRequestId) {
+        resolve(false);
+        return;
+      }
+
       const match = findVisibleTaskRow(taskId);
       if (match) {
+        if (requestId !== latestNavigationRequestId) {
+          resolve(false);
+          return;
+        }
         if (!isInsideViewport(match.row, match.viewport)) {
           match.row.scrollIntoView({ block: "nearest", inline: "nearest" });
         }

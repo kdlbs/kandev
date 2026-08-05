@@ -21,7 +21,10 @@ changes correctly, but the sidebar no longer provides visible context for where 
   move keyboard focus, scroll the document, or reset the task list to its top.
 - A row that is already fully visible is not unnecessarily repositioned.
 - Reveal waits through bounded asynchronous route and sidebar rendering instead of relying on a
-  fixed delay.
+  fixed delay. Command-panel selection queues the task ID while guarded navigation is pending and
+  starts the reveal only after the canonical task route and matching active-task state render.
+- If another command-panel task is selected before the previous reveal finishes, the latest request
+  supersedes the earlier one; a late row from the earlier request must never be scrolled into view.
 - If the active sidebar view filters the task out, a saved group or subtask branch hides it, or the
   desktop sidebar is not rendered, task navigation still succeeds and sidebar preferences remain
   unchanged.
@@ -50,6 +53,12 @@ changes correctly, but the sidebar no longer provides visible context for where 
 - **GIVEN** an overflowing desktop task sidebar and a Cmd+K result whose rendered row is above the
   task-list viewport, **WHEN** the user selects that result, **THEN** the task route opens and the
   active row is fully inside the task-list viewport.
+- **GIVEN** a dirty settings page that blocks navigation after a Cmd+K task selection, **WHEN** the
+  user confirms leaving after the initial reveal retry budget expires, **THEN** the task route opens
+  and the active row is still revealed after the guarded navigation completes.
+- **GIVEN** two successive Cmd+K task selections where the first row is initially missing, **WHEN**
+  the second task is revealed and the first row later renders, **THEN** only the second task is
+  scrolled into view.
 - **GIVEN** a Cmd+K task result whose sidebar row is already fully visible, **WHEN** the user selects
   it, **THEN** task navigation succeeds without an unnecessary sidebar jump.
 - **GIVEN** a Cmd+K task result excluded by the active sidebar view or hidden by a persisted

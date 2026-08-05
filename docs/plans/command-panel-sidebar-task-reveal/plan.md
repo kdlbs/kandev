@@ -11,7 +11,9 @@ status: implemented
 Add a bounded DOM-navigation helper for rendered task rows, invoke it when Cmd+K opens a task, and
 prove the behavior against an actually overflowing sidebar. The helper follows the retryable target
 navigation pattern already used by `apps/web/lib/review/navigation.ts`, while scoping lookup to a
-visible task-sidebar scroll viewport so the CSS-hidden desktop rail is never selected on mobile.
+visible task-sidebar scroll viewport so the CSS-hidden desktop rail is never selected on mobile. A
+command-panel selection is queued until the canonical route and matching active task render, and
+the helper gives each request a latest-wins generation token.
 
 ## Confirmed root cause
 
@@ -28,13 +30,15 @@ active-task state change while an off-screen sidebar row remains outside the vis
 - Add `apps/web/lib/sidebar/task-navigation.ts` with a stable task-row DOM attribute/selector and a
   bounded `requestAnimationFrame` retry helper. It resolves the row only inside a rendered, visible
   `task-sidebar-scroll` viewport and calls `scrollIntoView({ block: "nearest", inline: "nearest" })`.
-  A missing or hidden target resolves as a no-op rather than affecting navigation.
+  A missing or hidden target resolves as a no-op rather than affecting navigation. A newer reveal
+  request supersedes and terminates an older retry loop before it can scroll a stale row.
 - Add a row-specific task marker to the interactive row in
   `apps/web/components/task/task-item.tsx`. Keep the existing test ID and active-task accessibility
   attributes intact.
-- Update `useCommandPanelHandlers.handleTaskSelect` in
-  `apps/web/components/command-panel.tsx` to start the sidebar reveal alongside the existing
-  canonical task navigation. Do not move focus or change active sidebar view/collapse state.
+- Update command-panel task selection in `apps/web/hooks/use-command-panel-task-navigation.ts` to
+  queue the task ID alongside the existing canonical task navigation, then start the sidebar
+  reveal only after the matching task route and active-task state render. Do not move focus or
+  change active sidebar view/collapse state.
 
 ### Mobile design contract
 
@@ -49,8 +53,9 @@ surface, or safe-area behavior is introduced.
 
 ## Tests
 
-- **What:** selector escaping, immediate and delayed row discovery, minimum-distance scroll options,
-  visible-sidebar scoping, and bounded failure.
+- **What:** selector escaping, above/below viewport behavior, immediate and delayed row discovery,
+  minimum-distance scroll options, visible-sidebar scoping, latest-request supersession, and
+  bounded failure.
 - **File:** `apps/web/lib/sidebar/task-navigation.test.ts`.
 - **How:** Vitest/jsdom with explicit layout visibility and queued animation-frame callbacks.
 - **Regression order:** first add the overflowing-sidebar browser scenario and run it against the
@@ -62,6 +67,9 @@ surface, or safe-area behavior is introduced.
 - **Scenario:** Given enough desktop tasks to overflow the sidebar, when Cmd+K selects a task whose
   row is confirmed outside the nested viewport, then the URL, active-row state, and row/container
   bounding boxes prove the row was revealed.
+- **Scenario:** Given a dirty settings page that delays task-route activation beyond the initial
+  reveal retry budget, when the user confirms the guarded navigation, then the active row is
+  revealed after route activation.
 - **File:** `apps/web/e2e/tests/task/sidebar-scroll-preservation.spec.ts`.
 - **What to verify:** precondition overflow and off-screen target, command-panel selection through
   the UI, canonical `/t/:id` navigation, `aria-current`, containment within
@@ -75,14 +83,22 @@ surface, or safe-area behavior is introduced.
 ## Verification results
 
 - Dependency setup: `cd apps && pnpm install --frozen-lockfile` passed.
-- RED regression: the focused desktop E2E failed before the production wiring with the route
-  changing while the selected row remained outside the sidebar viewport.
-- Unit: `cd apps && pnpm --filter @kandev/web test -- --run lib/sidebar/task-navigation.test.ts` —
-  1 file, 6 tests passed.
-- Typecheck: `cd apps/web && pnpm run typecheck` passed.
-- Desktop GREEN: focused `sidebar-scroll-preservation.spec.ts` — 1 test passed.
-- Mobile GREEN: focused `mobile-command-panel-task-navigation.spec.ts` under `mobile-chrome` — 1
-  test passed.
+- RED regressions: the supersession unit test failed before generation cancellation, and the
+  delayed-blocker desktop E2E failed before post-navigation reveal queuing; both passed after the
+  implementation.
+- Unit: `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts` — 1 file, 8
+  tests passed.
+- Related unit consumers: `cd apps/web && pnpm exec vitest run lib/sidebar/task-navigation.test.ts
+  components/command-panel-content-search.test.tsx` — 2 files, 22 tests passed.
+- Typecheck: `cd apps/web && pnpm exec tsc --noEmit` passed.
+- Desktop focused GREEN: `cd apps/web && pnpm e2e:run --host --no-build
+  tests/task/sidebar-scroll-preservation.spec.ts --grep "after a delayed settings navigation
+  blocker|starts above the sidebar viewport"` — 2 tests passed.
+- Desktop full regression: `cd apps/web && pnpm e2e:run --host --no-build
+  tests/task/sidebar-scroll-preservation.spec.ts` — 8 tests passed.
+- Mobile GREEN: `cd apps/web && pnpm e2e:run --host --no-build --project mobile-chrome
+  tests/task/mobile-command-panel-task-navigation.spec.ts` — 1 test passed.
+- Build: `cd apps && pnpm --filter @kandev/web build:vite` passed.
 - Formatting and lint: focused Prettier check and ESLint with `--max-warnings 0` passed.
 - Repository checks: `git diff --check` passed. Managed E2E build/test artifacts were disposable
   and are not part of the change.
