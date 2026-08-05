@@ -109,6 +109,7 @@ Per-workspace credentials and triage triggers for external services.
 | [mcp-tool-argument-validation](integrations/mcp-tool-argument-validation.md) | shipped |
 | [github-authentication](integrations/github-authentication.md) | draft |
 | [gitlab-integration](gitlab-integration/spec.md) | shipped |
+| [gitlab-workflow-sync](gitlab-workflow-sync/spec.md) | draft |
 | [jira-status-filter](jira-status-filter/spec.md) | shipped |
 
 ## workspaces/ — workspace lifecycle
