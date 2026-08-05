@@ -10,6 +10,7 @@ const hookMocks = vi.hoisted(() => ({
   loading: false,
   updateMock: vi.fn(),
   refreshMock: vi.fn(),
+  resetPromptMock: vi.fn(),
 }));
 
 const responsiveMock = vi.hoisted(() => ({
@@ -32,6 +33,7 @@ vi.mock("@/hooks/domains/gitlab/use-task-mr-automation", () => ({
     error: hookMocks.error,
     refresh: hookMocks.refreshMock,
     update: hookMocks.updateMock,
+    resetPrompt: hookMocks.resetPromptMock,
   }),
 }));
 
@@ -78,6 +80,8 @@ function resetHookMocks() {
   hookMocks.updateMock.mockResolvedValue(makeOptions());
   hookMocks.refreshMock.mockReset();
   hookMocks.refreshMock.mockResolvedValue(makeOptions());
+  hookMocks.resetPromptMock.mockReset();
+  hookMocks.resetPromptMock.mockResolvedValue(makeOptions());
   responsiveMock.isFinePointer = true;
   responsiveMock.isMobile = false;
 }

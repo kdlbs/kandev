@@ -205,7 +205,7 @@ function MRMenuButton({
           </div>
         ))}
         <DropdownMenuSeparator />
-        <MRAutomationControls taskId={taskId} />
+        <MRAutomationControls taskId={taskId} mr={single ?? undefined} />
         {canLink ? (
           <>
             <DropdownMenuSeparator />
