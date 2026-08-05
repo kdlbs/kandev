@@ -18,16 +18,45 @@ write_macho() {
 const fs = require("node:fs");
 
 const path = process.argv[2];
-const signed = process.argv[3] === "signed";
+const signature = process.argv[3];
 const headerSize = 32;
 const loadCommandSize = 16;
-const data = Buffer.alloc(headerSize + loadCommandSize);
+const codeDirectorySize = 83;
+const superBlobSize = 20 + codeDirectorySize;
+const signatureOffset = headerSize + loadCommandSize;
+const data = Buffer.alloc(signatureOffset + (signature === "signed" ? superBlobSize : 0));
 data.writeUInt32LE(0xfeedfacf, 0);
 data.writeUInt32LE(0x0100000c, 4);
 data.writeUInt32LE(1, 16);
 data.writeUInt32LE(loadCommandSize, 20);
-data.writeUInt32LE(signed ? 0x1d : 0x1b, headerSize);
+data.writeUInt32LE(signature === "unsigned" ? 0x1b : 0x1d, headerSize);
 data.writeUInt32LE(loadCommandSize, headerSize + 4);
+if (signature !== "unsigned") {
+  data.writeUInt32LE(signatureOffset, headerSize + 8);
+  data.writeUInt32LE(superBlobSize, headerSize + 12);
+}
+if (signature === "signed") {
+  data.writeUInt32BE(0xfade0cc0, signatureOffset);
+  data.writeUInt32BE(superBlobSize, signatureOffset + 4);
+  data.writeUInt32BE(1, signatureOffset + 8);
+  data.writeUInt32BE(0, signatureOffset + 12);
+  data.writeUInt32BE(20, signatureOffset + 16);
+
+  const codeDirectoryOffset = signatureOffset + 20;
+  data.writeUInt32BE(0xfade0c02, codeDirectoryOffset);
+  data.writeUInt32BE(codeDirectorySize, codeDirectoryOffset + 4);
+  data.writeUInt32BE(0x20001, codeDirectoryOffset + 8);
+  data.writeUInt32BE(0x2, codeDirectoryOffset + 12);
+  data.writeUInt32BE(51, codeDirectoryOffset + 16);
+  data.writeUInt32BE(44, codeDirectoryOffset + 20);
+  data.writeUInt32BE(0, codeDirectoryOffset + 24);
+  data.writeUInt32BE(1, codeDirectoryOffset + 28);
+  data.writeUInt32BE(signatureOffset, codeDirectoryOffset + 32);
+  data.writeUInt8(32, codeDirectoryOffset + 36);
+  data.writeUInt8(2, codeDirectoryOffset + 37);
+  data.writeUInt8(12, codeDirectoryOffset + 39);
+  data.write("kandev\0", codeDirectoryOffset + 44, "utf8");
+}
 fs.writeFileSync(path, data, { mode: 0o755 });
 NODE
 }
@@ -92,6 +121,15 @@ if bash "$PACKAGE_SCRIPT" --bundle-dir "$unsigned_bundle" >"$TMP_DIR/out" 2>"$TM
 fi
 grep -Fq "agentctl-darwin-arm64 is not code-signed" "$TMP_DIR/err" ||
   fail "unsigned-helper error was not actionable"
+
+invalid_signature_bundle="$TMP_DIR/invalid darwin signature"
+cp -R "$custom_bundle" "$invalid_signature_bundle"
+write_macho "$invalid_signature_bundle/bin/agentctl-darwin-arm64" invalid-signature
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$invalid_signature_bundle" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted a darwin/arm64 helper with missing signature data"
+fi
+grep -Fq "agentctl-darwin-arm64 does not contain a valid code signature" "$TMP_DIR/err" ||
+  fail "invalid-signature error was not actionable"
 
 unparsable_bundle="$TMP_DIR/unparsable darwin helper"
 cp -R "$custom_bundle" "$unparsable_bundle"
