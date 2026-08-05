@@ -124,6 +124,50 @@ func TestService_MergeMRForAutomation_MergesAndReturnsMR(t *testing.T) {
 	}
 }
 
+// squashRecordingClient records the squash flag MergeMR was actually called
+// with. It embeds *MockClient so it satisfies the full Client interface and
+// only overrides the one method under test.
+type squashRecordingClient struct {
+	*MockClient
+	gotSquash bool
+	calls     int
+}
+
+func (c *squashRecordingClient) MergeMR(ctx context.Context, projectPath string, iid int, squash bool, msg string) (*MR, error) {
+	c.gotSquash = squash
+	c.calls++
+	return c.MockClient.MergeMR(ctx, projectPath, iid, squash, msg)
+}
+
+// TestService_MergeMRForAutomation_HonoursProjectSquashPolicy is the
+// regression for the QA finding that auto-merge hardcoded squash=false,
+// bypassing the project's configured merge methods. The fixture project
+// allows squash (MockClient.GetProjectMergeMethods returns AllowSquash:
+// true), so the empty-method resolution must select squash — the same
+// default the interactive merge path applies. Before the fix this asserted
+// false, meaning a squash-required project would have had its merge
+// rejected and a squash-by-default project would have been merged unsquashed.
+func TestService_MergeMRForAutomation_HonoursProjectSquashPolicy(t *testing.T) {
+	svc, mock := newMRAutomationAuthFixture(t)
+	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})
+	recorder := &squashRecordingClient{MockClient: mock}
+	svc.workspaceClientFn = func(_ context.Context, _ *GitLabConfig, _ string) (Client, error) {
+		return recorder, nil
+	}
+
+	if _, err := svc.MergeMRForAutomation(
+		context.Background(), "ws-1", "https://gitlab.example.com", "group/project", 1,
+	); err != nil {
+		t.Fatalf("MergeMRForAutomation() error = %v", err)
+	}
+	if recorder.calls != 1 {
+		t.Fatalf("MergeMR calls = %d, want 1", recorder.calls)
+	}
+	if !recorder.gotSquash {
+		t.Error("MergeMR squash = false, want true — automation must honour the project's squash policy, not hardcode false")
+	}
+}
+
 func TestService_MergeMRForAutomation_HostMismatchNeverMerges(t *testing.T) {
 	svc, mock := newMRAutomationAuthFixture(t)
 	mock.SeedMR("group/project", &MR{IID: 1, HeadBranch: "feature", State: mrStateOpen})

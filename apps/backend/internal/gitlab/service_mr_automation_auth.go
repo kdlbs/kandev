@@ -92,13 +92,18 @@ func latestPipelineStatusAndFailingJobs(ctx context.Context, client Client, proj
 
 // MergeMRForAutomation merges an MR on behalf of auto-merge, scoped to the
 // linked row's own workspace + host (C3) — see GetMRAutomationSnapshot's
-// doc for why this matters. GitLab's merge endpoint does not take a squash
-// commit message override the way GitHub's does; automation always merges
-// with the project's own configured merge method.
+// doc for why this matters.
+//
+// It routes through mergeMRWithClient with an empty method so the project's
+// own merge configuration decides, exactly as the interactive merge path
+// does. Calling client.MergeMR directly with squash=false instead would
+// override that policy: a project with squash *required* rejects the merge
+// outright, and a squash-by-default project silently gets unsquashed
+// automation merges.
 func (s *Service) MergeMRForAutomation(ctx context.Context, workspaceID, host, projectPath string, mrIID int) (*MR, error) {
 	var merged *MR
 	err := s.RunWithWorkspaceClient(ctx, workspaceID, host, func(client Client) error {
-		result, err := client.MergeMR(ctx, projectPath, mrIID, false, "")
+		result, err := s.mergeMRWithClient(ctx, client, projectPath, mrIID, "", "")
 		if err != nil {
 			return err
 		}
