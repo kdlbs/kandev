@@ -8,6 +8,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 import type { ReviewFile } from "./types";
 import { FileDiffToolbar } from "./review-diff-toolbar";
+import { useTranslation } from "react-i18next";
 
 export type ReviewExternalLinkContext = {
   baseBranchByRepo: Record<string, string>;
@@ -166,6 +167,7 @@ function MobileHeaderIdentity({
   onToggleCollapse,
   toolbar,
 }: ResponsiveHeaderIdentityProps) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="review-file-identity"
@@ -175,7 +177,11 @@ function MobileHeaderIdentity({
       <button
         type="button"
         aria-expanded={!collapsed}
-        aria-label={`${collapsed ? "Expand" : "Collapse"} ${file.path}`}
+        aria-label={
+          collapsed
+            ? t("review:expandFile", { path: file.path })
+            : t("review:collapseFile", { path: file.path })
+        }
         onClick={onToggleCollapse}
         className="flex min-h-11 min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left transition-colors duration-150 ease-out hover:text-foreground"
       >
@@ -200,6 +206,7 @@ function DesktopHeaderIdentity({
   onToggleCollapse,
   toolbar,
 }: ResponsiveHeaderIdentityProps) {
+  const { t } = useTranslation();
   return (
     <>
       <div data-testid="review-file-identity" className="flex min-w-0 flex-1 items-center gap-2">
@@ -211,7 +218,11 @@ function DesktopHeaderIdentity({
         <button
           type="button"
           aria-expanded={!collapsed}
-          aria-label={`${collapsed ? "Expand" : "Collapse"} ${file.path}`}
+          aria-label={
+            collapsed
+              ? t("review:expandFile", { path: file.path })
+              : t("review:collapseFile", { path: file.path })
+          }
           onClick={onToggleCollapse}
           className="flex min-w-0 flex-1 cursor-pointer items-center gap-1.5 text-left hover:text-foreground"
         >

@@ -15,19 +15,21 @@ import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
 import type { Repository } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import type { ComponentProps } from "react";
+import { useTranslation } from "react-i18next";
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];
   currentPage?: "kanban" | "tasks";
 };
 
-function getRepositoryPlaceholder(
+/** Returns a catalog key, not copy: `t()` must run at render, never here. */
+function getRepositoryPlaceholderKey(
   repositoriesLoading: boolean,
   repositoriesEmpty: boolean,
 ): string {
-  if (repositoriesLoading) return "Loading repositories...";
-  if (repositoriesEmpty) return "No repositories";
-  return "Select repository";
+  if (repositoriesLoading) return "kanban:loadingRepositories";
+  if (repositoriesEmpty) return "kanban:noRepositories";
+  return "kanban:selectRepository";
 }
 
 function WorkflowSection({
@@ -39,18 +41,19 @@ function WorkflowSection({
   workflows: WorkflowsState["items"];
   onWorkflowChange: (id: string | null) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <DropdownMenuLabel className="px-0 text-foreground">Workflow</DropdownMenuLabel>
+      <DropdownMenuLabel className="px-0 text-foreground">{t("kanban:workflow")}</DropdownMenuLabel>
       <Select
         value={activeWorkflowId ?? "all"}
         onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
       >
         <SelectTrigger data-testid="display-workflow-filter" className="w-full border-border">
-          <SelectValue placeholder="Select workflow" />
+          <SelectValue placeholder={t("kanban:selectWorkflow")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All Workflows</SelectItem>
+          <SelectItem value="all">{t("kanban:allWorkflowsTitleCase")}</SelectItem>
           {workflows.map((workflow: WorkflowsState["items"][number]) => (
             <SelectItem key={workflow.id} value={workflow.id}>
               {workflow.name}
@@ -73,9 +76,12 @@ function RepositorySection({
   repositoriesLoading: boolean;
   onRepositoryChange: (value: string | "all") => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="space-y-1.5">
-      <DropdownMenuLabel className="px-0 text-foreground">Repository</DropdownMenuLabel>
+      <DropdownMenuLabel className="px-0 text-foreground">
+        {t("kanban:repository")}
+      </DropdownMenuLabel>
       <Select
         value={repositoryValue}
         onValueChange={(value) => onRepositoryChange(value as string | "all")}
@@ -83,11 +89,13 @@ function RepositorySection({
       >
         <SelectTrigger data-testid="display-repository-filter" className="w-full border-border">
           <SelectValue
-            placeholder={getRepositoryPlaceholder(repositoriesLoading, repositories.length === 0)}
+            placeholder={t(
+              getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
+            )}
           />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">All repositories</SelectItem>
+          <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
           {repositories.map((repo: Repository) => (
             <SelectItem key={repo.id} value={repo.id}>
               {repo.name}
@@ -103,6 +111,7 @@ export function KanbanDisplayDropdown({
   triggerSize = "icon",
   currentPage = "kanban",
 }: KanbanDisplayDropdownProps) {
+  const { t } = useTranslation();
   const {
     workflows,
     activeWorkflowId,
@@ -148,7 +157,9 @@ export function KanbanDisplayDropdown({
           />
           <DropdownMenuSeparator />
           <div className="space-y-1.5">
-            <DropdownMenuLabel className="px-0 text-foreground">Preview Panel</DropdownMenuLabel>
+            <DropdownMenuLabel className="px-0 text-foreground">
+              {t("kanban:previewPanel")}
+            </DropdownMenuLabel>
             <label className="flex items-center gap-2 cursor-pointer">
               <Checkbox
                 checked={enablePreviewOnClick ?? false}
@@ -156,27 +167,28 @@ export function KanbanDisplayDropdown({
                   onTogglePreviewOnClick?.(!!checked);
                 }}
               />
-              <span className="text-sm text-foreground">Open preview on click</span>
+              <span className="text-sm text-foreground">{t("kanban:openPreviewOnClick")}</span>
             </label>
             <p className="text-xs text-muted-foreground pl-6">
-              When enabled, clicking a task opens the preview panel. When disabled, clicking
-              navigates directly to the session.
+              {t("kanban:whenEnabledClickingATaskOpens")}
             </p>
           </div>
           {currentPage === "tasks" && (
             <>
               <DropdownMenuSeparator />
               <div className="space-y-1.5">
-                <DropdownMenuLabel className="px-0 text-foreground">List rows</DropdownMenuLabel>
+                <DropdownMenuLabel className="px-0 text-foreground">
+                  {t("kanban:listRows")}
+                </DropdownMenuLabel>
                 <label className="flex items-center gap-2 cursor-pointer">
                   <Checkbox
                     checked={tasksListShowDetails}
                     onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
                   />
-                  <span className="text-sm text-foreground">Show task details</span>
+                  <span className="text-sm text-foreground">{t("kanban:showTaskDetails")}</span>
                 </label>
                 <p className="pl-6 text-xs text-muted-foreground">
-                  Add repository, pull request, session, parent, and review context to List rows.
+                  {t("kanban:addRepositoryPullRequestSessionParent")}
                 </p>
               </div>
             </>

@@ -30,6 +30,7 @@ import { ReviewRunButton } from "./review-run-button";
 import { ReviewFindingsButton } from "./review-findings-button";
 import { ReviewPRSelector } from "./review-pr-selector";
 import type { TaskPR } from "@/lib/types/github";
+import { useTranslation } from "react-i18next";
 
 type ReviewTopBarProps = {
   sessionId: string;
@@ -73,6 +74,7 @@ type ReviewSettingsMenuProps = {
 };
 
 function ReviewSettingsMenu({ reviewAutoMarkOnScroll, onToggleAutoMark }: ReviewSettingsMenuProps) {
+  const { t } = useTranslation();
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -89,7 +91,7 @@ function ReviewSettingsMenu({ reviewAutoMarkOnScroll, onToggleAutoMark }: Review
           }}
         >
           <Checkbox checked={reviewAutoMarkOnScroll} className="pointer-events-none" />
-          <span className="text-sm flex-1">Auto-mark reviewed on scroll</span>
+          <span className="text-sm flex-1">{t("review:autoMarkReviewedOnScroll")}</span>
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -99,6 +101,7 @@ function ReviewSettingsMenu({ reviewAutoMarkOnScroll, onToggleAutoMark }: Review
 type ReviewProgressProps = { reviewedCount: number; totalCount: number };
 
 function ReviewProgress({ reviewedCount, totalCount }: ReviewProgressProps) {
+  const { t } = useTranslation();
   const progressPercent = totalCount > 0 ? (reviewedCount / totalCount) * 100 : 0;
   return (
     <div className="flex items-center gap-2 flex-1 min-w-0 overflow-hidden">
@@ -109,7 +112,7 @@ function ReviewProgress({ reviewedCount, totalCount }: ReviewProgressProps) {
         />
       </div>
       <span className="text-xs text-muted-foreground truncate">
-        {reviewedCount} of {totalCount} files reviewed
+        {t("review:filesReviewed", { reviewedCount, totalCount })}
       </span>
     </div>
   );
@@ -121,6 +124,7 @@ function ReviewDisplayControls({
   onToggleWordWrap,
   onToggleSplitView,
 }: Pick<ReviewTopBarProps, "wordWrap" | "splitView" | "onToggleWordWrap" | "onToggleSplitView">) {
+  const { t } = useTranslation();
   return (
     <>
       <Tooltip>
@@ -134,7 +138,7 @@ function ReviewDisplayControls({
             <IconTextWrap className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent>Toggle word wrap</TooltipContent>
+        <TooltipContent>{t("review:toggleWordWrap")}</TooltipContent>
       </Tooltip>
       <Tooltip>
         <TooltipTrigger asChild>
@@ -152,7 +156,7 @@ function ReviewDisplayControls({
           </Button>
         </TooltipTrigger>
         <TooltipContent>
-          {splitView ? "Switch to unified view" : "Switch to split view"}
+          {splitView ? t("review:switchToUnifiedView") : t("review:switchToSplitView")}
         </TooltipContent>
       </Tooltip>
     </>
@@ -166,8 +170,11 @@ function ReviewWalkthroughButton({
   onRequestWalkthrough: (() => void) | undefined;
   disabled?: boolean;
 }) {
+  const { t } = useTranslation();
   if (!onRequestWalkthrough) return null;
-  const tooltip = disabled ? "Loading changed files..." : "Walk me through these changes";
+  const tooltip = disabled
+    ? t("review:loadingChangedFiles")
+    : t("review:walkMeThroughTheseChanges");
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -180,7 +187,7 @@ function ReviewWalkthroughButton({
             size="sm"
             variant="ghost"
             className="px-2 cursor-pointer"
-            aria-label="Walk me through these review changes"
+            aria-label={t("review:walkMeThroughTheseReviewChanges")}
             data-testid="review-request-walkthrough"
             disabled={disabled}
             onClick={onRequestWalkthrough}
@@ -216,6 +223,7 @@ export const ReviewTopBar = memo(function ReviewTopBar({
   onSelectPR,
   prDiffLoading,
 }: ReviewTopBarProps) {
+  const { t } = useTranslation();
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const { activeRun, findings } = useTaskReview(activeTaskId);
   const reviewRunning = isRunActive(activeRun);
@@ -279,7 +287,7 @@ export const ReviewTopBar = memo(function ReviewTopBar({
         variant="ghost"
         className="px-2 cursor-pointer"
         onClick={onClose}
-        aria-label="Close review"
+        aria-label={t("review:closeReview")}
       >
         <IconX className="h-4 w-4" />
       </Button>
