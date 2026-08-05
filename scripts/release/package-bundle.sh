@@ -9,6 +9,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BUNDLE="$ROOT_DIR/dist/kandev"
+DARWIN_HELPER_VALIDATOR="$ROOT_DIR/scripts/release/validate-darwin-arm64-helper.mjs"
 REMOTE_AGENTCTL_HELPERS=(
   agentctl-linux-amd64
   agentctl-linux-arm64
@@ -75,6 +76,28 @@ for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
     echo "Runtime binary $helper is not executable in $BUNDLE/bin" >&2
     exit 1
   fi
+  if [ "$helper" = "agentctl-darwin-arm64" ]; then
+    if ! command -v node >/dev/null 2>&1; then
+      echo "Node.js is required to validate $helper" >&2
+      exit 1
+    fi
+    node "$DARWIN_HELPER_VALIDATOR" "$BUNDLE/bin/$helper"
+  fi
 done
+
+while IFS= read -r -d '' entry; do
+  artifact="${entry##*/}"
+  expected=false
+  for required in "$launcher" "$agentctl" "${REMOTE_AGENTCTL_HELPERS[@]}"; do
+    if [ "$artifact" = "$required" ]; then
+      expected=true
+      break
+    fi
+  done
+  if [ "$expected" != true ]; then
+    echo "Unexpected runtime artifact $artifact in $BUNDLE/bin" >&2
+    exit 1
+  fi
+done < <(find "$BUNDLE/bin" -mindepth 1 -maxdepth 1 -print0)
 
 echo "Bundle assembled at $BUNDLE"

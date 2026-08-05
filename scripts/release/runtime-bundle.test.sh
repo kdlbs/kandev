@@ -11,6 +11,27 @@ fail() {
   exit 1
 }
 
+write_macho() {
+  local path="$1"
+  local signature="$2"
+  node - "$path" "$signature" <<'NODE'
+const fs = require("node:fs");
+
+const path = process.argv[2];
+const signed = process.argv[3] === "signed";
+const headerSize = 32;
+const loadCommandSize = 16;
+const data = Buffer.alloc(headerSize + loadCommandSize);
+data.writeUInt32LE(0xfeedfacf, 0);
+data.writeUInt32LE(0x0100000c, 4);
+data.writeUInt32LE(1, 16);
+data.writeUInt32LE(loadCommandSize, 20);
+data.writeUInt32LE(signed ? 0x1d : 0x1b, headerSize);
+data.writeUInt32LE(loadCommandSize, headerSize + 4);
+fs.writeFileSync(path, data, { mode: 0o755 });
+NODE
+}
+
 make_complete_bundle() {
   local bundle_dir="$1"
   mkdir -p "$bundle_dir/bin"
@@ -22,6 +43,7 @@ make_complete_bundle() {
     "$bundle_dir/bin/agentctl-darwin-arm64" \
     "$bundle_dir/bin/agentctl-darwin-amd64"
   chmod +x "$bundle_dir/bin/"*
+  write_macho "$bundle_dir/bin/agentctl-darwin-arm64" signed
 }
 
 custom_bundle="$TMP_DIR/custom bundle"
@@ -33,6 +55,16 @@ fi
 
 grep -Fq "Bundle assembled at $custom_bundle" "$TMP_DIR/out" ||
   fail "validator did not report the custom bundle path"
+
+extra_bundle="$TMP_DIR/extra artifact"
+cp -R "$custom_bundle" "$extra_bundle"
+touch "$extra_bundle/bin/debugger"
+chmod +x "$extra_bundle/bin/debugger"
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$extra_bundle" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted a seventh runtime artifact"
+fi
+grep -Fq "Unexpected runtime artifact debugger" "$TMP_DIR/err" ||
+  fail "extra-artifact error was not actionable"
 
 missing_bundle="$TMP_DIR/missing helper"
 cp -R "$custom_bundle" "$missing_bundle"
@@ -51,6 +83,25 @@ if bash "$PACKAGE_SCRIPT" --bundle-dir "$non_executable_bundle" >"$TMP_DIR/out" 
 fi
 grep -Fq "Runtime binary agentctl-darwin-arm64 is not executable" "$TMP_DIR/err" ||
   fail "non-executable-binary error was not actionable"
+
+unsigned_bundle="$TMP_DIR/unsigned darwin helper"
+cp -R "$custom_bundle" "$unsigned_bundle"
+write_macho "$unsigned_bundle/bin/agentctl-darwin-arm64" unsigned
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$unsigned_bundle" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted an unsigned darwin/arm64 helper"
+fi
+grep -Fq "agentctl-darwin-arm64 is not code-signed" "$TMP_DIR/err" ||
+  fail "unsigned-helper error was not actionable"
+
+unparsable_bundle="$TMP_DIR/unparsable darwin helper"
+cp -R "$custom_bundle" "$unparsable_bundle"
+printf 'not a Mach-O\n' > "$unparsable_bundle/bin/agentctl-darwin-arm64"
+chmod +x "$unparsable_bundle/bin/agentctl-darwin-arm64"
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$unparsable_bundle" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted an unparsable darwin/arm64 helper"
+fi
+grep -Fq "agentctl-darwin-arm64 is not a parsable thin darwin/arm64 Mach-O" "$TMP_DIR/err" ||
+  fail "unparsable-helper error was not actionable"
 
 if bash "$PACKAGE_SCRIPT" --bundle-dir / >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
   fail "validator accepted the filesystem root as a bundle"
@@ -104,8 +155,17 @@ grep -Fq "VERSION=\"1.2.3\"" "$TMP_DIR/runtime-dry-run" ||
   fail "runtime target did not forward RUNTIME_VERSION"
 grep -Fq "GOFLAGS=\"-trimpath\"" "$TMP_DIR/runtime-dry-run" ||
   fail "runtime target did not forward GOFLAGS"
-grep -Fq -- "--bundle-dir \"$runtime_output\"" "$TMP_DIR/runtime-dry-run" ||
-  fail "runtime target did not validate the selected output directory"
+grep -Fq -- 'requested_bundle_dir='"\"$runtime_output\"" "$TMP_DIR/runtime-dry-run" ||
+  fail "runtime target did not retain the selected output directory"
+grep -Fq -- '--bundle-dir "$resolved_bundle_dir"' "$TMP_DIR/runtime-dry-run" ||
+  fail "runtime target did not validate the canonical output directory"
+grep -Fq 'resolved_bundle_dir=' "$TMP_DIR/runtime-dry-run" ||
+  fail "runtime target did not canonicalize the bundle directory before writing"
+grep -Fq 'pwd -P' "$TMP_DIR/runtime-dry-run" ||
+  fail "runtime target did not resolve symlinked bundle directories"
+if grep -Fq "rm -rf \"$runtime_output/bin\"" "$TMP_DIR/runtime-dry-run"; then
+  fail "runtime target recursively deleted through an unresolved bundle path"
+fi
 
 for binary in \
   kandev \
@@ -121,6 +181,17 @@ done
 if grep -Eq 'pnpm( with current)? .*install|playwright install' "$TMP_DIR/runtime-dry-run"; then
   fail "runtime target attempted to install dependencies or Playwright"
 fi
+
+root_symlink="$TMP_DIR/root symlink"
+ln -s / "$root_symlink"
+if make -C "$ROOT_DIR" runtime-bundle \
+  MAKE=true \
+  RUNTIME_BUNDLE_DIR="$root_symlink" \
+  >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "runtime target accepted a bundle directory resolving to the filesystem root"
+fi
+grep -Fq "RUNTIME_BUNDLE_DIR must not resolve to /" "$TMP_DIR/out" ||
+  fail "symlinked-root error was not actionable"
 
 if ! make --dry-run -C "$ROOT_DIR" service-bundle \
   RUNTIME_VERSION=1.2.3 \

@@ -457,12 +457,28 @@ class ReleaseWorkflowContractTest(unittest.TestCase):
             self.assertIn('"scripts/release/nightly-version.test.mjs"', trigger_block.group(0))
             self.assertIn('"scripts/release/nightly-release.sh"', trigger_block.group(0))
             self.assertIn('"scripts/release/nightly-release.test.mjs"', trigger_block.group(0))
+            self.assertIn('"Makefile"', trigger_block.group(0))
+            self.assertIn('"apps/backend/Makefile"', trigger_block.group(0))
+            self.assertIn('"scripts/release/package-bundle.sh"', trigger_block.group(0))
+            self.assertIn('"scripts/release/runtime-bundle.test.sh"', trigger_block.group(0))
+            self.assertIn(
+                '"scripts/release/validate-darwin-arm64-helper.mjs"',
+                trigger_block.group(0),
+            )
 
         setup_node = (
             "uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6"
         )
         self.assertIn(setup_node, LINT_WORKFLOW)
         self.assertIn('node-version: "24"', LINT_WORKFLOW)
+        self.assertIn(
+            "run: bash scripts/release/runtime-bundle.test.sh",
+            LINT_WORKFLOW,
+        )
+        self.assertLess(
+            LINT_WORKFLOW.index(setup_node),
+            LINT_WORKFLOW.index("- name: Test runtime bundle contract"),
+        )
         self.assertLess(
             LINT_WORKFLOW.index(setup_node),
             LINT_WORKFLOW.index("- name: Test npm release helpers"),
