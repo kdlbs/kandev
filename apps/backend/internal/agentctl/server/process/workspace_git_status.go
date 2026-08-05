@@ -3,6 +3,7 @@ package process
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -516,31 +517,32 @@ type baseBranchResolution struct {
 // operator needs to see without turning on debug logging, so it warns, while a
 // task that simply has no recorded base is ordinary and stays at debug.
 func (r baseBranchResolution) log(wt *WorkspaceTracker) {
-	if r.reason == baseBranchStored {
-		return
-	}
-	key := strconv.Itoa(int(r.reason)) + "|" + r.ref
+	key := strconv.Itoa(int(r.reason)) + "|" + r.stored + "|" + r.ref
 	wt.baseBranchLogMu.Lock()
 	repeat := wt.lastBaseBranchLog == key
 	wt.lastBaseBranchLog = key
 	wt.baseBranchLogMu.Unlock()
-	if repeat {
+	if repeat || r.reason == baseBranchStored {
 		return
+	}
+	repository := wt.repositoryName
+	if repository == "" && wt.workDir != "" {
+		repository = filepath.Base(filepath.Clean(wt.workDir))
 	}
 
 	switch r.reason {
 	case baseBranchFallbackNoStored:
 		wt.logger.Debug("no base branch recorded for workspace, using integration fallback for diff stats",
-			zap.String("repository", wt.repositoryName),
+			zap.String("repository", repository),
 			zap.String("candidate", r.ref))
 	case baseBranchFallbackStoredUnresolved:
 		wt.logger.Warn("recorded base branch does not resolve in git, diff stats fall back to an integration branch",
-			zap.String("repository", wt.repositoryName),
+			zap.String("repository", repository),
 			zap.String("stored_base_branch", r.stored),
 			zap.String("candidate", r.ref))
 	case baseBranchUnresolved:
 		wt.logger.Warn("no base branch or integration candidate resolved, diff stats unavailable",
-			zap.String("repository", wt.repositoryName),
+			zap.String("repository", repository),
 			zap.String("stored_base_branch", r.stored))
 	case baseBranchStored:
 	}

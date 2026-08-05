@@ -87,6 +87,9 @@ None.
 
 ## Output Contract
 
-Every workspace's `WorkspaceTracker` has the task's recorded base branch before
-its first git-status poll produces a branch diff stat. No signature change to
-`PushBaseBranchesForTask` or `SetBaseBranches`.
+The provider is wired before lifecycle startup, so recovered executions and
+agentctl-ready executions are seeded from the task's recorded base-branch map.
+For workspaces created outside the full launch path, agentctl may publish one
+fallback-based status update before the readiness-time push lands; the push
+then refreshes the tracker and subsequent stats use the recorded base. No
+signature change to `PushBaseBranchesForTask` or `SetBaseBranches`.

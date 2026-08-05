@@ -2,6 +2,7 @@ package process
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -387,6 +388,25 @@ func TestResolveBaseBranchWithReason(t *testing.T) {
 func TestResolveBaseBranchLogsFallback(t *testing.T) {
 	ctx := context.Background()
 
+	t.Run("single-repo fallback names the repository", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTracker(repoDir, log)
+
+		wt.resolveBaseBranch(ctx)
+
+		entries := observed.FilterMessage(
+			"no base branch recorded for workspace, using integration fallback for diff stats").All()
+		if len(entries) != 1 {
+			t.Fatalf("got %d fallback log entries, want 1", len(entries))
+		}
+		if got := entries[0].ContextMap()["repository"]; got != filepath.Base(repoDir) {
+			t.Errorf("repository field = %v, want %q", got, filepath.Base(repoDir))
+		}
+	})
+
 	// A missing base branch is ordinary (legacy tasks, external branches), so it
 	// stays at debug and must not cry wolf at warn.
 	t.Run("no stored branch logs at debug with repository and candidate", func(t *testing.T) {
@@ -480,6 +500,45 @@ func TestResolveBaseBranchLogsFallback(t *testing.T) {
 
 		if got := observed.Len(); got != 2 {
 			t.Fatalf("got %d log entries, want 2 (one per distinct outcome): %+v", got, observed.All())
+		}
+	})
+
+	t.Run("different unresolved stored branches are logged separately", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+
+		wt.SetBaseBranch("features/first-missing")
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("features/second-missing")
+		wt.resolveBaseBranch(ctx)
+
+		if got := observed.Len(); got != 2 {
+			t.Fatalf("got %d log entries, want 2 for distinct stored branches: %+v", got, observed.All())
+		}
+	})
+
+	t.Run("fallback after a successful stored resolution is logged again", func(t *testing.T) {
+		repoDir, cleanup := setupTestRepo(t)
+		t.Cleanup(cleanup)
+
+		runGit(t, repoDir, "checkout", "-b", "develop")
+		runGit(t, repoDir, "checkout", "main")
+
+		log, observed := newObservedTestLogger(t)
+		wt := NewWorkspaceTrackerForRepo(repoDir, "frontend", log)
+
+		wt.SetBaseBranch("features/never-fetched")
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("develop")
+		wt.resolveBaseBranch(ctx)
+		wt.SetBaseBranch("features/never-fetched")
+		wt.resolveBaseBranch(ctx)
+
+		if got := observed.Len(); got != 2 {
+			t.Fatalf("got %d log entries, want 2 across fallback, stored, fallback: %+v", got, observed.All())
 		}
 	})
 }

@@ -65,7 +65,7 @@ type WorkspaceTracker struct {
 	// lastBaseBranchLog dedupes the diff-base resolution log. resolveBaseBranch
 	// runs on every status poll (as often as every couple of seconds), so
 	// logging each resolution would bury the signal it exists to provide.
-	// Holds the previously logged "reason|ref" so only a *change* is reported.
+	// Holds the previously logged "reason|stored|ref" so only a *change* is reported.
 	lastBaseBranchLog string
 	baseBranchLogMu   sync.Mutex
 

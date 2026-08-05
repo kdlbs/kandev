@@ -412,7 +412,7 @@ func startAgentInfrastructure(
 	// ============================================
 	// AGENT MANAGER
 	// ============================================
-	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore)
+	lifecycleMgr, err := provideLifecycleManager(ctx, cfg, log, eventBus, repos.AgentSettings, agentRegistry, userSecretStore, services.Task.TaskBaseBranches)
 	if err != nil {
 		log.Error("Failed to initialize agent manager", zap.Error(err))
 		return false
@@ -437,10 +437,6 @@ func startAgentInfrastructure(
 	workspaceSourceMaterializer := newWorkspaceSourceMaterializer(repos.Task, worktreeMgr, lifecycleMgr, log)
 	services.Task.SetWorkspaceSourceMaterializer(workspaceSourceMaterializer)
 	services.Task.SetAgentBaseBranchPusher(lifecycleMgr)
-	// Edit-time pushes flow Task → lifecycle above; this is the reverse
-	// direction, letting every workspace seed itself from the DB once agentctl
-	// is ready rather than only on the full launch path.
-	lifecycleMgr.SetBaseBranchProvider(services.Task.TaskBaseBranches)
 
 	lifecycleMgr.SetWorkspaceInfoProvider(services.Task)
 	// Session/environment-scoped HTTP surfaces (shell, files, ports, vscode,

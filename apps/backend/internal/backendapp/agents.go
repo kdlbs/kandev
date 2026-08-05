@@ -28,6 +28,7 @@ func provideLifecycleManager(
 	agentSettingsRepo settingsstore.Repository,
 	agentRegistry *registry.Registry,
 	secretStore secrets.SecretStore,
+	baseBranchProvider lifecycle.BaseBranchProvider,
 ) (*lifecycle.Manager, error) {
 	log.Info("Initializing Agent Manager...")
 
@@ -131,6 +132,9 @@ func provideLifecycleManager(
 
 	// MCP handler is set later in main.go after MCP handlers are registered
 	// via lifecycleMgr.SetMCPHandler(gateway.Dispatcher)
+	// Wire the base-branch provider before Start so recovered executions are
+	// seeded during startup as well as newly-created executions.
+	lifecycleMgr.SetBaseBranchProvider(baseBranchProvider)
 
 	if err := lifecycleMgr.Start(ctx); err != nil {
 		return nil, err
