@@ -82,8 +82,8 @@ No database or filesystem changes are required. `message.add.context_files` alre
   hooks/use-message-handler.test.ts components/task/chat/chat-input-area.test.tsx
   components/task/file-context-menu.test.tsx components/task/file-browser-context-action.test.tsx`.
 - `cd apps/web && pnpm run typecheck` passed. The i18n pseudo-catalog, key check, ratchet, and
-  Simplified Chinese catalog parity checks passed. Targeted ESLint passed with no errors; the
-  current focused test files retain three non-blocking max-lines/duplicate-string warnings.
+  Simplified Chinese catalog parity checks passed. Targeted ESLint passed with no errors, and
+  the final commit-hook web lint passed with no warnings.
 - Desktop managed E2E: `file-tree-chat-context.spec.ts` — 1 test passed on the initial run and
   again after the PR fixup, including the explicit collapsed-directory assertion.
 - Mobile managed E2E: `mobile-file-tree-chat-context.spec.ts` with `mobile-chrome` — 1 test
