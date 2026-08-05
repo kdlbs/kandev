@@ -51,7 +51,7 @@ RUNTIME_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
 RUNTIME_VERSION ?= $(shell git describe --tags --always --dirty $(NULL_REDIR) || echo dev)
 SERVICE_BUNDLE_DIR ?= $(CURDIR)/dist/kandev
 SERVICE_LAUNCHER = $(SERVICE_BUNDLE_DIR)/bin/kandev
-SERVICE_VERSION := $(shell git rev-parse --short HEAD $(NULL_REDIR) || echo dev)
+SERVICE_VERSION ?= $(RUNTIME_VERSION)
 SERVICE_ENV = KANDEV_BUNDLE_DIR="$(SERVICE_BUNDLE_DIR)" KANDEV_VERSION="$(SERVICE_VERSION)"
 SERVICE_PORT_FLAG := $(if $(PORT),--port $(PORT),)
 SERVICE_HOME_DIR_FLAG := $(if $(HOME_DIR),--home-dir "$(HOME_DIR)",)

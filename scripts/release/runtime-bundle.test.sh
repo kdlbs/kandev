@@ -21,6 +21,7 @@ make_complete_bundle() {
     "$bundle_dir/bin/agentctl-linux-arm64" \
     "$bundle_dir/bin/agentctl-darwin-arm64" \
     "$bundle_dir/bin/agentctl-darwin-amd64"
+  chmod +x "$bundle_dir/bin/"*
 }
 
 custom_bundle="$TMP_DIR/custom bundle"
@@ -42,6 +43,15 @@ fi
 grep -Fq "Missing remote agentctl helper agentctl-linux-arm64" "$TMP_DIR/err" ||
   fail "missing-helper error was not actionable"
 
+non_executable_bundle="$TMP_DIR/non-executable helper"
+cp -R "$custom_bundle" "$non_executable_bundle"
+chmod -x "$non_executable_bundle/bin/agentctl-darwin-arm64"
+if bash "$PACKAGE_SCRIPT" --bundle-dir "$non_executable_bundle" >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
+  fail "validator accepted a non-executable runtime binary"
+fi
+grep -Fq "Runtime binary agentctl-darwin-arm64 is not executable" "$TMP_DIR/err" ||
+  fail "non-executable-binary error was not actionable"
+
 if bash "$PACKAGE_SCRIPT" --bundle-dir / >"$TMP_DIR/out" 2>"$TMP_DIR/err"; then
   fail "validator accepted the filesystem root as a bundle"
 fi
@@ -58,25 +68,21 @@ if ! make --dry-run -C "$ROOT_DIR/apps/backend" build-runtime \
   fail "backend runtime target is unavailable: $(cat "$TMP_DIR/err")"
 fi
 
-for binary in \
-  bin/kandev \
+expected_runtime_binaries="$(printf '%s\n' \
   bin/agentctl \
+  bin/agentctl-darwin-amd64 \
+  bin/agentctl-darwin-arm64 \
   bin/agentctl-linux-amd64 \
   bin/agentctl-linux-arm64 \
-  bin/agentctl-darwin-arm64 \
-  bin/agentctl-darwin-amd64; do
-  grep -Fq "$binary" "$TMP_DIR/backend-dry-run" ||
-    fail "backend runtime target did not build $binary"
-done
+  bin/kandev)"
+actual_runtime_binaries="$(grep -oE 'bin/[[:alnum:]_.-]+' "$TMP_DIR/backend-dry-run" | sort -u)"
+[ "$actual_runtime_binaries" = "$expected_runtime_binaries" ] ||
+  fail "backend runtime target built an unexpected binary set: $actual_runtime_binaries"
 
 grep -Fq -- "-tags fts5" "$TMP_DIR/backend-dry-run" ||
   fail "backend runtime target omitted the fts5 build tag"
 grep -Fq -- "-X main.Version=1.2.3" "$TMP_DIR/backend-dry-run" ||
   fail "backend runtime target did not forward VERSION"
-
-if grep -Eq 'bin/(mock-agent|acpdbg|winjob)' "$TMP_DIR/backend-dry-run"; then
-  fail "backend runtime target built development-only helpers"
-fi
 
 runtime_output="$TMP_DIR/runtime output"
 if ! make --dry-run -C "$ROOT_DIR" runtime-bundle \
@@ -115,5 +121,14 @@ done
 if grep -Eq 'pnpm( with current)? .*install|playwright install' "$TMP_DIR/runtime-dry-run"; then
   fail "runtime target attempted to install dependencies or Playwright"
 fi
+
+if ! make --dry-run -C "$ROOT_DIR" service-bundle \
+  RUNTIME_VERSION=1.2.3 \
+  SERVICE_BUNDLE_DIR="$TMP_DIR/service bundle" \
+  >"$TMP_DIR/service-dry-run" 2>"$TMP_DIR/err"; then
+  fail "service bundle dry run failed: $(cat "$TMP_DIR/err")"
+fi
+grep -Fq 'RUNTIME_VERSION="1.2.3"' "$TMP_DIR/service-dry-run" ||
+  fail "service bundle replaced the release SemVer with another version"
 
 echo "PASS: runtime bundle contract"

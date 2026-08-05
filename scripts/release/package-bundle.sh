@@ -35,28 +35,44 @@ case "$#" in
     ;;
 esac
 
-if [ -z "$BUNDLE" ]; then
-  echo "bundle directory must not be empty" >&2
-  exit 2
-fi
 if [ "$BUNDLE" = "/" ]; then
   echo "bundle directory must not be /" >&2
   exit 2
 fi
 
-if [ ! -f "$BUNDLE/bin/kandev" ] && [ ! -f "$BUNDLE/bin/kandev.exe" ]; then
+launcher="kandev"
+if [ ! -f "$BUNDLE/bin/$launcher" ] && [ -f "$BUNDLE/bin/kandev.exe" ]; then
+  launcher="kandev.exe"
+fi
+if [ ! -f "$BUNDLE/bin/$launcher" ]; then
   echo "Missing native launcher in $BUNDLE/bin; build cmd/kandev first" >&2
   exit 1
 fi
+if [ ! -x "$BUNDLE/bin/$launcher" ]; then
+  echo "Runtime binary $launcher is not executable in $BUNDLE/bin" >&2
+  exit 1
+fi
 
-if [ ! -f "$BUNDLE/bin/agentctl" ] && [ ! -f "$BUNDLE/bin/agentctl.exe" ]; then
+agentctl="agentctl"
+if [ ! -f "$BUNDLE/bin/$agentctl" ] && [ -f "$BUNDLE/bin/agentctl.exe" ]; then
+  agentctl="agentctl.exe"
+fi
+if [ ! -f "$BUNDLE/bin/$agentctl" ]; then
   echo "Missing agentctl in $BUNDLE/bin; build cmd/agentctl first" >&2
+  exit 1
+fi
+if [ ! -x "$BUNDLE/bin/$agentctl" ]; then
+  echo "Runtime binary $agentctl is not executable in $BUNDLE/bin" >&2
   exit 1
 fi
 
 for helper in "${REMOTE_AGENTCTL_HELPERS[@]}"; do
   if [ ! -f "$BUNDLE/bin/$helper" ]; then
     echo "Missing remote agentctl helper $helper in $BUNDLE/bin; run make -C apps/backend build-agentctl-remote first" >&2
+    exit 1
+  fi
+  if [ ! -x "$BUNDLE/bin/$helper" ]; then
+    echo "Runtime binary $helper is not executable in $BUNDLE/bin" >&2
     exit 1
   fi
 done
