@@ -201,9 +201,9 @@ export function getWsBaseUrl(): string {
 
 /** Map WebSocket close codes to LSP status for pre-bridge failures. */
 export const CLOSE_CODE_STATUS: Record<number, (reason: string) => LspStatus> = {
-  4001: (reason) => ({
+  4001: () => ({
     state: "unavailable",
-    reason: reason || t("lsp:languageServerNotFound"),
+    reason: t("lsp:languageServerNotFound"),
     cause: "missing_binary",
   }),
   4002: () => ({

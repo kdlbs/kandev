@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { activateLocale } from "@/lib/i18n";
+import { activateLocale, t } from "@/lib/i18n";
 import { CLOSE_CODE_STATUS, getLspUnavailableSetupHint, toLspLanguage } from "./lsp-json-rpc";
-import { LSP_LANGUAGE_OPTIONS } from "./lsp-language-options";
+import { LSP_LANGUAGE_OPTIONS } from "@/components/settings/lsp-language-options";
 import { getMonacoLanguagesForLsp } from "./lsp-providers";
 
 const BACKEND_REASON = "backend English";
@@ -16,12 +16,17 @@ describe("Kotlin LSP language mapping", () => {
   });
 
   it("marks Kotlin as requiring manual installation", () => {
-    expect(LSP_LANGUAGE_OPTIONS.find((language) => language.id === "kotlin")).toMatchObject({
+    const kotlin = LSP_LANGUAGE_OPTIONS.find((language) => language.id === "kotlin");
+    expect(kotlin).toMatchObject({
       binary: "kotlin-lsp",
-      installHint:
-        "Install kotlin-lsp manually on the task host's PATH. For Local Docker tasks, it must be installed and on PATH inside the task container.",
+      installHintKey: "settings:lspInstallHintKotlin",
+      installHintValues: { binary: "kotlin-lsp", path: "PATH" },
       autoInstallSupported: false,
+      experimental: true,
     });
+    expect(kotlin && t(kotlin.installHintKey, kotlin.installHintValues)).toContain(
+      "Install kotlin-lsp manually on the task host's PATH",
+    );
   });
 });
 
@@ -53,6 +58,11 @@ describe("LSP task-host close codes", () => {
   it("localizes categorical close codes instead of rendering transport prose", async () => {
     await activateLocale("pseudo");
     try {
+      expect(CLOSE_CODE_STATUS[4001](BACKEND_REASON)).toEqual({
+        state: "unavailable",
+        reason: "Ĺàńĝũàĝē śēŕvēŕ ńōţ ƒōũńď",
+        cause: "missing_binary",
+      });
       expect(CLOSE_CODE_STATUS[4004](BACKEND_REASON)).toEqual({
         state: "unavailable",
         reason: "Ĺàńĝũàĝē śēŕvēŕś àŕē ńōţ śũƥƥōŕţēď ƀŷ ţĥĩś ţàśķ ēxēćũţōŕ",

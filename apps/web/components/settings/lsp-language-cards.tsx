@@ -1,9 +1,7 @@
 "use client";
 
-import { IconInfoCircle } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { Switch } from "@kandev/ui/switch";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { readBootPayload } from "@/src/boot-payload";
 import { Trans, useTranslation } from "react-i18next";
 import {
@@ -88,23 +86,13 @@ function LspLanguageCard({
             {t("settings:manualInstallRequired")}
           </span>
         )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <IconInfoCircle className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
-          </TooltipTrigger>
-          <TooltipContent side="top" className="max-w-[260px] text-xs">
-            {t(language.installHintKey, language.installHintValues)}
-          </TooltipContent>
-        </Tooltip>
       </div>
-      {!autoInstallConfigurable && (
-        <p
-          className="text-[11px] leading-relaxed text-muted-foreground"
-          data-testid={`lsp-install-guidance-${language.id}`}
-        >
-          {t(language.installHintKey, language.installHintValues)}
-        </p>
-      )}
+      <p
+        className="text-[11px] leading-relaxed text-muted-foreground"
+        data-testid={`lsp-install-guidance-${language.id}`}
+      >
+        {t(language.installHintKey, language.installHintValues)}
+      </p>
     </div>
   );
 }

@@ -194,7 +194,7 @@ Language-server settings are part of **Settings > General > Editors**. Kandev cu
 - Python;
 - Kotlin through the official `kotlin-lsp`. Kotlin support is experimental because the upstream server is still alpha.
 
-Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Open the language-server control to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
+Auto-start and auto-install are off for every language by default. Enable only the languages used by the workspace, then save settings. Each language card keeps its installation command, prerequisites, and managed destination visible next to the auto-install setting, including for touch and keyboard users. Open the language-server control to inspect its status and use the explicit **Start**, **Stop**, or **Retry** action. Browser-local storage remembers manual enablement for that session and language. Kandev disconnects an unused server connection after two minutes.
 
 **Status location** defaults to the active file's editor toolbar. On a fine-pointer desktop with the Application status bar enabled, you can instead place it in that bar; the item follows the active supported file and is absent on unsupported files and non-file panels. A touch-oriented tablet keeps the saved preference but uses the 44 px editor-toolbar control and bottom drawer. The phone file viewer has no LSP control. Runtime fallbacks do not overwrite the saved preference.
 

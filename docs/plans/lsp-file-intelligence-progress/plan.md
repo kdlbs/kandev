@@ -36,7 +36,7 @@ The progress protocol itself requires no backend payload transform because both 
 - Replace the one-click toolbar toggle with a disclosure-first `LspStatusButton`.
 - Add a shared progress body that separates connection readiness from project work, renders a determinate bar only for server percentages, uses tabular elapsed time, preserves concurrent-work counts, and avoids project-wide completion claims.
 - Use `useTouchDrawer`: fine pointers receive an anchored popover; coarse-pointer Monaco/tablet layouts receive an inset bottom drawer with one internal scroll owner and touch-sized controls. Phone CodeMirror viewing remains unchanged.
-- Gate each Editors auto-install checkbox with the task-host-independent preference list. Forward enabled preferences to agentctl so its actual platform decides whether installation can run.
+- Gate each Editors auto-install checkbox with the task-host-independent preference list. Forward enabled preferences to agentctl so its actual platform decides whether installation can run, and render each language's install prerequisites and destination visibly from the same localized metadata source used by Settings.
 
 ## Tests
 
@@ -46,8 +46,8 @@ The progress protocol itself requires no backend payload transform because both 
 - **Navigation identity:** the LSP file-opener hook test proves an attached-repository target reuses an existing task-root-relative editor key while retaining canonical repository-scoped opens for new targets.
 - **Completion and configuration:** focused provider and manager tests prove range fallback/override behavior, connection reuse, live configuration notification, and updated request responses.
 - **Provider ownership and semantic tokens:** focused Monaco/manager/provider tests prove TypeScript built-in suppression follows the owning session model, independent connections dispose separately, and valid empty semantic-token arrays complete without self-scheduled polling.
-- **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in and renders localized manual-install guidance rather than suggesting an unusable preference.
-- **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting without adding shallow React markup tests.
+- **Task-host setup guidance:** agentctl and frontend mapping tests prove a task host without an installer closes with `4007` before or after auto-install opt-in, and that `4001` and `4007` render localized categorical guidance instead of backend transport prose.
+- **Presentation helpers:** focused pure-helper tests cover labels, lifecycle actions, and locale-aware elapsed-time formatting; a rendered language-card regression proves auto-install prerequisites remain visible without tooltip interaction.
 - **Task-host environment:** focused Go tests cover PATH-based command discovery, task-HOME cache roots, GOBIN and Windows USERPROFILE result lookup, pre-install registry discovery, PATHEXT-aware managed npm shims, platform-gated Rust installation, process-manager environment exposure, read-only rejection of cold unsupported executors, and capacity rejection before supported execution startup.
 
 ## E2E Tests

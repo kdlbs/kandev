@@ -66,6 +66,7 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
 - Review hardening: TypeScript built-in suppression now follows per-connection model ownership instead of a global flag, so unrelated sessions keep Monaco intelligence; valid empty semantic-token arrays return an empty payload without periodic client polling.
 - Review hardening: Go post-install discovery now includes the task environment's `USERPROFILE\go\bin`, covering default Windows Local PC setups without explicit `GOBIN`, `GOPATH`, or `HOME`.
 - Review hardening: the browser-facing LSP capacity slot is acquired before `GetOrEnsureExecution`, so an over-cap request cannot start or resume a supported task host; all resolution failures release the provisional slot.
+- Review hardening: missing-binary close code `4001` now ignores backend prose and resolves through the active locale, Editors cards expose install prerequisites inline for pointer, keyboard, and touch users, and the test-only duplicate language table was removed in favor of the localized Settings metadata source.
 - Verified:
   - `pnpm --filter @kandev/web test -- --run lib/lsp/lsp-progress.test.ts lib/lsp/lsp-client-manager.test.ts`
   - `pnpm exec vitest run lib/lsp/lsp-providers.test.ts --reporter=dot`
@@ -84,4 +85,6 @@ Record RED/GREEN evidence, files changed, exact tests run, remaining risks, and 
   - `pnpm exec vitest run hooks/use-file-save-delete.test.ts hooks/use-lsp-file-opener.test.ts lib/lsp/lsp-client-manager.document-sync.test.ts components/task/task-center-panel-restoration.test.ts lib/lsp/lsp-document-sync.test.ts` (35 passed)
   - `pnpm test` (1,122 files; 8,657 passed, 4 skipped)
   - `pnpm lint`, `pnpm run typecheck`, `pnpm i18n:check`, and `pnpm i18n:ratchet`
+  - `pnpm exec vitest run lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.test.ts` (13 passed)
+  - `pnpm exec eslint lib/lsp/lsp-json-rpc.ts lib/lsp/lsp-language-mapping.test.ts components/settings/lsp-language-cards.tsx components/settings/lsp-language-cards.test.tsx components/settings/lsp-language-options.ts components/settings/lsp-language-options.test.ts`
   - `node --test scripts/validate-public-docs.test.mjs scripts/notify-docs-workflow.test.mjs && node scripts/validate-public-docs.mjs`

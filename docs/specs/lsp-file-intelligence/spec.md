@@ -106,7 +106,7 @@ Application close codes are:
 | `4006` | Unexpected LSP proxy stream failure.                                       |
 | `4007` | Server binary missing and the task host has no supported installer.        |
 
-The browser translates categorical `4002`, `4004`, `4005`, `4006`, and `4007` statuses from the close code instead of rendering transport prose. Binary and installation failures may retain an actionable server-provided diagnostic.
+The browser translates categorical `4001`, `4002`, `4004`, `4005`, `4006`, and `4007` statuses from the close code instead of rendering transport prose. Only the `4003` installation failure may retain an actionable server-provided diagnostic.
 
 ### Browser LSP progress contract
 
@@ -151,7 +151,7 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 
 - **Unsupported executor:** the file toolbar reports that the task host is unsupported and no process starts.
 - **Missing Kotlin server:** the UI tells the user to install `kotlin-lsp` on the task host; it does not offer or retry auto-install.
-- **Missing auto-installable server:** the UI reports the missing binary or shows install progress when auto-install is enabled.
+- **Missing auto-installable server:** the UI reports a localized missing-server status or shows install progress when auto-install is enabled. Editors settings keep each language's installation command, prerequisites, and destination visible beside its auto-install control.
 - **Installer failure:** the UI preserves the detailed task-host installer error after the WebSocket's generic close frame so toolchain, network, and package output remains actionable.
 - **Task-only toolchain:** binary lookup, installer execution, and installed-binary discovery use the task runtime environment instead of the agentctl host environment.
 - **Windows npm launcher:** installation and later cache lookup return the executable npm shim selected through PATHEXT rather than an unlaunchable extensionless path.
@@ -173,6 +173,8 @@ No backend or task-host payload transforms are required: both WebSocket proxy ho
 
 - **GIVEN** Kotlin auto-start is enabled and `kotlin-lsp` is on a Local PC task host's `PATH`, **WHEN** a `.kt` or `.kts` file opens, **THEN** the toolbar reaches ready and Monaco registers Kotlin providers.
 - **GIVEN** `kotlin-lsp` is missing, **WHEN** Kotlin LSP starts, **THEN** the connection closes with `4007` and the UI shows Kotlin-specific manual setup guidance without attempting installation.
+- **GIVEN** an auto-installable server is missing and the task-host close reason contains backend prose, **WHEN** the browser handles `4001` in a non-English locale, **THEN** it renders the localized missing-server catalog message rather than the transport reason.
+- **GIVEN** a language supports configurable auto-install, **WHEN** the user opens Editors settings, **THEN** its installation command, prerequisites, or managed destination are visible in the language card without requiring pointer hover.
 - **GIVEN** a local Docker task, **WHEN** an LSP starts, **THEN** the binary is resolved and executed inside the container rather than on the main backend host.
 - **GIVEN** Go and `GOBIN` are available only through the task runtime environment, **WHEN** Kandev discovers or installs `gopls`, **THEN** lookup, `go install`, and result discovery all use those task values.
 - **GIVEN** a Windows Local PC task uses Go's defaults with only `USERPROFILE` set, **WHEN** `go install` publishes `gopls.exe`, **THEN** Kandev discovers it under `USERPROFILE\go\bin` and completes auto-install successfully.
