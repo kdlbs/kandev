@@ -14,7 +14,10 @@ import (
 
 func TestBuildWorkflowExport(t *testing.T) {
 	t.Run("converts step IDs to positions", func(t *testing.T) {
-		wf := &taskmodels.Workflow{ID: "wf-1", Name: "My Workflow", Description: "desc"}
+		wf := &taskmodels.Workflow{
+			ID: "wf-1", Name: "My Workflow", Description: "desc",
+			Prompt: "Always open a draft PR.",
+		}
 		steps := []*WorkflowStep{
 			{ID: "step-a", Name: "Todo", Position: 0, Color: "blue"},
 			{
@@ -37,6 +40,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 		pw := export.Workflows[0]
 		assert.Equal(t, "My Workflow", pw.Name)
 		assert.Equal(t, "desc", pw.Description)
+		assert.Equal(t, "Always open a draft PR.", pw.Prompt)
 		require.Len(t, pw.Steps, 2)
 
 		// The move_to_step should reference position 0 (step-a's position), not step-a ID.

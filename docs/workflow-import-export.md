@@ -63,6 +63,8 @@ Each entry under `workflows:`:
 ```yaml
 - name: My Workflow
   description: Optional human description.
+  prompt: |               # optional shared agent instructions at every step entry
+    Always open a draft PR.
   agent_profile:        # optional, workflow-level default agent
     agent_name: Claude Code
     model: claude-opus-4-7
@@ -75,6 +77,7 @@ Each entry under `workflows:`:
 |-------|------|:--------:|-------|
 | `name` | string | yes | Workflow name. Required by `Validate()`. Used for **dedup on import** (see [Import rules](#import-matching-rules)). |
 | `description` | string | no | Omitted from export when empty. |
+| `prompt` | string | no | Optional workflow-level agent instructions prepended at every step entry before the step prompt. Omitted from export when empty. Supports `{task_id}` interpolation. |
 | `agent_profile` | object | no | Workflow-level default agent profile. See [Agent profiles](#agent-profiles). Omitted when the workflow has no profile. |
 | `steps` | list | — | The workflow's steps. See [`StepPortable`](#stepportable). |
 

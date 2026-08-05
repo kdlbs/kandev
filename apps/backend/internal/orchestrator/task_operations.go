@@ -1442,10 +1442,15 @@ func (s *Service) buildWorkflowPrompt(ctx context.Context, basePrompt string, st
 	return prompt
 }
 
-// workflowInstructionsHeading is the stable, agent-facing marker for the
-// optional workflow-level prompt block. The frontend collapses this section
-// by default; do not i18n it (sent to the model, same as step prompt English).
-const workflowInstructionsHeading = "## Workflow instructions"
+// workflowInstructionsHeading/End are stable, agent-facing markers for the
+// optional workflow-level prompt block. Chat collapses everything between
+// them by default. Do not i18n (sent to the model, same as step prompt English).
+// The end marker is required so multi-paragraph workflow prompts do not break
+// the frontend split (a first-blank-line heuristic would cut mid-body).
+const (
+	workflowInstructionsHeading = "## Workflow instructions"
+	workflowInstructionsEnd     = "<!-- /workflow-instructions -->"
+)
 
 func (s *Service) buildWorkflowPromptWithContext(
 	ctx context.Context,
@@ -1506,7 +1511,14 @@ func (s *Service) workflowInstructionsBlock(ctx context.Context, step *wfmodels.
 	if interpolated == "" {
 		return ""
 	}
-	return workflowInstructionsHeading + "\n\n" + interpolated
+	// Drop any accidental end-marker text from user content so chat split
+	// cannot cut the block early (frontend also prefers the final marker).
+	interpolated = strings.ReplaceAll(interpolated, workflowInstructionsEnd, "")
+	interpolated = strings.TrimSpace(interpolated)
+	if interpolated == "" {
+		return ""
+	}
+	return workflowInstructionsHeading + "\n\n" + interpolated + "\n\n" + workflowInstructionsEnd
 }
 
 // expandPromptReferences resolves "@name" saved-prompt references in prompt
