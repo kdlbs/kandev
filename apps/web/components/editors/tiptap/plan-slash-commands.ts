@@ -152,11 +152,26 @@ const blockCommands = (t: TFunction): PlanSlashCommand[] => [
   },
 ];
 
-const buildPlanSlashCommands = (t: TFunction): PlanSlashCommand[] => [
+/** Exported for unit testing — see `plan-slash-commands.test.ts`. */
+export const buildPlanSlashCommands = (t: TFunction): PlanSlashCommand[] => [
   ...textCommands(t),
   ...listCommands(t),
   ...blockCommands(t),
 ];
+
+/**
+ * Matches on the translated label and on the stable `id`, so the English command
+ * name keeps working as a query under a non-English locale.
+ *
+ * Exported for unit testing — see `plan-slash-commands.test.ts`.
+ */
+export function filterPlanSlashCommands(commands: PlanSlashCommand[], query: string) {
+  if (!query) return commands;
+  const lq = query.toLowerCase();
+  return commands.filter(
+    (cmd) => cmd.label.toLowerCase().includes(lq) || cmd.id.toLowerCase().includes(lq),
+  );
+}
 
 // ── Empty state ──────────────────────────────────────────────────────
 
@@ -189,16 +204,10 @@ export function createPlanSlashExtension(
           allowSpaces: false,
           startOfLine: true,
 
-          items: ({ query }) => {
+          items: ({ query }) =>
             // Resolved per call, so the menu follows a locale switch without the
             // extension itself having to be rebuilt.
-            const commands = buildPlanSlashCommands(getT());
-            if (!query) return commands;
-            const lq = query.toLowerCase();
-            return commands.filter(
-              (cmd) => cmd.label.toLowerCase().includes(lq) || cmd.id.toLowerCase().includes(lq),
-            );
-          },
+            filterPlanSlashCommands(buildPlanSlashCommands(getT()), query),
 
           command: ({ editor, range, props: cmd }) => {
             cmd.action(editor, range);
