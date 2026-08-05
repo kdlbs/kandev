@@ -371,12 +371,20 @@ func splitFullReference(full string) (namespace, projectPath string) {
 }
 
 func hasOpenDiscussions(discussions []MRDiscussion) bool {
+	return countUnresolvedDiscussions(discussions) > 0
+}
+
+// countUnresolvedDiscussions counts discussions that are resolvable but not
+// yet resolved — the same predicate hasOpenDiscussions checks, exposed as a
+// count for the automation snapshot and summary UI.
+func countUnresolvedDiscussions(discussions []MRDiscussion) int {
+	count := 0
 	for _, d := range discussions {
 		if d.Resolvable && !d.Resolved {
-			return true
+			count++
 		}
 	}
-	return false
+	return count
 }
 
 func pipelineFailing(pipelines []Pipeline) bool {
