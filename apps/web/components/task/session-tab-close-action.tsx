@@ -21,7 +21,7 @@ export function SessionTabCloseAction({
   return (
     <button
       type="button"
-      className="session-tab-close-action dv-default-tab-action inline-flex h-4 w-4 shrink-0 items-center justify-center rounded p-0 text-muted-foreground"
+      className="session-tab-close-action dv-default-tab-action inline-flex h-4 w-4 shrink-0 cursor-pointer items-center justify-center rounded p-0 text-muted-foreground"
       data-testid={`session-tab-close-${sessionId}`}
       aria-label={t("common:deleteSession")}
       aria-busy={isDeleting}
