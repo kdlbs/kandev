@@ -39,7 +39,7 @@ test.describe("Agent message comments on mobile", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
-    const { task, body } = await openSeededAgentReply(
+    const { task, session, body } = await openSeededAgentReply(
       testPage,
       apiClient,
       seedData,
@@ -62,6 +62,10 @@ test.describe("Agent message comments on mobile", () => {
       await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
     await drawer.getByTestId("agent-message-comment-input").fill("Run with this correction.");
+    // Under shard load the auto-started session can briefly return to STARTING
+    // after its first idle render. Wait for the stronger editable-idle state so
+    // Run exercises the direct-send path instead of racing into the queue.
+    await session.waitForChatIdle({ timeout: 30_000, requireEditable: true });
     await runButton.click();
 
     await expect(drawer).not.toBeVisible({ timeout: 15_000 });
