@@ -220,6 +220,13 @@ function SettingsShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  // A settings form floats its Save action above the fold and needs room to
+  // scroll clear of it. The index floats only the search field, which is a
+  // third of that — the same padding there is dead scroll below the last row.
+  const contentBottomPadding =
+    pathname === "/settings"
+      ? "pb-[calc(5.25rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
+      : "pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]";
 
   return (
     <TooltipProvider>
@@ -239,7 +246,7 @@ function SettingsShell({
             // it, and the home crumb leaves.
             showNavTrigger={false}
             contentTestId="settings-scroll-container"
-            contentClassName="flex flex-col gap-4 overscroll-contain p-4 pb-[calc(11rem_+_env(safe-area-inset-bottom)_+_var(--app-status-bar-height))]"
+            contentClassName={`flex flex-col gap-4 overscroll-contain p-4 ${contentBottomPadding}`}
           >
             {children}
           </PageShell>

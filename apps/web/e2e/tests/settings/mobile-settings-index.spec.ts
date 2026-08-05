@@ -56,6 +56,14 @@ test.describe("Settings index on a phone", () => {
     const chatBox = await chat.boundingBox();
     expect(chatBox).not.toBeNull();
     expect(box!.x + box!.width).toBeLessThanOrEqual(chatBox!.x);
+    // Sharing a centre line with it, so the pair reads as one row.
+    expect(box!.y + box!.height / 2).toBeCloseTo(chatBox!.y + chatBox!.height / 2, 0);
+
+    // And no dead scroll under the last row: the index floats a search field,
+    // not a settings form's Save action.
+    const container = testPage.getByTestId("settings-scroll-container");
+    const padding = await container.evaluate((el) => getComputedStyle(el).paddingBottom);
+    expect(Number.parseFloat(padding)).toBeLessThan(120);
 
     // Still filters the list it floats over.
     await search.getByRole("searchbox", { name: "Search settings" }).fill("terminal font size");
