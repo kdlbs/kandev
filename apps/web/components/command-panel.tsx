@@ -25,6 +25,7 @@ import { useDockviewStore } from "@/lib/state/dockview-store";
 import { getContentSearchResultValue } from "@/components/workspace-content-search";
 import { getFileName } from "@/lib/utils/file-path";
 import { isTaskWorkspaceSearchAvailable } from "@/lib/commands/task-workspace-search";
+import { revealSidebarTask } from "@/lib/sidebar/task-navigation";
 import {
   CommandPanelView,
   MODE_COMMANDS,
@@ -452,9 +453,10 @@ function useCommandPanelHandlers(
   const handleTaskSelect = useCallback(
     (task: Task) => {
       setOpen(false);
+      void revealSidebarTask(task.id);
       router.push(linkToTask(task.id));
     },
-    [setOpen, router],
+    [router, setOpen],
   );
 
   const handleFileSelect = useCallback(

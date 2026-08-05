@@ -258,4 +258,105 @@ test.describe("sidebar scrolling", () => {
       .poll(() => scrollContainer.evaluate((el) => el.scrollTop), { timeout: 5_000 })
       .toBeGreaterThan(scrollBefore - 50);
   });
+
+  test("reveals a command-selected task", async ({ testPage, apiClient, seedData }) => {
+    test.setTimeout(60_000);
+
+    const taskCount = 25;
+    const created: { id: string; title: string }[] = [];
+    for (let index = 0; index < taskCount; index++) {
+      const title = `Command Reveal Task ${String(index).padStart(2, "0")}`;
+      const task = await apiClient.createTask(seedData.workspaceId, title, {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      });
+      created.push({ id: task.id, title });
+    }
+
+    const initialTask = created.at(-1)!;
+    await testPage.goto(`/t/${initialTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+
+    const scrollContainer = testPage.getByTestId("task-sidebar-scroll");
+    await expect(scrollContainer).toBeVisible();
+    await expect(session.sidebar.getByTestId("sidebar-task-item")).toHaveCount(taskCount, {
+      timeout: 10_000,
+    });
+    await scrollContainer.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+
+    const dimensions = await scrollContainer.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+    }));
+    expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
+
+    const offscreenTitle = await scrollContainer.evaluate(
+      (element, taskTitles) => {
+        const containerRect = element.getBoundingClientRect();
+        const rows = element.querySelectorAll<HTMLElement>("[data-testid='sidebar-task-item']");
+        for (const row of rows) {
+          const rowRect = row.getBoundingClientRect();
+          const isOutside =
+            rowRect.bottom <= containerRect.top + 1 || rowRect.top >= containerRect.bottom - 1;
+          if (isOutside) {
+            const title = taskTitles.find((candidate) => row.textContent?.includes(candidate));
+            if (title) return title;
+          }
+        }
+        return null;
+      },
+      created.map(({ title }) => title),
+    );
+    if (!offscreenTitle) throw new Error("Expected a rendered task row outside the viewport");
+    const targetTask = created.find(({ title }) => title === offscreenTitle)!;
+    const targetRow = session.sidebarTaskItem(targetTask.title).first();
+    await expect(targetRow).toBeVisible();
+    const before = await Promise.all([scrollContainer.boundingBox(), targetRow.boundingBox()]);
+    if (!before[0] || !before[1]) throw new Error("Command-selected target has no layout box");
+    expect(
+      before[1].y + before[1].height <= before[0].y + 1 ||
+        before[1].y >= before[0].y + before[0].height - 1,
+      "target task should start outside the task-list viewport",
+    ).toBe(true);
+
+    const documentScrollBefore = await testPage.evaluate(() => ({ scrollX, scrollY }));
+    const modifier = process.platform === "darwin" ? "Meta" : "Control";
+    await testPage.keyboard.press(`${modifier}+k`);
+    const dialog = testPage.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill(targetTask.title);
+    const option = dialog.getByRole("option").filter({ hasText: targetTask.title }).first();
+    await expect(option).toBeVisible({ timeout: 10_000 });
+    await option.click();
+
+    await expect(testPage).toHaveURL(new RegExp(`/t/${targetTask.id}$`));
+    await expect(session.activeSidebarTaskItem(targetTask.title).first()).toHaveAttribute(
+      "aria-current",
+      "true",
+    );
+    await expect
+      .poll(
+        async () => {
+          const [containerBox, rowBox] = await Promise.all([
+            scrollContainer.boundingBox(),
+            targetRow.boundingBox(),
+          ]);
+          if (!containerBox || !rowBox) return false;
+          return (
+            rowBox.y >= containerBox.y - 1 &&
+            rowBox.y + rowBox.height <= containerBox.y + containerBox.height + 1
+          );
+        },
+        { timeout: 10_000 },
+      )
+      .toBe(true);
+
+    await expect
+      .poll(() => testPage.evaluate(() => ({ scrollX, scrollY })))
+      .toEqual(documentScrollBefore);
+  });
 });

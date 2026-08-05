@@ -479,7 +479,6 @@ export const TaskItem = memo(function TaskItem({
   isOnLastWorkflowStep = false,
 }: TaskItemProps) {
   const effectiveMenuOpen = menuOpen || isDeleting === true;
-  const isInProgress = computeIsInProgress(state, sessionState);
   const hasDiffStats = !!diffStats && (diffStats.additions > 0 || diffStats.deletions > 0);
   const showSubtaskToggle = !!subtaskCount && subtaskCount > 0 && !!onToggleSubtasks;
   const taskColor = useTaskColor(taskId);
@@ -490,6 +489,7 @@ export const TaskItem = memo(function TaskItem({
       role="button"
       tabIndex={0}
       data-testid="sidebar-task-item"
+      data-task-id={taskId}
       {...taskItemStateAttrs(isSelected, isMultiSelected)}
       onClick={taskItemRowClick(onSelect, onClick)}
       onKeyDown={(e) => handleTaskItemKeyDown(e, onSelect, onClick)}
@@ -502,7 +502,7 @@ export const TaskItem = memo(function TaskItem({
         sessionState={sessionState}
         state={state}
         foregroundActivity={foregroundActivity}
-        isInProgress={isInProgress}
+        isInProgress={computeIsInProgress(state, sessionState)}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         isOnLastWorkflowStep={isOnLastWorkflowStep}
