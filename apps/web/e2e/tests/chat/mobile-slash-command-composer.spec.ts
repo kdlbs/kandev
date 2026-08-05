@@ -43,12 +43,14 @@ test.describe("Mobile slash command composer", () => {
     if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
 
     const session = await openTaskChat(testPage, task.id);
-    await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
 
     // Resolve the active editor through the same startup-aware gate used by
     // send helpers; the visible idle placeholder can briefly precede TipTap's
     // editable host while the mobile session finishes starting.
     const editor = await session.composerReady();
+    // composerReady may reload to reconcile stale startup state. Seed the
+    // client-side command list only after that recovery so it is not discarded.
+    await seedAvailableCommands(testPage, task.session_id, [SLOW_COMMAND]);
     await editor.tap();
     await editor.fill("");
     await editor.pressSequentially("/s");

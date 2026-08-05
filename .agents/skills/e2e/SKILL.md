@@ -157,7 +157,10 @@ path. Always inspect `error-context.md`; mobile/terminal flakes often show
 state that the stack trace alone hides, such as duplicate active terminals or a
 terminal stuck on "Starting terminal...".
 
-When a PR-specific E2E shard fails, first identify the failed spec(s). If failures are in unrelated existing specs and no changed code plausibly affects that surface, record the failure as unrelated in the PR fixup summary instead of changing unrelated tests.
+When a PR E2E shard fails, investigate every spec, including those outside the
+diff; never dismiss, rerun, or merely record a failure as unrelated. Reproduce
+the exact test, then preserve shard ordering and CI pressure. Fix every valid
+defect with retries disabled, or evidence a concrete external blocker.
 
 **CRITICAL: E2E tests run against the production Vite build served by the Go backend**, not dev mode. After any frontend code change, you **must** rebuild before running tests (`pnpm e2e:run` does this for you):
 
