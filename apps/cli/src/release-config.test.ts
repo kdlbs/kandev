@@ -370,9 +370,7 @@ describe("release desktop artifacts", () => {
     expect(formula).toContain("/health");
     expect(formula).toContain('"status":"ok"');
     expect(formula).toContain("<title>Kandev</title>");
-    expect(formula.indexOf('version "__VERSION__"')).toBeLessThan(
-      formula.indexOf('license "AGPL-3.0-only"'),
-    );
+    expect(formula).not.toContain('version "__VERSION__"');
   });
 
   it("bumps desktop package and Tauri versions during release preparation", () => {
