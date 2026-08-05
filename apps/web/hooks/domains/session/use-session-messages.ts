@@ -9,6 +9,7 @@ import {
   useUnknownSessionSubscriptionRetry,
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
+import { doFetchMessages } from "./use-session-message-fetch";
 
 export { shouldRetryUnknownSessionSubscription } from "./use-session-subscription-retry";
 
@@ -173,11 +174,18 @@ function logFetchSummary(
 async function fetchAndStoreMessages(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
+  isActive?: () => boolean,
 ): Promise<Message[]> {
   const client = getWebSocketClient();
   if (!client) {
     return [];
   }
+  // Initial and recovery fetches must not overtake the server-side
+  // session.subscribe registration. The client returns an already-resolved
+  // promise when no durable subscription is active, preserving fetch behavior
+  // for non-session callers while gating this hook's normal subscription path.
+  await client.getSessionSubscriptionReadiness(sessionId);
+  if (isActive && !isActive()) return [];
   const seq = nextFetchSeq();
 
   const requestParams = {
@@ -186,6 +194,7 @@ async function fetchAndStoreMessages(
     sort: "desc" as const,
   };
   const response = await client.request<MessageListResponse>("message.list", requestParams, 10000);
+  if (isActive && !isActive()) return [];
   const fetched = [...(response.messages ?? [])].reverse();
   logFetchSummary(sessionId, fetched, response, requestParams.limit);
   // Merge: keep WS-delivered messages that aren't in the fetch response.
@@ -298,49 +307,6 @@ export async function autoBackfillUntilUserMessage(
   });
 }
 
-type FetchMessagesParams = {
-  taskSessionId: string;
-  store: ReturnType<typeof useAppStoreApi>;
-  setIsLoading: (v: boolean) => void;
-  setIsWaitingForInitialMessages: (v: boolean) => void;
-  initialFetchStartRef: MutableRefObject<number | null>;
-  lastFetchedSessionIdRef: MutableRefObject<string | null>;
-  onError?: (error: unknown) => void;
-};
-
-async function doFetchMessages({
-  taskSessionId,
-  store,
-  setIsLoading,
-  setIsWaitingForInitialMessages,
-  initialFetchStartRef,
-  lastFetchedSessionIdRef,
-  onError,
-}: FetchMessagesParams): Promise<void> {
-  setIsLoading(true);
-  store.getState().setMessagesLoading(taskSessionId, true);
-  if (initialFetchStartRef.current === null) {
-    initialFetchStartRef.current = Date.now();
-    setIsWaitingForInitialMessages(true);
-  }
-  try {
-    const fetched = await fetchAndStoreMessages(taskSessionId, store);
-    lastFetchedSessionIdRef.current = taskSessionId;
-    if (fetched.length > 0) setIsWaitingForInitialMessages(false);
-    if (fetched.length > 0 && !hasUserOrAgentMessage(fetched)) {
-      await autoBackfillUntilUserMessage(taskSessionId, store);
-    }
-  } catch (error) {
-    if (onError) onError(error);
-    else console.error("Failed to fetch messages:", error);
-    store.getState().setMessages(taskSessionId, []);
-    lastFetchedSessionIdRef.current = taskSessionId;
-  } finally {
-    store.getState().setMessagesLoading(taskSessionId, false);
-    setIsLoading(false);
-  }
-}
-
 function useTerminalStateFetch(
   taskSessionId: string | null,
   taskSessionState: TaskSessionState | null,
@@ -370,6 +336,9 @@ function useTerminalStateFetch(
     void doFetchMessages({
       taskSessionId,
       ...refs,
+      fetchAndStoreMessages,
+      autoBackfillUntilUserMessage,
+      hasUserOrAgentMessage,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
   }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
@@ -444,15 +413,23 @@ function useSessionSubscription(
       return;
     }
     debug("subscription: subscribing", { sessionId: taskSessionId });
-    const unsubscribe = client.subscribeSession(taskSessionId);
+    const subscription = client.subscribeSessionWithReady(taskSessionId);
+    let active = true;
 
-    // Re-fetch messages after subscribing to close the gap between SSR
-    // (which may have run before the agent responded) and this subscription.
-    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
+    // Re-fetch messages after the server acknowledges the subscription to
+    // close the gap between SSR (which may have run before the agent
+    // responded) and this subscription.
+    void subscription.ready
+      .then(() => {
+        if (!active) return;
+        return fetchAndStoreMessages(taskSessionId, store, () => active);
+      })
+      .catch(() => {});
 
     return () => {
+      active = false;
       debug("subscription: unsubscribing", { sessionId: taskSessionId });
-      unsubscribe();
+      subscription.unsubscribe();
     };
   }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
 }
@@ -618,21 +595,22 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     refs: fetchRefs,
   } = useMessageFetchState(store);
 
+  useSessionLifecycleSubscriptions({
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+    activeTurnId,
+    messages,
+    store,
+  });
+
   useEffect(() => {
     if (!taskSessionId) {
       initialFetchStartRef.current = null;
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
+      return;
     }
-  }, [
-    taskSessionId,
-    initialFetchStartRef,
-    lastFetchedSessionIdRef,
-    setIsWaitingForInitialMessages,
-  ]);
-
-  useEffect(() => {
-    if (!taskSessionId) return;
     if (messages.length > 0) {
       setIsWaitingForInitialMessages(false);
       return;
@@ -644,7 +622,13 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
   }, [taskSessionId, messages.length, initialFetchStartRef, setIsWaitingForInitialMessages]);
 
   useEffect(() => {
-    if (!taskSessionId || connectionStatus !== "connected") return;
+    let active = true;
+    const deactivate = () => {
+      active = false;
+    };
+    if (!taskSessionId || connectionStatus !== "connected") {
+      return deactivate;
+    }
 
     const isFreshMount = prevSessionIdRef.current === null;
     const sessionChanged =
@@ -659,23 +643,30 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     if (messages.length > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      return;
+      return deactivate;
     }
 
     // Fresh mount with cached messages — show cached instantly, fetch in background
     if (isFreshMount && messages.length > 0) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
-      fetchAndStoreMessages(taskSessionId, store).catch(() => {});
-      return;
+      fetchAndStoreMessages(taskSessionId, store, () => active).catch(() => {});
+      return deactivate;
     }
 
-    if (lastFetchedSessionIdRef.current === taskSessionId) return;
+    if (lastFetchedSessionIdRef.current === taskSessionId) {
+      return deactivate;
+    }
 
     void doFetchMessages({
       taskSessionId,
       ...fetchRefs,
+      fetchAndStoreMessages,
+      autoBackfillUntilUserMessage,
+      hasUserOrAgentMessage,
+      isActive: () => active,
     });
+    return deactivate;
   }, [
     taskSessionId,
     connectionStatus,
@@ -685,15 +676,6 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     setIsWaitingForInitialMessages,
     fetchRefs,
   ]);
-
-  useSessionLifecycleSubscriptions({
-    taskSessionId,
-    taskSessionState,
-    connectionStatus,
-    activeTurnId,
-    messages,
-    store,
-  });
 
   useVisibilityBackfill(taskSessionId, store);
 
